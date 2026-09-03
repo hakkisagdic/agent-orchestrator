@@ -34,7 +34,11 @@ def _bar(pct, width=20):
     return f"{col}{'█' * filled}{'░' * (width - filled)}{C['reset']} {pct:.0f}%"
 
 
-def render(cfg, msg_count=8, width=None):
+def render(cfg, msg_count=8, width=None, max_lines=None):
+    """Render the panel. When max_lines is given the output never exceeds it:
+    the fixed sections are laid out first and the message log — the only elastic
+    part — takes whatever is left. A panel taller than the window scrolls, and a
+    scrolled panel stacks its own headers on every refresh."""
     root, impl, adapter = _ctx(cfg)
     w = min(width or shutil.get_terminal_size((120, 40)).columns, 130)
     L = []
@@ -81,15 +85,7 @@ def render(cfg, msg_count=8, width=None):
             for line in q:
                 a(f"   {C['dim']}provider{C['reset']} {line}")
 
-        # messages
-        ms = A.messages(recs, msg_count)
-        if ms:
-            a(f"\n{C['b']}{C['mag']}── RECENT MESSAGES {'─' * max(0, w - 20)}{C['reset']}")
-            for hh, kind, text in ms:
-                tag = f"{C['blue']}YOU {C['reset']}" if kind == "user" else f"{C['cyan']}AGNT{C['reset']}"
-                for i, ln in enumerate(textwrap.wrap(text, w - 14)[:3]):
-                    a(f"   {C['dim']}{hh}{C['reset']} {tag}  {ln}" if i == 0
-                      else f"        {C['dim']}│{C['reset']}     {ln}")
+        msg_records = recs
 
     # reviews + round budget
     revs = A.reviews(root, cfg["reviews"])
@@ -114,7 +110,37 @@ def render(cfg, msg_count=8, width=None):
     mail = A.mailbox(root, cfg["mailbox"])
     a(f"\n   {C['b']}Mailbox:{C['reset']} " +
       (", ".join(mail) if mail else f"{C['dim']}empty{C['reset']}"))
-    return "\n".join(L)
+
+    # The message log is elastic and goes last, so a short window drops history
+    # rather than the state you actually steer by.
+    msgs_block = []
+    try:
+        ms = A.messages(msg_records, msg_count)
+    except NameError:
+        ms = []
+    if ms:
+        msgs_block.append(f"\n{C['b']}{C['mag']}── RECENT MESSAGES {'─' * max(0, w - 20)}{C['reset']}")
+        for hh, kind, text in ms:
+            tag = f"{C['blue']}YOU {C['reset']}" if kind == "user" else f"{C['cyan']}AGNT{C['reset']}"
+            for i, ln in enumerate(textwrap.wrap(text, w - 14)[:3]):
+                msgs_block.append(f"   {C['dim']}{hh}{C['reset']} {tag}  {ln}" if i == 0
+                                  else f"        {C['dim']}│{C['reset']}     {ln}")
+
+    if max_lines is None:
+        return "\n".join(L + msgs_block)
+
+    # Truncate by real lines, not by list elements: a section header carries its
+    # own leading blank line, so element count and line count are not the same.
+    fixed = "\n".join(L).split("\n")
+    if len(fixed) >= max_lines:
+        return "\n".join(fixed[:max_lines])
+    room = max_lines - len(fixed)
+    msg_lines = "\n".join(msgs_block).split("\n") if msgs_block else []
+    if len(msg_lines) > room:
+        msg_lines = msg_lines[:max(0, room - 1)]
+        if msg_lines:
+            msg_lines.append(f"   {C['dim']}… older messages hidden (window too short){C['reset']}")
+    return "\n".join(fixed + msg_lines)
 
 
 def cmd_status(cfg, args):
@@ -122,18 +148,19 @@ def cmd_status(cfg, args):
 
 
 def cmd_watch(cfg, args):
-    sys.stdout.write("\033[?1049h")          # alternate screen
+    sys.stdout.write("\033[?1049h\033[?25l")   # alternate screen, hidden cursor
     try:
         while True:
-            out = render(cfg, args.messages)
+            size = shutil.get_terminal_size((120, 40))
+            out = render(cfg, args.messages, size.columns, size.lines - 2)
             sys.stdout.write("\033[H\033[J" + out +
-                             f"\n\n{C['dim']}  refreshing every {args.interval}s · Ctrl+C to exit{C['reset']}\n")
+                             f"\n{C['dim']}  every {args.interval}s · Ctrl+C to exit{C['reset']}")
             sys.stdout.flush()
             time.sleep(args.interval)
     except KeyboardInterrupt:
         pass
     finally:
-        sys.stdout.write("\033[?1049l")      # restore scrollback
+        sys.stdout.write("\033[?25h\033[?1049l")  # cursor back, restore scrollback
         sys.stdout.flush()
 
 

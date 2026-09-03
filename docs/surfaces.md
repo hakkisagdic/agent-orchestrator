@@ -101,6 +101,12 @@ That constraint is less limiting than it sounds. With stdlib alone the panel get
 - **single-key input** in raw mode: `q` quit, `r` refresh now, `m` read mail, `l` lanes,
   `1`–`9` switch project — no Enter, no prompt
 - **sparklines** for credit burn and context growth, drawn with block characters
+- **height-aware layout**, which is not a nicety: a panel taller than the window
+  scrolls, and a scrolled panel stacks a fresh header on every refresh until the
+  screen is nothing but headers. Lay out the fixed sections first, give the
+  message log whatever lines remain, and truncate by real lines rather than by
+  list elements — a section header carries its own leading blank line, so the two
+  counts differ and off-by-two is enough to reintroduce the scroll.
 
 That is a real TUI, in about two hundred lines, that runs anywhere.
 
