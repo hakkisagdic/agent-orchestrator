@@ -57,7 +57,48 @@ keyflip next --strategy best     # rotate to the account with the most headroom
 Policy: if the implementer's account is exhausted → rotate → then nudge. If no account
 has headroom → do not nudge; surface it to the human instead of burning turns.
 
-## Integration point 3 — adapter discovery
+## Integration point 3 — which tools are actually usable here
+
+`keyflip surfaces` reports, per tool, whether an authenticated account exists —
+without ever reading the secret. Combined with a plain `which`, that answers the
+question an adapter registry cannot answer on its own:
+
+```
+adapter         verified    on this machine
+antigravity     full        installed
+copilot         untested    account, no CLI
+opencode        partial     installed + account
+```
+
+"Account, no CLI" is the useful cell: the credential is already there, so the tool
+is one install away from being usable. Without keyflip, `ao` could only report
+whether a binary exists.
+
+## Integration point 4 — budgets instead of invented thresholds
+
+The watchdog needs to know whether spending a turn is allowed. Its own answer was
+a guessed "97% of the window", which is a number nobody chose. keyflip enforces
+per-account 5h/7d budgets the user actually set:
+
+```bash
+keyflip budget set <account> --5h 80 --7d 90
+```
+
+When a budget exists, `ao` defers to it and stops inventing thresholds. When none
+exists, it falls back to reading the raw window. A policy someone chose beats a
+constant a script made up.
+
+## Integration point 5 — quota notifications at the source
+
+keyflip already emits `quota`, `switch` and `fleet-reply` events to desktop or a
+webhook. Turning them on means quota trouble reaches the human from the component
+that actually knows about it, rather than through a second detector in `ao`:
+
+```bash
+keyflip notify set --desktop --events quota,switch
+```
+
+## Integration point 6 — adapter discovery
 
 `keyflip agents` already enumerates other tools' memory and config locations
 (Cursor, Gemini, Codex …). That inventory seeds the adapter registry instead of

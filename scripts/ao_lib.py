@@ -294,6 +294,48 @@ def busy(cfg, adapter):
     return state, age, desc
 
 
+_SURFACES = {"at": 0.0, "rows": {}}
+
+
+def tool_availability(ttl=600):
+    """Which agent tools are actually usable on this machine.
+
+    Two independent facts, and both matter: is the CLI installed (which), and is
+    there an authenticated account for it. keyflip already answers the second for
+    a range of tools and never reads the secret itself, so ask it rather than
+    reinventing credential detection — align, do not depend: if keyflip is absent
+    the CLI check still works on its own.
+    """
+    import shutil as _sh
+    if time.time() - _SURFACES["at"] < ttl and _SURFACES["rows"]:
+        return _SURFACES["rows"]
+    rows = {}
+    out = sh("keyflip surfaces 2>/dev/null", cwd=HOME)
+    for line in out.split("\n"):
+        line = line.strip()
+        if not (line.startswith("●") or line.startswith("○")):
+            continue
+        body = line[1:].strip()
+        name = re.split(r"\s{2,}", body)[0].strip().lower()
+        rows[name] = {"account": line.startswith("●")}
+    alias = {"gemini cli": "gemini", "codex cli": "codex", "github copilot": "copilot",
+             "cursor": "cursor-agent", "aider": "aider", "opencode": "opencode"}
+    named = {}
+    for k, v in rows.items():
+        named[alias.get(k, k)] = v
+    for adapter_id, binary in (("kiro", "kiro-cli"), ("claude-code", "claude"),
+                               ("antigravity", "agy"), ("opencode", "opencode"),
+                               ("codex", "codex"), ("gemini", "gemini"),
+                               ("cursor-agent", "cursor-agent"), ("aider", "aider"),
+                               ("amp", "amp"), ("copilot", "copilot"),
+                               ("amazon-q", "q"), ("command-code", "cmd")):
+        entry = named.setdefault(adapter_id, {})
+        entry["installed"] = bool(_sh.which(binary))
+        entry["binary"] = binary
+    _SURFACES.update(at=time.time(), rows=named)
+    return named
+
+
 def last_nudge_error(root):
     """The most recent failed nudge, if the watchdog recorded one."""
     key = os.path.basename(root.rstrip("/")) or "root"

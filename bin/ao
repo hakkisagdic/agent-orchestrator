@@ -317,10 +317,22 @@ def cmd_adapters(cfg, args):
         rows.append((a.get("id", f), a.get("verified", "?"),
                      "call-return" if a.get("observation_mode") == "call-return"
                      else (a.get("transcript", {}) or {}).get("kind", "—")))
-    print(f"{'adapter':<16}{'verified':<12}observation")
+    avail = A.tool_availability()
+    print(f"{'adapter':<16}{'verified':<12}{'on this machine':<22}observation")
     for r in rows:
         col = C["green"] if r[1] == "full" else C["yellow"] if r[1] == "partial" else C["dim"]
-        print(f"{r[0]:<16}{col}{r[1]:<12}{C['reset']}{r[2]}")
+        a = avail.get(r[0], {})
+        if a.get("installed") and a.get("account"):
+            here = f"{C['green']}installed + account{C['reset']}"
+        elif a.get("installed"):
+            here = f"{C['green']}installed{C['reset']}"
+        elif a.get("account"):
+            here = f"{C['yellow']}account, no CLI{C['reset']}"
+        else:
+            here = f"{C['dim']}—{C['reset']}"
+        pad = 22 - len(A.re.sub(r"\033\[[0-9;]*m", "", here))
+        print(f"{r[0]:<16}{col}{r[1]:<12}{C['reset']}{here}{' ' * max(1, pad)}{r[2]}")
+    print(f"\n{C['dim']}Account detection via keyflip surfaces; it never reads the secret.{C['reset']}")
 
 
 def cmd_doctor(cfg, args):
