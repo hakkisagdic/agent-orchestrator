@@ -65,5 +65,14 @@ anything, so it refuses to spend when spending would not help:
 | Provider out of headroom (keyflip) | notify, do not nudge |
 | Two or three nudges produced no transcript growth | back off, then hand over to a human |
 
+Install it as a launchd job so it survives your terminal, your orchestrator
+session and a reboot:
+
+```bash
+ao -C ~/work/project watchdog install     # every 120s, nudge after 6m idle
+ao -C ~/work/project watchdog status      # is it loaded? recent log lines
+ao -C ~/work/project watchdog uninstall
+```
+
 Run it by hand, or every couple of minutes from launchd/cron. Idle threshold
 defaults to six minutes; `--dry-run` prints the decision without acting.

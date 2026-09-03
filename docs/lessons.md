@@ -111,3 +111,24 @@ The general lesson: any protocol strict enough to refuse unauthorised work needs
 designed, recorded path for the human to authorise it. Without one, strictness turns into
 a livelock and the human learns to route around the protocol entirely — which is worse
 than not having it.
+
+## 12. A scheduled job does not inherit your PATH
+
+The watchdog worked perfectly by hand and failed every two minutes under launchd:
+`FileNotFoundError: 'kiro-cli'`. Scheduled jobs run with a minimal environment that
+excludes `~/.local/bin`, `~/bin` and Homebrew — exactly where agent CLIs install.
+
+**Fix:** resolve the binary to an absolute path before spawning it, searching the user
+bin directories explicitly, and notify a human when it cannot be found rather than
+failing silently on a timer. A watchdog that fails quietly is worse than no watchdog,
+because it looks installed.
+
+## 13. A global state directory is not a project marker
+
+`find_root()` walked up looking for `.ao/` and found `$HOME/.ao` — the global state
+directory the watchdog had just created — so it installed the job against the home
+directory instead of the project.
+
+**Fix:** never treat `$HOME` as a project root, and take an explicitly given path at
+face value. Asking for a directory and silently being given its parent is never what
+the caller meant.

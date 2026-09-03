@@ -23,6 +23,7 @@ import argparse
 import json
 import os
 import subprocess
+import shutil
 import sys
 import time
 
@@ -168,6 +169,19 @@ def main():
     if not argv:
         print("adapter has no resume command")
         return 1
+
+    # launchd runs with a minimal PATH that excludes the user bin directories
+    # where agent CLIs actually live, so resolve the binary ourselves rather than
+    # failing with a bare FileNotFoundError two minutes at a time.
+    search = os.environ.get("PATH", "") + ":" + ":".join(
+        os.path.expanduser(d) for d in
+        ("~/.local/bin", "~/bin", "/usr/local/bin", "/opt/homebrew/bin"))
+    resolved = shutil.which(argv[0], path=search)
+    if not resolved:
+        notify("Voltrai: watchdog", f"{argv[0]} not on PATH; cannot nudge")
+        print(f"{argv[0]} not found on PATH ({search})")
+        return 1
+    argv[0] = resolved
     if "--trust-all-tools" not in argv and "trust_all" in (adapter.get("options") or {}):
         argv += adapter["options"]["trust_all"]
 

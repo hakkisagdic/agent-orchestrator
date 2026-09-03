@@ -2,7 +2,9 @@
 """ao — agent-orchestrator, observation layer.
 
 Implemented today: status, watch, tail, mail, adapters, doctor.
-Not yet: resume, verify, commit-ok, slice, decide, since, mcp serve — see the
+Also: watchdog install/uninstall/status — a launchd job that restarts a stalled
+implementer, with guards so it spends nothing when spending would not help.
+Not yet: verify, commit-ok, slice, decide, since, mcp serve — see the
 roadmap in README.md. Commands that do not exist say so rather than pretending.
 
 Standard library only. Observation is strictly read-only.
@@ -213,6 +215,64 @@ def cmd_mail(cfg, args):
         print(name)
 
 
+PLIST = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>{label}</string>
+  <key>ProgramArguments</key>
+  <array><string>{python}</string><string>{script}</string>
+    <string>--root</string><string>{root}</string>
+    <string>--idle-minutes</string><string>{idle}</string></array>
+  <key>StartInterval</key><integer>{interval}</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>{log}</string>
+  <key>StandardErrorPath</key><string>{log}</string>
+</dict></plist>
+"""
+
+
+def cmd_watchdog(cfg, args):
+    """Install, remove or inspect the launchd job that restarts a stalled agent."""
+    import getpass
+    root = cfg["root"]
+    key = os.path.basename(root.rstrip("/")).lower()
+    label = f"com.agentorchestrator.watchdog.{key}"
+    plist_path = os.path.expanduser(f"~/Library/LaunchAgents/{label}.plist")
+    script = os.path.join(A.REPO, "scripts", "ao-watchdog")
+    log = os.path.expanduser(f"~/.ao/watchdog-{key}.log")
+
+    if args.action == "status":
+        loaded = A.sh(f"launchctl list | grep {label}")
+        print(f"label   {label}")
+        print(f"plist   {'present' if os.path.exists(plist_path) else 'absent'}")
+        print(f"loaded  {loaded if loaded else 'no'}")
+        if os.path.exists(log):
+            print(f"\nlast lines of {log}:")
+            print(A.sh(f"tail -5 {log}"))
+        return
+
+    if args.action == "uninstall":
+        A.sh(f"launchctl bootout gui/$(id -u)/{label} 2>/dev/null || launchctl unload {plist_path} 2>/dev/null")
+        if os.path.exists(plist_path):
+            os.remove(plist_path)
+        print(f"removed {label}")
+        return
+
+    os.makedirs(os.path.dirname(plist_path), exist_ok=True)
+    os.makedirs(os.path.expanduser("~/.ao"), exist_ok=True)
+    open(plist_path, "w").write(PLIST.format(
+        label=label, python=sys.executable, script=script, root=root,
+        idle=args.idle_minutes, interval=args.interval, log=log))
+    A.sh(f"launchctl bootout gui/$(id -u)/{label} 2>/dev/null")
+    out = A.sh(f"launchctl bootstrap gui/$(id -u) {plist_path} 2>&1") or "loaded"
+    print(f"installed {label}")
+    print(f"  checks every {args.interval}s · nudges after {args.idle_minutes}m idle")
+    print(f"  log: {log}")
+    print(f"  remove with: ao -C {root} watchdog uninstall")
+    if "error" in out.lower():
+        print(f"  launchctl: {out}")
+
+
 def cmd_projects(cfg, args):
     ws = A.all_workspaces()
     if not ws:
@@ -256,7 +316,11 @@ def cmd_doctor(cfg, args):
     print(f"mailbox         {ok(os.path.isdir(os.path.join(root, cfg['mailbox'])))}")
     print(f"reviews         {ok(os.path.isdir(os.path.join(root, cfg['reviews'])))}")
     print(f"quota source    {'keyflip' if A.sh('command -v keyflip') else '—'}")
-    print(f"\n{C['dim']}Not implemented yet: resume, verify, commit-ok, slice, decide, "
+    key = os.path.basename(root.rstrip("/")).lower()
+    wd = A.sh(f"launchctl list | grep com.agentorchestrator.watchdog.{key}")
+    print(f"watchdog        {C['green']}running{C['reset']}" if wd else
+          f"watchdog        {C['dim']}not installed — ao watchdog install{C['reset']}")
+    print(f"\n{C['dim']}Not implemented yet: verify, commit-ok, slice, decide, "
           f"since, mcp serve.{C['reset']}")
 
 
@@ -284,6 +348,12 @@ def main():
     m.add_argument("topic", nargs="?")
     m.add_argument("--body")
     m.set_defaults(fn=cmd_mail)
+
+    wd = sub.add_parser("watchdog", help="launchd job that restarts a stalled agent")
+    wd.add_argument("action", choices=["install", "uninstall", "status"])
+    wd.add_argument("--interval", type=int, default=120)
+    wd.add_argument("--idle-minutes", type=float, default=6)
+    wd.set_defaults(fn=cmd_watchdog)
 
     sub.add_parser("projects", help="workspaces with a local agent session").set_defaults(fn=cmd_projects)
     sub.add_parser("adapters", help="adapter registry and verification status").set_defaults(fn=cmd_adapters)

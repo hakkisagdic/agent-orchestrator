@@ -22,10 +22,18 @@ C = {
 # ── config ────────────────────────────────────────────────────────────────────
 
 def find_root(start=None):
-    """Nearest ancestor containing .ao/, else the git root, else cwd."""
-    d = os.path.abspath(start or os.getcwd())
+    """Nearest ancestor containing .ao/, else the git root, else cwd.
+
+    An explicit path is taken at face value — asking for a directory and being
+    given its parent is never what the caller meant. And $HOME/.ao is the global
+    state directory, not a project marker, so the walk never treats home as a
+    project root.
+    """
+    if start:
+        return os.path.abspath(os.path.expanduser(start))
+    d = os.path.abspath(os.getcwd())
     while True:
-        if os.path.isdir(os.path.join(d, ".ao")):
+        if d != HOME and os.path.isdir(os.path.join(d, ".ao")):
             return d
         parent = os.path.dirname(d)
         if parent == d:
