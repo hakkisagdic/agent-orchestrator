@@ -92,16 +92,20 @@ The protocol, adapters, safety model and telemetry mappings in this repository a
 extracted from a system in daily production use — they are specifications and verified
 findings, not sketches.
 
-The `ao` CLI that ties them together is still being extracted from that private
-implementation. **The observation commands run today; the rest describe the intended surface.** Until they land, this repo is useful as: a protocol you can implement in an
-afternoon, a verified adapter registry, and a safety model worth stealing.
+**What runs today:** observation and the watchdog. Point `ao` at a project and it finds
+the implementer's session by itself, renders a live panel, and — once the watchdog is
+installed — restarts that agent when it stops mid-slice, without a human noticing.
+
+**What is still specification:** the gate, ledger and MCP layers below. Those commands
+say so when you run them rather than pretending.
 
 Roadmap, in order:
 
 - [x] agent-mail protocol, safety model, roles, parallel lanes, telemetry, MCP surface
-- [x] Adapter registry — 3 verified, 8 written from documentation
-- [x] `ao status` / `ao watch` / `ao tail` / `ao mail` / `ao adapters` / `ao doctor` — the observation layer
-- [ ] `ao mail` / `ao resume` — the driving layer with idle guard
+- [x] Adapter registry — 3 verified, 8 from documentation, plus a generic cloud adapter
+- [x] `ao status` / `watch` / `tail` / `mail` / `projects` / `adapters` / `doctor` — observation
+- [x] `ao watchdog` — a launchd job that restarts a stalled implementer, guarded so it
+      spends nothing when spending would not help
 - [ ] `ao verify` / `ao commit-ok` — the gate layer
 - [ ] `ao slice` / `ao decide` / `ao since` — slices, ledger and recovery
 - [ ] `ao mcp serve`
@@ -118,16 +122,38 @@ cd agent-orchestrator && ./install.sh
 
 ## Quickstart
 
+Nothing to configure. `ao` discovers the implementer session by matching your repository
+against the workspace paths the agent stores already record.
+
 ```bash
-ao init --implementer kiro            # write steering + hooks + mailbox into this repo
-ao mail send DECISION "use WeakSet branding, not instanceof"
-ao watch                              # live panel; leave it in a background terminal
-ao status                             # one-shot summary
-ao verify                             # re-run the gates yourself
-ao commit-ok "feat: ..."              # grant commit authority after gates pass
+ao projects                     # workspaces with a local agent session
+ao -C ~/work/project status     # one-shot summary
+ao -C ~/work/project watch      # live panel; leave it in a background terminal
+ao -C ~/work/project tail -n 5  # the agent's recent messages
+ao -C ~/work/project doctor     # wiring check
+```
+
+Stop typing "continue" — install the watchdog once and it restarts a stalled agent
+without you:
+
+```bash
+ao -C ~/work/project watchdog install     # checks every 120s, nudges after 6m idle
+ao -C ~/work/project watchdog status
+```
+
+It refuses to spend when spending would not help: no open work, a slice past its round
+budget, an exhausted provider window, or two nudges that changed nothing all mean it
+notifies you instead of burning another turn.
+
+Coordination messages, when you want to send one by hand:
+
+```bash
+ao -C ~/work/project mail list
+ao -C ~/work/project mail send DECISION branding --body "Brand by registry membership, not instanceof."
 ```
 
 ## Docs
+
 
 - [`docs/protocol.md`](docs/protocol.md) — agent-mail specification
 - [`docs/adapters.md`](docs/adapters.md) — adapter interface and support matrix

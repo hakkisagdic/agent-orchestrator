@@ -91,16 +91,20 @@ Tam model: [`docs/safety.md`](docs/safety.md).
 Bu depodaki protokol, adaptörler, güvenlik modeli ve telemetri eşlemeleri günlük üretim
 kullanımındaki bir sistemden çıkarıldı — taslak değil, spesifikasyon ve doğrulanmış bulgular.
 
-Bunları birbirine bağlayan `ao` komutu hâlâ o özel uygulamadan ayrıştırılıyor. **Gözlem komutları bugün çalışıyor; kalanlar hedeflenen yüzeyi tarif eder.** O gelene kadar bu depo şunlar
-için değerli: bir öğleden sonrada uygulayabileceğin bir protokol, doğrulanmış bir adaptör
-kaydı ve çalmaya değer bir güvenlik modeli.
+**Bugün çalışanlar:** gözlem katmanı ve bekçi. `ao`'yu bir projeye yönelt; uygulayıcının
+oturumunu kendi bulur, canlı paneli çizer ve — bekçi kurulduysa — ajan dilimin ortasında
+durduğunda kimse fark etmeden yeniden başlatır.
+
+**Hâlâ spesifikasyon olanlar:** aşağıdaki kapı, defter ve MCP katmanları. O komutlar
+çalıştırıldığında numara yapmak yerine durumu söylüyor.
 
 Yol haritası, sırayla:
 
 - [x] agent-mail protokolü, güvenlik modeli, roller, paralel şeritler, telemetri, MCP yüzeyi
-- [x] Adaptör kaydı — 3 doğrulanmış, 8 dokümandan yazılmış
-- [x] `ao status` / `ao watch` / `ao tail` / `ao mail` / `ao adapters` / `ao doctor` — gözlem katmanı
-- [ ] `ao mail` / `ao resume` — idle korumalı sürüş katmanı
+- [x] Adaptör kaydı — 3 doğrulanmış, 8 dokümandan, artı genel bulut adaptörü
+- [x] `ao status` / `watch` / `tail` / `mail` / `projects` / `adapters` / `doctor` — gözlem
+- [x] `ao watchdog` — duran uygulayıcıyı yeniden başlatan launchd görevi; harcamanın
+      işe yaramayacağı yerde hiçbir şey harcamayacak şekilde kapılı
 - [ ] `ao verify` / `ao commit-ok` — kapı katmanı
 - [ ] `ao slice` / `ao decide` / `ao since` — dilimler, defter ve kurtarma
 - [ ] `ao mcp serve`
@@ -117,16 +121,37 @@ cd agent-orchestrator && ./install.sh
 
 ## Hızlı başlangıç
 
+Yapılandırma gerekmiyor. `ao`, deponu ajan depolarının zaten kaydettiği çalışma alanı
+yollarıyla eşleştirerek uygulayıcı oturumunu kendi buluyor.
+
 ```bash
-ao init --implementer kiro            # steering + hook + posta kutusunu bu repoya yaz
-ao mail send DECISION "instanceof değil WeakSet markası kullan"
-ao watch                              # canlı panel; arka plandaki bir terminalde bırak
-ao status                             # tek seferlik özet
-ao verify                             # kapıları kendin koş
-ao commit-ok "feat: ..."              # kapılar geçtikten sonra commit yetkisi ver
+ao projects                     # yerel ajan oturumu olan çalışma alanları
+ao -C ~/proje status            # tek seferlik özet
+ao -C ~/proje watch             # canlı panel; arka plandaki bir terminalde bırak
+ao -C ~/proje tail -n 5         # ajanın son mesajları
+ao -C ~/proje doctor            # bağlantı kontrolü
+```
+
+"devam et" yazmayı bırak — bekçiyi bir kez kur, duran ajanı sensiz yeniden başlatsın:
+
+```bash
+ao -C ~/proje watchdog install     # 120 sn'de bir bakar, 6 dk boştalıkta dürter
+ao -C ~/proje watchdog status
+```
+
+Harcamanın işe yaramayacağı yerde harcamayı reddediyor: açık iş yoksa, dilim tur
+bütçesini aştıysa, sağlayıcı penceresi tükendiyse ya da iki dürtme hiçbir şey
+değiştirmediyse — bir tur daha yakmak yerine sana bildirim atıyor.
+
+Elle koordinasyon mesajı göndermek istersen:
+
+```bash
+ao -C ~/proje mail list
+ao -C ~/proje mail send DECISION marka --body "instanceof değil, kayıt üyeliğiyle markala."
 ```
 
 ## Dokümanlar
+
 
 - [`docs/protocol.md`](docs/protocol.md) — agent-mail spesifikasyonu
 - [`docs/adapters.md`](docs/adapters.md) — adaptör arayüzü ve destek matrisi

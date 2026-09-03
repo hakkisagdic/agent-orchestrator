@@ -308,6 +308,21 @@ def cmd_adapters(cfg, args):
 def cmd_doctor(cfg, args):
     root, impl, adapter = _ctx(cfg)
     ok = lambda b: f"{C['green']}ok{C['reset']}" if b else f"{C['red']}missing{C['reset']}"
+
+    # Run outside a project, every check is "missing" and none of it is a fault.
+    # Say that instead of printing a wall of red.
+    if not impl and not os.path.isdir(os.path.join(root, cfg["mailbox"])):
+        print(f"{C['yellow']}No project here.{C['reset']} {C['dim']}{root}{C['reset']}\n")
+        ws = A.all_workspaces()[:5]
+        if ws:
+            print("Point at one of these:")
+            for r in ws:
+                mins = int((time.time() - r["mtime"]) / 60)
+                age = f"{mins}m ago" if mins < 90 else f"{mins // 60}h ago"
+                print(f"  {C['b']}ao -C {r['path']} doctor{C['reset']}  {C['dim']}{age}{C['reset']}")
+        else:
+            print(f"{C['dim']}No local agent sessions found. See docs/adapters.md.{C['reset']}")
+        return
     print(f"root            {root}")
     print(f"config          {ok(os.path.exists(os.path.join(root, '.ao', 'config.json')))}")
     print(f"implementer     {impl.get('adapter','—')} / {impl.get('session','—')[:20]}")
