@@ -1,0 +1,10 @@
+{
+  "id": "copilot", "name": "GitHub Copilot CLI", "verified": "untested",
+  "disclaimer": "Written from documented interface, not verified against an install.",
+  "send":   { "argv": ["copilot", "-p", "{prompt}"] },
+  "resume": { "argv": ["copilot", "--resume", "{session}", "-p", "{prompt}"], "continue_last": ["copilot", "--continue", "-p", "{prompt}"] },
+  "options": { "model": ["--model", "{model}"], "effort": null, "trust_all": ["--allow-all-tools"] },
+  "transcript": { "kind": "unknown", "candidates": ["~/.copilot/history-session-state"] },
+  "busy": { "kind": "unknown" },
+  "directives": { "steering_files": [".github/copilot-instructions.md", "AGENTS.md"] }
+}

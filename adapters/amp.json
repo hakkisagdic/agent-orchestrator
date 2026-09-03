@@ -1,0 +1,11 @@
+{
+  "id": "amp", "name": "Amp (Sourcegraph)", "verified": "untested",
+  "disclaimer": "Written from documented interface, not verified against an install.",
+  "send":   { "argv": ["amp", "-x", "{prompt}"] },
+  "resume": { "argv": ["amp", "threads", "continue", "{session}", "-x", "{prompt}"] },
+  "list_sessions": { "argv": ["amp", "threads", "list"] },
+  "options": { "model": null, "model_note": "Amp selects models internally; no user-facing model flag.", "effort": null, "trust_all": ["--dangerously-allow-all"] },
+  "transcript": { "kind": "unknown", "candidates": ["~/.amp/threads"] },
+  "busy": { "kind": "unknown" },
+  "directives": { "steering_files": ["AGENT.md", "AGENTS.md"] }
+}

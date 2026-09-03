@@ -1,0 +1,18 @@
+{
+  "id": "aider", "name": "Aider", "verified": "untested",
+  "disclaimer": "Written from documented interface, not verified against an install.",
+  "note": "Unusual and useful: Aider keeps a human-readable transcript in the repo, so observation needs no vendor store.",
+  "send":   { "argv": ["aider", "--message", "{prompt}", "--yes-always"] },
+  "resume": { "argv": ["aider", "--message", "{prompt}", "--restore-chat-history", "--yes-always"] },
+  "options": {
+    "model": ["--model", "{model}"],
+    "effort": ["--reasoning-effort", "{effort}"],
+    "effort_values": ["low", "medium", "high"],
+    "thinking_tokens": ["--thinking-tokens", "{tokens}"],
+    "trust_all": ["--yes-always"],
+    "no_auto_commit": ["--no-auto-commits"]
+  },
+  "transcript": { "kind": "markdown", "path": "{cwd}/.aider.chat.history.md", "record": "markdown sections per exchange" },
+  "busy": { "mtime_file": "{cwd}/.aider.chat.history.md", "idle_seconds": 240 },
+  "directives": { "steering_files": ["CONVENTIONS.md"], "config": ".aider.conf.yml" }
+}

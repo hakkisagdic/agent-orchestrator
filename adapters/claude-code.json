@@ -1,0 +1,43 @@
+{
+  "id": "claude-code",
+  "name": "Claude Code",
+  "verified": "full",
+  "notes": "Works as implementer and as architect. When used as the architect it is the process running the orchestrator, so only send/resume matter.",
+
+  "send": {
+    "argv": ["claude", "-p", "{prompt}"],
+    "cwd_matters": true
+  },
+  "resume": {
+    "argv": ["claude", "--resume", "{session}", "-p", "{prompt}"],
+    "continue_last": ["claude", "--continue", "-p", "{prompt}"]
+  },
+
+  "options": {
+    "model": ["--model", "{model}"],
+    "output_json": ["--output-format", "stream-json"],
+    "allowed_tools": ["--allowedTools", "{tools}"],
+    "trust_all": ["--dangerously-skip-permissions"]
+  },
+
+  "transcript": {
+    "kind": "jsonl",
+    "path": "~/.claude/projects/{escaped_cwd}/{session}.jsonl",
+    "escaped_cwd": "absolute cwd with '/' replaced by '-'",
+    "record": { "time": "timestamp", "kind": "type", "text_keys": ["message.content", "content", "text"] },
+    "tail_bytes": 900000
+  },
+
+  "busy": {
+    "mtime_file": "{session}.jsonl",
+    "idle_seconds": 240,
+    "note": "No status file; rely on write age alone."
+  },
+
+  "directives": {
+    "steering_files": ["CLAUDE.md", ".claude/CLAUDE.md", "~/.claude/CLAUDE.md"],
+    "steering_format": "markdown, always included",
+    "hooks": ".claude/settings.json (hooks key)",
+    "skills_dir": ".claude/skills"
+  }
+}

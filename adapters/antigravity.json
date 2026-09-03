@@ -1,0 +1,73 @@
+{
+  "id": "antigravity",
+  "name": "Antigravity CLI (agy)",
+  "verified": "full",
+  "verified_version": "agy 1.1.19",
+  "observation_mode": "call-return",
+  "notes": "Verified against a running install. Keeps no local transcript we could find; instead every print-mode call returns a complete JSON record including the conversation id and full token accounting. The orchestrator persists that record itself, so observation and telemetry are better here than with a passive store — at the cost of only seeing turns it started.",
+
+  "syntax_warning": "Go-style flags: the prompt must be ATTACHED to the flag. `agy --print='...'` works; `agy -p '...'` silently takes the next argument as the flag value and drops the prompt. A space-separated form fails without writing anything, which looks exactly like the agent doing nothing.",
+
+  "send": {
+    "argv": ["agy", "--print={prompt}", "--output-format=json"],
+    "cwd_matters": true
+  },
+  "resume": {
+    "argv": ["agy", "--conversation={session}", "--print={prompt}", "--output-format=json"],
+    "continue_last": ["agy", "--continue", "--print={prompt}", "--output-format=json"]
+  },
+
+  "options": {
+    "model": ["--model={model}"],
+    "effort": ["--effort={effort}"],
+    "effort_values": ["low", "medium", "high"],
+    "agent_profile": ["--agent={agent}"],
+    "output_json": ["--output-format=json"],
+    "output_stream": ["--output-format=stream-json"],
+    "structured_output": ["--json-schema={schema}"],
+    "mode": ["--mode={mode}"],
+    "mode_values": ["accept-edits", "plan"],
+    "add_dir": ["--add-dir={dir}"],
+    "sandbox": ["--sandbox"],
+    "trust_all": ["--dangerously-skip-permissions"],
+    "timeout": ["--print-timeout={timeout}"]
+  },
+
+  "subcommands": {
+    "list_agents": ["agy", "agents"],
+    "list_models": ["agy", "models"],
+    "mcp": ["agy", "mcp"],
+    "plugins": ["agy", "plugin"]
+  },
+
+  "result_record": {
+    "session_id": "conversation_id",
+    "status": "status",
+    "status_values": ["SUCCESS"],
+    "text": "response",
+    "turns": "num_turns",
+    "duration": "duration_seconds",
+    "verified_example": "{\"conversation_id\":\"a0a7445c-…\",\"status\":\"SUCCESS\",\"response\":\"…\",\"duration_seconds\":18.8,\"num_turns\":1,\"usage\":{…}}"
+  },
+
+  "busy": {
+    "kind": "orchestrator-owned",
+    "note": "Print mode is synchronous, so the orchestrator knows exactly when a turn is in flight and does not have to infer it from file mtimes. The two-writer hazard is handled by an in-process lock per conversation id rather than an idle guard."
+  },
+
+  "telemetry": {
+    "cost": {
+      "from": "call-return",
+      "fields": ["usage.input_tokens", "usage.output_tokens", "usage.thinking_tokens", "usage.cache_read_tokens", "usage.total_tokens"],
+      "unit": "token",
+      "verified": true
+    },
+    "duration": { "from": "call-return", "field": "duration_seconds", "verified": true },
+    "context": { "from": "none", "note": "No context-percentage signal; approximate from input_tokens against the model's window if the window is known." },
+    "balance": { "from": "none", "note": "Never estimated." }
+  },
+
+  "directives": {
+    "todo": "Determine whether agy honours an always-included instruction file. Observed: a global rules preamble is replayed into responses, and one two-word prompt consumed 21140 input tokens — check what is being injected before blaming the model."
+  }
+}

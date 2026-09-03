@@ -1,0 +1,17 @@
+{
+  "id": "gemini", "name": "Google Gemini CLI", "verified": "untested",
+  "disclaimer": "Written from documented interface, not verified against an install.",
+  "send":   { "argv": ["gemini", "--prompt", "{prompt}"] },
+  "resume": { "argv": ["gemini", "--prompt", "{prompt}"], "note": "Session resume support varies by version; verify before relying on it." },
+  "options": {
+    "model": ["--model", "{model}"],
+    "effort": null,
+    "effort_note": "No reasoning-effort flag; model choice carries the tradeoff.",
+    "output_json": ["--output-format", "json"],
+    "trust_all": ["--yolo"],
+    "all_files": ["--all-files"]
+  },
+  "transcript": { "kind": "unknown", "candidates": ["~/.gemini/tmp", "~/.gemini/sessions"] },
+  "busy": { "kind": "unknown", "fallback": "synchronous print mode; orchestrator owns idle state" },
+  "directives": { "steering_files": ["GEMINI.md", "~/.gemini/GEMINI.md"], "config": "~/.gemini/settings.json" }
+}

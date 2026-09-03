@@ -1,0 +1,11 @@
+{
+  "id": "amazon-q", "name": "Amazon Q Developer CLI", "verified": "untested",
+  "disclaimer": "Written from documented interface, not verified against an install.",
+  "note": "Shares lineage with Kiro CLI: the flag surface is nearly identical, so the kiro adapter is the best starting point if this one drifts.",
+  "send":   { "argv": ["q", "chat", "--no-interactive", "{prompt}"] },
+  "resume": { "argv": ["q", "chat", "--resume", "--no-interactive", "{prompt}"] },
+  "options": { "model": ["--model", "{model}"], "effort": null, "trust_all": ["--trust-all-tools"], "trust_some": ["--trust-tools={tools}"] },
+  "transcript": { "kind": "unknown", "candidates": ["~/.aws/amazonq"] },
+  "busy": { "kind": "unknown" },
+  "directives": { "steering_files": [".amazonq/rules", "AmazonQ.md"] }
+}

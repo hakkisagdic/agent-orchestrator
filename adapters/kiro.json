@@ -1,0 +1,169 @@
+{
+  "id": "kiro",
+  "name": "Kiro CLI",
+  "verified": "full",
+  "verified_version": "kiro-cli (Kiro CLI), IDE 1.0.411",
+  "notes": "Reference adapter. Every capability exercised in a multi-week production run.",
+  "send": {
+    "argv": [
+      "kiro-cli",
+      "chat",
+      "--no-interactive",
+      "{prompt}"
+    ],
+    "cwd_matters": true
+  },
+  "resume": {
+    "argv": [
+      "kiro-cli",
+      "chat",
+      "--resume-id",
+      "{session}",
+      "--no-interactive",
+      "{prompt}"
+    ],
+    "note": "Injects into the same store the IDE uses; the IDE panel may not render an externally started turn even though it runs correctly."
+  },
+  "list_sessions": {
+    "argv": [
+      "kiro-cli",
+      "chat",
+      "--list-sessions",
+      "--format",
+      "json"
+    ],
+    "all_workspaces_flag": "--all-cwds",
+    "returns": "[{cwd, sessions:[{sessionId, source, title, updatedAt, status}]}]"
+  },
+  "list_models": {
+    "argv": [
+      "kiro-cli",
+      "chat",
+      "--list-models",
+      "--format",
+      "json"
+    ]
+  },
+  "options": {
+    "model": [
+      "--model",
+      "{model}"
+    ],
+    "effort": [
+      "--effort",
+      "{effort}"
+    ],
+    "effort_values": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "agent_profile": [
+      "--agent",
+      "{agent}"
+    ],
+    "output_json": [
+      "--output-format",
+      "stream-json"
+    ],
+    "trust_none": [
+      "--trust-tools="
+    ],
+    "trust_some": [
+      "--trust-tools={tools}"
+    ],
+    "trust_all": [
+      "--trust-all-tools"
+    ]
+  },
+  "transcript": {
+    "kind": "jsonl",
+    "path": "~/.kiro/sessions/{workspace_hash}/{session}/messages.jsonl",
+    "workspace_hash": "opaque per-workspace directory; resolve via list_sessions cwd match",
+    "record": {
+      "time": "timestamp",
+      "kind": "payload.type",
+      "text_keys": [
+        "text",
+        "content",
+        "message"
+      ]
+    },
+    "kinds": [
+      "user",
+      "assistant",
+      "tool_call",
+      "tool_result",
+      "session_metadata",
+      "turn_start",
+      "turn_end",
+      "sub_agent_start",
+      "sub_agent_complete"
+    ],
+    "tail_bytes": 900000
+  },
+  "busy": {
+    "meta": "~/.kiro/sessions/{workspace_hash}/{session}/session.json",
+    "status_field": "status",
+    "running_values": [
+      "in_progress"
+    ],
+    "description_field": "description",
+    "mtime_file": "messages.jsonl",
+    "idle_seconds": 240,
+    "note": "status can remain in_progress across an idle gap; the mtime check is the reliable half."
+  },
+  "directives": {
+    "steering_dir": ".kiro/steering",
+    "steering_format": "markdown with `inclusion: always` frontmatter",
+    "hooks_dir": ".kiro/hooks",
+    "hooks_format": "{\"version\":\"v1\",\"hooks\":[{name,trigger,action:{type:\"agent\"|\"command\",prompt|command}}]}",
+    "triggers": [
+      "SessionStart",
+      "Stop",
+      "PostFileSave",
+      "PostFileCreate",
+      "PostFileDelete",
+      "PreToolUse",
+      "PostToolUse",
+      "UserPromptSubmit",
+      "PreTaskExec",
+      "PostTaskExec"
+    ],
+    "warning": "File triggers fire only for changes made by the agent itself. A message dropped by an external process will NOT fire PostFileCreate — use SessionStart plus steering instead."
+  },
+  "telemetry": {
+    "context": {
+      "from": "transcript",
+      "type": "session_metadata",
+      "match": {
+        "key": "contextUsage"
+      },
+      "field": "value.usagePercentage",
+      "verified": true
+    },
+    "cost": {
+      "from": "transcript",
+      "type": "usage_summary",
+      "field": "promptTurnSummaries[].usage",
+      "unit": "credit",
+      "also": "promptTurnSummaries[].usedTools",
+      "verified": true
+    },
+    "quota": {
+      "from": "command",
+      "argv": [
+        "keyflip",
+        "usage",
+        "--providers"
+      ],
+      "cache_seconds": 300
+    },
+    "balance": {
+      "from": "none",
+      "note": "Plan balance is not written to disk. Never estimated; use keyflip for real quota windows."
+    }
+  }
+}

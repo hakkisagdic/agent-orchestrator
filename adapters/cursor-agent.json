@@ -1,0 +1,16 @@
+{
+  "id": "cursor-agent", "name": "Cursor Agent CLI", "verified": "untested",
+  "disclaimer": "Written from documented interface, not verified against an install.",
+  "send":   { "argv": ["cursor-agent", "--print", "{prompt}"] },
+  "resume": { "argv": ["cursor-agent", "--resume={session}", "--print", "{prompt}"] },
+  "list_sessions": { "argv": ["cursor-agent", "ls"] },
+  "options": {
+    "model": ["--model", "{model}"],
+    "effort": null,
+    "output_json": ["--output-format", "stream-json"],
+    "trust_all": ["--force"]
+  },
+  "transcript": { "kind": "unknown", "candidates": ["~/.cursor/cli", "~/.cursor/chats"] },
+  "busy": { "kind": "unknown" },
+  "directives": { "steering_files": [".cursor/rules", "AGENTS.md"] }
+}

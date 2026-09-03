@@ -1,0 +1,10 @@
+{
+  "id": "opencode", "name": "opencode", "verified": "partial",
+  "disclaimer": "Storage location verified on a real install; command flags from documentation.",
+  "send":   { "argv": ["opencode", "run", "{prompt}"] },
+  "resume": { "argv": ["opencode", "run", "--session", "{session}", "{prompt}"], "continue_last": ["opencode", "run", "--continue", "{prompt}"] },
+  "options": { "model": ["--model", "{model}"], "model_format": "provider/model", "effort": null, "agent_profile": ["--agent", "{agent}"] },
+  "transcript": { "kind": "sqlite", "path": "~/.local/share/opencode/opencode.db", "access": "READ-ONLY. A second writer corrupts the agent's own state.", "todo": "map the message table schema" },
+  "busy": { "mtime_file": "~/.local/share/opencode/opencode.db-wal", "idle_seconds": 240, "note": "WAL file mtime is a good activity proxy for SQLite-backed agents." },
+  "directives": { "steering_files": ["AGENTS.md"], "config": "opencode.json" }
+}

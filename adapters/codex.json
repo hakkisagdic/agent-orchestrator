@@ -1,0 +1,17 @@
+{
+  "id": "codex", "name": "OpenAI Codex CLI", "verified": "untested",
+  "disclaimer": "Written from documented interface, not verified against an install. Flags drift; correct and open a PR.",
+  "send":   { "argv": ["codex", "exec", "{prompt}"] },
+  "resume": { "argv": ["codex", "exec", "resume", "{session}", "{prompt}"], "continue_last": ["codex", "exec", "resume", "--last", "{prompt}"] },
+  "options": {
+    "model": ["--model", "{model}"],
+    "effort": ["-c", "model_reasoning_effort={effort}"],
+    "effort_values": ["minimal", "low", "medium", "high"],
+    "output_json": ["--json"],
+    "trust_all": ["--dangerously-bypass-approvals-and-sandbox"],
+    "sandbox": ["--sandbox", "{mode}"]
+  },
+  "transcript": { "kind": "jsonl", "path": "~/.codex/sessions/**/rollout-*.jsonl", "todo": "confirm record shape" },
+  "busy": { "mtime_glob": "~/.codex/sessions/**/rollout-*.jsonl", "idle_seconds": 240 },
+  "directives": { "steering_files": ["AGENTS.md", "~/.codex/AGENTS.md"], "config": "~/.codex/config.toml" }
+}
