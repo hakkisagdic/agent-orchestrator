@@ -134,10 +134,10 @@ def render(cfg, msg_count=8, width=None, max_lines=None):
     if ms:
         msgs_block.append(f"\n{C['b']}{C['mag']}── RECENT MESSAGES {'─' * max(0, w - 20)}{C['reset']}")
         for hh, kind, text in ms:
-            tag = f"{C['blue']}YOU {C['reset']}" if kind == "user" else f"{C['cyan']}AGNT{C['reset']}"
+            tag = f"{C['blue']}YOU  {C['reset']}" if kind == "user" else f"{C['cyan']}AGENT{C['reset']}"
             for i, ln in enumerate(textwrap.wrap(text, w - 14)[:3]):
                 msgs_block.append(f"   {C['dim']}{hh}{C['reset']} {tag}  {ln}" if i == 0
-                                  else f"        {C['dim']}│{C['reset']}     {ln}")
+                                  else f"        {C['dim']}│{C['reset']}      {ln}")
 
     if max_lines is None:
         return "\n".join(L + msgs_block)
@@ -184,7 +184,7 @@ def cmd_tail(cfg, args):
         return 1
     _, _, adapter = _ctx(cfg)
     for hh, kind, text in A.messages(A.read_tail(msgs_path), args.n):
-        who = "YOU " if kind == "user" else "AGNT"
+        who = "YOU  " if kind == "user" else "AGENT"
         print(f"--- {hh} [{who}] ---\n{text}\n")
 
 
