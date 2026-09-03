@@ -105,6 +105,24 @@ def render(cfg, msg_count=8, width=None, max_lines=None):
 
         msg_records = recs
 
+    # problems — only rendered when there is one, so an empty panel means healthy
+    if impl:
+        nudge_err = A.last_nudge_error(root)
+        errs = A.recent_errors(recs, 2, adapter)
+        if nudge_err or errs:
+            a(f"\n{C['b']}{C['red']}── PROBLEMS {'─' * max(0, w - 13)}{C['reset']}")
+            if nudge_err:
+                mins = int((time.time() - nudge_err.get("at", 0)) / 60)
+                a(f"   {C['red']}restart failed{C['reset']} {C['dim']}{mins}m ago · "
+                  f"exit {nudge_err.get('code')}{C['reset']}")
+                for ln in textwrap.wrap(nudge_err.get("tail", ""), w - 8)[:2]:
+                    a(f"     {C['dim']}{ln}{C['reset']}")
+                a(f"     {C['dim']}full log: ~/.ao/nudge-{os.path.basename(root)}.log{C['reset']}")
+            for hh, text in errs:
+                for i, ln in enumerate(textwrap.wrap(text, w - 12)[:2]):
+                    a(f"   {C['dim']}{hh}{C['reset']} {C['yellow']}agent error{C['reset']}  {ln}"
+                      if i == 0 else f"        {C['dim']}│{C['reset']}  {ln}")
+
     # reviews + round budget
     revs = A.reviews(root, cfg["reviews"])
     if revs:
@@ -340,6 +358,13 @@ def cmd_doctor(cfg, args):
     wd = A.sh(f"launchctl list | grep com.agentorchestrator.watchdog.{key}")
     print(f"watchdog        {C['green']}running{C['reset']}" if wd else
           f"watchdog        {C['dim']}not installed — ao watchdog install{C['reset']}")
+    err = A.last_nudge_error(root)
+    if err:
+        mins = int((time.time() - err.get("at", 0)) / 60)
+        print(f"last restart    {C['red']}failed {mins}m ago (exit {err.get('code')}){C['reset']}")
+        print(f"                {C['dim']}{err.get('tail','')[:110]}{C['reset']}")
+    else:
+        print(f"last restart    {C['dim']}no failures recorded{C['reset']}")
     print(f"\n{C['dim']}Not implemented yet: verify, commit-ok, slice, decide, "
           f"since, mcp serve.{C['reset']}")
 

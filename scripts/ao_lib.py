@@ -294,6 +294,55 @@ def busy(cfg, adapter):
     return state, age, desc
 
 
+def last_nudge_error(root):
+    """The most recent failed nudge, if the watchdog recorded one."""
+    key = os.path.basename(root.rstrip("/")) or "root"
+    try:
+        st = json.load(open(os.path.join(HOME, ".ao", f"watchdog-{key}.json")))
+    except Exception:
+        return None
+    return st.get("last_error")
+
+
+def recent_errors(recs, limit=3, adapter=None):
+    """Tool calls the agent itself marked as failed.
+
+    Use the structural verdict the store already carries — Kiro records
+    `success: true|false` on every tool_result — never a text search. Matching on
+    words like "failed" surfaces the agent's own search patterns and passing test
+    names, which is worse than showing nothing: a panel that cries wolf gets
+    ignored exactly when it is right.
+    """
+    field = ((adapter or {}).get("telemetry", {}).get("failure") or {}).get("field", "success")
+    out = []
+    for r in reversed(recs):
+        pl = r.get("payload", r)
+        if not isinstance(pl, dict) or pl.get("type") != "tool_result":
+            continue
+        if pl.get(field) is not False:
+            continue
+        # Failed tool output is usually a wall of passing lines with the real
+        # cause buried in it. Lead with the line that actually failed.
+        raw = str(pl.get("content", ""))
+        lines = [ln.strip() for ln in raw.split("\n") if ln.strip()]
+        def is_signal(ln):
+            low = ln.lower()
+            if ln.startswith("✔") or low.startswith("output:"):
+                return False
+            return (ln.startswith("✖") or "error ts" in low or "error:" in low
+                    or low.startswith("fail") or " failing tests" in low
+                    or "exit code: 1" in low or low.startswith("✗"))
+        signal = next((ln for ln in lines if is_signal(ln)), None)
+        if not signal:
+            signal = next((ln for ln in lines if not ln.lower().startswith("output:")
+                           and not ln.startswith("✔")), lines[0] if lines else raw)
+        text = " ".join(str(signal)[:260].split())
+        out.append((r.get("timestamp", "")[11:16] or "--:--", text))
+        if len(out) >= limit:
+            break
+    return list(reversed(out))
+
+
 # ── repository signals ────────────────────────────────────────────────────────
 
 def reviews(root, reviews_dir, limit=4):

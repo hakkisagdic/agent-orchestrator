@@ -224,10 +224,41 @@ def main():
         print("DRY RUN:", " ".join(argv[:4]), "…")
         return 0
 
+    # Never discard the child's output. A nudge that dies on an expired login or
+    # an exhausted plan looks exactly like an agent that ignored us, and the
+    # difference is the only thing worth knowing at that moment.
+    key = os.path.basename(root.rstrip("/")) or "root"
+    log_path = os.path.join(STATE_DIR, f"nudge-{key}.log")
+    os.makedirs(STATE_DIR, exist_ok=True)
     env = dict(os.environ, PATH=search)
-    subprocess.Popen(argv, cwd=root, env=env, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, start_new_session=True)
+    with open(log_path, "a") as log:
+        log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} nudge ===\n")
+        log.flush()
+        proc = subprocess.Popen(argv, cwd=root, env=env, stdout=log,
+                                stderr=subprocess.STDOUT, start_new_session=True)
+
+    # Give it a moment to fail. A healthy turn runs for minutes; anything that
+    # exits within seconds died rather than started.
+    early = None
+    for _ in range(12):
+        time.sleep(1)
+        if proc.poll() is not None:
+            early = proc.returncode
+            break
+
     st.update(attempts=st.get("attempts", 0) + 1, last_nudge=time.time(), last_size=size)
+    if early not in (None, 0):
+        tail = ""
+        try:
+            with open(log_path) as fh:
+                tail = " ".join(fh.read().strip().split("\n")[-3:])[-300:]
+        except OSError:
+            pass
+        st["last_error"] = {"at": time.time(), "code": early, "tail": tail}
+        notify("Voltrai: nudge failed", f"exit {early}: {tail[-120:] or 'see nudge log'}")
+        print(f"nudge failed (exit {early}): {tail}")
+    else:
+        st.pop("last_error", None)
     save_state(root, st)
     return 0
 

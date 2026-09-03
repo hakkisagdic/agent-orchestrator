@@ -164,6 +164,14 @@
     "balance": {
       "from": "none",
       "note": "Plan balance is not written to disk. Never estimated; use keyflip for real quota windows."
+    },
+    "failure": {
+      "from": "transcript",
+      "type": "tool_result",
+      "field": "success",
+      "failed_when": false,
+      "verified": true,
+      "note": "Structural verdict on every tool result. Never text-match for 'error' or 'failed' — the agent's own search patterns and passing test names contain both."
     }
   }
 }
