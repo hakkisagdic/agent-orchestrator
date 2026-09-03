@@ -52,6 +52,7 @@ gerçekten insana ait olan yerlerde tutar: kapsam, para, risk, yayın.
 | **agent-mail** | Ajanlar arası eşzamansız dosya protokolü. Silme=teslim, tipli mesajlar, varsayılan olarak güvenilmez içerik. |
 | **Gözlem** | Başka bir ajanın oturum transkriptini salt-okunur okuma. Canlı terminal paneli. Commit / inceleme / rapor olduğunda masaüstü bildirimi. |
 | **Sürüş** | Idle korumalı prompt enjeksiyonu, ajanın "devam et" sormasını bitiren kalıcı otonomi direktifleri. |
+| **Tıkanma yönetimi** | Uygulayıcı haklı olarak reddettiğinde mimar durur, sana bir kez sorar ve onayını birebir taşıyan bir `ESCALATION` yazar — kapsamı açar, yetkiyi asla. |
 | **Kapılar** | Mimar, commit yetkisi vermeden önce typecheck/test/diff kontrolünü **kendi** koşar. Push asla otomatik değildir. |
 | **Adaptörler** | Her CLI için: prompt gönder, oturuma dön, transkript oku, meşgul mü anla, direktif enjekte et. |
 | **Roller / aktörler** | Roller (mimar, uygulayıcı, denetçi, testçi, hata avcısı…) aktörlere atanır — orkestratörün kendisi ya da herhangi bir CLI oturumu. Tek komutla yer değiştirir. |

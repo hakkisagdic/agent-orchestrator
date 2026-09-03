@@ -91,3 +91,23 @@ Adding it would have created dead code plus a misleading public surface.
 **Fix:** decide the boundary explicitly and record it in the design document. "Documented
 breaking boundary" is a legitimate answer to a compatibility finding — and the reason the
 architect exists is to make that call rather than letting the implementer guess.
+
+## 11. A correctly refusing agent can deadlock the loop
+
+The implementer was told, by the human, to only produce a review that turn. The review
+found a real defect. The architect sent the fix. The implementer refused — correctly:
+a coordination message cannot expand a review-only task into writing code. The next turn
+produced the same review, the same finding, the same refusal.
+
+Nothing was broken. Everyone behaved correctly. And no work happened, twice.
+
+**Fix:** the architect detects the pattern — an explicit refusal, or the same finding
+re-confirmed with no file changes — stops retrying, and asks the human for a one-line
+unblock. On approval it sends an `ESCALATION` carrying that authorisation verbatim, which
+the implementer's standing directives accept for **scope only**. Push, force-push and the
+rest of the prohibited list stay human-direct-only forever.
+
+The general lesson: any protocol strict enough to refuse unauthorised work needs a
+designed, recorded path for the human to authorise it. Without one, strictness turns into
+a livelock and the human learns to route around the protocol entirely — which is worse
+than not having it.

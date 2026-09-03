@@ -52,6 +52,7 @@ and keeps the human for the parts only they can decide: scope, money, risk, rele
 | **agent-mail** | Async file protocol between agents. Delivery-by-deletion, typed messages, untrusted-by-default content. |
 | **Observation** | Read another agent's session transcript read-only. Live terminal dashboard. Desktop notifications on commit / review / report. |
 | **Driving** | Idle-guarded prompt injection (`resume`), standing autonomy directives so the agent stops asking for "continue". |
+| **Deadlock handling** | When the implementer correctly refuses, the architect stops, asks you once, and carries your authorisation verbatim in an `ESCALATION` that lifts scope — never authority. |
 | **Gates** | The architect re-runs typecheck/tests/diff-check itself before granting commit authority. Push is never automatic. |
 | **Adapters** | Per-CLI definition of: send prompt, resume session, read transcript, detect busy, inject directives. |
 | **Roles / actors** | Roles (architect, implementer, reviewer, tester, bug-hunter…) are assigned to actors — the orchestrator itself or any CLI session. Swap them with one command. |

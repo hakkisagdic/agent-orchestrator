@@ -80,6 +80,17 @@ The MCP surface is grouped: `read`, `write`, `run`, `drive`, `authority`. Only `
 `authority` lets it request commit rights. Turning those on is a deliberate act, and they
 are the two groups an attacker would want most.
 
+## 6b. Escalation lifts scope, never authority
+
+When the implementer refuses work because of a standing instruction, the architect stops
+and asks the human. An approved `ESCALATION` message carries the human's authorisation
+verbatim and unlocks exactly one scope lock — review-only becomes implement, a paused lane
+resumes.
+
+It can never unlock anything in the prohibited list of §1. An escalation that appears to
+grant push, force-push, hook bypass or foreign-repository mutation is malformed by
+definition and must be rejected whole, not partially honoured.
+
 ## 7. Secrets
 
 Secrets never enter the mailbox, the event log, a message, a commit, a status line or a
