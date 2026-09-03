@@ -1,0 +1,240 @@
+#!/usr/bin/env python3
+"""ao — agent-orchestrator, observation layer.
+
+Implemented today: status, watch, tail, mail, adapters, doctor.
+Not yet: resume, verify, commit-ok, slice, decide, since, mcp serve — see the
+roadmap in README.md. Commands that do not exist say so rather than pretending.
+
+Standard library only. Observation is strictly read-only.
+"""
+import argparse
+import os
+import shutil
+import sys
+import textwrap
+import time
+from datetime import datetime
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
+import ao_lib as A  # noqa: E402
+
+C = A.C
+
+
+def _ctx(cfg):
+    root = cfg["root"]
+    impl = cfg.get("implementer") or {}
+    adapter = A.load_adapter(impl.get("adapter", "")) if impl else {}
+    return root, impl, adapter
+
+
+def _bar(pct, width=20):
+    filled = max(0, min(width, int(pct / (100 / width))))
+    col = C["red"] if pct > 85 else C["yellow"] if pct > 70 else C["green"]
+    return f"{col}{'█' * filled}{'░' * (width - filled)}{C['reset']} {pct:.0f}%"
+
+
+def render(cfg, msg_count=8, width=None):
+    root, impl, adapter = _ctx(cfg)
+    w = min(width or shutil.get_terminal_size((120, 40)).columns, 130)
+    L = []
+    a = L.append
+
+    name = cfg.get("project") or os.path.basename(root)
+    a(f"{C['b']}{C['cyan']}{'═' * w}{C['reset']}")
+    a(f"{C['b']}  {name.upper()}{C['reset']}{C['dim']}   agent-orchestrator   "
+      f"{datetime.now():%d %b %H:%M:%S}{C['reset']}")
+    a(f"{C['b']}{C['cyan']}{'═' * w}{C['reset']}")
+
+    # implementer state
+    if impl:
+        state, age, desc = A.busy(cfg, adapter)
+        label = {"working": ("● WORKING", C["green"]),
+                 "slowing": ("◐ slowing", C["yellow"]),
+                 "idle": ("○ IDLE", C["red"])}.get(state, ("? unknown", C["dim"]))
+        txt, col = label
+        agestr = f"last write {age // 60}m {age % 60}s ago" if age is not None else "no transcript"
+        a(f"\n{col}{C['b']}{txt}{C['reset']}  {C['dim']}{impl.get('adapter','?')} · {agestr}{C['reset']}")
+        for i, ln in enumerate(textwrap.wrap(desc, w - 6)[:2]):
+            a(f"  {C['dim']}↳{C['reset']} {ln}" if i == 0 else f"    {ln}")
+    else:
+        a(f"\n{C['dim']}No implementer session found for this workspace.{C['reset']}")
+
+    # telemetry
+    if impl:
+        msgs_path, _ = A.session_paths(cfg)
+        recs = A.read_tail(msgs_path, 12_000_000) if msgs_path else []
+        tel = A.telemetry(recs, adapter)
+        q = A.quota(adapter)
+        if tel.get("ctx") is not None or tel.get("last") or q:
+            a(f"\n{C['b']}{C['mag']}── QUOTA / CONTEXT {'─' * max(0, w - 20)}{C['reset']}")
+            if tel.get("ctx") is not None:
+                note = "  ← start a fresh session" if tel["ctx"] > 85 else ""
+                a(f"   context  {_bar(tel['ctx'])}{C['dim']}{note}{C['reset']}")
+            if tel.get("last"):
+                lu, lt = tel["last"]
+                avg = tel["total"] / max(1, tel["turns"])
+                warn = f"  {C['yellow']}⚠ {lu/max(avg,1):.1f}× average{C['reset']}" if lu > 2 * avg else ""
+                a(f"   cost     last turn {C['b']}{lu:.0f}{C['reset']} {tel['unit']} "
+                  f"({lt} tool calls) · {tel['turns']} turns, total {C['b']}{tel['total']:.0f}{C['reset']}"
+                  f"{C['dim']} (avg {avg:.0f}){C['reset']}{warn}")
+            for line in q:
+                a(f"   {C['dim']}provider{C['reset']} {line}")
+
+        # messages
+        ms = A.messages(recs, msg_count)
+        if ms:
+            a(f"\n{C['b']}{C['mag']}── RECENT MESSAGES {'─' * max(0, w - 20)}{C['reset']}")
+            for hh, kind, text in ms:
+                tag = f"{C['blue']}YOU {C['reset']}" if kind == "user" else f"{C['cyan']}AGNT{C['reset']}"
+                for i, ln in enumerate(textwrap.wrap(text, w - 14)[:3]):
+                    a(f"   {C['dim']}{hh}{C['reset']} {tag}  {ln}" if i == 0
+                      else f"        {C['dim']}│{C['reset']}     {ln}")
+
+    # reviews + round budget
+    revs = A.reviews(root, cfg["reviews"])
+    if revs:
+        rn = A.rounds(root, cfg["reviews"])
+        budget = cfg.get("round_budget", 5)
+        flag = f"  {C['red']}⚠ over budget ({rn}/{budget}) — re-specify, split or change actor{C['reset']}" \
+            if rn > budget else (f"  {C['dim']}round {rn}/{budget}{C['reset']}" if rn else "")
+        a(f"\n{C['b']}{C['mag']}── REVIEWS {'─' * max(0, w - 12)}{C['reset']}{flag}")
+        for f, v in revs:
+            col = C["green"] if "APPROVED" in v.upper() else C["yellow"]
+            a(f"   {f.split('-pr')[0]}   {col}{v}{C['reset']}")
+
+    # git + mail
+    g = A.git_state(root)
+    a(f"\n{C['b']}{C['mag']}── REPOSITORY {'─' * max(0, w - 15)}{C['reset']}")
+    for ln in g["log"][:3]:
+        if ln:
+            a(f"   {ln[:w-5]}")
+    a(f"   {C['dim']}{len(g['dirty'])} files uncommitted · {g['ahead']} commits unpushed{C['reset']}")
+
+    mail = A.mailbox(root, cfg["mailbox"])
+    a(f"\n   {C['b']}Mailbox:{C['reset']} " +
+      (", ".join(mail) if mail else f"{C['dim']}empty{C['reset']}"))
+    return "\n".join(L)
+
+
+def cmd_status(cfg, args):
+    print(render(cfg, args.messages))
+
+
+def cmd_watch(cfg, args):
+    sys.stdout.write("\033[?1049h")          # alternate screen
+    try:
+        while True:
+            out = render(cfg, args.messages)
+            sys.stdout.write("\033[H\033[J" + out +
+                             f"\n\n{C['dim']}  refreshing every {args.interval}s · Ctrl+C to exit{C['reset']}\n")
+            sys.stdout.flush()
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        sys.stdout.write("\033[?1049l")      # restore scrollback
+        sys.stdout.flush()
+
+
+def cmd_tail(cfg, args):
+    msgs_path, _ = A.session_paths(cfg)
+    if not msgs_path:
+        print("No implementer session found.", file=sys.stderr)
+        return 1
+    _, _, adapter = _ctx(cfg)
+    for hh, kind, text in A.messages(A.read_tail(msgs_path), args.n):
+        who = "YOU " if kind == "user" else "AGNT"
+        print(f"--- {hh} [{who}] ---\n{text}\n")
+
+
+def cmd_mail(cfg, args):
+    root = cfg["root"]
+    d = os.path.join(root, cfg["mailbox"])
+    if args.action == "list":
+        for f in A.mailbox(root, cfg["mailbox"]):
+            print(f)
+    elif args.action == "read":
+        for f in A.mailbox(root, cfg["mailbox"]):
+            print(f"===== {f} =====\n{open(os.path.join(d, f)).read()}")
+    elif args.action == "send":
+        os.makedirs(d, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M")
+        topic = (args.topic or "note").replace(" ", "-").lower()
+        name = f"{stamp}-architect-to-implementer-{args.type.upper()}-{topic}.md"
+        body = args.body if args.body else sys.stdin.read()
+        open(os.path.join(d, name), "w").write(body.rstrip() + "\n")
+        print(name)
+
+
+def cmd_adapters(cfg, args):
+    d = os.path.join(A.REPO, "adapters")
+    rows = []
+    for f in sorted(os.listdir(d)):
+        if not f.endswith(".json") or f == "cloud-generic.json":
+            continue
+        try:
+            a = __import__("json").load(open(os.path.join(d, f)))
+        except Exception:
+            continue
+        rows.append((a.get("id", f), a.get("verified", "?"),
+                     "call-return" if a.get("observation_mode") == "call-return"
+                     else (a.get("transcript", {}) or {}).get("kind", "—")))
+    print(f"{'adapter':<16}{'verified':<12}observation")
+    for r in rows:
+        col = C["green"] if r[1] == "full" else C["yellow"] if r[1] == "partial" else C["dim"]
+        print(f"{r[0]:<16}{col}{r[1]:<12}{C['reset']}{r[2]}")
+
+
+def cmd_doctor(cfg, args):
+    root, impl, adapter = _ctx(cfg)
+    ok = lambda b: f"{C['green']}ok{C['reset']}" if b else f"{C['red']}missing{C['reset']}"
+    print(f"root            {root}")
+    print(f"config          {ok(os.path.exists(os.path.join(root, '.ao', 'config.json')))}")
+    print(f"implementer     {impl.get('adapter','—')} / {impl.get('session','—')[:20]}")
+    msgs, _ = A.session_paths(cfg)
+    print(f"transcript      {ok(bool(msgs and os.path.exists(msgs)))}")
+    print(f"mailbox         {ok(os.path.isdir(os.path.join(root, cfg['mailbox'])))}")
+    print(f"reviews         {ok(os.path.isdir(os.path.join(root, cfg['reviews'])))}")
+    print(f"quota source    {'keyflip' if A.sh('command -v keyflip') else '—'}")
+    print(f"\n{C['dim']}Not implemented yet: resume, verify, commit-ok, slice, decide, "
+          f"since, mcp serve.{C['reset']}")
+
+
+def main():
+    p = argparse.ArgumentParser(prog="ao", description="agent-orchestrator (observation layer)")
+    sub = p.add_subparsers(dest="cmd")
+
+    s = sub.add_parser("status", help="one-shot summary")
+    s.add_argument("-m", "--messages", type=int, default=6)
+    s.set_defaults(fn=cmd_status)
+
+    w = sub.add_parser("watch", help="live panel; leave it in a background terminal")
+    w.add_argument("-i", "--interval", type=int, default=15)
+    w.add_argument("-m", "--messages", type=int, default=8)
+    w.set_defaults(fn=cmd_watch)
+
+    t = sub.add_parser("tail", help="recent messages from the implementer's transcript")
+    t.add_argument("-n", type=int, default=5)
+    t.set_defaults(fn=cmd_tail)
+
+    m = sub.add_parser("mail", help="list, read or send coordination messages")
+    m.add_argument("action", choices=["list", "read", "send"])
+    m.add_argument("type", nargs="?", default="INFO")
+    m.add_argument("topic", nargs="?")
+    m.add_argument("--body")
+    m.set_defaults(fn=cmd_mail)
+
+    sub.add_parser("adapters", help="adapter registry and verification status").set_defaults(fn=cmd_adapters)
+    sub.add_parser("doctor", help="check this workspace's wiring").set_defaults(fn=cmd_doctor)
+
+    args = p.parse_args()
+    if not getattr(args, "fn", None):
+        p.print_help()
+        return 0
+    cfg = A.load_config(A.find_root())
+    return args.fn(cfg, args) or 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

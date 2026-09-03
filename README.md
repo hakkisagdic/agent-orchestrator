@@ -93,15 +93,14 @@ extracted from a system in daily production use — they are specifications and 
 findings, not sketches.
 
 The `ao` CLI that ties them together is still being extracted from that private
-implementation. **The commands shown below describe the intended surface; they do not run
-yet.** Until they land, this repo is useful as: a protocol you can implement in an
+implementation. **The observation commands run today; the rest describe the intended surface.** Until they land, this repo is useful as: a protocol you can implement in an
 afternoon, a verified adapter registry, and a safety model worth stealing.
 
 Roadmap, in order:
 
 - [x] agent-mail protocol, safety model, roles, parallel lanes, telemetry, MCP surface
 - [x] Adapter registry — 3 verified, 8 written from documentation
-- [ ] `ao status` / `ao watch` — the observation layer (reference scripts exist privately)
+- [x] `ao status` / `ao watch` / `ao tail` / `ao mail` / `ao adapters` / `ao doctor` — the observation layer
 - [ ] `ao mail` / `ao resume` — the driving layer with idle guard
 - [ ] `ao verify` / `ao commit-ok` — the gate layer
 - [ ] `ao slice` / `ao decide` / `ao since` — slices, ledger and recovery

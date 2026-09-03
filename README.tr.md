@@ -91,8 +91,7 @@ Tam model: [`docs/safety.md`](docs/safety.md).
 Bu depodaki protokol, adaptörler, güvenlik modeli ve telemetri eşlemeleri günlük üretim
 kullanımındaki bir sistemden çıkarıldı — taslak değil, spesifikasyon ve doğrulanmış bulgular.
 
-Bunları birbirine bağlayan `ao` komutu hâlâ o özel uygulamadan ayrıştırılıyor. **Aşağıdaki
-komutlar hedeflenen yüzeyi tarif eder; henüz çalışmazlar.** O gelene kadar bu depo şunlar
+Bunları birbirine bağlayan `ao` komutu hâlâ o özel uygulamadan ayrıştırılıyor. **Gözlem komutları bugün çalışıyor; kalanlar hedeflenen yüzeyi tarif eder.** O gelene kadar bu depo şunlar
 için değerli: bir öğleden sonrada uygulayabileceğin bir protokol, doğrulanmış bir adaptör
 kaydı ve çalmaya değer bir güvenlik modeli.
 
@@ -100,7 +99,7 @@ Yol haritası, sırayla:
 
 - [x] agent-mail protokolü, güvenlik modeli, roller, paralel şeritler, telemetri, MCP yüzeyi
 - [x] Adaptör kaydı — 3 doğrulanmış, 8 dokümandan yazılmış
-- [ ] `ao status` / `ao watch` — gözlem katmanı (referans script'ler özelde mevcut)
+- [x] `ao status` / `ao watch` / `ao tail` / `ao mail` / `ao adapters` / `ao doctor` — gözlem katmanı
 - [ ] `ao mail` / `ao resume` — idle korumalı sürüş katmanı
 - [ ] `ao verify` / `ao commit-ok` — kapı katmanı
 - [ ] `ao slice` / `ao decide` / `ao since` — dilimler, defter ve kurtarma
