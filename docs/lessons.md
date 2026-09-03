@@ -123,6 +123,19 @@ bin directories explicitly, and notify a human when it cannot be found rather th
 failing silently on a timer. A watchdog that fails quietly is worse than no watchdog,
 because it looks installed.
 
+## 12b. The agent inherits the PATH you hand it
+
+Fixing the watchdog's own PATH was only half the problem. The agent it spawns
+inherits that environment, so a nudged turn started fine and then could not run
+`npm` — the toolchain lived in a version-manager shim directory that the minimal
+environment did not include. The agent worked around it by hunting for absolute
+paths, which is time spent on our tooling rather than on the work.
+
+**Fix:** build one PATH that covers the user's real toolchain — user bin
+directories plus whichever shim currently owns `node` — use it both to resolve
+the CLI and to populate the child's environment. If you drive an agent, you owe
+it a shell it can actually build in.
+
 ## 13. A global state directory is not a project marker
 
 `find_root()` walked up looking for `.ao/` and found `$HOME/.ao` — the global state

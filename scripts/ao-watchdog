@@ -34,6 +34,44 @@ STATE_DIR = os.path.join(A.HOME, ".ao")
 MAX_ATTEMPTS = 3
 
 
+def child_path():
+    """A PATH the nudged agent can actually build with.
+
+    Two different failures hide here. launchd gives us a minimal PATH, so we
+    cannot find the agent CLI. And the agent we spawn inherits whatever PATH we
+    hand it — if that lacks the toolchain (node, npm, a version-manager shim),
+    the agent starts its turn and then cannot run its own gates. Resolve both by
+    building one PATH that covers the user's real toolchain, including any
+    version-manager shim directory the current interpreter can see.
+    """
+    parts = [os.environ.get("PATH", "")]
+    for d in ("~/.local/bin", "~/bin", "/usr/local/bin", "/opt/homebrew/bin",
+              "/usr/bin", "/bin", "/usr/sbin", "/sbin"):
+        parts.append(os.path.expanduser(d))
+    # fnm / nvm / asdf style shims: whichever one currently owns `node`
+    node = shutil.which("node")
+    if node:
+        parts.append(os.path.dirname(node))
+    for base in ("~/.local/state/fnm_multishells", "~/.nvm/versions/node", "~/.asdf/shims"):
+        b = os.path.expanduser(base)
+        if os.path.isdir(b):
+            try:
+                for entry in sorted(os.listdir(b), reverse=True)[:3]:
+                    cand = os.path.join(b, entry, "bin")
+                    if os.path.isdir(cand):
+                        parts.append(cand)
+                    elif os.path.isdir(os.path.join(b, entry)):
+                        parts.append(os.path.join(b, entry))
+            except OSError:
+                pass
+    seen, out = set(), []
+    for chunk in ":".join(parts).split(":"):
+        if chunk and chunk not in seen:
+            seen.add(chunk)
+            out.append(chunk)
+    return ":".join(out)
+
+
 def notify(title, msg):
     subprocess.run(["osascript", "-e",
                     f'display notification "{msg}" with title "{title}"'],
@@ -170,12 +208,8 @@ def main():
         print("adapter has no resume command")
         return 1
 
-    # launchd runs with a minimal PATH that excludes the user bin directories
-    # where agent CLIs actually live, so resolve the binary ourselves rather than
-    # failing with a bare FileNotFoundError two minutes at a time.
-    search = os.environ.get("PATH", "") + ":" + ":".join(
-        os.path.expanduser(d) for d in
-        ("~/.local/bin", "~/bin", "/usr/local/bin", "/opt/homebrew/bin"))
+    # Resolve the CLI and hand the child a usable PATH — see child_path().
+    search = child_path()
     resolved = shutil.which(argv[0], path=search)
     if not resolved:
         notify("Voltrai: watchdog", f"{argv[0]} not on PATH; cannot nudge")
@@ -190,7 +224,8 @@ def main():
         print("DRY RUN:", " ".join(argv[:4]), "…")
         return 0
 
-    subprocess.Popen(argv, cwd=root, stdout=subprocess.DEVNULL,
+    env = dict(os.environ, PATH=search)
+    subprocess.Popen(argv, cwd=root, env=env, stdout=subprocess.DEVNULL,
                      stderr=subprocess.DEVNULL, start_new_session=True)
     st.update(attempts=st.get("attempts", 0) + 1, last_nudge=time.time(), last_size=size)
     save_state(root, st)
