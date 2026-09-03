@@ -1,0 +1,12 @@
+{
+  "id": "deepseek", "name": "DeepSeek harness / CLI", "verified": "untested",
+  "disclaimer": "Written from documented interfaces. 'DeepSeek CLI' refers to several community and official harnesses; confirm which one is installed before relying on flags. The API is OpenAI-compatible, so an OpenAI-style adapter is a good fallback.",
+  "send":   { "argv": ["deepseek", "--prompt={prompt}"] },
+  "resume": { "argv": ["deepseek", "--session={session}", "--prompt={prompt}"], "note": "session support varies by harness" },
+  "options": { "model": ["--model={model}"], "model_values": ["deepseek-chat","deepseek-reasoner"],
+               "effort": null, "effort_note": "deepseek-reasoner exposes reasoning; no separate effort flag.",
+               "output_json": ["--json"], "base_url": ["--base-url={url}"], "api_openai_compatible": true },
+  "transcript": { "kind": "unknown", "candidates": ["~/.deepseek","~/.config/deepseek"] },
+  "busy": { "kind": "unknown" },
+  "directives": { "steering_files": ["AGENTS.md"] }
+}

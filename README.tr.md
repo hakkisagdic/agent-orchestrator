@@ -128,6 +128,7 @@ ao commit-ok "feat: ..."              # kapılar geçtikten sonra commit yetkisi
 - [`docs/adapters.md`](docs/adapters.md) — adaptör arayüzü ve destek matrisi
 - [`docs/roles.md`](docs/roles.md) — rol modeli, aktörler ve görevler ayrılığı
 - [`docs/parallel.md`](docs/parallel.md) — paralel projeler, şeritler ve merge kuyruğu
+- [`docs/ide-extensions.md`](docs/ide-extensions.md) — IDE-yerleşik ajanlar (Cursor, Copilot, Qoder): CLI, MCP ya da git ile
 - [`docs/cloud.md`](docs/cloud.md) — bulut ajanları, bulut şeritleri ve pull request arayüzü
 - [`docs/models.md`](docs/models.md) — model ve efor kontrolü
 - [`docs/mcp.md`](docs/mcp.md) — MCP yüzeyi ve yetenek kapıları

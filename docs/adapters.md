@@ -30,7 +30,12 @@ not the protocol.
 | opencode | ✓ | ? | SQLite | ? | — | partial |
 | Codex CLI | | | | | | planned |
 | Gemini CLI | | | | | | planned |
-| Cursor Agent | | | | | | planned |
+| Cursor Agent (`agent`) | ✓ | ✓ | ✓ call-return | ✓ | .cursor/rules | documented |
+| Command Code (`cmd`) | ✓ | ✓ | ✓ JSONL | ✓ | AGENTS.md | partial |
+| Codex CLI | | | | | | planned |
+| Gemini CLI | | | | | | planned |
+| DeepSeek | | | | | | planned |
+| Qoder | | | | | | planned |
 | Aider | | | | | | planned |
 | Amp | | | | | | planned |
 | GitHub Copilot CLI | | | | | | planned |

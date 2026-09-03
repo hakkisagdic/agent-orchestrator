@@ -1,0 +1,34 @@
+{
+  "id": "command-code", "name": "Command Code (cmd)", "verified": "partial",
+  "verified_version": "cmd 1.32.2",
+  "notes": "Command surface and session store verified on a real install. Rich CLI: print mode, JSON output, resume by id or transcript path, managed worktrees, model+effort, MCP, skills, and cross-tool import. Transcript field names not fully mapped, so telemetry is left partial.",
+  "send":   { "argv": ["cmd", "--print={prompt}", "--output-format=json", "--skip-onboarding"] },
+  "resume": { "argv": ["cmd", "--resume={session}", "--print={prompt}", "--output-format=json"],
+              "by_path": ["cmd", "--session={path}", "--print={prompt}", "--output-format=json"],
+              "continue_last": ["cmd", "--continue", "--print={prompt}", "--output-format=json"] },
+  "list_sessions": { "argv": ["cmd", "--resume"], "note": "interactive picker; prefer scanning ~/.commandcode/projects" },
+  "list_models": { "argv": ["cmd", "--list-models"] },
+  "options": {
+    "model": ["--model={model}"], "effort": ["--effort={effort}"],
+    "effort_values": ["low","medium","high"],
+    "output_json": ["--output-format=json"], "max_turns": ["--max-turns={n}"],
+    "worktree": ["--worktree={name}"], "add_dir": ["--add-dir={dir}"],
+    "trust_all": ["--yolo"], "permission_mode": ["--permission-mode={mode}"],
+    "tools_all": ["--tools-all"], "local_only": ["--local-only"]
+  },
+  "transcript": {
+    "kind": "jsonl",
+    "path": "~/.commandcode/projects/{session}.jsonl",
+    "record": { "time": "timestamp", "kind": "type", "id": "id", "parent": "parentId", "text_keys": ["content","text","p"] },
+    "kinds_seen": ["user"], "todo": "map assistant/result/usage record shapes; then promote to full",
+    "checkpoints": "~/.commandcode/projects/{session}.checkpoints.jsonl"
+  },
+  "busy": { "mtime_file": "~/.commandcode/projects/{session}.jsonl", "idle_seconds": 240 },
+  "directives": {
+    "steering_files": ["AGENTS.md"], "init": ["cmd", "/init"],
+    "import_from": ["claude","codex","cursor","pi","opencode","gemini"],
+    "note": "cmd /import can seed AGENTS.md, skills, MCP and memory from another agent — useful when migrating a project into an orchestrated loop.",
+    "mcp": ["cmd","mcp"], "skills": ["cmd","skills"]
+  },
+  "telemetry": { "context": {"from":"none"}, "cost": {"from":"transcript","todo":"locate usage record"}, "balance": {"from":"none","note":"never estimated"} }
+}

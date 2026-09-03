@@ -1,16 +1,20 @@
 {
-  "id": "cursor-agent", "name": "Cursor Agent CLI", "verified": "untested",
-  "disclaimer": "Written from documented interface, not verified against an install.",
-  "send":   { "argv": ["cursor-agent", "--print", "{prompt}"] },
-  "resume": { "argv": ["cursor-agent", "--resume={session}", "--print", "{prompt}"] },
-  "list_sessions": { "argv": ["cursor-agent", "ls"] },
+  "id": "cursor-agent", "name": "Cursor Agent CLI", "verified": "documented",
+  "verified_source": "cursor.com/docs/cli (headless + using), Aug 2026 changelog",
+  "important": "The invoked command is `agent`, not `cursor-agent`. The npm/binary is installed as cursor-agent but the CLI you run is `agent`. `-f`/`--force` (auto-approve) is REQUIRED for it to modify files in a headless run; without it the agent plans but changes nothing — a silent no-op that looks like failure.",
+  "send":   { "argv": ["agent", "-p", "{prompt}", "--output-format", "json", "-f"] },
+  "resume": { "argv": ["agent", "--resume", "{session}", "-p", "{prompt}", "--output-format", "json", "-f"] },
+  "list_sessions": { "argv": ["agent", "ls"] },
   "options": {
-    "model": ["--model", "{model}"],
-    "effort": null,
-    "output_json": ["--output-format", "stream-json"],
-    "trust_all": ["--force"]
+    "model": ["--model", "{model}"], "effort": null,
+    "output_text": ["--output-format", "text"],
+    "output_json": ["--output-format", "json"],
+    "output_stream": ["--output-format", "stream-json"],
+    "auto_approve": ["-f"]
   },
-  "transcript": { "kind": "unknown", "candidates": ["~/.cursor/cli", "~/.cursor/chats"] },
-  "busy": { "kind": "unknown" },
-  "directives": { "steering_files": [".cursor/rules", "AGENTS.md"] }
+  "transcript": { "kind": "call-return", "note": "--output-format json returns a structured final result; also `agent ls` lists prior chats.",
+                  "candidates_for_store": ["~/.cursor/cli","~/.config/cursor"] },
+  "busy": { "kind": "orchestrator-owned", "note": "print mode synchronous; Aug 2026 build retries wedged uploads on long headless sessions instead of hanging." },
+  "directives": { "steering_files": [".cursor/rules","AGENTS.md"], "mcp": ".cursor/mcp.json" },
+  "telemetry": { "cost": {"from":"call-return","todo":"confirm usage fields in json result"}, "balance": {"from":"none"} }
 }

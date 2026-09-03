@@ -129,6 +129,7 @@ ao commit-ok "feat: ..."              # grant commit authority after gates pass
 - [`docs/adapters.md`](docs/adapters.md) — adapter interface and support matrix
 - [`docs/roles.md`](docs/roles.md) — role model, actors and separation of duties
 - [`docs/parallel.md`](docs/parallel.md) — parallel projects, lanes and merge queue
+- [`docs/ide-extensions.md`](docs/ide-extensions.md) — IDE-native agents (Cursor, Copilot, Qoder) via CLI, MCP or git
 - [`docs/cloud.md`](docs/cloud.md) — cloud agents, cloud lanes and the pull-request interface
 - [`docs/models.md`](docs/models.md) — model and effort control
 - [`docs/mcp.md`](docs/mcp.md) — MCP surface and capability gating

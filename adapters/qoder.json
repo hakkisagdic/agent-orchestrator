@@ -1,0 +1,10 @@
+{
+  "id": "qoder", "name": "Qoder CLI", "verified": "untested",
+  "disclaimer": "Written from documented behaviour of Qoder's agentic CLI; verify against an install. Qoder is primarily an IDE (see docs/ide-extensions.md) with a companion CLI.",
+  "send":   { "argv": ["qoder", "-p", "{prompt}"] },
+  "resume": { "argv": ["qoder", "--resume", "{session}", "-p", "{prompt}"] },
+  "options": { "model": ["--model", "{model}"], "effort": null, "trust_all": ["--yolo"] },
+  "transcript": { "kind": "unknown", "candidates": ["~/.qoder","~/Library/Application Support/Qoder"] },
+  "busy": { "kind": "unknown" },
+  "directives": { "steering_files": ["AGENTS.md",".qoder/rules"] }
+}
