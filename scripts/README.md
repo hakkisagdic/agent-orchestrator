@@ -4,6 +4,7 @@ The observation layer, working today. Standard library Python only — no instal
 no dependencies, in keeping with `docs/surfaces.md`.
 
 ```bash
+bin/ao projects        # workspaces with a local agent session
 bin/ao status          # one-shot summary
 bin/ao watch           # live panel; leave it in a background terminal
 bin/ao tail -n 5       # recent messages from the implementer's transcript
@@ -12,7 +13,15 @@ bin/ao adapters        # registry and verification status
 bin/ao doctor          # check this workspace's wiring
 ```
 
-Run them from inside the project you are orchestrating. With no configuration at
+Run them from inside the project you are orchestrating, or point at one from
+anywhere with `-C`:
+
+```bash
+bin/ao -C ~/work/voltrai watch
+```
+
+Run from a directory with no project, `ao` says so and lists the workspaces it
+can see rather than rendering an empty panel. With no configuration at
 all, `ao` discovers the implementer session by scanning local agent stores for one
 whose workspace matches the current repository — so `bin/ao status` works on the
 first try.

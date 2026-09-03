@@ -62,7 +62,17 @@ def render(cfg, msg_count=8, width=None, max_lines=None):
         for i, ln in enumerate(textwrap.wrap(desc, w - 6)[:2]):
             a(f"  {C['dim']}↳{C['reset']} {ln}" if i == 0 else f"    {ln}")
     else:
-        a(f"\n{C['dim']}No implementer session found for this workspace.{C['reset']}")
+        a(f"\n{C['yellow']}No implementer session found for this workspace.{C['reset']}")
+        a(f"   {C['dim']}{root}{C['reset']}")
+        ws = A.all_workspaces()[:5]
+        if ws:
+            a(f"\n   Run it from a project, or point at one:")
+            for r in ws:
+                mins = int((time.time() - r["mtime"]) / 60)
+                age = f"{mins}m ago" if mins < 90 else f"{mins // 60}h ago"
+                a(f"     {C['b']}ao -C {r['path']}{C['reset']}  {C['dim']}{age}{C['reset']}")
+        else:
+            a(f"   {C['dim']}No local agent sessions found at all. See docs/adapters.md.{C['reset']}")
 
     # telemetry
     if impl:
@@ -194,6 +204,19 @@ def cmd_mail(cfg, args):
         print(name)
 
 
+def cmd_projects(cfg, args):
+    ws = A.all_workspaces()
+    if not ws:
+        print("No local agent sessions found.")
+        return
+    print(f"{'last active':<12}{'status':<14}workspace")
+    for r in ws:
+        mins = int((time.time() - r["mtime"]) / 60)
+        age = f"{mins}m" if mins < 90 else (f"{mins//60}h" if mins < 2880 else f"{mins//1440}d")
+        col = C["green"] if mins < 5 else C["dim"]
+        print(f"{col}{age:<12}{C['reset']}{r['status'][:13]:<14}{r['path']}")
+
+
 def cmd_adapters(cfg, args):
     d = os.path.join(A.REPO, "adapters")
     rows = []
@@ -230,6 +253,7 @@ def cmd_doctor(cfg, args):
 
 def main():
     p = argparse.ArgumentParser(prog="ao", description="agent-orchestrator (observation layer)")
+    p.add_argument("-C", "--root", help="project directory (default: nearest .ao/ or git root)")
     sub = p.add_subparsers(dest="cmd")
 
     s = sub.add_parser("status", help="one-shot summary")
@@ -252,6 +276,7 @@ def main():
     m.add_argument("--body")
     m.set_defaults(fn=cmd_mail)
 
+    sub.add_parser("projects", help="workspaces with a local agent session").set_defaults(fn=cmd_projects)
     sub.add_parser("adapters", help="adapter registry and verification status").set_defaults(fn=cmd_adapters)
     sub.add_parser("doctor", help="check this workspace's wiring").set_defaults(fn=cmd_doctor)
 
@@ -259,7 +284,7 @@ def main():
     if not getattr(args, "fn", None):
         p.print_help()
         return 0
-    cfg = A.load_config(A.find_root())
+    cfg = A.load_config(A.find_root(args.root))
     return args.fn(cfg, args) or 0
 
 

@@ -104,6 +104,39 @@ def discover_session(cwd):
     return best
 
 
+def all_workspaces():
+    """Every local agent session grouped by the workspace it belongs to.
+
+    Lets `ao` answer "which projects can I watch?" without any configuration —
+    the vendor stores already record their own workspace paths.
+    """
+    base = os.path.join(HOME, ".kiro", "sessions")
+    found = {}
+    if not os.path.isdir(base):
+        return []
+    for ws in os.listdir(base):
+        wsd = os.path.join(base, ws)
+        if not os.path.isdir(wsd):
+            continue
+        for sess in os.listdir(wsd):
+            meta = os.path.join(wsd, sess, "session.json")
+            msgs = os.path.join(wsd, sess, "messages.jsonl")
+            if not (os.path.exists(meta) and os.path.exists(msgs)):
+                continue
+            try:
+                m = json.load(open(meta))
+            except Exception:
+                continue
+            for path in (m.get("workspacePaths") or []):
+                mt = os.path.getmtime(msgs)
+                cur = found.get(path)
+                if cur is None or mt > cur["mtime"]:
+                    found[path] = {"path": path, "mtime": mt, "session": sess,
+                                   "workspace_hash": ws, "adapter": "kiro",
+                                   "title": m.get("title", ""), "status": m.get("status", "")}
+    return sorted(found.values(), key=lambda r: r["mtime"], reverse=True)
+
+
 def session_paths(cfg):
     impl = cfg.get("implementer") or {}
     ws, sess = impl.get("workspace_hash"), impl.get("session")
