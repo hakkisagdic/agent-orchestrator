@@ -52,7 +52,10 @@ and keeps the human for the parts only they can decide: scope, money, risk, rele
 | **agent-mail** | Async file protocol between agents. Delivery-by-deletion, typed messages, untrusted-by-default content. |
 | **Observation** | Read another agent's session transcript read-only. Live terminal dashboard. Desktop notifications on commit / review / report. |
 | **Driving** | Idle-guarded prompt injection (`resume`), standing autonomy directives so the agent stops asking for "continue". |
+| **Recovery** | `ao since` and `ao brief` rebuild the picture from disk after a restart. Watchers are latency, never truth. |
 | **Deadlock handling** | When the implementer correctly refuses, the architect stops, asks you once, and carries your authorisation verbatim in an `ESCALATION` that lifts scope — never authority. |
+| **Ledger** | Append-only decisions, verifications and slice history. Messages are deleted on delivery; the reasoning behind them is not. |
+| **Slices** | A mandatory acceptance boundary, a state machine, a round budget, and mechanical loop detection — because attention is what fails here. |
 | **Gates** | The architect re-runs typecheck/tests/diff-check itself before granting commit authority. Push is never automatic. |
 | **Adapters** | Per-CLI definition of: send prompt, resume session, read transcript, detect busy, inject directives. |
 | **Roles / actors** | Roles (architect, implementer, reviewer, tester, bug-hunter…) are assigned to actors — the orchestrator itself or any CLI session. Swap them with one command. |
@@ -101,6 +104,7 @@ Roadmap, in order:
 - [ ] `ao status` / `ao watch` — the observation layer (reference scripts exist privately)
 - [ ] `ao mail` / `ao resume` — the driving layer with idle guard
 - [ ] `ao verify` / `ao commit-ok` — the gate layer
+- [ ] `ao slice` / `ao decide` / `ao since` — slices, ledger and recovery
 - [ ] `ao mcp serve`
 - [ ] `ao init`, templates, install script
 
@@ -132,6 +136,10 @@ ao commit-ok "feat: ..."              # grant commit authority after gates pass
 - [`docs/parallel.md`](docs/parallel.md) — parallel projects, lanes and merge queue
 - [`docs/ide-extensions.md`](docs/ide-extensions.md) — IDE-native agents (Cursor, Copilot, Qoder) via CLI, MCP or git
 - [`docs/cloud.md`](docs/cloud.md) — cloud agents, cloud lanes and the pull-request interface
+- [`docs/slices.md`](docs/slices.md) — acceptance boundaries, round budgets and loop detection
+- [`docs/gates.md`](docs/gates.md) — declared gates, independent verification, commit authority
+- [`docs/ledger.md`](docs/ledger.md) — the append-only decision and verification record
+- [`docs/recovery.md`](docs/recovery.md) — catch-up after a restart
 - [`docs/models.md`](docs/models.md) — model and effort control
 - [`docs/mcp.md`](docs/mcp.md) — MCP surface and capability gating
 - [`docs/telemetry.md`](docs/telemetry.md) — quota, credits and context enrichment

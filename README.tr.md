@@ -52,7 +52,10 @@ gerçekten insana ait olan yerlerde tutar: kapsam, para, risk, yayın.
 | **agent-mail** | Ajanlar arası eşzamansız dosya protokolü. Silme=teslim, tipli mesajlar, varsayılan olarak güvenilmez içerik. |
 | **Gözlem** | Başka bir ajanın oturum transkriptini salt-okunur okuma. Canlı terminal paneli. Commit / inceleme / rapor olduğunda masaüstü bildirimi. |
 | **Sürüş** | Idle korumalı prompt enjeksiyonu, ajanın "devam et" sormasını bitiren kalıcı otonomi direktifleri. |
+| **Kurtarma** | `ao since` ve `ao brief` yeniden başlatmadan sonra tabloyu diskten kurar. İzleyiciler gecikme içindir, doğruluk kaynağı değil. |
 | **Tıkanma yönetimi** | Uygulayıcı haklı olarak reddettiğinde mimar durur, sana bir kez sorar ve onayını birebir taşıyan bir `ESCALATION` yazar — kapsamı açar, yetkiyi asla. |
+| **Defter** | Append-only kararlar, doğrulamalar ve dilim geçmişi. Mesajlar teslimde silinir; ardındaki gerekçe silinmez. |
+| **Dilimler** | Zorunlu kabul sınırı, durum makinesi, tur bütçesi ve mekanik döngü tespiti — burada tökezleyen şey dikkat olduğu için. |
 | **Kapılar** | Mimar, commit yetkisi vermeden önce typecheck/test/diff kontrolünü **kendi** koşar. Push asla otomatik değildir. |
 | **Adaptörler** | Her CLI için: prompt gönder, oturuma dön, transkript oku, meşgul mü anla, direktif enjekte et. |
 | **Roller / aktörler** | Roller (mimar, uygulayıcı, denetçi, testçi, hata avcısı…) aktörlere atanır — orkestratörün kendisi ya da herhangi bir CLI oturumu. Tek komutla yer değiştirir. |
@@ -100,6 +103,7 @@ Yol haritası, sırayla:
 - [ ] `ao status` / `ao watch` — gözlem katmanı (referans script'ler özelde mevcut)
 - [ ] `ao mail` / `ao resume` — idle korumalı sürüş katmanı
 - [ ] `ao verify` / `ao commit-ok` — kapı katmanı
+- [ ] `ao slice` / `ao decide` / `ao since` — dilimler, defter ve kurtarma
 - [ ] `ao mcp serve`
 - [ ] `ao init`, şablonlar, kurulum script'i
 
@@ -131,6 +135,10 @@ ao commit-ok "feat: ..."              # kapılar geçtikten sonra commit yetkisi
 - [`docs/parallel.md`](docs/parallel.md) — paralel projeler, şeritler ve merge kuyruğu
 - [`docs/ide-extensions.md`](docs/ide-extensions.md) — IDE-yerleşik ajanlar (Cursor, Copilot, Qoder): CLI, MCP ya da git ile
 - [`docs/cloud.md`](docs/cloud.md) — bulut ajanları, bulut şeritleri ve pull request arayüzü
+- [`docs/slices.md`](docs/slices.md) — kabul sınırları, tur bütçesi ve döngü tespiti
+- [`docs/gates.md`](docs/gates.md) — tanımlı kapılar, bağımsız doğrulama, commit yetkisi
+- [`docs/ledger.md`](docs/ledger.md) — append-only karar ve doğrulama defteri
+- [`docs/recovery.md`](docs/recovery.md) — yeniden başlatma sonrası yakalama
 - [`docs/models.md`](docs/models.md) — model ve efor kontrolü
 - [`docs/mcp.md`](docs/mcp.md) — MCP yüzeyi ve yetenek kapıları
 - [`docs/telemetry.md`](docs/telemetry.md) — kota, kredi ve bağlam zenginleştirmesi
