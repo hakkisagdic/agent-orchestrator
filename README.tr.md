@@ -10,7 +10,8 @@ bağlar, salt-okunur bir gözlem katmanı olan biteni sana gösterir, bağımsı
 kapısı neyin commit edilebileceğine karar verir.
 
 Sağlayıcıdan bağımsız: Kiro, Claude Code, Antigravity, Codex, Gemini, Cursor, opencode,
-Aider, Amp, Copilot — etkileşimsiz prompt modu olan her araç.
+Aider, Amp, Copilot — etkileşimsiz prompt modu olan her araç. Bulut ajanları da:
+Kiro cloud sessions, Codex cloud, Cursor background agents, Copilot coding agent.
 
 > Durum: gerçek bir üretim koşusundan çıkarıldı — haftalar boyunca tam olarak bu döngüyle
 > geliştirilen 30 epic'lik dayanıklı iş akışı ürünü. Düşünce deneyi değil, sahada yıprandı.
@@ -55,6 +56,7 @@ gerçekten insana ait olan yerlerde tutar: kapsam, para, risk, yayın.
 | **Adaptörler** | Her CLI için: prompt gönder, oturuma dön, transkript oku, meşgul mü anla, direktif enjekte et. |
 | **Roller / aktörler** | Roller (mimar, uygulayıcı, denetçi, testçi, hata avcısı…) aktörlere atanır — orkestratörün kendisi ya da herhangi bir CLI oturumu. Tek komutla yer değiştirir. |
 | **Paralel şeritler** | Aynı anda birden çok proje, proje başına birden çok şerit: yazan şeritler kendi git worktree'sini alır, okuyan şeritler checkout'u paylaşır. Serbest değil, merge kuyruğu. |
+| **Bulut ajanları** | Yerel şeritlerin yanında bulut şeritleri: görev gönder, durumu izle, gelen dalı yerelde doğrula. Pull request teslim eden her ajanla çalışır, satıcı API'si gerekmez. |
 | **Model/efor** | Dilim başına model ve akıl yürütme eforu politikası — mekanik işi pahalı yapılandırmayla yakmayı bırak. |
 | **Telemetri** | Bağlam doluluğu, tur başına maliyet ve sağlayıcı kotası ajanın kendi oturum deposundan okunur — panele bakmaya, API anahtarına gerek yok. |
 | **Yüzeyler** | Tek bir olay günlüğü, çok sayıda ucuz okuyucu: terminal paneli, masaüstü bildirimi ve herhangi bir sohbet uygulamasını kokpite çeviren MCP sunucusu. |
@@ -126,6 +128,7 @@ ao commit-ok "feat: ..."              # kapılar geçtikten sonra commit yetkisi
 - [`docs/adapters.md`](docs/adapters.md) — adaptör arayüzü ve destek matrisi
 - [`docs/roles.md`](docs/roles.md) — rol modeli, aktörler ve görevler ayrılığı
 - [`docs/parallel.md`](docs/parallel.md) — paralel projeler, şeritler ve merge kuyruğu
+- [`docs/cloud.md`](docs/cloud.md) — bulut ajanları, bulut şeritleri ve pull request arayüzü
 - [`docs/models.md`](docs/models.md) — model ve efor kontrolü
 - [`docs/mcp.md`](docs/mcp.md) — MCP yüzeyi ve yetenek kapıları
 - [`docs/telemetry.md`](docs/telemetry.md) — kota, kredi ve bağlam zenginleştirmesi

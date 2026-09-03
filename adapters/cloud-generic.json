@@ -1,0 +1,54 @@
+{
+  "id": "cloud-generic",
+  "name": "Generic cloud agent (pull-request delivered)",
+  "kind": "cloud",
+  "tier": 3,
+  "verified": "partial",
+  "notes": "Provider-agnostic tier-3 adapter: works with any cloud agent that delivers its result as a branch or pull request, with no vendor API and no vendor cooperation. Dispatch is out-of-band (assign an issue, click once in an IDE); everything after that is observed through git. Requires the GitHub CLI.",
+
+  "dispatch": {
+    "kind": "out-of-band",
+    "note": "The human or a vendor-specific adapter starts the task. This adapter is told the expected author/branch prefix and takes over from there.",
+    "optional_issue_assign": ["gh", "issue", "edit", "{issue}", "--add-assignee", "{agent_login}"]
+  },
+
+  "poll": {
+    "argv": ["gh", "pr", "list", "--search", "author:{agent_login} is:open",
+             "--json", "number,title,headRefName,updatedAt,isDraft,statusCheckRollup"],
+    "interval_seconds": 120,
+    "note": "Polling interval is measured in minutes, not seconds. Cloud tasks run for minutes to hours; a tight loop only burns API quota."
+  },
+
+  "result": {
+    "branch_field": "headRefName",
+    "pr_field": "number",
+    "diff": ["gh", "pr", "diff", "{pr}"],
+    "checks": ["gh", "pr", "checks", "{pr}"],
+    "fetch": ["git", "fetch", "origin", "{branch}"]
+  },
+
+  "busy": {
+    "kind": "service-reported",
+    "running_when": "no pull request yet, or the pull request is still a draft",
+    "note": "There is no local file to watch and no two-writer hazard: the workspace is remote."
+  },
+
+  "telemetry": {
+    "cost": {"from": "none", "note": "Usually included in a plan and not itemised per task."},
+    "duration": {"from": "derived", "note": "Elapsed time between the dispatch event and the result event, both written to the event log."},
+    "size": {"from": "result", "fields": ["files_changed", "additions", "deletions"]}
+  },
+
+  "verification": {
+    "runs": "local",
+    "rule": "The delivered branch is untrusted code. Gates run locally against the merged result before anything lands. Auto-merge is never enabled, and a check written by the same agent that wrote the code is not a gate.",
+    "merge": ["ao", "queue", "merge", "{lane}"]
+  },
+
+  "brief_requirements": [
+    "exact acceptance boundary",
+    "files the agent may touch",
+    "gates that will judge the result",
+    "explicit statement that fixture or partial evidence does not count as done"
+  ]
+}

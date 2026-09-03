@@ -10,7 +10,8 @@ connects them, a read-only observation layer shows you what is happening, and an
 independent verification gate decides what may be committed.
 
 Provider-agnostic: Kiro, Claude Code, Antigravity, Codex, Gemini, Cursor, opencode,
-Aider, Amp, Copilot — anything with a non-interactive prompt mode.
+Aider, Amp, Copilot — anything with a non-interactive prompt mode. Cloud agents too:
+Kiro cloud sessions, Codex cloud, Cursor background agents, Copilot's coding agent.
 
 > Status: extracted from a real production run — a 30-epic durable-workflow product
 > built over weeks with this exact loop. Battle-tested, not a thought experiment.
@@ -55,6 +56,7 @@ and keeps the human for the parts only they can decide: scope, money, risk, rele
 | **Adapters** | Per-CLI definition of: send prompt, resume session, read transcript, detect busy, inject directives. |
 | **Roles / actors** | Roles (architect, implementer, reviewer, tester, bug-hunter…) are assigned to actors — the orchestrator itself or any CLI session. Swap them with one command. |
 | **Parallel lanes** | Many projects at once, and many lanes per project: write lanes get their own git worktree, read lanes share the checkout. Merge queue, not a free-for-all. |
+| **Cloud agents** | Cloud lanes alongside local ones: dispatch, poll, and verify the delivered branch locally. Works with any agent that delivers a pull request, no vendor API required. |
 | **Model / effort** | Per-slice model and reasoning-effort policy, so mechanical work stops burning the expensive configuration. |
 | **Telemetry** | Context pressure, per-turn cost and provider quota read from the agent's own session store — no vendor UI, no API key. |
 | **Surfaces** | One append-only event log, many cheap readers: terminal panel, desktop notifications, and an MCP server that turns any chat app into the cockpit. |
@@ -127,6 +129,7 @@ ao commit-ok "feat: ..."              # grant commit authority after gates pass
 - [`docs/adapters.md`](docs/adapters.md) — adapter interface and support matrix
 - [`docs/roles.md`](docs/roles.md) — role model, actors and separation of duties
 - [`docs/parallel.md`](docs/parallel.md) — parallel projects, lanes and merge queue
+- [`docs/cloud.md`](docs/cloud.md) — cloud agents, cloud lanes and the pull-request interface
 - [`docs/models.md`](docs/models.md) — model and effort control
 - [`docs/mcp.md`](docs/mcp.md) — MCP surface and capability gating
 - [`docs/telemetry.md`](docs/telemetry.md) — quota, credits and context enrichment
