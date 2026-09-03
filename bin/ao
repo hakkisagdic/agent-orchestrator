@@ -92,8 +92,14 @@ def render(cfg, msg_count=8, width=None, max_lines=None):
                 a(f"   cost     last turn {C['b']}{lu:.0f}{C['reset']} {tel['unit']} "
                   f"({lt} tool calls) · {tel['turns']} turns, total {C['b']}{tel['total']:.0f}{C['reset']}"
                   f"{C['dim']} (avg {avg:.0f}){C['reset']}{warn}")
-            for line in q:
-                a(f"   {C['dim']}provider{C['reset']} {line}")
+            if q:
+                # keyflip reports machine-wide provider windows, which are NOT the
+                # implementer's own pool — Kiro bills credits, Claude Code bills a
+                # 5h window. Labelling it plainly avoids reading someone else's
+                # quota as this agent's.
+                a(f"   {C['dim']}other tools on this machine (not {impl.get('adapter','this agent')}'s pool):{C['reset']}")
+                for line in q:
+                    a(f"     {C['dim']}{line}{C['reset']}")
 
         msg_records = recs
 

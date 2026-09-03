@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""ao-watchdog — restart a stalled implementer, cheaply.
+
+Turn-based agents stop when a turn ends, mid-slice or not. Something has to
+notice and nudge. Detection here is free: a file mtime and a few `git` calls.
+Only the nudge itself costs anything, and it costs exactly what the work would
+have cost when a human noticed twenty minutes later.
+
+Guards, in order — the point is to spend nothing when spending would not help:
+
+  1. Is the session actually idle?          (mtime)
+  2. Is there open work to continue?        (mailbox / dirty tree / NEEDS_CHANGES)
+  3. Is the slice over its round budget?    (if so: notify a human, never nudge)
+  4. Is there provider quota left?          (keyflip, if installed)
+  5. Did the last nudge achieve anything?   (backoff, then hand over to a human)
+
+Run it from cron/launchd every couple of minutes, or once by hand.
+
+    ao-watchdog --root ~/work/project            # act
+    ao-watchdog --root ~/work/project --dry-run  # decide, change nothing
+"""
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import ao_lib as A  # noqa: E402
+
+STATE_DIR = os.path.join(A.HOME, ".ao")
+MAX_ATTEMPTS = 3
+
+
+def notify(title, msg):
+    subprocess.run(["osascript", "-e",
+                    f'display notification "{msg}" with title "{title}"'],
+                   capture_output=True)
+
+
+def state_path(root):
+    key = os.path.basename(root.rstrip("/")) or "root"
+    return os.path.join(STATE_DIR, f"watchdog-{key}.json")
+
+
+def load_state(root):
+    try:
+        return json.load(open(state_path(root)))
+    except Exception:
+        return {"attempts": 0, "last_nudge": 0, "last_size": 0}
+
+
+def save_state(root, st):
+    os.makedirs(STATE_DIR, exist_ok=True)
+    json.dump(st, open(state_path(root), "w"), indent=2)
+
+
+def open_work(cfg, root):
+    """Is there something to continue? Cheap signals only."""
+    reasons = []
+    if A.mailbox(root, cfg["mailbox"]):
+        reasons.append("unread mail")
+    if A.sh("git status --porcelain", cwd=root):
+        reasons.append("uncommitted changes")
+    revs = A.reviews(root, cfg["reviews"], limit=1)
+    if revs and "APPROVED" not in revs[0][1].upper():
+        reasons.append("open review findings")
+    return reasons
+
+
+def quota_ok(adapter):
+    """True unless a provider is demonstrably out of headroom."""
+    for line in A.quota(adapter):
+        for token in line.replace("%", "% ").split():
+            if token.endswith("%"):
+                try:
+                    if float(token[:-1]) >= 97:
+                        return False
+                except ValueError:
+                    pass
+    return True
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--root", required=True)
+    p.add_argument("--idle-minutes", type=float, default=6)
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--prompt", default=(
+        "devam et. Açık dilimi bitir: gate'ler + taze review; APPROVED ise tek local commit "
+        "(semantic-review/ stage etme, PUSH YOK), sonra RAPOR yaz. Karar gerekiyorsa "
+        "'## KARAR GEREKLİ' bloğu yazıp dur. Kullanıcı beklemesi yok."))
+    args = p.parse_args()
+
+    root = os.path.abspath(os.path.expanduser(args.root))
+    cfg = A.load_config(root)
+    impl = cfg.get("implementer") or {}
+    if not impl:
+        print("no implementer session; nothing to watch")
+        return 0
+    adapter = A.load_adapter(impl.get("adapter", ""))
+    msgs, _ = A.session_paths(cfg)
+    if not msgs or not os.path.exists(msgs):
+        print("no transcript; nothing to watch")
+        return 0
+
+    age = time.time() - os.path.getmtime(msgs)
+    size = os.path.getsize(msgs)
+    st = load_state(root)
+
+    # 1 — still working
+    if age < args.idle_minutes * 60:
+        if st.get("attempts"):
+            st.update(attempts=0, last_size=size)   # it moved; forget the backoff
+            save_state(root, st)
+        print(f"working ({int(age)}s since last write)")
+        return 0
+
+    # 2 — nothing to continue
+    reasons = open_work(cfg, root)
+    if not reasons:
+        print("idle, but no open work — leaving it alone")
+        return 0
+
+    # 3 — over the round budget: a nudge would only buy another identical round.
+    # Unless the architect has already intervened: a coordination message newer
+    # than the newest review means the slice was re-specified, and the budget
+    # applies to the old specification, not the new one.
+    rn = A.rounds(root, cfg["reviews"])
+    budget = cfg.get("round_budget", 5)
+    intervened = False
+    revs_all = A.reviews(root, cfg["reviews"], limit=1)
+    if revs_all:
+        rev_mt = os.path.getmtime(os.path.join(root, cfg["reviews"], revs_all[0][0]))
+        for m in A.mailbox(root, cfg["mailbox"]):
+            if os.path.getmtime(os.path.join(root, cfg["mailbox"], m)) > rev_mt:
+                intervened = True
+                break
+    if rn > budget and not intervened:
+        notify("Voltrai: over budget",
+               f"round {rn}/{budget} — re-specify, split or change actor")
+        print(f"over budget ({rn}/{budget}); notified instead of nudging")
+        return 0
+    if rn > budget and intervened:
+        print(f"over budget ({rn}/{budget}) but re-specified since the last review; proceeding")
+
+    # 4 — no quota
+    if not quota_ok(adapter):
+        notify("Voltrai: out of quota", "provider window exhausted; not nudging")
+        print("provider out of headroom; not nudging")
+        return 0
+
+    # 5 — the previous nudge changed nothing
+    if st.get("attempts", 0) >= MAX_ATTEMPTS:
+        notify("Voltrai: agent stuck",
+               f"{MAX_ATTEMPTS} nudges, no progress — needs a human")
+        print("backoff exhausted; notified a human")
+        return 0
+    if st.get("last_nudge") and size == st.get("last_size"):
+        wait = args.idle_minutes * 60 * (2 ** st["attempts"])
+        if time.time() - st["last_nudge"] < wait:
+            print(f"backing off ({st['attempts']} attempts, waiting {int(wait)}s)")
+            return 0
+
+    argv = [x.replace("{session}", impl["session"]).replace("{prompt}", args.prompt)
+            for x in (adapter.get("resume", {}).get("argv") or [])]
+    if not argv:
+        print("adapter has no resume command")
+        return 1
+    if "--trust-all-tools" not in argv and "trust_all" in (adapter.get("options") or {}):
+        argv += adapter["options"]["trust_all"]
+
+    print(f"idle {int(age)}s · {', '.join(reasons)} · nudging")
+    if args.dry_run:
+        print("DRY RUN:", " ".join(argv[:4]), "…")
+        return 0
+
+    subprocess.Popen(argv, cwd=root, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+    st.update(attempts=st.get("attempts", 0) + 1, last_nudge=time.time(), last_size=size)
+    save_state(root, st)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
