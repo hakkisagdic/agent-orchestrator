@@ -4,7 +4,7 @@
 Implemented today: status, watch, tail, mail, adapters, doctor.
 Also: watchdog install/uninstall/status — a launchd job that restarts a stalled
 implementer, with guards so it spends nothing when spending would not help.
-Not yet: verify, commit-ok, slice, decide, since, mcp serve — see the
+Not yet: commit-ok, slice, decide, since, mcp serve — see the
 roadmap in README.md. Commands that do not exist say so rather than pretending.
 
 Standard library only. Observation is strictly read-only.
@@ -249,6 +249,82 @@ PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
+def cmd_verify(cfg, args):
+    """Run the project's declared gates ourselves and record what we measured.
+
+    The whole point of a second agent is not needing to trust the first one's
+    report, so this executes the commands and writes the numbers to the ledger.
+    Commit authority is later granted against this record, not against a claim.
+    """
+    import json as _json
+    import subprocess
+    root = cfg["root"]
+    gates_file = os.path.join(root, ".ao", "gates.json")
+    if not os.path.exists(gates_file):
+        print(f"{C['yellow']}No .ao/gates.json — nothing declared to verify.{C['reset']}")
+        print(f"{C['dim']}See docs/gates.md for the shape.{C['reset']}")
+        return 1
+    spec = _json.load(open(gates_file))
+    profile = args.profile or spec.get("default_profile", "quick")
+    names = spec.get("profiles", {}).get(profile)
+    if not names:
+        print(f"unknown profile {profile}; have: {', '.join(spec.get('profiles', {}))}")
+        return 1
+
+    results, ok = [], True
+    for name in names:
+        g = spec["gates"][name]
+        print(f"{C['dim']}▶ {name}{C['reset']}  {g['run']}")
+        started = time.time()
+        try:
+            r = subprocess.run(g["run"], shell=True, cwd=root, capture_output=True,
+                               text=True, timeout=g.get("timeout", 600))
+            out, code = (r.stdout + r.stderr), r.returncode
+        except subprocess.TimeoutExpired:
+            out, code = "timed out", 124
+        took = int(time.time() - started)
+
+        if g.get("expect") == "empty":
+            passed = not out.strip()
+            detail = "clean" if passed else " ".join(out.split())[:120]
+        else:
+            passed = code == 0
+            m = A.re.search(r"#\s*pass\s+(\d+)[\s\S]*?#\s*fail\s+(\d+)", out) or \
+                A.re.search(r"(?:ℹ\s*)?pass\s+(\d+)[\s\S]*?(?:ℹ\s*)?fail\s+(\d+)", out)
+            if m:
+                p_, f_ = int(m.group(1)), int(m.group(2))
+                detail = f"{p_}/{p_ + f_}"
+                passed = passed and f_ == 0
+            else:
+                detail = f"exit {code}"
+        ok = ok and passed
+        mark = f"{C['green']}pass{C['reset']}" if passed else f"{C['red']}FAIL{C['reset']}"
+        print(f"  {mark}  {detail}  {C['dim']}{took}s{C['reset']}")
+        if not passed:
+            tail = " ".join(out.strip().split("\n")[-4:])[:400]
+            print(f"  {C['dim']}{tail}{C['reset']}")
+        results.append({"name": name, "passed": passed, "detail": detail,
+                        "exit": code, "seconds": took})
+
+    revs = A.reviews(root, cfg["reviews"], limit=1)
+    rec = {"id": f"V-{int(time.time())}", "at": datetime.now().isoformat(timespec="seconds"),
+           "profile": profile, "by": "ao verify", "passed": ok, "gates": results,
+           "review": revs[0][0] if revs else None,
+           "review_verdict": revs[0][1] if revs else None,
+           "head": A.sh("git rev-parse --short HEAD", cwd=root),
+           "dirty": len([l for l in A.sh("git status --short", cwd=root).split("\n") if l.strip()])}
+    ledger = os.path.join(root, ".ao", "ledger")
+    os.makedirs(ledger, exist_ok=True)
+    with open(os.path.join(ledger, "verifications.jsonl"), "a") as fh:
+        fh.write(_json.dumps(rec, ensure_ascii=False) + "\n")
+
+    print(f"\n{C['b']}{'PASS' if ok else 'FAIL'}{C['reset']}  recorded as {rec['id']}")
+    if revs:
+        col = C["green"] if "APPROVED" in (revs[0][1] or "").upper() else C["yellow"]
+        print(f"{C['dim']}newest review:{C['reset']} {col}{revs[0][1]}{C['reset']} ({revs[0][0]})")
+    return 0 if ok else 1
+
+
 def cmd_watchdog(cfg, args):
     """Install, remove or inspect the launchd job that restarts a stalled agent."""
     import getpass
@@ -377,7 +453,7 @@ def cmd_doctor(cfg, args):
         print(f"                {C['dim']}{err.get('tail','')[:110]}{C['reset']}")
     else:
         print(f"last restart    {C['dim']}no failures recorded{C['reset']}")
-    print(f"\n{C['dim']}Not implemented yet: verify, commit-ok, slice, decide, "
+    print(f"\n{C['dim']}Not implemented yet: commit-ok, slice, decide, "
           f"since, mcp serve.{C['reset']}")
 
 
@@ -405,6 +481,10 @@ def main():
     m.add_argument("topic", nargs="?")
     m.add_argument("--body")
     m.set_defaults(fn=cmd_mail)
+
+    v = sub.add_parser("verify", help="run the declared gates and record the result")
+    v.add_argument("-p", "--profile")
+    v.set_defaults(fn=cmd_verify)
 
     wd = sub.add_parser("watchdog", help="launchd job that restarts a stalled agent")
     wd.add_argument("action", choices=["install", "uninstall", "status"])

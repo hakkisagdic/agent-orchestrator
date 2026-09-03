@@ -10,6 +10,7 @@ bin/ao watch           # live panel; leave it in a background terminal
 bin/ao tail -n 5       # recent messages from the implementer's transcript
 bin/ao mail list|read|send
 bin/ao adapters        # registry and verification status
+bin/ao verify          # run the declared gates yourself and record the numbers
 bin/ao doctor          # check this workspace's wiring
 
 scripts/ao-watchdog --root ~/work/project   # restart a stalled agent, cheaply
@@ -76,3 +77,20 @@ ao -C ~/work/project watchdog uninstall
 
 Run it by hand, or every couple of minutes from launchd/cron. Idle threshold
 defaults to six minutes; `--dry-run` prints the decision without acting.
+
+## Keeping work moving without you
+
+A blocked slice must not stop the run: the architect can hit a quota limit and the
+human can be away. Two pieces make that safe.
+
+**A pre-authorised backlog** (`.ao/backlog.md`) lists work whose acceptance
+boundary was written in advance. When the implementer hits something needing an
+architectural decision, it parks that slice, leaves a `KARAR GEREKLİ` message and
+takes the next backlog item — using authority that already exists rather than
+inventing any. The watchdog's default prompt carries this rule.
+
+**Declared gates** (`.ao/gates.json`) let `ao verify` execute the checks itself
+and write the numbers to `.ao/ledger/verifications.jsonl`. Commit authority is
+granted against that record rather than against the implementer's report, so the
+gate does not depend on a human being awake — while push, PR and marking work
+complete stay human-only, permanently.

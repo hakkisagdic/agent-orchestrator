@@ -138,10 +138,16 @@ def main():
     p.add_argument("--root", required=True)
     p.add_argument("--idle-minutes", type=float, default=6)
     p.add_argument("--dry-run", action="store_true")
+    # The default prompt encodes park-and-continue: a blocked slice must not stop
+    # the run, because the architect can hit a quota limit and the human can be
+    # away. Work moves to the pre-authorised backlog instead of waiting.
     p.add_argument("--prompt", default=(
         "devam et. Açık dilimi bitir: gate'ler + taze review; APPROVED ise tek local commit "
-        "(semantic-review/ stage etme, PUSH YOK), sonra RAPOR yaz. Karar gerekiyorsa "
-        "'## KARAR GEREKLİ' bloğu yazıp dur. Kullanıcı beklemesi yok."))
+        "(semantic-review/ stage etme, PUSH YOK), sonra RAPOR yaz. "
+        "Bir mimari karara ya da insan girdisine takılırsan DURMA: dilimi blocked işaretle, "
+        "agent-mail'e '## KARAR GEREKLİ' mesajı bırak ve .ao/backlog.md dosyasındaki ilk açık "
+        "maddeye geç, onu normal dilim disipliniyle yürüt. Kuyruk dışına çıkma. "
+        "Kullanıcı beklemesi yok."))
     args = p.parse_args()
 
     root = os.path.abspath(os.path.expanduser(args.root))
