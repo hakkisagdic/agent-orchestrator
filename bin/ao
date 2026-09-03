@@ -324,8 +324,13 @@ def cmd_doctor(cfg, args):
             print(f"{C['dim']}No local agent sessions found. See docs/adapters.md.{C['reset']}")
         return
     print(f"root            {root}")
-    print(f"config          {ok(os.path.exists(os.path.join(root, '.ao', 'config.json')))}")
-    print(f"implementer     {impl.get('adapter','—')} / {impl.get('session','—')[:20]}")
+    # Configuration is optional: discovery covers the common case, so its absence
+    # is a fact, not a fault. Red is reserved for things that need fixing.
+    has_cfg = os.path.exists(os.path.join(root, ".ao", "config.json"))
+    print(f"config          " + (f"{C['green']}.ao/config.json{C['reset']}" if has_cfg
+                                 else f"{C['dim']}none — using auto-discovery{C['reset']}"))
+    print(f"implementer     " + (f"{impl.get('adapter')} / {impl.get('session','')[:24]}"
+                                 if impl else f"{C['red']}none found{C['reset']}"))
     msgs, _ = A.session_paths(cfg)
     print(f"transcript      {ok(bool(msgs and os.path.exists(msgs)))}")
     print(f"mailbox         {ok(os.path.isdir(os.path.join(root, cfg['mailbox'])))}")
