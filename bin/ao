@@ -102,9 +102,12 @@ def render(cfg, msg_count=8, width=None, max_lines=None):
     if revs:
         rn = A.rounds(root, cfg["reviews"])
         budget = cfg.get("round_budget", 5)
-        flag = f"  {C['red']}⚠ over budget ({rn}/{budget}) — re-specify, split or change actor{C['reset']}" \
-            if rn > budget else (f"  {C['dim']}round {rn}/{budget}{C['reset']}" if rn else "")
-        a(f"\n{C['b']}{C['mag']}── REVIEWS {'─' * max(0, w - 12)}{C['reset']}{flag}")
+        a(f"\n{C['b']}{C['mag']}── REVIEWS {'─' * max(0, w - 12)}{C['reset']}")
+        if rn > budget:
+            a(f"   {C['red']}⚠ round {rn}/{budget} — over budget: re-specify, split, "
+              f"or change actor{C['reset']}")
+        elif rn:
+            a(f"   {C['dim']}round {rn}/{budget}{C['reset']}")
         for f, v in revs:
             col = C["green"] if "APPROVED" in v.upper() else C["yellow"]
             a(f"   {f.split('-pr')[0]}   {col}{v}{C['reset']}")
