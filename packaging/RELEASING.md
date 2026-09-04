@@ -13,13 +13,27 @@ git commit -am "release: v$V" && git tag "v$V" && git push --follow-tags
 
 ## 2. PyPI
 
-```bash
-python3 -m build            # wheel + sdist into dist/
-python3 -m twine upload dist/*
-```
+Publishing is automatic: pushing a `v*` tag runs `.github/workflows/release.yml`,
+which builds, checks that the tag matches the packaged version, checks the
+adapters actually shipped in the wheel, and uploads over **Trusted Publishing** —
+no token in the repository, in Actions secrets, or on a laptop.
 
-Then `pip install agent-orchestrator`, `uv tool install agent-orchestrator`, or
-`pipx install agent-orchestrator` all work.
+One-time setup on pypi.org, before the first tag (PyPI account owner, in a
+browser — it cannot be scripted):
+
+    pypi.org -> Your projects -> Publishing -> Add a pending publisher
+      PyPI project name: ao-cli
+      Owner:             hakkisagdic
+      Repository:        agent-orchestrator
+      Workflow:          release.yml
+      Environment:       pypi
+
+Then `pip install ao-cli`, `uv tool install ao-cli` or `pipx install ao-cli` all
+work, and each provides the `ao` command.
+
+The distribution is `ao-cli` because `agent-orchestrator` on PyPI belongs to an
+unrelated project. The import package stays `ao`, which is also the command, so
+nothing inside the code or the docs has to know about the difference.
 
 Check the wheel before uploading — the failure that matters is packaged data
 going missing, and nothing in a smoke test of `--help` would catch it:

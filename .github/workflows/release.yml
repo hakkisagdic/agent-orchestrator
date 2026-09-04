@@ -6,7 +6,7 @@
 # hijacked, and the cheapest fix is not to have one.
 #
 # One-time setup on pypi.org → Publishing → Add a pending publisher:
-#   owner: hakkisagdic   repo: agent-orchestrator
+#   project: ao-cli   owner: hakkisagdic   repo: agent-orchestrator
 #   workflow: release.yml   environment: pypi
 name: release
 

@@ -16,7 +16,7 @@ process, it drives the loop, and adopting it means restarting your work inside i
 and leaves the agent where it is.
 
 ```bash
-pip install agent-orchestrator      # or: uv tool install agent-orchestrator
+pip install ao-cli                  # or: uv tool install ao-cli
 cd ~/your-project && ao status      # it finds the running session by itself
 ```
 
@@ -36,7 +36,7 @@ the first run: `ao` discovers the session from the agent's own store.
 `board` and `doctor` with nothing installed. It is a deliberate subset and stays one —
 everything else either takes a decision, spends the machine, kills processes or speaks
 a protocol, and a second implementation of any of those is a second thing to be wrong.
-For the rest: `winget install Python.Python.3.12 && pip install agent-orchestrator`.
+For the rest: `winget install Python.Python.3.12 && pip install ao-cli`.
 The script is written and reviewed but **not yet run on Windows**.
 
 > **Where this came from.** Extracted from a 30-epic durable-workflow product built

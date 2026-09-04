@@ -20,7 +20,7 @@
 
   For anything beyond looking: install the Python package.
       winget install Python.Python.3.12
-      pip install agent-orchestrator
+      pip install ao-cli
 
 .EXAMPLE
   .\ao.ps1 status
@@ -176,11 +176,11 @@ function Show-Doctor([string]$Root) {
   $py = Get-Command python, python3 -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($py) {
     Write-Host "python    $($py.Source)" -ForegroundColor Green
-    Write-Host "          full ao available: pip install agent-orchestrator" -ForegroundColor DarkGray
+    Write-Host "          full ao available: pip install ao-cli" -ForegroundColor DarkGray
   } else {
     Write-Host "python    not found - this script is the read-only subset" -ForegroundColor Yellow
     Write-Host "          verify, commit-ok, hold, watchdog, mcp and a2a need Python" -ForegroundColor DarkGray
-    Write-Host "          winget install Python.Python.3.12; pip install agent-orchestrator" -ForegroundColor DarkGray
+    Write-Host "          winget install Python.Python.3.12; pip install ao-cli" -ForegroundColor DarkGray
   }
 }
 
