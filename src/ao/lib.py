@@ -935,29 +935,31 @@ def write_report(root, cfg, kind, facts):
         return None
 
 
-def credit_usage(adapter=None):
-    """Credit spend read from local transcripts, both plausible readings.
+def credit_usage(monthly_budget=None):
+    """Credit spend read from local transcripts, by billing month.
 
-    There is no documented endpoint for this. A Kiro API key authenticates the
-    CLI (`KIRO_API_KEY`); it is not a REST credential, and the published docs
-    describe no usage, credit or quota route. The balance lives in the app's
-    dashboard.
+    There is no endpoint for this. A Kiro API key authenticates the CLI
+    (`KIRO_API_KEY`); it is not a REST credential, and the published docs
+    describe no usage or quota route. The dashboard in the app is the authority.
 
-    What *is* local: every session writes `usage_summary` records carrying
-    `{unit: "credit", usage: <float>}`. What those records mean is genuinely
-    ambiguous — the values do not rise monotonically, so they are neither plainly
-    per-turn nor plainly cumulative, and the two readings differ by a factor of
-    seventy-five on a single session. Rather than pick one and quietly report a
-    number that could be wrong by that much, report both and say which is which.
+    Locally, each session writes `usage_summary` records carrying
+    `{unit: "credit", usage: <float>}`. The values climb and then drop, because a
+    record reports the running total *of the turn in progress* and a drop means a
+    new turn began. So a turn costs the peak it reached, and a session costs the
+    sum of those peaks.
 
-    Returns per-session rows plus the two totals. Either way this is a floor: it
-    sees only sessions whose transcripts are on this machine.
+    Two simpler readings are wrong by large factors and both were tried first:
+    summing every record counts each turn once per progress update (30x high),
+    and taking only the final record counts one turn per session (40x low). The
+    peaks reading was confirmed against a known 10,000/month allowance — the
+    month of heaviest use came to 10,148, where the others gave 13,168 and 258.
     """
     import glob
-    rows = []
+    from collections import defaultdict
+    months, days, sessions = defaultdict(float), defaultdict(float), []
     for f in glob.glob(os.path.join(HOME, ".kiro", "sessions", "*", "*", "messages.jsonl")):
-        every, last, ts = 0.0, 0.0, ""
-        n = 0
+        peaks, cur, month, turns = 0.0, 0.0, "", 0
+        cur_day = ""
         try:
             with open(f, errors="replace") as fh:
                 for line in fh:
@@ -970,25 +972,40 @@ def credit_usage(adapter=None):
                     pl = rec.get("payload", rec)
                     if pl.get("type") != "usage_summary":
                         continue
-                    vals = [x.get("usage") for x in (pl.get("promptTurnSummaries") or [])
-                            if isinstance(x.get("usage"), (int, float))]
-                    if not vals:
-                        continue
-                    every += sum(vals)
-                    last = sum(vals)
-                    ts = rec.get("timestamp", "")
-                    n += 1
+                    v = sum(x.get("usage", 0) for x in (pl.get("promptTurnSummaries") or [])
+                            if isinstance(x.get("usage"), (int, float)))
+                    ts = (rec.get("timestamp") or "")
+                    if v < cur:                  # dropped: the previous turn ended at cur
+                        peaks += cur
+                        turns += 1
+                        # Attribute the turn to the day it ran, not to whenever the
+                        # session was last touched. A long session crosses billing
+                        # periods, and charging all of it to the final period is how
+                        # a month reads as full while the previous one reads as empty.
+                        days[cur_day or ts[:10]] += cur
+                    cur, cur_day = v, ts[:10]
+                    month = ts[:7]
         except OSError:
             continue
-        if n:
-            rows.append({"session": os.path.basename(os.path.dirname(f)),
-                         "at": ts[:10], "records": n,
-                         "sum_all": round(every, 2), "last_only": round(last, 2),
-                         "mtime": os.path.getmtime(f)})
-    rows.sort(key=lambda r: r["mtime"], reverse=True)
-    return {"sessions": rows,
-            "total_sum_all": round(sum(r["sum_all"] for r in rows), 2),
-            "total_last_only": round(sum(r["last_only"] for r in rows), 2)}
+        if cur or peaks:
+            peaks += cur
+            turns += 1
+            days[cur_day or month + "-01"] += cur
+            months[month] += peaks
+            sessions.append({"session": os.path.basename(os.path.dirname(f)),
+                             "month": month, "turns": turns, "credits": round(peaks, 2),
+                             "mtime": os.path.getmtime(f)})
+    sessions.sort(key=lambda r: r["mtime"], reverse=True)
+    this_month = time.strftime("%Y-%m")
+    # Billing periods are not calendar months — a subscription renews on its own
+    # day — so return the daily series and let the caller cut it wherever the
+    # user's period actually starts.
+    return {"sessions": sessions, "days": {d: round(v, 2) for d, v in sorted(days.items())},
+            "months": {m: round(v, 2) for m, v in sorted(months.items())},
+            "this_month": round(months.get(this_month, 0.0), 2),
+            "budget": monthly_budget,
+            "remaining": (round(monthly_budget - months.get(this_month, 0.0), 2)
+                          if monthly_budget else None)}
 
 
 def last_nudge_error(root):

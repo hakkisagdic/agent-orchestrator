@@ -579,31 +579,69 @@ def cmd_lock(cfg, args):
 
 
 def cmd_credits(cfg, args):
-    """What the local transcripts say has been spent — with the ambiguity shown.
+    """Credit spend by billing period, measured from local transcripts.
 
-    Kiro publishes no usage endpoint and its API key is a CLI credential, not a
-    REST one, so the dashboard is the only authority. This reports what can be
-    measured locally and refuses to pick between two readings that differ by
-    seventy-five times; comparing one session against the app settles it in
-    seconds, and a guess would not.
+    A floor, not a balance. Only sessions stored on this machine are visible and
+    Kiro exposes no endpoint to check against, so this under-reports by whatever
+    ran elsewhere — which is the honest direction for a number someone might use
+    to decide whether to start another run.
     """
+    from datetime import date
     u = A.credit_usage()
-    if not u["sessions"]:
+    if not u["days"]:
         print(f"{C['dim']}No local sessions with usage records.{C['reset']}")
         return 0
-    print(f"{C['dim']}{'date':<12}{'session':<20}{'recs':>5}{'sum of all':>12}{'last only':>12}{C['reset']}")
-    for r in u["sessions"][:args.n]:
-        print(f"{r['at']:<12}{r['session'][:19]:<20}{r['records']:>5}"
-              f"{r['sum_all']:>12.2f}{r['last_only']:>12.2f}")
-    print()
-    print(f"{C['b']}{'TOTAL':<37}{u['total_sum_all']:>12.2f}"
-          f"{u['total_last_only']:>12.2f}{C['reset']}")
-    print()
-    print(f"{C['yellow']}Two readings, not one.{C['reset']} A session's usage records do not")
-    print("rise monotonically, so they are neither plainly per-turn nor plainly cumulative.")
-    print("Compare one session against Kiro's own dashboard and it is settled in seconds;")
-    print("until then neither column is labelled correct.")
-    print(f"{C['dim']}Either way this is a floor — only sessions stored on this machine.{C['reset']}")
+    budget = args.budget
+    reset = max(1, min(28, args.reset_day))
+
+    # Cut the daily series where the subscription renews, not where the calendar
+    # does. A period that starts on the 6th makes calendar months meaningless, and
+    # the number people compare against their dashboard is the period's.
+    periods = {}
+    for d, v in u["days"].items():
+        y, m, dd = (int(x) for x in d.split("-"))
+        if dd < reset:
+            m -= 1
+            if m == 0:
+                y, m = y - 1, 12
+        periods[f"{y:04d}-{m:02d}"] = periods.get(f"{y:04d}-{m:02d}", 0) + v
+
+    today = date.today()
+    cur_y, cur_m = today.year, today.month
+    if today.day < reset:
+        cur_m -= 1
+        if cur_m == 0:
+            cur_y, cur_m = cur_y - 1, 12
+    current = f"{cur_y:04d}-{cur_m:02d}"
+
+    label = "period" if reset != 1 else "month"
+    print(f"{C['b']}{C['mag']}── BY {label.upper()} {'─' * 44}{C['reset']}")
+    for pm in sorted(periods):
+        v = periods[pm]
+        bar = note = ""
+        if budget:
+            pct = min(100.0, v / budget * 100)
+            col = C["red"] if pct > 90 else C["yellow"] if pct > 70 else C["green"]
+            bar = f"  {col}{'█' * int(pct / 5)}{'░' * (20 - int(pct / 5))}{C['reset']} {pct:5.1f}%"
+            note = f"  {C['dim']}of {budget:,.0f}{C['reset']}"
+        mark = f" {C['b']}←{C['reset']}" if pm == current else ""
+        print(f"   {pm}   {v:>9,.2f}{note}{bar}{mark}")
+
+    if budget:
+        left = budget - periods.get(current, 0.0)
+        col = C["red"] if left < budget * 0.1 else C["yellow"] if left < budget * 0.3 else C["green"]
+        print(f"\n   {C['b']}at least{C['reset']} {periods.get(current, 0):,.0f} spent this "
+              f"{label} · {col}{left:,.0f} or less remaining{C['reset']}")
+
+    if args.days:
+        print(f"\n{C['b']}{C['mag']}── BY DAY {'─' * 48}{C['reset']}")
+        for d, v in list(u["days"].items())[-args.days:]:
+            print(f"   {d}   {v:>9,.2f}")
+
+    print(f"\n{C['dim']}A floor, not the account balance. Only sessions stored on this"
+          f"\nmachine are visible and Kiro publishes no endpoint to check against,"
+          f"\nso the real figure is higher. A turn costs the peak its usage records"
+          f"\nreach before the next turn resets them.{C['reset']}")
     return 0
 
 
@@ -1132,7 +1170,9 @@ def main():
 
     sub.add_parser("board", help="where each pre-authorised item is").set_defaults(fn=cmd_board)
     cr = sub.add_parser("credits", help="credit spend measured from local transcripts")
-    cr.add_argument("-n", type=int, default=12)
+    cr.add_argument("--budget", type=float, help="allowance per period, for the remaining figure")
+    cr.add_argument("--reset-day", type=int, default=1, help="day the subscription renews")
+    cr.add_argument("--days", type=int, default=0, help="also show the last N days")
     cr.set_defaults(fn=cmd_credits)
     sub.add_parser("commit-ok", help="may this tree be committed? decided from evidence"
                    ).set_defaults(fn=cmd_commit_ok)
