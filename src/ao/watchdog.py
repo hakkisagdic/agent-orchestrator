@@ -232,12 +232,43 @@ def escalate(root, cfg, adapter, age, args, st):
         print(f"anomaly {a['kind']}: {'reported as ' + name if name else 'already reported'}")
         woke = True
     arch = cfg.get("architect") or {}
+    # Waking the architect spends a turn on the same provider the implementer
+    # uses. Escalation runs before the quota guard in the chain, so check here or
+    # a low window gets burned on a report that could have waited.
+    if woke and arch.get("argv") and not quota_ok(adapter):
+        print("anomaly reported, but no quota headroom to wake the architect")
+        woke = False
     if woke and arch.get("argv") and not args.dry_run and not child_alive(st):
-        prompt = ("agent-mail'de `*-watchdog-to-fable-ANOMALY-*.md` mesajları var. "
-                  "Bunlar watchdog'un gözlemleri — olgu, yorum değil. Her birini oku, "
-                  "gerçekten müdahale gerekip gerekmediğine karar ver, gerekiyorsa yap, "
-                  "sonra mesajı sil. Normalse yalnız sil.")
-        argv = [x.replace("{prompt}", prompt) for x in arch["argv"]]
+        prompt = (
+            "Sen bu deponun mimarısın ve watchdog tarafından uyandırıldın. "
+            "`agent-mail/` içindeki `*-watchdog-to-fable-ANOMALY-*.md` ve "
+            "`*-kiro-to-fable-*.md` mesajlarını oku. Watchdog'unkiler olgudur, yorum "
+            "değil — kendi kararını sen ver. Durumu `ao status`, `ao board`, "
+            "`ao doctor` ile doğrula; ölçmeden sonuç çıkarma.\n\n"
+            "Gerçekten müdahale gerekiyorsa yap: `agent-mail/`'e uygulayıcı için "
+            "karar mesajı yaz, gerekiyorsa `.ao/board.md`'yi güncelle. Acil bir şeyse "
+            "mesaja `## ACİL` başlığı koy — o zaman uygulayıcıya `ao lock`, `ao verify` "
+            "ve `ao commit-ok` üzerinden ulaşır.\n\n"
+            "Sonra işlediğin mesajı sil; teslim onayı budur. Normal bir durumsa "
+            "yalnız sil ve bir şey yapma.\n\n"
+            "Yapmayacakların: push, PR, force-push, epic kutusu işaretleme, mimari "
+            "sözleşme değiştirme. Bunlar insana aittir. Emin değilsen dokunma ve "
+            "kullanıcıya bırak.")
+        # Resolve the session at wake time. A resumed architect carries the whole
+        # history -- what was decided and why -- where a fresh one knows only what
+        # is on disk. Claude Code forks a copy rather than double-writing when the
+        # session is already running, so resuming cannot repeat the two-writer
+        # incident. Pinning an id in config would go stale the moment the human
+        # opens a new conversation, and a watchdog waking a dead session fails
+        # silently, which is the worst shape of failure.
+        sess = arch.get("session")
+        if sess in (None, "auto"):
+            sess = (A.discover_architect(arch.get("cwd") or root) or {}).get("session")
+        if "{session}" in " ".join(arch["argv"]) and not sess:
+            print("architect session not resolvable; reported only")
+            return woke
+        argv = [x.replace("{prompt}", prompt) .replace("{session}", sess or "")
+                for x in arch["argv"]]
         search = child_path()
         resolved = shutil.which(argv[0], path=search)
         if resolved:
@@ -435,7 +466,21 @@ def main():
             if child_alive(st):
                 print("queue low, but a turn is still running")
                 return 0
-            argv = [x.replace("{prompt}", arch.get("prompt", REFILL_PROMPT)) for x in arch["argv"]]
+            # Resolve the session at wake time. A resumed architect carries the whole
+            # history -- what was decided and why -- where a fresh one knows only what
+            # is on disk. Claude Code forks a copy rather than double-writing when the
+            # session is already running, so resuming cannot repeat the two-writer
+            # incident. Pinning an id in config would go stale the moment the human
+            # opens a new conversation, and a watchdog waking a dead session fails
+            # silently, which is the worst shape of failure.
+            sess = arch.get("session")
+            if sess in (None, "auto"):
+                sess = (A.discover_architect(arch.get("cwd") or root) or {}).get("session")
+            if "{session}" in " ".join(arch["argv"]) and not sess:
+                print("architect session not resolvable; reported only")
+                return 0
+            argv = [x.replace("{prompt}", arch.get("prompt", REFILL_PROMPT)) .replace("{session}", sess or "")
+                    for x in arch["argv"]]
             search = child_path()
             resolved = shutil.which(argv[0], path=search)
             if not resolved:

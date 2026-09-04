@@ -187,3 +187,51 @@ cannot deliver it. A stuck agent is exactly the one not reading its mail.
 Keep the always-included file short and durable. It is paid for on every turn, so
 transient state does not belong there — but the *rule* that resolves a class of
 transient confusion does, and it is the cheapest fix available for a loop.
+
+## Waking the architect
+
+A notification is not an actor. The watchdog could raise a desktop alert and write
+an anomaly report, and both would sit there — the human saw it, the architect did
+not, and nothing moved until someone forwarded it by hand. Three reports queued
+that way in one afternoon.
+
+So `.ao/config.json` names an architect the watchdog can start:
+
+```json
+{"architect": {
+  "adapter": "claude-code",
+  "cwd": "/path/to/the/architect's/working/directory",
+  "session": "auto",
+  "argv": ["claude", "--resume", "{session}", "-p", "{prompt}",
+           "--allowedTools", "Read,Grep,Glob,Write,Edit,Bash(ao:*),…"]}}
+```
+
+Three decisions in that block are load-bearing.
+
+**Resume, not spawn.** A resumed session carries the whole history — what was
+decided, what was tried, why a rule exists. A fresh one knows only what is on
+disk, which is a lot here but not that. Verified: a resumed session answered a
+question about this project that appears nowhere in the repository.
+
+**`"session": "auto"`.** Pinning an id goes stale the moment the human opens a
+new conversation, and a watchdog waking a dead session fails silently — which is
+the worst shape of failure, because everything still looks configured. It is
+resolved from disk at wake time, newest transcript for that directory.
+
+**Scoped tools.** An unattended architect with unrestricted Bash is what goes
+wrong at 3am. It may inspect, run `ao`, and write coordination files. It may not
+run arbitrary commands, and nothing anywhere grants push.
+
+The two-writer hazard that cost this project a night does not apply: Claude Code
+forks a copy rather than double-writing when the session is already running. That
+guard is in the tool, not in our discipline, which is the better place for it.
+
+Waking costs a turn on the same provider the implementer uses, so it happens at
+most once per condition per hour, and not at all when quota is short — a report
+that could have waited should not burn the window the implementer needs.
+
+### Why not A2A for this
+
+A2A is messaging between running endpoints. An architect between turns is not
+running and has no address to push to. The problem was never the protocol; it was
+that nothing could *start* the architect. `--resume` is the address.

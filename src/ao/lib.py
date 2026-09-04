@@ -1164,6 +1164,32 @@ def urgent_messages(root, cfg):
     return out
 
 
+def discover_architect(cwd):
+    """The newest Claude Code session for a directory, by transcript mtime.
+
+    Pinning a session id in config goes stale the moment the human opens a new
+    conversation, and a watchdog that wakes a dead session fails silently — the
+    worst shape of failure, because everything still looks configured. Resolve it
+    from disk instead, the same way the implementer's session is resolved.
+    """
+    # Claude Code flattens the path into a directory name by replacing both "/"
+    # and "." — a worktree under ".claude" becomes "…Voltrai--claude-worktrees…",
+    # with the doubled dash where "/." was.
+    escaped = cwd.replace("/", "-").replace(".", "-")
+    d = os.path.join(HOME, ".claude", "projects", escaped)
+    if not os.path.isdir(d):
+        return None
+    best, best_mt = None, 0
+    for f in os.listdir(d):
+        if not f.endswith(".jsonl"):
+            continue
+        mt = os.path.getmtime(os.path.join(d, f))
+        if mt > best_mt:
+            best, best_mt = f[:-6], mt
+    return {"session": best, "transcript": os.path.join(d, best + ".jsonl"),
+            "age": int(time.time() - best_mt)} if best else None
+
+
 def last_nudge_error(root):
     """The most recent failed nudge, if the watchdog recorded one."""
     key = os.path.basename(root.rstrip("/")) or "root"
