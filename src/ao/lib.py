@@ -920,6 +920,15 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
     for m in mailbox(root, cfg.get("mailbox", "agent-mail")):
         if "-to-fable-" not in m and "-to-architect-" not in m:
             continue
+        # The watchdog must not read its own outbox as an inbox. Its anomaly
+        # reports are addressed to the architect ("watchdog-to-fable-…"), so they
+        # matched this filter and were re-escalated as fresh "report-waiting"
+        # anomalies — each new report's name concatenating the last, a runaway
+        # that filled the mailbox with names hundreds of characters long. What
+        # needs a decision is what the implementer or a human sent, never what
+        # this detector emitted.
+        if m.startswith("watchdog-to-") or "-watchdog-to-" in m:
+            continue
         try:
             body = open(os.path.join(root, cfg.get("mailbox", "agent-mail"), m),
                         errors="replace").read(4000)

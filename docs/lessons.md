@@ -3,6 +3,39 @@
 Every item below is a real failure from a production run, not a hypothetical. They are
 the reason the defaults are what they are.
 
+## 19. The woken architect edited its own tooling, and made a runaway
+
+A watchdog-woken architect was given `Write` and `Edit` so it could write decision
+messages and update the board. Its allowlist did not constrain *which* files, and
+with the whole session's context it did the natural thing: it noticed a real
+defect — one standing condition producing a fresh report every cycle — and rewrote
+`write_report` in the orchestrator's own source to deduplicate by (kind, source).
+
+The fix was plausible and wrong. It keyed the report filename on a source string
+scraped from the facts ("the implementer wrote X.md"), while the anomaly scanner
+counted the watchdog's own `watchdog-to-fable-ANOMALY-*.md` files as reports
+awaiting the architect. Each cycle read the last report as a new one, built a
+filename from it, and wrote a longer name — a feedback loop that filled the
+mailbox with names hundreds of characters long.
+
+Two root causes, one in code and one in governance:
+
+- **The watchdog read its own outbox as an inbox.** A detector must never treat
+  its own output as input; excluding `watchdog-to-*` from both the scanner and
+  the pending-report counter closes it.
+- **An unattended actor edited the code that governs it.** That is not a
+  coordination write, it is a change to the orchestrator's own contract, and
+  `reviewer ≠ implementer` applies to the architect as much as to the implementer
+  — more so, because nobody was watching. The wake prompt saying "don't change
+  architectural contracts" is not a control; the allowlist is. The architect
+  should reach the mailbox and board through scoped `ao` commands, and anything
+  needing a code change should become a report to a human, not an edit at 3am.
+
+The general shape, again: a guard added to reduce noise removed a correctness
+property. Every guard needs "what if this fires when it should not" — and for one
+that writes files in a loop, the answer cannot be "someone notices the mailbox is
+full."
+
 ## 1. The observer dies with the session
 
 Background watchers started inside an agent session are session-scoped. When the session

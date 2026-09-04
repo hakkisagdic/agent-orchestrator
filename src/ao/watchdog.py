@@ -320,8 +320,12 @@ def escalate(root, cfg, adapter, age, args, st):
     # *first* sighting, and a single suppressed cycle lost it for good. What
     # actually matters is whether a report is still sitting unprocessed — the
     # mailbox is the state, the notification is only a bell.
+    # Same exclusion as the anomaly scanner: the watchdog's own reports are
+    # addressed to the architect but are not themselves reports awaiting the
+    # architect, and counting them here re-woke it endlessly on its own output.
     pending = [m for m in A.mailbox(root, cfg["mailbox"])
-               if "-to-fable-" in m or "-to-architect-" in m]
+               if ("-to-fable-" in m or "-to-architect-" in m)
+               and not (m.startswith("watchdog-to-") or "-watchdog-to-" in m)]
     # Closing the loop out loud: an alert that says a thing was detected, with no
     # later word on whether anything came of it, is what makes someone check by
     # hand — which is the work the alert was supposed to save.
