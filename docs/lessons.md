@@ -210,3 +210,27 @@ a guard added to stop an agent doing something harmful will, sooner or later, st
 it doing something necessary. Every one of them needs an answer to "what happens
 if this fires when it should not?" — and for a guard that blocks work, the answer
 has to be a way out that does not require a human to notice.
+
+## 16. An instruction the agent cannot follow is a blocker you built
+
+Steering told the implementer to run its heavy gates through `ao lock -- npm test`.
+`ao` existed only as a shell alias in the human's `.zshrc`, and a non-interactive
+agent process cannot see an alias. So the command did not exist for the one actor
+required to use it.
+
+The agent behaved exactly as it should. It searched `$HOME/.local/bin`,
+`/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`,
+found nothing, declined to invent a replacement wrapper, refused to run heavy
+gates unlocked, and parked three slices with a precise request for the canonical
+path. Every one of those slices was otherwise finished. Half a day passed with
+completed work uncommitted because a rule referenced a tool that was not there.
+
+The discipline was not the problem — it is the reason nothing was corrupted. The
+problem was writing a rule without checking it was executable in the environment
+that had to execute it, which is a different question from whether it works in
+the terminal where it was written.
+
+`ao doctor` now resolves `ao` against a spawned child's PATH rather than the
+current shell's, and says so plainly when steering references a tool the agent
+cannot reach. The general form is worth keeping: every instruction given to an
+agent is a dependency, and dependencies belong in the health check.

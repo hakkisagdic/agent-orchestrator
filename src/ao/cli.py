@@ -1129,8 +1129,30 @@ def cmd_doctor(cfg, args):
         print(f"                {C['dim']}{err.get('tail','')[:110]}{C['reset']}")
     else:
         print(f"last restart    {C['dim']}no failures recorded{C['reset']}")
-    print(f"\n{C['dim']}Not implemented yet: commit-ok, slice, decide, "
-          f"since, mcp serve.{C['reset']}")
+    # Can the *agent* run `ao`? A shell alias is invisible to a non-interactive
+    # process, so steering that says "run your gates through ao lock" is an
+    # instruction the agent cannot follow — and a disciplined agent then parks the
+    # slice rather than working around it. That cost this project three parked
+    # items and half a day. Check the child's PATH, not this shell's.
+    from .watchdog import child_path
+    reachable = shutil.which("ao", path=child_path())
+    if reachable:
+        print(f"ao for agents   {C['green']}{reachable}{C['reset']}")
+    else:
+        print(f"ao for agents   {C['red']}not on a spawned agent's PATH{C['reset']}")
+        print(f"                {C['dim']}a shell alias does not count — "
+              f"uv tool install ao-orchestrator{C['reset']}")
+
+    steer = os.path.join(root, ".kiro", "steering")
+    if os.path.isdir(steer) and not reachable:
+        refs = [f for f in os.listdir(steer)
+                if f.endswith(".md") and "ao " in open(os.path.join(steer, f),
+                                                       errors="replace").read()]
+        if refs:
+            print(f"                {C['yellow']}steering references it: "
+                  f"{', '.join(refs)}{C['reset']}")
+
+    print(f"\n{C['dim']}Not implemented yet: decide, since, init.{C['reset']}")
 
 
 def main():
