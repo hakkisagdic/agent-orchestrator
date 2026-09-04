@@ -8,7 +8,8 @@ have cost when a human noticed twenty minutes later.
 
 Guards, in order — the point is to spend nothing when spending would not help:
 
-  0. Is a turn we started still running?    (pid — never make a second writer)
+  -1. Has a human taken the tree?           (.ao/hold — overrides everything)
+  0. Is ANY agent already in this tree?     (cwd match — never make a second writer)
   2b. Did the queue run dry rather than end? (wake the architect, not the implementer)
   1. Is the session actually idle?          (mtime)
   2. Is there open work to continue?        (mailbox / dirty tree / NEEDS_CHANGES)
@@ -262,10 +263,26 @@ def main():
         save_state(root, st)
         print(f"spinning: {spin}m active with no artifact change")
 
-    # 0 — a turn we started is still running. This guard is not an optimisation:
-    # skipping it makes two writers of one working tree. See child_alive().
-    if child_alive(st):
-        print(f"turn still running (pid {st['child_pid']}); not starting a second one")
+    # -1 — a human has taken the tree. Nothing else in this chain may override it.
+    held = A.hold_state(root)
+    if held:
+        print(f"held by {held.get('by')} for {held['minutes']}m: {held.get('reason','')}")
+        return 0
+
+    # 0 — is ANY agent already working this tree? Not just the child we started.
+    #
+    # Tracking only our own last child was wrong, and expensively so: every nudge
+    # spawns a detached process, nothing reaps them, and this project accumulated
+    # fifteen live agent processes in one repository with four still burning CPU.
+    # Each was invisible to a guard that remembered a single pid. Ask the OS which
+    # processes have this repo as their cwd, and treat any of them as a writer.
+    running = A.agent_pids(root, adapter)
+    if running:
+        print(f"{len(running)} agent process(es) already in this tree ({running}); "
+              f"not starting another")
+        if len(running) > 4:
+            notify("Voltrai: turns piling up",
+                   f"{len(running)} agent processes in one tree — `ao hold` to clear")
         return 0
 
     # 1 — still working

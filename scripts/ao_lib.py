@@ -606,6 +606,50 @@ def spinning(root, min_minutes=20, min_samples=6):
     return int(span) if grew and span >= min_minutes else None
 
 
+HOLD_FILE = ".ao/hold"
+
+
+def hold_state(root):
+    """Who has stopped this project's agent, and why. None when running free."""
+    p = os.path.join(root, HOLD_FILE)
+    if not os.path.exists(p):
+        return None
+    try:
+        st = json.load(open(p))
+    except Exception:
+        st = {"by": "unknown", "reason": "unreadable hold file"}
+    st["minutes"] = int((time.time() - st.get("at", time.time())) / 60)
+    return st
+
+
+def agent_pids(root, adapter):
+    """Agent processes whose working directory is this repository.
+
+    Match on the process's cwd rather than its command line. The command line is
+    unreliable — a long resume prompt gets truncated by `ps`, and the binary may
+    be a bare `node` under a version manager — whereas the cwd is exactly the
+    question being asked: is something editing *this* tree?
+    """
+    names = set()
+    for key in ("send", "resume"):
+        argv = (adapter.get(key) or {}).get("argv") or []
+        if argv:
+            names.add(os.path.basename(argv[0]))
+    names.update({"kiro-cli", "claude", "claude-code", "codex", "cursor-agent"})
+    out = []
+    for name in names:
+        for pid in (sh(f"pgrep -f {name}") or "").split():
+            if not pid.isdigit() or int(pid) == os.getpid():
+                continue
+            cwd = ""
+            for line in (sh(f"lsof -a -p {pid} -d cwd -Fn") or "").split("\n"):
+                if line.startswith("n"):
+                    cwd = line[1:]
+            if cwd and os.path.realpath(cwd) == os.path.realpath(root):
+                out.append(int(pid))
+    return sorted(set(out))
+
+
 def last_nudge_error(root):
     """The most recent failed nudge, if the watchdog recorded one."""
     key = os.path.basename(root.rstrip("/")) or "root"
