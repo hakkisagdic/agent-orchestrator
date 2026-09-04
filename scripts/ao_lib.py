@@ -650,6 +650,71 @@ def agent_pids(root, adapter):
     return sorted(set(out))
 
 
+def record_notice(root, title, msg, sent, key=None):
+    """Every notification we raise, kept where the architect can read it.
+
+    A desktop notification is fire-and-forget: it reaches the human and vanishes,
+    so the one participant who could act on a pattern of alerts — the architect
+    reading the panel — is the only one who never sees them. Recording them puts
+    both sides on the same evidence.
+
+    `sent=False` rows matter as much as sent ones: they are the alerts a human
+    would have received without the rate limit, and a long run of them is itself
+    the signal that something has been wrong for a while.
+    """
+    d = os.path.join(root, ".ao", "ledger")
+    try:
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "notices.jsonl"), "a") as fh:
+            fh.write(json.dumps({"at": int(time.time()), "title": title,
+                                 "msg": msg, "sent": bool(sent),
+                                 "key": key or title}, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def notices(root, limit=10, include_suppressed=False):
+    """Recent notifications, newest first."""
+    p = os.path.join(root, ".ao", "ledger", "notices.jsonl")
+    if not os.path.exists(p):
+        return []
+    out = []
+    for line in open(p, errors="replace"):
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        if rec.get("sent") or include_suppressed:
+            out.append(rec)
+    return list(reversed(out))[:limit]
+
+
+def notice_recently_sent(root, key, window):
+    """Was this same alert already delivered inside the window?"""
+    p = os.path.join(root, ".ao", "ledger", "notices.jsonl")
+    if not os.path.exists(p):
+        return False
+    cutoff = time.time() - window
+    try:
+        with open(p, errors="replace") as fh:
+            fh.seek(max(0, os.path.getsize(p) - 100_000))
+            lines = fh.read().split("\n")
+    except OSError:
+        return False
+    for line in reversed(lines):
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        if rec.get("at", 0) < cutoff:
+            return False
+        if rec.get("key") == key and rec.get("sent"):
+            return True
+    return False
+
+
 def last_nudge_error(root):
     """The most recent failed nudge, if the watchdog recorded one."""
     key = os.path.basename(root.rstrip("/")) or "root"

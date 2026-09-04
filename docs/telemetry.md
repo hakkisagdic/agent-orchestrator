@@ -104,3 +104,37 @@ panel degrades, it does not break.
 The third one is worth the trouble. A turn that costs five times the average is almost
 never five times more valuable; it is usually an agent retrying a failing command in a
 loop, and the tool-call list in `usage_summary` shows you which one.
+
+## Notices, and why they are recorded
+
+A desktop notification reaches the human and vanishes. The architect reading the
+panel — the participant who could act on a *pattern* of alerts — is then the only
+one who never sees what the human was told. `ao notices` closes that: every alert
+is written to `.ao/ledger/notices.jsonl` as it is raised.
+
+Alerts are rate-limited per key, default thirty minutes. The watchdog runs every
+two minutes, so a guard that notified on each run would turn one ongoing condition
+into thirty alerts an hour; a human who learns to swipe those away has turned the
+alerting off while everyone still believes it works.
+
+Suppressed alerts are recorded too, with `sent: false`. A long run of them is
+itself the signal — it says the condition has held for a long time, which a single
+delivered notification cannot express. `ao notices --all` shows them.
+
+## Keeping the records small
+
+Everything here grows monotonically: the progress ledger gains a row every couple
+of minutes, and one nudge log reached 295 KB overnight. Unbounded growth is how a
+tool becomes the thing someone turns off.
+
+```bash
+ao prune                 # dry run: what would go
+ao prune --yes           # operational records older than 7 days, logs trimmed to 64KB tails
+ao prune --evidence --yes   # also verification records and plan hashes
+```
+
+Evidence is excluded by default and takes an explicit flag. Verification records
+and plan hashes are what commit authority was granted against — deleting them as
+housekeeping would quietly remove the ability to answer "on what basis did this
+land". Log trimming keeps the tail rather than the head, because the last turn's
+output is the part anyone actually reads when diagnosing a failed nudge.

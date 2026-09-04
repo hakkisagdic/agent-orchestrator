@@ -634,6 +634,148 @@ def _alive(pid):
         return False
 
 
+# What each store is for. The split matters: pruning operational noise is
+# housekeeping, pruning evidence destroys the record that commit authority was
+# granted against — so they cannot share a default.
+STORES = [
+    ("progress",      "operational", ".ao/ledger/progress.jsonl",      "watchdog samples behind the spin check"),
+    ("notices",       "operational", ".ao/ledger/notices.jsonl",       "alerts raised and suppressed"),
+    ("inbox",         "operational", ".ao/inbox",                      "imported source pulls (*.imported)"),
+    ("verifications", "evidence",    ".ao/ledger/verifications.jsonl", "measured gate results"),
+    ("plans",         "evidence",    ".ao/ledger/plans.jsonl",         "plan hashes as admitted"),
+]
+HOME_LOGS = ["nudge-{key}.log", "watchdog-{key}.log", "refill-{key}.log"]
+
+
+def _prune_jsonl(path, cutoff, dry):
+    """Drop records older than cutoff. Returns (dropped, kept, bytes_freed)."""
+    if not os.path.exists(path):
+        return 0, 0, 0
+    before = os.path.getsize(path)
+    keep = []
+    dropped = 0
+    for line in open(path, errors="replace"):
+        if not line.strip():
+            continue
+        try:
+            if json.loads(line).get("at", 0) < cutoff:
+                dropped += 1
+                continue
+        except Exception:
+            pass                                  # unparseable: keep it, do not silently lose data
+        keep.append(line if line.endswith("\n") else line + "\n")
+    if dropped and not dry:
+        with open(path, "w") as fh:
+            fh.writelines(keep)
+    freed = before - sum(len(k.encode()) for k in keep) if dropped else 0
+    return dropped, len(keep), max(0, freed)
+
+
+def cmd_prune(cfg, args):
+    """Trim the records this tool accumulates, without touching the audit trail.
+
+    Every store here grows monotonically — one nudge log reached 295 KB in a
+    night, and the progress ledger gains a row every two minutes. Left alone they
+    become the reason someone stops running the tool.
+
+    Evidence is excluded by default and needs `--evidence`. Verification records
+    and plan hashes are what commit authority was granted against; deleting them
+    as housekeeping would quietly remove the ability to answer "on what basis did
+    this land".
+    """
+    root = cfg["root"]
+    cutoff = time.time() - args.days * 86400
+    dry = not args.yes
+    key = os.path.basename(root.rstrip("/")) or "root"
+    print(f"{C['b']}pruning records older than {args.days} day(s){C['reset']}"
+          f"{C['dim']}  {root}{C['reset']}")
+    if dry:
+        print(f"{C['yellow']}dry run — add --yes to apply{C['reset']}")
+
+    total = 0
+    for name, kind, rel, desc in STORES:
+        if kind == "evidence" and not args.evidence:
+            path = os.path.join(root, rel)
+            if os.path.exists(path):
+                n = sum(1 for _ in open(path, errors="replace"))
+                print(f"  {C['dim']}skip  {name:<14} {n} records — evidence, needs --evidence{C['reset']}")
+            continue
+        path = os.path.join(root, rel)
+        if name == "inbox":
+            if not os.path.isdir(path):
+                continue
+            gone = 0
+            for f in os.listdir(path):
+                fp = os.path.join(path, f)
+                if f.endswith(".imported") and os.path.getmtime(fp) < cutoff:
+                    total += os.path.getsize(fp)
+                    gone += 1
+                    if not dry:
+                        os.remove(fp)
+            if gone:
+                print(f"  {C['green']}{'would drop' if dry else 'dropped'}{C['reset']}  "
+                      f"{name:<14} {gone} file(s)  {C['dim']}{desc}{C['reset']}")
+            continue
+        dropped, kept, freed = _prune_jsonl(path, cutoff, dry)
+        total += freed
+        if dropped:
+            print(f"  {C['green']}{'would drop' if dry else 'dropped'}{C['reset']}  "
+                  f"{name:<14} {dropped} of {dropped + kept}  {C['dim']}{desc}{C['reset']}")
+
+    # Dedupe by inode, not by path string: this filesystem is case-insensitive, so
+    # "nudge-Voltrai.log" and "nudge-voltrai.log" are one file that would
+    # otherwise be counted — and truncated — twice.
+    seen_inodes = set()
+    for pattern in HOME_LOGS:
+        path = os.path.join(A.HOME, ".ao", pattern.format(key=key))
+        alt = os.path.join(A.HOME, ".ao", pattern.format(key=key.lower()))
+        for pth in {path, alt}:
+            if not os.path.exists(pth):
+                continue
+            ino = os.stat(pth).st_ino
+            if ino in seen_inodes:
+                continue
+            seen_inodes.add(ino)
+            size = os.path.getsize(pth)
+            if size < args.keep_kb * 1024:
+                continue
+            if not dry:
+                # keep the tail: the last turn's output is the only part anyone
+                # reads, and it is what a failed nudge is diagnosed from
+                with open(pth, errors="replace") as fh:
+                    fh.seek(max(0, size - args.keep_kb * 1024))
+                    tail = fh.read()
+                with open(pth, "w") as fh:
+                    fh.write(f"[truncated by ao prune {datetime.now():%Y-%m-%d %H:%M}]\n" + tail)
+            total += size - args.keep_kb * 1024
+            print(f"  {C['green']}{'would trim' if dry else 'trimmed'}{C['reset']}  "
+                  f"{os.path.basename(pth):<24} {size // 1024}KB → {args.keep_kb}KB")
+
+    print(f"\n{C['b']}{total // 1024}KB{C['reset']} {'reclaimable' if dry else 'reclaimed'}")
+    return 0
+
+
+def cmd_notices(cfg, args):
+    """Alerts this project raised — the desktop notification, kept.
+
+    A notification reaches the human and vanishes, so the architect reading the
+    panel is the one participant who never sees what the human was told.
+    """
+    root = cfg["root"]
+    rows = A.notices(root, args.n, include_suppressed=args.all)
+    if not rows:
+        print(f"{C['dim']}No notices recorded.{C['reset']}")
+        return 0
+    for r in rows:
+        when = datetime.fromtimestamp(r["at"]).strftime("%d %b %H:%M")
+        tag = (f"{C['green']}sent{C['reset']}" if r.get("sent")
+               else f"{C['dim']}held{C['reset']}")
+        print(f"  {C['dim']}{when}{C['reset']}  {tag}  {C['b']}{r['title']}{C['reset']}  {r['msg']}")
+    if not args.all:
+        print(f"{C['dim']}  (--all also shows alerts the rate limit suppressed){C['reset']}")
+    return 0
+
+
 def cmd_watchdog(cfg, args):
     """Install, remove or inspect the launchd job that restarts a stalled agent."""
     import getpass
@@ -805,6 +947,16 @@ def main():
     wd.set_defaults(fn=cmd_watchdog)
 
     sub.add_parser("board", help="where each pre-authorised item is").set_defaults(fn=cmd_board)
+    n = sub.add_parser("notices", help="alerts this project raised")
+    n.add_argument("-n", type=int, default=12)
+    n.add_argument("--all", action="store_true", help="include rate-limited ones")
+    n.set_defaults(fn=cmd_notices)
+    pr = sub.add_parser("prune", help="trim accumulated records and logs")
+    pr.add_argument("--days", type=float, default=7)
+    pr.add_argument("--keep-kb", type=int, default=64, help="log tail to keep")
+    pr.add_argument("--evidence", action="store_true", help="also prune verifications and plans")
+    pr.add_argument("--yes", action="store_true", help="apply (default is a dry run)")
+    pr.set_defaults(fn=cmd_prune)
     h = sub.add_parser("hold", help="stop this project's agents and keep them stopped")
     h.add_argument("action", choices=["hold", "release", "status"], nargs="?", default="hold")
     h.add_argument("reason", nargs="?")
