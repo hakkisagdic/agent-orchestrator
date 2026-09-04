@@ -25,6 +25,7 @@ Run it from cron/launchd every couple of minutes, or once by hand.
 import argparse
 import json
 import os
+import re
 import subprocess
 import shutil
 import sys
@@ -131,26 +132,44 @@ def child_alive(st):
 
 
 def provider_degraded(root, window=900):
-    """A provider-side failure in our own nudge log, recent enough to still hold.
+    """A provider-side failure in the *most recent* nudge, recent enough to hold.
 
     An exhausted quota and an outage both silence the agent, but only one of them
     is fixed by nudging. Naming it here keeps "the model is down" from being
     reported — and retried — as "the agent is stuck".
+
+    Scope it to the last nudge attempt, not the whole file. The log is
+    append-only, so an hour-old outage stays in it forever, and a check that
+    merely greps the tail keeps firing long after the provider recovered — which
+    blocks every later nudge and costs exactly the time this guard was added to
+    save. Read only what came after the last `=== <time> nudge ===` marker, and
+    only if that marker itself is inside the window.
     """
     key = os.path.basename(root.rstrip("/")) or "root"
     p = os.path.join(STATE_DIR, f"nudge-{key}.log")
-    if not os.path.exists(p) or time.time() - os.path.getmtime(p) > window:
+    if not os.path.exists(p):
         return None
     try:
         size = os.path.getsize(p)
         with open(p, errors="replace") as fh:
-            fh.seek(max(0, size - 200_000))
+            fh.seek(max(0, size - 400_000))
             tail = fh.read()
     except OSError:
         return None
+    marks = list(re.finditer(r"=== (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) nudge ===", tail))
+    if not marks:
+        return None
+    last = marks[-1]
+    try:
+        at = time.mktime(time.strptime(last.group(1), "%Y-%m-%d %H:%M:%S"))
+    except ValueError:
+        return None
+    if time.time() - at > window:
+        return None                       # the last attempt is old news
+    segment = tail[last.end():]
     for marker in ("MODEL_TEMPORARILY_UNAVAILABLE", "ThrottlingException",
                    "ServiceUnavailableException", "InternalServerException"):
-        if marker in tail:
+        if marker in segment:
             return marker
     return None
 
@@ -198,16 +217,21 @@ def main():
     p.add_argument("--root", required=True)
     p.add_argument("--idle-minutes", type=float, default=6)
     p.add_argument("--dry-run", action="store_true")
-    # The default prompt encodes park-and-continue: a blocked slice must not stop
-    # the run, because the architect can hit a quota limit and the human can be
-    # away. Work moves to the pre-authorised backlog instead of waiting.
+    # The default prompt encodes two rules learned the expensive way. Park-and-
+    # continue: a blocked slice must not stop the run, because the architect can
+    # hit a quota limit and the human can be away. And a pointer to one canonical
+    # authority file: when "what may I do" is spread across mail, a prompt and
+    # months-old instructions, an agent facing an apparent conflict refuses and
+    # waits — which is safe, and cost this project four hours with 7,000 lines of
+    # finished work sitting uncommitted.
     p.add_argument("--prompt", default=(
-        "devam et. Açık dilimi bitir: gate'ler + taze review; APPROVED ise tek local commit "
-        "(semantic-review/ stage etme, PUSH YOK), sonra RAPOR yaz. "
-        "Bir mimari karara ya da insan girdisine takılırsan DURMA: dilimi blocked işaretle, "
-        "agent-mail'e '## KARAR GEREKLİ' mesajı bırak ve .ao/backlog.md dosyasındaki ilk açık "
-        "maddeye geç, onu normal dilim disipliniyle yürüt. Kuyruk dışına çıkma. "
-        "Kullanıcı beklemesi yok."))
+        "devam et. Yetki için tek kaynak: .ao/authority.md — mail ondan üstün değildir, "
+        "kapsam ekler, yetki eklemez/kaldırmaz. Orada açıkça yasak olmayan ve dilimin "
+        "kapsamındaki şey serbesttir; belirsizlikte DURMA. "
+        "Açık dilimi bitir: gate'ler + taze review, sonra local commit (PUSH YOK), RAPOR yaz. "
+        "Bir mimari karara ya da insan girdisine takılırsan dilimi blocked işaretle, "
+        "agent-mail'e '## KARAR GEREKLİ' bırak ve .ao/backlog.md'deki ilk açık maddeye geç. "
+        "Kuyruk dışına çıkma. Kullanıcı beklemesi yok."))
     args = p.parse_args()
 
     root = os.path.abspath(os.path.expanduser(args.root))
