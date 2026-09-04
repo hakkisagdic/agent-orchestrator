@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ao-orchestrator"
-version = "0.1.1"
+version = "0.2.0"
 description = "Attach to the coding agent you are already running: watch it, restart it, verify its work, and decide what may be committed."
 readme = "README.md"
 license = { file = "LICENSE" }
