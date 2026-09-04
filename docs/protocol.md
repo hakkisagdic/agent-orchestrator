@@ -155,3 +155,35 @@ forever. The fix is a standing directive, not a tool:
 
 Keep the stopping conditions — they are where verification and human judgement enter. An
 agent that never stops is not a feature.
+
+## Channel choice: mail carries scope, steering carries rules
+
+A mailbox is the wrong place for anything the agent must know *before* it decides
+what to do. Mail is read when the agent gets to it, and an agent that opens every
+turn by re-establishing its own preconditions may never get to it.
+
+That is not hypothetical. An implementer spent four hours re-verifying whether a
+second writer existed. Two messages sat unread in its mailbox the whole time, both
+containing the measurement that would have ended the loop. Its own turn structure
+put "verify the tree" before "read mail", so the answer never arrived before the
+question was asked again.
+
+Most agents expose an always-included context file — Kiro calls it steering,
+others call it rules or a project prompt. Route by whether the agent needs the
+information to decide, or only to act:
+
+| Content | Channel |
+|---|---|
+| What I may do (authority, prohibitions) | always-included context |
+| How to establish a precondition (and how often) | always-included context |
+| Durable facts about the other actors | always-included context |
+| Which slice to work on next | mail |
+| A decision that unblocks a specific parked item | mail |
+| Findings from a review | reviews directory |
+
+The test is simple: if an agent stuck in a loop would need this to get out, mail
+cannot deliver it. A stuck agent is exactly the one not reading its mail.
+
+Keep the always-included file short and durable. It is paid for on every turn, so
+transient state does not belong there — but the *rule* that resolves a class of
+transient confusion does, and it is the cheapest fix available for a loop.
