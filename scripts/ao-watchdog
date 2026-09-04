@@ -167,10 +167,16 @@ def provider_degraded(root, window=900):
         return None
     if time.time() - at > window:
         return None                       # the last attempt is old news
-    segment = tail[last.end():]
+    # Only the *end* of the segment counts. A 5xx the turn recovered from is
+    # history: this log had one at line 130 of 242, with a hundred lines of real
+    # work after it. Blocking on that would stand the watchdog down for fifteen
+    # minutes because of an error the agent had already handled.
+    segment = tail[last.end():].strip().split("\n")[-30:]
+    end = "\n".join(segment)
     for marker in ("MODEL_TEMPORARILY_UNAVAILABLE", "ThrottlingException",
-                   "ServiceUnavailableException", "InternalServerException"):
-        if marker in segment:
+                   "ServiceUnavailableException", "InternalServerException",
+                   "experiencing a high volume of traffic"):
+        if marker in end:
             return marker
     return None
 
