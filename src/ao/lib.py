@@ -935,6 +935,62 @@ def write_report(root, cfg, kind, facts):
         return None
 
 
+def credit_usage(adapter=None):
+    """Credit spend read from local transcripts, both plausible readings.
+
+    There is no documented endpoint for this. A Kiro API key authenticates the
+    CLI (`KIRO_API_KEY`); it is not a REST credential, and the published docs
+    describe no usage, credit or quota route. The balance lives in the app's
+    dashboard.
+
+    What *is* local: every session writes `usage_summary` records carrying
+    `{unit: "credit", usage: <float>}`. What those records mean is genuinely
+    ambiguous — the values do not rise monotonically, so they are neither plainly
+    per-turn nor plainly cumulative, and the two readings differ by a factor of
+    seventy-five on a single session. Rather than pick one and quietly report a
+    number that could be wrong by that much, report both and say which is which.
+
+    Returns per-session rows plus the two totals. Either way this is a floor: it
+    sees only sessions whose transcripts are on this machine.
+    """
+    import glob
+    rows = []
+    for f in glob.glob(os.path.join(HOME, ".kiro", "sessions", "*", "*", "messages.jsonl")):
+        every, last, ts = 0.0, 0.0, ""
+        n = 0
+        try:
+            with open(f, errors="replace") as fh:
+                for line in fh:
+                    if '"promptTurnSummaries"' not in line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except Exception:
+                        continue
+                    pl = rec.get("payload", rec)
+                    if pl.get("type") != "usage_summary":
+                        continue
+                    vals = [x.get("usage") for x in (pl.get("promptTurnSummaries") or [])
+                            if isinstance(x.get("usage"), (int, float))]
+                    if not vals:
+                        continue
+                    every += sum(vals)
+                    last = sum(vals)
+                    ts = rec.get("timestamp", "")
+                    n += 1
+        except OSError:
+            continue
+        if n:
+            rows.append({"session": os.path.basename(os.path.dirname(f)),
+                         "at": ts[:10], "records": n,
+                         "sum_all": round(every, 2), "last_only": round(last, 2),
+                         "mtime": os.path.getmtime(f)})
+    rows.sort(key=lambda r: r["mtime"], reverse=True)
+    return {"sessions": rows,
+            "total_sum_all": round(sum(r["sum_all"] for r in rows), 2),
+            "total_last_only": round(sum(r["last_only"] for r in rows), 2)}
+
+
 def last_nudge_error(root):
     """The most recent failed nudge, if the watchdog recorded one."""
     key = os.path.basename(root.rstrip("/")) or "root"

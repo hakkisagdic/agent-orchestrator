@@ -578,6 +578,35 @@ def cmd_lock(cfg, args):
         A.release_gate_lock()
 
 
+def cmd_credits(cfg, args):
+    """What the local transcripts say has been spent — with the ambiguity shown.
+
+    Kiro publishes no usage endpoint and its API key is a CLI credential, not a
+    REST one, so the dashboard is the only authority. This reports what can be
+    measured locally and refuses to pick between two readings that differ by
+    seventy-five times; comparing one session against the app settles it in
+    seconds, and a guess would not.
+    """
+    u = A.credit_usage()
+    if not u["sessions"]:
+        print(f"{C['dim']}No local sessions with usage records.{C['reset']}")
+        return 0
+    print(f"{C['dim']}{'date':<12}{'session':<20}{'recs':>5}{'sum of all':>12}{'last only':>12}{C['reset']}")
+    for r in u["sessions"][:args.n]:
+        print(f"{r['at']:<12}{r['session'][:19]:<20}{r['records']:>5}"
+              f"{r['sum_all']:>12.2f}{r['last_only']:>12.2f}")
+    print()
+    print(f"{C['b']}{'TOTAL':<37}{u['total_sum_all']:>12.2f}"
+          f"{u['total_last_only']:>12.2f}{C['reset']}")
+    print()
+    print(f"{C['yellow']}Two readings, not one.{C['reset']} A session's usage records do not")
+    print("rise monotonically, so they are neither plainly per-turn nor plainly cumulative.")
+    print("Compare one session against Kiro's own dashboard and it is settled in seconds;")
+    print("until then neither column is labelled correct.")
+    print(f"{C['dim']}Either way this is a floor — only sessions stored on this machine.{C['reset']}")
+    return 0
+
+
 def cmd_board(cfg, args):
     """Where every pre-authorised item is, blocked ones first.
 
@@ -1102,6 +1131,9 @@ def main():
     wd.set_defaults(fn=cmd_watchdog)
 
     sub.add_parser("board", help="where each pre-authorised item is").set_defaults(fn=cmd_board)
+    cr = sub.add_parser("credits", help="credit spend measured from local transcripts")
+    cr.add_argument("-n", type=int, default=12)
+    cr.set_defaults(fn=cmd_credits)
     sub.add_parser("commit-ok", help="may this tree be committed? decided from evidence"
                    ).set_defaults(fn=cmd_commit_ok)
     lk = sub.add_parser("lock", help="run a heavy command under the machine-wide lock")
