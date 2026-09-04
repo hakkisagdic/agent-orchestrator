@@ -349,6 +349,17 @@ def escalate(root, cfg, adapter, age, args, st):
     # that could have waited must not burn the window the implementer needs.
     if woke and arch.get("argv") and not quota_ok(adapter):
         print("reports pending, but no quota headroom to wake the architect")
+        if time.time() - st.get("last_handoff", 0) > 3600:
+            try:
+                exe = shutil.which("ao", path=child_path())
+                if exe:
+                    subprocess.run([exe, "-C", root, "handoff", "--reason",
+                                    "mimar uyandırılamadı — kota yok"],
+                                   capture_output=True, timeout=120)
+                    st["last_handoff"] = time.time()
+                    save_state(root, st)
+            except Exception:
+                pass
         woke = False
 
     # Wake into absence, never alongside. A live architect does not need a copy of
@@ -658,9 +669,24 @@ def main():
     if rn > budget and intervened:
         print(f"over budget ({rn}/{budget}) but re-specified since the last review; proceeding")
 
-    # 4 — no quota
+    # 4 — no quota. Delivery still works: reports are written above this gate and
+    # the transport is HTTP, so a pending question reaches a phone even now. What
+    # stops is deciding — so hand the state to whoever can.
     if not quota_ok(adapter):
-        notify("Voltrai: out of quota", "provider window exhausted; not nudging", root)
+        if time.time() - st.get("last_handoff", 0) > 3600:
+            try:
+                import subprocess as _sp
+                exe = shutil.which("ao", path=child_path())
+                if exe:
+                    _sp.run([exe, "-C", root, "handoff", "--reason",
+                             "sağlayıcı kotası tükendi"],
+                            capture_output=True, timeout=120)
+                    st["last_handoff"] = time.time()
+                    save_state(root, st)
+            except Exception:
+                pass
+        notify("Voltrai: out of quota",
+               "provider window exhausted; handoff note sent", root)
         print("provider out of headroom; not nudging")
         return 0
 

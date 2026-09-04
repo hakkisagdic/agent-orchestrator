@@ -864,6 +864,93 @@ def cmd_decisions(cfg, args):
     return 0
 
 
+def cmd_handoff(cfg, args):
+    """Write down everything a successor needs, and send it.
+
+    The centre running out of quota does not break delivery — reports are written
+    before the quota gate and the transport is HTTP, so a question still reaches a
+    phone when the architect is dead. What breaks is that nobody decides, and the
+    person who could is handed "out of quota" and nothing else.
+
+    So say what is actually stopped, what it is waiting on, and what would move it.
+    Twice in one day here the state that would have unblocked a run existed only
+    inside a conversation nobody else could reach; this is that state, on disk,
+    where the next actor — a human, a fresh architect, tomorrow's session — can
+    pick it up.
+    """
+    root = cfg["root"]
+    impl = cfg.get("implementer") or {}
+    adapter = A.load_adapter(impl.get("adapter", "")) if impl else {}
+    bd = A.board(root)
+    g = A.git_state(root)
+    opens = A.decisions(root, "open")
+    revs = A.reviews(root, cfg["reviews"], limit=1)
+    acct = A.kiro_account_usage() if impl.get("adapter") == "kiro" else None
+    state, age, doing = A.busy(cfg, adapter) if impl else ("unknown", None, "")
+
+    lines = [f"# Devir — {cfg.get('project') or os.path.basename(root)}",
+             f"_{datetime.now():%Y-%m-%d %H:%M}_", ""]
+    if args.reason:
+        lines += [f"**Sebep:** {args.reason}", ""]
+
+    lines += ["## Şu an", f"- uygulayıcı: **{state}**"
+              + (f", son yazım {age // 60}dk önce" if age is not None else ""),
+              f"- HEAD `{(g['log'][0] if g['log'] else '?')[:60]}`",
+              f"- {len(g['dirty'])} dosya commit'siz, {g['ahead']} commit push'suz"]
+    if revs:
+        lines.append(f"- son review: {revs[0][1]} ({revs[0][0]})")
+    if doing:
+        lines.append(f"- diyor ki: _{doing[:200]}_")
+    if acct and not acct.get("error"):
+        lines.append(f"- kredi: {acct['used']:,.0f} / {acct['limit']:,.0f}"
+                     f" ({acct['limit'] - acct['used']:,.0f} kaldı)")
+
+    if opens:
+        lines += ["", "## Cevap bekleyen kararlar — **bunlar işi açar**"]
+        for d in opens:
+            lines.append(f"- `{d['id']}` {d['question']}")
+            for o in d["options"]:
+                lines.append(f"    - `{d['id']} {o['key']}` → {o['label']}")
+
+    if bd["blocked"]:
+        lines += ["", "## Blocked"]
+        for it in bd["blocked"]:
+            lines.append(f"- **{it['id']}** {it['title']} — "
+                         f"{it['notes'].get('needs', 'sebep kayıtlı değil')}")
+    if bd["running"]:
+        lines += ["", "## Yürüyen"]
+        for it in bd["running"]:
+            lines.append(f"- **{it['id']}** {it['title']}")
+    if bd["queued"]:
+        lines += ["", f"## Sıradaki ({len(bd['queued'])} madde)",
+                  f"- **{bd['queued'][0]['id']}** {bd['queued'][0]['title']}"]
+
+    lines += ["", "## Devralan ne yapabilir",
+              "- Bekleyen kararı cevapla: telefondan butona bas, ya da "
+              "`ao answer <id> <harf>`",
+              "- Serbest karar yaz: Telegram'a mesaj at — acil olarak kutuya düşer",
+              "- Durumu gör: `ao status`, `ao board`, `ao decisions`",
+              "", "_push, PR ve epic kapatma hiçbir devirde aktarılmaz._"]
+
+    text = "\n".join(lines)
+    path = os.path.join(root, cfg["mailbox"],
+                        f"{datetime.now():%Y%m%d-%H%M}-fable-to-anyone-DEVIR.md")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    open(path, "w").write(text + "\n")
+    print(text)
+
+    if not args.no_send:
+        try:
+            from . import telegram
+            head = text.split("## Devralan")[0]
+            n = telegram.send(head[:3800], root)
+            print(f"\n{C['dim']}sent to {n} chat(s) · saved to "
+                  f"{os.path.relpath(path, root)}{C['reset']}")
+        except Exception as e:
+            print(f"\n{C['dim']}saved; phone delivery skipped: {e}{C['reset']}")
+    return 0
+
+
 def cmd_board(cfg, args):
     """Where every pre-authorised item is, blocked ones first.
 
@@ -1423,6 +1510,10 @@ def main():
     dc = sub.add_parser("decisions", help="open and answered questions")
     dc.add_argument("-n", type=int, default=10)
     dc.set_defaults(fn=cmd_decisions)
+    hf = sub.add_parser("handoff", help="write and send everything a successor needs")
+    hf.add_argument("--reason")
+    hf.add_argument("--no-send", action="store_true")
+    hf.set_defaults(fn=cmd_handoff)
     tg = sub.add_parser("telegram", help="phone channel: alerts out, decisions in")
     tg.add_argument("action", nargs="?", default="status",
                     choices=["status", "setup", "test", "poll", "install", "uninstall"])

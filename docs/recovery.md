@@ -77,3 +77,30 @@ the whole reason this system exists is to stop treating "it was true earlier" as
 The orchestrator's *reasoning* in a dead session is gone, and that is fine — the ledger has
 the conclusions and the rejected alternatives, which is what the next session needs. Do not
 try to serialise a chain of thought; write the decision down instead.
+
+## When the centre runs out of quota
+
+Delivery does not depend on the centre. Anomaly reports are written before the
+quota gate, and the transport is HTTP and files — no model anywhere in it. So a
+pending question still reaches a phone when the architect is dead, which is the
+property that matters and it holds by construction rather than by care.
+
+What stops is *deciding*. That is the intended fallback: the human decides, from
+a phone, in one tap if the question was posed with options.
+
+But "out of quota" and nothing else is not actionable. So exhaustion now writes a
+handoff — what is running, what is blocked and on what, which decisions are open
+with their exact reply syntax, what is next in the queue, how many credits remain
+and when they reset:
+
+```bash
+ao handoff --reason "…"      # also runs automatically on exhaustion, hourly at most
+```
+
+It lands in the mailbox and on the phone. Twice in one day here the state that
+would have unblocked a run existed only inside a conversation nobody else could
+reach; this is that state on disk, where a human, a fresh architect or tomorrow's
+session can pick it up.
+
+Nothing about push, PRs or closing an epic transfers in a handoff. Those are not
+the architect's to give.
