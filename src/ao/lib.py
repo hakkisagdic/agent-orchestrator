@@ -792,15 +792,20 @@ def latest_verification(root):
     return last
 
 
-def record_authority(root, granted, reasons, tree, verification, token=None):
+def record_authority(root, granted, reasons, tree, verification, token=None,
+                     review=None, reviewer=None):
     """Every authority decision, granted or refused, with what it rested on."""
     d = os.path.join(root, ".ao", "ledger")
     try:
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "authority.jsonl"), "a") as fh:
+            # Keep the reviewer's identity here, not only in the review file.
+            # That file is untracked and was wiped once already; the record of
+            # what authority rested on has to outlive the evidence it cites.
             fh.write(json.dumps({"at": int(time.time()), "granted": bool(granted),
                                  "token": token, "reasons": reasons, "tree": tree,
-                                 "verification": verification},
+                                 "verification": verification,
+                                 "review": review, "reviewer": reviewer},
                                 ensure_ascii=False) + "\n")
     except OSError:
         pass

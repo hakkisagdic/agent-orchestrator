@@ -480,6 +480,27 @@ def cmd_commit_ok(cfg, args):
         reasons.append("no review found")
     elif "APPROVED" not in (revs[0][1] or "").upper():
         reasons.append(f"newest review is {revs[0][1]} ({revs[0][0]})")
+    else:
+        # `reviewer != implementer` was stated in the safety model and enforced
+        # nowhere: the implementer wrote its own review and authority was granted
+        # on it. A model reviewing its own output shares its own blind spots, so
+        # the verdict measured nothing it did not already believe.
+        try:
+            body = open(os.path.join(root, cfg["reviews"], revs[0][0]),
+                        errors="replace").read(4000)
+        except OSError:
+            body = ""
+        m = A.re.search(r"reviewer:\s*`([^`]+)`", body)
+        who = m.group(1) if m else None
+        impl_id = (cfg.get("implementer") or {}).get("session") or ""
+        if not who:
+            reasons.append(f"{revs[0][0]} names no reviewer — cannot tell who wrote it")
+        elif impl_id and (who in impl_id or impl_id in who):
+            reasons.append(f"the review was written by the implementer ({who})")
+        # The review's own tree digest must match, or it described a different tree.
+        tm = A.re.search(r"tree:\s*`([^`]+)`", body)
+        if tm and tm.group(1) != now:
+            reasons.append(f"{revs[0][0]} reviewed a different tree — re-run `ao review`")
     held = A.hold_state(root)
     if held:
         reasons.append(f"project is held by {held.get('by')}: {held.get('reason','')}")
@@ -499,11 +520,18 @@ def cmd_commit_ok(cfg, args):
         return 1
 
     token = f"C-{int(time.time())}"
+    try:
+        rbody = open(os.path.join(root, cfg["reviews"], revs[0][0]),
+                     errors="replace").read(4000)
+        rwho = (A.re.search(r"reviewer:\s*`([^`]+)`", rbody) or [None, None])[1]
+    except Exception:
+        rwho = None
     print(f"{C['green']}{C['b']}GRANTED{C['reset']}  {token}")
     print(f"  {C['dim']}verified{C['reset']} {ver['id']} · {C['dim']}review{C['reset']} {revs[0][0]}")
     print(f"  {C['dim']}tree{C['reset']}     {now[:23]}…")
     print(f"\n  {C['dim']}push is not covered by this grant and never will be.{C['reset']}")
-    A.record_authority(root, True, [], now, ver["id"], token)
+    A.record_authority(root, True, [], now, ver["id"], token,
+                       review=revs[0][0], reviewer=rwho)
     return 0
 
 
@@ -949,6 +977,137 @@ def cmd_handoff(cfg, args):
         except Exception as e:
             print(f"\n{C['dim']}saved; phone delivery skipped: {e}{C['reset']}")
     return 0
+
+
+REVIEW_PROMPT = """Sen bu deponun BAĞIMSIZ gözden geçireni sin. Kodu sen yazmadın ve
+yazanı savunmuyorsun.
+
+İncelenecek: aşağıdaki diff. Kabul sınırı: {boundary}
+
+Şunu ara, sırayla:
+1. Kabul sınırının karşılanmadığı yerler — iddia edilen ile yapılan arasındaki fark
+2. Doğruluk hataları: yanlış sonuç, kaçırılan durum, sessiz başarısızlık
+3. Güvenlik/yetki sınırı ihlalleri: fixture kanıtının production gibi sunulması,
+   yetki yüzeyinin genişlemesi, fail-open davranış
+4. Testin gerçekten ne kanıtladığı — geçen test, doğru şeyi test etmiyor olabilir
+
+Bulmadığın şeyi yazma. Bulgu yoksa bunu açıkça söyle; boş bir review, uydurulmuş
+bir bulgudan iyidir.
+
+Çıktını TAM OLARAK şu biçimde ver, başka hiçbir şey yazma:
+
+VERDICT: APPROVED  (ya da NEEDS_CHANGES)
+BLOCKER: <n>
+HIGH: <n>
+MEDIUM: <n>
+LOW: <n>
+
+## Bulgular
+- [SEVERITY] dosya:satır — tek cümlelik iddia
+  Nasıl bozulur: <somut girdi/durum → yanlış çıktı>
+
+BLOCKER veya HIGH varsa VERDICT mutlaka NEEDS_CHANGES olmalı."""
+
+
+def cmd_review(cfg, args):
+    """Review the working tree with an actor that did not write it.
+
+    `reviewer != implementer` is stated in the safety model and was, until this
+    command, enforced nowhere: the implementer wrote its own review and
+    `commit-ok` granted authority on it. A model reviewing its own output shares
+    its own blind spots, so the verdict measured nothing that the implementer had
+    not already believed.
+
+    The reviewer is configured separately and should be a different family where
+    one is available. Its identity is recorded in the review, and commit-ok
+    refuses a review whose author is the implementer.
+    """
+    import subprocess
+    root = cfg["root"]
+    impl = cfg.get("implementer") or {}
+    rv = cfg.get("reviewer") or {}
+    if not rv.get("argv"):
+        print(f"{C['yellow']}No reviewer configured.{C['reset']} Add to .ao/config.json:")
+        print(json.dumps({"reviewer": {
+            "id": "claude-reviewer", "family": "anthropic",
+            "argv": ["claude", "-p", "{prompt}", "--model", "claude-opus-5",
+                     "--allowedTools", "Read,Grep,Glob"]}}, indent=2))
+        print(f"\n{C['dim']}It must not be the implementer. A model reviewing its own")
+        print(f"output shares its own blind spots.{C['reset']}")
+        return 1
+    if rv.get("id") and rv["id"] == impl.get("session"):
+        print(f"{C['red']}The reviewer is the implementer.{C['reset']} That is the one "
+              f"configuration this refuses.")
+        return 2
+
+    diff = A.sh("git diff HEAD", cwd=root, timeout=60) or ""
+    untracked = [l[3:] for l in (A.sh("git status --porcelain", cwd=root) or "").split("\n")
+                 if l.startswith("?? ") and not l[3:].startswith((".ao/", "agent-mail/"))]
+    for f in untracked[:20]:
+        p = os.path.join(root, f)
+        if os.path.isfile(p) and os.path.getsize(p) < 200_000:
+            try:
+                diff += f"\n--- NEW FILE {f} ---\n" + open(p, errors="replace").read()
+            except OSError:
+                pass
+    if not diff.strip():
+        print(f"{C['dim']}Nothing to review — the tree matches HEAD.{C['reset']}")
+        return 0
+
+    boundary = args.boundary or ""
+    if not boundary:
+        for it in A.board(root)["running"]:
+            boundary = it["notes"].get("acceptance") or it["notes"].get("scope") or it["title"]
+            break
+    boundary = boundary or "not declared — say so as a finding"
+
+    prompt = REVIEW_PROMPT.format(boundary=boundary) + "\n\n--- DIFF ---\n" + diff[:400_000]
+    argv = [x.replace("{prompt}", prompt) for x in rv["argv"]]
+    exe = shutil.which(argv[0])
+    if not exe:
+        print(f"{C['red']}{argv[0]} not on PATH{C['reset']}")
+        return 1
+    argv[0] = exe
+    print(f"{C['dim']}reviewing {len(diff):,} chars against: {boundary[:70]}{C['reset']}")
+    r = subprocess.run(argv, cwd=root, capture_output=True, text=True,
+                       timeout=args.timeout)
+    out = (r.stdout or r.stderr or "").strip()
+    if not out:
+        print(f"{C['red']}reviewer produced nothing{C['reset']} (exit {r.returncode})")
+        return 1
+
+    verdict = "NEEDS_CHANGES"
+    m = A.re.search(r"VERDICT:\s*(APPROVED|NEEDS_CHANGES)", out)
+    if m:
+        verdict = m.group(1)
+    sev = {k: int(A.re.search(rf"{k}:\s*(\d+)", out).group(1))
+           if A.re.search(rf"{k}:\s*(\d+)", out) else 0
+           for k in ("BLOCKER", "HIGH", "MEDIUM", "LOW")}
+    # A verdict that contradicts its own findings is not a verdict.
+    if verdict == "APPROVED" and (sev["BLOCKER"] or sev["HIGH"]):
+        verdict = "NEEDS_CHANGES"
+
+    d = os.path.join(root, cfg["reviews"])
+    os.makedirs(d, exist_ok=True)
+    head = A.sh("git rev-parse --short HEAD", cwd=root)
+    name = f"{datetime.now():%Y-%m-%d-%H%M%S}-{head}.md"
+    open(os.path.join(d, name), "w").write(
+        f"# Review {name}\n\n"
+        f"- reviewer: `{rv.get('id') or argv[0]}`  family: `{rv.get('family','?')}`\n"
+        f"- implementer: `{impl.get('adapter')}/{(impl.get('session') or '')[:20]}`\n"
+        f"- tree: `{A.tree_digest(root)}`\n- boundary: {boundary}\n\n{out}\n")
+    A.record_notice(root, "review", f"{verdict} {sev}", sent=False, key="review")
+
+    col = C["green"] if verdict == "APPROVED" else C["yellow"]
+    print(f"\n{col}{C['b']}{verdict}{C['reset']}  "
+          f"BLOCKER {sev['BLOCKER']} · HIGH {sev['HIGH']} · "
+          f"MEDIUM {sev['MEDIUM']} · LOW {sev['LOW']}")
+    print(f"{C['dim']}{cfg['reviews']}/{name}{C['reset']}")
+    if verdict != "APPROVED":
+        for line in out.split("\n"):
+            if line.strip().startswith("- ["):
+                print("  " + line.strip()[:150])
+    return 0 if verdict == "APPROVED" else 1
 
 
 def cmd_board(cfg, args):
@@ -1514,6 +1673,10 @@ def main():
     hf.add_argument("--reason")
     hf.add_argument("--no-send", action="store_true")
     hf.set_defaults(fn=cmd_handoff)
+    rw = sub.add_parser("review", help="review the tree with an actor that did not write it")
+    rw.add_argument("--boundary", help="acceptance boundary; defaults to the running slice")
+    rw.add_argument("--timeout", type=int, default=900)
+    rw.set_defaults(fn=cmd_review)
     tg = sub.add_parser("telegram", help="phone channel: alerts out, decisions in")
     tg.add_argument("action", nargs="?", default="status",
                     choices=["status", "setup", "test", "poll", "install", "uninstall"])

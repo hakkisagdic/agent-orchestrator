@@ -145,3 +145,29 @@ than queued into a thrash.
   boundary. Decide that before you send the prompt.
 - **Malicious adapters.** An adapter file is executable configuration; it names commands
   that will be run. Review one before installing it, the same as any script.
+
+## 4b. The reviewer was the implementer, and nothing checked
+
+Section 4 says `reviewer ≠ implementer` is "enforced rather than advised". It was
+not enforced anywhere. The implementer wrote its own review, `ao commit-ok`
+required only that a review say APPROVED, and authority was granted on a verdict
+the implementer had produced about itself. A model reviewing its own output shares
+its own blind spots, so that verdict measured nothing it did not already believe.
+
+`ao review` runs a separate actor against the diff and the slice's acceptance
+boundary. It records who reviewed, against which tree digest, and `commit-ok` now
+refuses when:
+
+- the review names no reviewer — nobody can tell who wrote it;
+- the reviewer is the implementer;
+- the review's tree digest no longer matches, so it described different code.
+
+The first independent run returned NEEDS_CHANGES with a BLOCKER on work whose
+self-review had been APPROVED with zero findings: three of the acceptance
+boundary's four items were not covered. That is the argument for the separation,
+made on its first use.
+
+The reviewer's identity also goes into `.ao/ledger/authority.jsonl`, because the
+review file is evidence and evidence gets cleaned up — `semantic-review/` was
+untracked and a routine cleanup slice removed it. The record of what authority
+rested on has to outlive the document it cites.
