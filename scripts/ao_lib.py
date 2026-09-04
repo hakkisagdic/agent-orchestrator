@@ -725,6 +725,49 @@ def notice_recently_sent(root, key, window):
     return False
 
 
+def tree_digest(root):
+    """A stable fingerprint of the working tree, tracked and untracked alike.
+
+    `git status --porcelain` names what differs; hashing the diff plus the status
+    line captures *what* it differs by. Together they answer the only question
+    that matters when reusing a measurement: is this the same tree the numbers
+    were taken from?
+    """
+    h = hashlib.sha256()
+    h.update((sh("git rev-parse HEAD", cwd=root) or "").encode())
+    h.update((sh("git status --porcelain", cwd=root) or "").encode())
+    h.update((sh("git diff HEAD", cwd=root) or "").encode())
+    return "sha256:" + h.hexdigest()
+
+
+def latest_verification(root):
+    """The newest `ao verify` record, or None."""
+    p = os.path.join(root, ".ao", "ledger", "verifications.jsonl")
+    if not os.path.exists(p):
+        return None
+    last = None
+    for line in open(p, errors="replace"):
+        try:
+            last = json.loads(line)
+        except Exception:
+            continue
+    return last
+
+
+def record_authority(root, granted, reasons, tree, verification, token=None):
+    """Every authority decision, granted or refused, with what it rested on."""
+    d = os.path.join(root, ".ao", "ledger")
+    try:
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "authority.jsonl"), "a") as fh:
+            fh.write(json.dumps({"at": int(time.time()), "granted": bool(granted),
+                                 "token": token, "reasons": reasons, "tree": tree,
+                                 "verification": verification},
+                                ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
 def last_nudge_error(root):
     """The most recent failed nudge, if the watchdog recorded one."""
     key = os.path.basename(root.rstrip("/")) or "root"

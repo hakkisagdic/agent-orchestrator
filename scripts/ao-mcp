@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""ao-mcp — expose this project's orchestration state over MCP, read-mostly.
+
+Any MCP-capable client (Claude Code, Cursor, Zed, an IDE extension) can then ask
+what the implementer is doing and what has been measured, without shelling out
+and without learning this tool's output format.
+
+One rule shapes the surface: **authority never goes on it.** `commit-ok` decides
+whether work may land, and exposing it here would let the implementer grant
+itself the authority the separation exists to withhold. Reading is free; the one
+expensive action, `verify`, is opt-in because it runs the project's real gates.
+
+JSON-RPC 2.0 over stdio, standard library only.
+"""
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import ao_lib as A  # noqa: E402
+
+PROTOCOL = "2025-06-18"
+
+TOOLS = [
+    {"name": "ao_status",
+     "description": "Implementer state, context/cost telemetry, git state and open reviews.",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "ao_board",
+     "description": "Where each pre-authorised work item is: running, blocked (with what it "
+                    "waits on), queued, inbox, verified, done. Blocked items are the ones a "
+                    "human must act on.",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "ao_notices",
+     "description": "Alerts this project raised, including ones the rate limit suppressed.",
+     "inputSchema": {"type": "object",
+                     "properties": {"limit": {"type": "integer", "default": 10},
+                                    "include_suppressed": {"type": "boolean", "default": False}}}},
+    {"name": "ao_fleet",
+     "description": "One row per project with a local agent session, ordered by what needs a "
+                    "human first.",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "ao_verify",
+     "description": "Run the project's declared gates and record the measured result. "
+                    "Expensive; disabled unless the server was started with --allow-verify.",
+     "inputSchema": {"type": "object",
+                     "properties": {"profile": {"type": "string"}}}},
+]
+
+
+def status_payload(cfg):
+    root = cfg["root"]
+    impl = cfg.get("implementer") or {}
+    adapter = A.load_adapter(impl.get("adapter", "")) if impl else {}
+    state, age, desc = A.busy(cfg, adapter) if impl else ("unknown", None, "")
+    msgs, _ = A.session_paths(cfg)
+    recs = A.read_tail(msgs, 4_000_000) if msgs else []
+    tel = A.telemetry(recs, adapter) if recs else {}
+    g = A.git_state(root)
+    revs = A.reviews(root, cfg["reviews"], limit=3)
+    return {"project": cfg.get("project") or os.path.basename(root), "root": root,
+            "adapter": impl.get("adapter"), "state": state, "seconds_since_write": age,
+            "doing": desc, "spinning_minutes": A.spinning(root),
+            "context_percent": tel.get("ctx"), "turns": tel.get("turns"),
+            "cost_total": tel.get("total"), "cost_unit": tel.get("unit"),
+            "head": g["log"][0] if g["log"] else None,
+            "dirty_files": len(g["dirty"]), "unpushed": g["ahead"],
+            "mailbox": A.mailbox(root, cfg["mailbox"]),
+            "reviews": [{"file": f, "verdict": v} for f, v in revs],
+            "held": A.hold_state(root),
+            "agent_processes": len(A.agent_pids(root, adapter)) if impl else 0}
+
+
+def board_payload(root):
+    b = A.board(root)
+    return {"states": {k: v for k, v in b.items() if v},
+            "a2a": {k: A.A2A_STATE.get(k) for k in b if b[k]},
+            "counts": {k: len(v) for k, v in b.items()}}
+
+
+def call(name, args, cfg, allow_verify):
+    root = cfg["root"]
+    if name == "ao_status":
+        return status_payload(cfg)
+    if name == "ao_board":
+        return board_payload(root)
+    if name == "ao_notices":
+        return {"notices": A.notices(root, args.get("limit", 10),
+                                     args.get("include_suppressed", False))}
+    if name == "ao_fleet":
+        return {"projects": [{"name": os.path.basename(w["path"]), "root": w["path"]}
+                             for w in A.all_workspaces()]}
+    if name == "ao_verify":
+        if not allow_verify:
+            return {"error": "verify is disabled; start the server with --allow-verify"}
+        import subprocess
+        r = subprocess.run([os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "bin", "ao"), "-C", root, "verify"]
+            + (["-p", args["profile"]] if args.get("profile") else []),
+            capture_output=True, text=True, timeout=3600)
+        return {"exit": r.returncode, "output": r.stdout[-4000:],
+                "record": A.latest_verification(root)}
+    return {"error": f"unknown tool {name}"}
+
+
+def main():
+    root = None
+    allow_verify = "--allow-verify" in sys.argv
+    if "-C" in sys.argv:
+        root = sys.argv[sys.argv.index("-C") + 1]
+    cfg = A.load_config(A.find_root(root))
+
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            req = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        rid, method = req.get("id"), req.get("method")
+        try:
+            if method == "initialize":
+                result = {"protocolVersion": PROTOCOL,
+                          "capabilities": {"tools": {}},
+                          "serverInfo": {"name": "agent-orchestrator", "version": "0.1.0"}}
+            elif method in ("notifications/initialized", "initialized"):
+                continue                                  # notification: no reply
+            elif method == "tools/list":
+                result = {"tools": TOOLS}
+            elif method == "tools/call":
+                p = req.get("params") or {}
+                payload = call(p.get("name"), p.get("arguments") or {}, cfg, allow_verify)
+                result = {"content": [{"type": "text",
+                                       "text": json.dumps(payload, ensure_ascii=False,
+                                                          indent=2, default=str)}]}
+            elif method == "ping":
+                result = {}
+            else:
+                raise ValueError(f"method not found: {method}")
+        except Exception as e:                            # never take the transport down
+            sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": rid,
+                                         "error": {"code": -32603, "message": str(e)}}) + "\n")
+            sys.stdout.flush()
+            continue
+        if rid is not None:
+            sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": rid, "result": result},
+                                        ensure_ascii=False, default=str) + "\n")
+            sys.stdout.flush()
+
+
+if __name__ == "__main__":
+    main()

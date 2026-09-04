@@ -4,7 +4,7 @@
 Implemented today: status, watch, tail, mail, verify, board, adapters, doctor.
 Also: watchdog install/uninstall/status — a launchd job that restarts a stalled
 implementer, with guards so it spends nothing when spending would not help.
-Not yet: commit-ok, decide, since, mcp serve — see the
+Not yet: decide, since, init — see the
 roadmap in README.md. Commands that do not exist say so rather than pretending.
 
 Standard library only. Observation is strictly read-only.
@@ -414,6 +414,10 @@ def cmd_verify(cfg, args):
     rec = {"id": f"V-{int(time.time())}", "at": datetime.now().isoformat(timespec="seconds"),
            "profile": profile, "by": "ao verify", "passed": ok, "gates": results,
            "plan_drift": drift,
+           # Which tree these numbers describe. Without it the record cannot
+           # authorise anything: a pass measured before the last three edits says
+           # nothing about what is about to be committed.
+           "tree": A.tree_digest(root),
            "review": revs[0][0] if revs else None,
            "review_verdict": revs[0][1] if revs else None,
            "head": A.sh("git rev-parse --short HEAD", cwd=root),
@@ -428,6 +432,91 @@ def cmd_verify(cfg, args):
         col = C["green"] if "APPROVED" in (revs[0][1] or "").upper() else C["yellow"]
         print(f"{C['dim']}newest review:{C['reset']} {col}{revs[0][1]}{C['reset']} ({revs[0][0]})")
     return 0 if ok else 1
+
+
+def cmd_commit_ok(cfg, args):
+    """May the current working tree be committed? Answered from evidence.
+
+    This is the piece that lets work land without the architect awake. It grants
+    nothing on request and nothing on a claim — it re-reads what was independently
+    measured and checks that the measurement still describes the tree in front of
+    it. Every refusal names the missing condition, so an agent can act on it
+    instead of asking again.
+
+    It does not commit. Deciding and acting stay in different hands; that
+    separation is the whole reason the answer is worth anything.
+    """
+    root = cfg["root"]
+    now = A.tree_digest(root)
+    ver = A.latest_verification(root)
+    revs = A.reviews(root, cfg["reviews"], limit=1)
+    drift = A.plan_drift(root)
+
+    reasons = []
+    if not ver:
+        reasons.append("no verification record — run `ao verify`")
+    else:
+        if not ver.get("passed"):
+            failed = [g["name"] for g in ver.get("gates", []) if not g.get("passed")]
+            reasons.append(f"last verification failed: {', '.join(failed) or ver['id']}")
+        if ver.get("tree") and ver["tree"] != now:
+            reasons.append(f"tree changed since {ver['id']} — re-run `ao verify`")
+        elif not ver.get("tree"):
+            reasons.append(f"{ver['id']} predates tree digests — re-run `ao verify`")
+    if drift:
+        reasons.append(f"plan edited after admission: {', '.join(drift)}")
+    if not revs:
+        reasons.append("no review found")
+    elif "APPROVED" not in (revs[0][1] or "").upper():
+        reasons.append(f"newest review is {revs[0][1]} ({revs[0][0]})")
+    held = A.hold_state(root)
+    if held:
+        reasons.append(f"project is held by {held.get('by')}: {held.get('reason','')}")
+    if not A.sh("git status --porcelain", cwd=root):
+        reasons.append("nothing to commit")
+
+    if reasons:
+        print(f"{C['red']}{C['b']}REFUSED{C['reset']}")
+        for r in reasons:
+            print(f"  {C['red']}·{C['reset']} {r}")
+        A.record_authority(root, False, reasons, now, (ver or {}).get("id"))
+        return 1
+
+    token = f"C-{int(time.time())}"
+    print(f"{C['green']}{C['b']}GRANTED{C['reset']}  {token}")
+    print(f"  {C['dim']}verified{C['reset']} {ver['id']} · {C['dim']}review{C['reset']} {revs[0][0]}")
+    print(f"  {C['dim']}tree{C['reset']}     {now[:23]}…")
+    print(f"\n  {C['dim']}push is not covered by this grant and never will be.{C['reset']}")
+    A.record_authority(root, True, [], now, ver["id"], token)
+    return 0
+
+
+def _exec_server(script, cfg, extra):
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    os.execv(sys.executable, [sys.executable, os.path.join(here, "scripts", script),
+                              "-C", cfg["root"]] + extra)
+
+
+def cmd_mcp(cfg, args):
+    """Serve this project's state to any MCP client, over stdio."""
+    if args.action != "serve":
+        print(f"{C['b']}Add to an MCP client's config:{C['reset']}")
+        print(json.dumps({"mcpServers": {"agent-orchestrator": {
+            "command": os.path.join(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))), "scripts", "ao-mcp"),
+            "args": ["-C", cfg["root"]]}}}, indent=2))
+        return 0
+    _exec_server("ao-mcp", cfg, ["--allow-verify"] if args.allow_verify else [])
+
+
+def cmd_a2a(cfg, args):
+    """Serve this project's board as A2A tasks, on loopback."""
+    if args.action != "serve":
+        print(f"{C['b']}ao a2a serve --port {args.port}{C['reset']}")
+        print(f"  card   http://127.0.0.1:{args.port}/.well-known/agent-card.json")
+        print(f"  tasks  http://127.0.0.1:{args.port}/tasks")
+        return 0
+    _exec_server("ao-a2a", cfg, ["--port", str(args.port)])
 
 
 def cmd_board(cfg, args):
@@ -949,6 +1038,16 @@ def main():
     wd.set_defaults(fn=cmd_watchdog)
 
     sub.add_parser("board", help="where each pre-authorised item is").set_defaults(fn=cmd_board)
+    sub.add_parser("commit-ok", help="may this tree be committed? decided from evidence"
+                   ).set_defaults(fn=cmd_commit_ok)
+    mc = sub.add_parser("mcp", help="serve project state to MCP clients (stdio)")
+    mc.add_argument("action", choices=["serve", "config"], nargs="?", default="config")
+    mc.add_argument("--allow-verify", action="store_true", help="expose the gate runner too")
+    mc.set_defaults(fn=cmd_mcp)
+    a2 = sub.add_parser("a2a", help="serve the board as A2A tasks (loopback HTTP)")
+    a2.add_argument("action", choices=["serve", "info"], nargs="?", default="info")
+    a2.add_argument("--port", type=int, default=8731)
+    a2.set_defaults(fn=cmd_a2a)
     n = sub.add_parser("notices", help="alerts this project raised")
     n.add_argument("-n", type=int, default=12)
     n.add_argument("--all", action="store_true", help="include rate-limited ones")
