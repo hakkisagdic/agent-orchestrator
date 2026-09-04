@@ -352,6 +352,16 @@ def cmd_verify(cfg, args):
     import subprocess
     root = cfg["root"]
     gates_file = os.path.join(root, ".ao", "gates.json")
+    holder = A.gate_lock_holder()
+    if holder and holder.get("root") != root:
+        print(f"{C['yellow']}{os.path.basename(holder['root'])} is running its gates"
+              f"{C['reset']} {C['dim']}({holder['minutes']}m){C['reset']} — waiting up to "
+              f"{args.wait}s so two suites do not fight for one machine")
+        if not A.acquire_gate_lock(root, args.wait):
+            print(f"{C['red']}still busy; not starting a second suite{C['reset']}")
+            return 2
+    else:
+        A.acquire_gate_lock(root, 0)
     if not os.path.exists(gates_file):
         print(f"{C['yellow']}No .ao/gates.json — nothing declared to verify.{C['reset']}")
         print(f"{C['dim']}See docs/gates.md for the shape.{C['reset']}")
@@ -427,6 +437,7 @@ def cmd_verify(cfg, args):
     with open(os.path.join(ledger, "verifications.jsonl"), "a") as fh:
         fh.write(_json.dumps(rec, ensure_ascii=False) + "\n")
 
+    A.release_gate_lock()
     print(f"\n{C['b']}{'PASS' if ok else 'FAIL'}{C['reset']}  recorded as {rec['id']}")
     if revs:
         col = C["green"] if "APPROVED" in (revs[0][1] or "").upper() else C["yellow"]
@@ -1029,6 +1040,8 @@ def main():
 
     v = sub.add_parser("verify", help="run the declared gates and record the result")
     v.add_argument("-p", "--profile")
+    v.add_argument("--wait", type=int, default=900,
+                   help="seconds to wait if another project holds the machine gate lock")
     v.set_defaults(fn=cmd_verify)
 
     wd = sub.add_parser("watchdog", help="launchd job that restarts a stalled agent")

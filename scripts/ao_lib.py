@@ -768,6 +768,69 @@ def record_authority(root, granted, reasons, tree, verification, token=None):
         pass
 
 
+GATE_LOCK = os.path.join(HOME, ".ao", "gate.lock")
+
+
+def gate_lock_holder():
+    """Which project is running its gates right now, if any."""
+    if not os.path.exists(GATE_LOCK):
+        return None
+    try:
+        st = json.load(open(GATE_LOCK))
+    except Exception:
+        return None
+    try:
+        os.kill(st.get("pid", -1), 0)             # stale lock from a killed run
+    except OSError:
+        try:
+            os.remove(GATE_LOCK)
+        except OSError:
+            pass
+        return None
+    st["minutes"] = int((time.time() - st.get("at", time.time())) / 60)
+    return st
+
+
+def acquire_gate_lock(root, timeout=0):
+    """Serialise the expensive work across every project on this machine.
+
+    Roles split who decides; this splits who spends the machine. Each project's
+    watchdog is independent, so without a machine-wide lock N projects run N test
+    suites at once — and on a shared laptop that is not N times the throughput, it
+    is one suite that no longer finishes. This project watched an agent burn five
+    review rounds walking a concurrency setting down from 8 to 1 while fighting
+    exactly that.
+
+    Advisory and best-effort: a lock nobody can steal becomes a lock that wedges
+    the machine, so a holder whose process is gone is cleared on sight.
+    """
+    os.makedirs(os.path.dirname(GATE_LOCK), exist_ok=True)
+    deadline = time.time() + timeout
+    while True:
+        holder = gate_lock_holder()
+        if not holder:
+            try:
+                fd = os.open(GATE_LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                with os.fdopen(fd, "w") as fh:
+                    json.dump({"root": root, "pid": os.getpid(),
+                               "at": int(time.time())}, fh)
+                return True
+            except FileExistsError:
+                pass
+        if time.time() >= deadline:
+            return False
+        time.sleep(2)
+
+
+def release_gate_lock():
+    holder = gate_lock_holder()
+    if holder and holder.get("pid") == os.getpid():
+        try:
+            os.remove(GATE_LOCK)
+        except OSError:
+            pass
+
+
 def last_nudge_error(root):
     """The most recent failed nudge, if the watchdog recorded one."""
     key = os.path.basename(root.rstrip("/")) or "root"
