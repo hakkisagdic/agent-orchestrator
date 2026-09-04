@@ -336,6 +336,54 @@ def tool_availability(ttl=600):
     return named
 
 
+BOARD_STATES = ("running", "blocked", "queued", "verified", "done")
+
+
+def board(root):
+    """.ao/board.md — where each pre-authorised item currently is.
+
+    A flat backlog answers "what is next" but not "what stopped, and on what".
+    Once an agent is allowed to park a blocked slice and pick up the next item,
+    that second question is the one a human actually needs on returning: the
+    parked item is invisible precisely because work continued without it.
+
+    The file is the single source of truth and the agent edits it directly, the
+    way it edits mail and reviews. Parsing here stays deliberately forgiving —
+    a board a human cannot hand-edit during an incident is a board that goes
+    stale during exactly the incident it was built for.
+
+    Returns {state: [{"id", "title", "notes": {k: v}}]}.
+    """
+    p = os.path.join(root, ".ao", "board.md")
+    out = {st: [] for st in BOARD_STATES}
+    if not os.path.exists(p):
+        return out
+    state = None
+    for line in open(p, errors="replace"):
+        line = line.rstrip()
+        m = re.match(r"^##\s+([a-z]+)\s*$", line.strip())
+        if m:
+            state = m.group(1) if m.group(1) in out else None
+            continue
+        if not state or not line.lstrip().startswith("- "):
+            continue
+        item = line.lstrip()[2:].strip()
+        m = re.match(r"^\[([^\]]+)\]\s*(.*)$", item)
+        if not m:
+            continue
+        rest = [x.strip() for x in m.group(2).split("·")]
+        notes = {}
+        for chunk in rest[1:]:
+            k, _, v = chunk.partition(":")
+            if v:
+                notes[k.strip()] = v.strip()
+            elif chunk:
+                notes[chunk] = ""
+        out[state].append({"id": m.group(1), "title": rest[0] if rest else "",
+                           "notes": notes})
+    return out
+
+
 def last_nudge_error(root):
     """The most recent failed nudge, if the watchdog recorded one."""
     key = os.path.basename(root.rstrip("/")) or "root"

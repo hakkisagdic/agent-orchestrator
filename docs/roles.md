@@ -98,3 +98,35 @@ role_models:
   reviewer:    { family: anthropic, not_family_of: implementer }
   bug-hunter:  { family: google }
 ```
+
+## Heavy operations belong to one actor
+
+Roles split *who decides*. They must also split *who spends the machine*, and that
+second split is easy to miss until it breaks something.
+
+A run on one laptop hit this directly. The implementer's slices were not failing on
+logic; they were failing on contention. It had a 330-test suite, a shared 16 GB
+machine, and other agents on it — so it spent five review rounds walking a
+concurrency setting from 8 down to 1, killing orphaned runners from earlier attempts,
+and re-running the suite to get one trustworthy number. None of those rounds produced
+a line of product code, and every one of them counted against the slice's round
+budget as if it had.
+
+Adding parallel lanes there makes it strictly worse: each lane runs the same suite,
+and they contend with each other instead of with the background.
+
+So separate the work by weight, not only by role:
+
+| Work | Where |
+|---|---|
+| Writing code, reading code, designing, reviewing | any lane, in parallel |
+| Full test suites, builds, containers, benchmarks | **one actor, serialised** |
+
+The lanes stay light and parallel; a single actor merges and runs the expensive
+gates once, on a machine it is not fighting for. `ao verify` is that actor's
+instrument — it already serialises the `full` profile for this reason.
+
+The rule generalises past tests. Anything that saturates a shared resource — a
+database restore, a Docker image build, an integration environment — is a
+centralised operation, and treating it as parallelisable work costs rounds without
+producing any.

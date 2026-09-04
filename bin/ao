@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """ao — agent-orchestrator, observation layer.
 
-Implemented today: status, watch, tail, mail, adapters, doctor.
+Implemented today: status, watch, tail, mail, verify, board, adapters, doctor.
 Also: watchdog install/uninstall/status — a launchd job that restarts a stalled
 implementer, with guards so it spends nothing when spending would not help.
-Not yet: commit-ok, slice, decide, since, mcp serve — see the
+Not yet: commit-ok, decide, since, mcp serve — see the
 roadmap in README.md. Commands that do not exist say so rather than pretending.
 
 Standard library only. Observation is strictly read-only.
@@ -149,6 +149,18 @@ def render(cfg, msg_count=8, width=None, max_lines=None):
     mail = A.mailbox(root, cfg["mailbox"])
     a(f"\n   {C['b']}Mailbox:{C['reset']} " +
       (", ".join(mail) if mail else f"{C['dim']}empty{C['reset']}"))
+
+    # Board — one line, because a parked item is invisible by construction: work
+    # moved on past it, so no other signal in this panel looks wrong.
+    bd = A.board(root)
+    if any(bd.values()):
+        counts = " · ".join(f"{len(bd[k])} {k}" for k in
+                            ("running", "blocked", "queued", "verified", "done") if bd[k])
+        a(f"   {C['b']}Board:{C['reset']}   {counts}")
+        for it in bd["blocked"]:
+            why = it["notes"].get("needs") or it["notes"].get("waiting") or "reason not recorded"
+            for i, ln in enumerate(textwrap.wrap(f"{it['id']}  {it['title']} — {why}", w - 14)[:2]):
+                a(f"     {C['red']}⊘{C['reset']} {ln}" if i == 0 else f"       {C['dim']}{ln}{C['reset']}")
 
     # The message log is elastic and goes last, so a short window drops history
     # rather than the state you actually steer by.
@@ -325,6 +337,37 @@ def cmd_verify(cfg, args):
     return 0 if ok else 1
 
 
+def cmd_board(cfg, args):
+    """Where every pre-authorised item is, blocked ones first.
+
+    Order is deliberate: `running` and `blocked` are the two states a human can
+    act on, and `blocked` is the one that goes unnoticed — work carried on past
+    it, so nothing else in the panel looks wrong.
+    """
+    root = cfg["root"]
+    b = A.board(root)
+    path = os.path.join(root, ".ao", "board.md")
+    if not os.path.exists(path):
+        print(f"{C['yellow']}No board here.{C['reset']} Create {C['b']}.ao/board.md{C['reset']} with "
+              f"`## running` / `## blocked` / `## queued` / `## verified` / `## done` sections\n"
+              f"and one `- [ID] title · note: value` line per item.")
+        return 0
+    colours = {"running": C["green"], "blocked": C["red"], "queued": C["dim"],
+               "verified": C["cyan"], "done": C["dim"]}
+    for st in ("running", "blocked", "queued", "verified", "done"):
+        items = b[st]
+        if not items:
+            continue
+        print(f"\n{C['b']}{colours[st]}{st.upper()}{C['reset']} {C['dim']}({len(items)}){C['reset']}")
+        for it in items:
+            notes = "  ".join(f"{C['dim']}{k}:{C['reset']} {v}" if v else f"{C['dim']}{k}{C['reset']}"
+                              for k, v in it["notes"].items())
+            print(f"   {C['b']}{it['id']}{C['reset']}  {it['title']}" + (f"   {notes}" if notes else ""))
+    if not any(b.values()):
+        print(f"{C['dim']}Board is empty.{C['reset']}")
+    return 0
+
+
 def cmd_watchdog(cfg, args):
     """Install, remove or inspect the launchd job that restarts a stalled agent."""
     import getpass
@@ -492,6 +535,7 @@ def main():
     wd.add_argument("--idle-minutes", type=float, default=6)
     wd.set_defaults(fn=cmd_watchdog)
 
+    sub.add_parser("board", help="where each pre-authorised item is").set_defaults(fn=cmd_board)
     sub.add_parser("projects", help="workspaces with a local agent session").set_defaults(fn=cmd_projects)
     sub.add_parser("adapters", help="adapter registry and verification status").set_defaults(fn=cmd_adapters)
     sub.add_parser("doctor", help="check this workspace's wiring").set_defaults(fn=cmd_doctor)

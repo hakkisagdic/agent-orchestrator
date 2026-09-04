@@ -8,10 +8,12 @@ have cost when a human noticed twenty minutes later.
 
 Guards, in order — the point is to spend nothing when spending would not help:
 
+  0. Is a turn we started still running?    (pid — never make a second writer)
   1. Is the session actually idle?          (mtime)
   2. Is there open work to continue?        (mailbox / dirty tree / NEEDS_CHANGES)
   3. Is the slice over its round budget?    (if so: notify a human, never nudge)
   4. Is there provider quota left?          (keyflip, if installed)
+  4b. Is the provider itself degraded?      (5xx in our own nudge log)
   5. Did the last nudge achieve anything?   (backoff, then hand over to a human)
 
 Run it from cron/launchd every couple of minutes, or once by hand.
@@ -95,6 +97,51 @@ def save_state(root, st):
     json.dump(st, open(state_path(root), "w"), indent=2)
 
 
+def child_alive(st):
+    """Is the turn we last started still running?
+
+    A transcript mtime cannot answer this. A turn retrying a provider 5xx sits in
+    backoff writing nothing, which looks exactly like a turn that ended — and
+    nudging then starts a SECOND turn on the same session id. Two turns editing
+    one tree produce a half-finished refactor: one renames a field, the other
+    still calls the old name, and the build breaks in a way neither writer can
+    attribute to itself. Ask the OS instead of inferring from a file.
+    """
+    pid = st.get("child_pid")
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)          # signal 0 asks "does this exist?" and changes nothing
+    except OSError:
+        return False
+    return True
+
+
+def provider_degraded(root, window=900):
+    """A provider-side failure in our own nudge log, recent enough to still hold.
+
+    An exhausted quota and an outage both silence the agent, but only one of them
+    is fixed by nudging. Naming it here keeps "the model is down" from being
+    reported — and retried — as "the agent is stuck".
+    """
+    key = os.path.basename(root.rstrip("/")) or "root"
+    p = os.path.join(STATE_DIR, f"nudge-{key}.log")
+    if not os.path.exists(p) or time.time() - os.path.getmtime(p) > window:
+        return None
+    try:
+        size = os.path.getsize(p)
+        with open(p, errors="replace") as fh:
+            fh.seek(max(0, size - 200_000))
+            tail = fh.read()
+    except OSError:
+        return None
+    for marker in ("MODEL_TEMPORARILY_UNAVAILABLE", "ThrottlingException",
+                   "ServiceUnavailableException", "InternalServerException"):
+        if marker in tail:
+            return marker
+    return None
+
+
 def open_work(cfg, root):
     """Is there something to continue? Cheap signals only."""
     reasons = []
@@ -166,6 +213,12 @@ def main():
     size = os.path.getsize(msgs)
     st = load_state(root)
 
+    # 0 — a turn we started is still running. This guard is not an optimisation:
+    # skipping it makes two writers of one working tree. See child_alive().
+    if child_alive(st):
+        print(f"turn still running (pid {st['child_pid']}); not starting a second one")
+        return 0
+
     # 1 — still working
     if age < args.idle_minutes * 60:
         if st.get("attempts"):
@@ -206,6 +259,14 @@ def main():
     if not quota_ok(adapter):
         notify("Voltrai: out of quota", "provider window exhausted; not nudging")
         print("provider out of headroom; not nudging")
+        return 0
+
+    # 4b — the provider stopped, not the agent. Nudging an outage buys nothing
+    # and, while the stalled turn is still retrying, costs a second writer.
+    degraded = provider_degraded(root)
+    if degraded:
+        notify("Voltrai: provider degraded", f"{degraded} — waiting, not nudging")
+        print(f"provider degraded ({degraded}); waiting rather than nudging")
         return 0
 
     # 5 — the previous nudge changed nothing
@@ -264,7 +325,8 @@ def main():
             early = proc.returncode
             break
 
-    st.update(attempts=st.get("attempts", 0) + 1, last_nudge=time.time(), last_size=size)
+    st.update(attempts=st.get("attempts", 0) + 1, last_nudge=time.time(),
+              last_size=size, child_pid=proc.pid)
     if early not in (None, 0):
         tail = ""
         try:
@@ -272,6 +334,7 @@ def main():
                 tail = " ".join(fh.read().strip().split("\n")[-3:])[-300:]
         except OSError:
             pass
+        st.pop("child_pid", None)                 # it is gone; do not guard on a dead pid
         st["last_error"] = {"at": time.time(), "code": early, "tail": tail}
         notify("Voltrai: nudge failed", f"exit {early}: {tail[-120:] or 'see nudge log'}")
         print(f"nudge failed (exit {early}): {tail}")
