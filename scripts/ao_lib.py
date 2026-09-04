@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import time
+from datetime import datetime
 
 HOME = os.path.expanduser("~")
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -198,6 +199,27 @@ def _strings(o, out, depth=0):
             _strings(x, out, depth + 1)
 
 
+def local_hhmm(ts):
+    """Render an ISO timestamp in the reader's own timezone.
+
+    Transcripts store UTC. Slicing "…T00:44:12.525Z" for its characters prints
+    00:44 next to a panel header showing local 03:44, and a message written
+    thirty seconds ago then reads as three hours stale. In an observation tool
+    that is not cosmetic: it is the difference between "the agent just said this"
+    and "the agent stopped saying things", which are opposite conclusions.
+    """
+    if not ts or len(ts) < 16:
+        return "--:--"
+    try:
+        t = ts.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(t)
+        if dt.tzinfo is None:                 # naive stamps are already local
+            return dt.strftime("%H:%M")
+        return dt.astimezone().strftime("%H:%M")
+    except ValueError:
+        return ts[11:16]
+
+
 def messages(recs, limit=8, kinds=("assistant", "user")):
     """[(HH:MM, kind, text)] oldest→newest."""
     out = []
@@ -214,7 +236,7 @@ def messages(recs, limit=8, kinds=("assistant", "user")):
         if len(text) < 40:
             continue
         ts = r.get("timestamp", "")
-        out.append((ts[11:16] or "--:--", kind, text))
+        out.append((local_hhmm(ts), kind, text))
         if len(out) >= limit:
             break
     return list(reversed(out))
@@ -561,7 +583,7 @@ def recent_errors(recs, limit=3, adapter=None):
             signal = next((ln for ln in lines if not ln.lower().startswith("output:")
                            and not ln.startswith("✔")), lines[0] if lines else raw)
         text = " ".join(str(signal)[:260].split())
-        out.append((r.get("timestamp", "")[11:16] or "--:--", text))
+        out.append((local_hhmm(r.get("timestamp", "")) or "--:--", text))
         if len(out) >= limit:
             break
     return list(reversed(out))
