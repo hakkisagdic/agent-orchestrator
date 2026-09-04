@@ -901,11 +901,18 @@ def anomalies(root, cfg, adapter, age, idle_seconds):
         except OSError:
             continue
         first = next((l for l in body.split("\n") if l.strip().startswith("#")), m)
-        out.append({"kind": "decision-requested",
+        # "I am blocked" and "I finished" both want the architect eventually, but
+        # only one of them stops work. Treating a completion report as urgent is
+        # how an urgent channel becomes background noise.
+        low = body.lower()
+        asking = any(k in low for k in ("karar gerekli", "karar gerekli̇",
+                                        "decision required", "decision needed",
+                                        "blocked", "blocker", "needs input"))
+        out.append({"kind": "decision-requested" if asking else "report-waiting",
                     "facts": [f"the implementer wrote {m}",
                               first.lstrip("# ").strip()[:200],
-                              "this is a request, not a symptom — it does not need "
-                              "corroborating"]})
+                              "an explicit request — not a symptom needing corroboration"
+                              if asking else "a report, not a blocker"]})
 
     pids = agent_pids(root, adapter)
     dirty = len([l for l in sh("git status --porcelain", cwd=root).split("\n") if l.strip()])

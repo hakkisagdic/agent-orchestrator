@@ -221,6 +221,8 @@ def escalate(root, cfg, adapter, age, args, st):
     for a in found:
         key = f"anomaly:{a['kind']}"
         window = 600 if a["kind"] == "decision-requested" else 3600
+        if a["kind"] == "report-waiting" and not open_work(cfg, root):
+            continue                     # nothing is stuck; it can wait for a human
         if A.notice_recently_sent(root, key, window):
             A.record_notice(root, "Voltrai: anomaly", a["kind"], sent=False, key=key)
             continue
@@ -402,6 +404,13 @@ def main():
                 pass
 
     # 1 — still working
+    head = A.sh("git rev-parse --short HEAD", cwd=root)
+    if st.get("attempts") and head and head != st.get("last_head"):
+        # Something landed since the last nudge, so the nudges were working. The
+        # backoff counted attempts rather than failures, and after three of them
+        # it stood down permanently on a project that was committing fine.
+        st.update(attempts=0, last_head=head)
+        save_state(root, st)
     if age < args.idle_minutes * 60:
         if st.get("attempts"):
             st.update(attempts=0, last_size=size)   # it moved; forget the backoff
@@ -540,7 +549,8 @@ def main():
             break
 
     st.update(attempts=st.get("attempts", 0) + 1, last_nudge=time.time(),
-              last_size=size, child_pid=proc.pid)
+              last_size=size, child_pid=proc.pid,
+              last_head=A.sh("git rev-parse --short HEAD", cwd=root))
     if early not in (None, 0):
         tail = ""
         try:
