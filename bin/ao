@@ -59,6 +59,7 @@ def render(cfg, msg_count=8, width=None, max_lines=None):
         state, age, desc = A.busy(cfg, adapter)
         label = {"working": ("● WORKING", C["green"]),
                  "slowing": ("◐ slowing", C["yellow"]),
+                 "stopped": ("■ STOPPED", C["red"]),
                  "idle": ("○ IDLE", C["red"])}.get(state, ("? unknown", C["dim"]))
         txt, col = label
         agestr = f"last write {age // 60}m {age % 60}s ago" if age is not None else "no transcript"
@@ -265,6 +266,7 @@ def render_fleet(width=None):
         return L
     for r in rows:
         dot, col = {"working": ("●", C["green"]), "slowing": ("◐", C["yellow"]),
+                    "stopped": ("■", C["red"]),
                     "idle": ("○", C["red"])}.get(r["state"], ("?", C["dim"]))
         agestr = f"{r['age'] // 60}m" if r["age"] is not None else "—"
         flags = []

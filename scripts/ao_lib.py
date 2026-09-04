@@ -308,6 +308,16 @@ def busy(cfg, adapter):
             pass
     idle_s = (adapter.get("busy") or {}).get("idle_seconds", 240)
     running = status in ((adapter.get("busy") or {}).get("running_values") or ["in_progress"])
+
+    # A freshly-written transcript does not mean a live turn. The file keeps its
+    # mtime after the process exits, so a killed agent reads as WORKING for the
+    # whole idle window — the observation layer asserting the opposite of the
+    # truth, at exactly the moment someone is looking to find out what happened.
+    # Only ask the OS when the mtime would otherwise claim "working"; that is the
+    # only case where the answer changes anything, and it keeps the panel cheap.
+    if age < idle_s and not agent_pids(cfg["root"], adapter):
+        return "stopped", age, desc
+
     if age < 120:
         state = "working"
     elif age < idle_s:
