@@ -579,30 +579,61 @@ def cmd_lock(cfg, args):
 
 
 def cmd_credits(cfg, args):
-    """Credit spend by billing period, measured from local transcripts.
+    """Credit usage: the provider's own figure, with a local estimate behind it.
 
-    A floor, not a balance. Only sessions stored on this machine are visible and
-    Kiro exposes no endpoint to check against, so this under-reports by whatever
-    ran elsewhere — which is the honest direction for a number someone might use
-    to decide whether to start another run.
+    Prefer the account. `GetUsageLimits` returns exactly what the dashboard shows,
+    authenticated with the token the CLI already holds, so there is no reason to
+    estimate when the real number is one request away. The transcript reading
+    stays as the offline path and is labelled as the floor it is — measured here
+    at roughly two thirds of the true figure, because it cannot see what ran on
+    another machine.
     """
-    from datetime import date
+    from datetime import date, datetime
+
+    acct = None if args.offline else A.kiro_account_usage()
+    if acct and not acct.get("error") and not acct.get("expired"):
+        used, limit = acct["used"], acct["limit"]
+        pct = used / limit * 100 if limit else 0
+        col = C["red"] if pct > 90 else C["yellow"] if pct > 70 else C["green"]
+        filled = int(pct / 5)
+        reset = datetime.fromtimestamp(acct["reset_at"]).strftime("%d %b") if acct.get("reset_at") else "?"
+        print(f"{C['b']}{acct.get('plan') or 'account'}{C['reset']}"
+              f"{C['dim']}  resets {reset}{C['reset']}")
+        print(f"\n   {col}{'█' * filled}{'░' * (20 - filled)}{C['reset']} {pct:5.1f}%"
+              f"   {C['b']}{used:,.2f}{C['reset']} of {limit:,.0f}")
+        print(f"   {C['b']}{limit - used:,.2f}{C['reset']} remaining")
+        if acct.get("overage_status") == "DISABLED":
+            print(f"\n   {C['dim']}overage disabled — work stops at the limit, it does not "
+                  f"bill on{C['reset']}")
+        elif acct.get("overage_cap"):
+            print(f"\n   {C['dim']}overage {acct['overage_now']:,.2f} of "
+                  f"{acct['overage_cap']:,.0f} at {acct.get('overage_rate')}/credit{C['reset']}")
+
+        if args.local:
+            u = A.credit_usage()
+            here = sum(v for d, v in u["days"].items()
+                       if d >= date.today().replace(day=1).isoformat())
+            share = here / used * 100 if used else 0
+            print(f"\n   {C['dim']}transcripts on this machine account for {here:,.0f} "
+                  f"({share:.0f}%) of it{C['reset']}")
+        return 0
+
+    if acct and acct.get("expired"):
+        print(f"{C['yellow']}The CLI's token has expired.{C['reset']} "
+              f"Run {C['b']}kiro-cli login{C['reset']} and try again.")
+    elif acct and acct.get("error"):
+        print(f"{C['yellow']}Account lookup failed:{C['reset']} {acct['error']}")
+    elif not args.offline:
+        print(f"{C['dim']}No account token available; falling back to transcripts.{C['reset']}")
+
     u = A.credit_usage()
     if not u["days"]:
-        print(f"{C['dim']}No local sessions with usage records.{C['reset']}")
-        return 0
-    budget = args.budget
-    # The renewal day belongs to the provider, not to whoever is typing. Kiro
-    # renews on the 1st; others renew on the subscription date, and a user should
-    # not have to remember which is which per tool.
+        print(f"{C['dim']}No local sessions with usage records either.{C['reset']}")
+        return 1
     impl = cfg.get("implementer") or {}
     adapter = A.load_adapter(impl.get("adapter", "")) if impl else {}
     reset = args.reset_day or (adapter.get("billing") or {}).get("reset_day") or 1
     reset = max(1, min(28, int(reset)))
-
-    # Cut the daily series where the subscription renews, not where the calendar
-    # does. A period that starts on the 6th makes calendar months meaningless, and
-    # the number people compare against their dashboard is the period's.
     periods = {}
     for d, v in u["days"].items():
         y, m, dd = (int(x) for x in d.split("-"))
@@ -611,43 +642,11 @@ def cmd_credits(cfg, args):
             if m == 0:
                 y, m = y - 1, 12
         periods[f"{y:04d}-{m:02d}"] = periods.get(f"{y:04d}-{m:02d}", 0) + v
-
-    today = date.today()
-    cur_y, cur_m = today.year, today.month
-    if today.day < reset:
-        cur_m -= 1
-        if cur_m == 0:
-            cur_y, cur_m = cur_y - 1, 12
-    current = f"{cur_y:04d}-{cur_m:02d}"
-
-    label = "period" if reset != 1 else "month"
-    print(f"{C['b']}{C['mag']}── BY {label.upper()} {'─' * 44}{C['reset']}")
+    print(f"\n{C['b']}{C['mag']}── ESTIMATE FROM LOCAL TRANSCRIPTS {'─' * 22}{C['reset']}")
     for pm in sorted(periods):
-        v = periods[pm]
-        bar = note = ""
-        if budget:
-            pct = min(100.0, v / budget * 100)
-            col = C["red"] if pct > 90 else C["yellow"] if pct > 70 else C["green"]
-            bar = f"  {col}{'█' * int(pct / 5)}{'░' * (20 - int(pct / 5))}{C['reset']} {pct:5.1f}%"
-            note = f"  {C['dim']}of {budget:,.0f}{C['reset']}"
-        mark = f" {C['b']}←{C['reset']}" if pm == current else ""
-        print(f"   {pm}   {v:>9,.2f}{note}{bar}{mark}")
-
-    if budget:
-        left = budget - periods.get(current, 0.0)
-        col = C["red"] if left < budget * 0.1 else C["yellow"] if left < budget * 0.3 else C["green"]
-        print(f"\n   {C['b']}at least{C['reset']} {periods.get(current, 0):,.0f} spent this "
-              f"{label} · {col}{left:,.0f} or less remaining{C['reset']}")
-
-    if args.days:
-        print(f"\n{C['b']}{C['mag']}── BY DAY {'─' * 48}{C['reset']}")
-        for d, v in list(u["days"].items())[-args.days:]:
-            print(f"   {d}   {v:>9,.2f}")
-
-    print(f"\n{C['dim']}A floor, not the account balance. Only sessions stored on this"
-          f"\nmachine are visible and Kiro publishes no endpoint to check against,"
-          f"\nso the real figure is higher. A turn costs the peak its usage records"
-          f"\nreach before the next turn resets them.{C['reset']}")
+        print(f"   {pm}   {periods[pm]:>9,.2f}")
+    print(f"\n{C['dim']}A floor: only sessions stored here are visible. Measured against"
+          f"\nthe account figure it came to about two thirds of the truth.{C['reset']}")
     return 0
 
 
@@ -1176,9 +1175,9 @@ def main():
 
     sub.add_parser("board", help="where each pre-authorised item is").set_defaults(fn=cmd_board)
     cr = sub.add_parser("credits", help="credit spend measured from local transcripts")
-    cr.add_argument("--budget", type=float, help="allowance per period, for the remaining figure")
-    cr.add_argument("--reset-day", type=int, help="override the adapter's renewal day")
-    cr.add_argument("--days", type=int, default=0, help="also show the last N days")
+    cr.add_argument("--offline", action="store_true", help="skip the account lookup")
+    cr.add_argument("--local", action="store_true", help="also show this machine's share")
+    cr.add_argument("--reset-day", type=int, help="fallback: override the renewal day")
     cr.set_defaults(fn=cmd_credits)
     sub.add_parser("commit-ok", help="may this tree be committed? decided from evidence"
                    ).set_defaults(fn=cmd_commit_ok)

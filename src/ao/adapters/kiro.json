@@ -177,10 +177,25 @@
   "billing": {
     "unit": "credit",
     "reset_day": 1,
-    "note": "Kiro's period always starts on the 1st. Other providers renew on the subscription date, so this belongs to the adapter rather than to a flag the user has to remember per tool.",
-    "usage_source": "transcript",
-    "usage_reading": "peak-per-turn",
-    "usage_note": "usage_summary reports the running total of the turn in progress; a turn costs the peak it reached before the next turn resets it. Summing every record over-counts ~50x, taking the last under-counts.",
-    "balance": "none — no endpoint; KIRO_API_KEY authenticates the CLI, it is not a REST credential. Local totals are a floor."
+    "source": "api",
+    "api": {
+      "endpoint": "https://codewhisperer.us-east-1.amazonaws.com/",
+      "target": "AmazonCodeWhispererService.GetUsageLimits",
+      "content_type": "application/x-amz-json-1.0",
+      "auth": "Bearer <access_token> from the CLI's own store",
+      "token_store": "~/Library/Application Support/kiro-cli/data.sqlite3, auth_kv where key='kirocli:odic:token', field access_token",
+      "request": {
+        "profileArn": "from `kiro-cli whoami`"
+      },
+      "response": "usageBreakdownList[resourceType=CREDIT].currentUsageWithPrecision and .usageLimitWithPrecision; plus subscriptionInfo, overageConfiguration, nextDateReset, daysUntilReset",
+      "verified": true
+    },
+    "api_key_note": "A ksk_ API key is NOT a bearer token for this endpoint — it is rejected with AccessDeniedException on codewhisperer and 'Invalid token' on management.kiro.dev. It authenticates the CLI via KIRO_API_KEY. The CLI's cached OIDC access token is what works here.",
+    "fallback": {
+      "source": "transcript",
+      "reading": "peak-per-turn",
+      "note": "usage_summary reports the running total of the turn in progress; a turn costs the peak it reached before the next turn resets it. Summing every record over-counts ~3x, taking only the last under-counts ~18x.",
+      "accuracy": "a floor — measured at 69% of the account figure, since sessions on other machines are invisible"
+    }
   }
 }

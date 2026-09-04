@@ -935,6 +935,92 @@ def write_report(root, cfg, kind, facts):
         return None
 
 
+def kiro_account_usage(timeout=20):
+    """Real credit usage from the provider, not an estimate.
+
+    `GetUsageLimits` on the CodeWhisperer runtime returns exactly what the app's
+    dashboard shows: credits used, the plan limit, the reset date, overage
+    settings. It authenticates with the OIDC access token the CLI already holds
+    after login, read from its local store — the same credential, on the same
+    machine, for the same account.
+
+    Two things this is not. It is not the `ksk_` API key: that key is rejected as
+    a bearer token here, so it authenticates something else. And it is not
+    guesswork from transcripts — that reading exists as an offline fallback and
+    undercounts by whatever ran on another machine, which measured about a third.
+
+    Returns None when there is no usable token; the caller falls back rather than
+    presenting an error as a balance. The token is used and never stored, logged
+    or returned.
+    """
+    db = os.path.join(HOME, "Library", "Application Support", "kiro-cli", "data.sqlite3")
+    if not os.path.exists(db):
+        return None
+    raw = sh(f"sqlite3 {json.dumps(db)} "
+             "\"SELECT value FROM auth_kv WHERE key='kirocli:odic:token';\"")
+    if not raw:
+        return None
+    try:
+        tok = json.loads(raw)
+    except Exception:
+        return None
+    access = tok.get("access_token")
+    if not access:
+        return None
+    if tok.get("expires_at"):
+        try:
+            exp = tok["expires_at"]
+            exp = float(exp) if not isinstance(exp, str) else \
+                __import__("datetime").datetime.fromisoformat(
+                    exp.replace("Z", "+00:00")).timestamp()
+            if exp < time.time():
+                return {"expired": True}
+        except Exception:
+            pass
+
+    arn = ""
+    prof = sh("kiro-cli whoami 2>/dev/null")
+    for line in (prof or "").split("\n"):
+        if line.strip().startswith("arn:aws:codewhisperer"):
+            arn = line.strip()
+    if not arn:
+        return None
+
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(
+        "https://codewhisperer.us-east-1.amazonaws.com/",
+        data=json.dumps({"profileArn": arn}).encode(),
+        headers={"Content-Type": "application/x-amz-json-1.0",
+                 "x-amz-target": "AmazonCodeWhispererService.GetUsageLimits",
+                 "Authorization": "Bearer " + access})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            d = json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        return {"error": f"HTTP {e.code}"}
+    except Exception:
+        return None
+
+    row = next((b for b in d.get("usageBreakdownList") or []
+                if b.get("resourceType") == "CREDIT"), None)
+    if not row:
+        return {"error": "no CREDIT row in response"}
+    sub = d.get("subscriptionInfo") or {}
+    over = d.get("overageConfiguration") or {}
+    return {
+        "used": row.get("currentUsageWithPrecision", row.get("currentUsage")),
+        "limit": row.get("usageLimitWithPrecision", row.get("usageLimit")),
+        "reset_at": row.get("nextDateReset") or d.get("nextDateReset"),
+        "days_until_reset": d.get("daysUntilReset"),
+        "plan": sub.get("subscriptionTitle"),
+        "overage_status": over.get("overageStatus"),
+        "overage_cap": row.get("overageCapWithPrecision", row.get("overageCap")),
+        "overage_rate": row.get("overageRate"),
+        "overage_now": row.get("currentOveragesWithPrecision", row.get("currentOverages")),
+    }
+
+
 def credit_usage(monthly_budget=None):
     """Credit spend read from local transcripts, by billing month.
 
