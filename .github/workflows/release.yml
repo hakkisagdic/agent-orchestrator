@@ -1,0 +1,88 @@
+# Publish to PyPI on a version tag.
+#
+# Trusted Publishing (OIDC), so no token exists anywhere: not in the repository,
+# not in Actions secrets, not on anyone's laptop. GitHub proves the workflow's
+# identity to PyPI directly. A leaked token is the ordinary way a package gets
+# hijacked, and the cheapest fix is not to have one.
+#
+# One-time setup on pypi.org → Publishing → Add a pending publisher:
+#   owner: hakkisagdic   repo: agent-orchestrator
+#   workflow: release.yml   environment: pypi
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: python -m pip install --upgrade build
+      - run: python -m build
+
+      - name: The tag must match the packaged version
+        # A mismatch publishes a version nobody can reproduce from a tag, and PyPI
+        # never lets that number be reused.
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(python -c "import re;print(re.search(r'^version = \"([^\"]+)\"', open('pyproject.toml').read(), re.M).group(1))")
+          echo "tag=$TAG package=$PKG"
+          test "$TAG" = "$PKG"
+
+      - name: The adapters must actually be in the wheel
+        # The one packaging failure a --help smoke test cannot catch: the code
+        # ships, the data it reads does not, and every adapter lookup dies at the
+        # user's first command.
+        run: |
+          python - <<'PY'
+          import glob, zipfile
+          names = zipfile.ZipFile(glob.glob('dist/*.whl')[0]).namelist()
+          n = len([x for x in names if '/adapters/' in x])
+          assert n >= 15, f'only {n} adapter files in the wheel'
+          print('ok:', n, 'adapters,', len(names), 'entries')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with: { name: dist, path: dist/ }
+
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write        # the OIDC token that replaces an API token
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: dist, path: dist/ }
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: dist, path: dist/ }
+      - name: Publish the release and print the Homebrew hash
+        # The formula needs the sha256 of the source tarball for this tag, and
+        # computing it by hand after the fact is how a formula ends up pinned to
+        # the wrong archive.
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "$GITHUB_REF_NAME" --generate-notes
+          sleep 5
+          URL="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+          echo "homebrew sha256 for $URL"
+          curl -sL "$URL" | shasum -a 256
+        env:
+          GH_TOKEN: ${{ github.token }}
