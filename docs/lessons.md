@@ -258,3 +258,25 @@ still not safe enough to act on. Reporting now fires at six minutes; reaping kee
 the conservative bound.
 
 Set thresholds by consequence, not by signal.
+
+## 18. A rule in an untracked file is not a rule
+
+Three steering files carrying the coordination protocol, the machine-lock rule and
+the concurrent-writer procedure disappeared during a routine slice. Nothing
+malfunctioned: the implementer was isolating uncommitted changes to get a clean
+tree for its gates — exactly as instructed — and untracked files are what that
+operation removes. The three steering files that survived were the ones in git.
+
+The rules had been written into files that the project's own hygiene treats as
+disposable. That is not the agent's mistake; it is a category error in how they
+were stored. An instruction that governs an agent has the same standing as the
+code it governs, and belongs under the same version control — reviewable,
+attributable, and surviving a clean checkout.
+
+The failure is quiet, which is what makes it expensive. Nothing errors when
+steering vanishes. The agent simply stops following a rule nobody can see is
+missing, and the next incident looks like a regression in judgement.
+
+Two things follow. Rules go in tracked files. And a health check should say so:
+`ao doctor` already verifies that tools referenced by steering are reachable, and
+the same reasoning applies to whether steering itself will still exist tomorrow.
