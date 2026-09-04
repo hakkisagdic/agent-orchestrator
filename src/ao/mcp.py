@@ -15,6 +15,7 @@ JSON-RPC 2.0 over stdio, standard library only.
 import json
 import os
 import sys
+import time
 
 from . import lib as A
 
@@ -38,6 +39,32 @@ TOOLS = [
      "description": "One row per project with a local agent session, ordered by what needs a "
                     "human first.",
      "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "ao_inbox",
+     "description": "Coordination messages addressed to you that you have not yet "
+                    "acknowledged. Check this at the start of every turn. Each message "
+                    "carries an id; acknowledge it with ao_ack once you have applied or "
+                    "explicitly rejected it.",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "ao_ack",
+     "description": "Acknowledge one coordination message: it is removed, which is how "
+                    "delivery is confirmed. Acknowledge only after applying or explicitly "
+                    "rejecting the message — never on a partial read.",
+     "inputSchema": {"type": "object", "required": ["id"],
+                     "properties": {"id": {"type": "string"},
+                                    "outcome": {"type": "string",
+                                                "description": "applied | rejected: why"}}}},
+    {"name": "ao_report",
+     "description": "Tell the architect something, at any point in a turn. Use kind "
+                    "'blocked' when you cannot proceed without a decision — that escalates "
+                    "immediately rather than waiting for a detector to infer it. Use "
+                    "'status' or 'done' for everything else.",
+     "inputSchema": {"type": "object", "required": ["kind", "summary"],
+                     "properties": {
+                         "kind": {"type": "string", "enum": ["blocked", "status", "done"]},
+                         "summary": {"type": "string"},
+                         "detail": {"type": "string"},
+                         "needs": {"type": "string",
+                                   "description": "for kind=blocked: what input would unblock it"}}}},
     {"name": "ao_verify",
      "description": "Run the project's declared gates and record the measured result. "
                     "Expensive; disabled unless the server was started with --allow-verify.",
@@ -88,6 +115,55 @@ def call(name, args, cfg, allow_verify):
     if name == "ao_fleet":
         return {"projects": [{"name": os.path.basename(w["path"]), "root": w["path"]}
                              for w in A.all_workspaces()]}
+    if name == "ao_inbox":
+        # The same files the file-based protocol uses. One source of truth: an MCP
+        # store beside the mailbox would be a second place for the same fact, and
+        # every failure in this project's history has come from two records of one
+        # thing drifting apart.
+        box = cfg.get("mailbox", "agent-mail")
+        out = []
+        for m in A.mailbox(root, box):
+            if "-to-fable-" in m or "-to-architect-" in m:
+                continue                     # our own outbound; not addressed to us
+            try:
+                body = open(os.path.join(root, box, m), errors="replace").read(20000)
+            except OSError:
+                continue
+            out.append({"id": m, "body": body})
+        return {"messages": out, "count": len(out),
+                "note": "acknowledge each with ao_ack after applying or rejecting it"}
+
+    if name == "ao_ack":
+        box = cfg.get("mailbox", "agent-mail")
+        mid = os.path.basename(args.get("id", ""))
+        path = os.path.join(root, box, mid)
+        if not mid or mid == "README.md" or not os.path.exists(path):
+            return {"error": f"no such message: {args.get('id')}"}
+        os.remove(path)
+        A.record_notice(root, "ack", f"{mid}: {args.get('outcome', 'applied')}",
+                        sent=False, key="ack")
+        return {"acknowledged": mid, "outcome": args.get("outcome", "applied")}
+
+    if name == "ao_report":
+        box = cfg.get("mailbox", "agent-mail")
+        os.makedirs(os.path.join(root, box), exist_ok=True)
+        kind = args.get("kind", "status")
+        # `blocked` writes the marker the watchdog escalates on within one cycle.
+        # The agent saying so directly beats a detector inferring it twenty
+        # minutes later, which is what used to happen.
+        header = "## KARAR GEREKLİ" if kind == "blocked" else f"## {kind.upper()}"
+        slug = "".join(c if c.isalnum() else "-" for c in args["summary"].lower())[:40]
+        name_ = f"{time.strftime('%Y%m%d-%H%M')}-kiro-to-fable-{kind.upper()}-{slug}.md"
+        with open(os.path.join(root, box, name_), "w") as fh:
+            fh.write(f"# {args['summary']}\n\n{header}\n\n")
+            if args.get("detail"):
+                fh.write(args["detail"] + "\n\n")
+            if args.get("needs"):
+                fh.write(f"**Needs:** {args['needs']}\n")
+        return {"written": name_, "escalates": kind == "blocked",
+                "note": ("the architect is woken on the next watchdog cycle"
+                         if kind == "blocked" else "queued for the architect")}
+
     if name == "ao_verify":
         if not allow_verify:
             return {"error": "verify is disabled; start the server with --allow-verify"}

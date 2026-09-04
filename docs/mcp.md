@@ -67,3 +67,52 @@ a target that is currently writing.
 
 Mixing is supported and normal. The mailbox remains the source of truth in both cases —
 MCP is an interface to it, not a replacement for it.
+
+## Coordination over MCP, backed by the same files
+
+`ao mcp serve` exposes three coordination tools alongside the read-only ones:
+
+| tool | for |
+|---|---|
+| `ao_inbox` | messages addressed to the implementer, not yet acknowledged |
+| `ao_ack` | confirm delivery by removing one, after applying or rejecting it |
+| `ao_report` | tell the architect something at any point in a turn |
+
+**They read and write the mailbox files directly.** There is no MCP-side database,
+and that is the whole design: a second store for the same fact is a second thing
+to drift, and every expensive failure in this project's history has been two
+records of one truth disagreeing. So a project without MCP loses nothing — the
+files are the protocol, and MCP is a faster door onto the same room.
+
+`ao_report {kind: "blocked"}` writes the marker the watchdog escalates on within
+one cycle. That matters more than it sounds: three finished slices once sat for
+half a day because a detector had to infer a blockage the agent already knew
+about. An agent that can say "I am stuck" in one tool call has no reason to be
+inferred about.
+
+Authority stays off this surface. `ao commit-ok` decides whether work may land and
+is deliberately not exposed — an implementer able to grant itself commit authority
+would remove the separation the tool exists to hold. `push` is granted by nothing.
+
+## Registering it
+
+```bash
+kiro-cli mcp add --name ao --scope workspace \
+  --command "$HOME/.local/bin/ao" \
+  --args '["-C","/path/to/project","mcp","serve"]'
+```
+
+Other clients take the same shape; `ao mcp` with no arguments prints the JSON.
+
+## A2A, and why it is not this
+
+Kiro does not speak A2A. Searched both the CLI binary and the IDE bundle: no
+`agent2agent`, no agent card, no `.well-known/agent`, no task lifecycle methods —
+the only `a2a` string in the IDE is `a2a-sdk` sitting in a package-name list. MCP,
+by contrast, is genuinely implemented in both.
+
+So A2A is an outward surface here, not an inward dependency: `ao a2a serve` lets an
+A2A-speaking orchestrator read this board, while the loop itself runs over MCP and
+files. Bridges in the other direction exist — [a2a-mcp](https://github.com/a2anet/a2a-mcp)
+exposes remote A2A agents as MCP tools — and would let an MCP-only agent reach an
+A2A one, if that is ever needed.
