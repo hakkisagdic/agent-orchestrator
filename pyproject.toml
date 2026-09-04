@@ -3,8 +3,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "ao-cli"
-version = "0.1.0"
+name = "ao-orchestrator"
+version = "0.1.1"
 description = "Attach to the coding agent you are already running: watch it, restart it, verify its work, and decide what may be committed."
 readme = "README.md"
 license = { file = "LICENSE" }

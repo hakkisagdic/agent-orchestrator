@@ -16,7 +16,7 @@ başlatmak demektir. `ao` bunun yerine **yetkinin** sahibidir — ne bitti, ne i
 inebilir — ajanı olduğu yerde bırakır.
 
 ```bash
-pip install ao-cli                  # ya da: uv tool install ao-cli
+pip install ao-orchestrator                  # ya da: uv tool install ao-orchestrator
 cd ~/projen && ao status            # çalışan oturumu kendi bulur
 ```
 
@@ -37,7 +37,7 @@ kurmadan `status`, `board` ve `doctor` verir. Bilerek sınırlı bir alt küme v
 kalacak — geri kalan her şey ya karar verir, ya makineyi harcar, ya süreç öldürür, ya
 protokol konuşur; ve bunların herhangi birinin ikinci bir implementasyonu, yanlış
 olabilecek ikinci bir şeydir. Gerisi için:
-`winget install Python.Python.3.12 && pip install ao-cli`.
+`winget install Python.Python.3.12 && pip install ao-orchestrator`.
 Script yazıldı ve gözden geçirildi ama **henüz Windows'ta koşulmadı**.
 
 > **Nereden çıktı.** Haftalarca tam olarak bu döngüyle geliştirilen 30 epic'lik

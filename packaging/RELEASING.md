@@ -22,16 +22,16 @@ One-time setup on pypi.org, before the first tag (PyPI account owner, in a
 browser — it cannot be scripted):
 
     pypi.org -> Your projects -> Publishing -> Add a pending publisher
-      PyPI project name: ao-cli
+      PyPI project name: ao-orchestrator
       Owner:             hakkisagdic
       Repository:        agent-orchestrator
       Workflow:          release.yml
       Environment:       pypi
 
-Then `pip install ao-cli`, `uv tool install ao-cli` or `pipx install ao-cli` all
+Then `pip install ao-orchestrator`, `uv tool install ao-orchestrator` or `pipx install ao-orchestrator` all
 work, and each provides the `ao` command.
 
-The distribution is `ao-cli` because `agent-orchestrator` on PyPI belongs to an
+The distribution is `ao-orchestrator` because `agent-orchestrator` on PyPI belongs to an
 unrelated project. The import package stays `ao`, which is also the command, so
 nothing inside the code or the docs has to know about the difference.
 
