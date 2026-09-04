@@ -80,3 +80,25 @@ A red gate is data, not an accusation. The record keeps the exact output, the sl
 to `changes-requested`, and the round counter increments — which is how a slice that cannot
 converge eventually trips its budget in [`slices.md`](slices.md) instead of quietly
 consuming an afternoon.
+
+
+## The board carries edges, and the review loop is measured
+
+`needs: B3, B4` on a queued item is a dependency: the item becomes READY the moment
+those land. `unlocks:` is the same edge written from the other end. This is the
+useful core of "backend done, now the frontend" — the next item becomes eligible
+without the implementer choosing its own scope, which is the one authority it must
+not hold. `role:` tags an item for a particular actor; routing is a detail on top
+of the graph, not a mechanism of its own.
+
+A round budget counts rounds. It cannot see that round four's blocker is round
+two's blocker with the line numbers moved — the actual shape of a slice that is
+not converging. `ao` fingerprints each finding on its file and first clause across
+consecutive NEEDS_CHANGES reviews and raises a `review-loop` anomaly when one
+recurs three times: more rounds will not fix it; it needs re-specifying or a
+different actor.
+
+`ao digest` reads all of this back from the ledgers rather than from memory.
+Refusals repeated across a week are surfaced as a process signal, because a
+commit-ok refused five times for "re-run ao verify" is not five incidents — it
+is one habit.

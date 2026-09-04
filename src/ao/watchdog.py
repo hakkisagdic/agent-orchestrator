@@ -583,12 +583,16 @@ def main():
                 pass
 
     # 1 — still working
-    head = A.sh("git rev-parse --short HEAD", cwd=root)
-    if st.get("attempts") and head and head != st.get("last_head"):
-        # Something landed since the last nudge, so the nudges were working. The
-        # backoff counted attempts rather than failures, and after three of them
-        # it stood down permanently on a project that was committing fine.
-        st.update(attempts=0, last_head=head)
+    #
+    # Progress is not the same as a commit. A slice whose independent review found
+    # real defects is *correct* to withhold the commit while it fixes them, and to
+    # a HEAD-only check that looks exactly like an agent that has stopped: three
+    # nudges, no movement, stand down. It happened — two hours of a live slice sat
+    # idle because the counter could not tell a careful implementer from a dead
+    # one. Fingerprint everything that moves when work is happening.
+    fp = A.work_fingerprint(root)
+    if st.get("attempts") and fp != st.get("last_fingerprint"):
+        st.update(attempts=0, last_fingerprint=fp)
         save_state(root, st)
     if age < args.idle_minutes * 60:
         if st.get("attempts"):
@@ -760,7 +764,7 @@ def main():
 
     st.update(attempts=st.get("attempts", 0) + 1, last_nudge=time.time(),
               last_size=size, child_pid=proc.pid,
-              last_head=A.sh("git rev-parse --short HEAD", cwd=root))
+              last_fingerprint=A.work_fingerprint(root))
     if early not in (None, 0):
         tail = ""
         try:

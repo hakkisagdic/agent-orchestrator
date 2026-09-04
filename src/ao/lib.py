@@ -763,6 +763,132 @@ def notice_recently_sent(root, key, window):
     return False
 
 
+def digest(root, cfg, since_days=1.0):
+    """What actually happened in a window, from the ledgers rather than memory.
+
+    Event alerts answer "did something just occur". They cannot answer "is this
+    week going well", and asking a human to reconstruct that from thirty
+    notifications is asking them to do the tool's job. Everything here is already
+    on disk — commits, verifications, authority grants, decisions, notices — so
+    the summary is read, never estimated.
+    """
+    cut = time.time() - since_days * 86400
+    out = {"since_days": since_days, "at": int(time.time())}
+
+    # git's approxidate wants "N hours ago"; a bare "24.hours" parses to nothing
+    # and silently reports zero commits on a day that landed two.
+    # Quote the format: sh() runs through a shell, where a bare "|" in
+    # --pretty=%h|%ct|%s is a pipe, and the commit list quietly came back empty.
+    log = sh(f"git log --since='{int(since_days * 24)} hours ago' --pretty='%h|%ct|%s'",
+             cwd=root) or ""
+    out["commits"] = [dict(zip(("sha", "at", "subject"), l.split("|", 2)))
+                      for l in log.split("\n") if l.count("|") >= 2]
+    out["unpushed"] = int(sh("git rev-list --count @{u}..HEAD 2>/dev/null", cwd=root) or 0) \
+        if sh("git rev-parse --abbrev-ref @{u} 2>/dev/null", cwd=root) else \
+        len([l for l in (sh("git log --branches --not --remotes --pretty=%h", cwd=root) or "").split("\n") if l])
+
+    def _jsonl(rel):
+        p = os.path.join(root, rel)
+        rows = []
+        if os.path.exists(p):
+            for line in open(p, errors="replace"):
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    continue
+                # The ledgers disagree on the type of `at`: verifications write an
+                # ISO string, everything else an epoch. Read both.
+                at = r.get("at", 0)
+                if isinstance(at, str):
+                    try:
+                        at = datetime.fromisoformat(at.replace("Z", "+00:00")).timestamp()
+                    except ValueError:
+                        at = 0
+                if at >= cut:
+                    rows.append(r)
+        return rows
+
+    ver = _jsonl(".ao/ledger/verifications.jsonl")
+    out["verifications"] = {"total": len(ver),
+                            "passed": sum(1 for v in ver if v.get("passed")),
+                            "failed": sum(1 for v in ver if not v.get("passed"))}
+    auth = _jsonl(".ao/ledger/authority.jsonl")
+    out["authority"] = {"granted": sum(1 for a in auth if a.get("granted")),
+                        "refused": sum(1 for a in auth if not a.get("granted"))}
+    # Why authority was withheld is the actionable half — a refusal repeated all
+    # week is a process problem, not an incident.
+    reasons = {}
+    for a in auth:
+        for r in a.get("reasons") or []:
+            key = re.sub(r"[0-9a-f]{7,}|V-\d+|D-\d+|\d{4}-\d\d-\d\d\S*", "…", r)[:70]
+            reasons[key] = reasons.get(key, 0) + 1
+    out["refusal_reasons"] = sorted(reasons.items(), key=lambda x: -x[1])[:5]
+
+    notices = _jsonl(".ao/ledger/notices.jsonl")
+    out["alerts"] = {"sent": sum(1 for n in notices if n.get("sent")),
+                     "held": sum(1 for n in notices if not n.get("sent"))}
+
+    decs = [d for d in decisions(root) if d.get("asked_at", 0) >= cut]
+    answered = [d for d in decs if d.get("state") == "answered"]
+    out["decisions"] = {
+        "asked": len(decs), "answered": len(answered),
+        "open": len([d for d in decisions(root, "open")]),
+        "median_minutes": (sorted((d["answered_at"] - d["asked_at"]) // 60
+                                  for d in answered)[len(answered) // 2]
+                           if answered else None)}
+
+    b = board(root)
+    out["board"] = {k: len(v) for k, v in b.items() if v}
+    out["blocked"] = [{"id": i["id"], "title": i["title"],
+                       "needs": i["notes"].get("needs", "")} for i in b["blocked"]]
+
+    revs = reviews(root, cfg.get("reviews", "semantic-review"), limit=40)
+    fresh = []
+    for f, v in revs:
+        try:
+            if os.path.getmtime(os.path.join(root, cfg.get("reviews", "semantic-review"), f)) >= cut:
+                fresh.append(v)
+        except OSError:
+            pass
+    out["reviews"] = {"total": len(fresh),
+                      "approved": sum(1 for v in fresh if "APPROVED" in (v or "").upper()),
+                      "changes": sum(1 for v in fresh if "APPROVED" not in (v or "").upper())}
+
+    acct = kiro_account_usage()
+    if acct and not acct.get("error"):
+        out["credits"] = {"used": acct["used"], "limit": acct["limit"],
+                          "remaining": acct["limit"] - acct["used"]}
+    local = credit_usage()
+    days = sorted(local.get("days", {}).items())
+    out["credit_days"] = [(d, v) for d, v in days
+                          if d >= time.strftime("%Y-%m-%d", time.localtime(cut))]
+    return out
+
+
+def work_fingerprint(root):
+    """Everything that moves when work is happening, in one short string.
+
+    A commit is one shape of progress, not the only one. A slice whose review
+    found real defects withholds its commit *because it is behaving correctly*,
+    and a HEAD-only progress check cannot tell that apart from an agent that
+    died — so the backoff exhausted itself on a live slice and stood down for two
+    hours. Count the working tree, the reviews and the decisions too: if any of
+    them moved, something is being done.
+    """
+    parts = [sh("git rev-parse --short HEAD", cwd=root) or "",
+             sh("git status --porcelain", cwd=root) or ""]
+    for sub in ("semantic-review", ".ao/decisions", ".ao/ledger"):
+        d = os.path.join(root, sub)
+        if os.path.isdir(d):
+            try:
+                parts.append("|".join(sorted(
+                    f"{f}:{int(os.path.getmtime(os.path.join(d, f)))}"
+                    for f in os.listdir(d))))
+            except OSError:
+                pass
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
+
+
 def tree_digest(root):
     """A stable fingerprint of the working tree, tracked and untracked alike.
 
@@ -991,6 +1117,15 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
         out.append({"kind": "over-round-budget",
                     "facts": [f"round {rn} of {budget} on the current slice"] +
                              [f"{f}: {v}" for f, v in revs]})
+    # The same finding returning review after review. A round count cannot see
+    # it; this is the actual shape of a slice that is not converging.
+    loops = review_loop(root, cfg.get("reviews", "semantic-review"))
+    if loops:
+        out.append({"kind": "review-loop",
+                    "facts": [f"[{l['sev']}] {l['file']} — \"{l['clause']}\" has come back "
+                              f"{l['count']} reviews running" for l in loops[:4]] +
+                             ["more rounds will not converge this; it needs re-specifying "
+                              "or a different actor"]})
     err = last_nudge_error(root)
     if err and time.time() - err.get("at", 0) < 3600:
         out.append({"kind": "restart-failed",
@@ -1410,13 +1545,97 @@ def reviews(root, reviews_dir, limit=4):
         verdict = ""
         try:
             for line in open(os.path.join(d, f), errors="ignore"):
-                if "Verdict" in line:
+                # Case-insensitive on purpose. The implementer's reviews wrote
+                # "**Verdict:**" and `ao review` writes "VERDICT:", and a match on
+                # the capitalised form alone left every ao-review verdict empty —
+                # so commit-ok could never accept the independent reviewer's
+                # APPROVED, the one verdict it was built to require.
+                if "verdict" in line.lower():
                     verdict = re.sub(r".*:\s*", "", line).replace("*", "").strip()
                     break
         except Exception:
             pass
         out.append((f, verdict))
     return out
+
+
+def ready(root):
+    """Queued items whose dependencies are done.
+
+    A dependency graph, not a handoff mechanism. The valuable part of "backend
+    done, now the frontend" is that the second item becomes eligible the moment
+    the first lands — and *who* picks it up is a routing detail. Putting the edge
+    on the board keeps the implementer from choosing its own scope, which is the
+    one authority it must not hold; the board decides what is next.
+
+    `needs: B3, B4` on a queued line is the edge. `unlocks:` is the same edge
+    written from the other end, kept because people think in both directions.
+    """
+    b = board(root)
+    done = {i["id"] for st in ("done", "verified") for i in b[st]}
+    unlocked = set()
+    for st in ("done", "verified"):
+        for i in b[st]:
+            for u in re.split(r"[,\s]+", i["notes"].get("unlocks", "")):
+                if u:
+                    unlocked.add(u)
+    out = []
+    for i in b["queued"]:
+        needs = [n for n in re.split(r"[,\s]+", i["notes"].get("needs", "")) if n]
+        # a `needs:` on a *queued* item is a dependency, not a human blocker
+        missing = [n for n in needs if n not in done and not n.startswith("(")]
+        if not missing or i["id"] in unlocked:
+            out.append({**i, "role": i["notes"].get("role", "")})
+    return out
+
+
+def review_loop(root, reviews_dir, min_repeats=3):
+    """The same finding coming back review after review.
+
+    A round budget counts rounds. It cannot see that round four's blocker is
+    round two's blocker with the line numbers moved — which is the actual
+    failure: the implementer is not converging, and more rounds will not help.
+    Fingerprint each finding on its file and its first clause, and report any
+    that recurs across consecutive NEEDS_CHANGES reviews.
+    """
+    seen = {}
+    d = os.path.join(root, reviews_dir)
+    for f, v in reviews(root, reviews_dir, limit=12):
+        if "APPROVED" in (v or "").upper():
+            break
+        try:
+            body = open(os.path.join(d, f), errors="replace").read()
+        except OSError:
+            continue
+        for m in re.finditer(r"^- \[(BLOCKER|HIGH|MEDIUM|LOW)\]\s*([^\s:]+)[:\d]*\s*[—-]\s*(.{0,60})",
+                             body, re.M):
+            key = (m.group(2), re.sub(r"\W+", " ", m.group(3).lower()).strip()[:40])
+            seen.setdefault(key, {"sev": m.group(1), "count": 0, "reviews": []})
+            seen[key]["count"] += 1
+            seen[key]["reviews"].append(f)
+    return [{"file": k[0], "clause": k[1], **v}
+            for k, v in seen.items() if v["count"] >= min_repeats]
+
+
+def note(root, cfg, to, title, body, urgent=False):
+    """Write an architect message into the mailbox through the tool.
+
+    So that a woken architect needs no raw Write or Edit to do its job. That
+    matters because the one time it had them, it used them on the orchestrator's
+    own source and built a runaway. The mailbox is the only thing an unattended
+    architect should be able to write, and this is the only door to it.
+    """
+    box = os.path.join(root, cfg.get("mailbox", "agent-mail"))
+    os.makedirs(box, exist_ok=True)
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower())[:40].strip("-") or "not"
+    kind = "ACIL" if urgent else "DECISION"
+    name = f"{time.strftime('%Y%m%d-%H%M')}-fable-to-{to}-{kind}-{slug}.md"
+    with open(os.path.join(box, name), "w") as fh:
+        fh.write(f"# {title}\n\n")
+        if urgent:
+            fh.write("## ACİL\n\n")
+        fh.write(body.rstrip() + "\n")
+    return name
 
 
 def slice_started(root):

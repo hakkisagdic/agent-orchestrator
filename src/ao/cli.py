@@ -1110,6 +1110,112 @@ def cmd_review(cfg, args):
     return 0 if verdict == "APPROVED" else 1
 
 
+def cmd_digest(cfg, args):
+    """What happened in a window — read from the ledgers, never estimated.
+
+    Event alerts answer "did something just occur". They cannot answer "is this
+    week going well", and reconstructing that from thirty notifications is asking
+    a human to do the tool's job.
+
+    It also absorbs the question people actually ask most: *why is nothing
+    moving*. That is not a separate command — it is the same facts, read at the
+    top instead of the bottom.
+    """
+    root = cfg["root"]
+    d = A.digest(root, cfg, args.days)
+    win = ("24 saat" if args.days == 1 else
+           f"{int(args.days)} gün" if args.days == int(args.days) else f"{args.days} gün")
+
+    # Lead with the blocking answer. Someone opening this at 3am wants "what is
+    # in the way", not a scoreboard.
+    impl = cfg.get("implementer") or {}
+    adapter = A.load_adapter(impl.get("adapter", "")) if impl else {}
+    state, age, doing = A.busy(cfg, adapter) if impl else ("unknown", None, "")
+    spin = A.spinning(root)
+    print(f"{C['b']}{cfg.get('project') or os.path.basename(root)}{C['reset']}"
+          f"{C['dim']}  son {win}{C['reset']}\n")
+
+    col = {"working": C["green"], "slowing": C["yellow"]}.get(state, C["red"])
+    line = f"{col}{state}{C['reset']}"
+    if age is not None:
+        line += f"{C['dim']}, son yazım {age // 60}dk önce{C['reset']}"
+    if spin:
+        line += f"  {C['red']}⚠ {spin}dk meşgul, üretim yok{C['reset']}"
+    print(f"  durum    {line}")
+    if doing:
+        print(f"  {C['dim']}↳ {doing[:110]}{C['reset']}")
+
+    if d["decisions"]["open"]:
+        print(f"\n  {C['yellow']}{d['decisions']['open']} cevap bekleyen karar{C['reset']}"
+              f"{C['dim']} — bunlar işi açar: ao decisions{C['reset']}")
+    for b in d["blocked"]:
+        print(f"  {C['red']}⊘{C['reset']} {b['id']}  {C['dim']}{b['needs'][:88]}{C['reset']}")
+
+    print(f"\n{C['b']}{C['mag']}── İNEN İŞ {'─' * 46}{C['reset']}")
+    print(f"  {C['b']}{len(d['commits'])}{C['reset']} commit"
+          f"{C['dim']}, {d['unpushed']} push'suz{C['reset']}")
+    for c in d["commits"][:args.n]:
+        print(f"    {C['dim']}{c['sha']}{C['reset']} {c['subject'][:76]}")
+
+    v, a, r = d["verifications"], d["authority"], d["reviews"]
+    print(f"\n{C['b']}{C['mag']}── KAPILAR {'─' * 46}{C['reset']}")
+    vf = f", {C['red']}{v['failed']} düştü{C['reset']}" if v["failed"] else ""
+    rc = f", {C['yellow']}{r['changes']} değişiklik{C['reset']}" if r["changes"] else ""
+    ar = f", {C['yellow']}{a['refused']} reddedildi{C['reset']}" if a["refused"] else ""
+    print(f"  doğrulama  {C['green']}{v['passed']} geçti{C['reset']}{vf}")
+    print(f"  review     {C['green']}{r['approved']} APPROVED{C['reset']}{rc}")
+    print(f"  commit-ok  {C['green']}{a['granted']} verildi{C['reset']}{ar}")
+    # A refusal repeated all week is a process problem, not an incident.
+    for reason, n in d["refusal_reasons"]:
+        if n > 1:
+            print(f"    {C['dim']}{n}× {reason}{C['reset']}")
+
+    dec = d["decisions"]
+    if dec["asked"]:
+        med = f"{dec['median_minutes']}dk" if dec["median_minutes"] is not None else "—"
+        print(f"\n  karar      {dec['answered']}/{dec['asked']} cevaplandı"
+              f"{C['dim']}, ortanca {med}{C['reset']}")
+
+    if d.get("credits"):
+        c = d["credits"]
+        pct = c["used"] / c["limit"] * 100 if c["limit"] else 0
+        cc = C["red"] if pct > 90 else C["yellow"] if pct > 70 else C["green"]
+        print(f"\n{C['b']}{C['mag']}── KREDİ {'─' * 48}{C['reset']}")
+        print(f"  {cc}{c['used']:,.0f}{C['reset']} / {c['limit']:,.0f}"
+              f"{C['dim']}  ({c['remaining']:,.0f} kaldı){C['reset']}")
+    for day, val in d["credit_days"][-args.n:]:
+        print(f"    {C['dim']}{day}{C['reset']}  {val:>8,.0f}")
+
+    al = d["alerts"]
+    print(f"\n{C['dim']}pano: " +
+          " · ".join(f"{k} {n}" for k, n in d["board"].items()) +
+          f"  |  uyarı: {al['sent']} gönderildi, {al['held']} susturuldu{C['reset']}")
+    return 0
+
+
+def cmd_note(cfg, args):
+    """Write an architect message into the mailbox — through the tool, on purpose.
+
+    A woken architect should need no raw Write or Edit to do its job. The one
+    time it had them, it used them on the orchestrator's own source and built a
+    runaway. This is the only door to the mailbox an unattended architect gets.
+    """
+    # Read stdin only when asked. Defaulting to it made `ao note "title"` hang
+    # waiting on a terminal that would never close, which is the wrong failure
+    # for a command an unattended architect calls.
+    body = args.body if args.body else (sys.stdin.read() if args.stdin else "")
+    if not args.title or not body.strip():
+        print(f"usage: {C['b']}ao note \"title\" --body \"…\" [--to kiro] [--urgent]{C['reset']}")
+        print(f"       {C['dim']}or pipe the body on stdin{C['reset']}")
+        return 1
+    name = A.note(cfg["root"], cfg, args.to, args.title, body, urgent=args.urgent)
+    print(f"{C['green']}written{C['reset']} {cfg['mailbox']}/{name}")
+    if args.urgent:
+        print(f"{C['dim']}urgent: reaches the implementer via ao lock, ao verify and "
+              f"ao commit-ok{C['reset']}")
+    return 0
+
+
 def cmd_board(cfg, args):
     """Where every pre-authorised item is, blocked ones first.
 
@@ -1127,6 +1233,16 @@ def cmd_board(cfg, args):
         return 0
     colours = {"running": C["green"], "blocked": C["red"], "queued": C["dim"],
                "verified": C["cyan"], "done": C["dim"]}
+    # Eligible work first: queued items whose `needs:` are all done. This is the
+    # dependency graph answering "what is next" without the implementer choosing
+    # its own scope.
+    rd = A.ready(root)
+    if rd:
+        print(f"\n{C['b']}{C['green']}READY{C['reset']} {C['dim']}({len(rd)}) — "
+              f"dependencies satisfied{C['reset']}")
+        for it in rd:
+            role = f"  {C['cyan']}role:{it['role']}{C['reset']}" if it.get("role") else ""
+            print(f"   {C['b']}{it['id']}{C['reset']}  {it['title']}{role}")
     for st in ("running", "blocked", "queued", "verified", "done"):
         items = b[st]
         if not items:
@@ -1669,6 +1785,17 @@ def main():
     dc = sub.add_parser("decisions", help="open and answered questions")
     dc.add_argument("-n", type=int, default=10)
     dc.set_defaults(fn=cmd_decisions)
+    dg = sub.add_parser("digest", help="what happened, read from the ledgers")
+    dg.add_argument("--days", type=float, default=1.0)
+    dg.add_argument("-n", type=int, default=6)
+    dg.set_defaults(fn=cmd_digest)
+    nt = sub.add_parser("note", help="write an architect message into the mailbox")
+    nt.add_argument("title")
+    nt.add_argument("--body")
+    nt.add_argument("--to", default="kiro")
+    nt.add_argument("--urgent", action="store_true")
+    nt.add_argument("--stdin", action="store_true", help="read the body from stdin")
+    nt.set_defaults(fn=cmd_note)
     hf = sub.add_parser("handoff", help="write and send everything a successor needs")
     hf.add_argument("--reason")
     hf.add_argument("--no-send", action="store_true")

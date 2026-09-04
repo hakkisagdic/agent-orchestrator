@@ -81,7 +81,7 @@ scope is the one authority an implementer must not have.
 |---|---|
 | `ao status` · `ao watch` | one project: state, telemetry, problems, board |
 | `ao watch --all` · `ao fleet` | every project, ordered by what needs a human first |
-| `ao board` | where each work item is, blocked ones first |
+| `ao board` | where each item is; READY = queued items whose `needs:` are done |
 | `ao verify [-p full]` | run the declared gates, record the result |
 | `ao commit-ok` | may this tree be committed? decided from evidence |
 | `ao hold` / `ao hold release --note …` | stop every agent in the tree, and keep them stopped |
@@ -90,6 +90,11 @@ scope is the one authority an implementer must not have.
 | `ao watchdog install` | launchd job that restarts a stalled agent |
 | `ao mcp serve` · `ao a2a serve` | expose state to MCP clients / as A2A tasks |
 | `ao telegram setup` | alerts to your phone, decisions back from it |
+| `ao digest [--days N]` | what happened, read from the ledgers — also answers "why is nothing moving" |
+| `ao ask` · `ao answer` · `ao decisions` | questions answerable in one tap; free text always last |
+| `ao note` | an architect message into the mailbox, through the tool |
+| `ao review` | review the tree with an actor that did not write it |
+| `ao handoff` | write and send everything a successor needs |
 | `ao a2a-mcp serve` | reach A2A agents from an MCP-only client |
 | `ao prune` | trim accumulated records and logs |
 | `ao doctor` · `ao adapters` | check the wiring; what is supported and how well |

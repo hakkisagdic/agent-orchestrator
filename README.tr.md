@@ -81,7 +81,7 @@ gereken tek yetkidir.
 |---|---|
 | `ao status` · `ao watch` | tek proje: durum, telemetri, sorunlar, pano |
 | `ao watch --all` · `ao fleet` | tüm projeler, insana en çok ihtiyaç duyan üstte |
-| `ao board` | her işin nerede olduğu, blocked olanlar başta |
+| `ao board` | her iş nerede; READY = `needs:` bağımlılıkları tamamlanmış kuyruk maddeleri |
 | `ao verify [-p full]` | tanımlı gate'leri koştur, sonucu kaydet |
 | `ao commit-ok` | bu ağaç commit edilebilir mi? kanıttan karar |
 | `ao hold` / `ao hold release --note …` | ağaçtaki tüm ajanları durdur ve durdurulmuş tut |
@@ -90,6 +90,11 @@ gereken tek yetkidir.
 | `ao watchdog install` | takılan ajanı yeniden başlatan launchd işi |
 | `ao mcp serve` · `ao a2a serve` | durumu MCP istemcilerine / A2A görevi olarak sun |
 | `ao telegram setup` | telefona uyarı, telefondan karar |
+| `ao digest [--days N]` | ne oldu, defterlerden okunur — "neden ilerlemiyor"un da cevabı |
+| `ao ask` · `ao answer` · `ao decisions` | tek dokunuşla cevaplanan sorular; serbest metin hep sonda |
+| `ao note` | kutuya mimar mesajı, araç üzerinden |
+| `ao review` | ağacı, onu yazmayan bir aktörle gözden geçir |
+| `ao handoff` | devralanın ihtiyacı olan her şeyi yaz ve gönder |
 | `ao a2a-mcp serve` | MCP-only istemciden A2A ajanlarına ulaş |
 | `ao prune` | biriken kayıt ve logları buda |
 | `ao doctor` · `ao adapters` | bağlantıları denetle; ne destekleniyor ve ne kadar |
