@@ -159,9 +159,24 @@ def all_workspaces():
 
 
 def session_paths(cfg):
+    """Transcript and metadata paths for the configured implementer.
+
+    This was hard-wired to Kiro's store, which made the watchdog Kiro-only in
+    practice: a Claude Code implementer resolved to no transcript, the watchdog
+    said "nothing to watch" and quietly never ran. The claude-code adapter
+    already declares its transcript layout; honour it.
+    """
     impl = cfg.get("implementer") or {}
-    ws, sess = impl.get("workspace_hash"), impl.get("session")
-    if not (ws and sess):
+    sess = impl.get("session")
+    if not sess:
+        return None, None
+    if impl.get("adapter") == "claude-code":
+        cwd = impl.get("cwd") or cfg.get("root", "")
+        escaped = cwd.replace("/", "-").replace(".", "-")
+        d = os.path.join(HOME, ".claude", "projects", escaped)
+        return os.path.join(d, sess + ".jsonl"), None
+    ws = impl.get("workspace_hash")
+    if not ws:
         return None, None
     d = os.path.join(HOME, ".kiro", "sessions", ws, sess)
     return os.path.join(d, "messages.jsonl"), os.path.join(d, "session.json")
