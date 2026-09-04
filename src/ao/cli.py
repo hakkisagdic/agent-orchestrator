@@ -790,6 +790,80 @@ def cmd_telegram(cfg, args):
     return 0
 
 
+def _decision_text(rec):
+    lines = [f"❓ *{rec['question']}*"]
+    if rec.get("context"):
+        lines.append(f"\n_{rec['context']}_")
+    if rec.get("slice"):
+        lines.append(f"\ndilim: `{rec['slice']}`")
+    lines.append("")
+    for o in rec["options"]:
+        lines.append(f"*{o['key']})* {o['label']}")
+    lines.append(f"\nCevap: butona bas, ya da `{rec['id']} <harf>` yaz. "
+                 f"Serbest metin için `{rec['id']} x <cevabın>`.")
+    return "\n".join(lines)
+
+
+def cmd_ask(cfg, args):
+    """Pose a decision the implementer cannot make for itself.
+
+    A blocker written as prose costs minutes to answer from a phone. The same
+    blocker as a question with options costs one tap, and that difference decides
+    whether a run survives the hours when nobody is at a desk.
+    """
+    root = cfg["root"]
+    if not args.question:
+        print(f"usage: {C['b']}ao ask \"question\" \"option a\" \"option b\" …{C['reset']}")
+        return 0
+    rec = A.ask(root, args.question, args.options or [], context=args.context,
+                slice_id=args.slice)
+    print(f"{C['b']}{rec['id']}{C['reset']}  {rec['question']}")
+    for o in rec["options"]:
+        print(f"   {C['b']}{o['key']}){C['reset']} {o['label']}")
+    try:
+        from . import telegram
+        kb = [[{"text": f"{o['key']}) {o['label'][:40]}",
+                "callback_data": f"{rec['id']}:{o['key']}"}]
+              for o in rec["options"] if not o.get("free_text")]
+        n = telegram.send(_decision_text(rec), root, keyboard=kb)
+        print(f"\n{C['dim']}sent to {n} chat(s){C['reset']}" if n else
+              f"\n{C['dim']}no phone channel configured — answer with "
+              f"`ao answer {rec['id']} <key>`{C['reset']}")
+    except Exception as e:
+        print(f"\n{C['dim']}phone delivery skipped: {e}{C['reset']}")
+    return 0
+
+
+def cmd_answer(cfg, args):
+    """Answer a pending decision from the terminal."""
+    rec = A.answer(cfg["root"], args.id, " ".join(args.value), by="terminal")
+    if not rec:
+        print(f"{C['red']}no such decision{C['reset']} {args.id}")
+        return 1
+    print(f"{C['green']}answered{C['reset']} {rec['id']}: {rec['answer']}")
+    return 0
+
+
+def cmd_decisions(cfg, args):
+    """Open and recently answered questions."""
+    rows = A.decisions(cfg["root"])
+    if not rows:
+        print(f"{C['dim']}No decisions recorded.{C['reset']}")
+        return 0
+    for r in sorted(rows, key=lambda x: x["asked_at"], reverse=True)[:args.n]:
+        age = int((time.time() - r["asked_at"]) / 60)
+        if r["state"] == "open":
+            print(f"{C['yellow']}OPEN{C['reset']}     {C['b']}{r['id']}{C['reset']}  "
+                  f"{r['question']}  {C['dim']}{age}m{C['reset']}")
+            for o in r["options"]:
+                print(f"           {C['dim']}{o['key']}){C['reset']} {o['label']}")
+        else:
+            print(f"{C['green']}answered{C['reset']} {C['b']}{r['id']}{C['reset']}  "
+                  f"{r['question']}  {C['dim']}→ {r['answer']} "
+                  f"({r.get('answered_by')}){C['reset']}")
+    return 0
+
+
 def cmd_board(cfg, args):
     """Where every pre-authorised item is, blocked ones first.
 
@@ -1336,6 +1410,19 @@ def main():
     wd.set_defaults(fn=cmd_watchdog)
 
     sub.add_parser("board", help="where each pre-authorised item is").set_defaults(fn=cmd_board)
+    ak = sub.add_parser("ask", help="pose a decision, answerable in one tap")
+    ak.add_argument("question", nargs="?")
+    ak.add_argument("options", nargs="*")
+    ak.add_argument("--context")
+    ak.add_argument("--slice")
+    ak.set_defaults(fn=cmd_ask)
+    an = sub.add_parser("answer", help="answer a pending decision")
+    an.add_argument("id")
+    an.add_argument("value", nargs="+")
+    an.set_defaults(fn=cmd_answer)
+    dc = sub.add_parser("decisions", help="open and answered questions")
+    dc.add_argument("-n", type=int, default=10)
+    dc.set_defaults(fn=cmd_decisions)
     tg = sub.add_parser("telegram", help="phone channel: alerts out, decisions in")
     tg.add_argument("action", nargs="?", default="status",
                     choices=["status", "setup", "test", "poll", "install", "uninstall"])

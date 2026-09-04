@@ -21,6 +21,7 @@ nothing else here does.
 import json
 import os
 import sys
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -104,7 +105,8 @@ def poll(root, cfg_project, seconds=25):
         offset = int(open(_offset_path()).read().strip())
     except Exception:
         offset = 0
-    r = api(cfg, "getUpdates", offset=offset or None, timeout=seconds)
+    r = api(cfg, "getUpdates", offset=offset or None, timeout=seconds,
+            allowed_updates=["message", "channel_post", "callback_query"])
     if not r.get("ok"):
         return {"error": r.get("error") or r.get("description") or "getUpdates failed"}
 
@@ -113,6 +115,30 @@ def poll(root, cfg_project, seconds=25):
     written, ignored, last = [], 0, offset
     for u in r.get("result", []):
         last = max(last, u.get("update_id", 0) + 1)
+
+        # A tapped button. This is the whole point of asking with options: the
+        # answer costs one tap, where the same blocker as prose costs minutes.
+        cq = u.get("callback_query")
+        if cq:
+            chat = str(((cq.get("message") or {}).get("chat") or {}).get("id", ""))
+            if chat not in cfg["chats"]:
+                ignored += 1
+                api(cfg, "answerCallbackQuery", callback_query_id=cq["id"],
+                    text="yetkisiz")
+                continue
+            did, _, keyv = (cq.get("data") or "").partition(":")
+            rec = A.answer(root, did, keyv,
+                           by=(cq.get("from") or {}).get("username") or chat)
+            if rec:
+                api(cfg, "answerCallbackQuery", callback_query_id=cq["id"],
+                    text=f"{keyv}) kaydedildi")
+                send(f"✅ *{rec['question']}*\n→ {rec['answer']}", root)
+                written.append(f"{did}={keyv}")
+            else:
+                api(cfg, "answerCallbackQuery", callback_query_id=cq["id"],
+                    text="karar bulunamadı")
+            continue
+
         m = u.get("message") or u.get("channel_post") or {}
         text = (m.get("text") or "").strip()
         chat = str((m.get("chat") or {}).get("id", ""))
@@ -123,6 +149,20 @@ def poll(root, cfg_project, seconds=25):
             continue
         if text.startswith("/"):
             written.append(_command(root, cfg_project, text, chat))
+            continue
+
+        # "D-123 b" or "D-123 x <free text>" answers a pending question by typing,
+        # for when a button is not in reach — an old message, a different device.
+        mm = re.match(r"^(D-\d+)\s+(\S+)\s*(.*)$", text, re.S)
+        if mm:
+            did, key, extra = mm.group(1), mm.group(2), mm.group(3).strip()
+            rec = A.answer(root, did, extra if (key.lower() == "x" and extra) else key,
+                           by=(m.get("from") or {}).get("username") or chat)
+            if rec:
+                send(f"✅ *{rec['question']}*\n→ {rec['answer']}", root)
+                written.append(f"{did}={rec.get('answer_key') or 'free'}")
+                continue
+            send(f"`{did}` diye bir karar yok.", root)
             continue
         # Everything a person types is urgent. They reached for a phone to say it.
         slug = "".join(c if c.isalnum() else "-" for c in text.lower())[:40].strip("-")
@@ -147,9 +187,11 @@ def _command(root, cfg_project, text, chat):
                        "..", "bin", "ao")
     exe = os.path.abspath(exe) if os.path.exists(exe) else "ao"
     allowed = {"status": ["status"], "board": ["board"], "credits": ["credits"],
-               "notices": ["notices", "-n", "8"], "fleet": ["fleet"]}
+               "notices": ["notices", "-n", "8"], "fleet": ["fleet"],
+               "decisions": ["decisions", "-n", "6"]}
     if cmd not in allowed:
-        send("Komutlar: /status /board /credits /notices /fleet\n"
+        send("Komutlar: /status /board /credits /notices /fleet /decisions\n\n"
+             "Bekleyen bir karara cevap: butona bas, ya da `D-123 b` yaz.\n"
              "Komut olmayan her mesaj acil karar olarak kutuya yazılır.", root)
         return f"/{cmd} (unknown)"
     try:

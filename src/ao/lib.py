@@ -1266,6 +1266,74 @@ def architect_present(cwd, idle_seconds=600):
     return bool(found and found["age"] < idle_seconds)
 
 
+DECISION_DIR = ".ao/decisions"
+
+
+def decisions(root, state=None):
+    """Open questions the implementer cannot answer for itself.
+
+    A blocker written as prose costs minutes to answer from a phone: read it,
+    work out what is being asked, type a paragraph. The same blocker written as
+    a question with options costs one tap. That difference decides whether a run
+    survives the hours when nobody is at a desk.
+    """
+    d = os.path.join(root, DECISION_DIR)
+    out = []
+    if not os.path.isdir(d):
+        return out
+    for f in sorted(os.listdir(d)):
+        if not f.endswith(".json"):
+            continue
+        try:
+            rec = json.load(open(os.path.join(d, f)))
+        except Exception:
+            continue
+        rec["id"] = f[:-5]
+        if state and rec.get("state") != state:
+            continue
+        out.append(rec)
+    return out
+
+
+def ask(root, question, options, context=None, slice_id=None):
+    """Record a question. Free text is always the last option.
+
+    Options are a convenience, never a cage: the answer that matters is often the
+    one nobody listed, and a form that cannot express it produces a wrong answer
+    chosen because it was available.
+    """
+    d = os.path.join(root, DECISION_DIR)
+    os.makedirs(d, exist_ok=True)
+    did = f"D-{int(time.time())}"
+    opts = [{"key": chr(ord('a') + i), "label": o} for i, o in enumerate(options[:8])]
+    opts.append({"key": "x", "label": "Başka (serbest metin)", "free_text": True})
+    rec = {"asked_at": int(time.time()), "question": question, "context": context,
+           "slice": slice_id, "options": opts, "state": "open",
+           "answer": None, "answered_at": None, "answered_by": None}
+    json.dump(rec, open(os.path.join(d, did + ".json"), "w"),
+              ensure_ascii=False, indent=2)
+    rec["id"] = did
+    return rec
+
+
+def answer(root, did, key_or_text, by="human"):
+    """Answer one question. Returns the updated record, or None if unknown."""
+    p = os.path.join(root, DECISION_DIR, did + ".json")
+    if not os.path.exists(p):
+        return None
+    rec = json.load(open(p))
+    chosen = next((o for o in rec["options"] if o["key"] == key_or_text.strip().lower()), None)
+    rec["answer"] = chosen["label"] if chosen and not chosen.get("free_text") \
+        else key_or_text
+    rec["answer_key"] = chosen["key"] if chosen else None
+    rec["state"] = "answered"
+    rec["answered_at"] = int(time.time())
+    rec["answered_by"] = by
+    json.dump(rec, open(p, "w"), ensure_ascii=False, indent=2)
+    rec["id"] = did
+    return rec
+
+
 def last_nudge_error(root):
     """The most recent failed nudge, if the watchdog recorded one."""
     key = os.path.basename(root.rstrip("/")) or "root"

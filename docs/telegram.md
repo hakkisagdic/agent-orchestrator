@@ -79,3 +79,26 @@ because nothing in `ao` grants those to anyone.
 Nothing degrades. `telegram.send` returns 0, the desktop notification still fires,
 the mailbox still works, and the file protocol is unchanged. This is an addition
 for people who install it, never a dependency.
+
+## Decisions: one tap instead of a paragraph
+
+```bash
+ao ask "B2 için OS kimlik deposu?" "Keychain" "DPAPI fixture" "Ertele" --slice B2
+ao decisions            # what is open, what was answered
+ao answer D-123 b       # from the terminal
+```
+
+The implementer poses its own through MCP (`ao_ask`) and reads answers with
+`ao_decisions`. On the phone the options arrive as inline buttons; a tap answers
+it. Typing `D-123 b` works too, for when the message has scrolled away, and
+`D-123 x <text>` gives the free-text answer.
+
+Free text is always the last option, appended automatically. Options are a
+convenience, never a cage: the answer that matters is often the one nobody
+listed, and a form that cannot express it produces a wrong answer chosen because
+it was available.
+
+The implementer does not get its own channel to a phone. It reports — `ao_ask`,
+or `ao_report {kind: "blocked"}` — and delivery is decided centrally. An agent
+holding its own notification pipe is a spam surface, and a channel people mute is
+worse than no channel.

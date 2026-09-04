@@ -65,6 +65,27 @@ TOOLS = [
                          "detail": {"type": "string"},
                          "needs": {"type": "string",
                                    "description": "for kind=blocked: what input would unblock it"}}}},
+    {"name": "ao_ask",
+     "description": "Ask the architect or the human a question you cannot answer "
+                    "yourself, with options. Prefer this over parking on a prose "
+                    "blocker: an options question is answerable from a phone in one "
+                    "tap, a paragraph is not. Free text is always available as a last "
+                    "option, so list what you think is likely, not everything.",
+     "inputSchema": {"type": "object", "required": ["question", "options"],
+                     "properties": {
+                         "question": {"type": "string"},
+                         "options": {"type": "array", "items": {"type": "string"},
+                                     "description": "2-8 concrete choices"},
+                         "context": {"type": "string",
+                                     "description": "what makes this a real question"},
+                         "slice": {"type": "string"}}}},
+    {"name": "ao_decisions",
+     "description": "Questions you asked and whether they have been answered. Check "
+                    "this at the start of a turn: an answered question is the thing "
+                    "that unparks a slice.",
+     "inputSchema": {"type": "object",
+                     "properties": {"state": {"type": "string",
+                                              "enum": ["open", "answered"]}}}},
     {"name": "ao_verify",
      "description": "Run the project's declared gates and record the measured result. "
                     "Expensive; disabled unless the server was started with --allow-verify.",
@@ -160,9 +181,44 @@ def call(name, args, cfg, allow_verify):
                 fh.write(args["detail"] + "\n\n")
             if args.get("needs"):
                 fh.write(f"**Needs:** {args['needs']}\n")
+        delivered = 0
+        if kind == "blocked":
+            try:
+                from . import telegram
+                delivered = telegram.send(
+                    f"⛔ *{args['summary']}*\n\n{args.get('needs') or args.get('detail') or ''}"
+                    f"\n\n_uygulayıcı takıldı; cevap yazarsan acil karar olarak düşer_",
+                    root)
+            except Exception:
+                pass
         return {"written": name_, "escalates": kind == "blocked",
+                "delivered_to_phone": delivered,
                 "note": ("the architect is woken on the next watchdog cycle"
                          if kind == "blocked" else "queued for the architect")}
+
+    if name == "ao_ask":
+        rec = A.ask(root, args["question"], args.get("options") or [],
+                    context=args.get("context"), slice_id=args.get("slice"))
+        # Delivery is decided here, not by the caller. An implementer with its own
+        # channel to a phone is a spam surface; an implementer that reports and
+        # lets the centre route is not.
+        delivered = 0
+        try:
+            from . import telegram
+            from .cli import _decision_text
+            kb = [[{"text": f"{o['key']}) {o['label'][:40]}",
+                    "callback_data": f"{rec['id']}:{o['key']}"}]
+                  for o in rec["options"] if not o.get("free_text")]
+            delivered = telegram.send(_decision_text(rec), root, keyboard=kb)
+        except Exception:
+            pass
+        return {"id": rec["id"], "options": rec["options"],
+                "delivered_to_phone": delivered,
+                "note": "park the slice and take the next queued item; check "
+                        "ao_decisions next turn"}
+
+    if name == "ao_decisions":
+        return {"decisions": A.decisions(root, args.get("state"))}
 
     if name == "ao_verify":
         if not allow_verify:
