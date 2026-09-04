@@ -25,8 +25,7 @@ import os
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import ao_lib as A  # noqa: E402
+from . import lib as A
 
 CFG = {}
 

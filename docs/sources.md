@@ -71,7 +71,7 @@ Each phase becomes one board line, so the queue holds slices, never projects:
 ```
 
 The classification is worth doing with a cheap local model and the boundary with
-an expensive one — see [ollama](../adapters/ollama.json) and [roles.md](roles.md).
+an expensive one — see [ollama](../src/ao/adapters/ollama.json) and [roles.md](roles.md).
 
 ## A plan is read, never edited
 

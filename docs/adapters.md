@@ -42,7 +42,7 @@ not the protocol.
 | Amazon Q CLI | | | | | | planned |
 
 Contributions that move a row from `planned` to `full` are the most valuable thing you
-can send this project. See [`adapters/README.md`](../adapters/README.md).
+can send this project. See [`adapters/README.md`](../src/ao/adapters/README.md).
 
 ## Two observation modes
 

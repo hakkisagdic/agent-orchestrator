@@ -16,13 +16,29 @@ başlatmak demektir. `ao` bunun yerine **yetkinin** sahibidir — ne bitti, ne i
 inebilir — ajanı olduğu yerde bırakır.
 
 ```bash
-git clone https://github.com/hakkisagdic/agent-orchestrator ~/ao
-echo 'alias ao="$HOME/ao/bin/ao"' >> ~/.zshrc && exec zsh
-cd ~/projen && ao status        # çalışan oturumu kendi bulur
+pip install agent-orchestrator      # ya da: uv tool install agent-orchestrator
+cd ~/projen && ao status            # çalışan oturumu kendi bulur
 ```
 
-Bağımlılık yok. Yalnız Python standart kütüphanesi. İlk koşudan önce yapılandırma
-gerekmez — `ao` oturumu ajanın kendi deposundan keşfeder.
+Ya da **hiçbir şey kurmadan**, macOS'un ve çoğu Linux dağıtımının zaten getirdiği
+Python ile:
+
+```bash
+git clone https://github.com/hakkisagdic/agent-orchestrator ~/ao
+echo 'alias ao="$HOME/ao/bin/ao"' >> ~/.zshrc && exec zsh
+```
+
+Bağımlılık yok, bilerek — bu araç kontrol etmediğin makinelerdeki ajanları izler ve
+bağımlılık, tam da orada eksik olabilecek şeydir. İlk koşudan önce yapılandırma
+gerekmez: `ao` oturumu ajanın kendi deposundan keşfeder.
+
+**Windows** PowerShell ile gelir, Python ile gelmez; bu yüzden `bin/ao.ps1` hiçbir şey
+kurmadan `status`, `board` ve `doctor` verir. Bilerek sınırlı bir alt küme ve öyle
+kalacak — geri kalan her şey ya karar verir, ya makineyi harcar, ya süreç öldürür, ya
+protokol konuşur; ve bunların herhangi birinin ikinci bir implementasyonu, yanlış
+olabilecek ikinci bir şeydir. Gerisi için:
+`winget install Python.Python.3.12 && pip install agent-orchestrator`.
+Script yazıldı ve gözden geçirildi ama **henüz Windows'ta koşulmadı**.
 
 > **Nereden çıktı.** Haftalarca tam olarak bu döngüyle geliştirilen 30 epic'lik
 > dayanıklı-iş-akışı ürününden çıkarıldı. Buradaki her koruma önce bir şey ters

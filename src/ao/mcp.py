@@ -16,8 +16,7 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import ao_lib as A  # noqa: E402
+from . import lib as A
 
 PROTOCOL = "2025-06-18"
 
@@ -93,11 +92,10 @@ def call(name, args, cfg, allow_verify):
         if not allow_verify:
             return {"error": "verify is disabled; start the server with --allow-verify"}
         import subprocess
-        r = subprocess.run([os.path.join(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__))), "bin", "ao"), "-C", root, "verify"]
-            + (["-p", args["profile"]] if args.get("profile") else []),
-            capture_output=True, text=True, timeout=3600)
-        return {"exit": r.returncode, "output": r.stdout[-4000:],
+        r = subprocess.run([sys.executable, "-m", "ao", "-C", root, "verify"]
+                           + (["-p", args["profile"]] if args.get("profile") else []),
+                           capture_output=True, text=True, timeout=3600)
+        return {"exit": r.returncode, "output": (r.stdout or r.stderr)[-4000:],
                 "record": A.latest_verification(root)}
     return {"error": f"unknown tool {name}"}
 

@@ -16,13 +16,28 @@ process, it drives the loop, and adopting it means restarting your work inside i
 and leaves the agent where it is.
 
 ```bash
-git clone https://github.com/hakkisagdic/agent-orchestrator ~/ao
-echo 'alias ao="$HOME/ao/bin/ao"' >> ~/.zshrc && exec zsh
-cd ~/your-project && ao status        # it finds the running session by itself
+pip install agent-orchestrator      # or: uv tool install agent-orchestrator
+cd ~/your-project && ao status      # it finds the running session by itself
 ```
 
-No dependencies. Python standard library only. Nothing to configure before the first
-run — `ao` discovers the session from the agent's own store.
+Or with nothing installed at all, using the Python macOS and most Linux distributions
+already ship:
+
+```bash
+git clone https://github.com/hakkisagdic/agent-orchestrator ~/ao
+echo 'alias ao="$HOME/ao/bin/ao"' >> ~/.zshrc && exec zsh
+```
+
+No dependencies, by choice — this watches agents on machines it does not control, and
+a dependency is a thing that can be missing exactly there. Nothing to configure before
+the first run: `ao` discovers the session from the agent's own store.
+
+**Windows** ships PowerShell and does not ship Python, so `bin/ao.ps1` covers `status`,
+`board` and `doctor` with nothing installed. It is a deliberate subset and stays one —
+everything else either takes a decision, spends the machine, kills processes or speaks
+a protocol, and a second implementation of any of those is a second thing to be wrong.
+For the rest: `winget install Python.Python.3.12 && pip install agent-orchestrator`.
+The script is written and reviewed but **not yet run on Windows**.
 
 > **Where this came from.** Extracted from a 30-epic durable-workflow product built
 > over weeks by exactly this loop. Every guard in here exists because something went

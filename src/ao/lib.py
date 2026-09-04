@@ -12,7 +12,18 @@ import time
 from datetime import datetime
 
 HOME = os.path.expanduser("~")
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Adapters ship with the package, but the documented install is still a git
+# clone plus an alias — both have to resolve. Look beside this module first, then
+# at the repository root, so neither path depends on the other existing.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(os.path.dirname(_HERE))
+
+
+def adapters_dir():
+    for cand in (os.path.join(_HERE, "adapters"), os.path.join(REPO, "adapters")):
+        if os.path.isdir(cand):
+            return cand
+    return os.path.join(_HERE, "adapters")
 
 C = {
     "reset": "\033[0m", "dim": "\033[2m", "b": "\033[1m", "green": "\033[32m",
@@ -66,7 +77,7 @@ def load_config(root):
 
 
 def load_adapter(adapter_id):
-    p = os.path.join(REPO, "adapters", f"{adapter_id}.json")
+    p = os.path.join(adapters_dir(), f"{adapter_id}.json")
     return json.load(open(p)) if os.path.exists(p) else {}
 
 
