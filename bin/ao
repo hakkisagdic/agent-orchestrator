@@ -10,6 +10,7 @@ roadmap in README.md. Commands that do not exist say so rather than pretending.
 Standard library only. Observation is strictly read-only.
 """
 import argparse
+import json
 import os
 import shutil
 import sys
@@ -318,9 +319,22 @@ def cmd_verify(cfg, args):
         results.append({"name": name, "passed": passed, "detail": detail,
                         "exit": code, "seconds": took})
 
+    # A plan the implementer edited is a plan that no longer measures anything:
+    # the work and the standard it is judged by came from the same hand. Treat it
+    # as a failed gate, because that is what it is.
+    drift = A.plan_drift(root)
+    if drift:
+        ok = False
+        print(f"\n  {C['red']}FAIL{C['reset']}  plan changed after admission: "
+              f"{', '.join(drift)}")
+        print(f"  {C['dim']}the implementer reads its plan; it does not write to it{C['reset']}")
+        results.append({"name": "plan-integrity", "passed": False,
+                        "detail": f"drifted: {','.join(drift)}", "exit": 1, "seconds": 0})
+
     revs = A.reviews(root, cfg["reviews"], limit=1)
     rec = {"id": f"V-{int(time.time())}", "at": datetime.now().isoformat(timespec="seconds"),
            "profile": profile, "by": "ao verify", "passed": ok, "gates": results,
+           "plan_drift": drift,
            "review": revs[0][0] if revs else None,
            "review_verdict": revs[0][1] if revs else None,
            "head": A.sh("git rev-parse --short HEAD", cwd=root),
@@ -365,6 +379,91 @@ def cmd_board(cfg, args):
             print(f"   {C['b']}{it['id']}{C['reset']}  {it['title']}" + (f"   {notes}" if notes else ""))
     if not any(b.values()):
         print(f"{C['dim']}Board is empty.{C['reset']}")
+    return 0
+
+
+def cmd_source(cfg, args):
+    """External work queues: what is configured, what is waiting, what may enter.
+
+    Admission is the whole point of this command. Pulling an issue is free and
+    carries no authority; a tracker item is something a person wrote, not a
+    specification anyone verified. An item enters the board only with a written
+    acceptance boundary, because the alternative — an agent inferring scope from
+    a title — is how a one-line bug fix becomes a refactor nobody asked for.
+
+    `ao` does not judge which items qualify: it has no model and no tracker
+    credential. It enforces the rule; an architect turn makes the call and writes
+    it into the inbox file.
+    """
+    root = cfg["root"]
+    sc = A.sources(root)
+    if not sc:
+        print(f"{C['yellow']}No sources configured.{C['reset']}  Create {C['b']}.ao/sources.json{C['reset']}:\n"
+              f'  {{"bound_root": "{root}", "wip_limit": 1, "refill_below": 3,\n'
+              f'   "sources": [{{"id": "linear-x", "kind": "mcp", "server": "linear",\n'
+              f'                "select": {{"team": "…", "state": "Todo"}}}}]}}')
+        return 0
+
+    files = A.inbox_files(root)
+    if args.action in ("list", "status"):
+        bd = A.board(root)
+        print(f"{C['b']}bound to{C['reset']}  {sc.get('bound_root', root)}")
+        for src in sc["sources"]:
+            sel = " ".join(f"{k}={v}" for k, v in (src.get("select") or {}).items())
+            wb = (src.get("writeback") or {})
+            wbs = (f"{C['yellow']}writes back{C['reset']}" if wb.get("enabled")
+                   else f"{C['dim']}read-only{C['reset']}")
+            print(f"  {C['b']}{src['id']}{C['reset']}  {src.get('kind','mcp')}:{src.get('server','?')}"
+                  f"  {C['dim']}{sel}{C['reset']}  {wbs}")
+        depth = len(bd["queued"])
+        low = depth < sc["refill_below"]
+        col = C["yellow"] if low else C["green"]
+        print(f"\n{C['b']}queue{C['reset']}  {col}{depth} admitted{C['reset']}"
+              f"{C['dim']} · refill below {sc['refill_below']} · wip limit {sc['wip_limit']}{C['reset']}"
+              + (f"  {C['yellow']}← needs a refill pass{C['reset']}" if low else ""))
+        print(f"{C['b']}inbox{C['reset']}  {len(bd['inbox'])} on the board, "
+              f"{len(files)} pull file(s) not yet imported")
+        return 0
+
+    # import — the only place an item crosses from "someone wrote this" to
+    # "an agent may work on it unattended"
+    if not files:
+        print(f"{C['dim']}Nothing in .ao/inbox/ to import.{C['reset']}")
+        return 0
+    admitted = held = 0
+    for f in files:
+        try:
+            doc = json.load(open(f))
+        except Exception as e:
+            print(f"{C['red']}skip{C['reset']} {os.path.basename(f)}: unreadable ({e})")
+            continue
+        err = A.binding_error(root, doc.get("bound_root"))
+        if err:
+            print(f"{C['red']}REFUSED{C['reset']} {os.path.basename(f)}: {err}")
+            continue
+        sid = doc.get("source", "?")
+        for it in doc.get("items", []):
+            iid, title = it.get("id"), it.get("title", "")
+            if not iid:
+                continue
+            if any(x["id"] == iid for st in A.BOARD_STATES for x in A.board(root)[st]):
+                continue                                  # already on the board
+            acc = (it.get("acceptance") or "").strip()
+            if acc:
+                A.board_append(root, "queued",
+                               f"- [{iid}] {title} · source: {sid} · acceptance: {acc}")
+                dg = A.plan_digest(root, iid)
+                if dg:
+                    A.record_plan(root, iid, dg)   # baseline: the plan as admitted
+                admitted += 1
+            else:
+                why = it.get("shape") or "no acceptance boundary written"
+                A.board_append(root, "inbox",
+                               f"- [{iid}] {title} · source: {sid} · needs: {why}")
+                held += 1
+        os.rename(f, f + ".imported")
+    print(f"{C['green']}{admitted} admitted{C['reset']} to queued · "
+          f"{C['yellow']}{held} held{C['reset']} in inbox (no acceptance boundary)")
     return 0
 
 
@@ -536,6 +635,9 @@ def main():
     wd.set_defaults(fn=cmd_watchdog)
 
     sub.add_parser("board", help="where each pre-authorised item is").set_defaults(fn=cmd_board)
+    sr = sub.add_parser("source", help="external work queues feeding the board")
+    sr.add_argument("action", choices=["list", "status", "import"], nargs="?", default="status")
+    sr.set_defaults(fn=cmd_source)
     sub.add_parser("projects", help="workspaces with a local agent session").set_defaults(fn=cmd_projects)
     sub.add_parser("adapters", help="adapter registry and verification status").set_defaults(fn=cmd_adapters)
     sub.add_parser("doctor", help="check this workspace's wiring").set_defaults(fn=cmd_doctor)

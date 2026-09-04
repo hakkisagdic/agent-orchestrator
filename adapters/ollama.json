@@ -1,0 +1,27 @@
+{
+  "id": "ollama",
+  "name": "Ollama (local models)",
+  "verified": "untested",
+  "kind": "model-backend",
+  "notes": "Not a coding agent. Ollama serves models; an agent adapter points at it. Listed here so a role can be assigned a local model by name, and because the economics differ enough to change which roles are worth running: no quota, no per-token cost, no network — but a smaller model and a shorter context.",
+  "serve": { "argv": ["ollama", "serve"], "default_endpoint": "http://127.0.0.1:11434" },
+  "list_models": { "argv": ["ollama", "list"] },
+  "hosts": {
+    "note": "Agents that can be pointed at an Ollama endpoint instead of a hosted provider.",
+    "opencode": "provider config; installed on this machine",
+    "aider": "--model ollama/<model>",
+    "continue": "config.json models[].provider = ollama"
+  },
+  "good_for": [
+    "normalising tracker items into the inbox schema",
+    "deduplicating and clustering issues",
+    "classifying an item's shape (slice vs project) as a first pass",
+    "summarising a transcript for a status line"
+  ],
+  "not_for": [
+    "writing acceptance boundaries — admission is a judgement call and the whole gate",
+    "implementing slices against a spec",
+    "reviewing another agent's work"
+  ],
+  "why": "The cheap roles are high-volume and low-stakes: fifty issues normalised into one schema costs a frontier model real quota and asks nothing a local model cannot do. The expensive roles are the opposite — one decision, and being wrong is costly. Splitting them is what makes an unattended queue affordable."
+}

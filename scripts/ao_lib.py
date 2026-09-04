@@ -3,6 +3,7 @@
 Standard library only, by design — see docs/surfaces.md. Nothing here writes to a
 vendor's session store; observation is strictly read-only.
 """
+import hashlib
 import json
 import os
 import re
@@ -336,7 +337,22 @@ def tool_availability(ttl=600):
     return named
 
 
-BOARD_STATES = ("running", "blocked", "queued", "verified", "done")
+BOARD_STATES = ("running", "blocked", "queued", "inbox", "verified", "done", "rejected")
+
+# A2A (Agent2Agent) task states, for the day an A2A endpoint serialises this
+# board. Kept as a table rather than adopted as the vocabulary: `inbox` and
+# `queued` are both A2A `submitted`, and `verified` has no A2A equivalent at all
+# — it is evidence gathered *before* completion, which is the distinction this
+# whole tool exists to make. Renaming our states to match would delete it.
+A2A_STATE = {
+    "inbox": "submitted",       # pulled from a source, not yet admitted
+    "queued": "submitted",      # admitted: has a written acceptance boundary
+    "running": "working",
+    "blocked": "input-required",
+    "verified": "working",      # gates passed; authority to land not yet granted
+    "done": "completed",
+    "rejected": "rejected",
+}
 
 
 def board(root):
@@ -382,6 +398,124 @@ def board(root):
         out[state].append({"id": m.group(1), "title": rest[0] if rest else "",
                            "notes": notes})
     return out
+
+
+def sources(root):
+    """.ao/sources.json — external work queues feeding this project's board.
+
+    `ao` speaks no tracker API and holds no tracker credential. The MCP client is
+    the *agent*: it pulls from Linear/Jira/GitHub with a server that already
+    exists, normalises the result to a file, and this side admits it. That keeps
+    the zero-install, file-only core intact — a tracker is an addition for people
+    who install one, never a prerequisite.
+    """
+    p = os.path.join(root, ".ao", "sources.json")
+    if not os.path.exists(p):
+        return {}
+    try:
+        cfg = json.load(open(p))
+    except Exception:
+        return {}
+    cfg.setdefault("sources", [])
+    cfg.setdefault("wip_limit", 1)
+    cfg.setdefault("refill_below", 3)
+    return cfg
+
+
+def inbox_files(root):
+    """Normalised pulls waiting to be admitted: .ao/inbox/<source-id>.json."""
+    d = os.path.join(root, ".ao", "inbox")
+    if not os.path.isdir(d):
+        return []
+    return [os.path.join(d, f) for f in sorted(os.listdir(d)) if f.endswith(".json")]
+
+
+def binding_error(root, declared):
+    """Refuse work that belongs to another project.
+
+    A source is bound to exactly one repository. Without this check a tracker
+    feeding project A can put an item on project B's board, and an agent that
+    grinds boards without reading URLs will happily implement it there. The
+    damage is silent and lands as a commit in the wrong repository, so the check
+    belongs at the boundary rather than in anyone's memory.
+    """
+    if not declared:
+        return "item file declares no bound_root"
+    if os.path.realpath(declared) != os.path.realpath(root):
+        return f"bound to {declared}, not {root}"
+    return None
+
+
+def plan_digest(root, item_id):
+    """Content hash of the plan an item is worked against, or None."""
+    base = item_id.split("/")[0]
+    p = os.path.join(root, ".ao", "plans", f"{base}.md")
+    if not os.path.exists(p):
+        return None
+    h = hashlib.sha256()
+    with open(p, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return "sha256:" + h.hexdigest()
+
+
+def plan_baseline(root):
+    """Plan hashes as they stood when each item was admitted."""
+    p = os.path.join(root, ".ao", "ledger", "plans.jsonl")
+    out = {}
+    if not os.path.exists(p):
+        return out
+    for line in open(p, errors="replace"):
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        if rec.get("item") and rec.get("digest"):
+            out[rec["item"]] = rec["digest"]
+    return out
+
+
+def plan_drift(root):
+    """Items whose plan changed after admission.
+
+    The implementer reads its plan; it does not write to it. When the document a
+    slice is measured against can be edited by the thing being measured, every
+    later check is circular. Recording the hash at admission turns that from an
+    invisible failure into a line of output.
+    """
+    base = plan_baseline(root)
+    drifted = []
+    for item, was in base.items():
+        now = plan_digest(root, item)
+        if now and now != was:
+            drifted.append(item)
+    return drifted
+
+
+def record_plan(root, item_id, digest):
+    d = os.path.join(root, ".ao", "ledger")
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "plans.jsonl"), "a") as fh:
+        fh.write(json.dumps({"item": item_id, "digest": digest,
+                             "at": int(time.time())}) + "\n")
+
+
+def board_append(root, state, line):
+    """Append one item line under `## <state>`, creating the section if needed.
+
+    Append rather than rewrite: the implementing agent edits this same file, and
+    a full rewrite would silently drop whatever it wrote between our read and our
+    write.
+    """
+    p = os.path.join(root, ".ao", "board.md")
+    text = open(p).read() if os.path.exists(p) else "# Board\n"
+    head = f"## {state}"
+    if head not in text:
+        text = text.rstrip("\n") + f"\n\n{head}\n"
+    idx = text.index(head) + len(head)
+    nl = text.index("\n", idx) + 1
+    text = text[:nl] + line.rstrip() + "\n" + text[nl:]
+    open(p, "w").write(text)
 
 
 def last_nudge_error(root):

@@ -115,3 +115,28 @@ keyflip — or do without.
 Neither tool requires the other. agent-orchestrator works fine on a single machine with
 one account; keyflip works fine without any orchestration. The integration is opt-in and
 lives behind `ao config set transport keyflip`.
+
+## Integration point 7 — MCP server definitions
+
+Once the architect pulls work from Linear, Jira or GitHub, every project and every
+agent surface needs those MCP servers configured. Done per tool, that is a config
+sprawl problem, and it is a *credential* problem — which puts it on keyflip's side
+of the boundary, not this one.
+
+keyflip already carries the mechanism:
+
+```bash
+keyflip mcpreg set linear --command … --args … --env …   # define once
+keyflip mcpreg enable linear --surface claude-code       # turn on per surface
+keyflip mcpreg list
+```
+
+`ao` therefore names a server and nothing else — `"server": "linear"` in
+`.ao/sources.json`. It stores no endpoint, no token, no command line. If the
+server is not enabled on the surface the architect runs on, the pull simply finds
+no tool, which is the correct failure: visible, and fixed in one place.
+
+Two gaps worth closing on the keyflip side rather than working around here: the
+registry is currently empty on this machine (the mechanism exists, unused), and
+`enable` targets only `claude-code` and `claude-desktop` — Kiro, Cursor, Codex and
+opencode are not yet surfaces.

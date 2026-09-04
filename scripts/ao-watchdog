@@ -9,6 +9,7 @@ have cost when a human noticed twenty minutes later.
 Guards, in order — the point is to spend nothing when spending would not help:
 
   0. Is a turn we started still running?    (pid — never make a second writer)
+  2b. Did the queue run dry rather than end? (wake the architect, not the implementer)
   1. Is the session actually idle?          (mtime)
   2. Is there open work to continue?        (mailbox / dirty tree / NEEDS_CHANGES)
   3. Is the slice over its round budget?    (if so: notify a human, never nudge)
@@ -34,6 +35,18 @@ import ao_lib as A  # noqa: E402
 
 STATE_DIR = os.path.join(A.HOME, ".ao")
 MAX_ATTEMPTS = 3
+
+# What an architect turn is for. Deliberately narrow: it refills and admits, it
+# does not implement. Admission is the step that turns "someone filed this" into
+# "an agent may work on this unattended", and it is the only step that may not
+# be delegated to whoever will do the work.
+REFILL_PROMPT = (
+    "Kuyruk boşaldı. .ao/sources.json'daki kaynaklardan yeni işleri çek, "
+    "normalize edip .ao/inbox/<source-id>.json'a yaz, sonra `ao source import` çalıştır. "
+    "Her madde için kabul sınırı yaz: dilim boyutundaysa acceptance alanını doldur; "
+    "proje boyutundaysa acceptance'ı boş bırak ve shape alanına sebebini yaz — "
+    "kabul sınırı olmayan madde inbox'ta kalır, kuyruğa girmez. "
+    "Uygulama YAPMA; yalnız çek, sınıflandır, kabul et.")
 
 
 def child_path():
@@ -227,9 +240,43 @@ def main():
         print(f"working ({int(age)}s since last write)")
         return 0
 
-    # 2 — nothing to continue
+    # 2 — nothing to continue. Before standing down, ask why: an empty board can
+    # mean "all done" or "the queue ran dry". Only the second one is actionable,
+    # and it needs the *architect*, not the implementer — refilling means pulling
+    # from a tracker and deciding what may be worked, and an implementer that
+    # chooses its own scope is the one thing this tool exists to prevent.
     reasons = open_work(cfg, root)
     if not reasons:
+        sc = A.sources(root)
+        arch = cfg.get("architect") or {}
+        depth = len(A.board(root)["queued"])
+        if sc and arch.get("argv") and depth < sc.get("refill_below", 3):
+            if args.dry_run:
+                print(f"queue low ({depth}); would wake the architect to refill")
+                return 0
+            if child_alive(st):
+                print("queue low, but a turn is still running")
+                return 0
+            argv = [x.replace("{prompt}", arch.get("prompt", REFILL_PROMPT)) for x in arch["argv"]]
+            search = child_path()
+            resolved = shutil.which(argv[0], path=search)
+            if not resolved:
+                print(f"architect command {argv[0]} not on PATH")
+                return 0
+            argv[0] = resolved
+            key = os.path.basename(root.rstrip("/")) or "root"
+            log_path = os.path.join(STATE_DIR, f"refill-{key}.log")
+            os.makedirs(STATE_DIR, exist_ok=True)
+            with open(log_path, "a") as log:
+                log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} refill ===\n")
+                log.flush()
+                proc = subprocess.Popen(argv, cwd=root, env=dict(os.environ, PATH=search),
+                                        stdout=log, stderr=subprocess.STDOUT,
+                                        start_new_session=True)
+            st.update(child_pid=proc.pid, last_refill=time.time())
+            save_state(root, st)
+            print(f"queue low ({depth} < {sc.get('refill_below', 3)}); woke the architect")
+            return 0
         print("idle, but no open work — leaving it alone")
         return 0
 
