@@ -116,3 +116,35 @@ A2A-speaking orchestrator read this board, while the loop itself runs over MCP a
 files. Bridges in the other direction exist — [a2a-mcp](https://github.com/a2anet/a2a-mcp)
 exposes remote A2A agents as MCP tools — and would let an MCP-only agent reach an
 A2A one, if that is ever needed.
+
+## MCP cannot interrupt, and pretending otherwise is the bug
+
+An A2A agent receives an inbound message and can act on it at a suitable point.
+An MCP agent cannot: tools fire only when the agent chooses to call one. So an
+urgent message sits unread until its next `ao_inbox` — a turn away, or never if it
+is stuck. No protocol design closes that gap, and the Kiro CLI offers no hook to
+close it either: `preToolUse` and `postToolUse` do not exist in the headless path.
+
+What does exist is a boundary the agent crosses on its own. It runs `ao` to take
+the machine lock, to verify, and to ask whether it may commit — all of them just
+before something expensive or irreversible. So the message travels there, in three
+tiers by how hard each one bites:
+
+| tier | surface | effect |
+|---|---|---|
+| 1 | `ao lock`, `ao verify` | prints the message before running, flushed so it precedes the subprocess |
+| 2 | every `ao_*` MCP response | attaches `URGENT_UNACKNOWLEDGED` to whatever the agent asked for |
+| 3 | `ao commit-ok` | **refuses** while any remains unacknowledged |
+
+Tier 3 is the one that actually holds. We cannot stop an agent from working, but
+we decide whether the work may land — so an unread urgent message becomes a closed
+gate rather than a missed notification. That is the same authority the tool already
+owns, pointed at a delivery problem.
+
+Only messages marked `## ACİL` / `## URGENT` travel this way. Routine coordination
+waits for the turn-start inbox check, because a channel that carries everything is
+one people learn to skim, and then tier 3 is the only tier left.
+
+When it truly must stop now, `ao hold` kills the turn. That is a real interrupt and
+it costs the in-flight work, which is why it is the last resort rather than the
+mechanism.

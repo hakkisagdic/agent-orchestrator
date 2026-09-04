@@ -350,6 +350,7 @@ def cmd_verify(cfg, args):
     import json as _json
     import subprocess
     root = cfg["root"]
+    _urgent_banner(cfg)
     gates_file = os.path.join(root, ".ao", "gates.json")
     holder = A.gate_lock_holder()
     if holder and holder.get("root") != root:
@@ -482,6 +483,11 @@ def cmd_commit_ok(cfg, args):
     held = A.hold_state(root)
     if held:
         reasons.append(f"project is held by {held.get('by')}: {held.get('reason','')}")
+    # The strongest lever available against a protocol that cannot interrupt. We
+    # cannot stop the agent working, but we decide whether the work may land — so
+    # an unacknowledged urgent message blocks the commit rather than being missed.
+    for m in A.urgent_messages(root, cfg):
+        reasons.append(f"urgent message unacknowledged: {m['id']} — {m['title']}")
     if not A.sh("git status --porcelain", cwd=root):
         reasons.append("nothing to commit")
 
@@ -534,6 +540,32 @@ def cmd_a2a(cfg, args):
     return _serve("a2a", cfg, ["--port", str(args.port)])
 
 
+def _urgent_banner(cfg):
+    """Print anything urgent before the caller does something expensive.
+
+    This is the injection point MCP cannot provide. The agent came here on its
+    own, on the way to a heavy operation, and that is the last cheap moment to
+    tell it the ground moved.
+    """
+    msgs = A.urgent_messages(cfg["root"], cfg)
+    if not msgs:
+        return msgs
+    print(f"{C['red']}{C['b']}{'━' * 62}{C['reset']}")
+    print(f"{C['red']}{C['b']}  {len(msgs)} URGENT message(s) from the architect, unacknowledged"
+          f"{C['reset']}")
+    for m in msgs:
+        print(f"{C['red']}  ·{C['reset']} {C['b']}{m['title']}{C['reset']}")
+        print(f"    {C['dim']}{m['id']}{C['reset']}")
+    print(f"{C['dim']}  Read them (ao_inbox, or the file) and acknowledge before "
+          f"continuing.{C['reset']}")
+    print(f"{C['red']}{C['b']}{'━' * 62}{C['reset']}\n")
+    # Flush before returning. The caller is about to hand the terminal to a
+    # subprocess writing straight to the fd, and buffered output would surface
+    # *after* the thing it was warning about — a warning nobody can act on.
+    sys.stdout.flush()
+    return msgs
+
+
 def cmd_lock(cfg, args):
     """Run a heavy command under the machine-wide lock.
 
@@ -558,6 +590,7 @@ def cmd_lock(cfg, args):
                if holder else f"{C['dim']}free{C['reset']}"))
         return 0
     import subprocess
+    _urgent_banner(cfg)
     if args.command and args.command[0] == "--":
         args.command = args.command[1:]
     if not args.command:

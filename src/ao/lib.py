@@ -1129,6 +1129,41 @@ def credit_usage(monthly_budget=None):
                           if monthly_budget else None)}
 
 
+URGENT_MARKERS = ("## ACİL", "## URGENT", "## DUR", "## STOP")
+
+
+def urgent_messages(root, cfg):
+    """Unacknowledged messages the implementer must see before it does anything big.
+
+    MCP cannot interrupt. Its tools fire only when the agent chooses to call them,
+    so an urgent message sits unread until the agent's next `ao_inbox` — which may
+    be a turn away, or never if it is stuck. A2A agents get an inbound push; an
+    MCP-only agent does not, and no amount of protocol design changes that.
+
+    What we do control is the boundary the agent crosses on its own: it runs `ao`
+    to take the machine lock, to verify, and to ask whether it may commit. Those
+    are precisely the moments before something expensive or irreversible, which is
+    exactly when an urgent message needs to land. So the CLI carries it.
+
+    Marked messages only. Everything routine waits for `ao_inbox`, or the channel
+    becomes noise and gets skimmed — which is how it fails.
+    """
+    box = cfg.get("mailbox", "agent-mail")
+    out = []
+    for m in mailbox(root, box):
+        if "-to-fable-" in m or "-to-architect-" in m:
+            continue                       # outbound; not for the implementer
+        try:
+            body = open(os.path.join(root, box, m), errors="replace").read(8000)
+        except OSError:
+            continue
+        upper = body.upper()
+        if any(k.upper() in upper for k in URGENT_MARKERS):
+            title = next((l for l in body.split("\n") if l.strip().startswith("# ")), m)
+            out.append({"id": m, "title": title.lstrip("# ").strip()[:120], "body": body})
+    return out
+
+
 def last_nudge_error(root):
     """The most recent failed nudge, if the watchdog recorded one."""
     key = os.path.basename(root.rstrip("/")) or "root"

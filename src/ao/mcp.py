@@ -204,6 +204,18 @@ def main():
             elif method == "tools/call":
                 p = req.get("params") or {}
                 payload = call(p.get("name"), p.get("arguments") or {}, cfg, allow_verify)
+                # Ride along on whatever the agent called. MCP has no way to push,
+                # so the next best thing is to attach the message to the next
+                # response it asks for — which costs nothing and arrives sooner
+                # than the agent's own next inbox check.
+                if isinstance(payload, dict) and p.get("name") != "ao_inbox":
+                    urgent = A.urgent_messages(cfg["root"], cfg)
+                    if urgent:
+                        payload["URGENT_UNACKNOWLEDGED"] = [
+                            {"id": u["id"], "title": u["title"]} for u in urgent]
+                        payload["URGENT_NOTE"] = (
+                            "Read these with ao_inbox and acknowledge them before "
+                            "continuing. ao commit-ok will refuse while any remain.")
                 result = {"content": [{"type": "text",
                                        "text": json.dumps(payload, ensure_ascii=False,
                                                           indent=2, default=str)}]}
