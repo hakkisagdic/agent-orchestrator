@@ -234,3 +234,27 @@ the terminal where it was written.
 current shell's, and says so plainly when steering references a tool the agent
 cannot reach. The general form is worth keeping: every instruction given to an
 agent is a dependency, and dependencies belong in the health check.
+
+## 17. The agent had already said so
+
+An implementer parked three slices and wrote a message headed "KARAR GEREKLİ" —
+decision required. Thirty-two minutes later a heuristic noticed that nothing had
+been committed for a while and raised an anomaly. The heuristic was not wrong; it
+was redundant. The agent had stated the problem in plain words at minute zero.
+
+Two mistakes, and the second one hid behind the first.
+
+The obvious one: an explicit request outranks every inference about it. A message
+from the implementer to the architect is not a symptom needing corroboration, it
+is the report. It now escalates on the next watchdog cycle — about two minutes —
+and needs no threshold at all, because there is nothing to be confident about.
+
+The subtler one: one threshold was doing two jobs. The busy-without-progress
+detector was set at twenty minutes to avoid tripping on a slow test suite, which
+is the right caution for something that *acts* — spending a turn, killing a
+process. But this detector only reports, and a false report costs a line of
+output. Conflating the two gave the worst of both: too slow to be useful, and
+still not safe enough to act on. Reporting now fires at six minutes; reaping keeps
+the conservative bound.
+
+Set thresholds by consequence, not by signal.

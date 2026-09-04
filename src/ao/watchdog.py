@@ -220,7 +220,8 @@ def escalate(root, cfg, adapter, age, args, st):
     woke = False
     for a in found:
         key = f"anomaly:{a['kind']}"
-        if A.notice_recently_sent(root, key, 3600):
+        window = 600 if a["kind"] == "decision-requested" else 3600
+        if A.notice_recently_sent(root, key, window):
             A.record_notice(root, "Voltrai: anomaly", a["kind"], sent=False, key=key)
             continue
         name = A.write_report(root, cfg, a["kind"], a["facts"])
@@ -377,6 +378,8 @@ def main():
                 notify("Voltrai: turns piling up",
                        f"{len(turns)} concurrent turns — `ao hold` to clear", root)
             return 0
+        # Reaping is an action, so it keeps the conservative bound even though
+        # reporting no longer does.
         print(f"{len(running)} process(es) alive but silent {int(age / 60)}m; reaping")
         notify("Voltrai: reaping hung turn",
                f"{len(running)} process(es) silent {int(age / 60)}m — cleaning up", root)

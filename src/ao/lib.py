@@ -590,7 +590,7 @@ def record_progress(root, cfg):
         fh.write(json.dumps(rec) + "\n")
 
 
-def spinning(root, min_minutes=20, min_samples=6):
+def spinning(root, min_minutes=6, min_samples=3):
     """Is the agent busy without producing anything?
 
     An agent stuck in an observe-and-wait loop is the hardest failure to see,
@@ -605,6 +605,13 @@ def spinning(root, min_minutes=20, min_samples=6):
 
     This exact failure cost roughly forty minutes in this project's own run,
     while the panel showed WORKING in green the entire time.
+
+    The defaults are deliberately low because of what this is used for. Reporting
+    a false positive costs a line of output; acting on one costs a turn. So the
+    *report* threshold is a few watchdog cycles, while anything that spends money
+    or kills a process keeps its own, far more conservative bound. Set one
+    threshold for both and you get the worst of each: too slow to be useful, and
+    still not safe enough to act on.
     """
     p = os.path.join(root, ".ao", "ledger", "progress.jsonl")
     if not os.path.exists(p):
@@ -879,6 +886,27 @@ def anomalies(root, cfg, adapter, age, idle_seconds):
     seven hours the last time something made it.
     """
     out = []
+
+    # An explicit request outranks every heuristic here. When the implementer
+    # writes to the architect it has already decided it is blocked, and waiting
+    # for a detector to independently notice is absurd — this project spent half a
+    # day doing exactly that while a message saying "decision required" sat
+    # unread. Fire on the next cycle, not after a threshold.
+    for m in mailbox(root, cfg.get("mailbox", "agent-mail")):
+        if "-to-fable-" not in m and "-to-architect-" not in m:
+            continue
+        try:
+            body = open(os.path.join(root, cfg.get("mailbox", "agent-mail"), m),
+                        errors="replace").read(4000)
+        except OSError:
+            continue
+        first = next((l for l in body.split("\n") if l.strip().startswith("#")), m)
+        out.append({"kind": "decision-requested",
+                    "facts": [f"the implementer wrote {m}",
+                              first.lstrip("# ").strip()[:200],
+                              "this is a request, not a symptom — it does not need "
+                              "corroborating"]})
+
     pids = agent_pids(root, adapter)
     dirty = len([l for l in sh("git status --porcelain", cwd=root).split("\n") if l.strip()])
     head = sh("git rev-parse --short HEAD", cwd=root)
