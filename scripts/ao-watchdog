@@ -9,13 +9,15 @@ have cost when a human noticed twenty minutes later.
 Guards, in order — the point is to spend nothing when spending would not help:
 
   -1. Has a human taken the tree?           (.ao/hold — overrides everything)
-  0. Is ANY agent already in this tree?     (cwd match — never make a second writer)
-  2b. Did the queue run dry rather than end? (wake the architect, not the implementer)
+  0. Is an agent already WORKING here?      (cwd match AND a moving transcript; a
+                                             process alive but long silent is hung,
+                                             and is reaped rather than waited on)
   1. Is the session actually idle?          (mtime)
   2. Is there open work to continue?        (mailbox / dirty tree / NEEDS_CHANGES)
+  2b. Did the queue run dry rather than end? (wake the architect, not the implementer)
   3. Is the slice over its round budget?    (if so: notify a human, never nudge)
   4. Is there provider quota left?          (keyflip, if installed)
-  4b. Is the provider itself degraded?      (5xx in our own nudge log)
+  4b. Is the provider itself degraded?      (5xx at the end of our own nudge log)
   5. Did the last nudge achieve anything?   (backoff, then hand over to a human)
 
 Run it from cron/launchd every couple of minutes, or once by hand.
@@ -29,6 +31,7 @@ import os
 import re
 import subprocess
 import shutil
+import signal
 import sys
 import time
 
@@ -301,11 +304,42 @@ def main():
     # processes have this repo as their cwd, and treat any of them as a writer.
     running = A.agent_pids(root, adapter)
     if running:
-        print(f"{len(running)} agent process(es) already in this tree ({running}); "
-              f"not starting another")
-        if len(running) > 4:
-            notify("Voltrai: turns piling up", f"{len(running)} agent processes in one tree — `ao hold` to clear", root)
-        return 0
+        # A process being alive is not a turn being in flight. An agent can finish
+        # its turn and never exit, and the first version of this guard treated that
+        # hung process as a writer — so one zombie blocked every future nudge for
+        # seven hours while the slice it had already finished sat uncommitted.
+        # Fixing an accumulation bug had quietly introduced a deadlock.
+        #
+        # Tell them apart by the transcript: a live turn writes to it. Silence far
+        # past the idle threshold, with a process still up, is hung, not busy.
+        if age < args.idle_minutes * 60 * 3:
+            print(f"{len(running)} agent process(es) already in this tree ({running}); "
+                  f"not starting another")
+            if len(running) > 4:
+                notify("Voltrai: turns piling up",
+                       f"{len(running)} agent processes in one tree — `ao hold` to clear",
+                       root)
+            return 0
+        print(f"{len(running)} process(es) alive but silent {int(age / 60)}m; reaping")
+        notify("Voltrai: reaping hung turn",
+               f"{len(running)} process(es) silent {int(age / 60)}m — cleaning up", root)
+        if args.dry_run:
+            print("DRY RUN: would reap", running)
+            return 0
+        for pid in running:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                pass
+        for _ in range(20):
+            if not A.agent_pids(root, adapter):
+                break
+            time.sleep(0.5)
+        for pid in A.agent_pids(root, adapter):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
 
     # 1 — still working
     if age < args.idle_minutes * 60:

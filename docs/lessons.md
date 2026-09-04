@@ -182,3 +182,31 @@ Guard against the obvious false positives. A slow test suite freezes artifacts
 for minutes — hence a floor on both duration and sample count. An agent that has
 genuinely stopped freezes the transcript too, and that is the idle guard's job,
 not this one.
+
+## 15. The fix for a pile-up became a deadlock
+
+Fifteen agent processes had accumulated in one repository because the guard
+watched only the pid of the child it had started most recently. The fix was to
+ask the OS which processes have this repo as their cwd and start nothing while
+any of them is alive.
+
+That guard then blocked every nudge for seven hours.
+
+One process had finished its turn and never exited. It used no CPU and wrote
+nothing, but it was alive, so the guard counted it as a writer — and the slice it
+had already completed, gates green and review approved, sat uncommitted until a
+human looked. The panel said IDLE. The watchdog said, correctly and uselessly,
+"1 agent process already in this tree".
+
+Being alive and doing work are different questions, and a guard that conflates
+them trades one failure for another. Both signals were already available: the
+process table says something exists, the transcript says something is happening.
+A live turn writes. A process still up after silence far past the idle threshold
+is hung, and the right response is to reap it and continue — not to keep waiting
+on it, and not to leave it for someone to find.
+
+The general shape is worth naming, because this is the second time in one night:
+a guard added to stop an agent doing something harmful will, sooner or later, stop
+it doing something necessary. Every one of them needs an answer to "what happens
+if this fires when it should not?" — and for a guard that blocks work, the answer
+has to be a way out that does not require a human to notice.
