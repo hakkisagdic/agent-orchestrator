@@ -33,12 +33,14 @@ CFG = {}
 def agent_card(base):
     root = CFG["root"]
     return {
-        "protocolVersion": "0.3.0",
+        "protocolVersion": "1.0",
         "name": f"agent-orchestrator:{CFG.get('project') or os.path.basename(root)}",
         "description": "Orchestration state for one repository: what the implementer is "
                        "doing, what is blocked and on what, and what has been measured.",
         "url": base,
         "preferredTransport": "JSONRPC",
+        "interfaces": [{"url": base, "protocolBinding": "JSONRPC",
+                        "protocolVersion": "1.0"}],
         "version": "0.1.0",
         "capabilities": {"streaming": False, "pushNotifications": False},
         "defaultInputModes": ["text/plain"],
@@ -55,22 +57,31 @@ def agent_card(base):
     }
 
 
-def tasks():
-    """Board items as A2A tasks. The id is the board id, so it is stable."""
+def tasks(v1=True):
+    """Board items as A2A tasks. The id is the board id, so it is stable.
+
+    1.0 prefixes and upper-cases every state (`input-required` becomes
+    `TASK_STATE_INPUT_REQUIRED`) and re-cases roles. Emit whichever the caller
+    asked for, keyed off the method name it used, rather than picking one and
+    making half the callers wrong.
+    """
     root = CFG["root"]
     out = []
     for state, items in A.board(root).items():
         for it in items:
             note = it["notes"]
+            a2a = A.A2A_STATE.get(state, "unknown")
+            wire = ("TASK_STATE_" + a2a.upper().replace("-", "_")) if v1 else a2a
             task = {"id": it["id"], "contextId": os.path.basename(root),
-                    "status": {"state": A.A2A_STATE.get(state, "unknown")},
+                    "status": {"state": wire},
                     "metadata": {"aoState": state, "title": it["title"], **note}}
             if state == "blocked":
-                # A2A says input-required; the useful part is *what* input.
+                # A2A calls it input-required; the useful part is *what* input.
+                part = {"text": note.get("needs") or "reason not recorded"}
+                if not v1:
+                    part["kind"] = "text"
                 task["status"]["message"] = {
-                    "role": "agent",
-                    "parts": [{"kind": "text",
-                               "text": note.get("needs") or "reason not recorded"}]}
+                    "role": "ROLE_AGENT" if v1 else "agent", "parts": [part]}
             out.append(task)
     return out
 
@@ -79,7 +90,7 @@ class Handler(BaseHTTPRequestHandler):
     def _send(self, code, payload):
         body = json.dumps(payload, ensure_ascii=False, default=str).encode()
         self.send_response(code)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Type", "application/a2a+json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -104,16 +115,18 @@ class Handler(BaseHTTPRequestHandler):
                                     "error": {"code": -32700, "message": str(e)}})
         rid, method = req.get("id"), req.get("method")
         params = req.get("params") or {}
-        if method == "tasks/list":
-            return self._send(200, {"jsonrpc": "2.0", "id": rid, "result": {"tasks": tasks()}})
-        if method == "tasks/get":
+        if method in ("ListTasks", "tasks/list"):
+            return self._send(200, {"jsonrpc": "2.0", "id": rid,
+                                    "result": {"tasks": tasks(method[0].isupper())}})
+        if method in ("GetTask", "tasks/get"):
             want = params.get("id")
-            for t in tasks():
+            for t in tasks(method[0].isupper()):
                 if t["id"] == want:
                     return self._send(200, {"jsonrpc": "2.0", "id": rid, "result": t})
             return self._send(200, {"jsonrpc": "2.0", "id": rid,
                                     "error": {"code": -32001, "message": "task not found"}})
-        if method in ("message/send", "message/stream", "tasks/cancel"):
+        if method in ("message/send", "message/stream", "tasks/cancel",
+                      "SendMessage", "SubscribeToTask", "CancelTask"):
             return self._send(200, {"jsonrpc": "2.0", "id": rid, "error": {
                 "code": -32004,
                 "message": "this endpoint is read-only: admitting work is a local decision, "

@@ -148,3 +148,46 @@ one people learn to skim, and then tier 3 is the only tier left.
 When it truly must stop now, `ao hold` kills the turn. That is a real interrupt and
 it costs the in-flight work, which is why it is the last resort rather than the
 mechanism.
+
+## Reaching A2A agents from an MCP-only client
+
+`ao a2a-mcp serve` is the other direction: remote A2A agents appear as MCP tools,
+so an implementer that speaks only MCP can discover them, send them work and
+follow the result.
+
+| tool | |
+|---|---|
+| `a2a_agents` | configured agents, and the dialect each one speaks |
+| `a2a_agent` | one agent's card and advertised skills |
+| `a2a_send` | send a message; returns the task, `input-required` included |
+| `a2a_task` | state and artifacts of a task already sent |
+| `a2a_cancel` | cancel one |
+
+Agents live in `.ao/a2a-agents.json` — a file, not an environment variable,
+because everything else here keeps state where a human can read it during an
+incident, and a registry that exists only inside a process is the one thing you
+cannot inspect when something is wrong.
+
+### Why not use the existing bridge
+
+[a2anet/a2a-mcp](https://github.com/a2anet/a2a-mcp) does this job and came first.
+It speaks A2A 0.3, and 0.3 is no longer what the specification says. 1.0 renamed
+every JSON-RPC method, re-cased the roles, prefixed every task state and changed
+the content type:
+
+| | 0.3 | 1.0 |
+|---|---|---|
+| method | `message/send`, `tasks/get` | `SendMessage`, `GetTask` |
+| role | `user` | `ROLE_USER` |
+| state | `input-required` | `TASK_STATE_INPUT_REQUIRED` |
+| content type | `application/json` | `application/a2a+json` |
+
+An 0.3-only client fails silently against a 1.0 agent; a 1.0-only client fails
+against most of what is deployed. So this reads the agent card, takes the version
+the agent declares, and speaks that dialect — trying both when a card declares
+nothing, since an omitted version is far more common than a wrong one. Callers see
+one normalised vocabulary either way.
+
+`ao a2a serve` now answers both, verified against itself through this bridge:
+`ListTasks` returns `TASK_STATE_INPUT_REQUIRED` and `tasks/list` returns
+`input-required`, from the same board.

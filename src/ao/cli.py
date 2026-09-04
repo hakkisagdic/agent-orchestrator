@@ -530,6 +530,23 @@ def cmd_mcp(cfg, args):
     return _serve("mcp", cfg, ["--allow-verify"] if args.allow_verify else [])
 
 
+def cmd_a2a_mcp(cfg, args):
+    """Expose configured A2A agents to an MCP client."""
+    if args.action != "serve":
+        reg = os.path.join(cfg["root"], ".ao", "a2a-agents.json")
+        exe = shutil.which("ao") or sys.argv[0]
+        print(f"{C['b']}Add to an MCP client's config:{C['reset']}")
+        print(json.dumps({"mcpServers": {"a2a": {
+            "command": exe, "args": ["-C", cfg["root"], "a2a-mcp", "serve"]}}}, indent=2))
+        print(f"\n{C['b']}Then register agents in {reg}:{C['reset']}")
+        print(json.dumps({"weather": {"url": "https://agent.example.com/a2a/v1",
+                                      "headers": {"Authorization": "Bearer …"}}}, indent=2))
+        print(f"{C['dim']}The dialect is read from each agent's card; set "
+              f'"version": "0.3" to pin one.{C["reset"]}')
+        return 0
+    return _serve("a2a_mcp", cfg, [])
+
+
 def cmd_a2a(cfg, args):
     """Serve this project's board as A2A tasks, on loopback."""
     if args.action != "serve":
@@ -1244,6 +1261,10 @@ def main():
     mc.add_argument("action", choices=["serve", "config"], nargs="?", default="config")
     mc.add_argument("--allow-verify", action="store_true", help="expose the gate runner too")
     mc.set_defaults(fn=cmd_mcp)
+    am = sub.add_parser("a2a-mcp", help="reach A2A agents from an MCP client (stdio)")
+    am.add_argument("action", choices=["serve", "config"], nargs="?", default="config")
+    am.set_defaults(fn=cmd_a2a_mcp)
+
     a2 = sub.add_parser("a2a", help="serve the board as A2A tasks (loopback HTTP)")
     a2.add_argument("action", choices=["serve", "info"], nargs="?", default="info")
     a2.add_argument("--port", type=int, default=8731)
