@@ -31,11 +31,26 @@ Never inject into a session that is mid-turn. Two hazards, two mitigations:
 
 | Hazard | Mitigation |
 |---|---|
-| Two writers on one session transcript | Idle guard: status **and** write-age, ANDed, before any injection. |
+| Two writers on one session transcript | Ask the OS which agent processes have this repo as their cwd. Start nothing while any of them is alive. |
 | Two writers on one working tree | Write lanes get separate git worktrees; a second write lane in the same workspace is refused. |
+| A human needs the tree | `ao hold` stops every agent in it and holds the lock; every restart path checks the lock first. |
 
-The AND is deliberate. A false "idle" corrupts a session; a false "busy" only delays a
-nudge. Bias toward delay.
+**Do not infer this from file timestamps.** That was the original design — status AND
+write-age, ANDed — and it failed twice in one night. A turn retrying a provider 5xx sits
+in backoff writing nothing, which reads exactly like a turn that ended, so the guard
+started a second turn on the same session id and the two left a rename half-applied.
+Then the fix that tracked the pid of *our own last child* missed the other fourteen:
+every nudge spawns a detached process, nothing reaps them, and fifteen live agents had
+accumulated in one repository with four still burning CPU.
+
+Measure with `pgrep -f` plus an `lsof` cwd match, and never with `ps -eo args | grep`:
+`ps` truncates long argument lists, a resume prompt is long, and a `ps`-based check
+reported one process while fifteen were running. That wrong answer was then passed to
+the implementer as a measured fact, which cost more time than the original bug.
+
+The corresponding rule for the agent: check at most once per turn, act on the answer,
+and never conclude a second writer exists from a growing diff. Your own edits land
+asynchronously — a file changing during your own turn is you.
 
 Call-return adapters avoid this entirely — a synchronous call means the orchestrator
 knows when a turn is in flight and takes a real lock instead of inferring one.
@@ -51,6 +66,22 @@ The agent that writes the code does not decide when it is good enough.
 
 Reports from implementers are usually accurate. The point is not to catch liars; it is that
 a system whose correctness depends on self-reporting has no independent check at all.
+
+`ao commit-ok` is that step made mechanical, so work can land while nobody is awake. It
+grants only when four things hold at once:
+
+- the newest verification passed, and
+- its **tree digest still matches** the working tree — a pass measured before the last
+  three edits describes a tree that no longer exists, and
+- no plan was edited after admission, and
+- the newest review is APPROVED and the project is not held.
+
+Every refusal names its missing condition so an agent can act instead of asking again,
+and every decision — granted or refused — is appended to an authority ledger with the
+evidence it rested on. The grant never covers `push`, and no configuration makes it.
+
+It decides; it does not commit. Deciding and acting stay in different hands, which is
+the only reason the decision is worth anything.
 
 ## 4. Separation of duties
 
