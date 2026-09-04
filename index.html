@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agent-orchestrator — attach to the agent you are already running</title>
+<meta name="description" content="Attach to a coding agent that is already working. No new harness, no re-planning, no restart. It watches, restarts, verifies and decides what may be committed.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◎</text></svg>">
+<style>
+:root{
+  --bg:#fbfaf8; --fg:#1a1a19; --muted:#6b6a66; --line:#e5e2dc;
+  --card:#ffffff; --accent:#b4562a; --accent-soft:#f5ede7;
+  --term-bg:#1c1b19; --term-fg:#e8e5df; --green:#5c8a4a; --red:#b8443a; --dim:#8a8781;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+  --bg:#141413; --fg:#e8e5df; --muted:#9a9791; --line:#2c2b28;
+  --card:#1c1b19; --accent:#d97a4e; --accent-soft:#2a201a;
+  --term-bg:#0e0e0d; --dim:#77746e;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);
+  line-height:1.65;-webkit-font-smoothing:antialiased}
+.wrap{max-width:860px;margin:0 auto;padding:0 24px}
+a{color:var(--accent)}
+code{font-family:var(--mono);font-size:.9em;background:var(--accent-soft);
+  padding:.15em .4em;border-radius:4px}
+
+header{padding:72px 0 48px;border-bottom:1px solid var(--line)}
+.eyebrow{font-family:var(--mono);font-size:13px;color:var(--muted);letter-spacing:.04em}
+h1{font-size:clamp(30px,5.5vw,46px);line-height:1.15;margin:14px 0 0;letter-spacing:-.02em}
+.lede{font-size:19px;color:var(--muted);margin:20px 0 0;max-width:62ch}
+.lede strong{color:var(--fg);font-weight:600}
+
+.langs{position:absolute;top:20px;right:24px;font-family:var(--mono);font-size:13px}
+.langs button{background:none;border:1px solid var(--line);color:var(--muted);
+  padding:4px 10px;border-radius:6px;cursor:pointer;font:inherit}
+.langs button[aria-pressed=true]{color:var(--fg);border-color:var(--accent)}
+
+pre.term{background:var(--term-bg);color:var(--term-fg);font-family:var(--mono);
+  font-size:12.5px;line-height:1.55;padding:20px 22px;border-radius:10px;
+  overflow-x:auto;margin:32px 0;border:1px solid var(--line)}
+pre.term .g{color:var(--green)} pre.term .r{color:var(--red)}
+pre.term .d{color:var(--dim)} pre.term .a{color:var(--accent)}
+pre.sh{background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:16px 18px;font-family:var(--mono);font-size:13px;overflow-x:auto}
+
+section{padding:56px 0;border-bottom:1px solid var(--line)}
+h2{font-size:15px;font-family:var(--mono);font-weight:600;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--muted);margin:0 0 24px}
+h3{font-size:19px;margin:0 0 6px;letter-spacing:-.01em}
+.grid{display:grid;gap:28px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.grid p{margin:0;color:var(--muted);font-size:15px}
+.rules li{margin:0 0 14px;color:var(--muted)}
+.rules li strong{color:var(--fg);font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:14.5px}
+td,th{text-align:left;padding:9px 12px 9px 0;border-bottom:1px solid var(--line);
+  vertical-align:top}
+th{font-family:var(--mono);font-size:12px;color:var(--muted);font-weight:600;
+  text-transform:uppercase;letter-spacing:.05em}
+td:first-child{font-family:var(--mono);font-size:13px;white-space:nowrap;
+  padding-right:20px}
+.pill{font-family:var(--mono);font-size:11px;padding:2px 7px;border-radius:4px;
+  background:var(--accent-soft);color:var(--accent)}
+footer{padding:44px 0 72px;color:var(--muted);font-size:14px}
+[lang-tr]{display:none}
+html[data-lang=tr] [lang-en]{display:none}
+html[data-lang=tr] [lang-tr]{display:revert}
+</style>
+</head>
+<body>
+<div class="langs">
+  <button onclick="setLang('en')" aria-pressed="true" id="b-en">EN</button>
+  <button onclick="setLang('tr')" aria-pressed="false" id="b-tr">TR</button>
+</div>
+
+<header><div class="wrap">
+  <div class="eyebrow">agent-orchestrator</div>
+  <h1><span lang-en>Point it at the agent you<br>are already running.</span
+      ><span lang-tr>Zaten çalışan ajanına<br>doğrult.</span></h1>
+  <p class="lede">
+    <span lang-en><strong>No new harness. No re-planning. No restart.</strong>
+    It attaches to a coding agent already working — in your IDE, in a terminal,
+    started by someone else — reads its state without touching it, and takes over
+    the tedious half: noticing when it stalls, running the gates, deciding what may
+    be committed, and keeping work moving while you sleep.</span>
+    <span lang-tr><strong>Yeni harness yok. Yeniden planlama yok. Yeniden başlatma yok.</strong>
+    Hâlihazırda çalışan bir kodlama ajanına iliştirir — IDE'ndeki, terminaldeki,
+    başkasının başlattığı — durumunu ona dokunmadan okur ve sıkıcı yarısını devralır:
+    takıldığını fark etmek, gate'leri koşturmak, neyin commit edilebileceğine karar
+    vermek, ve sen uyurken işi yürütmek.</span>
+  </p>
+</div></header>
+
+<section><div class="wrap">
+  <h2><span lang-en>Sixty seconds</span><span lang-tr>Altmış saniye</span></h2>
+  <pre class="sh">git clone https://github.com/hakkisagdic/agent-orchestrator ~/ao
+echo 'alias ao="$HOME/ao/bin/ao"' &gt;&gt; ~/.zshrc &amp;&amp; exec zsh
+cd ~/your-project &amp;&amp; ao status</pre>
+  <p style="color:var(--muted);font-size:15px">
+    <span lang-en>No dependencies — Python standard library only. Nothing to configure
+    first: it discovers the running session from the agent's own store.</span>
+    <span lang-tr>Bağımlılık yok — yalnız Python standart kütüphanesi. Önceden
+    yapılandırma gerekmez: çalışan oturumu ajanın kendi deposundan keşfeder.</span></p>
+
+<pre class="term"><span class="a">══════════════════════════════════════════════════════════════════</span>
+  <b>VOLTRAI</b><span class="d">   agent-orchestrator   04 Sep 03:44:44</span>
+<span class="a">══════════════════════════════════════════════════════════════════</span>
+
+<span class="g">● WORKING</span>  <span class="d">kiro · last write 0m 32s ago</span>
+  <span class="d">↳</span> closing the half-applied rename, then gates
+
+<span class="a">── QUOTA / CONTEXT ───────────────────────────────────────────────</span>
+   context  <span class="g">█████████████░░░░░░░</span> 68%
+   cost     last turn <b>99</b> credit (162 tool calls) · 5 turns
+
+<span class="r">── PROBLEMS ──────────────────────────────────────────────────────</span>
+   <span class="r">spinning</span> <span class="d">41m busy, nothing committed or changed</span>
+     <span class="d">activity is not progress — re-specify, or check for a wait loop</span>
+
+<span class="a">── REVIEWS ───────────────────────────────────────────────────────</span>
+   <span class="d">round 5/5</span>
+   2026-09-04-023522   <span class="r">NEEDS_CHANGES</span>
+
+   <b>Board:</b>   1 running · 2 blocked · 6 queued · 2 done
+     <span class="r">⊘</span> E15-close  needs: Windows signing certificate, 6 host profiles</pre>
+</div></section>
+
+<section><div class="wrap">
+  <h2><span lang-en>What it does</span><span lang-tr>Ne yapar</span></h2>
+  <div class="grid">
+    <div><h3><span lang-en>Watches</span><span lang-tr>İzler</span></h3><p>
+      <span lang-en>A live panel — and the part no other panel has: whether the agent is
+      <em>busy but producing nothing</em>. A stuck agent looks perfectly healthy.
+      Transcript growing, tool calls firing, credits burning. This compares activity
+      against artifacts and says so.</span>
+      <span lang-tr>Canlı bir panel — ve başka hiçbir panelde olmayan şey: ajan
+      <em>meşgul ama üretmiyor mu?</em> Saplanmış bir ajan sapasağlam görünür.
+      Transcript büyür, tool call'lar akar, kredi yanar. Bu, faaliyeti üretilen şeyle
+      karşılaştırır ve söyler.</span></p></div>
+    <div><h3><span lang-en>Restarts</span><span lang-tr>Yeniden başlatır</span></h3><p>
+      <span lang-en>Turn-based agents stop when a turn ends, mid-slice or not. A watchdog
+      notices and nudges — behind guards that make sure a nudge is never spent where it
+      cannot help.</span>
+      <span lang-tr>Tur-bazlı ajanlar tur bitince durur, dilim ortasında bile. Watchdog
+      fark edip dürter — dürtmenin işe yaramayacağı yerde harcanmamasını sağlayan bir
+      koruma zincirinin ardında.</span></p></div>
+    <div><h3><span lang-en>Verifies</span><span lang-tr>Doğrular</span></h3><p>
+      <span lang-en>Runs <em>your</em> gates and writes the numbers to a ledger. Not the
+      agent's report of its gates — the commands, run again, by something with no stake
+      in the result.</span>
+      <span lang-tr><em>Senin</em> gate'lerini koşturur ve sayıları deftere yazar. Ajanın
+      gate raporunu değil — komutları, yeniden, sonuçta çıkarı olmayan bir şey
+      tarafından.</span></p></div>
+    <div><h3><span lang-en>Decides</span><span lang-tr>Karar verir</span></h3><p>
+      <span lang-en>Commit authority from that evidence: gates passed, review approved,
+      plan unedited, and the measurement still describes the tree in front of it. Every
+      refusal names its missing condition. It never covers <code>push</code>.</span>
+      <span lang-tr>Commit yetkisini o kanıttan verir: gate'ler geçti, review onaylandı,
+      plan değiştirilmedi, ölçüm hâlâ önündeki ağacı tarif ediyor. Her ret eksik koşulu
+      adıyla söyler. <code>push</code>'u asla kapsamaz.</span></p></div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <h2><span lang-en>Why it is different</span><span lang-tr>Farkı ne</span></h2>
+  <p style="font-size:17px;max-width:64ch">
+    <span lang-en>Every other orchestrator <strong>owns the agent</strong>: it spawns the
+    process, drives the loop, and adopting it means restarting your work inside it.
+    This one owns the <strong>authority</strong> instead — what is finished, what is
+    good, what may land — and leaves the agent exactly where it is.</span>
+    <span lang-tr>Piyasadaki diğer orkestratörler <strong>ajanın sahibidir</strong>:
+    süreci onlar başlatır, döngüyü onlar sürer, ve benimsemek işini onların içinde
+    yeniden başlatmak demektir. Bu ise <strong>yetkinin</strong> sahibidir — ne bitti,
+    ne iyi, ne inebilir — ajanı tam olduğu yerde bırakır.</span></p>
+</div></section>
+
+<section><div class="wrap">
+  <h2><span lang-en>The rules it enforces</span><span lang-tr>Dayattığı kurallar</span></h2>
+  <p style="color:var(--muted);margin-top:-12px;font-size:15px">
+    <span lang-en>Not style preferences. Each one is a failure that cost real hours.</span>
+    <span lang-tr>Üslup tercihi değil. Her biri gerçek saatlere mal olmuş bir arıza.</span></p>
+  <ul class="rules">
+    <li><span lang-en><strong>Whoever writes the code does not verify it</strong>, and does
+      not decide it may land.</span>
+      <span lang-tr><strong>Kodu yazan doğrulamaz</strong>, ve inebileceğine karar veremez.</span></li>
+    <li><span lang-en><strong>A plan is read, never edited.</strong> When the document a
+      slice is judged against can be edited by the thing being judged, every later check
+      is circular.</span>
+      <span lang-tr><strong>Plan okunur, yazılmaz.</strong> Bir dilimin karşısında ölçüldüğü
+      belge, ölçülen şey tarafından değiştirilebiliyorsa sonraki her kontrol döngüseldir.</span></li>
+    <li><span lang-en><strong>Pulling work is not authorising it.</strong> A tracker item is
+      something a person wrote, not a specification anyone verified.</span>
+      <span lang-tr><strong>İş çekmek yetkilendirmek değildir.</strong> Takip sistemindeki
+      bir kayıt birinin yazdığı şeydir; kimsenin doğruladığı bir şartname değil.</span></li>
+    <li><span lang-en><strong>Heavy operations belong to one actor.</strong> N projects
+      running N test suites is not N times the throughput — it is one suite that no longer
+      finishes.</span>
+      <span lang-tr><strong>Ağır işler tek aktöre aittir.</strong> N proje N test suite
+      koşturmak N kat verim değil — artık hiç bitmeyen tek bir suite'tir.</span></li>
+    <li><span lang-en><strong>Authority lives in always-included context, never in a
+      mailbox.</strong> A stuck agent is exactly the agent not reading its mail.</span>
+      <span lang-tr><strong>Yetki her tura enjekte edilen bağlamda yaşar, posta kutusunda
+      değil.</strong> Tıkanmış ajan, zaten mail okumayan ajandır.</span></li>
+    <li><span lang-en><strong><code>push</code> is never granted by this tool.</strong>
+      Nor PRs, force-pushes, or hook bypasses.</span>
+      <span lang-tr><strong><code>push</code> bu araç tarafından asla verilmez.</strong>
+      PR, force-push ve hook atlama da öyle.</span></li>
+  </ul>
+</div></section>
+
+<section><div class="wrap">
+  <h2><span lang-en>Agent support</span><span lang-tr>Ajan desteği</span></h2>
+  <table>
+    <tr><th lang-en>verified</th><th lang-tr>doğrulama</th><th>adapters</th></tr>
+    <tr><td><span class="pill">full</span></td><td>kiro · claude-code · antigravity<br>
+      <span style="color:var(--muted);font-size:13px">
+      <span lang-en>every capability exercised in a production run</span>
+      <span lang-tr>her yetenek gerçek koşumda sınandı</span></span></td></tr>
+    <tr><td><span class="pill">partial</span></td><td>opencode · command-code<br>
+      <span style="color:var(--muted);font-size:13px">
+      <span lang-en>reads state, some capabilities unexercised</span>
+      <span lang-tr>durumu okur, bazı yetenekler sınanmadı</span></span></td></tr>
+    <tr><td><span class="pill">documented</span></td><td>cursor-agent<br>
+      <span style="color:var(--muted);font-size:13px">
+      <span lang-en>written from published docs, not yet run</span>
+      <span lang-tr>yayımlanmış dokümandan yazıldı, henüz koşulmadı</span></span></td></tr>
+    <tr><td><span class="pill">untested</span></td><td>codex · gemini · aider · amp ·
+      copilot · amazon-q · deepseek · qoder · ollama<br>
+      <span style="color:var(--muted);font-size:13px">
+      <span lang-en>schema present, needs a first run</span>
+      <span lang-tr>şema hazır, ilk koşumu bekliyor</span></span></td></tr>
+  </table>
+</div></section>
+
+<section><div class="wrap">
+  <h2><span lang-en>Where this came from</span><span lang-tr>Nereden çıktı</span></h2>
+  <p style="max-width:64ch">
+    <span lang-en>Extracted from a 30-epic durable-workflow product built over weeks by
+    exactly this loop. Every guard in it exists because something went wrong first: a
+    watchdog that started a second turn on one session and left a rename half-applied;
+    fifteen agent processes accumulated in one repository; a timestamp bug that made
+    live evidence look three hours stale. None of it was designed in advance —
+    <a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/lessons.md">the
+    lessons file</a> is the list.</span>
+    <span lang-tr>Haftalarca tam olarak bu döngüyle geliştirilen 30 epic'lik
+    dayanıklı-iş-akışı ürününden çıkarıldı. İçindeki her koruma önce bir şey ters
+    gittiği için var: tek oturumda ikinci tur başlatıp yeniden adlandırmayı yarım
+    bırakan bir watchdog; tek depoda biriken on beş ajan süreci; canlı kanıtı üç saat
+    bayat gösteren bir saat hatası. Hiçbiri önceden tasarlanmadı —
+    <a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/lessons.md">dersler
+    dosyası</a> listesi.</span></p>
+</div></section>
+
+<footer><div class="wrap">
+  <a href="https://github.com/hakkisagdic/agent-orchestrator">GitHub</a> ·
+  <a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/protocol.md">Docs</a> ·
+  <a href="https://github.com/hakkisagdic/keyflip">keyflip</a> ·
+  MIT
+</div></footer>
+
+<script>
+function setLang(l){
+  document.documentElement.setAttribute('data-lang', l);
+  document.documentElement.setAttribute('lang', l);
+  document.getElementById('b-en').setAttribute('aria-pressed', l==='en');
+  document.getElementById('b-tr').setAttribute('aria-pressed', l==='tr');
+  try{ localStorage.setItem('ao-lang', l); }catch(e){}
+}
+try{
+  var saved = localStorage.getItem('ao-lang');
+  if(saved) setLang(saved);
+  else if((navigator.language||'').toLowerCase().startsWith('tr')) setLang('tr');
+}catch(e){}
+</script>
+</body>
+</html>

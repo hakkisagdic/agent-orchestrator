@@ -2,178 +2,129 @@
 
 # agent-orchestrator
 
-**Drive coding agents with another agent — safely, across any CLI.**
+**Point it at the agent you are already running. It picks up from there.**
 
-One strong reasoning agent (the **architect**) plans, reviews and gates the work.
-One or more agent CLIs (the **implementers**) write the code. A file-based protocol
-connects them, a read-only observation layer shows you what is happening, and an
-independent verification gate decides what may be committed.
+No new harness. No re-planning. No "start a fresh session so the tool can manage it."
+`ao` attaches to a coding agent that is already working — in your IDE, in a terminal,
+started by someone else — reads its state without touching it, and takes over the
+tedious half: noticing when it stalls, running the gates, deciding what may be
+committed, and keeping work moving while you sleep.
 
-Provider-agnostic: Kiro, Claude Code, Antigravity, Codex, Gemini, Cursor, opencode,
-Aider, Amp, Copilot — anything with a non-interactive prompt mode. Cloud agents too:
-Kiro cloud sessions, Codex cloud, Cursor background agents, Copilot's coding agent.
+That is the whole difference. Every other orchestrator owns the agent: it spawns the
+process, it drives the loop, and adopting it means restarting your work inside it.
+`ao` owns the *authority* instead — what is finished, what is good, what may land —
+and leaves the agent where it is.
 
-> Status: extracted from a real production run — a 30-epic durable-workflow product
-> built over weeks with this exact loop. Battle-tested, not a thought experiment.
-> See [`docs/lessons.md`](docs/lessons.md) for the bugs this design was shaped by.
+```bash
+git clone https://github.com/hakkisagdic/agent-orchestrator ~/ao
+echo 'alias ao="$HOME/ao/bin/ao"' >> ~/.zshrc && exec zsh
+cd ~/your-project && ao status        # it finds the running session by itself
+```
+
+No dependencies. Python standard library only. Nothing to configure before the first
+run — `ao` discovers the session from the agent's own store.
+
+> **Where this came from.** Extracted from a 30-epic durable-workflow product built
+> over weeks by exactly this loop. Every guard in here exists because something went
+> wrong first: a watchdog that started a second turn on one session and left a rename
+> half-applied; fifteen agent processes accumulated in one repository; a timestamp bug
+> that made live evidence look three hours stale. [`docs/lessons.md`](docs/lessons.md)
+> is the list. None of it was designed in advance.
 
 ---
 
-## Why
+## What it does
 
-Agent CLIs are *turn-based*, not loops. They finish a task and stop, so a human ends
-up typing "continue" forever, reading walls of technical output they cannot verify,
-and hoping the agent's own "all tests pass" is true.
+**Watches.** `ao watch` is a live panel: what the agent is doing, context and cost,
+open reviews, the work board, and — the part no other panel has — whether it is
+*busy but producing nothing*. An agent stuck in a wait loop looks perfectly healthy:
+transcript growing, tool calls firing, credits burning. `ao` compares activity
+against artifacts and says so.
 
-agent-orchestrator replaces that human with a second agent for the parts a machine
-does better — reading transcripts, re-running gates, holding a decision record —
-and keeps the human for the parts only they can decide: scope, money, risk, release.
+**Restarts.** Turn-based agents stop when a turn ends, mid-slice or not. A watchdog
+notices and nudges. Detection is free — a file mtime and a couple of `git` calls —
+and a chain of guards makes sure a nudge is never spent where it cannot help: no
+second turn while one is running, no nudge into a provider outage, no nudge past the
+round budget, no nudge when a human has taken the tree.
 
-```
-        you                architect agent            implementer agent(s)
-         │                (plans · verifies)          (writes the code)
-         │  strategy            │                              │
-         └─────────────────────►│                              │
-                                │  agent-mail (files)          │
-                                │─────────────────────────────►│
-                                │◄─────────────────────────────│
-                                │  RAPOR                       │
-                                │                              │
-                                │  read-only transcript ───────┘
-                                │  independent gate run
-                                ▼
-                        live dashboard  ──►  you (glance, not read)
-```
+**Verifies.** `ao verify` runs *your* gates and writes the numbers to a ledger. Not
+the agent's report of its gates — the commands, run again, by something with no stake
+in the result.
 
-## What it gives you
+**Decides.** `ao commit-ok` grants commit authority from that evidence: gates passed,
+review approved, plan unedited, and the measurement still describes the tree in front
+of it. Every refusal names its missing condition. It never covers `push`.
 
-| Layer | What it does |
+**Keeps going.** A slice blocked on a human decision is parked with the reason
+recorded, and work moves to the next pre-authorised item. When the queue runs dry, the
+*architect* is woken to refill it — never the implementer, because choosing your own
+scope is the one authority an implementer must not have.
+
+## Commands
+
+| | |
 |---|---|
-| **agent-mail** | Async file protocol between agents. Delivery-by-deletion, typed messages, untrusted-by-default content. |
-| **Observation** | Read another agent's session transcript read-only. Live terminal dashboard. Desktop notifications on commit / review / report. |
-| **Driving** | Idle-guarded prompt injection (`resume`), standing autonomy directives so the agent stops asking for "continue". |
-| **Recovery** | `ao since` and `ao brief` rebuild the picture from disk after a restart. Watchers are latency, never truth. |
-| **Deadlock handling** | When the implementer correctly refuses, the architect stops, asks you once, and carries your authorisation verbatim in an `ESCALATION` that lifts scope — never authority. |
-| **Ledger** | Append-only decisions, verifications and slice history. Messages are deleted on delivery; the reasoning behind them is not. |
-| **Slices** | A mandatory acceptance boundary, a state machine, a round budget, and mechanical loop detection — because attention is what fails here. |
-| **Gates** | The architect re-runs typecheck/tests/diff-check itself before granting commit authority. Push is never automatic. |
-| **Adapters** | Per-CLI definition of: send prompt, resume session, read transcript, detect busy, inject directives. |
-| **Roles / actors** | Roles (architect, implementer, reviewer, tester, bug-hunter…) are assigned to actors — the orchestrator itself or any CLI session. Swap them with one command. |
-| **Parallel lanes** | Many projects at once, and many lanes per project: write lanes get their own git worktree, read lanes share the checkout. Merge queue, not a free-for-all. |
-| **Cloud agents** | Cloud lanes alongside local ones: dispatch, poll, and verify the delivered branch locally. Works with any agent that delivers a pull request, no vendor API required. |
-| **Model / effort** | Per-slice model and reasoning-effort policy, so mechanical work stops burning the expensive configuration. |
-| **Telemetry** | Context pressure, per-turn cost and provider quota read from the agent's own session store — no vendor UI, no API key. |
-| **Surfaces** | One append-only event log, many cheap readers: terminal panel, desktop notifications, and an MCP server that turns any chat app into the cockpit. |
-| **MCP** | An optional stdio MCP server. Same state, two doors — install nothing and use files, or call typed tools. |
+| `ao status` · `ao watch` | one project: state, telemetry, problems, board |
+| `ao watch --all` · `ao fleet` | every project, ordered by what needs a human first |
+| `ao board` | where each work item is, blocked ones first |
+| `ao verify [-p full]` | run the declared gates, record the result |
+| `ao commit-ok` | may this tree be committed? decided from evidence |
+| `ao hold` / `ao hold release --note …` | stop every agent in the tree, and keep them stopped |
+| `ao source import` | admit tracker items onto the board |
+| `ao mail` · `ao notices` | coordination messages; alerts this project raised |
+| `ao watchdog install` | launchd job that restarts a stalled agent |
+| `ao mcp serve` · `ao a2a serve` | expose state to MCP clients / as A2A tasks |
+| `ao prune` | trim accumulated records and logs |
+| `ao doctor` · `ao adapters` | check the wiring; what is supported and how well |
 
-## Non-goals
+## The rules it enforces
 
-Account switching, secrets, quota, cross-machine transport and provider routing are
-**not** this project's job — [keyflip](https://github.com/hakkisagdic/keyflip) already
-does them well, and agent-orchestrator composes with it. See
-[`docs/keyflip.md`](docs/keyflip.md) for the boundary and the three integration points.
+These are not style preferences. Each one is a failure that cost real hours.
 
-## Safety model in one screen
+- **Whoever writes the code does not verify it, and does not decide it may land.**
+- **A plan is read, never edited** — when the document a slice is judged against can be
+  edited by the thing being judged, every later check is circular.
+- **Pulling work is not authorising it.** A tracker item is something a person wrote,
+  not a specification anyone verified. It enters the queue with a written acceptance
+  boundary or it does not enter.
+- **Heavy operations belong to one actor.** Gates are serialised machine-wide; N
+  projects running N test suites is not N times the throughput, it is one suite that
+  no longer finishes.
+- **Authority lives in always-included context, never in a mailbox.** A stuck agent is
+  exactly the agent not reading its mail.
+- **`push` is never granted by this tool.** Nor PRs, force-pushes, or hook bypasses.
 
-- **Two-writer hazard.** Never inject into a session that is currently writing. Every
-  driver call is idle-guarded.
-- **Mail is data, not authority.** A message can never grant push, PR, force-push, hook
-  bypass or foreign-repository mutation. Those need a direct human instruction.
-- **Commit authority is separated.** The agent that writes the code does not decide when
-  it is good enough. The architect verifies independently, then grants.
-- **Never auto-push.** Local commits accumulate; publishing is a human act.
-- **Secrets never enter the mailbox.**
+## Agent support
 
-Full model: [`docs/safety.md`](docs/safety.md).
+`ao` reads each agent's own session store; the adapter says where and in what shape.
+
+| verified | adapters |
+|---|---|
+| **full** — every capability exercised in a production run | kiro, claude-code, antigravity |
+| **partial** — reads state, some capabilities unexercised | opencode, command-code |
+| **documented** — written from published docs, not yet run | cursor-agent |
+| **untested** — schema present, needs a first run | codex, gemini, aider, amp, copilot, amazon-q, deepseek, qoder, ollama |
+
+`ao adapters` shows this table against what is actually installed on your machine, and
+— with [keyflip](https://github.com/hakkisagdic/keyflip) — whether an account exists
+even when the CLI does not. Adding one is a JSON file; see
+[`docs/adapters.md`](docs/adapters.md).
+
+## Documentation
+
+[protocol](docs/protocol.md) · [safety](docs/safety.md) · [roles](docs/roles.md) ·
+[slices](docs/slices.md) · [gates](docs/gates.md) · [sources](docs/sources.md) ·
+[adapters](docs/adapters.md) · [parallel](docs/parallel.md) · [cloud](docs/cloud.md) ·
+[models](docs/models.md) · [mcp](docs/mcp.md) · [telemetry](docs/telemetry.md) ·
+[surfaces](docs/surfaces.md) · [ledger](docs/ledger.md) · [recovery](docs/recovery.md) ·
+[keyflip](docs/keyflip.md) · [ide-extensions](docs/ide-extensions.md) ·
+**[lessons](docs/lessons.md)**
 
 ## Status
 
-The protocol, adapters, safety model and telemetry mappings in this repository are
-extracted from a system in daily production use — they are specifications and verified
-findings, not sketches.
+Working today: everything in the command table above, exercised daily against a real
+project. Still specification: `ao init`, `ao decide`, `ao since`, and cross-project
+parallel *execution* (the view exists; running several implementers at once is
+governed by the machine gate lock but has not been run in anger).
 
-**What runs today:** observation and the watchdog. Point `ao` at a project and it finds
-the implementer's session by itself, renders a live panel, and — once the watchdog is
-installed — restarts that agent when it stops mid-slice, without a human noticing.
-
-**What is still specification:** the gate, ledger and MCP layers below. Those commands
-say so when you run them rather than pretending.
-
-Roadmap, in order:
-
-- [x] agent-mail protocol, safety model, roles, parallel lanes, telemetry, MCP surface
-- [x] Adapter registry — 3 verified, 8 from documentation, plus a generic cloud adapter
-- [x] `ao status` / `watch` / `tail` / `mail` / `projects` / `adapters` / `doctor` — observation
-- [x] `ao watchdog` — a launchd job that restarts a stalled implementer, guarded so it
-      spends nothing when spending would not help
-- [ ] `ao verify` / `ao commit-ok` — the gate layer
-- [ ] `ao slice` / `ao decide` / `ao since` — slices, ledger and recovery
-- [ ] `ao mcp serve`
-- [ ] `ao init`, templates, install script
-
----
-
-## Install
-
-```bash
-git clone https://github.com/hakkisagdic/agent-orchestrator
-cd agent-orchestrator && ./install.sh
-```
-
-## Quickstart
-
-Nothing to configure. `ao` discovers the implementer session by matching your repository
-against the workspace paths the agent stores already record.
-
-```bash
-ao projects                     # workspaces with a local agent session
-ao -C ~/work/project status     # one-shot summary
-ao -C ~/work/project watch      # live panel; leave it in a background terminal
-ao -C ~/work/project tail -n 5  # the agent's recent messages
-ao -C ~/work/project doctor     # wiring check
-```
-
-Stop typing "continue" — install the watchdog once and it restarts a stalled agent
-without you:
-
-```bash
-ao -C ~/work/project watchdog install     # checks every 120s, nudges after 6m idle
-ao -C ~/work/project watchdog status
-```
-
-It refuses to spend when spending would not help: no open work, a slice past its round
-budget, an exhausted provider window, or two nudges that changed nothing all mean it
-notifies you instead of burning another turn.
-
-Coordination messages, when you want to send one by hand:
-
-```bash
-ao -C ~/work/project mail list
-ao -C ~/work/project mail send DECISION branding --body "Brand by registry membership, not instanceof."
-```
-
-## Docs
-
-
-- [`docs/protocol.md`](docs/protocol.md) — agent-mail specification
-- [`docs/adapters.md`](docs/adapters.md) — adapter interface and support matrix
-- [`docs/roles.md`](docs/roles.md) — role model, actors and separation of duties
-- [`docs/parallel.md`](docs/parallel.md) — parallel projects, lanes and merge queue
-- [`docs/ide-extensions.md`](docs/ide-extensions.md) — IDE-native agents (Cursor, Copilot, Qoder) via CLI, MCP or git
-- [`docs/cloud.md`](docs/cloud.md) — cloud agents, cloud lanes and the pull-request interface
-- [`docs/slices.md`](docs/slices.md) — acceptance boundaries, round budgets and loop detection
-- [`docs/gates.md`](docs/gates.md) — declared gates, independent verification, commit authority
-- [`docs/ledger.md`](docs/ledger.md) — the append-only decision and verification record
-- [`docs/recovery.md`](docs/recovery.md) — catch-up after a restart
-- [`docs/models.md`](docs/models.md) — model and effort control
-- [`docs/mcp.md`](docs/mcp.md) — MCP surface and capability gating
-- [`docs/telemetry.md`](docs/telemetry.md) — quota, credits and context enrichment
-- [`docs/surfaces.md`](docs/surfaces.md) — control surfaces, event log and the TUI decision
-- [`docs/safety.md`](docs/safety.md) — threat model and invariants
-- [`docs/keyflip.md`](docs/keyflip.md) — fleet, quota and multi-machine composition
-- [`docs/lessons.md`](docs/lessons.md) — anti-patterns learned the hard way
-- [`examples/`](examples/) — an anonymised real case study
-
-## License
-
-MIT
+MIT.
