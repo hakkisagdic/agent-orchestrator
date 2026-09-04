@@ -540,6 +540,72 @@ def board_append(root, state, line):
     open(p, "w").write(text)
 
 
+def record_progress(root, cfg):
+    """One line per watchdog check: what actually moved.
+
+    Cheap by construction — the watchdog already runs, and this is a git call
+    plus an append. The point is to have *history* of the artifacts, because a
+    single snapshot cannot tell activity from progress.
+    """
+    msgs, _ = session_paths(cfg)
+    rec = {"at": int(time.time()),
+           "head": sh("git rev-parse --short HEAD", cwd=root),
+           "dirty": len([l for l in sh("git status --porcelain", cwd=root).split("\n") if l.strip()]),
+           "size": os.path.getsize(msgs) if msgs and os.path.exists(msgs) else 0}
+    d = os.path.join(root, ".ao", "ledger")
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, "progress.jsonl")
+    try:
+        with open(p) as fh:
+            last = fh.readlines()[-1:]
+        if last:
+            prev = json.loads(last[0])
+            if (prev.get("head"), prev.get("dirty"), prev.get("size")) == \
+               (rec["head"], rec["dirty"], rec["size"]):
+                return                                # nothing changed; do not log noise
+    except Exception:
+        pass
+    with open(p, "a") as fh:
+        fh.write(json.dumps(rec) + "\n")
+
+
+def spinning(root, min_minutes=20, min_samples=6):
+    """Is the agent busy without producing anything?
+
+    An agent stuck in an observe-and-wait loop is the hardest failure to see,
+    because every health signal is green: the transcript grows, tool calls fire,
+    cost accrues. The watchdog never questions "working". What separates five
+    productive turns from five turns of re-checking whether the tree is stable is
+    not activity — it is whether any artifact moved.
+
+    So compare the two directly: transcript growing (busy) while HEAD and the
+    dirty-file count hold still (nothing produced), sustained long enough that a
+    slow gate cannot explain it. Returns minutes spent spinning, or None.
+
+    This exact failure cost roughly forty minutes in this project's own run,
+    while the panel showed WORKING in green the entire time.
+    """
+    p = os.path.join(root, ".ao", "ledger", "progress.jsonl")
+    if not os.path.exists(p):
+        return None
+    recs = []
+    for line in open(p, errors="replace"):
+        try:
+            recs.append(json.loads(line))
+        except Exception:
+            continue
+    recs = recs[-40:]
+    if len(recs) < min_samples:
+        return None
+    head, dirty = recs[-1].get("head"), recs[-1].get("dirty")
+    run = [r for r in reversed(recs) if r.get("head") == head and r.get("dirty") == dirty]
+    if len(run) < min_samples:
+        return None
+    grew = run[0].get("size", 0) > run[-1].get("size", 0)      # transcript still moving
+    span = (run[0]["at"] - run[-1]["at"]) / 60
+    return int(span) if grew and span >= min_minutes else None
+
+
 def last_nudge_error(root):
     """The most recent failed nudge, if the watchdog recorded one."""
     key = os.path.basename(root.rstrip("/")) or "root"

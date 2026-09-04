@@ -145,3 +145,40 @@ directory instead of the project.
 **Fix:** never treat `$HOME` as a project root, and take an explicitly given path at
 face value. Asking for a directory and silently being given its parent is never what
 the caller meant.
+
+## 14. Activity is not progress, and the panel showed only activity
+
+An implementer spent roughly forty minutes waiting for a "second writer" to stop
+editing the tree. There was no second writer. An earlier incident had produced a
+real one, and afterwards the agent matched every observed change against that
+pattern — including its own writes landing between its own reads. The stability
+window it was waiting for could never close, because the thing it was waiting for
+was itself.
+
+Nothing caught it. The watchdog watches for idleness, and the agent was not idle:
+transcript growing, tool calls firing, credits accruing. Every signal in the panel
+was green for the entire forty minutes. `WORKING` is the one state the guard chain
+never questions.
+
+Two failures, and only one of them was the agent's:
+
+- **The tool measured the wrong thing.** Five productive turns and five turns of
+  re-checking whether the tree is stable look identical if you only count
+  activity. What separates them is whether any artifact moved.
+- **A timestamp bug hid the evidence.** Transcripts store UTC; the panel header
+  showed local. A message written thirty seconds earlier rendered three hours
+  stale, and the architect reading the panel concluded the messages were old
+  history rather than a live incident. In an observation tool, a clock error is
+  not cosmetic — it inverts the reading.
+
+The fix is to compare the two signals directly rather than trusting either. The
+watchdog already runs every couple of minutes, so it appends what it sees — HEAD,
+dirty-file count, transcript size. Transcript growing while HEAD and the dirty
+count hold still, sustained past any plausible gate, is spinning. It notifies and
+deliberately does not nudge: a nudge adds a turn to a loop that is already
+spending them.
+
+Guard against the obvious false positives. A slow test suite freezes artifacts
+for minutes — hence a floor on both duration and sample count. An agent that has
+genuinely stopped freezes the transcript too, and that is the idle guard's job,
+not this one.

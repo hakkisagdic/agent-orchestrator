@@ -110,8 +110,14 @@ def render(cfg, msg_count=8, width=None, max_lines=None):
     if impl:
         nudge_err = A.last_nudge_error(root)
         errs = A.recent_errors(recs, 2, adapter)
-        if nudge_err or errs:
+        spin = A.spinning(root)
+        if nudge_err or errs or spin:
             a(f"\n{C['b']}{C['red']}── PROBLEMS {'─' * max(0, w - 13)}{C['reset']}")
+            if spin:
+                a(f"   {C['red']}spinning{C['reset']} {C['dim']}{spin}m busy, nothing committed "
+                  f"or changed{C['reset']}")
+                a(f"     {C['dim']}activity is not progress — re-specify, split, or check for "
+                  f"a wait loop{C['reset']}")
             if nudge_err:
                 mins = int((time.time() - nudge_err.get("at", 0)) / 60)
                 a(f"   {C['red']}restart failed{C['reset']} {C['dim']}{mins}m ago · "
@@ -204,7 +210,11 @@ def cmd_watch(cfg, args):
     try:
         while True:
             size = shutil.get_terminal_size((120, 40))
-            out = render(cfg, args.messages, size.columns, size.lines - 2)
+            if getattr(args, "all", False):
+                lines = render_fleet(size.columns)
+                out = "\n".join(lines[:max(4, size.lines - 2)])
+            else:
+                out = render(cfg, args.messages, size.columns, size.lines - 2)
             sys.stdout.write("\033[H\033[J" + out +
                              f"\n{C['dim']}  every {args.interval}s · Ctrl+C to exit{C['reset']}")
             sys.stdout.flush()
@@ -214,6 +224,72 @@ def cmd_watch(cfg, args):
     finally:
         sys.stdout.write("\033[?25h\033[?1049l")  # cursor back, restore scrollback
         sys.stdout.flush()
+
+
+def _fleet_rows():
+    """One row per workspace with a local agent session."""
+    rows = []
+    for ws in A.all_workspaces():
+        root = ws["path"]
+        try:
+            cfg = A.load_config(root)
+        except Exception:
+            continue
+        impl = cfg.get("implementer") or {}
+        adapter = A.load_adapter(impl.get("adapter", "")) if impl else {}
+        state, age, desc = A.busy(cfg, adapter) if impl else ("unknown", None, "")
+        bd = A.board(root)
+        g = A.git_state(root)
+        rows.append({"name": cfg.get("project") or os.path.basename(root), "root": root,
+                     "state": state, "age": age, "desc": desc,
+                     "queued": len(bd["queued"]), "blocked": len(bd["blocked"]),
+                     "running": len(bd["running"]), "dirty": len(g["dirty"]),
+                     "mail": len(A.mailbox(root, cfg["mailbox"])),
+                     "spin": A.spinning(root),
+                     "sources": bool(A.sources(root))})
+    # what needs a human first: spinning, then blocked, then idle
+    rows.sort(key=lambda r: (r["spin"] is None, r["blocked"] == 0, r["state"] != "idle"))
+    return rows
+
+
+def render_fleet(width=None):
+    w = min(width or shutil.get_terminal_size((120, 40)).columns, 130)
+    L = [f"{C['b']}{C['cyan']}{'═' * w}{C['reset']}",
+         f"{C['b']}  ALL PROJECTS{C['reset']}{C['dim']}   agent-orchestrator   "
+         f"{datetime.now():%d %b %H:%M:%S}{C['reset']}",
+         f"{C['b']}{C['cyan']}{'═' * w}{C['reset']}"]
+    rows = _fleet_rows()
+    if not rows:
+        L.append(f"\n{C['dim']}No workspaces with a local agent session.{C['reset']}")
+        return L
+    for r in rows:
+        dot, col = {"working": ("●", C["green"]), "slowing": ("◐", C["yellow"]),
+                    "idle": ("○", C["red"])}.get(r["state"], ("?", C["dim"]))
+        agestr = f"{r['age'] // 60}m" if r["age"] is not None else "—"
+        flags = []
+        if r["spin"]:
+            flags.append(f"{C['red']}spinning {r['spin']}m{C['reset']}")
+        if r["blocked"]:
+            flags.append(f"{C['red']}{r['blocked']} blocked{C['reset']}")
+        if r["mail"]:
+            flags.append(f"{C['cyan']}{r['mail']} mail{C['reset']}")
+        if not r["sources"]:
+            flags.append(f"{C['dim']}no source{C['reset']}")
+        L.append(f"\n {col}{dot}{C['reset']} {C['b']}{r['name'][:22]:<22}{C['reset']}"
+                 f"{C['dim']}{r['state']:<8} {agestr:>4}{C['reset']}  "
+                 f"q{r['queued']} r{r['running']} "
+                 f"{C['dim']}·{C['reset']} {r['dirty']} dirty"
+                 + ("   " + "  ".join(flags) if flags else ""))
+        if r["desc"]:
+            for ln in textwrap.wrap(r["desc"], w - 8)[:1]:
+                L.append(f"     {C['dim']}↳ {ln}{C['reset']}")
+    return L
+
+
+def cmd_fleet(cfg, args):
+    for ln in render_fleet():
+        print(ln)
+    return 0
 
 
 def cmd_tail(cfg, args):
@@ -611,7 +687,10 @@ def main():
     w = sub.add_parser("watch", help="live panel; leave it in a background terminal")
     w.add_argument("-i", "--interval", type=int, default=15)
     w.add_argument("-m", "--messages", type=int, default=8)
+    w.add_argument("--all", action="store_true", help="one row per project instead of one panel")
     w.set_defaults(fn=cmd_watch)
+
+    sub.add_parser("fleet", help="one-shot view of every project").set_defaults(fn=cmd_fleet)
 
     t = sub.add_parser("tail", help="recent messages from the implementer's transcript")
     t.add_argument("-n", type=int, default=5)

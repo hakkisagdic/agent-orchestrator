@@ -225,6 +225,18 @@ def main():
     age = time.time() - os.path.getmtime(msgs)
     size = os.path.getsize(msgs)
     st = load_state(root)
+    A.record_progress(root, cfg)      # history of what moved, for the spin check
+
+    # An agent that is busy and producing nothing never trips the idle guard, so
+    # check it before the guard chain rather than inside it. Notify only; a nudge
+    # would add a turn to a loop that is already spending them.
+    spin = A.spinning(root)
+    if spin and time.time() - st.get("last_spin_notice", 0) > 1800:
+        notify("Voltrai: agent spinning",
+               f"{spin}m busy, nothing committed or changed — needs re-specifying")
+        st["last_spin_notice"] = time.time()
+        save_state(root, st)
+        print(f"spinning: {spin}m active with no artifact change")
 
     # 0 — a turn we started is still running. This guard is not an optimisation:
     # skipping it makes two writers of one working tree. See child_alive().
