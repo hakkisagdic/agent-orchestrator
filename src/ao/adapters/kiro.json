@@ -173,5 +173,14 @@
       "verified": true,
       "note": "Structural verdict on every tool result. Never text-match for 'error' or 'failed' — the agent's own search patterns and passing test names contain both."
     }
+  },
+  "billing": {
+    "unit": "credit",
+    "reset_day": 1,
+    "note": "Kiro's period always starts on the 1st. Other providers renew on the subscription date, so this belongs to the adapter rather than to a flag the user has to remember per tool.",
+    "usage_source": "transcript",
+    "usage_reading": "peak-per-turn",
+    "usage_note": "usage_summary reports the running total of the turn in progress; a turn costs the peak it reached before the next turn resets it. Summing every record over-counts ~50x, taking the last under-counts.",
+    "balance": "none — no endpoint; KIRO_API_KEY authenticates the CLI, it is not a REST credential. Local totals are a floor."
   }
 }

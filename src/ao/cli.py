@@ -592,7 +592,13 @@ def cmd_credits(cfg, args):
         print(f"{C['dim']}No local sessions with usage records.{C['reset']}")
         return 0
     budget = args.budget
-    reset = max(1, min(28, args.reset_day))
+    # The renewal day belongs to the provider, not to whoever is typing. Kiro
+    # renews on the 1st; others renew on the subscription date, and a user should
+    # not have to remember which is which per tool.
+    impl = cfg.get("implementer") or {}
+    adapter = A.load_adapter(impl.get("adapter", "")) if impl else {}
+    reset = args.reset_day or (adapter.get("billing") or {}).get("reset_day") or 1
+    reset = max(1, min(28, int(reset)))
 
     # Cut the daily series where the subscription renews, not where the calendar
     # does. A period that starts on the 6th makes calendar months meaningless, and
@@ -1171,7 +1177,7 @@ def main():
     sub.add_parser("board", help="where each pre-authorised item is").set_defaults(fn=cmd_board)
     cr = sub.add_parser("credits", help="credit spend measured from local transcripts")
     cr.add_argument("--budget", type=float, help="allowance per period, for the remaining figure")
-    cr.add_argument("--reset-day", type=int, default=1, help="day the subscription renews")
+    cr.add_argument("--reset-day", type=int, help="override the adapter's renewal day")
     cr.add_argument("--days", type=int, default=0, help="also show the last N days")
     cr.set_defaults(fn=cmd_credits)
     sub.add_parser("commit-ok", help="may this tree be committed? decided from evidence"
