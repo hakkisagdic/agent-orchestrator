@@ -904,10 +904,26 @@ def anomalies(root, cfg, adapter, age, idle_seconds):
         # "I am blocked" and "I finished" both want the architect eventually, but
         # only one of them stops work. Treating a completion report as urgent is
         # how an urgent channel becomes background noise.
+        # Match structure, not substrings. The implementer's report template ends
+        # with a "Blockers:" line on every message, including "Blockers: none", so
+        # a bare `"blocker" in body` test classified every routine status report
+        # as urgent and re-raised it every ten minutes: twenty-eight false alarms
+        # in one hour, produced by a line that said the opposite of what matched.
         low = body.lower()
-        asking = any(k in low for k in ("karar gerekli", "karar gerekli̇",
-                                        "decision required", "decision needed",
-                                        "blocked", "blocker", "needs input"))
+        asking = any(h in low for h in ("## karar gerekli", "## acil",
+                                        "## decision required", "## urgent",
+                                        "## blocked"))
+        if not asking:
+            for line in low.split("\n"):
+                t = line.strip().lstrip("-*# ").strip()
+                if not t.startswith(("blockers:", "blocker:", "engel:", "engeller:")):
+                    continue
+                value = t.split(":", 1)[1].strip(" .`")
+                # An empty value, or one that opens by saying there are none, is
+                # the template reporting health — not a request for anything.
+                asking = bool(value) and not value.startswith(
+                    ("none", "no ", "yok", "-", "n/a", "hiç"))
+                break
         out.append({"kind": "decision-requested" if asking else "report-waiting",
                     "facts": [f"the implementer wrote {m}",
                               first.lstrip("# ").strip()[:200],
@@ -1188,6 +1204,23 @@ def discover_architect(cwd):
             best, best_mt = f[:-6], mt
     return {"session": best, "transcript": os.path.join(d, best + ".jsonl"),
             "age": int(time.time() - best_mt)} if best else None
+
+
+def architect_present(cwd, idle_seconds=600):
+    """Is a human-driven architect session currently active?
+
+    The two-writer rule applied to the architect's own session. Resuming it while
+    it is live does not corrupt anything — Claude Code forks a copy — but it
+    produces a second architect that inherits the first one's task and continues
+    *that* instead of the triage it was woken for. Observed directly: a woken copy
+    picked up the conversation in progress and reported on it rather than reading
+    the anomaly queue.
+
+    So wake only into absence. A transcript written recently means someone is
+    already there and does not need a duplicate of themselves.
+    """
+    found = discover_architect(cwd)
+    return bool(found and found["age"] < idle_seconds)
 
 
 def last_nudge_error(root):

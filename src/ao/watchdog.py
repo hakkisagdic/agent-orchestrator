@@ -18,6 +18,7 @@ Guards, in order — the point is to spend nothing when spending would not help:
   3. Is the slice over its round budget?    (if so: notify a human, never nudge)
   4. Is there provider quota left?          (keyflip, if installed)
   4b. Is the provider itself degraded?      (5xx at the end of our own nudge log)
+  4c. Are reports sitting unhandled?        (wake the architect — its own pid guard)
   5. Did the last nudge achieve anything?   (backoff, then hand over to a human)
 
 Run it from cron/launchd every couple of minutes, or once by hand.
@@ -132,6 +133,24 @@ def save_state(root, st):
     json.dump(st, open(state_path(root), "w"), indent=2)
 
 
+def arch_alive(st):
+    """Is an architect turn we started still running?
+
+    Separate from the implementer's pid, and the separation matters: gating the
+    architect on `child_alive` meant it was never woken while the implementer was
+    working, which is exactly when anomalies happen. Two actors, two guards --
+    the same lesson as one threshold doing two jobs, in a different disguise.
+    """
+    pid = st.get("arch_pid")
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
 def child_alive(st):
     """Is the turn we last started still running?
 
@@ -227,18 +246,47 @@ def escalate(root, cfg, adapter, age, args, st):
             A.record_notice(root, "Voltrai: anomaly", a["kind"], sent=False, key=key)
             continue
         name = A.write_report(root, cfg, a["kind"], a["facts"])
-        notify("Voltrai: anomaly", f"{a['kind']} — reported to the architect", root,
-               key=key, window=3600)
+        # Say what actually happened. "reported to the architect" was untrue
+        # whenever no architect was configured or startable, and a notification
+        # that overstates its own effect is how a gap stays invisible.
+        reach = "architect will be woken" if (cfg.get("architect") or {}).get("argv") \
+            else "written to the mailbox; no architect configured"
+        notify("Voltrai: anomaly", f"{a['kind']} — {reach}", root,
+               key=key, window=window)
         print(f"anomaly {a['kind']}: {'reported as ' + name if name else 'already reported'}")
         woke = True
     arch = cfg.get("architect") or {}
-    # Waking the architect spends a turn on the same provider the implementer
-    # uses. Escalation runs before the quota guard in the chain, so check here or
-    # a low window gets burned on a report that could have waited.
-    if woke and arch.get("argv") and not quota_ok(adapter):
-        print("anomaly reported, but no quota headroom to wake the architect")
+
+    # Wake on durable state, not on the moment of detection. The notification
+    # throttle exists so a human is not rung every two minutes; using it to gate
+    # the wake as well meant the architect was only ever started on an anomaly's
+    # *first* sighting, and a single suppressed cycle lost it for good. What
+    # actually matters is whether a report is still sitting unprocessed — the
+    # mailbox is the state, the notification is only a bell.
+    pending = [m for m in A.mailbox(root, cfg["mailbox"])
+               if "-to-fable-" in m or "-to-architect-" in m]
+    last_wake = st.get("last_arch_wake", 0)
+    stale = [m for m in pending
+             if os.path.getmtime(os.path.join(root, cfg["mailbox"], m)) > last_wake]
+    woke = bool(stale)
+    if woke and time.time() - last_wake < 900:
+        print(f"{len(stale)} unhandled report(s), but the architect was woken "
+              f"{int((time.time() - last_wake) / 60)}m ago")
         woke = False
-    if woke and arch.get("argv") and not args.dry_run and not child_alive(st):
+
+    # Waking spends a turn on the same provider the implementer uses, so a report
+    # that could have waited must not burn the window the implementer needs.
+    if woke and arch.get("argv") and not quota_ok(adapter):
+        print("reports pending, but no quota headroom to wake the architect")
+        woke = False
+
+    # Wake into absence, never alongside. A live architect does not need a copy of
+    # itself: the copy inherits the conversation in progress and continues that
+    # rather than the triage it was started for.
+    if woke and A.architect_present(arch.get("cwd") or root):
+        print("reports pending, but the architect is already at the keyboard")
+        woke = False
+    if woke and arch.get("argv") and not args.dry_run and not arch_alive(st):
         prompt = (
             "Sen bu deponun mimarısın ve watchdog tarafından uyandırıldın. "
             "`agent-mail/` içindeki `*-watchdog-to-fable-ANOMALY-*.md` ve "
@@ -279,12 +327,20 @@ def escalate(root, cfg, adapter, age, args, st):
             with open(log_path, "a") as log:
                 log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} escalate ===\n")
                 log.flush()
+                # stdin must be closed, not inherited. A detached child holding a
+                # pipe or tty it will never read can wait forever for an EOF that
+                # never comes: alive, silent, producing nothing. That is the exact
+                # shape of the first architect wake — over a minute, no output —
+                # and very likely of the fifteen agent processes this project
+                # found accumulated in one repository.
                 proc = subprocess.Popen(argv, cwd=root, env=dict(os.environ, PATH=search),
+                                        stdin=subprocess.DEVNULL,
                                         stdout=log, stderr=subprocess.STDOUT,
                                         start_new_session=True)
-            st["child_pid"] = proc.pid
+            st["arch_pid"] = proc.pid
+            st["last_arch_wake"] = time.time()
             save_state(root, st)
-            print("woke the architect to judge it")
+            print(f"woke the architect (pid {proc.pid}) to judge it")
     return woke
 
 
@@ -494,9 +550,10 @@ def main():
                 log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} refill ===\n")
                 log.flush()
                 proc = subprocess.Popen(argv, cwd=root, env=dict(os.environ, PATH=search),
+                                        stdin=subprocess.DEVNULL,   # see escalate()
                                         stdout=log, stderr=subprocess.STDOUT,
                                         start_new_session=True)
-            st.update(child_pid=proc.pid, last_refill=time.time())
+            st.update(arch_pid=proc.pid, last_refill=time.time())
             save_state(root, st)
             print(f"queue low ({depth} < {sc.get('refill_below', 3)}); woke the architect")
             return 0
@@ -581,8 +638,9 @@ def main():
     with open(log_path, "a") as log:
         log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} nudge ===\n")
         log.flush()
-        proc = subprocess.Popen(argv, cwd=root, env=env, stdout=log,
-                                stderr=subprocess.STDOUT, start_new_session=True)
+        proc = subprocess.Popen(argv, cwd=root, env=env, stdin=subprocess.DEVNULL,
+                                stdout=log, stderr=subprocess.STDOUT,
+                                start_new_session=True)
 
     # Give it a moment to fail. A healthy turn runs for minutes; anything that
     # exits within seconds died rather than started.
