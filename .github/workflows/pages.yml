@@ -1,0 +1,55 @@
+# Publish the landing page. Pages is set to "GitHub Actions" as its source, so a
+# workflow — not a branch — decides what gets served.
+#
+# Only index.html and its siblings are published. The repository is a tool, not a
+# site: shipping the whole tree would put scripts and adapters on a public URL for
+# no reason, and every future file would silently become public by default.
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths: ['index.html', '.nojekyll', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deploy finish rather than cancelling it; a half-deployed site is
+# worse than a slightly stale one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble the site
+        run: |
+          mkdir -p _site
+          cp index.html _site/
+          touch _site/.nojekyll
+
+      - name: Check it is self-contained
+        # The page must carry no external assets: a landing page that breaks
+        # because a CDN moved is a landing page nobody notices is broken.
+        run: |
+          if grep -Eq '<(script|link|img)[^>]+(src|href)="https?://' _site/index.html; then
+            echo "external asset reference found in index.html"; exit 1
+          fi
+          test -s _site/index.html
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

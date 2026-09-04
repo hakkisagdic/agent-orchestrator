@@ -831,6 +831,99 @@ def release_gate_lock():
             pass
 
 
+def process_trees(pids):
+    """Group pids into independent trees — how many *turns*, not how many processes.
+
+    One turn is several processes: a wrapper spawns a runtime which spawns
+    children. Counting processes therefore reports four concurrent writers where
+    there is one, and an alarm that fires on normal operation is an alarm people
+    learn to ignore. Count only the roots: a pid whose parent is not itself in the
+    set.
+    """
+    if not pids:
+        return []
+    parent = {}
+    for line in (sh("ps -eo pid,ppid") or "").split("\n")[1:]:
+        f = line.split()
+        if len(f) >= 2 and f[0].isdigit() and f[1].isdigit():
+            parent[int(f[0])] = int(f[1])
+    known = set(pids)
+    return sorted(p for p in pids if parent.get(p) not in known)
+
+
+def anomalies(root, cfg, adapter, age, idle_seconds):
+    """Conditions a watchdog cannot resolve, reported as facts rather than verdicts.
+
+    A guard chain is good at mechanical questions — is a turn running, is there
+    quota, has this nudge already failed. It is bad at everything else, and the
+    failures of this project came from letting it try: it decided a provider
+    outage was a stuck agent, decided a hung process was a live writer, decided a
+    finished slice was work in progress. Each decision was defensible from the one
+    signal it had and wrong given the others.
+
+    So it stops deciding. It collects what it can see and hands that to the
+    architect, who has the context to weigh it. Crucially the facts carry no
+    conclusion — "four processes, transcript moved 12s ago, HEAD unchanged for
+    three hours" is useful; "there is a concurrent writer" is the guess that cost
+    seven hours the last time something made it.
+    """
+    out = []
+    pids = agent_pids(root, adapter)
+    dirty = len([l for l in sh("git status --porcelain", cwd=root).split("\n") if l.strip()])
+    head = sh("git rev-parse --short HEAD", cwd=root)
+
+    trees = process_trees(pids)
+    if len(trees) > 1 and age < idle_seconds:
+        out.append({"kind": "several-turns-active",
+                    "facts": [f"{len(trees)} independent process trees with this repo as "
+                              f"cwd, roots {trees} (of {len(pids)} processes)",
+                              f"transcript last written {int(age)}s ago",
+                              "separate roots mean separate turns, not one turn's children"]})
+    spin = spinning(root)
+    if spin:
+        out.append({"kind": "busy-without-progress",
+                    "facts": [f"transcript growing for {spin}m",
+                              f"HEAD unchanged at {head}", f"{dirty} files dirty, unchanged"]})
+    rn = rounds(root, cfg["reviews"])
+    budget = cfg.get("round_budget", 5)
+    if rn > budget:
+        revs = reviews(root, cfg["reviews"], limit=3)
+        out.append({"kind": "over-round-budget",
+                    "facts": [f"round {rn} of {budget} on the current slice"] +
+                             [f"{f}: {v}" for f, v in revs]})
+    err = last_nudge_error(root)
+    if err and time.time() - err.get("at", 0) < 3600:
+        out.append({"kind": "restart-failed",
+                    "facts": [f"exit {err.get('code')} "
+                              f"{int((time.time() - err.get('at', 0)) / 60)}m ago",
+                              (err.get("tail") or "")[:300]]})
+    return out
+
+
+def write_report(root, cfg, kind, facts):
+    """A watchdog-to-architect message: observations, no interpretation."""
+    box = os.path.join(root, cfg.get("mailbox", "agent-mail"))
+    try:
+        os.makedirs(box, exist_ok=True)
+        name = f"{time.strftime('%Y%m%d-%H%M')}-watchdog-to-fable-ANOMALY-{kind}.md"
+        path = os.path.join(box, name)
+        if os.path.exists(path):
+            return None
+        with open(path, "w") as fh:
+            fh.write(f"# ANOMALY — {kind}\n\n"
+                     f"Watchdog observation at {time.strftime('%Y-%m-%d %H:%M:%S')}. "
+                     f"Facts only; the watchdog draws no conclusion and took no action "
+                     f"beyond standing down.\n\n")
+            for f in facts:
+                fh.write(f"- {f}\n")
+            fh.write("\n## Asked of the architect\n\n"
+                     "Decide whether this needs intervention, and what. If it is normal, "
+                     "delete this message; if not, act and record what you did.\n")
+        return name
+    except OSError:
+        return None
+
+
 def last_nudge_error(root):
     """The most recent failed nudge, if the watchdog recorded one."""
     key = os.path.basename(root.rstrip("/")) or "root"

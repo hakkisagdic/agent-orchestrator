@@ -530,6 +530,50 @@ def cmd_a2a(cfg, args):
     _exec_server("ao-a2a", cfg, ["--port", str(args.port)])
 
 
+def cmd_lock(cfg, args):
+    """Run a heavy command under the machine-wide lock.
+
+    `ao verify` already serialises its own runs, but the implementer does not go
+    through `ao verify` — it runs `npm test` directly, as it should. So the lock
+    covered the architect's measurements and not the thing they were competing
+    with, which is the collision that actually happens.
+
+    Wrapping is the fix, and it generalises past tests: a container build, a
+    database restore, an integration environment. Anything that saturates a
+    shared machine belongs behind one lock, or the machine is not shared, it is
+    contended.
+
+        ao lock -- npm test
+        ao lock --wait 1800 -- docker build .
+    """
+    if not args.command:
+        print(f"usage: {C['b']}ao lock -- <command>{C['reset']}")
+        holder = A.gate_lock_holder()
+        print(f"  {C['dim']}holder:{C['reset']} " +
+              (f"{os.path.basename(holder['root'])} ({holder['minutes']}m)"
+               if holder else f"{C['dim']}free{C['reset']}"))
+        return 0
+    import subprocess
+    if args.command and args.command[0] == "--":
+        args.command = args.command[1:]
+    if not args.command:
+        print("nothing to run")
+        return 0
+    root = cfg["root"]
+    holder = A.gate_lock_holder()
+    if holder and holder.get("root") != root:
+        print(f"{C['yellow']}{os.path.basename(holder['root'])} holds the machine lock"
+              f"{C['reset']} {C['dim']}({holder['minutes']}m){C['reset']} — waiting up to "
+              f"{args.wait}s", flush=True)
+    if not A.acquire_gate_lock(root, args.wait):
+        print(f"{C['red']}machine still busy after {args.wait}s; not starting{C['reset']}")
+        return 2
+    try:
+        return subprocess.run(args.command, cwd=root).returncode
+    finally:
+        A.release_gate_lock()
+
+
 def cmd_board(cfg, args):
     """Where every pre-authorised item is, blocked ones first.
 
@@ -1053,6 +1097,10 @@ def main():
     sub.add_parser("board", help="where each pre-authorised item is").set_defaults(fn=cmd_board)
     sub.add_parser("commit-ok", help="may this tree be committed? decided from evidence"
                    ).set_defaults(fn=cmd_commit_ok)
+    lk = sub.add_parser("lock", help="run a heavy command under the machine-wide lock")
+    lk.add_argument("--wait", type=int, default=1800)
+    lk.add_argument("command", nargs=argparse.REMAINDER)
+    lk.set_defaults(fn=cmd_lock)
     mc = sub.add_parser("mcp", help="serve project state to MCP clients (stdio)")
     mc.add_argument("action", choices=["serve", "config"], nargs="?", default="config")
     mc.add_argument("--allow-verify", action="store_true", help="expose the gate runner too")

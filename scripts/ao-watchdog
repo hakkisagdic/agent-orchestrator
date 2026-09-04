@@ -202,6 +202,59 @@ def provider_degraded(root, window=900):
     return None
 
 
+def escalate(root, cfg, adapter, age, args, st):
+    """Hand every judgement call to the architect, once per condition per hour.
+
+    The watchdog is good at mechanical questions and bad at everything else. Its
+    worst failures came from answering the second kind anyway: a provider outage
+    read as a stuck agent, a hung process read as a live writer, a finished slice
+    read as work in progress. Each was defensible from the one signal it had and
+    wrong given the others.
+
+    So it reports instead. Facts go to the mailbox where they persist; the
+    architect is woken only if one is configured, because a report nobody reads is
+    not an escalation.
+    """
+    found = A.anomalies(root, cfg, adapter, age, args.idle_minutes * 60)
+    if not found:
+        return False
+    woke = False
+    for a in found:
+        key = f"anomaly:{a['kind']}"
+        if A.notice_recently_sent(root, key, 3600):
+            A.record_notice(root, "Voltrai: anomaly", a["kind"], sent=False, key=key)
+            continue
+        name = A.write_report(root, cfg, a["kind"], a["facts"])
+        notify("Voltrai: anomaly", f"{a['kind']} — reported to the architect", root,
+               key=key, window=3600)
+        print(f"anomaly {a['kind']}: {'reported as ' + name if name else 'already reported'}")
+        woke = True
+    arch = cfg.get("architect") or {}
+    if woke and arch.get("argv") and not args.dry_run and not child_alive(st):
+        prompt = ("agent-mail'de `*-watchdog-to-fable-ANOMALY-*.md` mesajları var. "
+                  "Bunlar watchdog'un gözlemleri — olgu, yorum değil. Her birini oku, "
+                  "gerçekten müdahale gerekip gerekmediğine karar ver, gerekiyorsa yap, "
+                  "sonra mesajı sil. Normalse yalnız sil.")
+        argv = [x.replace("{prompt}", prompt) for x in arch["argv"]]
+        search = child_path()
+        resolved = shutil.which(argv[0], path=search)
+        if resolved:
+            argv[0] = resolved
+            key = os.path.basename(root.rstrip("/")) or "root"
+            log_path = os.path.join(STATE_DIR, f"escalate-{key}.log")
+            os.makedirs(STATE_DIR, exist_ok=True)
+            with open(log_path, "a") as log:
+                log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} escalate ===\n")
+                log.flush()
+                proc = subprocess.Popen(argv, cwd=root, env=dict(os.environ, PATH=search),
+                                        stdout=log, stderr=subprocess.STDOUT,
+                                        start_new_session=True)
+            st["child_pid"] = proc.pid
+            save_state(root, st)
+            print("woke the architect to judge it")
+    return woke
+
+
 def open_work(cfg, root):
     """Is there something to continue? Cheap signals only."""
     reasons = []
@@ -295,6 +348,11 @@ def main():
         print(f"held by {held.get('by')} for {held['minutes']}m: {held.get('reason','')}")
         return 0
 
+    # Report anything needing judgement before the guard chain stands down on it.
+    # Standing down silently is how a condition persists for hours: the watchdog
+    # was right to not act and wrong to be the only one who knew.
+    escalate(root, cfg, adapter, age, args, st)
+
     # 0 — is ANY agent already working this tree? Not just the child we started.
     #
     # Tracking only our own last child was wrong, and expensively so: every nudge
@@ -312,13 +370,13 @@ def main():
         #
         # Tell them apart by the transcript: a live turn writes to it. Silence far
         # past the idle threshold, with a process still up, is hung, not busy.
+        turns = A.process_trees(running)
         if age < args.idle_minutes * 60 * 3:
-            print(f"{len(running)} agent process(es) already in this tree ({running}); "
-                  f"not starting another")
-            if len(running) > 4:
+            print(f"{len(turns)} turn(s) already in this tree "
+                  f"(roots {turns}, {len(running)} processes); not starting another")
+            if len(turns) > 2:
                 notify("Voltrai: turns piling up",
-                       f"{len(running)} agent processes in one tree — `ao hold` to clear",
-                       root)
+                       f"{len(turns)} concurrent turns — `ao hold` to clear", root)
             return 0
         print(f"{len(running)} process(es) alive but silent {int(age / 60)}m; reaping")
         notify("Voltrai: reaping hung turn",
