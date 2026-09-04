@@ -569,9 +569,23 @@ def record_progress(root, cfg):
     single snapshot cannot tell activity from progress.
     """
     msgs, _ = session_paths(cfg)
+    porcelain = [l for l in sh("git status --porcelain", cwd=root).split("\n") if l.strip()]
+    # Content churn, not file count. A slice deep in editing its established file
+    # set holds the dirty *count* stable for many minutes — same eight files, new
+    # content each cycle — and a count-only check reads that as frozen and cries
+    # spin. The newest mtime across the changed set advances on every edit, so it
+    # tells editing apart from a genuine stall. A long gate run writes nothing, so
+    # it correctly stays frozen, and the minute threshold covers that case.
+    churn = 0
+    for l in porcelain:
+        f = l[3:].split(" -> ")[-1].strip().strip('"')
+        try:
+            churn = max(churn, int(os.path.getmtime(os.path.join(root, f))))
+        except OSError:
+            pass
     rec = {"at": int(time.time()),
            "head": sh("git rev-parse --short HEAD", cwd=root),
-           "dirty": len([l for l in sh("git status --porcelain", cwd=root).split("\n") if l.strip()]),
+           "dirty": len(porcelain), "churn": churn,
            "size": os.path.getsize(msgs) if msgs and os.path.exists(msgs) else 0}
     d = os.path.join(root, ".ao", "ledger")
     os.makedirs(d, exist_ok=True)
@@ -581,8 +595,8 @@ def record_progress(root, cfg):
             last = fh.readlines()[-1:]
         if last:
             prev = json.loads(last[0])
-            if (prev.get("head"), prev.get("dirty"), prev.get("size")) == \
-               (rec["head"], rec["dirty"], rec["size"]):
+            if (prev.get("head"), prev.get("dirty"), prev.get("churn"), prev.get("size")) == \
+               (rec["head"], rec["dirty"], rec["churn"], rec["size"]):
                 return                                # nothing changed; do not log noise
     except Exception:
         pass
@@ -625,8 +639,14 @@ def spinning(root, min_minutes=6, min_samples=3):
     recs = recs[-40:]
     if len(recs) < min_samples:
         return None
-    head, dirty = recs[-1].get("head"), recs[-1].get("dirty")
-    run = [r for r in reversed(recs) if r.get("head") == head and r.get("dirty") == dirty]
+    # Frozen means nothing was produced AND nothing was edited: same HEAD, same
+    # dirty count, and no newer mtime in the changed set. Editing the same files
+    # advances churn, so it breaks the run and is not spin.
+    head = recs[-1].get("head")
+    dirty = recs[-1].get("dirty")
+    churn = recs[-1].get("churn")
+    run = [r for r in reversed(recs)
+           if r.get("head") == head and r.get("dirty") == dirty and r.get("churn") == churn]
     if len(run) < min_samples:
         return None
     grew = run[0].get("size", 0) > run[-1].get("size", 0)      # transcript still moving
@@ -869,7 +889,7 @@ def process_trees(pids):
     return sorted(p for p in pids if parent.get(p) not in known)
 
 
-def anomalies(root, cfg, adapter, age, idle_seconds):
+def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
     """Conditions a watchdog cannot resolve, reported as facts rather than verdicts.
 
     A guard chain is good at mechanical questions — is a turn running, is there
@@ -930,13 +950,17 @@ def anomalies(root, cfg, adapter, age, idle_seconds):
                               "an explicit request — not a symptom needing corroboration"
                               if asking else "a report, not a blocker"]})
 
-    pids = agent_pids(root, adapter)
+    # Exclude pids the caller knows are not implementer writers — above all the
+    # architect the watchdog itself spawned, which resumes with this repo as its
+    # cwd and would otherwise read as a second turn. The watchdog knows its pid;
+    # the detector should not have to guess.
+    pids = [p for p in agent_pids(root, adapter) if p not in set(exclude_pids)]
     dirty = len([l for l in sh("git status --porcelain", cwd=root).split("\n") if l.strip()])
     head = sh("git rev-parse --short HEAD", cwd=root)
 
     trees = process_trees(pids)
     if len(trees) > 1 and age < idle_seconds:
-        out.append({"kind": "several-turns-active",
+        out.append({"kind": "several-turns-active", "roots": trees,
                     "facts": [f"{len(trees)} independent process trees with this repo as "
                               f"cwd, roots {trees} (of {len(pids)} processes)",
                               f"transcript last written {int(age)}s ago",
@@ -963,11 +987,30 @@ def anomalies(root, cfg, adapter, age, idle_seconds):
 
 
 def write_report(root, cfg, kind, facts):
-    """A watchdog-to-architect message: observations, no interpretation."""
+    """A watchdog-to-architect message: observations, no interpretation.
+
+    Deduplicated by what the anomaly is *about*, not by wall-clock time. The name
+    once carried a minute stamp, so the exists-guard only caught collisions inside
+    the same minute and a standing condition produced a fresh file every cycle —
+    twenty-five copies of one unread status report in an hour. Key the filename on
+    (kind, source) instead: while an anomaly for that pair sits unprocessed, no
+    second one is written. The architect deleting it is what re-arms the report,
+    which is correct — a condition that recurs after it was judged is genuinely
+    new.
+    """
     box = os.path.join(root, cfg.get("mailbox", "agent-mail"))
     try:
         os.makedirs(box, exist_ok=True)
-        name = f"{time.strftime('%Y%m%d-%H%M')}-watchdog-to-fable-ANOMALY-{kind}.md"
+        # A stable key from the source the facts name (e.g. "the implementer wrote
+        # X.md"), falling back to the kind alone for anomalies with no single
+        # source. This is what makes the exists-guard actually guard.
+        src = ""
+        for f in facts:
+            mrk = re.search(r"wrote\s+(\S+\.md)", f)
+            if mrk:
+                src = "-" + re.sub(r"[^A-Za-z0-9]+", "-", mrk.group(1)[:-3]).strip("-")
+                break
+        name = f"watchdog-to-fable-ANOMALY-{kind}{src}.md"
         path = os.path.join(box, name)
         if os.path.exists(path):
             return None

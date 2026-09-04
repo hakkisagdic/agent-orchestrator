@@ -92,7 +92,19 @@ def child_path():
     return ":".join(out)
 
 
-def notify(title, msg, root=None, key=None, window=1800):
+# Who each alert is actually for. Severity was the wrong axis: an anomaly is
+# urgent *and* entirely the architect's business, and ringing a human about it
+# teaches them to ignore the channel before the one alert that needs them
+# arrives. A human hears only what a human can fix.
+HUMAN_AUDIENCE = ("out of quota", "agent stuck", "nudge failed", "watchdog",
+                  "turns piling up", "needs you", "provider degraded")
+
+
+def for_human(title):
+    return any(k in title.lower() for k in HUMAN_AUDIENCE)
+
+
+def notify(title, msg, root=None, key=None, window=1800, audience="human"):
     """Raise an alert at most once per window, and always record that we did.
 
     The watchdog runs every two minutes. A guard that notifies on each run turns
@@ -104,6 +116,12 @@ def notify(title, msg, root=None, key=None, window=1800):
     of them says the condition has held for a long time.
     """
     key = key or title
+    # Architect-audience alerts are recorded and delivered through the mailbox and
+    # the wake; they do not ring a phone.
+    if audience == "architect" or not for_human(title):
+        if root:
+            A.record_notice(root, title, msg, sent=False, key=key)
+        return False
     if root and A.notice_recently_sent(root, key, window):
         A.record_notice(root, title, msg, sent=False, key=key)
         return False
@@ -233,9 +251,36 @@ def escalate(root, cfg, adapter, age, args, st):
     architect is woken only if one is configured, because a report nobody reads is
     not an escalation.
     """
-    found = A.anomalies(root, cfg, adapter, age, args.idle_minutes * 60)
+    # The architect we spawned resumes with this repo as its cwd, so it reads as a
+    # second turn to the process check. We know its pid; exclude it and our own
+    # rather than making the detector guess.
+    found = A.anomalies(root, cfg, adapter, age, args.idle_minutes * 60,
+                        exclude_pids={st.get("arch_pid"), os.getpid()})
+
+    # A second turn is a hazard only if it persists. A real concurrent writer runs
+    # for minutes; a gate helper, an `ao` call or a one-shot process blinks in and
+    # out and trips a single-scan check for one cycle. Require the same extra roots
+    # on two consecutive scans before flagging.
+    prev_roots = set(st.get("last_roots") or [])
+    seen_several = False
+    kept = []
+    for a in found:
+        if a["kind"] == "several-turns-active":
+            seen_several = True
+            roots = set(a.get("roots") or [])
+            st["last_roots"] = list(roots)
+            if len(roots) < 2 or not (roots & prev_roots):
+                print(f"several turns seen once ({sorted(roots)}); waiting for a "
+                      f"second scan before flagging")
+                continue
+        kept.append(a)
+    if not seen_several:
+        st["last_roots"] = []
+    save_state(root, st)
+    found = kept
     if not found:
         return False
+
     woke = False
     for a in found:
         key = f"anomaly:{a['kind']}"
@@ -252,7 +297,7 @@ def escalate(root, cfg, adapter, age, args, st):
         reach = "architect will be woken" if (cfg.get("architect") or {}).get("argv") \
             else "written to the mailbox; no architect configured"
         notify("Voltrai: anomaly", f"{a['kind']} — {reach}", root,
-               key=key, window=window)
+               key=key, window=window, audience="architect")
         print(f"anomaly {a['kind']}: {'reported as ' + name if name else 'already reported'}")
         woke = True
     arch = cfg.get("architect") or {}
@@ -426,7 +471,7 @@ def main():
     # would add a turn to a loop that is already spending them.
     spin = A.spinning(root)
     if spin and time.time() - st.get("last_spin_notice", 0) > 1800:
-        notify("Voltrai: agent spinning", f"{spin}m busy, nothing committed or changed — needs re-specifying", root)
+        notify("Voltrai: agent spinning", f"{spin}m busy, nothing committed or changed — needs re-specifying", root, audience="architect")
         st["last_spin_notice"] = time.time()
         save_state(root, st)
         print(f"spinning: {spin}m active with no artifact change")
@@ -471,7 +516,7 @@ def main():
         # reporting no longer does.
         print(f"{len(running)} process(es) alive but silent {int(age / 60)}m; reaping")
         notify("Voltrai: reaping hung turn",
-               f"{len(running)} process(es) silent {int(age / 60)}m — cleaning up", root)
+               f"{len(running)} process(es) silent {int(age / 60)}m — cleaning up", root, audience="architect")
         if args.dry_run:
             print("DRY RUN: would reap", running)
             return 0
@@ -575,7 +620,7 @@ def main():
                 intervened = True
                 break
     if rn > budget and not intervened:
-        notify("Voltrai: over budget", f"round {rn}/{budget} — re-specify, split or change actor", root)
+        notify("Voltrai: over budget", f"round {rn}/{budget} — re-specify, split or change actor", root, audience="architect")
         print(f"over budget ({rn}/{budget}); notified instead of nudging")
         return 0
     if rn > budget and intervened:
