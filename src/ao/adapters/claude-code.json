@@ -3,39 +3,76 @@
   "name": "Claude Code",
   "verified": "full",
   "notes": "Works as implementer and as architect. When used as the architect it is the process running the orchestrator, so only send/resume matter.",
-
   "send": {
-    "argv": ["claude", "-p", "{prompt}"],
+    "argv": [
+      "claude",
+      "-p",
+      "{prompt}"
+    ],
     "cwd_matters": true
   },
   "resume": {
-    "argv": ["claude", "--resume", "{session}", "-p", "{prompt}"],
-    "continue_last": ["claude", "--continue", "-p", "{prompt}"]
+    "argv": [
+      "claude",
+      "--resume",
+      "{session}",
+      "-p",
+      "{prompt}",
+      "--allowedTools",
+      "Read,Grep,Glob,Write,Edit,Bash(ao:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(python3:*),Bash(pytest:*),Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
+    ],
+    "continue_last": [
+      "claude",
+      "--continue",
+      "-p",
+      "{prompt}"
+    ],
+    "note": "Scoped rather than --dangerously-skip-permissions. The implementer is trusted with the tree — it must write code and run gates — but not with push, gh, or arbitrary shell; authority is withheld by ao, and the allowlist keeps the blast radius to the repo."
   },
-
   "options": {
-    "model": ["--model", "{model}"],
-    "output_json": ["--output-format", "stream-json"],
-    "allowed_tools": ["--allowedTools", "{tools}"],
-    "trust_all": ["--dangerously-skip-permissions"]
+    "model": [
+      "--model",
+      "{model}"
+    ],
+    "output_json": [
+      "--output-format",
+      "stream-json"
+    ],
+    "allowed_tools": [
+      "--allowedTools",
+      "{tools}"
+    ],
+    "trust_all": [
+      "--dangerously-skip-permissions"
+    ],
+    "implementer_tools": "Read,Grep,Glob,Write,Edit,Bash(ao:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(python3:*),Bash(pytest:*),Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
   },
-
   "transcript": {
     "kind": "jsonl",
     "path": "~/.claude/projects/{escaped_cwd}/{session}.jsonl",
     "escaped_cwd": "absolute cwd with '/' replaced by '-'",
-    "record": { "time": "timestamp", "kind": "type", "text_keys": ["message.content", "content", "text"] },
+    "record": {
+      "time": "timestamp",
+      "kind": "type",
+      "text_keys": [
+        "message.content",
+        "content",
+        "text"
+      ]
+    },
     "tail_bytes": 900000
   },
-
   "busy": {
     "mtime_file": "{session}.jsonl",
     "idle_seconds": 240,
     "note": "No status file; rely on write age alone."
   },
-
   "directives": {
-    "steering_files": ["CLAUDE.md", ".claude/CLAUDE.md", "~/.claude/CLAUDE.md"],
+    "steering_files": [
+      "CLAUDE.md",
+      ".claude/CLAUDE.md",
+      "~/.claude/CLAUDE.md"
+    ],
     "steering_format": "markdown, always included",
     "hooks": ".claude/settings.json (hooks key)",
     "skills_dir": ".claude/skills"

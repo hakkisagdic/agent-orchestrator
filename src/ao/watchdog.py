@@ -731,7 +731,11 @@ def main():
         print(f"{argv[0]} not found on PATH ({search})")
         return 1
     argv[0] = resolved
-    if "--trust-all-tools" not in argv and "trust_all" in (adapter.get("options") or {}):
+    # Only widen to trust-all when the adapter's resume carries no allowlist of
+    # its own. Appending --dangerously-skip-permissions on top of --allowedTools
+    # would silently override the narrower grant.
+    scoped = any(a in ("--allowedTools", "--allowed-tools", "--trust-all-tools") for a in argv)
+    if not scoped and "trust_all" in (adapter.get("options") or {}):
         argv += adapter["options"]["trust_all"]
 
     print(f"idle {int(age)}s · {', '.join(reasons)} · nudging")

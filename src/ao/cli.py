@@ -330,7 +330,7 @@ PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0"><dict>
   <key>Label</key><string>{label}</string>
   <key>ProgramArguments</key>
-  <array><string>{python}</string><string>{script}</string>
+  <array>{python_arg}<string>{script}</string>
     <string>--root</string><string>{root}</string>
     <string>--idle-minutes</string><string>{idle}</string></array>
   <key>StartInterval</key><integer>{interval}</integer>
@@ -1956,6 +1956,14 @@ def cmd_watchdog(cfg, args):
     # script on PATH. launchd needs an absolute path either way, so resolve
     # whichever one this installation actually has.
     script = shutil.which("ao-watchdog") or os.path.join(A.REPO, "scripts", "ao-watchdog")
+    # A console script carries its own interpreter in its shebang — the venv's.
+    # Prefixing it with *this* process's python (the system one, if `ao watchdog
+    # install` was run from a checkout) imports `ao` from an interpreter that
+    # does not have it, and launchd logs ModuleNotFoundError every two minutes.
+    # Only our repo shim needs an explicit interpreter, because its shebang is
+    # `/usr/bin/env python3` and launchd's PATH is minimal.
+    in_repo = os.path.realpath(script).startswith(os.path.realpath(A.REPO))
+    python = sys.executable if in_repo else ""
     log = os.path.expanduser(f"~/.ao/watchdog-{key}.log")
 
     if args.action == "status":
@@ -1978,7 +1986,8 @@ def cmd_watchdog(cfg, args):
     os.makedirs(os.path.dirname(plist_path), exist_ok=True)
     os.makedirs(os.path.expanduser("~/.ao"), exist_ok=True)
     open(plist_path, "w").write(PLIST.format(
-        label=label, python=sys.executable, script=script, root=root,
+        label=label, python_arg=(f"<string>{python}</string>" if python else ""),
+        script=script, root=root,
         idle=args.idle_minutes, interval=args.interval, log=log))
     A.sh(f"launchctl bootout gui/$(id -u)/{label} 2>/dev/null")
     out = A.sh(f"launchctl bootstrap gui/$(id -u) {plist_path} 2>&1") or "loaded"
