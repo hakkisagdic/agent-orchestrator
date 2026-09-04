@@ -685,7 +685,7 @@ def hold_state(root):
     return st
 
 
-def agent_pids(root, adapter):
+def agent_pids(root, adapter, headless_only=False):
     """Agent processes whose working directory is this repository.
 
     Match on the process's cwd rather than its command line. The command line is
@@ -710,7 +710,22 @@ def agent_pids(root, adapter):
                     cwd = line[1:]
             if cwd and os.path.realpath(cwd) == os.path.realpath(root):
                 out.append(int(pid))
-    return sorted(set(out))
+    out = sorted(set(out))
+    if headless_only:
+        # Never a human's interactive session. `ao hold` once stopped seven
+        # processes in a repository; two were the orchestrator's own turn and
+        # five were the owner's live Claude sessions, cut mid-work. A hold
+        # exists to stop unattended turns — the ones started with -p/--print —
+        # and an interactive session, by definition, has a person in it who did
+        # not ask to be stopped.
+        out = [p for p in out if _is_headless(p)]
+    return out
+
+
+def _is_headless(pid):
+    """A turn started non-interactively (-p / --print / --no-interactive)."""
+    args = sh(f"ps -o args= -p {pid}") or ""
+    return any(f in args.split() for f in ("-p", "--print", "--no-interactive"))
 
 
 def record_notice(root, title, msg, sent, key=None):

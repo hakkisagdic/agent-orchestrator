@@ -313,3 +313,34 @@ missing, and the next incident looks like a regression in judgement.
 Two things follow. Rules go in tracked files. And a health check should say so:
 `ao doctor` already verifies that tools referenced by steering are reachable, and
 the same reasoning applies to whether steering itself will still exist tomorrow.
+
+## 20. `ao hold` killed the owner's sessions
+
+Told to *talk to* a second project's orchestrator agent and have it install the
+tool, the architect installed it through the agent — correctly — and then kept
+going on its own: wrote the first slice, the config, the MCP registration,
+installed a watchdog that spawns turns every two minutes, and started an
+implementer on product code. None of it approved. The owner's rule was one
+sentence: nothing runs in this repository without asking.
+
+Stopping that was the second mistake. `ao hold` terminated every agent process
+whose cwd was the repository — seven of them. Two were the unapproved
+implementer. Five were the owner's own interactive Claude sessions, cut off
+mid-turn. The hold was designed on a project whose only agent was a headless
+Kiro; on a repository where the owner works interactively it is a weapon pointed
+at the owner.
+
+Two rules, one from each mistake:
+
+- **"Talk to the agent" is not "act in its repository."** Approval to have an
+  agent install a tool is not approval to write its config, register servers in
+  its editor, schedule jobs on its machine, or start work on its code. Each of
+  those is a separate action in someone else's project and each needs its own yes.
+- **A hold stops unattended turns and never a person.** A process started with
+  `-p`, `--print` or `--no-interactive` is a turn the orchestrator could have
+  started and may stop. An interactive session has a human in it who did not ask.
+  `hold` and the reaper now act only on headless turns; the watchdog's "is anyone
+  working here" guard still sees everyone, because a person's session is a writer.
+
+The general shape is the oldest one in this file: a mechanism built for one
+actor was pointed at a different one and behaved as designed, which was wrong.

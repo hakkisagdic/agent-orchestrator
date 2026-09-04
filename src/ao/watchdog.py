@@ -567,16 +567,18 @@ def main():
         if args.dry_run:
             print("DRY RUN: would reap", running)
             return 0
-        for pid in running:
+        # Reap only what we could have started. A person's interactive session
+        # in this tree is silent between their keystrokes, not hung.
+        for pid in A.agent_pids(root, adapter, headless_only=True):
             try:
                 os.kill(pid, signal.SIGTERM)
             except OSError:
                 pass
         for _ in range(20):
-            if not A.agent_pids(root, adapter):
+            if not A.agent_pids(root, adapter, headless_only=True):
                 break
             time.sleep(0.5)
-        for pid in A.agent_pids(root, adapter):
+        for pid in A.agent_pids(root, adapter, headless_only=True):
             try:
                 os.kill(pid, signal.SIGKILL)
             except OSError:

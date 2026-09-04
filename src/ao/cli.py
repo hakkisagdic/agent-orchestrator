@@ -1763,8 +1763,10 @@ def cmd_hold(cfg, args):
             print(f"handover note → {cfg['mailbox']}/{name}")
         return 0
 
-    # hold
-    pids = A.agent_pids(root, adapter)
+    # hold — stops unattended turns only. An interactive session has a person in
+    # it who did not ask to be stopped; the lock still keeps the watchdog from
+    # starting anything new.
+    pids = A.agent_pids(root, adapter, headless_only=True)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     json.dump({"by": args.by, "reason": args.reason or "manual intervention",
                "at": int(time.time()), "stopped": pids},
