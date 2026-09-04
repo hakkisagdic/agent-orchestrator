@@ -796,12 +796,45 @@ def reviews(root, reviews_dir, limit=4):
     return out
 
 
+def slice_started(root):
+    """When the running slice began, from the board's `since:` note."""
+    for it in board(root)["running"]:
+        raw = it["notes"].get("since")
+        if not raw:
+            continue
+        for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+            try:
+                return time.mktime(time.strptime(raw.strip()[:len(time.strftime(fmt))], fmt))
+            except ValueError:
+                continue
+    return None
+
+
 def rounds(root, reviews_dir):
-    """Consecutive NEEDS_CHANGES from the newest backwards — the round budget."""
+    """Review rounds spent on the *current slice*.
+
+    Counting back to the last APPROVED was wrong: a round budget is a statement
+    about one slice, and reviews from a previous slice keep counting against the
+    next one forever. Worse, rounds burned on environmental failure — a
+    double-writer incident, a provider outage — are indistinguishable from rounds
+    burned on the work, so the budget starts measuring the harness rather than the
+    agent, and the guard that reads it stops nudging for the wrong reason.
+
+    A slice declares its start on the board. Count reviews after that, and the
+    counter resets exactly when a new slice begins — which is also when
+    re-specification happens, so no separate reset mechanism is needed.
+    """
+    started = slice_started(root)
     n = 0
-    for _, v in reviews(root, reviews_dir, limit=50):
+    for f, v in reviews(root, reviews_dir, limit=50):
         if "APPROVED" in v.upper():
             break
+        if started:
+            try:
+                if os.path.getmtime(os.path.join(root, reviews_dir, f)) < started:
+                    break
+            except OSError:
+                pass
         n += 1
     return n
 
