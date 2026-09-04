@@ -398,6 +398,18 @@ def cmd_verify(cfg, args):
                 p_, f_ = int(m.group(1)), int(m.group(2))
                 detail = f"{p_}/{p_ + f_}"
                 passed = passed and f_ == 0
+                # Exit zero is not proof that anything ran. A test runner whose
+                # worker pool fails can collect zero tests and exit 0, and the
+                # gate stays green having measured nothing — the second pilot's
+                # agent found vitest doing exactly that. A gate that declares
+                # `min_tests` must see at least that many actually execute.
+                need = int(g.get("min_tests", 0) or 0)
+                if need and (p_ + f_) < need:
+                    passed = False
+                    detail += f" — only {p_ + f_} ran, {need} required"
+            elif g.get("min_tests"):
+                passed = False
+                detail = f"exit {code}, but no test count found and min_tests={g['min_tests']}"
             else:
                 detail = f"exit {code}"
         ok = ok and passed
@@ -2087,7 +2099,24 @@ def cmd_doctor(cfg, args):
             print(f"                {C['yellow']}steering references it: "
                   f"{', '.join(refs)}{C['reset']}")
 
-    print(f"\n{C['dim']}Not implemented yet: decide, since, init.{C['reset']}")
+    # Two copies of `ao` on one machine is an ambiguity that bites silently: a
+    # shell alias to a git checkout and a package install answer to the same
+    # name, drift apart after the next commit, and which one runs depends on
+    # how it was invoked. The second pilot's agent caught it on its first day.
+    cands = []
+    for cand in (shutil.which("ao"), os.path.join(A.HOME, ".local", "bin", "ao"),
+                 os.path.join(A.REPO, "bin", "ao")):
+        if cand and os.path.exists(cand):
+            real = os.path.realpath(cand)
+            if real not in [os.path.realpath(c) for c in cands]:
+                cands.append(cand)
+    if len(cands) > 1:
+        print(f"ao binaries     {C['yellow']}{len(cands)} distinct{C['reset']} — "
+              f"{C['dim']}which one runs depends on how it is invoked{C['reset']}")
+        for c in cands:
+            print(f"                {C['dim']}{c} → {os.path.realpath(c)}{C['reset']}")
+        print(f"                {C['dim']}keep one: drop the shell alias, or "
+              f"uv tool uninstall ao-orchestrator{C['reset']}")
 
 
 def main():
