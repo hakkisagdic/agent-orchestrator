@@ -700,6 +700,96 @@ def cmd_credits(cfg, args):
     return 0
 
 
+def cmd_telegram(cfg, args):
+    """Set up, test, or run the phone channel.
+
+    The inbound direction is the reason this exists. When the architect's quota
+    runs out everything stops — twice in one day here — and a person who can write
+    a decision from a phone at that moment keeps it moving. Their message becomes
+    an urgent file in the mailbox, which is what the architect's own decisions
+    already are.
+    """
+    from . import telegram
+    conf = telegram.CONF
+    c = telegram.config()
+    label = f"com.agentorchestrator.telegram.{os.path.basename(cfg['root']).lower()}"
+
+    if args.action == "setup":
+        print(f"{C['b']}1.{C['reset']} Telegram: {C['b']}@BotFather{C['reset']} → /newbot → token")
+        print(f"{C['b']}2.{C['reset']} Bota bir mesaj yaz, sonra chat id'ni al:")
+        print(f"   {C['dim']}curl -s \"https://api.telegram.org/bot<TOKEN>/getUpdates\" \\\\{C['reset']}")
+        print(f"   {C['dim']}  | python3 -c \"import sys,json; print([u['message']['chat']['id'] for u in json.load(sys.stdin)['result']])\"{C['reset']}")
+        print(f"{C['b']}3.{C['reset']} Dosyayı {C['b']}sen{C['reset']} yaz — bir bot token'ı "
+              f"kimlik bilgisidir; ne repoya ne bir sohbete girer:")
+        print(f"   {C['dim']}mkdir -p ~/.ao{C['reset']}")
+        print(f"   {C['dim']}echo '{{\"token\":\"<BOT_TOKEN>\",\"chats\":[\"<CHAT_ID>\"]}}' > {conf}{C['reset']}")
+        print(f"   {C['dim']}chmod 600 {conf}{C['reset']}")
+        print(f"\n{C['b']}4.{C['reset']} {C['b']}ao telegram test{C['reset']} → {C['b']}ao telegram install{C['reset']}")
+        print(f"\n{C['dim']}The allowlist is not optional: an inbound channel without one")
+        print(f"is an authority surface open to whoever finds the bot.{C['reset']}")
+        return 0
+
+    if args.action == "test":
+        if not c:
+            print(f"{C['red']}No config at {conf}{C['reset']} — run {C['b']}ao telegram setup{C['reset']}")
+            return 1
+        name = cfg.get("project") or os.path.basename(cfg["root"])
+        n = telegram.send(f"*{name}* — bağlantı testi.\n\nBu sohbete yazdığın her mesaj "
+                          f"acil karar olarak kutuya düşer ve uygulayıcı onaylamadan "
+                          f"commit edemez.\n\nKomutlar: /status /board /credits /notices /fleet",
+                          cfg["root"])
+        print(f"{C['green']}sent to {n} chat(s){C['reset']}" if n else
+              f"{C['red']}send failed{C['reset']} — check the token and the chat ids")
+        return 0 if n else 1
+
+    if args.action == "poll":
+        return _serve("telegram", cfg, ["--once"] if args.once else [])
+
+    if args.action == "uninstall":
+        A.sh(f"launchctl bootout gui/$(id -u)/{label} 2>/dev/null")
+        p = os.path.join(A.HOME, "Library", "LaunchAgents", label + ".plist")
+        if os.path.exists(p):
+            os.remove(p)
+        print(f"removed {label}")
+        return 0
+
+    if args.action == "install":
+        if not c:
+            print(f"{C['red']}No config{C['reset']} — run ao telegram setup first")
+            return 1
+        exe = shutil.which("ao") or os.path.abspath(sys.argv[0])
+        log = os.path.join(A.HOME, ".ao", f"telegram-{os.path.basename(cfg['root']).lower()}.log")
+        # KeepAlive rather than StartInterval: long polling holds the connection
+        # open, so the job wants restarting when it ends, not running on a clock.
+        plist = os.path.join(A.HOME, "Library", "LaunchAgents", label + ".plist")
+        open(plist, "w").write(
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+            '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+            '<plist version="1.0"><dict>\n'
+            f'  <key>Label</key><string>{label}</string>\n'
+            '  <key>ProgramArguments</key>\n'
+            f'  <array><string>{exe}</string><string>-C</string><string>{cfg["root"]}</string>\n'
+            '    <string>telegram</string><string>poll</string></array>\n'
+            '  <key>KeepAlive</key><true/>\n  <key>RunAtLoad</key><true/>\n'
+            f'  <key>StandardOutPath</key><string>{log}</string>\n'
+            f'  <key>StandardErrorPath</key><string>{log}</string>\n'
+            '</dict></plist>\n')
+        A.sh(f"launchctl bootout gui/$(id -u)/{label} 2>/dev/null")
+        A.sh(f"launchctl bootstrap gui/$(id -u) {plist} 2>&1")
+        print(f"{C['green']}installed{C['reset']} {label}")
+        return 0
+
+    print("config          " + (f"{C['green']}{conf}{C['reset']}" if c else
+                                f"{C['red']}missing{C['reset']} — ao telegram setup"))
+    if c:
+        print(f"chats allowed   {len(c['chats'])}")
+    print("poller          " + (f"{C['green']}running{C['reset']}"
+                                if A.sh(f"launchctl list | grep {label}") else
+                                f"{C['dim']}not installed — ao telegram install{C['reset']}"))
+    return 0
+
+
 def cmd_board(cfg, args):
     """Where every pre-authorised item is, blocked ones first.
 
@@ -1246,6 +1336,11 @@ def main():
     wd.set_defaults(fn=cmd_watchdog)
 
     sub.add_parser("board", help="where each pre-authorised item is").set_defaults(fn=cmd_board)
+    tg = sub.add_parser("telegram", help="phone channel: alerts out, decisions in")
+    tg.add_argument("action", nargs="?", default="status",
+                    choices=["status", "setup", "test", "poll", "install", "uninstall"])
+    tg.add_argument("--once", action="store_true", help="poll: one pass then exit")
+    tg.set_defaults(fn=cmd_telegram)
     cr = sub.add_parser("credits", help="credit spend measured from local transcripts")
     cr.add_argument("--offline", action="store_true", help="skip the account lookup")
     cr.add_argument("--local", action="store_true", help="also show this machine's share")

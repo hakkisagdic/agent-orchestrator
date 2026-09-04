@@ -89,6 +89,8 @@ gereken tek yetkidir.
 | `ao mail` · `ao notices` | koordinasyon mesajları; projenin ürettiği uyarılar |
 | `ao watchdog install` | takılan ajanı yeniden başlatan launchd işi |
 | `ao mcp serve` · `ao a2a serve` | durumu MCP istemcilerine / A2A görevi olarak sun |
+| `ao telegram setup` | telefona uyarı, telefondan karar |
+| `ao a2a-mcp serve` | MCP-only istemciden A2A ajanlarına ulaş |
 | `ao prune` | biriken kayıt ve logları buda |
 | `ao doctor` · `ao adapters` | bağlantıları denetle; ne destekleniyor ve ne kadar |
 
@@ -130,7 +132,7 @@ olup olmadığını söyler. Yeni adaptör bir JSON dosyasıdır;
 [protokol](docs/protocol.md) · [güvenlik](docs/safety.md) · [roller](docs/roles.md) ·
 [dilimler](docs/slices.md) · [gate'ler](docs/gates.md) · [kaynaklar](docs/sources.md) ·
 [adaptörler](docs/adapters.md) · [paralellik](docs/parallel.md) · [bulut](docs/cloud.md) ·
-[modeller](docs/models.md) · [mcp](docs/mcp.md) · [telemetri](docs/telemetry.md) ·
+[modeller](docs/models.md) · [telegram](docs/telegram.md) · [mcp](docs/mcp.md) · [telemetri](docs/telemetry.md) ·
 [yüzeyler](docs/surfaces.md) · [defter](docs/ledger.md) · [kurtarma](docs/recovery.md) ·
 [keyflip](docs/keyflip.md) · [ide-eklentileri](docs/ide-extensions.md) ·
 **[dersler](docs/lessons.md)**

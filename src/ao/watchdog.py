@@ -121,6 +121,13 @@ def notify(title, msg, root=None, key=None, window=1800, audience="human"):
     if audience == "architect" or not for_human(title):
         if root:
             A.record_notice(root, title, msg, sent=False, key=key)
+            try:
+                from . import telegram
+                if not A.notice_recently_sent(root, "tg:" + key, window):
+                    if telegram.send(f"*{title}*\n{msg}", root):
+                        A.record_notice(root, title, msg, sent=True, key="tg:" + key)
+            except Exception:
+                pass
         return False
     if root and A.notice_recently_sent(root, key, window):
         A.record_notice(root, title, msg, sent=False, key=key)
@@ -129,6 +136,11 @@ def notify(title, msg, root=None, key=None, window=1800, audience="human"):
     subprocess.run(["osascript", "-e",
                     f'display notification "{safe}" with title "{title}"'],
                    capture_output=True)
+    try:
+        from . import telegram
+        telegram.send(f"*{title}*\n{msg}", root)
+    except Exception:
+        pass                                # a phone being unreachable is not a failure
     if root:
         A.record_notice(root, title, msg, sent=True, key=key)
     return True
@@ -310,6 +322,20 @@ def escalate(root, cfg, adapter, age, args, st):
     # mailbox is the state, the notification is only a bell.
     pending = [m for m in A.mailbox(root, cfg["mailbox"])
                if "-to-fable-" in m or "-to-architect-" in m]
+    # Closing the loop out loud: an alert that says a thing was detected, with no
+    # later word on whether anything came of it, is what makes someone check by
+    # hand — which is the work the alert was supposed to save.
+    if st.get("arch_pending") and not pending:
+        try:
+            from . import telegram
+            telegram.send(f"✅ *Mimar bitirdi* — {st['arch_pending']} rapor kapandı, "
+                          f"kuyruk boş", root)
+        except Exception:
+            pass
+        st["arch_pending"] = 0
+        save_state(root, st)
+    elif pending:
+        st["arch_pending"] = len(pending)
     last_wake = st.get("last_arch_wake", 0)
     stale = [m for m in pending
              if os.path.getmtime(os.path.join(root, cfg["mailbox"], m)) > last_wake]
@@ -385,6 +411,12 @@ def escalate(root, cfg, adapter, age, args, st):
             st["arch_pid"] = proc.pid
             st["last_arch_wake"] = time.time()
             save_state(root, st)
+            try:
+                from . import telegram
+                telegram.send(f"🤖 *Mimar uyandırıldı* — {len(stale)} rapor "
+                              f"işleniyor (pid {proc.pid})", root)
+            except Exception:
+                pass
             print(f"woke the architect (pid {proc.pid}) to judge it")
     return woke
 

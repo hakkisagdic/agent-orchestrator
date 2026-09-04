@@ -89,6 +89,8 @@ scope is the one authority an implementer must not have.
 | `ao mail` · `ao notices` | coordination messages; alerts this project raised |
 | `ao watchdog install` | launchd job that restarts a stalled agent |
 | `ao mcp serve` · `ao a2a serve` | expose state to MCP clients / as A2A tasks |
+| `ao telegram setup` | alerts to your phone, decisions back from it |
+| `ao a2a-mcp serve` | reach A2A agents from an MCP-only client |
 | `ao prune` | trim accumulated records and logs |
 | `ao doctor` · `ao adapters` | check the wiring; what is supported and how well |
 
@@ -130,7 +132,7 @@ even when the CLI does not. Adding one is a JSON file; see
 [protocol](docs/protocol.md) · [safety](docs/safety.md) · [roles](docs/roles.md) ·
 [slices](docs/slices.md) · [gates](docs/gates.md) · [sources](docs/sources.md) ·
 [adapters](docs/adapters.md) · [parallel](docs/parallel.md) · [cloud](docs/cloud.md) ·
-[models](docs/models.md) · [mcp](docs/mcp.md) · [telemetry](docs/telemetry.md) ·
+[models](docs/models.md) · [telegram](docs/telegram.md) · [mcp](docs/mcp.md) · [telemetry](docs/telemetry.md) ·
 [surfaces](docs/surfaces.md) · [ledger](docs/ledger.md) · [recovery](docs/recovery.md) ·
 [keyflip](docs/keyflip.md) · [ide-extensions](docs/ide-extensions.md) ·
 **[lessons](docs/lessons.md)**
