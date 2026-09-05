@@ -2268,7 +2268,20 @@ def cmd_watchdog(cfg, args):
         script=script, root=root,
         idle=args.idle_minutes, interval=args.interval, log=log))
     A.sh(f"launchctl bootout gui/$(id -u)/{label} 2>/dev/null")
-    out = A.sh(f"launchctl bootstrap gui/$(id -u) {plist_path} 2>&1") or "loaded"
+    # bootout is asynchronous: a bootstrap issued before the old job is fully
+    # gone fails with "5: Input/output error" and leaves nothing loaded — a
+    # reinstall that silently uninstalled. Wait for the label to clear, retry.
+    out = ""
+    for attempt in range(5):
+        if A.sh(f"launchctl list | grep {label}"):
+            time.sleep(1)
+        out = A.sh(f"launchctl bootstrap gui/$(id -u) {plist_path} 2>&1") or "loaded"
+        if "error" not in out.lower() or A.sh(f"launchctl list | grep {label}"):
+            break
+        time.sleep(1 + attempt)
+    if not A.sh(f"launchctl list | grep {label}"):
+        print(f"{C['red']}NOT LOADED{C['reset']} {label}: {out.strip()[:120]} — run: launchctl bootstrap gui/$(id -u) {plist_path}")
+        return 1
     print(f"installed {label}")
     # The second, independent check. A watchdog cannot report its own death;
     # this job runs `ao doctor --check` every fifteen minutes from its own
