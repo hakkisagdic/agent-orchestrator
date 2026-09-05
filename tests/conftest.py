@@ -33,5 +33,7 @@ def project(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setattr(A, "HOME", str(home))
+    from ao import watchdog as W
+    monkeypatch.setattr(W, "STATE_DIR", str(home / ".ao"))   # bound at import from the real HOME
     full = dict(cfg, root=str(root))
     return full
