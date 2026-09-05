@@ -116,7 +116,8 @@ def test_verify_record_does_not_invalidate_its_own_tree(project, tmp_path, monke
     _git(root, "add", ".ao/ledger/verifications.jsonl")
     _git(root, "commit", "-q", "-m", "track verification ledger")
 
-    command = f"{shlex.quote(sys.executable)} -c {shlex.quote('print(\"gate ok\")')}"
+    script = 'print("gate ok")'
+    command = f"{shlex.quote(sys.executable)} -c {shlex.quote(script)}"
     gates = {
         "gates": {"smoke": {"run": command, "expect": "exit_zero", "timeout": 30}},
         "profiles": {"quick": ["smoke"]},
