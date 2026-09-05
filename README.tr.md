@@ -103,6 +103,7 @@ gereken tek yetkidir.
 | `ao ask` · `ao answer` · `ao decisions` | tek dokunuşla cevaplanan sorular; serbest metin hep sonda |
 | `ao note` | kutuya mimar mesajı, araç üzerinden |
 | `ao review` | ağacı, onu yazmayan bir aktörle gözden geçir |
+| `ao review --commits <aralık>` | inmiş işi sonradan review et; çıkış 3 = reviewer erişilemedi (asla verdict değil), yedekler `reviewer.fallbacks` ([roles.md](docs/roles.md)) |
 | `ao handoff` | devralanın ihtiyacı olan her şeyi yaz ve gönder |
 | `ao a2a-mcp serve` | MCP-only istemciden A2A ajanlarına ulaş |
 | `ao prune` | biriken kayıt ve logları buda |

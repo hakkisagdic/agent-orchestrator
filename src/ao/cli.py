@@ -1060,6 +1060,32 @@ LOW: <n>
 BLOCKER veya HIGH varsa VERDICT mutlaka NEEDS_CHANGES olmalı."""
 
 
+def _run_reviewer(root, argv, timeout, fallback=False):
+    """One reviewer attempt. {"ok", "out", "reason"}; quota and auth errors are reasons, not output."""
+    import subprocess
+    print(f"{C['dim']}reviewer: {os.path.basename(argv[0])}{' (fallback)' if fallback else ''}{C['reset']}")
+    # The reviewer runs inside the repository and is an agent by every other
+    # test; register it as a helper so no writer count takes it for a turn.
+    proc = subprocess.Popen(argv, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    A.helper_register(root, proc.pid, "reviewer")
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        return {"ok": False, "out": "", "reason": f"timeout after {timeout}s"}
+    finally:
+        A.helper_release(root, proc.pid)
+    out = (stdout or stderr or "").strip()
+    if not out:
+        return {"ok": False, "out": "", "reason": f"produced nothing (exit {proc.returncode})"}
+    if A.REVIEW_UNAVAILABLE_RE.search(out) and not A.re.search(r"VERDICT:\s*(APPROVED|NEEDS_CHANGES)", out):
+        from .watchdog import parse_reset
+        until = parse_reset(out)
+        A.set_reviewer_state(root, until=until, reason=out[:200], at=int(time.time()))
+        return {"ok": False, "out": out, "reason": out.split("\n")[0][:120]}
+    return {"ok": True, "out": out, "reason": ""}
+
+
 def cmd_review(cfg, args):
     """Review the working tree with an actor that did not write it.
 
@@ -1091,7 +1117,13 @@ def cmd_review(cfg, args):
               f"configuration this refuses.")
         return 2
 
-    diff, included = A.review_diff(root, cfg, paths=args.paths or None)
+    if args.commits:
+        # A retrospective review of landed work — after a waiver, or for a slice
+        # that landed while the reviewer was unavailable.
+        diff = A.sh(f"git diff {args.commits}", cwd=root, timeout=60) or ""
+        included = []
+    else:
+        diff, included = A.review_diff(root, cfg, paths=args.paths or None)
     if not diff.strip():
         print(f"{C['dim']}Nothing to review — the tree matches HEAD.{C['reset']}")
         return 0
@@ -1104,33 +1136,59 @@ def cmd_review(cfg, args):
     boundary = boundary or "not declared — say so as a finding"
 
     prompt = REVIEW_PROMPT.format(boundary=boundary) + "\n\n--- DIFF ---\n" + diff[:400_000]
-    argv = [x.replace("{prompt}", prompt) for x in rv["argv"]]
-    exe = shutil.which(argv[0])
-    if not exe:
-        print(f"{C['red']}{argv[0]} not on PATH{C['reset']}")
-        return 1
-    argv[0] = exe
-    print(f"{C['dim']}reviewing {len(diff):,} chars against: {boundary[:70]}"
-          + (f" · paths: {' '.join(args.paths)}" if args.paths else "")
-          + (f" · new files: {len(included)}" if included else "") + f"{C['reset']}")
-    # The reviewer runs inside the repository and is an agent by every other
-    # test; register it as a helper so no writer count takes it for a turn.
-    proc = subprocess.Popen(argv, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    A.helper_register(root, proc.pid, "reviewer")
-    try:
-        stdout, stderr = proc.communicate(timeout=args.timeout)
-    finally:
-        A.helper_release(root, proc.pid)
-    r = subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
-    out = (r.stdout or r.stderr or "").strip()
-    if not out:
-        print(f"{C['red']}reviewer produced nothing{C['reset']} (exit {r.returncode})")
-        return 1
-
+    # The reviewer chain: the configured reviewer first, then its fallbacks in
+    # order. A reviewer that is out of quota is not a verdict — it is the next
+    # reviewer's turn, and the identity of whoever actually reviewed is recorded.
+    chain = [rv] + [f for f in (rv.get("fallbacks") or []) if f.get("argv")]
+    out, used, unavailable = "", None, []
+    for cand in chain:
+        argv = [x.replace("{prompt}", prompt) for x in cand["argv"]]
+        exe, _ = A.resolve_binary(argv[0])
+        if not exe:
+            unavailable.append((cand.get("id") or argv[0], "not installed"))
+            continue
+        argv[0] = exe
+        attempt = _run_reviewer(root, argv, args.timeout, cand is not rv)
+        if attempt["ok"]:
+            out, used = attempt["out"], cand
+            break
+        unavailable.append((cand.get("id") or argv[0], attempt["reason"]))
+    if not used:
+        why = "; ".join(f"{i}: {r}" for i, r in unavailable) or "no reviewer"
+        until = A.reviewer_state(root).get("until")
+        d = os.path.join(root, cfg["reviews"])
+        os.makedirs(d, exist_ok=True)
+        head = A.sh("git rev-parse --short HEAD", cwd=root)
+        name = f"{datetime.now():%Y-%m-%d-%H%M%S}-{head}.md"
+        open(os.path.join(d, name), "w").write(
+            f"# Review {name}\n\nVERDICT: UNAVAILABLE\n\n- boundary: {boundary}\n- reviewers tried: {why}\n"
+            + (f"- window resets: {time.strftime('%H:%M', time.localtime(until))}\n" if until else "")
+            + "\nNo review took place. This file is not a round.\n")
+        A.set_reviewer_state(root, pending_review=True, boundary=boundary[:200], at=int(time.time()))
+        A.record_notice(root, "review unavailable", why[:200], sent=False, key="review-unavailable")
+        print(f"{C['yellow']}{C['b']}REVIEWER UNAVAILABLE{C['reset']}  {why}"
+              + (f" — window resets {time.strftime('%H:%M', time.localtime(until))}" if until else ""))
+        print(f"{C['dim']}Not a verdict, not a round. Park the review, continue with the next READY item; "
+              f"the watchdog nudges when the window reopens.{C['reset']}")
+        return 3
+    rv = used
+    A.set_reviewer_state(root, pending_review=False)
     verdict = "NEEDS_CHANGES"
     m = A.re.search(r"VERDICT:\s*(APPROVED|NEEDS_CHANGES)", out)
     if m:
         verdict = m.group(1)
+    else:
+        # No verdict line is not NEEDS_CHANGES. It is a reviewer that did not do
+        # the job — and the file it leaves says so, so nothing counts it.
+        d = os.path.join(root, cfg["reviews"])
+        os.makedirs(d, exist_ok=True)
+        head = A.sh("git rev-parse --short HEAD", cwd=root)
+        name = f"{datetime.now():%Y-%m-%d-%H%M%S}-{head}.md"
+        open(os.path.join(d, name), "w").write(
+            f"# Review {name}\n\nVERDICT: INVALID\n\n- reviewer: `{rv.get('id') or argv[0]}`\n"
+            f"- boundary: {boundary}\n\nThe reviewer returned no verdict line:\n\n{out[:4000]}\n")
+        print(f"{C['yellow']}{C['b']}INVALID REVIEW{C['reset']}  no VERDICT line — not a round; re-run")
+        return 3
     sev = {k: int(A.re.search(rf"{k}:\s*(\d+)", out).group(1))
            if A.re.search(rf"{k}:\s*(\d+)", out) else 0
            for k in ("BLOCKER", "HIGH", "MEDIUM", "LOW")}
@@ -1142,13 +1200,20 @@ def cmd_review(cfg, args):
     os.makedirs(d, exist_ok=True)
     head = A.sh("git rev-parse --short HEAD", cwd=root)
     name = f"{datetime.now():%Y-%m-%d-%H%M%S}-{head}.md"
-    open(os.path.join(d, name), "w").write(
-        f"# Review {name}\n\n"
-        f"- reviewer: `{rv.get('id') or argv[0]}`  family: `{rv.get('family','?')}`\n"
-        f"- implementer: `{impl.get('adapter')}/{(impl.get('session') or '')[:20]}`\n"
-        f"- tree: `{A.tree_digest(root)}`\n- boundary: {boundary}\n"
-        + (f"- paths: {' '.join(args.paths)}\n" if args.paths else "")
-        + (f"- new files: {', '.join(included)}\n" if included else "") + f"\n{out}\n")
+    primary = cfg.get("reviewer") or {}
+    header = [f"# Review {name}", "",
+              f"- reviewer: `{rv.get('id') or argv[0]}`  family: `{rv.get('family', '?')}`"
+              + ("  (fallback — the primary reviewer was unavailable)" if rv is not primary else ""),
+              f"- implementer: `{impl.get('adapter')}/{(impl.get('session') or '')[:20]}`",
+              f"- tree: `{A.tree_digest(root)}`",
+              f"- boundary: {boundary}"]
+    if args.commits:
+        header.append(f"- commits: {args.commits}")
+    if args.paths:
+        header.append(f"- paths: {' '.join(args.paths)}")
+    if included:
+        header.append(f"- new files: {', '.join(included)}")
+    open(os.path.join(d, name), "w").write("\n".join(header) + f"\n\n{out}\n")
     A.record_notice(root, "review", f"{verdict} {sev}", sent=False, key="review")
 
     col = C["green"] if verdict == "APPROVED" else C["yellow"]
@@ -2656,6 +2721,7 @@ def main():
     rw = sub.add_parser("review", help="review the tree with an actor that did not write it")
     rw.add_argument("--boundary", help="acceptance boundary; defaults to the running slice")
     rw.add_argument("--paths", nargs="*", help="review only these paths (tracked diff and untracked files under them)")
+    rw.add_argument("--commits", help="review landed work: a git range such as abc123..def456")
     rw.add_argument("--timeout", type=int, default=900)
     rw.set_defaults(fn=cmd_review)
     tg = sub.add_parser("telegram", help="phone channel: alerts out, decisions in")

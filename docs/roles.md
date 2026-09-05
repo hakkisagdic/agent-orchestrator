@@ -130,3 +130,19 @@ The rule generalises past tests. Anything that saturates a shared resource — a
 database restore, a Docker image build, an integration environment — is a
 centralised operation, and treating it as parallelisable work costs rounds without
 producing any.
+
+## When the reviewer cannot review
+
+`reviewer.fallbacks` in `.ao/config.json` is a list of further reviewer blocks
+tried in order when the primary is unavailable — out of quota, not logged in,
+timed out, or silent. The identity of whoever actually reviewed is recorded in
+the review file, marked as a fallback. A reviewer from a different family is
+preferred; a fresh session of the implementer's family with no tools is an
+acceptable last resort and still not the implementer reviewing itself.
+
+If no reviewer is available, `ao review` exits 3 and writes a file whose verdict
+is `UNAVAILABLE`. That file is not a round and never becomes NEEDS_CHANGES; the
+implementer parks the review, and the watchdog nudges again when the window
+reopens (`reviewer window reopened` in `ao watchdog explain`). `ao review
+--commits <range>` reviews landed work after the fact — the way to close a
+waiver.

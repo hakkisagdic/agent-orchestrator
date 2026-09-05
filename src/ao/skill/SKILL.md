@@ -52,7 +52,10 @@ Anything not forbidden there and inside the slice's scope is allowed.
    verification.
 6. `ao review --boundary "…"` — independent, on the boundary, never your own.
    Fix findings; re-review. Over the round budget? The architect re-specifies;
-   do not grind.
+   do not grind. Exit 3 means no reviewer could review (quota, login): not a
+   round, not a verdict — park the review, continue with the next READY item;
+   the watchdog nudges when the window reopens. Landed work is reviewed after
+   the fact with `ao review --commits <range>`.
 7. `ao commit-ok` — grants a token only when the tree digest matches the
    verification and an APPROVED review by someone else, no urgent mail is
    unacknowledged, no plan drift. Then one local commit. **No push.**

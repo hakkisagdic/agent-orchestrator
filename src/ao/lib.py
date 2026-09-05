@@ -1746,7 +1746,14 @@ def reviews(root, reviews_dir, limit=4):
     for f in files:
         verdict = ""
         try:
-            for line in open(os.path.join(d, f), errors="ignore"):
+            body = open(os.path.join(d, f), errors="ignore").read()
+            # A reviewer that could not review has no verdict. Twelve one-line
+            # "session limit" files once counted as twelve NEEDS_CHANGES rounds
+            # and put a slice 12/5 over a budget it had never spent.
+            if REVIEW_UNAVAILABLE_RE.search(body) or "VERDICT: UNAVAILABLE" in body:
+                out.append((f, "UNAVAILABLE"))
+                continue
+            for line in body.split("\n"):
                 # Case-insensitive on purpose. The implementer's reviews wrote
                 # "**Verdict:**" and `ao review` writes "VERDICT:", and a match on
                 # the capitalised form alone left every ao-review verdict empty —
@@ -1757,8 +1764,37 @@ def reviews(root, reviews_dir, limit=4):
                     break
         except Exception:
             pass
-        out.append((f, verdict))
+        out.append((f, verdict or "INVALID"))
     return out
+
+
+REVIEW_UNAVAILABLE_RE = re.compile(
+    r"hit your (?:session|usage|weekly|monthly) limit|usage limit|rate limit|"
+    r"out of (?:credits|quota)|API Error: (?:401|403|429|5\d\d)|"
+    r"Not logged in|login required|authentication", re.I)
+
+
+def reviewer_state_path(root):
+    key = os.path.basename(root.rstrip("/")) or "root"
+    return os.path.join(HOME, ".ao", f"reviewer-{key}.json")
+
+
+def reviewer_state(root):
+    try:
+        return json.load(open(reviewer_state_path(root)))
+    except (OSError, ValueError):
+        return {}
+
+
+def set_reviewer_state(root, **fields):
+    st = reviewer_state(root)
+    st.update(fields)
+    try:
+        os.makedirs(os.path.dirname(reviewer_state_path(root)), exist_ok=True)
+        json.dump(st, open(reviewer_state_path(root), "w"))
+    except OSError:
+        pass
+    return st
 
 
 def ready(root):
@@ -1895,6 +1931,8 @@ def rounds(root, reviews_dir):
         started = respec
     n = 0
     for f, v in reviews(root, reviews_dir, limit=50):
+        if v in ("UNAVAILABLE", "INVALID"):
+            continue                          # not a round: nobody reviewed anything
         if "APPROVED" in v.upper():
             break
         if started:

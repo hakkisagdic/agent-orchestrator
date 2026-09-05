@@ -619,6 +619,9 @@ def open_work(cfg, root):
     # on a plan must be nudged back into it.
     if A.board(root)["running"]:
         reasons.append("slice running")
+    rs = A.reviewer_state(root)
+    if rs.get("pending_review") and (not rs.get("until") or rs["until"] <= time.time()):
+        reasons.append("reviewer window reopened — re-run the pending review")
     if A.product_dirty(root, cfg):
         reasons.append("uncommitted changes")
     revs = A.reviews(root, cfg["reviews"], limit=1)

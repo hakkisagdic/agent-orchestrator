@@ -412,3 +412,28 @@ repeat count and its original age; anomalies are one per kind with a count.
 The pattern to remember: when a system loops, look for the reading each part
 takes of another part's *output as if it were input*. The mailbox is a channel,
 not a to-do list; a report is not work; a failed wake is not a wake.
+
+## 24. A quota error is not a verdict
+
+Between 19:45 and 21:50 the reviewer was out of quota. It shared the
+architect's five-hour window, so it ran dry at the same moment the architect
+did, and every `ao review` came back as one line: "You've hit your session
+limit". The code had a default verdict for output without a `VERDICT:` line —
+NEEDS_CHANGES — so twelve of those lines became twelve review rounds, a
+five-round budget read 12/5, and the round-budget alarm fired on a slice
+nobody had reviewed. The implementer, correctly, would not commit without an
+APPROVED review it could not obtain. The human bypassed the whole arrangement
+by hand.
+
+Three rules came out of it. A reviewer that could not review has produced no
+verdict: the file says `UNAVAILABLE`, nothing counts it as a round, and the
+command exits 3 so the implementer parks the review and continues. The
+reviewer is a chain, not a name: when the primary is out of quota the next one
+is tried, and whoever actually reviewed is recorded — on this project a fresh
+Kiro session with no tools, whose credits are a different pool. And the
+watchdog treats a reopened window as open work, so the parked review is re-run
+without anyone remembering to ask.
+
+The general form: never let the *absence* of an answer default to one of the
+answers. "No verdict" is a third state, and every consumer of the verdict has
+to know it exists.

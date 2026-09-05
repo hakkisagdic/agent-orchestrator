@@ -103,6 +103,7 @@ scope is the one authority an implementer must not have.
 | `ao ask` · `ao answer` · `ao decisions` | questions answerable in one tap; free text always last |
 | `ao note` | an architect message into the mailbox, through the tool |
 | `ao review` | review the tree with an actor that did not write it |
+| `ao review --commits <range>` | review landed work after the fact; exit 3 means no reviewer could review (never a verdict), fallbacks in `reviewer.fallbacks` ([roles.md](docs/roles.md)) |
 | `ao handoff` | write and send everything a successor needs |
 | `ao a2a-mcp serve` | reach A2A agents from an MCP-only client |
 | `ao prune` | trim accumulated records and logs |
