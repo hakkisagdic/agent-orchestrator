@@ -56,7 +56,8 @@ Anything not forbidden there and inside the slice's scope is allowed.
    round, not a verdict — park the review, continue with the next READY item;
    the watchdog nudges when the window reopens. Landed work is reviewed after
    the fact with `ao review --commits <range>`.
-7. `ao commit-ok` — grants a token only when the tree digest matches the
+7. `ao commit-ok --verify` — runs the quick gates itself when the verification is
+   stale, then grants a token only when the tree digest matches the
    verification and an APPROVED review by someone else, no urgent mail is
    unacknowledged, no plan drift. Then one local commit. **No push.**
 8. `ao_report {kind: "done"}`, board `running → done` with the gates named,
@@ -164,6 +165,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao telegram setup|test|install` | the orange channel and phone decisions |
 | `ao fanout ok|record|history` | budget gate for sub-agent fan-outs |
 | `ao credits` | provider credits and windows |
+| `ao cost [--since 24h]` | what the coordination spends: implementer turns by class, wasted turns, review counts |
 | `ao since last|2h|<ref>` | what happened since |
 | `ao digest` | landed work, gates, reviews, decisions in one page |
 | `ao notices` / `ao prune` | alert history; trim records and logs |

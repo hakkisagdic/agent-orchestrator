@@ -83,10 +83,11 @@ gereken tek yetkidir.
 | `ao watch --all` · `ao fleet` | tüm projeler, insana en çok ihtiyaç duyan üstte |
 | `ao board` | her iş nerede; READY = `needs:` bağımlılıkları tamamlanmış kuyruk maddeleri |
 | `ao verify [-p full]` | tanımlı gate'leri koştur, sonucu kaydet |
-| `ao commit-ok` | bu ağaç commit edilebilir mi? kanıttan karar |
+| `ao commit-ok [--verify]` | bu ağaç commit edilebilir mi? kanıttan karar |
 | `ao hold` / `ao hold release --note …` | ağaçtaki tüm ajanları durdur ve durdurulmuş tut |
 | `ao writers` / `ao writers --clean` | ağaçtaki canlı turlar (süreç değil tur başına bir), öksüzler ayrı; `--clean` yalnız öksüzleri durdurur |
 | `ao fanout ok --agents N` / `ao fanout record …` / `ao fanout history` | N alt-ajanlık fan-out şimdi başlayabilir mi (üst sınır, yakın limit vuruşu, sağlayıcı penceresi); bir koşunun maliyetini kaydet |
+| `ao cost --since 24h` | koordinasyonun kendisi ne harcıyor: uygulayıcı turları sınıfa göre (ürün / analiz / tören / koordinasyon), boşa giden turlar, review sayısı |
 | `ao skill install` / `ao skill show` | playbook (roller, döngü, yetki, protokol, alarmlar, tüm komutlar) deponun ajanları için: Claude skill, Kiro steering, AGENTS.md |
 | `ao init --profile claude-kiro|claude-claude` | rol bloklarını yaz: kim uygular (adaptör, model, efor), kim review eder (başka model), kim karar verir ([profiles.md](docs/profiles.md)) |
 | `ao doctor --check` | zamanlayıcı için sessiz doctor: problem başına bir satır, exit 1, alarm — `ao watchdog install` 15 dakikalık launchd işi olarak kurar |

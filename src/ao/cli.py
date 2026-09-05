@@ -511,6 +511,16 @@ def cmd_commit_ok(cfg, args):
     root = cfg["root"]
     now = A.tree_digest(root)
     ver = A.latest_verification(root)
+    # --verify: when the last verification is missing or describes another tree,
+    # run the quick profile here instead of refusing and costing the implementer
+    # a turn to run `ao verify` and another to come back. Same evidence, one
+    # ceremony command. The review is never run here — that is another actor's.
+    if getattr(args, "verify", False) and (not ver or ver.get("tree") != now or not ver.get("passed")):
+        from types import SimpleNamespace
+        print(f"{C['dim']}verification stale or missing — running quick gates first{C['reset']}")
+        cmd_verify(cfg, SimpleNamespace(profile=getattr(args, "profile", None) or "quick", wait=900))
+        now = A.tree_digest(root)
+        ver = A.latest_verification(root)
     revs = A.reviews(root, cfg["reviews"], limit=1)
     drift = A.plan_drift(root)
 
@@ -2203,6 +2213,49 @@ def _doctor_check(cfg):
     return 1
 
 
+def cmd_cost(cfg, args):
+    """What the coordination spends: the implementer's turns by what they did.
+
+    The honest answer to "is ao bureaucracy" is the share of spend in turns that
+    wrote nothing — ceremony (review/gate commands), coordination (inbox, reports,
+    writer checks) — against turns that wrote product. `wasted` counts turns that
+    ended in a blocked report without a product change: the queue-empty loop.
+    """
+    root = cfg["root"]
+    since = None
+    if args.since:
+        n, unit = A.re.match(r"(\d+)([hd])", args.since).groups()
+        since = time.time() - int(n) * (3600 if unit == "h" else 86400)
+    c = A.turn_costs(cfg, since=since)
+    if not c["turns"]:
+        print("no transcript"); return 0
+    tot = c["total"] or 1
+    print(f"{C['b']}implementer spend by turn class{C['reset']}  {C['dim']}({c['unit']}; "
+          f"{'last ' + args.since if args.since else 'whole transcript'}){C['reset']}")
+    print(f"  {'class':<14}{'turns':>6}{'spend':>10}{'share':>7}   {'wasted turns':>12}")
+    for cls in ("product", "analysis", "ceremony", "coordination"):
+        b = c["by_class"].get(cls)
+        if not b:
+            continue
+        w = f"{b['wasted']} ({b['wasted_usage']:.0f})" if b["wasted"] else ""
+        print(f"  {cls:<14}{b['turns']:>6}{b['usage']:>10.0f}{100 * b['usage'] / tot:>6.0f}%   {w:>12}")
+    print(f"  {'total':<14}{sum(b['turns'] for b in c['by_class'].values()):>6}{tot:>10.0f}")
+    overhead = sum(c["by_class"].get(k, {}).get("usage", 0) for k in ("ceremony", "coordination"))
+    print(f"\n  coordination + ceremony: {C['b']}{100 * overhead / tot:.0f}%{C['reset']} of spend"
+          f"  ·  ao commands: {', '.join(f'{k} {v}' for k, v in c['ao_commands'].most_common(6))}")
+    # the reviewer's side: files, wasted, sizes
+    d = os.path.join(root, cfg["reviews"])
+    if os.path.isdir(d):
+        files = [f for f in os.listdir(d) if f.endswith(".md") and (not since or os.path.getmtime(os.path.join(d, f)) >= since)]
+        una = sum(1 for f in files if A.reviews(root, cfg["reviews"], limit=10_000) and False)  # placeholder
+        verdicts = dict(A.reviews(root, cfg["reviews"], limit=10_000))
+        una = sum(1 for f in files if verdicts.get(f) in ("UNAVAILABLE", "INVALID"))
+        size = sum(os.path.getsize(os.path.join(d, f)) for f in files)
+        print(f"  reviews: {len(files)} files ({una} unavailable/invalid, cost nothing), "
+              f"{size // 1000}k chars of verdict text; each review sends the slice diff to the reviewer model")
+    return 0
+
+
 def _alive(pid):
     try:
         os.kill(pid, 0)
@@ -2734,8 +2787,10 @@ def main():
     cr.add_argument("--local", action="store_true", help="also show this machine's share")
     cr.add_argument("--reset-day", type=int, help="fallback: override the renewal day")
     cr.set_defaults(fn=cmd_credits)
-    sub.add_parser("commit-ok", help="may this tree be committed? decided from evidence"
-                   ).set_defaults(fn=cmd_commit_ok)
+    ck = sub.add_parser("commit-ok", help="may this tree be committed? decided from evidence")
+    ck.add_argument("--verify", action="store_true", help="run the quick gates first when the verification is stale")
+    ck.add_argument("-p", "--profile", help="gate profile for --verify (default quick)")
+    ck.set_defaults(fn=cmd_commit_ok)
     lk = sub.add_parser("lock", help="run a heavy command under the machine-wide lock")
     lk.add_argument("--wait", type=int, default=1800)
     lk.add_argument("command", nargs=argparse.REMAINDER)
@@ -2778,6 +2833,9 @@ def main():
     al.add_argument("action", choices=["list", "test"], nargs="?", default="list")
     al.add_argument("--level", choices=["yellow", "orange", "red"])
     al.set_defaults(fn=cmd_alarms)
+    co = sub.add_parser("cost", help="what the coordination spends: implementer turns by class (product/analysis/ceremony/coordination)")
+    co.add_argument("--since", help="window such as 24h or 7d (default: whole transcript)")
+    co.set_defaults(fn=cmd_cost)
     fo = sub.add_parser("fanout", help="may a fan-out of N sub-agents start now; record what one cost")
     fo.add_argument("action", choices=["ok", "record", "history"], nargs="?", default="ok")
     fo.add_argument("--agents", type=int)

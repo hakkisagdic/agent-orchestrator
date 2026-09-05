@@ -2677,3 +2677,107 @@ def helper_pids(root):
     except OSError:
         pass
     return live
+
+
+# ---- cost: what the coordination itself spends ----------------------------------
+#
+# "How much quota does ao cost, and is it bureaucracy?" is answerable only from
+# the transcript. Every turn is classified by what it did — wrote product, ran
+# the review/gate ceremony, only coordinated, or read and thought — and its
+# spend is summed per class, so the overhead is a number and not an opinion.
+
+_PRODUCT_PATH = re.compile(r"(^|/)(src|lib|app|apps|test|tests|spec|fixtures|evidence|docs|plugins|site|"
+                           r"package\.json|pyproject\.toml|tsconfig)")
+_COORD_PATH = re.compile(r"(^|/)(agent-mail|\.ao|semantic-review|\.kiro|\.claude)(/|$)")
+
+
+def turn_costs(cfg, since=None):
+    """Per-turn cost and class from the implementer's transcript.
+
+    Returns {"unit", "turns": [ {start, usage, cls, tool_calls, product_writes,
+    reviews, commits, blocked_report} ], "by_class": {cls: {turns, usage}},
+    "ao_commands": Counter, "total"}. Classes: product (wrote product files or
+    committed), ceremony (review / verify / lock / commit-ok, nothing written),
+    coordination (only inbox/report/writers/board, few calls), analysis (read and
+    reasoned, wrote nothing).
+    """
+    import collections
+    msgs, _ = session_paths(cfg)
+    out = {"unit": "credit", "turns": [], "by_class": {}, "ao_commands": collections.Counter(), "total": 0.0}
+    if not msgs or not os.path.exists(msgs):
+        return out
+    recs = read_tail(msgs, 400_000_000)
+    cur = None
+
+    def ts(d):
+        raw = d.get("timestamp", "")
+        try:
+            import datetime as _dt
+            return _dt.datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return None
+    for d in recs:
+        pl = d.get("payload") or d.get("message") or {}
+        t = pl.get("type") or d.get("type")
+        if t == "turn_start" or (t == "user" and cur is None) or (t == "user" and cur and cur.get("closed")):
+            cur = {"start": ts(d), "usage": 0.0, "product_writes": 0, "coord_writes": 0, "tool_calls": 0,
+                   "reviews": 0, "commits": 0, "blocked_report": False, "ao": collections.Counter()}
+            out["turns"].append(cur)
+            continue
+        if cur is None:
+            continue
+        if t == "usage_summary":
+            for ps in pl.get("promptTurnSummaries") or []:
+                try:
+                    cur["usage"] += float(ps.get("usage") or 0)
+                    out["unit"] = ps.get("unit") or out["unit"]
+                except (TypeError, ValueError):
+                    pass
+        elif t == "assistant" and isinstance(pl.get("usage"), dict):      # claude-code transcripts
+            u = pl["usage"]
+            cur["usage"] += (u.get("input_tokens", 0) + u.get("output_tokens", 0)) / 1000.0
+            out["unit"] = "ktok"
+        elif t == "turn_end":
+            cur["closed"] = True
+        elif t == "tool_call":
+            cur["tool_calls"] += 1
+            name = str(pl.get("toolName") or pl.get("name") or "")
+            args = pl.get("args") or pl.get("input") or {}
+            text = json.dumps(args, ensure_ascii=False) if not isinstance(args, str) else args
+            if name.endswith("ao_report") and "blocked" in text:      # MCP clients prefix tool names
+                cur["blocked_report"] = True
+            if "write" in name.lower() or name in ("fs_write", "Edit", "Write", "MultiEdit"):
+                path = str(args.get("path") or args.get("file_path") or "") if isinstance(args, dict) else ""
+                if _COORD_PATH.search(path):
+                    cur["coord_writes"] += 1
+                elif _PRODUCT_PATH.search(path) or (path and "/" in path):
+                    cur["product_writes"] += 1
+            m = re.search(r"\bao\s+(?:-C\s+\S+\s+)?([a-z][a-z-]+)", text)
+            if m:
+                cur["ao"][m.group(1)] += 1
+                out["ao_commands"][m.group(1)] += 1
+            if re.search(r"\bao\s+(?:-C\s+\S+\s+)?review\b", text):
+                cur["reviews"] += 1
+            if re.search(r"git\s+commit\b", text):
+                cur["commits"] += 1
+    for tn in out["turns"]:
+        if since and (not tn["start"] or tn["start"] < since):
+            tn["cls"] = None
+            continue
+        if tn["product_writes"] or tn["commits"]:
+            cls = "product"
+        elif tn["reviews"] or any(c in tn["ao"] for c in ("verify", "lock", "commit-ok")):
+            cls = "ceremony"
+        elif tn["blocked_report"] or (tn["tool_calls"] <= 8 and (tn["ao"] or tn["coord_writes"])):
+            cls = "coordination"
+        else:
+            cls = "analysis"
+        tn["cls"] = cls
+        b = out["by_class"].setdefault(cls, {"turns": 0, "usage": 0.0, "wasted": 0, "wasted_usage": 0.0})
+        b["turns"] += 1
+        b["usage"] += tn["usage"]
+        if tn["blocked_report"] and not tn["product_writes"]:
+            b["wasted"] += 1
+            b["wasted_usage"] += tn["usage"]
+        out["total"] += tn["usage"]
+    return out
