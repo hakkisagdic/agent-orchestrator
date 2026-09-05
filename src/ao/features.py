@@ -10,6 +10,7 @@ it; `ao features` prints the estimate for the current switches.
 """
 import json
 import os
+UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 # key: (label, default, share of implementer spend in %, what it spends)
 FEATURES = {
@@ -47,7 +48,7 @@ def estimate(cfg):
 
 def set_switch(root, key, on):
     p = os.path.join(root, ".ao", "config.json")
-    cfg = json.load(open(p))
+    cfg = json.load(open(p, encoding=UTF8))
     cfg.setdefault("features", {})[key] = bool(on)
-    json.dump(cfg, open(p, "w"), indent=2, ensure_ascii=False)
+    json.dump(cfg, open(p, "w", encoding=UTF8), indent=2, ensure_ascii=False)
     return cfg["features"]

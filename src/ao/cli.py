@@ -21,6 +21,7 @@ import time
 from datetime import datetime
 
 from . import lib as A
+UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 C = A.C
 
@@ -314,7 +315,7 @@ def cmd_mail(cfg, args):
             print(f)
     elif args.action == "read":
         for f in A.mailbox(root, cfg["mailbox"]):
-            print(f"===== {f} =====\n{open(os.path.join(d, f)).read()}")
+            print(f"===== {f} =====\n{open(os.path.join(d, f), encoding=UTF8).read()}")
     elif args.action == "send":
         os.makedirs(d, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d-%H%M")
@@ -405,7 +406,7 @@ def cmd_verify(cfg, args):
         print(f"{C['yellow']}No .ao/gates.json — nothing declared to verify.{C['reset']}")
         print(f"{C['dim']}See docs/gates.md for the shape.{C['reset']}")
         return 1
-    spec = _json.load(open(gates_file))
+    spec = _json.load(open(gates_file, encoding=UTF8))
     profile = args.profile or spec.get("default_profile", "quick")
     names = spec.get("profiles", {}).get(profile)
     if not names:
@@ -419,7 +420,7 @@ def cmd_verify(cfg, args):
         started = time.time()
         try:
             r = subprocess.run(g["run"], shell=True, cwd=root, capture_output=True,
-                               text=True, timeout=g.get("timeout", 600))
+                               text=True, encoding=UTF8, errors="replace", timeout=g.get("timeout", 600))
             out, code = (r.stdout + r.stderr), r.returncode
         except subprocess.TimeoutExpired:
             out, code = "timed out", 124
@@ -485,7 +486,7 @@ def cmd_verify(cfg, args):
            "dirty": len([l for l in A.sh("git status --short", cwd=root).split("\n") if l.strip()])}
     ledger = os.path.join(root, ".ao", "ledger")
     os.makedirs(ledger, exist_ok=True)
-    with open(os.path.join(ledger, "verifications.jsonl"), "a") as fh:
+    with open(os.path.join(ledger, "verifications.jsonl"), "a", encoding=UTF8) as fh:
         fh.write(_json.dumps(rec, ensure_ascii=False) + "\n")
 
     A.release_gate_lock()
@@ -557,7 +558,7 @@ def cmd_commit_ok(cfg, args):
         # the verdict measured nothing it did not already believe.
         try:
             body = open(os.path.join(root, cfg["reviews"], revs[0][0]),
-                        errors="replace").read(4000)
+                        errors="replace", encoding=UTF8).read(4000)
         except OSError:
             body = ""
         m = A.re.search(r"reviewer:\s*`([^`]+)`", body)
@@ -592,7 +593,7 @@ def cmd_commit_ok(cfg, args):
     token = f"C-{int(time.time())}"
     try:
         rbody = open(os.path.join(root, cfg["reviews"], review_name),
-                     errors="replace").read(4000)
+                     errors="replace", encoding=UTF8).read(4000)
         rwho = (A.re.search(r"reviewer:\s*`([^`]+)`", rbody) or [None, None])[1]
     except Exception:
         rwho = None
@@ -860,7 +861,7 @@ def cmd_telegram(cfg, args):
         # KeepAlive rather than StartInterval: long polling holds the connection
         # open, so the job wants restarting when it ends, not running on a clock.
         plist = os.path.join(A.HOME, "Library", "LaunchAgents", label + ".plist")
-        open(plist, "w").write(
+        open(plist, "w", encoding=UTF8).write(
             '<?xml version="1.0" encoding="UTF-8"?>\n'
             '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
             '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
@@ -1034,7 +1035,7 @@ def cmd_handoff(cfg, args):
     path = os.path.join(root, cfg["mailbox"],
                         f"{datetime.now():%Y%m%d-%H%M}-fable-to-anyone-DEVIR.md")
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    open(path, "w").write(text + "\n")
+    open(path, "w", encoding=UTF8).write(text + "\n")
     print(text)
 
     if not args.no_send:
@@ -1086,7 +1087,7 @@ def _run_reviewer(root, argv, timeout, fallback=False):
     print(f"{C['dim']}reviewer: {os.path.basename(argv[0])}{' (fallback)' if fallback else ''}{C['reset']}")
     # The reviewer runs inside the repository and is an agent by every other
     # test; register it as a helper so no writer count takes it for a turn.
-    proc = subprocess.Popen(argv, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    proc = subprocess.Popen(argv, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding=UTF8, errors="replace")
     A.helper_register(root, proc.pid, "reviewer")
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
@@ -1180,7 +1181,7 @@ def cmd_review(cfg, args):
         os.makedirs(d, exist_ok=True)
         head = A.sh("git rev-parse --short HEAD", cwd=root)
         name = f"{datetime.now():%Y-%m-%d-%H%M%S}-{head}.md"
-        open(os.path.join(d, name), "w").write(
+        open(os.path.join(d, name), "w", encoding=UTF8).write(
             f"# Review {name}\n\nVERDICT: UNAVAILABLE\n\n- boundary: {boundary}\n- reviewers tried: {why}\n"
             + (f"- window resets: {time.strftime('%H:%M', time.localtime(until))}\n" if until else "")
             + "\nNo review took place. This file is not a round.\n")
@@ -1206,7 +1207,7 @@ def cmd_review(cfg, args):
         os.makedirs(d, exist_ok=True)
         head = A.sh("git rev-parse --short HEAD", cwd=root)
         name = f"{datetime.now():%Y-%m-%d-%H%M%S}-{head}.md"
-        open(os.path.join(d, name), "w").write(
+        open(os.path.join(d, name), "w", encoding=UTF8).write(
             f"# Review {name}\n\nVERDICT: INVALID\n\n- reviewer: `{rv.get('id') or argv[0]}`\n"
             f"- boundary: {boundary}\n\nThe reviewer returned no verdict line:\n\n{out[:4000]}\n")
         print(f"{C['yellow']}{C['b']}INVALID REVIEW{C['reset']}  no VERDICT line — not a round; re-run")
@@ -1235,7 +1236,7 @@ def cmd_review(cfg, args):
         header.append(f"- paths: {' '.join(args.paths)}")
     if included:
         header.append(f"- new files: {', '.join(included)}")
-    open(os.path.join(d, name), "w").write("\n".join(header) + f"\n\n{out}\n")
+    open(os.path.join(d, name), "w", encoding=UTF8).write("\n".join(header) + f"\n\n{out}\n")
     A.record_notice(root, "review", f"{verdict} {sev}", sent=False, key="review")
 
     col = C["green"] if verdict == "APPROVED" else C["yellow"]
@@ -1479,7 +1480,7 @@ def _detect_gates(root):
     pj = os.path.join(root, "package.json")
     if os.path.exists(pj):
         try:
-            scripts = (json.load(open(pj)).get("scripts") or {})
+            scripts = (json.load(open(pj, encoding=UTF8)).get("scripts") or {})
         except Exception:
             scripts = {}
         for name, key in (("typecheck", "typecheck"), ("lint", "lint"), ("test", "test")):
@@ -1533,7 +1534,7 @@ def _apply_profile(root, args):
         return []
     p = os.path.join(root, ".ao", "config.json")
     try:
-        cfg = json.load(open(p))
+        cfg = json.load(open(p, encoding=UTF8))
     except (OSError, ValueError):
         cfg = {}
     added = []
@@ -1560,7 +1561,7 @@ def _apply_profile(root, args):
                             "_why": "resumable and woken only into absence; read-only tools plus ao"}
         added.append("architect")
     if added:
-        json.dump(cfg, open(p, "w"), indent=2, ensure_ascii=False)
+        json.dump(cfg, open(p, "w", encoding=UTF8), indent=2, ensure_ascii=False)
     return added
 
 
@@ -1582,7 +1583,7 @@ def cmd_init(cfg, args):
             kept.append(rel)
             return
         os.makedirs(os.path.dirname(p), exist_ok=True)
-        with open(p, "w") as fh:
+        with open(p, "w", encoding=UTF8) as fh:
             fh.write(content)
         if mode:
             os.chmod(p, mode)
@@ -1606,11 +1607,11 @@ def cmd_init(cfg, args):
     put("agent-mail/README.md", MAIL_README.format())
 
     gi = os.path.join(root, ".gitignore")
-    lines = open(gi).read().split("\n") if os.path.exists(gi) else []
+    lines = open(gi, encoding=UTF8).read().split("\n") if os.path.exists(gi) else []
     add = [l for l in ("agent-mail/*.md", "!agent-mail/README.md", ".ao/inbox/", ".ao/hold")
            if l not in lines]
     if add:
-        with open(gi, "a") as fh:
+        with open(gi, "a", encoding=UTF8) as fh:
             fh.write("\n# agent-orchestrator: mail is transient; the ledger and reviews are not\n"
                      + "\n".join(add) + "\n")
         wrote.append(".gitignore (+%d)" % len(add))
@@ -1622,8 +1623,8 @@ def cmd_init(cfg, args):
     else:
         for f in ("CLAUDE.md", "AGENTS.md"):
             p = os.path.join(root, f)
-            if os.path.exists(p) and "ao_inbox" not in open(p, errors="replace").read():
-                with open(p, "a") as fh:
+            if os.path.exists(p) and "ao_inbox" not in open(p, errors="replace", encoding=UTF8).read():
+                with open(p, "a", encoding=UTF8) as fh:
                     fh.write("\n\n" + STEERING_COORD.split("---\n\n", 2)[-1])
                 wrote.append(f + " (+ao section)")
                 break
@@ -1651,7 +1652,7 @@ def cmd_init(cfg, args):
             print("           " + "\n           ".join(what.splitlines()[1:]))
     if args.watchdog:
         code = subprocess.run([exe, "-C", root, "watchdog", "install"],
-                              capture_output=True, text=True).returncode
+                              capture_output=True, text=True, encoding=UTF8, errors="replace").returncode
         print(f"  {C['green'] if code == 0 else C['red']}watchdog{C['reset']} "
               f"{'installed' if code == 0 else 'install failed — run ao watchdog install'}")
 
@@ -1675,7 +1676,7 @@ def cmd_decide(cfg, args):
         p = os.path.join(root, ".ao", "ledger", "decisions.jsonl")
         rows = []
         if os.path.exists(p):
-            for line in open(p, errors="replace"):
+            for line in open(p, errors="replace", encoding=UTF8):
                 try:
                     rows.append(json.loads(line))
                 except Exception:
@@ -1702,7 +1703,7 @@ def cmd_decide(cfg, args):
            "why": args.why, "scope": args.scope, "answers": args.answers, "by": "architect"}
     d = os.path.join(root, ".ao", "ledger")
     os.makedirs(d, exist_ok=True)
-    with open(os.path.join(d, "decisions.jsonl"), "a") as fh:
+    with open(os.path.join(d, "decisions.jsonl"), "a", encoding=UTF8) as fh:
         fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
     if args.answers:
         ans = A.answer(root, args.answers, "x " + args.decision if False else args.decision,
@@ -1735,7 +1736,7 @@ def cmd_since(cfg, args):
     now = time.time()
     if ref == "last":
         try:
-            cut = json.load(open(_since_marker(root)))["at"]
+            cut = json.load(open(_since_marker(root), encoding=UTF8))["at"]
         except Exception:
             cut = now - 86400
     elif A.re.fullmatch(r"\d+(\.\d+)?[hdm]", ref):
@@ -1792,7 +1793,7 @@ def cmd_since(cfg, args):
 
     if not args.no_mark:
         os.makedirs(os.path.dirname(_since_marker(root)), exist_ok=True)
-        json.dump({"at": now}, open(_since_marker(root), "w"))
+        json.dump({"at": now}, open(_since_marker(root), "w", encoding=UTF8))
     return 0
 
 
@@ -1888,7 +1889,7 @@ def cmd_source(cfg, args):
     admitted = held = 0
     for f in files:
         try:
-            doc = json.load(open(f))
+            doc = json.load(open(f, encoding=UTF8))
         except Exception as e:
             print(f"{C['red']}skip{C['reset']} {os.path.basename(f)}: unreadable ({e})")
             continue
@@ -1965,7 +1966,7 @@ def cmd_hold(cfg, args):
             box = os.path.join(root, cfg["mailbox"])
             os.makedirs(box, exist_ok=True)
             name = f"{datetime.now():%Y%m%d-%H%M}-fable-to-kiro-INFO-hold-released.md"
-            with open(os.path.join(box, name), "w") as fh:
+            with open(os.path.join(box, name), "w", encoding=UTF8) as fh:
                 fh.write(f"# INFO — hold released\n\nDuruldu: {st.get('minutes',0)} dakika\n"
                          f"Sebep: {st.get('reason','')}\n\n## Bu sürede ne değişti\n\n"
                          f"{args.note}\n")
@@ -1979,7 +1980,7 @@ def cmd_hold(cfg, args):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     json.dump({"by": args.by, "reason": args.reason or "manual intervention",
                "at": int(time.time()), "stopped": pids},
-              open(path, "w"), indent=2)
+              open(path, "w", encoding=UTF8), indent=2)
     if not pids:
         dead = A.orphans(root, adapter)
         if dead:
@@ -2425,17 +2426,17 @@ def cmd_hooks(cfg, args):
         hooks = os.path.join(root, hooks)
     p = os.path.join(hooks, "pre-push")
     if args.action == "uninstall":
-        if os.path.exists(p) and "agent-orchestrator" in open(p).read():
+        if os.path.exists(p) and "agent-orchestrator" in open(p, encoding=UTF8).read():
             os.remove(p); print("removed pre-push")
         return 0
     if args.action == "status":
-        print(f"pre-push: {'installed' if os.path.exists(p) and 'agent-orchestrator' in open(p).read() else 'absent'}")
+        print(f"pre-push: {'installed' if os.path.exists(p) and 'agent-orchestrator' in open(p, encoding=UTF8).read() else 'absent'}")
         return 0
     os.makedirs(hooks, exist_ok=True)
-    if os.path.exists(p) and "agent-orchestrator" not in open(p).read():
+    if os.path.exists(p) and "agent-orchestrator" not in open(p, encoding=UTF8).read():
         print(f"{C['yellow']}a pre-push hook already exists and is not ours; not overwriting{C['reset']}"); return 1
     ao = shutil.which("ao") or os.path.join(A.REPO, "bin", "ao")
-    open(p, "w").write(PRE_PUSH_HOOK.format(ao=ao, root=root))
+    open(p, "w", encoding=UTF8).write(PRE_PUSH_HOOK.format(ao=ao, root=root))
     os.chmod(p, 0o755)
     print(f"{C['green']}installed{C['reset']} pre-push → refuses unless `ao push allow` was run in the last 30 minutes")
     return 0
@@ -2448,11 +2449,11 @@ def cmd_push(cfg, args):
     tok = os.path.join(A.HOME, ".ao", f"push-{key}.ok")
     if args.action == "allow":
         os.makedirs(os.path.dirname(tok), exist_ok=True)
-        json.dump({"at": int(time.time()), "minutes": args.minutes, "by": os.environ.get("USER", "human")}, open(tok, "w"))
+        json.dump({"at": int(time.time()), "minutes": args.minutes, "by": os.environ.get("USER", "human")}, open(tok, "w", encoding=UTF8))
         print(f"{C['green']}push allowed{C['reset']} for {args.minutes} minutes"); return 0
     if args.action == "check":
         try:
-            t = json.load(open(tok))
+            t = json.load(open(tok, encoding=UTF8))
             if time.time() - t["at"] <= t.get("minutes", 30) * 60:
                 return 0
         except (OSError, ValueError, KeyError):
@@ -2460,7 +2461,7 @@ def cmd_push(cfg, args):
         sys.stderr.write("agent-orchestrator: push refused — pushing is a human decision. Run `ao push allow` and push again.\n")
         return 1
     try:
-        t = json.load(open(tok)); left = t.get("minutes", 30) * 60 - (time.time() - t["at"])
+        t = json.load(open(tok, encoding=UTF8)); left = t.get("minutes", 30) * 60 - (time.time() - t["at"])
         print(f"push window: {'open, ' + str(int(left // 60)) + 'm left' if left > 0 else 'closed'}")
     except (OSError, ValueError, KeyError):
         print("push window: closed")
@@ -2495,7 +2496,7 @@ def _prune_jsonl(path, cutoff, dry):
     before = os.path.getsize(path)
     keep = []
     dropped = 0
-    for line in open(path, errors="replace"):
+    for line in open(path, errors="replace", encoding=UTF8):
         if not line.strip():
             continue
         try:
@@ -2506,7 +2507,7 @@ def _prune_jsonl(path, cutoff, dry):
             pass                                  # unparseable: keep it, do not silently lose data
         keep.append(line if line.endswith("\n") else line + "\n")
     if dropped and not dry:
-        with open(path, "w") as fh:
+        with open(path, "w", encoding=UTF8) as fh:
             fh.writelines(keep)
     freed = before - sum(len(k.encode()) for k in keep) if dropped else 0
     return dropped, len(keep), max(0, freed)
@@ -2538,7 +2539,7 @@ def cmd_prune(cfg, args):
         if kind == "evidence" and not args.evidence:
             path = os.path.join(root, rel)
             if os.path.exists(path):
-                n = sum(1 for _ in open(path, errors="replace"))
+                n = sum(1 for _ in open(path, errors="replace", encoding=UTF8))
                 print(f"  {C['dim']}skip  {name:<14} {n} records — evidence, needs --evidence{C['reset']}")
             continue
         path = os.path.join(root, rel)
@@ -2583,10 +2584,10 @@ def cmd_prune(cfg, args):
             if not dry:
                 # keep the tail: the last turn's output is the only part anyone
                 # reads, and it is what a failed nudge is diagnosed from
-                with open(pth, errors="replace") as fh:
+                with open(pth, errors="replace", encoding=UTF8) as fh:
                     fh.seek(max(0, size - args.keep_kb * 1024))
                     tail = fh.read()
-                with open(pth, "w") as fh:
+                with open(pth, "w", encoding=UTF8) as fh:
                     fh.write(f"[truncated by ao prune {datetime.now():%Y-%m-%d %H:%M}]\n" + tail)
             total += size - args.keep_kb * 1024
             print(f"  {C['green']}{'would trim' if dry else 'trimmed'}{C['reset']}  "
@@ -2625,7 +2626,7 @@ def _watchdog_windows(cfg, args):
              f"ao-doctor-{key}": (15, f'"{shutil.which("ao") or "ao"}" -C "{root}" doctor --check')}
     if args.action == "status":
         for name in tasks:
-            r = subprocess.run(["schtasks", "/Query", "/TN", name], capture_output=True, text=True)
+            r = subprocess.run(["schtasks", "/Query", "/TN", name], capture_output=True, text=True, encoding=UTF8, errors="replace")
             print(f"{name}: {'scheduled' if r.returncode == 0 else 'absent'}")
         return 0
     if args.action == "uninstall":
@@ -2635,7 +2636,7 @@ def _watchdog_windows(cfg, args):
         return 0
     for name, (minutes, cmd) in tasks.items():
         r = subprocess.run(["schtasks", "/Create", "/F", "/SC", "MINUTE", "/MO", str(minutes), "/TN", name, "/TR", cmd],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, encoding=UTF8, errors="replace")
         print(f"{'installed' if r.returncode == 0 else 'FAILED'} {name} (every {minutes}m)" + ("" if r.returncode == 0 else f": {r.stderr.strip()[:120]}"))
     return 0
 
@@ -2692,7 +2693,7 @@ def cmd_watchdog(cfg, args):
 
     os.makedirs(os.path.dirname(plist_path), exist_ok=True)
     os.makedirs(os.path.expanduser("~/.ao"), exist_ok=True)
-    open(plist_path, "w").write(PLIST.format(
+    open(plist_path, "w", encoding=UTF8).write(PLIST.format(
         label=label, python_arg=(f"<string>{python}</string>" if python else ""),
         script=script, root=root,
         idle=args.idle_minutes, interval=args.interval, log=log))
@@ -2720,7 +2721,7 @@ def cmd_watchdog(cfg, args):
     ao_exe = shutil.which("ao") or os.path.join(A.REPO, "bin", "ao")
     ao_in_repo = os.path.realpath(ao_exe).startswith(os.path.realpath(A.REPO))
     dargs = ([sys.executable] if ao_in_repo else []) + [ao_exe, "-C", root, "doctor", "--check"]
-    open(dplist, "w").write(PLIST_CMD.format(
+    open(dplist, "w", encoding=UTF8).write(PLIST_CMD.format(
         label=dlabel, args="".join(f"<string>{a}</string>" for a in dargs),
         interval=900, log=os.path.expanduser(f"~/.ao/doctor-{key}.log")))
     A.sh(f"launchctl bootout gui/$(id -u)/{dlabel} 2>/dev/null")
@@ -2753,7 +2754,7 @@ def cmd_adapters(cfg, args):
         if not f.endswith(".json") or f == "cloud-generic.json":
             continue
         try:
-            a = __import__("json").load(open(os.path.join(d, f)))
+            a = __import__("json").load(open(os.path.join(d, f), encoding=UTF8))
         except Exception:
             continue
         rows.append((a.get("id", f), a.get("verified", "?"),
@@ -2898,7 +2899,7 @@ def cmd_doctor(cfg, args):
         print(f"ping            {C['green'] + 'configured' + C['reset'] if A.ping_url(root) else C['yellow'] + 'off' + C['reset'] + '  ao pings setup'}")
         hk = os.path.join(A.sh('git rev-parse --git-dir', cwd=root) or '.git', 'hooks', 'pre-push')
         hk = hk if os.path.isabs(hk) else os.path.join(root, hk)
-        print(f"push hook       {C['green'] + 'installed' + C['reset'] if os.path.exists(hk) and 'agent-orchestrator' in open(hk).read() else C['yellow'] + 'off' + C['reset'] + '  ao hooks install'}")
+        print(f"push hook       {C['green'] + 'installed' + C['reset'] if os.path.exists(hk) and 'agent-orchestrator' in open(hk, encoding=UTF8).read() else C['yellow'] + 'off' + C['reset'] + '  ao hooks install'}")
         from . import features as _F
         print(f"features        {sum(_F.switches(cfg).values())}/{len(_F.ORDER)} on · est. ~{_F.estimate(cfg)}% of implementer spend  {C['dim']}ao features{C['reset']}")
         print(f"ao for agents   {C['green']}{reachable}{C['reset']}")
@@ -2911,7 +2912,7 @@ def cmd_doctor(cfg, args):
     if os.path.isdir(steer) and not reachable:
         refs = [f for f in os.listdir(steer)
                 if f.endswith(".md") and "ao " in open(os.path.join(steer, f),
-                                                       errors="replace").read()]
+                                                       errors="replace", encoding=UTF8).read()]
         if refs:
             print(f"                {C['yellow']}steering references it: "
                   f"{', '.join(refs)}{C['reset']}")

@@ -20,13 +20,14 @@ import os
 import struct
 import subprocess
 import sys
+UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 _NATIVE = None          # decided on first use: "darwin" | "linux" | None (shell fallbacks)
 
 
 def _sh(cmd):
     try:
-        return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30).stdout
+        return subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding=UTF8, errors="replace", timeout=30).stdout
     except Exception:
         return ""
 
@@ -117,7 +118,7 @@ class _Linux:
 
     def info(self, pid):
         try:
-            stat = open(f"/proc/{pid}/stat").read()
+            stat = open(f"/proc/{pid}/stat", encoding=UTF8).read()
         except OSError:
             return None
         rest = stat[stat.rindex(")") + 2:].split()

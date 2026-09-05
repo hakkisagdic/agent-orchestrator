@@ -10,6 +10,7 @@ import re
 import subprocess
 import time
 from datetime import datetime
+UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 HOME = os.path.expanduser("~")
 # Adapters ship with the package, but the documented install is still a git
@@ -63,7 +64,7 @@ def load_config(root):
     cfg = {}
     if os.path.exists(p):
         try:
-            cfg = json.load(open(p))
+            cfg = json.load(open(p, encoding=UTF8))
         except Exception:
             cfg = {}
     cfg.setdefault("root", root)
@@ -78,7 +79,7 @@ def load_config(root):
 
 def load_adapter(adapter_id):
     p = os.path.join(adapters_dir(), f"{adapter_id}.json")
-    return json.load(open(p)) if os.path.exists(p) else {}
+    return json.load(open(p, encoding=UTF8)) if os.path.exists(p) else {}
 
 
 # ── shell ─────────────────────────────────────────────────────────────────────
@@ -86,7 +87,7 @@ def load_adapter(adapter_id):
 def sh(cmd, cwd=None, timeout=20):
     try:
         r = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True,
-                           text=True, timeout=timeout)
+                           text=True, encoding=UTF8, errors="replace", timeout=timeout)
         return r.stdout.strip()
     except Exception:
         return ""
@@ -113,7 +114,7 @@ def discover_session(cwd):
                 if not (os.path.exists(meta) and os.path.exists(msgs)):
                     continue
                 try:
-                    m = json.load(open(meta))
+                    m = json.load(open(meta, encoding=UTF8))
                 except Exception:
                     continue
                 if cwd not in (m.get("workspacePaths") or []):
@@ -145,7 +146,7 @@ def all_workspaces():
             if not (os.path.exists(meta) and os.path.exists(msgs)):
                 continue
             try:
-                m = json.load(open(meta))
+                m = json.load(open(meta, encoding=UTF8))
             except Exception:
                 continue
             for path in (m.get("workspacePaths") or []):
@@ -325,7 +326,7 @@ def busy(cfg, adapter):
     status, desc = "", ""
     if meta and os.path.exists(meta):
         try:
-            m = json.load(open(meta))
+            m = json.load(open(meta, encoding=UTF8))
             status = m.get(
                 (adapter.get("busy") or {}).get("status_field", "status"), "")
             desc = m.get(
@@ -433,7 +434,7 @@ def board(root):
     if not os.path.exists(p):
         return out
     state = None
-    for line in open(p, errors="replace"):
+    for line in open(p, errors="replace", encoding=UTF8):
         line = line.rstrip()
         m = re.match(r"^##\s+([a-z]+)\s*$", line.strip())
         if m:
@@ -471,7 +472,7 @@ def sources(root):
     if not os.path.exists(p):
         return {}
     try:
-        cfg = json.load(open(p))
+        cfg = json.load(open(p, encoding=UTF8))
     except Exception:
         return {}
     cfg.setdefault("sources", [])
@@ -523,7 +524,7 @@ def plan_baseline(root):
     out = {}
     if not os.path.exists(p):
         return out
-    for line in open(p, errors="replace"):
+    for line in open(p, errors="replace", encoding=UTF8):
         try:
             rec = json.loads(line)
         except Exception:
@@ -553,7 +554,7 @@ def plan_drift(root):
 def record_plan(root, item_id, digest):
     d = os.path.join(root, ".ao", "ledger")
     os.makedirs(d, exist_ok=True)
-    with open(os.path.join(d, "plans.jsonl"), "a") as fh:
+    with open(os.path.join(d, "plans.jsonl"), "a", encoding=UTF8) as fh:
         fh.write(json.dumps({"item": item_id, "digest": digest,
                              "at": int(time.time())}) + "\n")
 
@@ -566,14 +567,14 @@ def board_append(root, state, line):
     write.
     """
     p = os.path.join(root, ".ao", "board.md")
-    text = open(p).read() if os.path.exists(p) else "# Board\n"
+    text = open(p, encoding=UTF8).read() if os.path.exists(p) else "# Board\n"
     head = f"## {state}"
     if head not in text:
         text = text.rstrip("\n") + f"\n\n{head}\n"
     idx = text.index(head) + len(head)
     nl = text.index("\n", idx) + 1
     text = text[:nl] + line.rstrip() + "\n" + text[nl:]
-    open(p, "w").write(text)
+    open(p, "w", encoding=UTF8).write(text)
 
 
 def record_progress(root, cfg):
@@ -606,7 +607,7 @@ def record_progress(root, cfg):
     os.makedirs(d, exist_ok=True)
     p = os.path.join(d, "progress.jsonl")
     try:
-        with open(p) as fh:
+        with open(p, encoding=UTF8) as fh:
             last = fh.readlines()[-1:]
         if last:
             prev = json.loads(last[0])
@@ -615,7 +616,7 @@ def record_progress(root, cfg):
                 return                                # nothing changed; do not log noise
     except Exception:
         pass
-    with open(p, "a") as fh:
+    with open(p, "a", encoding=UTF8) as fh:
         fh.write(json.dumps(rec) + "\n")
 
 
@@ -646,7 +647,7 @@ def spinning(root, min_minutes=6, min_samples=3):
     if not os.path.exists(p):
         return None
     recs = []
-    for line in open(p, errors="replace"):
+    for line in open(p, errors="replace", encoding=UTF8):
         try:
             recs.append(json.loads(line))
         except Exception:
@@ -678,7 +679,7 @@ def hold_state(root):
     if not os.path.exists(p):
         return None
     try:
-        st = json.load(open(p))
+        st = json.load(open(p, encoding=UTF8))
     except Exception:
         st = {"by": "unknown", "reason": "unreadable hold file"}
     st["minutes"] = int((time.time() - st.get("at", time.time())) / 60)
@@ -916,7 +917,7 @@ def record_notice(root, title, msg, sent, key=None):
     d = os.path.join(root, ".ao", "ledger")
     try:
         os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, "notices.jsonl"), "a") as fh:
+        with open(os.path.join(d, "notices.jsonl"), "a", encoding=UTF8) as fh:
             fh.write(json.dumps({"at": int(time.time()), "title": title,
                                  "msg": msg, "sent": bool(sent),
                                  "key": key or title}, ensure_ascii=False) + "\n")
@@ -930,7 +931,7 @@ def notices(root, limit=10, include_suppressed=False):
     if not os.path.exists(p):
         return []
     out = []
-    for line in open(p, errors="replace"):
+    for line in open(p, errors="replace", encoding=UTF8):
         try:
             rec = json.loads(line)
         except Exception:
@@ -947,7 +948,7 @@ def notice_recently_sent(root, key, window):
         return False
     cutoff = time.time() - window
     try:
-        with open(p, errors="replace") as fh:
+        with open(p, errors="replace", encoding=UTF8) as fh:
             fh.seek(max(0, os.path.getsize(p) - 100_000))
             lines = fh.read().split("\n")
     except OSError:
@@ -994,7 +995,7 @@ def digest(root, cfg, since_days=1.0):
         p = os.path.join(root, rel)
         rows = []
         if os.path.exists(p):
-            for line in open(p, errors="replace"):
+            for line in open(p, errors="replace", encoding=UTF8):
                 try:
                     r = json.loads(line)
                 except Exception:
@@ -1113,7 +1114,7 @@ def latest_verification(root):
     if not os.path.exists(p):
         return None
     last = None
-    for line in open(p, errors="replace"):
+    for line in open(p, errors="replace", encoding=UTF8):
         try:
             last = json.loads(line)
         except Exception:
@@ -1127,7 +1128,7 @@ def record_authority(root, granted, reasons, tree, verification, token=None,
     d = os.path.join(root, ".ao", "ledger")
     try:
         os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, "authority.jsonl"), "a") as fh:
+        with open(os.path.join(d, "authority.jsonl"), "a", encoding=UTF8) as fh:
             # Keep the reviewer's identity here, not only in the review file.
             # That file is untracked and was wiped once already; the record of
             # what authority rested on has to outlive the evidence it cites.
@@ -1148,7 +1149,7 @@ def gate_lock_holder():
     if not os.path.exists(GATE_LOCK):
         return None
     try:
-        st = json.load(open(GATE_LOCK))
+        st = json.load(open(GATE_LOCK, encoding=UTF8))
     except Exception:
         return None
     try:
@@ -1262,7 +1263,7 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
             continue
         try:
             body = open(os.path.join(root, cfg.get("mailbox", "agent-mail"), m),
-                        errors="replace").read(4000)
+                        errors="replace", encoding=UTF8).read(4000)
         except OSError:
             continue
         first = next((l for l in body.split("\n") if l.strip().startswith("#")), m)
@@ -1508,7 +1509,7 @@ def credit_usage(monthly_budget=None):
         peaks, cur, month, turns = 0.0, 0.0, "", 0
         cur_day = ""
         try:
-            with open(f, errors="replace") as fh:
+            with open(f, errors="replace", encoding=UTF8) as fh:
                 for line in fh:
                     if '"promptTurnSummaries"' not in line:
                         continue
@@ -1580,7 +1581,7 @@ def urgent_messages(root, cfg):
         if "-to-fable-" in m or "-to-architect-" in m:
             continue                       # outbound; not for the implementer
         try:
-            body = open(os.path.join(root, box, m), errors="replace").read(8000)
+            body = open(os.path.join(root, box, m), errors="replace", encoding=UTF8).read(8000)
         except OSError:
             continue
         upper = body.upper()
@@ -1652,7 +1653,7 @@ def decisions(root, state=None):
         if not f.endswith(".json"):
             continue
         try:
-            rec = json.load(open(os.path.join(d, f)))
+            rec = json.load(open(os.path.join(d, f), encoding=UTF8))
         except Exception:
             continue
         rec["id"] = f[:-5]
@@ -1677,7 +1678,7 @@ def ask(root, question, options, context=None, slice_id=None):
     rec = {"asked_at": int(time.time()), "question": question, "context": context,
            "slice": slice_id, "options": opts, "state": "open",
            "answer": None, "answered_at": None, "answered_by": None}
-    json.dump(rec, open(os.path.join(d, did + ".json"), "w"),
+    json.dump(rec, open(os.path.join(d, did + ".json"), "w", encoding=UTF8),
               ensure_ascii=False, indent=2)
     rec["id"] = did
     return rec
@@ -1688,7 +1689,7 @@ def answer(root, did, key_or_text, by="human"):
     p = os.path.join(root, DECISION_DIR, did + ".json")
     if not os.path.exists(p):
         return None
-    rec = json.load(open(p))
+    rec = json.load(open(p, encoding=UTF8))
     chosen = next((o for o in rec["options"] if o["key"] == key_or_text.strip().lower()), None)
     rec["answer"] = chosen["label"] if chosen and not chosen.get("free_text") \
         else key_or_text
@@ -1696,7 +1697,7 @@ def answer(root, did, key_or_text, by="human"):
     rec["state"] = "answered"
     rec["answered_at"] = int(time.time())
     rec["answered_by"] = by
-    json.dump(rec, open(p, "w"), ensure_ascii=False, indent=2)
+    json.dump(rec, open(p, "w", encoding=UTF8), ensure_ascii=False, indent=2)
     rec["id"] = did
     return rec
 
@@ -1705,7 +1706,7 @@ def last_nudge_error(root):
     """The most recent failed nudge, if the watchdog recorded one."""
     key = os.path.basename(root.rstrip("/")) or "root"
     try:
-        st = json.load(open(os.path.join(HOME, ".ao", f"watchdog-{key}.json")))
+        st = json.load(open(os.path.join(HOME, ".ao", f"watchdog-{key}.json"), encoding=UTF8))
     except Exception:
         return None
     return st.get("last_error")
@@ -1762,7 +1763,7 @@ def reviews(root, reviews_dir, limit=4):
     for f in files:
         verdict = ""
         try:
-            body = open(os.path.join(d, f), errors="ignore").read()
+            body = open(os.path.join(d, f), errors="ignore", encoding=UTF8).read()
             # A reviewer that could not review has no verdict. Twelve one-line
             # "session limit" files once counted as twelve NEEDS_CHANGES rounds
             # and put a slice 12/5 over a budget it had never spent.
@@ -1797,7 +1798,7 @@ def reviewer_state_path(root):
 
 def reviewer_state(root):
     try:
-        return json.load(open(reviewer_state_path(root)))
+        return json.load(open(reviewer_state_path(root), encoding=UTF8))
     except (OSError, ValueError):
         return {}
 
@@ -1807,7 +1808,7 @@ def set_reviewer_state(root, **fields):
     st.update(fields)
     try:
         os.makedirs(os.path.dirname(reviewer_state_path(root)), exist_ok=True)
-        json.dump(st, open(reviewer_state_path(root), "w"))
+        json.dump(st, open(reviewer_state_path(root), "w", encoding=UTF8))
     except OSError:
         pass
     return st
@@ -1858,7 +1859,7 @@ def review_loop(root, reviews_dir, min_repeats=3):
         if "APPROVED" in (v or "").upper():
             break
         try:
-            body = open(os.path.join(d, f), errors="replace").read()
+            body = open(os.path.join(d, f), errors="replace", encoding=UTF8).read()
         except OSError:
             continue
         for m in re.finditer(r"^- \[(BLOCKER|HIGH|MEDIUM|LOW)\]\s*([^\s:]+)[:\d]*\s*[—-]\s*(.{0,60})",
@@ -1911,7 +1912,7 @@ def respecified_at(root):
     if not ids or not os.path.exists(p):
         return None
     last = 0
-    for line in open(p, errors="replace"):
+    for line in open(p, errors="replace", encoding=UTF8):
         try:
             r = json.loads(line)
         except ValueError:
@@ -2038,7 +2039,7 @@ def fanout_history(root, limit=20):
     if not os.path.exists(p):
         return []
     rows = []
-    for line in open(p, errors="replace"):
+    for line in open(p, errors="replace", encoding=UTF8):
         try:
             rows.append(json.loads(line))
         except ValueError:
@@ -2061,7 +2062,7 @@ def record_fanout(root, agents, done=None, errors=None, tokens=None, note=None):
         rec["note"] = note
     rec["limit_hit"] = bool(rec.get("errors")) and bool(
         re.search(r"limit|quota|429|rate", note or "", re.I))
-    with open(os.path.join(d, "fanouts.jsonl"), "a") as fh:
+    with open(os.path.join(d, "fanouts.jsonl"), "a", encoding=UTF8) as fh:
         fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
     return rec
 
@@ -2149,20 +2150,22 @@ _BIN_GLOBS = ("~/.local/share/fnm/node-versions/*/installation/bin",
 def binary_candidates(name, path=None):
     """Every executable called `name` this machine has, PATH first, deduplicated."""
     import glob as _glob
-    dirs = [d for d in (path or os.environ.get("PATH", "")).split(":") if d]
+    dirs = [d for d in (path or os.environ.get("PATH", "")).split(os.pathsep) if d]
     dirs += [os.path.expanduser(d) for d in _BIN_DIRS]
     for g in _BIN_GLOBS:
         dirs += sorted(_glob.glob(os.path.expanduser(g)), reverse=True)
+    exts = [""] + (os.environ.get("PATHEXT", ".EXE;.CMD;.BAT").split(";") if os.name == "nt" else [])
     seen, out = set(), []
     for d in dirs:
-        cand = os.path.join(d, name)
-        if not (os.path.isfile(cand) and os.access(cand, os.X_OK)):
-            continue
-        real = os.path.realpath(cand)
-        if real in seen:
-            continue
-        seen.add(real)
-        out.append(cand)
+        for ext in exts:
+            cand = os.path.join(d, name + ext.lower()) if ext else os.path.join(d, name)
+            if not (os.path.isfile(cand) and os.access(cand, os.X_OK)):
+                continue
+            real = os.path.realpath(cand)
+            if real in seen:
+                continue
+            seen.add(real)
+            out.append(cand)
     return out
 
 
@@ -2170,7 +2173,7 @@ def binary_version(path):
     """`path --version`, cached by (path, mtime) so a wake does not pay for it twice."""
     cache_p = os.path.join(HOME, ".ao", "binaries.json")
     try:
-        cache = json.load(open(cache_p))
+        cache = json.load(open(cache_p, encoding=UTF8))
     except (OSError, ValueError):
         cache = {}
     try:
@@ -2184,7 +2187,7 @@ def binary_version(path):
     try:
         # cwd=HOME: a version probe started from inside a repository would inherit
         # that cwd and read, for one cycle, as a turn running in it.
-        r = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=25, cwd=HOME,
+        r = subprocess.run([path, "--version"], capture_output=True, text=True, encoding=UTF8, errors="replace", timeout=25, cwd=HOME,
                            env=dict(os.environ, PATH=os.environ.get("PATH", "") + ":" +
                                     os.path.dirname(os.path.realpath(path)) + ":" + os.path.dirname(path)))
         m = re.search(r"(\d+\.\d+\.\d+)", (r.stdout or "") + (r.stderr or ""))
@@ -2194,7 +2197,7 @@ def binary_version(path):
     cache[path] = {"mtime": mtime, "version": out, "at": int(time.time())}
     try:
         os.makedirs(os.path.dirname(cache_p), exist_ok=True)
-        json.dump(cache, open(cache_p, "w"))
+        json.dump(cache, open(cache_p, "w", encoding=UTF8))
     except OSError:
         pass
     return out
@@ -2223,7 +2226,7 @@ def resolve_binary(name, path=None):
 
 def _report_summary(path):
     try:
-        for line in open(path, errors="replace"):
+        for line in open(path, errors="replace", encoding=UTF8):
             if line.startswith("#"):
                 return line.lstrip("# ").strip()
     except OSError:
@@ -2235,7 +2238,7 @@ def bump_repeat(path):
     """Fold a repeated report into the standing one; keep its mtime (its age is the fact)."""
     try:
         st = os.stat(path)
-        body = open(path, errors="replace").read()
+        body = open(path, errors="replace", encoding=UTF8).read()
     except OSError:
         return 0
     m = re.search(r"^Tekrar: (\d+)", body, re.M)
@@ -2243,7 +2246,7 @@ def bump_repeat(path):
     line = f"Tekrar: {n} · son: {time.strftime('%Y-%m-%d %H:%M')}"
     body = re.sub(r"^Tekrar: .*$", line, body, flags=re.M) if m else body.rstrip("\n") + "\n\n" + line + "\n"
     try:
-        open(path, "w").write(body)
+        open(path, "w", encoding=UTF8).write(body)
         os.utime(path, (st.st_atime, st.st_mtime))
     except OSError:
         pass
@@ -2297,7 +2300,7 @@ def waiting_on_architect(root, cfg):
     latest = reports[-1]
     p = os.path.join(root, box, latest)
     try:
-        low = open(p, errors="replace").read(4000).lower()
+        low = open(p, errors="replace", encoding=UTF8).read(4000).lower()
     except OSError:
         return None
     if not any(h in low for h in ("## karar gerekli", "## acil", "## decision required",
@@ -2350,7 +2353,7 @@ def write_mail(root, cfg, name, body, meta=None):
     order = ["ao", "id", "kind", "from", "to", "slice", "at"]
     keys = [k for k in order if k in meta] + [k for k in meta if k not in order]
     head = "---\n" + "".join(f"{k}: {meta[k]}\n" for k in keys if meta[k] not in (None, "")) + "---\n"
-    with open(os.path.join(box, name), "w") as fh:
+    with open(os.path.join(box, name), "w", encoding=UTF8) as fh:
         fh.write(head + body.lstrip("\n"))
     summary = next((l.lstrip("# ").strip() for l in body.split("\n") if l.startswith("#")), "")
     mail_ledger_append(root, {"event": "written", "id": name, "kind": meta.get("kind"),
@@ -2362,7 +2365,7 @@ def write_mail(root, cfg, name, body, meta=None):
 def mail_meta(path):
     """The envelope of a mail file, or {} for a file written without one."""
     try:
-        head = open(path, errors="replace").read(2000)
+        head = open(path, errors="replace", encoding=UTF8).read(2000)
     except OSError:
         return {}
     if not head.startswith("---\n"):
@@ -2384,7 +2387,7 @@ def mail_ledger_append(root, row):
         os.makedirs(d, exist_ok=True)
         row = dict(row)
         row.setdefault("at", int(time.time()))
-        with open(os.path.join(d, "mail.jsonl"), "a") as fh:
+        with open(os.path.join(d, "mail.jsonl"), "a", encoding=UTF8) as fh:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
     except OSError:
         pass
@@ -2395,7 +2398,7 @@ def mail_log(root, limit=200):
     if not os.path.exists(p):
         return []
     rows = []
-    for line in open(p, errors="replace"):
+    for line in open(p, errors="replace", encoding=UTF8):
         try:
             rows.append(json.loads(line))
         except ValueError:
@@ -2462,7 +2465,7 @@ def alarms_path():
 
 def load_alarms():
     try:
-        return json.load(open(alarms_path()))
+        return json.load(open(alarms_path(), encoding=UTF8))
     except (OSError, ValueError):
         return {}
 
@@ -2470,7 +2473,7 @@ def load_alarms():
 def save_alarms(d):
     try:
         os.makedirs(os.path.dirname(alarms_path()), exist_ok=True)
-        json.dump(d, open(alarms_path(), "w"), indent=1)
+        json.dump(d, open(alarms_path(), "w", encoding=UTF8), indent=1)
     except OSError:
         pass
 
@@ -2538,7 +2541,7 @@ def heartbeat(root):
     try:
         p = heartbeat_path(root)
         os.makedirs(os.path.dirname(p), exist_ok=True)
-        with open(p, "w") as fh:
+        with open(p, "w", encoding=UTF8) as fh:
             fh.write(str(int(time.time())))
     except OSError:
         pass
@@ -2657,29 +2660,29 @@ def helpers_path(root):
 def helper_register(root, pid, what):
     """A reviewer, a probe: started by ao inside the repo, never a writer."""
     try:
-        d = json.load(open(helpers_path(root)))
+        d = json.load(open(helpers_path(root), encoding=UTF8))
     except (OSError, ValueError):
         d = {}
     d[str(pid)] = {"what": what, "at": int(time.time())}
     try:
         os.makedirs(os.path.dirname(helpers_path(root)), exist_ok=True)
-        json.dump(d, open(helpers_path(root), "w"))
+        json.dump(d, open(helpers_path(root), "w", encoding=UTF8))
     except OSError:
         pass
 
 
 def helper_release(root, pid):
     try:
-        d = json.load(open(helpers_path(root)))
+        d = json.load(open(helpers_path(root), encoding=UTF8))
         d.pop(str(pid), None)
-        json.dump(d, open(helpers_path(root), "w"))
+        json.dump(d, open(helpers_path(root), "w", encoding=UTF8))
     except (OSError, ValueError):
         pass
 
 
 def helper_pids(root):
     try:
-        d = json.load(open(helpers_path(root)))
+        d = json.load(open(helpers_path(root), encoding=UTF8))
     except (OSError, ValueError):
         return set()
     live = set()
@@ -2689,7 +2692,7 @@ def helper_pids(root):
         else:
             d.pop(k)
     try:
-        json.dump(d, open(helpers_path(root), "w"))
+        json.dump(d, open(helpers_path(root), "w", encoding=UTF8))
     except OSError:
         pass
     return live
@@ -2812,7 +2815,7 @@ def deferred_append(root, kind, **fields):
     rec.update(fields)
     try:
         os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, "deferred.jsonl"), "a") as fh:
+        with open(os.path.join(d, "deferred.jsonl"), "a", encoding=UTF8) as fh:
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
     except OSError:
         pass
@@ -2822,7 +2825,7 @@ def deferred_append(root, kind, **fields):
 def deferred_close(root, did, outcome="done"):
     d = os.path.join(root, ".ao", "ledger")
     try:
-        with open(os.path.join(d, "deferred.jsonl"), "a") as fh:
+        with open(os.path.join(d, "deferred.jsonl"), "a", encoding=UTF8) as fh:
             fh.write(json.dumps({"event": "closed", "id": did, "at": int(time.time()), "outcome": outcome}) + "\n")
     except OSError:
         pass
@@ -2833,7 +2836,7 @@ def deferred_open(root):
     if not os.path.exists(p):
         return []
     rows, closed = {}, set()
-    for line in open(p, errors="replace"):
+    for line in open(p, errors="replace", encoding=UTF8):
         try:
             r = json.loads(line)
         except ValueError:
@@ -2859,7 +2862,7 @@ def waive(root, gate, slice_id, why, by="human"):
     rec = {"event": "waived", "id": f"W-{int(time.time())}", "gate": gate, "slice": slice_id,
            "why": why, "by": by, "at": int(time.time()),
            "head": sh("git rev-parse HEAD", cwd=root), "tree": tree_digest(root)}
-    with open(os.path.join(d, "waivers.jsonl"), "a") as fh:
+    with open(os.path.join(d, "waivers.jsonl"), "a", encoding=UTF8) as fh:
         fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
     return rec
 
@@ -2867,7 +2870,7 @@ def waive(root, gate, slice_id, why, by="human"):
 def close_waiver(root, wid, outcome):
     d = os.path.join(root, ".ao", "ledger")
     try:
-        with open(os.path.join(d, "waivers.jsonl"), "a") as fh:
+        with open(os.path.join(d, "waivers.jsonl"), "a", encoding=UTF8) as fh:
             fh.write(json.dumps({"event": "closed", "id": wid, "at": int(time.time()), "outcome": outcome}) + "\n")
     except OSError:
         pass
@@ -2878,7 +2881,7 @@ def open_waivers(root, gate=None, slice_id=None):
     if not os.path.exists(p):
         return []
     rows, closed = {}, set()
-    for line in open(p, errors="replace"):
+    for line in open(p, errors="replace", encoding=UTF8):
         try:
             r = json.loads(line)
         except ValueError:
@@ -2901,7 +2904,7 @@ def record_credit_sample(root, used, limit, reset_at=None):
     d = os.path.join(root, ".ao", "ledger")
     try:
         os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, "credits.jsonl"), "a") as fh:
+        with open(os.path.join(d, "credits.jsonl"), "a", encoding=UTF8) as fh:
             fh.write(json.dumps({"at": int(time.time()), "used": float(used), "limit": float(limit),
                                  "reset_at": reset_at}) + "\n")
     except OSError:
@@ -2913,7 +2916,7 @@ def credit_samples(root, limit=500):
     if not os.path.exists(p):
         return []
     rows = []
-    for line in open(p, errors="replace"):
+    for line in open(p, errors="replace", encoding=UTF8):
         try:
             rows.append(json.loads(line))
         except ValueError:
@@ -2951,7 +2954,7 @@ def pings_path():
 
 def ping_url(root):
     try:
-        d = json.load(open(pings_path()))
+        d = json.load(open(pings_path(), encoding=UTF8))
     except (OSError, ValueError):
         return None
     key = os.path.basename(root.rstrip("/"))
@@ -2960,12 +2963,12 @@ def ping_url(root):
 
 def set_ping_url(root, url, all_projects=False):
     try:
-        d = json.load(open(pings_path()))
+        d = json.load(open(pings_path(), encoding=UTF8))
     except (OSError, ValueError):
         d = {}
     d["*" if all_projects else os.path.basename(root.rstrip("/"))] = url
     os.makedirs(os.path.dirname(pings_path()), exist_ok=True)
-    json.dump(d, open(pings_path(), "w"), indent=2)
+    json.dump(d, open(pings_path(), "w", encoding=UTF8), indent=2)
     os.chmod(pings_path(), 0o600)
     return d
 
@@ -2994,7 +2997,7 @@ def architect_lock_path(root):
 
 def architect_lock_holder(root):
     try:
-        d = json.load(open(architect_lock_path(root)))
+        d = json.load(open(architect_lock_path(root), encoding=UTF8))
     except (OSError, ValueError):
         return None
     if d.get("pid") and not _pid_alive(int(d["pid"])):
@@ -3013,7 +3016,7 @@ def acquire_architect(root, pid, who):
     d = {"pid": pid, "who": who, "at": int(time.time())}
     try:
         os.makedirs(os.path.dirname(architect_lock_path(root)), exist_ok=True)
-        json.dump(d, open(architect_lock_path(root), "w"))
+        json.dump(d, open(architect_lock_path(root), "w", encoding=UTF8))
     except OSError:
         pass
     return d
@@ -3021,7 +3024,7 @@ def acquire_architect(root, pid, who):
 
 def release_architect(root, pid=None):
     try:
-        d = json.load(open(architect_lock_path(root)))
+        d = json.load(open(architect_lock_path(root), encoding=UTF8))
         if pid is None or d.get("pid") == pid:
             os.remove(architect_lock_path(root))
     except (OSError, ValueError):
@@ -3087,7 +3090,7 @@ def foreign_edits(root, cfg, minutes=15):
 
 def fleet_reserve():
     try:
-        return int(json.load(open(os.path.join(HOME, ".ao", "fleet.json"))).get("window_reserve_pct", 20))
+        return int(json.load(open(os.path.join(HOME, ".ao", "fleet.json"), encoding=UTF8)).get("window_reserve_pct", 20))
     except (OSError, ValueError):
         return 20
 

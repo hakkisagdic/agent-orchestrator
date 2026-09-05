@@ -128,10 +128,8 @@ def test_verdict_without_counts_is_invalid(project, tmp_path):
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], cwd=root, check=True)
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "a"], cwd=root, check=True)
     open(os.path.join(root, "src", "a.py"), "w").write("x = 2\n")
-    sc = tmp_path / "r"
-    sc.write_text("#!/bin/sh\necho 'VERDICT: APPROVED'\n")
-    os.chmod(sc, stat.S_IRWXU)
-    cfg = dict(project, reviewer={"id": "r", "family": "x", "argv": [str(sc), "{prompt}"]})
+    import sys
+    cfg = dict(project, reviewer={"id": "r", "family": "x", "argv": [sys.executable, "-c", "print('VERDICT: APPROVED')", "{prompt}"]})
     assert cli.cmd_review(cfg, SimpleNamespace(boundary="b", timeout=30, paths=None, commits=None)) == 3
     assert A.reviews(root, "semantic-review")[0][1] == "INVALID"
 
@@ -145,10 +143,9 @@ def test_catchup_reviews_the_landed_range_and_closes_the_waiver(project, tmp_pat
     w = A.waive(root, "review", "B7", "quota", by="h")
     open(os.path.join(root, "src", "a.py"), "w").write("x = 2\n")
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-am", "b7"], cwd=root, check=True)
-    sc = tmp_path / "ok"
-    sc.write_text("#!/bin/sh\necho 'BLOCKER: 0'; echo 'HIGH: 0'; echo 'MEDIUM: 0'; echo 'LOW: 0'; echo 'VERDICT: APPROVED'\n")
-    os.chmod(sc, stat.S_IRWXU)
-    cfg = dict(project, reviewer={"id": "r", "family": "x", "argv": [str(sc), "{prompt}"]})
+    import sys
+    cfg = dict(project, reviewer={"id": "r", "family": "x", "argv": [sys.executable, "-c",
+                                  "print('BLOCKER: 0'); print('HIGH: 0'); print('MEDIUM: 0'); print('LOW: 0'); print('VERDICT: APPROVED')", "{prompt}"]})
     from ao import watchdog as W
     monkeypatch.setattr(W, "run", lambda ns: 0)
     assert cli.cmd_catchup(cfg, SimpleNamespace(boundary=None)) == 0

@@ -31,6 +31,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ao import lib as A  # noqa: E402
+UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 PROTOCOL = "2025-06-18"
 CARD_PATHS = ("/.well-known/agent-card.json", "/.well-known/agent.json")
@@ -73,7 +74,7 @@ def agents():
               os.path.join(A.HOME, ".ao", "a2a-agents.json")):
         if os.path.exists(p):
             try:
-                return json.load(open(p))
+                return json.load(open(p, encoding=UTF8))
             except Exception:
                 return {}
     return {}

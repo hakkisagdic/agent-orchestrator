@@ -46,6 +46,7 @@ STATE_DIR = os.path.join(A.HOME, ".ao")
 # answerable only by reading a log of prose. `ao watchdog explain` runs a dry
 # cycle and prints the trace; `ao watchdog trace` reads the recorded ones.
 import builtins as _builtins
+UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 _TRACE = []
 _FACTS = {}
 
@@ -70,9 +71,9 @@ def record_cycle(root, args):
         p = cycles_path(root)
         os.makedirs(STATE_DIR, exist_ok=True)
         if os.path.exists(p) and os.path.getsize(p) > 2_000_000:
-            tail = open(p, errors="replace").read()[-1_000_000:]
-            open(p, "w").write(tail[tail.find("\n") + 1:])
-        with open(p, "a") as fh:
+            tail = open(p, errors="replace", encoding=UTF8).read()[-1_000_000:]
+            open(p, "w", encoding=UTF8).write(tail[tail.find("\n") + 1:])
+        with open(p, "a", encoding=UTF8) as fh:
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
     except OSError:
         pass
@@ -83,7 +84,7 @@ def cycles(root, last=20):
     if not os.path.exists(p):
         return []
     rows = []
-    for line in open(p, errors="replace"):
+    for line in open(p, errors="replace", encoding=UTF8):
         try:
             rows.append(json.loads(line))
         except ValueError:
@@ -273,14 +274,14 @@ def state_path(root):
 
 def load_state(root):
     try:
-        return json.load(open(state_path(root)))
+        return json.load(open(state_path(root), encoding=UTF8))
     except Exception:
         return {"attempts": 0, "last_nudge": 0, "last_size": 0}
 
 
 def save_state(root, st):
     os.makedirs(STATE_DIR, exist_ok=True)
-    json.dump(st, open(state_path(root), "w"), indent=2)
+    json.dump(st, open(state_path(root), "w", encoding=UTF8), indent=2)
 
 
 def arch_alive(st):
@@ -341,7 +342,7 @@ def provider_degraded(root, window=900):
         return None
     try:
         size = os.path.getsize(p)
-        with open(p, errors="replace") as fh:
+        with open(p, errors="replace", encoding=UTF8) as fh:
             fh.seek(max(0, size - 400_000))
             tail = fh.read()
     except OSError:
@@ -593,7 +594,7 @@ def escalate(root, cfg, adapter, age, args, st):
         if resolved:
             argv[0] = resolved
             os.makedirs(STATE_DIR, exist_ok=True)
-            with open(log_path, "a") as log:
+            with open(log_path, "a", encoding=UTF8) as log:
                 log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} escalate {resolved} {ver} ===\n")
                 log.flush()
                 # stdin must be closed, not inherited. A detached child holding a
@@ -701,7 +702,7 @@ def wake_error(log_path):
     wants rediscovery.
     """
     try:
-        tail = open(log_path, errors="replace").read()[-20000:]
+        tail = open(log_path, errors="replace", encoding=UTF8).read()[-20000:]
     except OSError:
         return None
     segs = re.split(r"^=== (\S+ \S+) (escalate|refill)(?: (.*?))? ===$", tail, flags=re.M)
@@ -1016,7 +1017,7 @@ def _cycle(args, root):
             key = os.path.basename(root.rstrip("/")) or "root"
             log_path = os.path.join(STATE_DIR, f"refill-{key}.log")
             os.makedirs(STATE_DIR, exist_ok=True)
-            with open(log_path, "a") as log:
+            with open(log_path, "a", encoding=UTF8) as log:
                 log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} refill {resolved} {ver} ===\n")
                 log.flush()
                 proc = subprocess.Popen(argv, cwd=root, env=dict(os.environ, PATH=search),
@@ -1148,7 +1149,7 @@ def _cycle(args, root):
     log_path = os.path.join(STATE_DIR, f"nudge-{key}.log")
     os.makedirs(STATE_DIR, exist_ok=True)
     env = dict(os.environ, PATH=search)
-    with open(log_path, "a") as log:
+    with open(log_path, "a", encoding=UTF8) as log:
         log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} nudge ===\n")
         log.flush()
         proc = subprocess.Popen(argv, cwd=root, env=env, stdin=subprocess.DEVNULL,
@@ -1170,7 +1171,7 @@ def _cycle(args, root):
     if early not in (None, 0):
         tail = ""
         try:
-            with open(log_path) as fh:
+            with open(log_path, encoding=UTF8) as fh:
                 tail = " ".join(fh.read().strip().split("\n")[-3:])[-300:]
         except OSError:
             pass

@@ -17,6 +17,7 @@ import time
 import urllib.request
 
 from . import lib as A
+UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 CONF = os.path.join(A.HOME, ".ao", "email.json")
 ENDPOINT = "https://formsubmit.co/ajax/{token}"
@@ -28,7 +29,7 @@ def config():
     if not os.path.exists(CONF):
         return None
     try:
-        c = json.load(open(CONF))
+        c = json.load(open(CONF, encoding=UTF8))
     except (OSError, ValueError):
         return None
     if not c.get("token"):
@@ -41,7 +42,7 @@ def config():
 def save(token, to=None, name="ao"):
     os.makedirs(os.path.dirname(CONF), exist_ok=True)
     c = {"provider": "formsubmit", "token": token.strip(), "to": to or "", "name": name}
-    with open(CONF, "w") as fh:
+    with open(CONF, "w", encoding=UTF8) as fh:
         json.dump(c, fh, indent=2)
     os.chmod(CONF, 0o600)
     return c

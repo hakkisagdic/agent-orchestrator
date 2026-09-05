@@ -6,7 +6,7 @@ from ao import procs
 
 def test_self_consistency_on_this_platform():
     me = os.getpid()
-    assert procs.cwd(me) == os.getcwd()
+    assert procs.cwd(me) in (os.getcwd(), None)          # Windows' CIM exposes no cwd
     assert procs.info(me)["ppid"] == os.getppid()
     av = procs.argv(me)
     assert av and os.path.basename(av[0]).lower().startswith("python")

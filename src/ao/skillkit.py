@@ -17,6 +17,7 @@ import shutil
 import subprocess
 
 from . import lib as A
+UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 MARK_START = "<!-- ao-playbook:start -->"
 MARK_END = "<!-- ao-playbook:end -->"
@@ -25,7 +26,7 @@ SKILL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "skill", "
 
 def playbook():
     """(frontmatter, body) of the packaged playbook."""
-    text = open(SKILL_PATH, encoding="utf-8").read()
+    text = open(SKILL_PATH, encoding=UTF8).read()
     if text.startswith("---\n"):
         end = text.find("\n---\n", 4)
         return text[:end + 5], text[end + 5:].lstrip("\n")
@@ -53,17 +54,17 @@ def _write_marked(path, body, header=""):
     """Write `body` between markers; replace an earlier rendering; keep the rest."""
     block = f"{MARK_START}\n{body.rstrip()}\n{MARK_END}\n"
     if os.path.exists(path):
-        old = open(path, encoding="utf-8", errors="replace").read()
+        old = open(path, encoding=UTF8, errors="replace").read()
         if MARK_START in old and MARK_END in old:
             new = old[:old.index(MARK_START)] + block + old[old.index(MARK_END) + len(MARK_END):].lstrip("\n")
             if new != old:
-                open(path, "w", encoding="utf-8").write(new)
+                open(path, "w", encoding=UTF8).write(new)
                 return "updated"
             return "kept"
-        open(path, "a", encoding="utf-8").write("\n\n" + block)
+        open(path, "a", encoding=UTF8).write("\n\n" + block)
         return "appended"
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    open(path, "w", encoding="utf-8").write(header + block)
+    open(path, "w", encoding=UTF8).write(header + block)
     return "wrote"
 
 
@@ -104,7 +105,7 @@ def register_mcp(root, agents, exe=None):
         data = {}
         if os.path.exists(path):
             try:
-                data = json.load(open(path))
+                data = json.load(open(path, encoding=UTF8))
             except ValueError:
                 data = {}
         servers = data.setdefault(key, {})
@@ -113,7 +114,7 @@ def register_mcp(root, agents, exe=None):
             return "kept"
         servers["ao"] = entry
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        json.dump(data, open(path, "w"), indent=2)
+        json.dump(data, open(path, "w", encoding=UTF8), indent=2)
         return "registered"
 
     if "claude-code" in agents:
@@ -123,7 +124,7 @@ def register_mcp(root, agents, exe=None):
         if shutil.which("kiro-cli") and not os.path.exists(p):
             r = subprocess.run(["kiro-cli", "mcp", "add", "--name", "ao", "--scope", "workspace",
                                 "--command", exe, "--args", json.dumps(["-C", root, "mcp", "serve"])],
-                               capture_output=True, text=True, cwd=root)
+                               capture_output=True, text=True, encoding=UTF8, errors="replace", cwd=root)
             out["kiro"] = "registered" if r.returncode == 0 else merge(p, extra={"env": {}})
         else:
             out["kiro"] = merge(p, extra={"env": {}})

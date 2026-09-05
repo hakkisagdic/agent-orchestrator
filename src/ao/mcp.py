@@ -18,6 +18,7 @@ import sys
 import time
 
 from . import lib as A
+UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 PROTOCOL = "2025-06-18"
 
@@ -167,7 +168,7 @@ def call(name, args, cfg, allow_verify):
             if A.to_architect(m, cfg) or A.from_watchdog(m):
                 continue                     # our own outbound, or the watchdog's; not addressed to us
             try:
-                body = open(os.path.join(root, box, m), errors="replace").read(20000)
+                body = open(os.path.join(root, box, m), errors="replace", encoding=UTF8).read(20000)
             except OSError:
                 continue
             out.append({"id": m, "body": body})
@@ -279,7 +280,7 @@ def call(name, args, cfg, allow_verify):
         import subprocess
         r = subprocess.run([sys.executable, "-m", "ao", "-C", root, "verify"]
                            + (["-p", args["profile"]] if args.get("profile") else []),
-                           capture_output=True, text=True, timeout=3600)
+                           capture_output=True, text=True, encoding=UTF8, errors="replace", timeout=3600)
         return {"exit": r.returncode, "output": (r.stdout or r.stderr)[-4000:],
                 "record": A.latest_verification(root)}
     return {"error": f"unknown tool {name}"}

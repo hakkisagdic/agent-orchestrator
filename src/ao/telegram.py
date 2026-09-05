@@ -29,6 +29,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ao import lib as A  # noqa: E402
+UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 CONF = os.path.join(A.HOME, ".ao", "telegram.json")
 API = "https://api.telegram.org/bot{token}/{method}"
@@ -45,7 +46,7 @@ def config():
     if not os.path.exists(CONF):
         return None
     try:
-        c = json.load(open(CONF))
+        c = json.load(open(CONF, encoding=UTF8))
     except Exception:
         return None
     if not c.get("token") or not c.get("chats"):
@@ -102,7 +103,7 @@ def poll(root, cfg_project, seconds=25):
     if not cfg:
         return {"error": f"no config at {CONF}"}
     try:
-        offset = int(open(_offset_path()).read().strip())
+        offset = int(open(_offset_path(), encoding=UTF8).read().strip())
     except Exception:
         offset = 0
     r = api(cfg, "getUpdates", offset=offset or None, timeout=seconds,
@@ -168,14 +169,14 @@ def poll(root, cfg_project, seconds=25):
         slug = "".join(c if c.isalnum() else "-" for c in text.lower())[:40].strip("-")
         name = f"{time.strftime('%Y%m%d-%H%M%S')}-fable-to-kiro-ACIL-{slug or 'mesaj'}.md"
         who = (m.get("from") or {}).get("username") or chat
-        with open(os.path.join(root, box, name), "w") as fh:
+        with open(os.path.join(root, box, name), "w", encoding=UTF8) as fh:
             fh.write(f"# {text.splitlines()[0][:120]}\n\n## ACİL\n\n{text}\n\n"
                      f"---\n_Telegram, {who}, {time.strftime('%Y-%m-%d %H:%M')}_\n")
         written.append(name)
         send(f"✅ Kaydedildi: `{name}`\n\nUygulayıcıya `ao lock`, `ao verify` ve "
              f"`ao commit-ok` üzerinden ulaşacak; onaylamadan commit edemez.", root)
     if last != offset:
-        open(_offset_path(), "w").write(str(last))
+        open(_offset_path(), "w", encoding=UTF8).write(str(last))
     return {"written": written, "ignored_unauthorised": ignored}
 
 
@@ -196,7 +197,7 @@ def _command(root, cfg_project, text, chat):
         return f"/{cmd} (unknown)"
     try:
         out = subprocess.run([exe, "-C", root] + allowed[cmd], capture_output=True,
-                             text=True, timeout=60).stdout
+                             text=True, encoding=UTF8, errors="replace", timeout=60).stdout
     except Exception as e:
         out = str(e)
     import re
