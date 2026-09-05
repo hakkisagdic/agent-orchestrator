@@ -2115,7 +2115,9 @@ def binary_version(path):
         return ent.get("version", "")
     out = ""
     try:
-        r = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=25,
+        # cwd=HOME: a version probe started from inside a repository would inherit
+        # that cwd and read, for one cycle, as a turn running in it.
+        r = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=25, cwd=HOME,
                            env=dict(os.environ, PATH=os.environ.get("PATH", "") + ":" +
                                     os.path.dirname(os.path.realpath(path)) + ":" + os.path.dirname(path)))
         m = re.search(r"(\d+\.\d+\.\d+)", (r.stdout or "") + (r.stderr or ""))
