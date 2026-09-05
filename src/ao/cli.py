@@ -325,6 +325,18 @@ def cmd_mail(cfg, args):
         A.write_mail(root, cfg, name, body.rstrip() + "\n",
                      {"kind": args.type.lower(), "from": arch, "to": impl})
         print(name)
+    elif args.action == "ack":
+        import fnmatch
+        pattern = args.type if args.type and args.type != "INFO" else None
+        if not pattern:
+            print("usage: ao mail ack <file-or-glob>   e.g. ao mail ack 'watchdog-to-fable-ANOMALY-*'"); return 2
+        hits = [f for f in A.mailbox(root, cfg["mailbox"]) if f == pattern or fnmatch.fnmatch(f, pattern)]
+        if not hits:
+            print(f"no message matches {pattern}"); return 1
+        for f in hits:
+            os.remove(os.path.join(d, f))
+            A.mail_ledger_append(root, {"event": "consumed", "id": f, "outcome": args.body or "processed"})
+            print(f"  {C['green']}acked{C['reset']} {f}")
     elif args.action == "log":
         A.reconcile_mail_ledger(root, cfg)
         for r in A.mail_log(root, 40):
@@ -1079,16 +1091,7 @@ def cmd_review(cfg, args):
               f"configuration this refuses.")
         return 2
 
-    diff = A.sh("git diff HEAD", cwd=root, timeout=60) or ""
-    untracked = [l[3:] for l in (A.sh("git status --porcelain", cwd=root) or "").split("\n")
-                 if l.startswith("?? ") and not l[3:].startswith((".ao/", "agent-mail/"))]
-    for f in untracked[:20]:
-        p = os.path.join(root, f)
-        if os.path.isfile(p) and os.path.getsize(p) < 200_000:
-            try:
-                diff += f"\n--- NEW FILE {f} ---\n" + open(p, errors="replace").read()
-            except OSError:
-                pass
+    diff, included = A.review_diff(root, cfg, paths=args.paths or None)
     if not diff.strip():
         print(f"{C['dim']}Nothing to review — the tree matches HEAD.{C['reset']}")
         return 0
@@ -1107,9 +1110,18 @@ def cmd_review(cfg, args):
         print(f"{C['red']}{argv[0]} not on PATH{C['reset']}")
         return 1
     argv[0] = exe
-    print(f"{C['dim']}reviewing {len(diff):,} chars against: {boundary[:70]}{C['reset']}")
-    r = subprocess.run(argv, cwd=root, capture_output=True, text=True,
-                       timeout=args.timeout)
+    print(f"{C['dim']}reviewing {len(diff):,} chars against: {boundary[:70]}"
+          + (f" · paths: {' '.join(args.paths)}" if args.paths else "")
+          + (f" · new files: {len(included)}" if included else "") + f"{C['reset']}")
+    # The reviewer runs inside the repository and is an agent by every other
+    # test; register it as a helper so no writer count takes it for a turn.
+    proc = subprocess.Popen(argv, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    A.helper_register(root, proc.pid, "reviewer")
+    try:
+        stdout, stderr = proc.communicate(timeout=args.timeout)
+    finally:
+        A.helper_release(root, proc.pid)
+    r = subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
     out = (r.stdout or r.stderr or "").strip()
     if not out:
         print(f"{C['red']}reviewer produced nothing{C['reset']} (exit {r.returncode})")
@@ -1134,7 +1146,9 @@ def cmd_review(cfg, args):
         f"# Review {name}\n\n"
         f"- reviewer: `{rv.get('id') or argv[0]}`  family: `{rv.get('family','?')}`\n"
         f"- implementer: `{impl.get('adapter')}/{(impl.get('session') or '')[:20]}`\n"
-        f"- tree: `{A.tree_digest(root)}`\n- boundary: {boundary}\n\n{out}\n")
+        f"- tree: `{A.tree_digest(root)}`\n- boundary: {boundary}\n"
+        + (f"- paths: {' '.join(args.paths)}\n" if args.paths else "")
+        + (f"- new files: {', '.join(included)}\n" if included else "") + f"\n{out}\n")
     A.record_notice(root, "review", f"{verdict} {sev}", sent=False, key="review")
 
     col = C["green"] if verdict == "APPROVED" else C["yellow"]
@@ -2504,7 +2518,7 @@ def main():
     t.set_defaults(fn=cmd_tail)
 
     m = sub.add_parser("mail", help="list, read or send coordination messages")
-    m.add_argument("action", choices=["list", "read", "send", "log", "search"])
+    m.add_argument("action", choices=["list", "read", "send", "log", "search", "ack"])
     m.add_argument("type", nargs="?", default="INFO")
     m.add_argument("topic", nargs="?")
     m.add_argument("--body")
@@ -2575,6 +2589,7 @@ def main():
     hf.set_defaults(fn=cmd_handoff)
     rw = sub.add_parser("review", help="review the tree with an actor that did not write it")
     rw.add_argument("--boundary", help="acceptance boundary; defaults to the running slice")
+    rw.add_argument("--paths", nargs="*", help="review only these paths (tracked diff and untracked files under them)")
     rw.add_argument("--timeout", type=int, default=900)
     rw.set_defaults(fn=cmd_review)
     tg = sub.add_parser("telegram", help="phone channel: alerts out, decisions in")

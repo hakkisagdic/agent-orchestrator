@@ -103,7 +103,8 @@ auto-continue is a second resume path), or simply returning: **first** `ao
 status`, `ao board`, `ao doctor`, then the mailbox — `*-to-<architect>-*` and
 `watchdog-to-*-ANOMALY-*`. Watchdog files are facts, not verdicts. Decide,
 write decisions with `ao decide "…" --scope <slice> --why "…"` (`--urgent` for
-`## ACİL`), answer questions with `ao answer`, delete what you processed. Empty
+`## ACİL`), answer questions with `ao answer`, delete what you processed with
+`ao mail ack <file-or-glob>`. Empty
 queue: refill from the specification with invariant boundaries — never leave
 an implementer waiting for lack of a slice. Over-budget slice: re-specify
 (inventory first); the budget restarts at your decision. Never edit ao's own
@@ -142,13 +143,13 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao board` | READY / running / blocked (`needs:`) / verified / done |
 | `ao fleet` | every project on this machine at a glance |
 | `ao tail` | the implementer's transcript, live |
-| `ao mail list|read|send|log|search` | the mailbox and its ledger |
+| `ao mail list|read|send|log|search|ack` | the mailbox and its ledger; `ack` deletes processed messages (delivery confirmation) |
 | `ao note` | architect → implementer note without raw file writes (`--urgent`) |
 | `ao decide` | record an architect decision (`--scope`, `--why`, `--answers D-…`) |
 | `ao ask` / `ao answer` / `ao decisions` | questions with options; the answers unpark slices |
 | `ao lock -- <cmd>` | hold the writer lock, run a gate, record it |
 | `ao verify -p quick|full` | run the declared gates and record the measured result |
-| `ao review --boundary "…"` | independent review by a different actor |
+| `ao review --boundary "…" [--paths …]` | independent review by a different actor; `--paths` narrows it to the slice files, untracked included |
 | `ao commit-ok` | may this tree land? digest, verification, review, urgent ack |
 | `ao writers [--clean]` | live turns (not processes); orphans set aside |
 | `ao hold` / `ao hold release` | stop unattended turns and keep them stopped |

@@ -503,8 +503,8 @@ def escalate(root, cfg, adapter, age, args, st):
             "karar mesajı yaz, gerekiyorsa `.ao/board.md`'yi güncelle. Acil bir şeyse "
             "mesaja `## ACİL` başlığı koy — o zaman uygulayıcıya `ao lock`, `ao verify` "
             "ve `ao commit-ok` üzerinden ulaşır.\n\n"
-            "Sonra işlediğin mesajı sil; teslim onayı budur. Normal bir durumsa "
-            "yalnız sil ve bir şey yapma.\n\n"
+            "Sonra işlediğin mesajı `ao mail ack <dosya-veya-glob>` ile sil; teslim onayı "
+            "budur. Normal bir durumsa yalnız sil ve bir şey yapma.\n\n"
             "Yapmayacakların: push, PR, force-push, epic kutusu işaretleme, mimari "
             "sözleşme değiştirme. Bunlar insana aittir. Emin değilsen dokunma ve "
             "kullanıcıya bırak.")

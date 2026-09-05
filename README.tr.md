@@ -91,7 +91,7 @@ gereken tek yetkidir.
 | `ao doctor --check` | zamanlayıcı için sessiz doctor: problem başına bir satır, exit 1, alarm — `ao watchdog install` 15 dakikalık launchd işi olarak kurar |
 | `ao email setup` / `ao email test` | kırmızı alarm kanalı: formsubmit.co ile e-posta, sunucu yok ([alarms.md](docs/alarms.md)) |
 | `ao alarms` / `ao alarms test --level red` | canlı alarm bölümleri ve seviyeleri; test tüm kanalları çaldırır |
-| `ao mail log` / `ao mail search <metin>` | posta defteri: yazılan her mesaj ve ne zaman okunduğu, silindikten sonra da aranabilir |
+| `ao mail log` / `ao mail search <metin>` / `ao mail ack <glob>` | posta defteri: yazılan her mesaj ve ne zaman okunduğu, silindikten sonra da aranabilir |
 | `ao watchdog explain` / `ao watchdog trace` | watchdog neden dürttü ya da dürtmedi: bu döngünün ve kayıtlı döngülerin ölçüm ve kararları ([watchdog.md](docs/watchdog.md)) |
 | `ao source import` | takip sistemindeki işleri panoya kabul et |
 | `ao mail` · `ao notices` | koordinasyon mesajları; projenin ürettiği uyarılar |

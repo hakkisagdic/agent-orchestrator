@@ -712,6 +712,19 @@ def agent_pids(root, adapter, headless_only=False):
     # only when an agent binary is actually on its command line — as the
     # program, or as a path component of the runtime it is running under.
     cands = {p for p in cands if _is_agent_process(p, names)}
+    # Processes ao itself started inside the repo — the reviewer above all — are
+    # agents by every other test and writers by none. Exclude them and their
+    # descendants: a reviewer's runtime child would otherwise surface as a root.
+    helpers = helper_pids(root)
+    if helpers and cands:
+        table = _proc_table()
+
+        def under_helper(pid, depth=0):
+            if pid in helpers:
+                return True
+            ppid = table.get(pid, (0, 0, ""))[0]
+            return depth < 12 and ppid > 1 and under_helper(ppid, depth + 1)
+        cands = {p for p in cands if not under_helper(p)}
     out = []
     if cands:
         # One lsof for every candidate. A call per pid was fine at ten processes
@@ -2517,3 +2530,112 @@ def stale_siblings(root, max_age=900):
     except OSError:
         pass
     return out
+
+
+# ---- review scope ----------------------------------------------------------------
+
+COORDINATION_DIRS = (".ao/", "agent-mail/", ".kiro/", ".claude/", ".codex/")
+
+
+def review_diff(root, cfg, paths=None, budget=1_500_000):
+    """What the reviewer sees: the slice's changes, and nothing else.
+
+    `git diff HEAD` carried every tracked change in the tree, so an unrelated
+    steering edit polluted a review of a credential lifecycle; untracked files
+    were capped at the first twenty, and thirty review artefacts consumed the
+    cap before the one untracked file that mattered — the inventory under
+    review — was reached. Two rounds of a five-round budget went to that.
+
+    Coordination directories are never product. Untracked product files are
+    included newest first within a byte budget. `paths` narrows both sides.
+    """
+    skip = COORDINATION_DIRS + (cfg.get("reviews", "semantic-review").rstrip("/") + "/",
+                                cfg.get("mailbox", "agent-mail").rstrip("/") + "/")
+    spec = " -- " + " ".join(f"'{p}'" for p in paths) if paths else ""
+    diff = sh(f"git diff HEAD{spec}", cwd=root, timeout=60) or ""
+    if not paths:
+        parts = re.split(r"(?m)^(?=diff --git )", diff)
+        diff = "".join(pt for pt in parts if not any(
+            f" b/{d}" in pt.split("\n", 1)[0] for d in skip))
+    untracked = [l[3:].strip().strip('"') for l in (sh("git status --porcelain", cwd=root) or "").split("\n")
+                 if l.startswith("?? ")]
+    untracked = [f for f in untracked if not f.startswith(skip)]
+    if paths:
+        untracked = [f for f in untracked if any(f == p or f.startswith(p.rstrip("/") + "/")
+                                                  or p.startswith(f.rstrip("/") + "/") for p in paths)]
+    files = []
+    for f in untracked:
+        p = os.path.join(root, f)
+        if os.path.isdir(p):
+            for dp, _, fn in os.walk(p):
+                for x in fn:
+                    rel = os.path.relpath(os.path.join(dp, x), root)
+                    if not paths or any(rel == q or rel.startswith(q.rstrip("/") + "/") for q in paths):
+                        files.append(rel)
+        elif os.path.isfile(p):
+            files.append(f)
+    files.sort(key=lambda f: -os.path.getmtime(os.path.join(root, f)))
+    included, used = [], 0
+    for f in files:
+        p = os.path.join(root, f)
+        try:
+            size = os.path.getsize(p)
+            if size > 400_000 or used + size > budget:
+                continue
+            raw = open(p, "rb").read()
+            if b"\0" in raw[:4000]:
+                continue
+            diff += f"\n--- NEW FILE {f} ---\n" + raw.decode("utf-8", "replace")
+            used += size
+            included.append(f)
+        except OSError:
+            pass
+    return diff, included
+
+
+# ---- helpers: processes ao starts that are not writers -------------------------
+
+def helpers_path(root):
+    key = os.path.basename(root.rstrip("/")) or "root"
+    return os.path.join(HOME, ".ao", f"helpers-{key}.json")
+
+
+def helper_register(root, pid, what):
+    """A reviewer, a probe: started by ao inside the repo, never a writer."""
+    try:
+        d = json.load(open(helpers_path(root)))
+    except (OSError, ValueError):
+        d = {}
+    d[str(pid)] = {"what": what, "at": int(time.time())}
+    try:
+        os.makedirs(os.path.dirname(helpers_path(root)), exist_ok=True)
+        json.dump(d, open(helpers_path(root), "w"))
+    except OSError:
+        pass
+
+
+def helper_release(root, pid):
+    try:
+        d = json.load(open(helpers_path(root)))
+        d.pop(str(pid), None)
+        json.dump(d, open(helpers_path(root), "w"))
+    except (OSError, ValueError):
+        pass
+
+
+def helper_pids(root):
+    try:
+        d = json.load(open(helpers_path(root)))
+    except (OSError, ValueError):
+        return set()
+    live = set()
+    for k in list(d):
+        if _pid_alive(int(k)):
+            live.add(int(k))
+        else:
+            d.pop(k)
+    try:
+        json.dump(d, open(helpers_path(root), "w"))
+    except OSError:
+        pass
+    return live
