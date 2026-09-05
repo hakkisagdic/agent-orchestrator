@@ -118,7 +118,8 @@ window). After: `ao fanout record --agents N --done D --errors E --tokens T`.
 
 ## 9. Setup, once per repository
 
-`ao init` writes `.ao/` (config, board, backlog, authority, gates), the mailbox,
+`ao init --profile claude-kiro|claude-claude` writes `.ao/` (config with the role
+blocks: who implements, reviews, judges; board, backlog, authority, gates), the mailbox,
 this playbook for the agents it detects, and **registers the ao MCP server** for
 them (`.mcp.json` for Claude Code, `.kiro/settings/mcp.json` for Kiro). Ask the
 human before running it; afterwards tell them: *start or restart the app in this

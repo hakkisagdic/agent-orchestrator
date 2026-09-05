@@ -1053,6 +1053,17 @@ def _cycle(args, root):
     scoped = any(a in ("--allowedTools", "--allowed-tools", "--trust-all-tools") for a in argv)
     if not scoped and "trust_all" in (adapter.get("options") or {}):
         argv += adapter["options"]["trust_all"]
+    # The project chooses the implementer's model and effort in its config; the
+    # adapter says how to spell them. Nothing is appended for an adapter that
+    # has no such option.
+    opts = adapter.get("options") or {}
+    for key in ("model", "effort"):
+        val = impl.get(key)
+        if val and key in opts and not any(str(a).startswith(f"--{key}") for a in argv):
+            if key == "effort" and opts.get("effort_values") and val not in opts["effort_values"]:
+                print(f"effort {val!r} not in {opts['effort_values']}; ignored")
+                continue
+            argv += [x.replace("{" + key + "}", str(val)) for x in opts[key]]
 
     print(f"idle {int(age)}s · {', '.join(reasons)} · nudging")
     if args.dry_run:

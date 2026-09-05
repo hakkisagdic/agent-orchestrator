@@ -1416,6 +1416,60 @@ def _detect_gates(root):
             "default_profile": "quick"}
 
 
+PROFILES = {
+    # implementer adapter, implementer model, reviewer model
+    "claude-kiro":   {"implementer": "kiro",        "model": None,              "reviewer_model": "claude-opus-5"},
+    "claude-claude": {"implementer": "claude-code", "model": "claude-sonnet-5", "reviewer_model": "claude-opus-5"},
+}
+
+ARCHITECT_TOOLS = ("Read,Grep,Glob,Bash(ao:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),"
+                   "Bash(git show:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(grep:*),"
+                   "Bash(find:*),Bash(ps:*),Bash(lsof:*),Bash(rm agent-mail/*)")
+
+
+def _apply_profile(root, args):
+    """Write the implementer / reviewer / architect blocks a profile implies.
+
+    Returns the names of the blocks it added. A block that already exists is
+    the project's own decision and is left alone.
+    """
+    prof = PROFILES.get(getattr(args, "profile", None) or "")
+    impl_adapter = getattr(args, "implementer", None) or (prof or {}).get("implementer")
+    if not impl_adapter and not prof:
+        return []
+    p = os.path.join(root, ".ao", "config.json")
+    try:
+        cfg = json.load(open(p))
+    except (OSError, ValueError):
+        cfg = {}
+    added = []
+    if "implementer" not in cfg:
+        block = {"adapter": impl_adapter or "kiro", "session": "auto",
+                 "name": {"kiro": "kiro", "claude-code": "claude"}.get(impl_adapter or "kiro", impl_adapter)}
+        model = getattr(args, "model", None) or (prof or {}).get("model")
+        if model:
+            block["model"] = model
+        if getattr(args, "effort", None):
+            block["effort"] = args.effort
+        cfg["implementer"] = block
+        added.append("implementer")
+    if "reviewer" not in cfg:
+        rmodel = getattr(args, "reviewer_model", None) or (prof or {}).get("reviewer_model") or "claude-opus-5"
+        cfg["reviewer"] = {"id": f"claude-reviewer-{rmodel}", "family": "anthropic",
+                           "argv": ["claude", "-p", "{prompt}", "--model", rmodel, "--allowedTools", "Read,Grep,Glob"],
+                           "_why": "must not be the implementer; a different model where one is available"}
+        added.append("reviewer")
+    if "architect" not in cfg:
+        cfg["architect"] = {"adapter": "claude-code", "session": "auto", "cwd": root, "name": "fable",
+                            "argv": ["claude", "--resume", "{session}", "-p", "{prompt}",
+                                     "--allowedTools", ARCHITECT_TOOLS],
+                            "_why": "resumable and woken only into absence; read-only tools plus ao"}
+        added.append("architect")
+    if added:
+        json.dump(cfg, open(p, "w"), indent=2, ensure_ascii=False)
+    return added
+
+
 def cmd_init(cfg, args):
     """Put `ao` on a project. Idempotent: existing files are left alone.
 
@@ -1441,6 +1495,13 @@ def cmd_init(cfg, args):
         wrote.append(rel)
 
     put(".ao/config.json", json.dumps({"project": name, "round_budget": 5}, indent=2) + "\n")
+    # Roles are configuration, and a project's answer to "who implements, who
+    # reviews, who judges" differs per project: Claude + Kiro here, Claude +
+    # Claude worktrees there, another model as the reviewer somewhere else. A
+    # profile writes the three blocks; existing blocks are never overwritten.
+    added = _apply_profile(root, args)
+    if added:
+        wrote.append(".ao/config.json (+" + ", ".join(added) + ")")
     put(".ao/board.md", BOARD_TEMPLATE)
     put(".ao/backlog.md", BACKLOG_TEMPLATE.format(name=name))
     put(".ao/authority.md", AUTHORITY_TEMPLATE)
@@ -2560,6 +2621,11 @@ def main():
     ini.add_argument("--agent", choices=["kiro", "claude", "claude-code", "codex", "auto", "all"], default="auto")
     ini.add_argument("--mcp", action="store_true", help="(default) register the MCP server for detected agents")
     ini.add_argument("--no-mcp", action="store_true", help="skip the MCP registration")
+    ini.add_argument("--profile", choices=sorted(PROFILES), help="write the role blocks: who implements, reviews, judges")
+    ini.add_argument("--implementer", help="implementer adapter id (kiro, claude-code, …); overrides the profile")
+    ini.add_argument("--model", help="implementer model, passed through the adapter's --model option")
+    ini.add_argument("--effort", help="implementer effort, where the adapter has one (kiro: low…max)")
+    ini.add_argument("--reviewer-model", dest="reviewer_model", help="reviewer model (default claude-opus-5)")
     ini.add_argument("--watchdog", action="store_true", help="also install the watchdog")
     ini.set_defaults(fn=cmd_init)
     de = sub.add_parser("decide", help="record an architect decision durably")

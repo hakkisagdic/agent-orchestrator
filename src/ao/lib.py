@@ -736,7 +736,7 @@ def agent_pids(root, adapter, headless_only=False):
         pids = ",".join(str(p) for p in sorted(cands))
         for line in (sh(f"lsof -w -n -P -a -d cwd -Fpn -p {pids}") or "").split("\n"):
             if line.startswith("p") and line[1:].isdigit():
-                cur = int(line[1:])
+                cur = int(line[1:]) if int(line[1:]) in cands else None   # only what we asked about
             elif line.startswith("n") and cur is not None:
                 if os.path.realpath(line[1:]) == want:
                     out.append(cur)
