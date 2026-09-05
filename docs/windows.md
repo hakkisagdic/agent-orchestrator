@@ -13,8 +13,9 @@ What works, what does not, and how it is tested without a Windows machine.
 | pre-push hook | works under Git's own shell |
 
 The suite runs on every push locally (the repository's pre-push hook, on a Mac);
-the hosted `tests` workflow is manual — `gh workflow run tests -f os=windows-latest`
-— because macOS minutes bill at 10x and Windows at 2x. It runs the same suite,
+the hosted `tests` workflow is manual and per environment — `gh workflow run tests
+-f os=windows-latest` (or macos-latest, ubuntu-latest, all) — because macOS minutes
+bill at 10x and Windows at 2x. It runs the same suite,
 including the process backend's self-check on its own pid. That is how Windows is
 developed here: the runner is the machine, on demand.
 Faults found there get a scenario in `tests/test_scenarios.py` like any other.

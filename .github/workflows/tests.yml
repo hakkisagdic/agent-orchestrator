@@ -1,22 +1,25 @@
 name: tests
-# Manual only. GitHub bills macOS minutes at 10x and Windows at 2x; the suite runs
-# on every push locally (the repository's pre-push hook, on the maintainer's Mac),
-# so hosted runners are for what the Mac cannot do: Windows, and Linux on demand.
-# Trigger: gh workflow run tests -f os=windows-latest
+# Manual only, per environment, on the maintainer's word. GitHub bills macOS
+# minutes at 10x and Windows at 2x; the suite already runs on every push locally
+# through the repository's pre-push hook. Trigger one environment at a time:
+#   gh workflow run tests -f os=windows-latest
+#   gh workflow run tests -f os=macos-latest
+#   gh workflow run tests -f os=ubuntu-latest
+#   gh workflow run tests -f os=all
 on:
   workflow_dispatch:
     inputs:
       os:
-        description: "runner(s): windows-latest | ubuntu-latest | both"
+        description: "runner: windows-latest | macos-latest | ubuntu-latest | all"
         default: windows-latest
         type: choice
-        options: [windows-latest, ubuntu-latest, both]
+        options: [windows-latest, macos-latest, ubuntu-latest, all]
 jobs:
   pytest:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.os == 'both' && '["ubuntu-latest","windows-latest"]' || format('["{0}"]', inputs.os)) }}
+        os: ${{ fromJSON(inputs.os == 'all' && '["ubuntu-latest","macos-latest","windows-latest"]' || format('["{0}"]', inputs.os)) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 12
     env:
