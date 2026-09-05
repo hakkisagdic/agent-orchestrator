@@ -2204,7 +2204,9 @@ def cmd_doctor(cfg, args):
             if we:
                 text, used, when = we
                 print(f"last wake       {C['red']}failed{C['reset']} {when} [{used or '?'}]: {text[:90]}")
-                if used and used != f"{rb} {rv}":
+                if not used:
+                    print(f"                {C['dim']}binary not recorded (older log); the next wake uses the one above{C['reset']}")
+                elif used != f"{rb} {rv}":
                     print(f"                {C['dim']}a different binary resolves now; the next wake will use it{C['reset']}")
                 else:
                     print(f"                {C['yellow']}same binary — update it (claude update) or remove the stale copy{C['reset']}")
