@@ -17,7 +17,7 @@ import os
 import sys
 import time
 
-from . import lib as A
+from . import __version__, lib as A
 UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 PROTOCOL = "2025-06-18"
@@ -306,7 +306,7 @@ def main():
             if method == "initialize":
                 result = {"protocolVersion": PROTOCOL,
                           "capabilities": {"tools": {}},
-                          "serverInfo": {"name": "agent-orchestrator", "version": "0.1.0"}}
+                          "serverInfo": {"name": "agent-orchestrator", "version": __version__}}
             elif method in ("notifications/initialized", "initialized"):
                 continue                                  # notification: no reply
             elif method == "tools/list":

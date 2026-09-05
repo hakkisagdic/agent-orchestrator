@@ -479,7 +479,7 @@ def cmd_verify(cfg, args):
            # Which tree these numbers describe. Without it the record cannot
            # authorise anything: a pass measured before the last three edits says
            # nothing about what is about to be committed.
-           "tree": A.tree_digest(root),
+           "tree": A.tree_digest(root, cfg),
            "review": revs[0][0] if revs else None,
            "review_verdict": revs[0][1] if revs else None,
            "head": A.sh("git rev-parse --short HEAD", cwd=root),
@@ -510,7 +510,7 @@ def cmd_commit_ok(cfg, args):
     separation is the whole reason the answer is worth anything.
     """
     root = cfg["root"]
-    now = A.tree_digest(root)
+    now = A.tree_digest(root, cfg)
     ver = A.latest_verification(root)
     # --verify: when the last verification is missing or describes another tree,
     # run the quick profile here instead of refusing and costing the implementer
@@ -520,7 +520,7 @@ def cmd_commit_ok(cfg, args):
         from types import SimpleNamespace
         print(f"{C['dim']}verification stale or missing — running quick gates first{C['reset']}")
         cmd_verify(cfg, SimpleNamespace(profile=getattr(args, "profile", None) or "quick", wait=900))
-        now = A.tree_digest(root)
+        now = A.tree_digest(root, cfg)
         ver = A.latest_verification(root)
     revs = A.reviews(root, cfg["reviews"], limit=1)
     drift = A.plan_drift(root)
@@ -570,7 +570,9 @@ def cmd_commit_ok(cfg, args):
             reasons.append(f"the review was written by the implementer ({who})")
         # The review's own tree digest must match, or it described a different tree.
         tm = A.re.search(r"tree:\s*`([^`]+)`", body)
-        if tm and tm.group(1) != now:
+        if not tm:
+            reasons.append(f"{revs[0][0]} names no tree digest — re-run `ao review`")
+        elif tm.group(1) != now:
             reasons.append(f"{revs[0][0]} reviewed a different tree — re-run `ao review`")
     held = A.hold_state(root)
     if held:
@@ -587,7 +589,10 @@ def cmd_commit_ok(cfg, args):
         print(f"{C['red']}{C['b']}REFUSED{C['reset']}")
         for r in reasons:
             print(f"  {C['red']}·{C['reset']} {r}")
-        A.record_authority(root, False, reasons, now, (ver or {}).get("id"))
+        try:
+            A.record_authority(root, False, reasons, now, (ver or {}).get("id"))
+        except OSError as exc:
+            print(f"  {C['dim']}authority refusal could not be recorded: {exc}{C['reset']}")
         return 1
 
     token = f"C-{int(time.time())}"
@@ -597,12 +602,21 @@ def cmd_commit_ok(cfg, args):
         rwho = (A.re.search(r"reviewer:\s*`([^`]+)`", rbody) or [None, None])[1]
     except Exception:
         rwho = None
+
+    # A grant that was not durably recorded is no grant. Persist first so neither
+    # stdout nor the exit status can claim authority the audit trail does not have.
+    try:
+        A.record_authority(root, True, [], now, ver["id"], token,
+                           review=review_name, reviewer=rwho)
+    except OSError as exc:
+        print(f"{C['red']}{C['b']}REFUSED{C['reset']}")
+        print(f"  {C['red']}·{C['reset']} could not persist authority grant: {exc}")
+        return 1
+
     print(f"{C['green']}{C['b']}GRANTED{C['reset']}  {token}")
     print(f"  {C['dim']}verified{C['reset']} {ver['id']} · {C['dim']}review{C['reset']} {review_name}")
     print(f"  {C['dim']}tree{C['reset']}     {now[:23]}…")
     print(f"\n  {C['dim']}push is not covered by this grant and never will be.{C['reset']}")
-    A.record_authority(root, True, [], now, ver["id"], token,
-                       review=review_name, reviewer=rwho)
     return 0
 
 
@@ -1228,7 +1242,7 @@ def cmd_review(cfg, args):
               f"- reviewer: `{rv.get('id') or argv[0]}`  family: `{rv.get('family', '?')}`"
               + ("  (fallback — the primary reviewer was unavailable)" if rv is not primary else ""),
               f"- implementer: `{impl.get('adapter')}/{(impl.get('session') or '')[:20]}`",
-              f"- tree: `{A.tree_digest(root)}`",
+              f"- tree: `{A.tree_digest(root, cfg)}`",
               f"- boundary: {boundary}"]
     if args.commits:
         header.append(f"- commits: {args.commits}")

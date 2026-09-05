@@ -25,7 +25,7 @@ import os
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from . import lib as A
+from . import __version__, lib as A
 
 CFG = {}
 
@@ -41,7 +41,7 @@ def agent_card(base):
         "preferredTransport": "JSONRPC",
         "interfaces": [{"url": base, "protocolBinding": "JSONRPC",
                         "protocolVersion": "1.0"}],
-        "version": "0.1.0",
+        "version": __version__,
         "capabilities": {"streaming": False, "pushNotifications": False},
         "defaultInputModes": ["text/plain"],
         "defaultOutputModes": ["application/json"],

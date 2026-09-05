@@ -896,6 +896,19 @@ def sweep_orphans(pids, grace=3.0):
 
 def _pid_alive(pid):
     try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if os.name == "nt":
+        # On Windows signal 0 is CTRL_C_EVENT, not a harmless existence probe.
+        # Sending it to the lock owner interrupts the very gate run whose
+        # liveness we are checking. Use the platform process snapshot instead.
+        from . import procs
+        try:
+            return pid in set(procs.all_pids())
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return False
+    try:
         os.kill(pid, 0)
         return True
     except OSError:
@@ -1093,19 +1106,134 @@ def work_fingerprint(root):
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
 
 
-def tree_digest(root):
-    """A stable fingerprint of the working tree, tracked and untracked alike.
+def _coordination_dirs(cfg):
+    """Repository-relative directories generated or consumed by orchestration.
 
-    `git status --porcelain` names what differs; hashing the diff plus the status
-    line captures *what* it differs by. Together they answer the only question
-    that matters when reusing a measurement: is this the same tree the numbers
-    were taken from?
+    These files are evidence and coordination state, not the product tree being
+    measured. Keep one definition for review scope, dirty-product detection and
+    commit authority so one AO command cannot invalidate another command's
+    evidence merely by recording its result.
     """
-    h = hashlib.sha256()
-    h.update((sh("git rev-parse HEAD", cwd=root) or "").encode())
-    h.update((sh("git status --porcelain", cwd=root) or "").encode())
-    h.update((sh("git diff HEAD", cwd=root) or "").encode())
-    return "sha256:" + h.hexdigest()
+    defaults = globals().get(
+        "COORDINATION_DIRS",
+        (".ao/", "agent-mail/", ".kiro/", ".claude/", ".codex/"),
+    )
+    values = list(defaults) + [
+        (cfg or {}).get("reviews", "semantic-review"),
+        (cfg or {}).get("mailbox", "agent-mail"),
+    ]
+    out = []
+    for value in values:
+        raw = str(value or "").replace("\\", "/")
+        while raw.startswith("./"):
+            raw = raw[2:]
+        normal = os.path.normpath(raw).replace("\\", "/")
+        # A coordination setting must never be able to exclude the repository
+        # root, escape it, or hide an absolute product path from authority.
+        if not normal or normal in (".", "..") or normal.startswith("../") \
+                or os.path.isabs(raw):
+            continue
+        prefix = normal.rstrip("/") + "/"
+        if prefix not in out:
+            out.append(prefix)
+    return tuple(out)
+
+
+def _is_coordination_path(path, cfg):
+    normal = str(path or "").replace("\\", "/")
+    while normal.startswith("./"):
+        normal = normal[2:]
+    return any(normal == prefix.rstrip("/") or normal.startswith(prefix)
+               for prefix in _coordination_dirs(cfg))
+
+
+def _git_output(root, *args, timeout=60):
+    """Run git without a shell and return bytes, failing closed on an unreadable tree."""
+    try:
+        result = subprocess.run(
+            ["git", *args], cwd=root, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError(f"cannot measure git tree: {exc}") from exc
+    if result.returncode:
+        detail = result.stderr.decode(UTF8, "replace").strip()[:240]
+        raise RuntimeError(f"cannot measure git tree: {detail or 'git failed'}")
+    return result.stdout
+
+
+def _digest_field(digest, label, value):
+    """Length-frame one digest field so path/content boundaries cannot collide."""
+    digest.update(len(label).to_bytes(2, "big"))
+    digest.update(label)
+    digest.update(len(value).to_bytes(8, "big"))
+    digest.update(value)
+
+
+def tree_digest(root, cfg=None):
+    """A staging-independent fingerprint of tracked and untracked product state.
+
+    HEAD already identifies every unchanged tracked file. We therefore hash the
+    current bytes, type and executable bit of each path that differs from HEAD,
+    plus every non-ignored untracked path. The representation is identical before
+    and after `git add`, including for newly added files.
+
+    AO's own ledgers, reviews, mail and agent coordination directories are
+    deliberately excluded. Verification and review must be able to persist their
+    evidence without immediately making that evidence stale.
+    """
+    cfg = load_config(root) if cfg is None else cfg
+    changed = _git_output(
+        root, "diff", "--name-only", "-z", "--no-renames", "HEAD", "--"
+    ).split(b"\0")
+    untracked = _git_output(
+        root, "ls-files", "--others", "--exclude-standard", "-z", "--"
+    ).split(b"\0")
+    paths = {
+        os.fsdecode(raw)
+        for raw in changed + untracked
+        if raw and not _is_coordination_path(os.fsdecode(raw), cfg)
+    }
+
+    digest = hashlib.sha256()
+    _digest_field(digest, b"format", b"ao-product-tree-v2")
+    _digest_field(digest, b"head", _git_output(root, "rev-parse", "HEAD").strip())
+
+    for rel in sorted(paths, key=os.fsencode):
+        full = os.path.join(root, rel)
+        _digest_field(digest, b"path", os.fsencode(rel))
+        try:
+            st = os.lstat(full)
+        except OSError:
+            _digest_field(digest, b"entry", b"missing")
+            continue
+
+        if os.path.islink(full):
+            _digest_field(digest, b"entry", b"symlink")
+            _digest_field(digest, b"target", os.fsencode(os.readlink(full)))
+            continue
+        if os.path.isfile(full):
+            content = hashlib.sha256()
+            with open(full, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                    content.update(chunk)
+            _digest_field(digest, b"entry", b"file")
+            _digest_field(digest, b"executable", b"1" if st.st_mode & 0o111 else b"0")
+            _digest_field(digest, b"content", content.digest())
+            continue
+        if os.path.isdir(full):
+            # A directory here is normally a changed gitlink. Recurse so a dirty
+            # submodule is measured by content rather than by index state.
+            try:
+                sub = tree_digest(full, {})
+            except RuntimeError:
+                sub = "unreadable-directory"
+            _digest_field(digest, b"entry", b"directory")
+            _digest_field(digest, b"content", sub.encode(UTF8, "surrogateescape"))
+            continue
+        _digest_field(digest, b"entry", f"special:{st.st_mode}".encode())
+
+    return "sha256:" + digest.hexdigest()
 
 
 def latest_verification(root):
@@ -1124,21 +1252,21 @@ def latest_verification(root):
 
 def record_authority(root, granted, reasons, tree, verification, token=None,
                      review=None, reviewer=None):
-    """Every authority decision, granted or refused, with what it rested on."""
+    """Persist an authority decision, raising when durable recording fails."""
+    record = {"at": int(time.time()), "granted": bool(granted),
+              "token": token, "reasons": reasons, "tree": tree,
+              "verification": verification, "review": review,
+              "reviewer": reviewer}
     d = os.path.join(root, ".ao", "ledger")
-    try:
-        os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, "authority.jsonl"), "a", encoding=UTF8) as fh:
-            # Keep the reviewer's identity here, not only in the review file.
-            # That file is untracked and was wiped once already; the record of
-            # what authority rested on has to outlive the evidence it cites.
-            fh.write(json.dumps({"at": int(time.time()), "granted": bool(granted),
-                                 "token": token, "reasons": reasons, "tree": tree,
-                                 "verification": verification,
-                                 "review": review, "reviewer": reviewer},
-                                ensure_ascii=False) + "\n")
-    except OSError:
-        pass
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "authority.jsonl"), "a", encoding=UTF8) as fh:
+        # Keep the reviewer's identity here, not only in the review file.
+        # A grant is not real until this durable record exists; callers must
+        # refuse rather than print GRANTED when append or fsync fails.
+        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+    return record
 
 
 GATE_LOCK = os.path.join(HOME, ".ao", "gate.lock")
@@ -1152,9 +1280,7 @@ def gate_lock_holder():
         st = json.load(open(GATE_LOCK, encoding=UTF8))
     except Exception:
         return None
-    try:
-        os.kill(st.get("pid", -1), 0)             # stale lock from a killed run
-    except OSError:
+    if not _pid_alive(st.get("pid", -1)):            # stale lock from a killed run
         try:
             os.remove(GATE_LOCK)
         except OSError:
@@ -2271,14 +2397,15 @@ def implementer_inbox(root, cfg):
 
 def product_dirty(root, cfg):
     """Uncommitted paths outside the coordination directories."""
-    skip = tuple(x.rstrip("/") + "/" for x in (cfg.get("mailbox", "agent-mail"),
-                                                cfg.get("reviews", "semantic-review"), ".ao") if x)
     out = []
     for line in (sh("git status --porcelain", cwd=root) or "").split("\n"):
         if not line.strip():
             continue
-        path = line[3:].strip().strip('"')
-        if path.startswith(skip):
+        raw = line[3:].strip().strip('"')
+        paths = [part.strip().strip('"') for part in raw.split(" -> ")]
+        # A rename crossing the boundary is a product change; ignore it only
+        # when both its old and new names are coordination state.
+        if paths and all(_is_coordination_path(path, cfg) for path in paths):
             continue
         out.append(line)
     return out
@@ -2606,8 +2733,7 @@ def review_diff(root, cfg, paths=None, budget=1_500_000):
     Coordination directories are never product. Untracked product files are
     included newest first within a byte budget. `paths` narrows both sides.
     """
-    skip = COORDINATION_DIRS + (cfg.get("reviews", "semantic-review").rstrip("/") + "/",
-                                cfg.get("mailbox", "agent-mail").rstrip("/") + "/")
+    skip = _coordination_dirs(cfg)
     spec = " -- " + " ".join(f"'{p}'" for p in paths) if paths else ""
     diff = sh(f"git diff HEAD{spec}", cwd=root, timeout=60) or ""
     if not paths:
@@ -2616,7 +2742,7 @@ def review_diff(root, cfg, paths=None, budget=1_500_000):
             f" b/{d}" in pt.split("\n", 1)[0] for d in skip))
     untracked = [l[3:].strip().strip('"') for l in (sh("git status --porcelain", cwd=root) or "").split("\n")
                  if l.startswith("?? ")]
-    untracked = [f for f in untracked if not f.startswith(skip)]
+    untracked = [f for f in untracked if not _is_coordination_path(f, cfg)]
     if paths:
         untracked = [f for f in untracked if any(f == p or f.startswith(p.rstrip("/") + "/")
                                                   or p.startswith(f.rstrip("/") + "/") for p in paths)]
@@ -2627,6 +2753,8 @@ def review_diff(root, cfg, paths=None, budget=1_500_000):
             for dp, _, fn in os.walk(p):
                 for x in fn:
                     rel = os.path.relpath(os.path.join(dp, x), root).replace(os.sep, "/")
+                    if _is_coordination_path(rel, cfg):
+                        continue
                     if not paths or any(rel == q or rel.startswith(q.rstrip("/") + "/") for q in paths):
                         files.append(rel)
         elif os.path.isfile(p):
