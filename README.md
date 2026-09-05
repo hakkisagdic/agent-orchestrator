@@ -87,6 +87,10 @@ scope is the one authority an implementer must not have.
 | `ao hold` / `ao hold release --note …` | stop every agent in the tree, and keep them stopped |
 | `ao writers` / `ao writers --clean` | live turns in the tree (one per turn, not per process), orphans set aside; `--clean` stops only the orphans |
 | `ao fanout ok --agents N` / `ao fanout record …` / `ao fanout history` | may a fan-out of N sub-agents start now (hard cap, recent limit hit, provider window); record what one cost |
+| `ao email setup` / `ao email test` | the red alarm channel: e-mail via formsubmit.co, no server ([alarms.md](docs/alarms.md)) |
+| `ao alarms` / `ao alarms test --level red` | live alarm episodes and their level; test rings every channel |
+| `ao mail log` / `ao mail search <text>` | the mail ledger: every message written and when it was consumed, searchable after deletion |
+| `ao watchdog explain` / `ao watchdog trace` | why the watchdog did or did not act: measurements and verdicts of this cycle, and of the recorded ones ([watchdog.md](docs/watchdog.md)) |
 | `ao source import` | admit tracker items onto the board |
 | `ao mail` · `ao notices` | coordination messages; alerts this project raised |
 | `ao watchdog install` | launchd job that restarts a stalled agent |

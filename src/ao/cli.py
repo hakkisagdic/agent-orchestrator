@@ -319,10 +319,24 @@ def cmd_mail(cfg, args):
         os.makedirs(d, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d-%H%M")
         topic = (args.topic or "note").replace(" ", "-").lower()
-        name = f"{stamp}-architect-to-implementer-{args.type.upper()}-{topic}.md"
+        impl, arch = A.mail_names(cfg)
+        name = f"{stamp}-{arch}-to-{impl}-{args.type.upper()}-{topic}.md"
         body = args.body if args.body else sys.stdin.read()
-        open(os.path.join(d, name), "w").write(body.rstrip() + "\n")
+        A.write_mail(root, cfg, name, body.rstrip() + "\n",
+                     {"kind": args.type.lower(), "from": arch, "to": impl})
         print(name)
+    elif args.action == "log":
+        A.reconcile_mail_ledger(root, cfg)
+        for r in A.mail_log(root, 40):
+            when = datetime.fromtimestamp(r["at"]).strftime("%d %b %H:%M")
+            extra = f"  stood {r['stood_s'] // 60}m" if r.get("stood_s") is not None else ""
+            print(f"  {when}  {r.get('event', '?'):<9} {r.get('id', '')[:70]}{extra}")
+    elif args.action == "search":
+        if not args.type or args.type == "INFO":
+            print("usage: ao mail search <text>"); return 2
+        for r in A.mail_search(root, args.type):
+            when = datetime.fromtimestamp(r["at"]).strftime("%d %b %H:%M")
+            print(f"  {when}  {r.get('kind') or '':<9} {r['id'][:60]}  {C['dim']}{r.get('summary', '')[:70]}{C['reset']}")
 
 
 PLIST = """<?xml version="1.0" encoding="UTF-8"?>
@@ -1892,6 +1906,88 @@ def cmd_fanout(cfg, args):
     return 0 if v["ok"] else 1
 
 
+def cmd_email(cfg, args):
+    """The red channel: e-mail through formsubmit.co, no server."""
+    from . import email
+    if args.action == "setup":
+        if args.token:
+            c = email.save(args.token, to=args.to)
+            print(f"{C['green']}saved{C['reset']} {email.CONF} (0600) → {c.get('to') or 'address hidden behind token'}")
+            print(f"now: {C['b']}ao email test{C['reset']}")
+            return 0
+        print(email.SETUP.format(conf=email.CONF))
+        return 0
+    c = email.config()
+    if args.action == "status":
+        if not c:
+            print(f"{C['yellow']}not configured{C['reset']} — ao email setup"); return 1
+        print(f"{C['green']}configured{C['reset']} provider={c['provider']} to={c.get('to') or '(hidden)'} file={email.CONF}")
+        return 0
+    if args.action == "test":
+        if not c:
+            print(f"{C['red']}not configured{C['reset']} — ao email setup"); return 1
+        ok = email.send("test", f"ao e-posta kanalı çalışıyor. Proje: {cfg['root']}\n"
+                        f"Kırmızı alarmlar buraya gelir: bir saatten uzun süren turuncu durumlar, "
+                        f"tükenmiş kota, başarısız mimar uyandırma.", cfg["root"])
+        print(f"{C['green']}sent{C['reset']}" if ok else f"{C['red']}relay refused{C['reset']} — token/activation?")
+        return 0 if ok else 1
+    return 0
+
+
+def cmd_alarms(cfg, args):
+    """Live alarm episodes and their level; `test` rings every channel."""
+    root = cfg["root"]
+    project = os.path.basename(root.rstrip("/"))
+    if args.action == "test":
+        from .watchdog import notify
+        lvl = args.level or "orange"
+        ok = notify(f"{project}: alarm testi", f"{lvl} seviyesi testi — ao alarms test", root,
+                    key=f"alarm-test-{int(time.time())}", window=0, audience="human", level=lvl)
+        print(f"{lvl}: desktop+telegram {'sent' if ok else 'suppressed'}"
+              + (" · e-mail attempted (see ao notices)" if lvl == "red" else ""))
+        return 0
+    alive = A.active_alarms(project)
+    if not alive:
+        print(f"{C['green']}no live alarms{C['reset']}"); return 0
+    for e in alive:
+        tone = {"red": C['red'], "orange": C['yellow']}.get(e.get("ring"), C['dim'])
+        since = datetime.fromtimestamp(e["first"]).strftime("%d %b %H:%M")
+        print(f"  {tone}{e.get('ring', '?'):<7}{C['reset']} {e['key']:<32} since {since}  "
+              f"×{e.get('count', 1)}  {C['dim']}{e.get('title', '')[:50]}{C['reset']}"
+              + (f"  mailed {datetime.fromtimestamp(e['red_sent']).strftime('%H:%M')}" if e.get('red_sent') else ""))
+    return 0
+
+
+def _watchdog_debug(cfg, args):
+    """`ao watchdog explain` runs one dry cycle and shows every measurement and
+    verdict; `ao watchdog trace` shows the recorded cycles. The question both
+    answer is the one that cost the most this project: why did it not act?"""
+    from types import SimpleNamespace
+    from . import watchdog as W
+    root = cfg["root"]
+    if args.action == "explain":
+        ns = SimpleNamespace(root=root, idle_minutes=6.0, dry_run=True, prompt=W.NUDGE_PROMPT)
+        W.run(ns)
+        print(f"\n{C['b']}{C['mag']}── MEASUREMENTS ──{C['reset']}")
+        for k, v in W._FACTS.items():
+            print(f"   {k:<22} {v}")
+        print(f"\n{C['b']}{C['mag']}── DECISIONS (in order) ──{C['reset']}")
+        for i, line in enumerate(W._TRACE, 1):
+            last = i == len(W._TRACE)
+            print(f"   {C['b'] if last else ''}{i:>2}. {line}{C['reset']}")
+        return 0
+    rows = W.cycles(root, args.last or 20)
+    if not rows:
+        print("no cycles recorded yet"); return 0
+    for r in rows:
+        when = datetime.fromtimestamp(r["at"]).strftime("%d %b %H:%M:%S")
+        f = r.get("facts", {})
+        print(f"  {when}  {C['b']}{(r.get('verdict') or '')[:70]:<70}{C['reset']}  "
+              f"{C['dim']}idle {f.get('idle_s', '?')}s · writers {f.get('writers', '?')} · inbox {f.get('inbox', '?')} "
+              f"· queued {f.get('queued', '?')}{' · standing request' if f.get('standing_request') else ''}{C['reset']}")
+    return 0
+
+
 def _alive(pid):
     try:
         os.kill(pid, 0)
@@ -2044,6 +2140,8 @@ def cmd_notices(cfg, args):
 
 def cmd_watchdog(cfg, args):
     """Install, remove or inspect the launchd job that restarts a stalled agent."""
+    if args.action in ("explain", "trace"):
+        return _watchdog_debug(cfg, args)
     import getpass
     root = cfg["root"]
     key = os.path.basename(root.rstrip("/")).lower()
@@ -2202,7 +2300,7 @@ def cmd_doctor(cfg, args):
             key = os.path.basename(root.rstrip("/")) or "root"
             we = wake_error(os.path.join(STATE_DIR, f"escalate-{key}.log"))
             if we:
-                text, used, when = we
+                text, used, when = we["text"], we["binary"], we["when"]
                 print(f"last wake       {C['red']}failed{C['reset']} {when} [{used or '?'}]: {text[:90]}")
                 if not used:
                     print(f"                {C['dim']}binary not recorded (older log); the next wake uses the one above{C['reset']}")
@@ -2210,6 +2308,33 @@ def cmd_doctor(cfg, args):
                     print(f"                {C['dim']}a different binary resolves now; the next wake will use it{C['reset']}")
                 else:
                     print(f"                {C['yellow']}same binary — update it (claude update) or remove the stale copy{C['reset']}")
+        # Liveness and channels. A watchdog nobody can prove is alive, and an orange
+        # alarm with no channel beyond the desktop, are both silent failures.
+        hb = A.heartbeat_age(root)
+        if hb is None:
+            print(f"last tick       {C['yellow']}never{C['reset']} {C['dim']}(no heartbeat file yet){C['reset']}")
+        else:
+            tone = C['green'] if hb < 360 else C['red']
+            print(f"last tick       {tone}{hb // 60}m {hb % 60}s ago{C['reset']}"
+                  + (f"  {C['red']}watchdog is not running its cycles{C['reset']}" if hb >= 360 else ""))
+        from . import telegram as _tg, email as _em
+        tg_ok, em_ok = bool(_tg.config()), bool(_em.config())
+        print(f"channels        desktop {C['green']}on{C['reset']} · telegram "
+              f"{C['green'] if tg_ok else C['yellow']}{'on' if tg_ok else 'off'}{C['reset']} · e-mail "
+              f"{C['green'] if em_ok else C['yellow']}{'on' if em_ok else 'off'}{C['reset']}"
+              + ("" if (tg_ok or em_ok) else f"  {C['yellow']}orange alarms reach nothing but the desktop — ao email setup{C['reset']}"))
+        try:
+            from .watchdog import load_state as _ls
+            _st = _ls(root)
+            if _st.get("arch_quota_until", 0) > time.time():
+                print(f"architect       {C['yellow']}at quota{C['reset']} until "
+                      f"{time.strftime('%H:%M', time.localtime(_st['arch_quota_until']))}")
+        except Exception:
+            pass
+        alive = A.active_alarms(os.path.basename(root.rstrip('/')))
+        if alive:
+            worst = max(alive, key=lambda e: {"yellow": 0, "orange": 1, "red": 2}.get(e.get("ring"), 0))
+            print(f"alarms          {C['red'] if worst['ring'] == 'red' else C['yellow']}{len(alive)} live, worst {worst['ring']}{C['reset']}  {C['dim']}ao alarms{C['reset']}")
         print(f"ao for agents   {C['green']}{reachable}{C['reset']}")
     else:
         print(f"ao for agents   {C['red']}not on a spawned agent's PATH{C['reset']}")
@@ -2267,7 +2392,7 @@ def main():
     t.set_defaults(fn=cmd_tail)
 
     m = sub.add_parser("mail", help="list, read or send coordination messages")
-    m.add_argument("action", choices=["list", "read", "send"])
+    m.add_argument("action", choices=["list", "read", "send", "log", "search"])
     m.add_argument("type", nargs="?", default="INFO")
     m.add_argument("topic", nargs="?")
     m.add_argument("--body")
@@ -2280,9 +2405,10 @@ def main():
     v.set_defaults(fn=cmd_verify)
 
     wd = sub.add_parser("watchdog", help="launchd job that restarts a stalled agent")
-    wd.add_argument("action", choices=["install", "uninstall", "status"])
+    wd.add_argument("action", choices=["install", "uninstall", "status", "explain", "trace"])
     wd.add_argument("--interval", type=int, default=120)
     wd.add_argument("--idle-minutes", type=float, default=6)
+    wd.add_argument("--last", type=int, default=20)
     wd.set_defaults(fn=cmd_watchdog)
 
     sub.add_parser("board", help="where each pre-authorised item is").set_defaults(fn=cmd_board)
@@ -2383,6 +2509,15 @@ def main():
     h.add_argument("--note", help="on release: what changed while the agent was stopped")
     h.add_argument("--grace", type=float, default=10, help="seconds before SIGKILL")
     h.set_defaults(fn=cmd_hold)
+    em = sub.add_parser("email", help="the red alarm channel: e-mail via formsubmit.co, no server")
+    em.add_argument("action", choices=["setup", "test", "status"], nargs="?", default="status")
+    em.add_argument("--token")
+    em.add_argument("--to")
+    em.set_defaults(fn=cmd_email)
+    al = sub.add_parser("alarms", help="live alarm episodes (yellow/orange/red); test rings the channels")
+    al.add_argument("action", choices=["list", "test"], nargs="?", default="list")
+    al.add_argument("--level", choices=["yellow", "orange", "red"])
+    al.set_defaults(fn=cmd_alarms)
     fo = sub.add_parser("fanout", help="may a fan-out of N sub-agents start now; record what one cost")
     fo.add_argument("action", choices=["ok", "record", "history"], nargs="?", default="ok")
     fo.add_argument("--agents", type=int)

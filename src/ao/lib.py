@@ -704,6 +704,14 @@ def agent_pids(root, adapter, headless_only=False):
         for pid in (sh(f"pgrep -f {name}") or "").split():
             if pid.isdigit() and int(pid) != os.getpid():
                 cands.add(int(pid))
+    # `pgrep -f` matches the whole command line, and a command line can *mention*
+    # an agent without being one: a terminal shell titled "zsh (kiro-cli-term)",
+    # an editor with the transcript open, a grep for the name. One such shell,
+    # cwd in the repository, read as a running turn for thirteen minutes while
+    # the real implementer sat idle with an unread decision. Keep a candidate
+    # only when an agent binary is actually on its command line — as the
+    # program, or as a path component of the runtime it is running under.
+    cands = {p for p in cands if _is_agent_process(p, names)}
     out = []
     if cands:
         # One lsof for every candidate. A call per pid was fine at ten processes
@@ -729,6 +737,23 @@ def agent_pids(root, adapter, headless_only=False):
         # not ask to be stopped.
         out = [p for p in out if _is_headless(p)]
     return out
+
+
+def _is_agent_process(pid, names):
+    args = sh(f"ps -o args= -p {pid}") or ""
+    if not args:
+        return False
+    toks = args.split()
+    for name in names:
+        for i, t in enumerate(toks):
+            base = os.path.basename(t)
+            if base == name and (i == 0 or "/" in t):
+                return True                    # the program itself
+            if base.startswith(name + "-") and "/" in t:
+                return True                    # a sibling binary: kiro-cli-chat
+            if f"/{name}/" in t:
+                return True                    # a runtime under the agent's install dir
+    return False
 
 
 def _is_headless(pid):
@@ -784,7 +809,7 @@ def writers(root, adapter):
     table = _proc_table()
     dead = set(orphans(root, adapter, table))
     live = [p for p in agent_pids(root, adapter) if p not in dead]
-    return process_trees(live), sorted(dead)
+    return process_trees(live, {pid: t[0] for pid, t in table.items()}), sorted(dead)
 
 
 def kill_turn(pid, sig):
@@ -1149,7 +1174,7 @@ def release_gate_lock():
             pass
 
 
-def process_trees(pids):
+def process_trees(pids, parent=None):
     """Group pids into independent trees — how many *turns*, not how many processes.
 
     One turn is several processes: a wrapper spawns a runtime which spawns
@@ -1160,11 +1185,12 @@ def process_trees(pids):
     """
     if not pids:
         return []
-    parent = {}
-    for line in (sh("ps -eo pid,ppid") or "").split("\n")[1:]:
-        f = line.split()
-        if len(f) >= 2 and f[0].isdigit() and f[1].isdigit():
-            parent[int(f[0])] = int(f[1])
+    if parent is None:
+        parent = {}
+        for line in (sh("ps -eo pid,ppid") or "").split("\n")[1:]:
+            f = line.split()
+            if len(f) >= 2 and f[0].isdigit() and f[1].isdigit():
+                parent[int(f[0])] = int(f[1])
     known = set(pids)
     return sorted(p for p in pids if parent.get(p) not in known)
 
@@ -1194,7 +1220,7 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
     # day doing exactly that while a message saying "decision required" sat
     # unread. Fire on the next cycle, not after a threshold.
     for m in mailbox(root, cfg.get("mailbox", "agent-mail")):
-        if "-to-fable-" not in m and "-to-architect-" not in m:
+        if not to_architect(m, cfg):
             continue
         # The watchdog must not read its own outbox as an inbox. Its anomaly
         # reports are addressed to the architect ("watchdog-to-fable-…"), so they
@@ -1323,21 +1349,20 @@ def write_report(root, cfg, kind, facts, key=None):
             if mrk:
                 src = "-" + re.sub(r"[^A-Za-z0-9]+", "-", mrk.group(1)[:-3]).strip("-")
                 break
-        name = f"watchdog-to-fable-ANOMALY-{kind}{src}.md"
+        _, arch = mail_names(cfg)
+        name = f"watchdog-to-{arch}-ANOMALY-{kind}{src}.md"
         path = os.path.join(box, name)
         if os.path.exists(path):
             return None
-        with open(path, "w") as fh:
-            fh.write(f"# ANOMALY — {kind}\n\n"
-                     f"Watchdog observation at {time.strftime('%Y-%m-%d %H:%M:%S')}. "
-                     f"Facts only; the watchdog draws no conclusion and took no action "
-                     f"beyond standing down.\n\n")
-            for f in facts:
-                fh.write(f"- {f}\n")
-            fh.write("\n## Asked of the architect\n\n"
-                     "Decide whether this needs intervention, and what. If it is normal, "
-                     "delete this message; if not, act and record what you did.\n")
-        return name
+        text = (f"# ANOMALY — {kind}\n\n"
+                f"Watchdog observation at {time.strftime('%Y-%m-%d %H:%M:%S')}. "
+                f"Facts only; the watchdog draws no conclusion and took no action "
+                f"beyond standing down.\n\n"
+                + "".join(f"- {f}\n" for f in facts)
+                + "\n## Asked of the architect\n\n"
+                "Decide whether this needs intervention, and what. If it is normal, "
+                "delete this message; if not, act and record what you did.\n")
+        return write_mail(root, cfg, name, text, {"kind": "anomaly", "from": "watchdog", "to": arch})
     except OSError:
         return None
 
@@ -1793,13 +1818,10 @@ def note(root, cfg, to, title, body, urgent=False):
     os.makedirs(box, exist_ok=True)
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower())[:40].strip("-") or "not"
     kind = "ACIL" if urgent else "DECISION"
-    name = f"{time.strftime('%Y%m%d-%H%M')}-fable-to-{to}-{kind}-{slug}.md"
-    with open(os.path.join(box, name), "w") as fh:
-        fh.write(f"# {title}\n\n")
-        if urgent:
-            fh.write("## ACİL\n\n")
-        fh.write(body.rstrip() + "\n")
-    return name
+    _, arch = mail_names(cfg)
+    name = f"{time.strftime('%Y%m%d-%H%M')}-{arch}-to-{to}-{kind}-{slug}.md"
+    text = f"# {title}\n\n" + ("## ACİL\n\n" if urgent else "") + body.rstrip() + "\n"
+    return write_mail(root, cfg, name, text, {"kind": kind.lower(), "from": arch, "to": to})
 
 
 def slice_started(root):
@@ -2172,9 +2194,7 @@ def _name_time(name):
 def implementer_inbox(root, cfg):
     """Mail addressed to the implementer: not its own reports, not the watchdog's."""
     box = cfg.get("mailbox", "agent-mail")
-    return [m for m in mailbox(root, box)
-            if "-to-fable-" not in m and "-to-architect-" not in m
-            and not m.startswith("watchdog-to-") and "-watchdog-to-" not in m]
+    return [m for m in mailbox(root, box) if not to_architect(m, cfg) and not from_watchdog(m)]
 
 
 def product_dirty(root, cfg):
@@ -2202,8 +2222,7 @@ def waiting_on_architect(root, cfg):
     """
     box = cfg.get("mailbox", "agent-mail")
     files = mailbox(root, box)
-    reports = [m for m in files if ("-to-fable-" in m or "-to-architect-" in m)
-               and not m.startswith("watchdog-to-") and "-watchdog-to-" not in m]
+    reports = [m for m in files if to_architect(m, cfg) and not from_watchdog(m)]
     if not reports:
         return None
     latest = reports[-1]
@@ -2223,3 +2242,276 @@ def waiting_on_architect(root, cfg):
     if board(root)["queued"]:
         return None
     return latest, _name_time(latest) or os.path.getmtime(p)
+
+
+# ---- mail envelope, names, ledger --------------------------------------------
+
+def mail_names(cfg):
+    """(implementer, architect) mail names; defaults keep the historical files valid."""
+    impl = ((cfg.get("implementer") or {}).get("name") or "kiro").strip()
+    arch = ((cfg.get("architect") or {}).get("name") or "fable").strip()
+    return impl, arch
+
+
+def to_architect(name, cfg):
+    _, arch = mail_names(cfg)
+    return f"-to-{arch}-" in name or "-to-fable-" in name or "-to-architect-" in name
+
+
+def from_watchdog(name):
+    return name.startswith("watchdog-to-") or "-watchdog-to-" in name
+
+
+def write_mail(root, cfg, name, body, meta=None):
+    """Every mail ao itself writes goes through here: envelope first, prose after.
+
+    The body stays Markdown — agents and people read it. The envelope is a small
+    front-matter block a program can read without parsing prose: kind, from, to,
+    slice, time, id. And every write is mirrored to `.ao/ledger/mail.jsonl`, so
+    that delivery-by-deletion stops deleting the record: a mailbox that was
+    emptied is still searchable, and "how long did that request stand" has an
+    answer after the file is gone.
+    """
+    box = os.path.join(root, cfg.get("mailbox", "agent-mail"))
+    os.makedirs(box, exist_ok=True)
+    meta = dict(meta or {})
+    meta.setdefault("ao", 1)
+    meta.setdefault("id", name)
+    meta.setdefault("at", time.strftime("%Y-%m-%dT%H:%M:%S%z"))
+    order = ["ao", "id", "kind", "from", "to", "slice", "at"]
+    keys = [k for k in order if k in meta] + [k for k in meta if k not in order]
+    head = "---\n" + "".join(f"{k}: {meta[k]}\n" for k in keys if meta[k] not in (None, "")) + "---\n"
+    with open(os.path.join(box, name), "w") as fh:
+        fh.write(head + body.lstrip("\n"))
+    summary = next((l.lstrip("# ").strip() for l in body.split("\n") if l.startswith("#")), "")
+    mail_ledger_append(root, {"event": "written", "id": name, "kind": meta.get("kind"),
+                              "from": meta.get("from"), "to": meta.get("to"),
+                              "slice": meta.get("slice"), "summary": summary[:200]})
+    return name
+
+
+def mail_meta(path):
+    """The envelope of a mail file, or {} for a file written without one."""
+    try:
+        head = open(path, errors="replace").read(2000)
+    except OSError:
+        return {}
+    if not head.startswith("---\n"):
+        return {}
+    end = head.find("\n---", 4)
+    if end < 0:
+        return {}
+    out = {}
+    for line in head[4:end].split("\n"):
+        if ":" in line:
+            k, v = line.split(":", 1)
+            out[k.strip()] = v.strip()
+    return out
+
+
+def mail_ledger_append(root, row):
+    d = os.path.join(root, ".ao", "ledger")
+    try:
+        os.makedirs(d, exist_ok=True)
+        row = dict(row)
+        row.setdefault("at", int(time.time()))
+        with open(os.path.join(d, "mail.jsonl"), "a") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def mail_log(root, limit=200):
+    p = os.path.join(root, ".ao", "ledger", "mail.jsonl")
+    if not os.path.exists(p):
+        return []
+    rows = []
+    for line in open(p, errors="replace"):
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            pass
+    return rows[-limit:]
+
+
+def reconcile_mail_ledger(root, cfg):
+    """Mail the ledger saw written and the mailbox no longer has was consumed.
+
+    The architect and the implementer delete by hand; nothing hooks `rm`. So
+    the watchdog closes the loop each cycle: an open id that is not on disk gets
+    a `consumed` row, timed now — a lower bound on when it was read.
+    """
+    box = os.path.join(root, cfg.get("mailbox", "agent-mail"))
+    rows = mail_log(root, 5000)
+    open_ids = {}
+    for r in rows:
+        if r.get("event") == "written":
+            open_ids[r["id"]] = r
+        elif r.get("event") == "consumed":
+            open_ids.pop(r["id"], None)
+    closed = []
+    for mid, r in open_ids.items():
+        if not os.path.exists(os.path.join(box, mid)):
+            mail_ledger_append(root, {"event": "consumed", "id": mid, "kind": r.get("kind"),
+                                      "from": r.get("from"), "to": r.get("to"),
+                                      "stood_s": int(time.time()) - int(r.get("at") or time.time())})
+            closed.append(mid)
+    return closed
+
+
+def mail_search(root, text, limit=50):
+    """Ledger rows and live files whose id, summary or body mention `text`."""
+    t = text.lower()
+    out, seen = [], set()
+    for r in reversed(mail_log(root, 5000)):
+        if r.get("event") != "written":
+            continue
+        hay = " ".join(str(r.get(k) or "") for k in ("id", "summary", "kind", "slice")).lower()
+        if t in hay and r["id"] not in seen:
+            seen.add(r["id"])
+            out.append(r)
+        if len(out) >= limit:
+            return out
+    return out
+
+
+# ---- alarms -------------------------------------------------------------------
+#
+# Three levels, named by who acts: yellow is the architect's (an anomaly and a
+# wake), orange is the human's (desktop + Telegram), red is the human's *now*
+# (e-mail). The ladder is what turns a standing orange into a red: on 2026-09-05
+# every alert went to a notification centre nobody looked at for eleven hours.
+
+ALARM_RED_AFTER = 60 * 60
+ALARM_RED_REPEAT = 6 * 3600
+ALARM_RESET_AFTER = 2 * 3600
+
+
+def alarms_path():
+    return os.path.join(HOME, ".ao", "alarms.json")
+
+
+def load_alarms():
+    try:
+        return json.load(open(alarms_path()))
+    except (OSError, ValueError):
+        return {}
+
+
+def save_alarms(d):
+    try:
+        os.makedirs(os.path.dirname(alarms_path()), exist_ok=True)
+        json.dump(d, open(alarms_path(), "w"), indent=1)
+    except OSError:
+        pass
+
+
+def alarm_touch(project, key, level, now=None, red_after=ALARM_RED_AFTER, title=None):
+    """Record a raise of `key` at `level`; return (level to ring at, episode).
+
+    An orange raised repeatedly for `red_after` seconds rings red. `red_due` on
+    the episode says whether a mail should go now (once per ALARM_RED_REPEAT).
+    """
+    now = now or time.time()
+    d = load_alarms()
+    k = f"{project}:{key}"
+    e = d.get(k) or {}
+    if e and now - e.get("last", 0) > ALARM_RESET_AFTER:
+        e = {}
+    e.setdefault("first", now)
+    e["last"] = now
+    e["level"] = level
+    e["count"] = e.get("count", 0) + 1
+    if title:
+        e["title"] = title
+    ring = level
+    e["red_due"] = False
+    if level == "red" or (level == "orange" and now - e["first"] >= red_after):
+        ring = "red"
+        e["red_due"] = e.get("red_sent") is None or now - e["red_sent"] >= ALARM_RED_REPEAT
+    e["ring"] = ring
+    d[k] = e
+    save_alarms(d)
+    return ring, e
+
+
+def alarm_mailed(project, key, now=None):
+    d = load_alarms()
+    k = f"{project}:{key}"
+    if k in d:
+        d[k]["red_sent"] = now or time.time()
+        d[k]["red_due"] = False
+        save_alarms(d)
+
+
+def active_alarms(project=None, now=None):
+    now = now or time.time()
+    out = []
+    for k, e in load_alarms().items():
+        proj, _, key = k.partition(":")
+        if project and proj != project:
+            continue
+        if now - e.get("last", 0) > ALARM_RESET_AFTER:
+            continue
+        out.append(dict(e, project=proj, key=key, age_s=int(now - e.get("first", now))))
+    return sorted(out, key=lambda e: -e["age_s"])
+
+
+# ---- heartbeat ------------------------------------------------------------------
+
+def heartbeat_path(root):
+    key = os.path.basename(root.rstrip("/")) or "root"
+    return os.path.join(HOME, ".ao", f"heartbeat-{key}")
+
+
+def heartbeat(root):
+    """The watchdog touching this each cycle is the only proof it is alive."""
+    try:
+        p = heartbeat_path(root)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w") as fh:
+            fh.write(str(int(time.time())))
+    except OSError:
+        pass
+
+
+def heartbeat_age(root):
+    try:
+        return int(time.time() - os.path.getmtime(heartbeat_path(root)))
+    except OSError:
+        return None
+
+
+def expire_alarms(project, now=None):
+    """Episodes that went quiet are over; return them once and forget them."""
+    now = now or time.time()
+    d = load_alarms()
+    done = []
+    for k in list(d):
+        proj, _, key = k.partition(":")
+        e = d[k]
+        if proj == project and now - e.get("last", 0) > ALARM_RESET_AFTER:
+            done.append(dict(e, project=proj, key=key, age_s=int(e.get("last", now) - e.get("first", now))))
+            del d[k]
+    if done:
+        save_alarms(d)
+    return done
+
+
+def stale_siblings(root, max_age=900):
+    """Other projects whose watchdog once had a heartbeat and now has none.
+
+    A dead watchdog cannot report itself; the ones next to it can. Only projects
+    with a heartbeat file count — a project that never ran one is not late."""
+    me = os.path.basename(root.rstrip("/"))
+    out = {}
+    try:
+        for f in os.listdir(os.path.join(HOME, ".ao")):
+            if not f.startswith("heartbeat-") or f == f"heartbeat-{me}":
+                continue
+            age = int(time.time() - os.path.getmtime(os.path.join(HOME, ".ao", f)))
+            if age > max_age:
+                out[f[len("heartbeat-"):]] = age
+    except OSError:
+        pass
+    return out

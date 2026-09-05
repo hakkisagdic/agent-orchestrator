@@ -99,6 +99,13 @@ TOOLS = [
                          "per_agent_tokens": {"type": "integer"},
                          "done": {"type": "integer"}, "errors": {"type": "integer"},
                          "tokens": {"type": "integer"}, "note": {"type": "string"}}}},
+    {"name": "ao_watchdog",
+     "description": "Why the watchdog did or did not act. explain runs one dry cycle "
+                    "and returns its measurements and verdicts; trace returns the recorded "
+                    "cycles. Read-only.",
+     "inputSchema": {"type": "object",
+                     "properties": {"action": {"type": "string", "enum": ["explain", "trace"]},
+                                    "last": {"type": "integer"}}}},
     {"name": "ao_verify",
      "description": "Run the project's declared gates and record the measured result. "
                     "Expensive; disabled unless the server was started with --allow-verify.",
@@ -157,8 +164,8 @@ def call(name, args, cfg, allow_verify):
         box = cfg.get("mailbox", "agent-mail")
         out = []
         for m in A.mailbox(root, box):
-            if "-to-fable-" in m or "-to-architect-" in m:
-                continue                     # our own outbound; not addressed to us
+            if A.to_architect(m, cfg) or A.from_watchdog(m):
+                continue                     # our own outbound, or the watchdog's; not addressed to us
             try:
                 body = open(os.path.join(root, box, m), errors="replace").read(20000)
             except OSError:
@@ -176,6 +183,8 @@ def call(name, args, cfg, allow_verify):
         os.remove(path)
         A.record_notice(root, "ack", f"{mid}: {args.get('outcome', 'applied')}",
                         sent=False, key="ack")
+        A.mail_ledger_append(root, {"event": "consumed", "id": mid,
+                                    "outcome": args.get("outcome", "applied")})
         return {"acknowledged": mid, "outcome": args.get("outcome", "applied")}
 
     if name == "ao_report":
@@ -192,7 +201,8 @@ def call(name, args, cfg, allow_verify):
         # of "queue empty" stood in one mailbox after eleven hours, each a fresh
         # anomaly and a fresh wake. Fold a repeat into the standing report and
         # keep that file's age — the age is the fact the architect needs.
-        marker = f"-kiro-to-fable-{kind.upper()}-"
+        impl, arch = A.mail_names(cfg)
+        marker = f"-{impl}-to-{arch}-{kind.upper()}-"
         dup = None
         for m in A.mailbox(root, box):
             if marker in m and A._report_summary(os.path.join(root, box, m)) == args["summary"].strip():
@@ -203,13 +213,14 @@ def call(name, args, cfg, allow_verify):
                     "delivered_to_phone": 0,
                     "note": (f"the same {kind} report is already standing ({n}× now); the architect "
                              f"sees one file with its original time. Do not report it again; end the turn.")}
-        name_ = f"{time.strftime('%Y%m%d-%H%M')}-kiro-to-fable-{kind.upper()}-{slug}.md"
-        with open(os.path.join(root, box, name_), "w") as fh:
-            fh.write(f"# {args['summary']}\n\n{header}\n\n")
-            if args.get("detail"):
-                fh.write(args["detail"] + "\n\n")
-            if args.get("needs"):
-                fh.write(f"**Needs:** {args['needs']}\n")
+        name_ = f"{time.strftime('%Y%m%d-%H%M')}-{impl}-to-{arch}-{kind.upper()}-{slug}.md"
+        text = f"# {args['summary']}\n\n{header}\n\n"
+        if args.get("detail"):
+            text += args["detail"] + "\n\n"
+        if args.get("needs"):
+            text += f"**Needs:** {args['needs']}\n"
+        A.write_mail(root, cfg, name_, text, {"kind": kind, "from": impl, "to": arch,
+                                              "slice": args.get("slice")})
         delivered = 0
         if kind == "blocked":
             try:
@@ -225,6 +236,14 @@ def call(name, args, cfg, allow_verify):
                 "note": ("the architect is woken on the next watchdog cycle"
                          if kind == "blocked" else "queued for the architect")}
 
+    if name == "ao_watchdog":
+        from types import SimpleNamespace
+        from . import watchdog as W
+        if args.get("action", "explain") == "trace":
+            return {"cycles": W.cycles(root, int(args.get("last") or 20))}
+        W.run(SimpleNamespace(root=root, idle_minutes=6.0, dry_run=True, prompt=W.NUDGE_PROMPT))
+        return {"facts": dict(W._FACTS), "trace": list(W._TRACE),
+                "verdict": W._TRACE[-1] if W._TRACE else ""}
     if name == "ao_fanout":
         if args.get("action") == "record":
             return A.record_fanout(root, args["agents"], args.get("done"), args.get("errors"),

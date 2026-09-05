@@ -39,12 +39,71 @@ import time
 from . import lib as A
 
 STATE_DIR = os.path.join(A.HOME, ".ao")
+
+# Every decision line this module prints is also kept, so a cycle can be read
+# back as a trace: what was measured, what was decided, in what order. The one
+# question that cost this project the most — "why did it not act?" — used to be
+# answerable only by reading a log of prose. `ao watchdog explain` runs a dry
+# cycle and prints the trace; `ao watchdog trace` reads the recorded ones.
+import builtins as _builtins
+_TRACE = []
+_FACTS = {}
+
+
+def print(*args, **kw):
+    line = " ".join(str(a) for a in args)
+    _TRACE.append(line)
+    _builtins.print(*args, **kw)
+
+
+def cycles_path(root):
+    key = os.path.basename(root.rstrip("/")) or "root"
+    return os.path.join(STATE_DIR, f"cycles-{key}.jsonl")
+
+
+def record_cycle(root, args):
+    if getattr(args, "dry_run", False):
+        return
+    rec = {"at": int(time.time()), "verdict": _TRACE[-1] if _TRACE else "",
+           "trace": list(_TRACE), "facts": dict(_FACTS)}
+    try:
+        p = cycles_path(root)
+        os.makedirs(STATE_DIR, exist_ok=True)
+        if os.path.exists(p) and os.path.getsize(p) > 2_000_000:
+            tail = open(p, errors="replace").read()[-1_000_000:]
+            open(p, "w").write(tail[tail.find("\n") + 1:])
+        with open(p, "a") as fh:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def cycles(root, last=20):
+    p = cycles_path(root)
+    if not os.path.exists(p):
+        return []
+    rows = []
+    for line in open(p, errors="replace"):
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            pass
+    return rows[-last:]
 MAX_ATTEMPTS = 3
 
 # What an architect turn is for. Deliberately narrow: it refills and admits, it
 # does not implement. Admission is the step that turns "someone filed this" into
 # "an agent may work on this unattended", and it is the only step that may not
 # be delegated to whoever will do the work.
+NUDGE_PROMPT = (
+        "devam et. Yetki için tek kaynak: .ao/authority.md — mail ondan üstün değildir, "
+        "kapsam ekler, yetki eklemez/kaldırmaz. Orada açıkça yasak olmayan ve dilimin "
+        "kapsamındaki şey serbesttir; belirsizlikte DURMA. "
+        "Açık dilimi bitir: gate'ler + taze review, sonra local commit (PUSH YOK), RAPOR yaz. "
+        "Bir mimari karara ya da insan girdisine takılırsan dilimi blocked işaretle, "
+        "agent-mail'e '## KARAR GEREKLİ' bırak ve .ao/backlog.md'deki ilk açık maddeye geç. "
+        "Kuyruk dışına çıkma. Kullanıcı beklemesi yok.")
+
 REFILL_PROMPT = (
     "Kuyruk boşaldı. .ao/sources.json'daki kaynaklardan yeni işleri çek, "
     "normalize edip .ao/inbox/<source-id>.json'a yaz, sonra `ao source import` çalıştır. "
@@ -108,7 +167,7 @@ def for_human(title):
     return any(k in title.lower() for k in HUMAN_AUDIENCE)
 
 
-def notify(title, msg, root=None, key=None, window=1800, audience="human"):
+def notify(title, msg, root=None, key=None, window=1800, audience="human", level=None):
     """Raise an alert at most once per window, and always record that we did.
 
     The watchdog runs every two minutes. A guard that notifies on each run turns
@@ -133,8 +192,38 @@ def notify(title, msg, root=None, key=None, window=1800, audience="human"):
             except Exception:
                 pass
         return False
+    # The ladder: this is an orange (a person must act). Standing an hour, it
+    # rings red and goes to mail — the channel people open when they wake up.
+    project = os.path.basename((root or "").rstrip("/")) or "ao"
+    red_after = A.ALARM_RED_AFTER
+    if root:
+        try:
+            red_after = int((A.load_config(root).get("alarms") or {}).get("red_after_minutes", 60)) * 60
+        except Exception:
+            pass
+    ring, episode = A.alarm_touch(project, key, level or "orange", red_after=red_after, title=title)
+    if ring == "red" and episode.get("red_due"):
+        try:
+            from . import email
+            since = time.strftime("%d %b %H:%M", time.localtime(episode.get("first", time.time())))
+            if email.send(f"{title}", f"{msg}\n\nDuruyor: {since}'den beri ({episode.get('count', 1)} kez). "
+                          f"Proje: {root or '?'}\n`ao alarms` merdiveni, `ao status` durumu gösterir.", root):
+                A.alarm_mailed(project, key)
+                if root:
+                    A.record_notice(root, title, msg, sent=True, key="mail:" + key)
+        except Exception:
+            pass
     if root and A.notice_recently_sent(root, key, window):
         A.record_notice(root, title, msg, sent=False, key=key)
+        return False
+    if root and storm(root):
+        A.record_notice(root, title, msg, sent=False, key=key)
+        if not A.notice_recently_sent(root, "storm", 3600):
+            A.record_notice(root, f"{project}: alert storm", "12+ alerts in an hour; further ones "
+                            "are recorded only — ao notices", sent=True, key="storm")
+            subprocess.run(["osascript", "-e", f'display notification "12+ alerts in an hour; further '
+                            f'ones recorded only (ao notices)" with title "{project}: alert storm"'],
+                           capture_output=True)
         return False
     safe = msg.replace('"', "'")[:200]
     subprocess.run(["osascript", "-e",
@@ -148,6 +237,33 @@ def notify(title, msg, root=None, key=None, window=1800, audience="human"):
     if root:
         A.record_notice(root, title, msg, sent=True, key=key)
     return True
+
+
+def _announce_resolved(root, e):
+    """Close the loop on an alarm: the same channels that heard it hear it end."""
+    title = f"{e.get('project', '')}: resolved — {e.get('key', '')}"
+    msg = (f"stood {e.get('age_s', 0) // 60}m, raised {e.get('count', 1)}×"
+           + ("; was red" if e.get("red_sent") else ""))
+    A.record_notice(root, title, msg, sent=True, key="resolved:" + e.get("key", ""))
+    try:
+        subprocess.run(["osascript", "-e", f'display notification "{msg}" with title "{title}"'],
+                       capture_output=True)
+        from . import telegram
+        telegram.send(f"✅ *{title}*\n{msg}", root)
+        if e.get("red_sent"):
+            from . import email
+            email.send(title, msg, root)
+    except Exception:
+        pass
+
+
+def storm(root, limit=12):
+    """More than `limit` alerts sent in the last hour is a storm: the person has
+    stopped reading them. Record, do not ring — except red, which still mails."""
+    cut = time.time() - 3600
+    sent = [n for n in A.notices(root, limit=400) if n.get("sent") and n.get("at", 0) > cut
+            and not str(n.get("key", "")).startswith(("tg:", "mail:", "resolved:", "storm"))]
+    return len(sent) >= limit
 
 
 def state_path(root):
@@ -416,20 +532,46 @@ def escalate(root, cfg, adapter, age, args, st):
         # retry is the forty-first identical failure.
         err = wake_error(log_path)
         if resolved and err:
-            text, used, when = err
-            same = used == f"{resolved} {ver}"
+            text, used, when, kind = err["text"], err["binary"], err["when"], err["kind"]
             prev = st.get("wake_error") or {}
-            if prev.get("text") != text or prev.get("binary") != used:
-                st["wake_error"] = {"at": time.time(), "text": text, "binary": used, "when": when}
+            fresh = prev.get("text") != text or prev.get("binary") != used or prev.get("when") != when
+            if fresh:
+                st["wake_error"] = {"at": time.time(), "text": text, "binary": used,
+                                    "when": when, "kind": kind}
+                if kind == "quota":
+                    # The architect is paused, not broken. Wait for the window, tell
+                    # the human once (orange), and remember that the desktop app may
+                    # resume the session itself when its auto-continue is on.
+                    st["arch_quota_until"] = err.get("resets_at") or time.time() + 3600
                 save_state(root, st)
-                A.record_notice(root, f"{key}: architect wake failed", f"{text} [{used}]", True,
-                                key="architect-wake-failed")
-                notify(f"{key}: mimar uyandırılamadı", f"{text[:120]} — ikili: {used or '?'}; "
-                       f"`claude update` / `ao doctor`", root, key="architect-wake-failed",
-                       window=6 * 3600, audience="human")
-            if same and time.time() - (st.get("wake_error") or {}).get("at", 0) < 6 * 3600:
+                A.record_notice(root, f"{key}: architect wake failed", f"{kind}: {text} [{used}]",
+                                True, key="architect-wake-failed")
+                if kind == "quota":
+                    until = time.strftime("%H:%M", time.localtime(st["arch_quota_until"]))
+                    notify(f"{key}: mimar kotada", f"{text[:100]} — uyandırma {until}'e kadar "
+                           f"bekletiliyor; Claude Desktop auto-continue açıksa oturum kendi "
+                           f"devam eder", root, key="architect-quota", window=6 * 3600,
+                           audience="human")
+                else:
+                    notify(f"{key}: mimar uyandırılamadı", f"{kind}: {text[:110]} — ikili: "
+                           f"{used or '?'}; `ao doctor`", root, key="architect-wake-failed",
+                           window=6 * 3600, audience="human")
+            same = used == f"{resolved} {ver}"
+            if kind == "binary" and same and time.time() - (st.get("wake_error") or {}).get("at", 0) < 6 * 3600:
                 print(f"architect wake failed with this same binary ({used}); not retrying: {text[:90]}")
                 resolved = None
+            elif kind == "quota" and st.get("arch_quota_until", 0) > time.time():
+                print(f"architect at quota until "
+                      f"{time.strftime('%H:%M', time.localtime(st['arch_quota_until']))}; not waking")
+                resolved = None
+            elif kind == "session":
+                # A dead session id: rediscover instead of resuming it again.
+                arch["session"] = "auto"
+                print(f"last wake resumed a dead session ({text[:60]}); rediscovering")
+        if resolved and st.get("arch_quota_until", 0) > time.time():
+            print(f"architect at quota until "
+                  f"{time.strftime('%H:%M', time.localtime(st['arch_quota_until']))}; not waking")
+            resolved = None
         if resolved:
             argv[0] = resolved
             os.makedirs(STATE_DIR, exist_ok=True)
@@ -471,6 +613,11 @@ def open_work(cfg, root):
     reasons = []
     if A.implementer_inbox(root, cfg):
         reasons.append("unread mail")
+    # A slice the board says is running is work, whether or not a file has
+    # changed yet: an implementer that has just started one and ended its turn
+    # on a plan must be nudged back into it.
+    if A.board(root)["running"]:
+        reasons.append("slice running")
     if A.product_dirty(root, cfg):
         reasons.append("uncommitted changes")
     revs = A.reviews(root, cfg["reviews"], limit=1)
@@ -485,12 +632,50 @@ def open_work(cfg, root):
     return reasons
 
 
-def wake_error(log_path):
-    """What the last architect wake said, if it failed: (text, binary, when).
+WAKE_SIGNATURES = (
+    ("quota", r"(hit your (?:session|usage|weekly|monthly) limit[^\n]*|usage limit[^\n]*|"
+              r"rate limit(?:ed)?[^\n]*resets?[^\n]*|out of (?:credits|quota)[^\n]*)"),
+    ("binary", r"(does not support this model[^\n]*|version [^\n]*required[^\n]*|"
+               r"command not found[^\n]*|No such file or directory[^\n]*|env: node: [^\n]*)"),
+    ("session", r"(No conversation found[^\n]*|[Ss]ession[^\n]{0,40}not found[^\n]*|"
+                r"Invalid session[^\n]*)"),
+    ("other", r"(API Error: \d{3}[^\n]*|Error: [^\n]{8,})"),
+)
 
-    The wake is detached, so its outcome can only be read on the next cycle from
-    the log segment it wrote. Forty identical failures went unread because
-    nothing looked.
+
+def parse_reset(text, now=None):
+    """When does the quota come back? "resets 4:30am" / "resets in 4h 43m" / None."""
+    now = now or time.time()
+    m = re.search(r"resets?\s+in\s+((?:\d+\s*[hms]\s*)+)", text, re.I)
+    if m:
+        secs = 0
+        for n, u in re.findall(r"(\d+)\s*([hms])", m.group(1), re.I):
+            secs += int(n) * {"h": 3600, "m": 60, "s": 1}[u.lower()]
+        return now + secs
+    m = re.search(r"resets?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", text, re.I)
+    if not m:
+        return None
+    h, mi, ap = int(m.group(1)), int(m.group(2) or 0), (m.group(3) or "").lower()
+    if ap == "pm" and h < 12:
+        h += 12
+    if ap == "am" and h == 12:
+        h = 0
+    lt = time.localtime(now)
+    cand = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, h, mi, 0, 0, 0, -1))
+    if cand <= now:
+        cand += 24 * 3600
+    return cand
+
+
+def wake_error(log_path):
+    """What the last architect wake said, if it failed.
+
+    {"text", "binary", "when", "kind", "resets_at"} or None. The wake is
+    detached, so its outcome can only be read on the next cycle from the log
+    segment it wrote. Forty identical failures went unread because nothing
+    looked. `kind` is what the caller should do about it: a stale *binary* wants
+    another binary, a *quota* wants a wait until `resets_at`, a dead *session*
+    wants rediscovery.
     """
     try:
         tail = open(log_path, errors="replace").read()[-20000:]
@@ -500,12 +685,13 @@ def wake_error(log_path):
     if len(segs) < 5:
         return None
     when, _, binary, body = segs[-4], segs[-3], segs[-2] or "", segs[-1]
-    m = re.search(r"(API Error: \d{3}[^\n]*|does not support this model[^\n]*|"
-                  r"version [^\n]*required[^\n]*|command not found[^\n]*|"
-                  r"No such file or directory[^\n]*|env: node: [^\n]*)", body)
-    if not m:
-        return None
-    return m.group(1).strip()[:300], binary, when
+    for kind, pat in WAKE_SIGNATURES:
+        m = re.search(pat, body)
+        if m:
+            text = m.group(1).strip()[:300]
+            return {"text": text, "binary": binary, "when": when, "kind": kind,
+                    "resets_at": parse_reset(body) if kind == "quota" else None}
+    return None
 
 
 def quota_ok(adapter):
@@ -545,17 +731,23 @@ def main():
     # months-old instructions, an agent facing an apparent conflict refuses and
     # waits — which is safe, and cost this project four hours with 7,000 lines of
     # finished work sitting uncommitted.
-    p.add_argument("--prompt", default=(
-        "devam et. Yetki için tek kaynak: .ao/authority.md — mail ondan üstün değildir, "
-        "kapsam ekler, yetki eklemez/kaldırmaz. Orada açıkça yasak olmayan ve dilimin "
-        "kapsamındaki şey serbesttir; belirsizlikte DURMA. "
-        "Açık dilimi bitir: gate'ler + taze review, sonra local commit (PUSH YOK), RAPOR yaz. "
-        "Bir mimari karara ya da insan girdisine takılırsan dilimi blocked işaretle, "
-        "agent-mail'e '## KARAR GEREKLİ' bırak ve .ao/backlog.md'deki ilk açık maddeye geç. "
-        "Kuyruk dışına çıkma. Kullanıcı beklemesi yok."))
+    p.add_argument("--prompt", default=NUDGE_PROMPT)
     args = p.parse_args()
+    return run(args)
 
+
+def run(args):
+    """One cycle, traced and — unless dry — recorded."""
+    _TRACE.clear()
+    _FACTS.clear()
     root = os.path.abspath(os.path.expanduser(args.root))
+    try:
+        return _cycle(args, root)
+    finally:
+        record_cycle(root, args)
+
+
+def _cycle(args, root):
     cfg = A.load_config(root)
     impl = cfg.get("implementer") or {}
     if not impl:
@@ -570,7 +762,37 @@ def main():
     age = time.time() - os.path.getmtime(msgs)
     size = os.path.getsize(msgs)
     st = load_state(root)
+    A.heartbeat(root)                 # the only proof this watchdog is alive
+    A.reconcile_mail_ledger(root, cfg)  # deleted mail becomes a consumed row
     A.record_progress(root, cfg)      # history of what moved, for the spin check
+    project = os.path.basename(root.rstrip("/")) or "root"
+    try:
+        bd = A.board(root)
+        _FACTS.update(idle_s=int(age), transcript_bytes=size,
+                      inbox=len(A.implementer_inbox(root, cfg)),
+                      standing_request=bool(A.waiting_on_architect(root, cfg)),
+                      queued=len(bd["queued"]), running=len(bd["running"]), blocked=len(bd["blocked"]),
+                      hold=bool(A.hold_state(root)),
+                      arch_quota_until=st.get("arch_quota_until") or None,
+                      arch_present=A.architect_present((cfg.get("architect") or {}).get("cwd") or root),
+                      last_wake_error=(st.get("wake_error") or {}).get("kind"))
+    except Exception as exc:                                  # facts must never stop a cycle
+        _FACTS["facts_error"] = str(exc)[:120]
+    # Alarm hygiene, every cycle: close episodes that went quiet (and say so, once —
+    # an alert with no "over" teaches people to keep worrying), watch the sibling
+    # watchdogs' heartbeats (a dead watchdog cannot report itself), and a hold that
+    # has stood four hours is a person who forgot, which is a red.
+    for e in A.expire_alarms(project):
+        _announce_resolved(root, e)
+    for sib, age_s in A.stale_siblings(root).items():
+        notify(f"{sib}: watchdog silent", f"no heartbeat for {age_s // 60}m — its watchdog is not "
+               f"running; launchctl / ao watchdog status", root, key=f"watchdog-dead:{sib}",
+               window=3600, audience="human")
+    hs = A.hold_state(root)
+    if hs and time.time() - int(hs.get("at") or time.time()) > 4 * 3600:
+        notify(f"{project}: hold standing {int((time.time() - hs['at']) / 3600)}h",
+               f"set by {hs.get('by', '?')}: {hs.get('reason', '')} — ao hold release when done",
+               root, key="hold-standing", window=6 * 3600, audience="human", level="red")
 
     # An agent that is busy and producing nothing never trips the idle guard, so
     # check it before the guard chain rather than inside it. Notify only; a nudge
@@ -614,6 +836,7 @@ def main():
         if not args.dry_run:
             A.sweep_orphans(dead)
     running = [p for p in A.agent_pids(root, adapter) if p not in set(dead)]
+    _FACTS.update(writers=len(A.process_trees(running)) if running else 0, orphans=len(dead))
     if running:
         # A process being alive is not a turn being in flight. An agent can finish
         # its turn and never exit, and the first version of this guard treated that
@@ -690,12 +913,24 @@ def main():
         sc = A.sources(root)
         arch = cfg.get("architect") or {}
         depth = len(A.board(root)["queued"])
-        if sc and arch.get("argv") and depth < sc.get("refill_below", 3):
+        # With a source bound, refill below its threshold; without one, an empty
+        # queue is still a refill condition — the architect fills it from the
+        # spec. This project had no source, so the empty queue was never a
+        # refill and the only signal was the implementer's own blocked report.
+        threshold = sc.get("refill_below", 3) if sc else 1
+        if arch.get("argv") and depth < threshold:
             if args.dry_run:
                 print(f"queue low ({depth}); would wake the architect to refill")
                 return 0
             if child_alive(st):
                 print("queue low, but a turn is still running")
+                return 0
+            if time.time() - st.get("last_refill", 0) < 1800:
+                print(f"queue low ({depth}); refill wake sent "
+                      f"{int((time.time() - st.get('last_refill', 0)) / 60)}m ago; waiting")
+                return 0
+            if st.get("arch_quota_until", 0) > time.time():
+                print("queue low, but the architect is at quota; waiting")
                 return 0
             # Resolve the session at wake time. A resumed architect carries the whole
             # history -- what was decided and why -- where a fresh one knows only what
@@ -730,7 +965,7 @@ def main():
                                         start_new_session=True)
             st.update(arch_pid=proc.pid, last_refill=time.time())
             save_state(root, st)
-            print(f"queue low ({depth} < {sc.get('refill_below', 3)}); woke the architect")
+            print(f"queue low ({depth} < {threshold}); woke the architect")
             return 0
         print("idle, but no open work — leaving it alone")
         return 0

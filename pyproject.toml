@@ -43,3 +43,6 @@ packages = ["src/ao"]
 
 [tool.hatch.build.targets.sdist]
 include = ["src/ao", "docs", "README.md", "README.tr.md", "LICENSE", "pyproject.toml"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
