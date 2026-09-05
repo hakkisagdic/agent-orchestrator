@@ -344,3 +344,37 @@ Two rules, one from each mistake:
 
 The general shape is the oldest one in this file: a mechanism built for one
 actor was pointed at a different one and behaved as designed, which was wrong.
+
+## 21. The reaper made the writers it was counting
+
+Kiro stopped writing for three and a half hours. Its single-writer rule said "more
+than one agent process in this tree → do not edit", it measured four, and it was
+right about the four: `kiro-cli-chat acp`, two `node … kas` engines and a child,
+all with the repository as their cwd. What it could not see was that every one
+of them was a corpse. Their parent was init, their controlling terminal was
+gone, and the process group each still belonged to had a leader that no longer
+existed. Their stderr pointed at the watchdog's own nudge log.
+
+The chain was: the watchdog nudges; a turn hangs; the reaper sends SIGTERM to
+the one pid that carries the `--no-interactive` flag — the wrapper — and the
+wrapper exits. Its runtime and engine children carry no such flag, so the
+reaper never addresses them, and they are re-parented to init at 0% CPU with
+the repo as cwd. The next nudge starts a turn; Kiro counts the process table,
+finds the remnant, refuses to write, and ends the turn early. An early empty
+turn looks like a hung one to a silence threshold, so the reaper fires again
+and leaves one more remnant. Three nudges, three orphans, a rule that was
+correct every single time, and no progress.
+
+Two fixes, and the second is the one that matters. Turns are signalled by
+process group now (`kill_turn`): a nudge starts in its own session, so the
+wrapper's pid is the group id and one `killpg` reaches everything it spawned.
+And leftovers are recognised by shape rather than by age — no terminal, group
+leader dead — which nothing a person is sitting in can match, so the watchdog
+can clear them before it counts anything. `ao writers` gives the implementer
+the count it should have had all along: turns, not processes, with orphans set
+aside and named.
+
+The general lesson: when a guard's answer is "someone else is here", make sure
+the someone is not the guard's own debris. A safety mechanism that leaves
+remnants that trip the safety mechanism is a deadlock with extra steps, and
+it hides well because every individual reading is true.

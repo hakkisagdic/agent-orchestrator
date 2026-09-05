@@ -34,6 +34,7 @@ Never inject into a session that is mid-turn. Two hazards, two mitigations:
 | Two writers on one session transcript | Ask the OS which agent processes have this repo as their cwd. Start nothing while any of them is alive. |
 | Two writers on one working tree | Write lanes get separate git worktrees; a second write lane in the same workspace is refused. |
 | A human needs the tree | `ao hold` stops every agent in it and holds the lock; every restart path checks the lock first. |
+| A turn ended but its processes did not | `ao writers` shows them as orphans (no terminal, dead group leader) and counts zero writers; the watchdog clears them before every count, and `ao hold` / the reaper stop turns by process group so no new ones are made. |
 
 **Do not infer this from file timestamps.** That was the original design — status AND
 write-age, ANDed — and it failed twice in one night. A turn retrying a provider 5xx sits

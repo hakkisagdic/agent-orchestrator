@@ -1772,14 +1772,19 @@ def cmd_hold(cfg, args):
                "at": int(time.time()), "stopped": pids},
               open(path, "w"), indent=2)
     if not pids:
-        print(f"{C['yellow']}hold set{C['reset']} — no agent process was running")
+        dead = A.orphans(root, adapter)
+        if dead:
+            print(f"clearing {len(dead)} orphaned process(es) left by ended turns: {dead}")
+            A.sweep_orphans(dead)
+        print(f"{C['yellow']}hold set{C['reset']} — no agent turn was running")
         return 0
+    dead = A.orphans(root, adapter)
+    if dead:
+        print(f"clearing {len(dead)} orphaned process(es) left by ended turns: {dead}")
+        A.sweep_orphans(dead)
     print(f"stopping {len(pids)} process(es): {pids}")
     for pid in pids:
-        try:
-            os.kill(pid, signal.SIGTERM)         # let it finish the write it is in
-        except OSError:
-            pass
+        A.kill_turn(pid, signal.SIGTERM)     # whole group; let it finish the write it is in
     deadline = time.time() + args.grace
     while time.time() < deadline:
         alive = [p for p in pids if _alive(p)]
@@ -1788,13 +1793,58 @@ def cmd_hold(cfg, args):
         time.sleep(0.5)
     alive = [p for p in pids if _alive(p)]
     for pid in alive:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except OSError:
-            pass
+        A.kill_turn(pid, signal.SIGKILL)
     print(f"{C['red']}HELD{C['reset']} — {len(pids) - len(alive)} exited on request, "
           f"{len(alive)} killed. The watchdog will not restart while .ao/hold exists.")
     return 0
+
+
+def cmd_writers(cfg, args):
+    """Who is writing in this tree — turns, not processes, with orphans set aside.
+
+    This is the measurement a single-writer rule should run. The process table
+    answers a different question: one turn is a wrapper, a runtime and an engine,
+    and a turn that ended can leave the last two behind at 0% CPU with the repo
+    as their cwd. Counting processes reported four writers where there were
+    none, and an implementer that trusted the count refused to write for three
+    and a half hours. Exit status is 0 for at most one live turn, 1 otherwise;
+    `--clean` stops orphans only — never a live turn, never a person's session.
+    """
+    root = cfg["root"]
+    impl = cfg.get("implementer") or {}
+    adapter = A.load_adapter(impl.get("adapter", "")) if impl else {}
+    roots, dead = A.writers(root, adapter)
+    table = A._proc_table()
+    rows = []
+    for pid in roots:
+        args_ = (A.sh(f"ps -o etime=,args= -p {pid}") or "").strip()
+        et, _, cmd = args_.partition(" ")
+        rows.append({"pid": pid, "elapsed": et, "headless": A._is_headless(pid),
+                     "tty": table.get(pid, (0, 0, "?"))[2], "cmd": cmd.strip()[:90]})
+    if args.clean and dead:
+        A.sweep_orphans(dead)
+        left = [p for p in dead if A._pid_alive(p)]
+        cleaned = [p for p in dead if p not in left]
+    else:
+        cleaned, left = [], dead
+    if args.json:
+        print(json.dumps({"writers": len(roots), "turns": rows, "orphans": left,
+                          "cleaned": cleaned}, ensure_ascii=False))
+        return 0 if len(roots) <= 1 else 1
+    if not roots:
+        print(f"{C['green']}0 writers{C['reset']} — no live turn in this tree")
+    else:
+        colour = C['green'] if len(roots) == 1 else C['red']
+        print(f"{colour}{len(roots)} writer(s){C['reset']}")
+        for r in rows:
+            kind = "headless" if r["headless"] else f"interactive tty={r['tty']}"
+            print(f"   {r['pid']:>6}  {r['elapsed']:>10}  {kind:<22} {r['cmd']}")
+    if cleaned:
+        print(f"   cleaned {len(cleaned)} orphan(s): {cleaned}")
+    if left:
+        print(f"   {C['yellow']}{len(left)} orphan(s){C['reset']} left by ended turns, not counted: {left}"
+              + ("" if args.clean else "  (`ao writers --clean` stops them)"))
+    return 0 if len(roots) <= 1 else 1
 
 
 def _alive(pid):
@@ -2268,6 +2318,10 @@ def main():
     h.add_argument("--note", help="on release: what changed while the agent was stopped")
     h.add_argument("--grace", type=float, default=10, help="seconds before SIGKILL")
     h.set_defaults(fn=cmd_hold)
+    w = sub.add_parser("writers", help="live turns in this tree (not processes); orphans set aside")
+    w.add_argument("--clean", action="store_true", help="stop orphaned processes left by ended turns")
+    w.add_argument("--json", action="store_true")
+    w.set_defaults(fn=cmd_writers)
     sr = sub.add_parser("source", help="external work queues feeding the board")
     sr.add_argument("action", choices=["list", "status", "import"], nargs="?", default="status")
     sr.set_defaults(fn=cmd_source)

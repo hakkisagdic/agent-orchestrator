@@ -71,6 +71,11 @@ session.
 
 Step 5 is not paranoia. A remembered verdict is a verdict that was true at some point, and
 the whole reason this system exists is to stop treating "it was true earlier" as evidence.
+- `ao writers` — how many live turns are in the tree. Expect 0 or 1. Orphans (no
+  terminal, dead group leader) are listed separately and are not writers;
+  `ao writers --clean` stops them. A single-writer rule that counts processes
+  instead of running this once refused to write for hours over three corpses.
+
 
 ## What is deliberately not recovered
 

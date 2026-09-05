@@ -85,6 +85,7 @@ scope is the one authority an implementer must not have.
 | `ao verify [-p full]` | run the declared gates, record the result |
 | `ao commit-ok` | may this tree be committed? decided from evidence |
 | `ao hold` / `ao hold release --note …` | stop every agent in the tree, and keep them stopped |
+| `ao writers` / `ao writers --clean` | live turns in the tree (one per turn, not per process), orphans set aside; `--clean` stops only the orphans |
 | `ao source import` | admit tracker items onto the board |
 | `ao mail` · `ao notices` | coordination messages; alerts this project raised |
 | `ao watchdog install` | launchd job that restarts a stalled agent |

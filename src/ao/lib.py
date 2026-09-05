@@ -728,6 +728,116 @@ def _is_headless(pid):
     return any(f in args.split() for f in ("-p", "--print", "--no-interactive"))
 
 
+def _proc_table():
+    """pid -> (ppid, pgid, tty) for every process, from one ps call."""
+    out = {}
+    for line in (sh("ps -eo pid,ppid,pgid,tty") or "").split("\n")[1:]:
+        f = line.split()
+        if len(f) >= 4 and f[0].isdigit() and f[1].isdigit() and f[2].isdigit():
+            out[int(f[0])] = (int(f[1]), int(f[2]), f[3])
+    return out
+
+
+def orphans(root, adapter, table=None):
+    """Agent processes left behind by a turn that already ended.
+
+    A turn is spawned in its own session (`start_new_session=True`), so the wrapper
+    leads the process group and every child it starts — runtime, engine — inherits
+    that group. When the wrapper dies and a child does not, the child is
+    re-parented to init but keeps the dead leader's group id. That is the whole
+    signature: no controlling terminal, and a process-group leader that no longer
+    exists. Nothing a person is sitting in looks like that — a terminal session has
+    a tty, a desktop-app session has the app as its live parent and leader.
+
+    These matter because they are invisible to the reaper (the headless flag is on
+    the wrapper, not on them) and visible to every writer count. Three of them sat
+    in one repository for hours at 0% CPU, and the implementer — correctly applying
+    its single-writer rule to what the process table showed — refused to write for
+    the entire time, while each of its empty turns tripped the reaper again and
+    made one more.
+    """
+    table = table or _proc_table()
+    out = []
+    for pid in agent_pids(root, adapter):
+        ppid, pgid, tty = table.get(pid, (None, None, None))
+        if pgid and tty == "??" and pgid != pid and pgid not in table:
+            out.append(pid)
+    return out
+
+
+def writers(root, adapter):
+    """Live turn roots in this tree, with orphans set aside.
+
+    Returns (roots, orphans). The number of roots is what a single-writer rule
+    should count: one root per turn, however many processes the turn is made of,
+    and none for what a finished turn left behind.
+    """
+    table = _proc_table()
+    dead = set(orphans(root, adapter, table))
+    live = [p for p in agent_pids(root, adapter) if p not in dead]
+    return process_trees(live), sorted(dead)
+
+
+def kill_turn(pid, sig):
+    """Signal a turn — the whole process group when this pid leads one.
+
+    Signalling only the wrapper is how orphans are made: it exits, its runtime and
+    engine children do not, and they keep the repository as their cwd. A turn we
+    started is its own session, so its pid is its group id and one killpg reaches
+    everything it spawned. A pid that leads no group is signalled alone.
+    """
+    try:
+        pgid = os.getpgid(pid)
+    except OSError:
+        return
+    try:
+        if pgid == pid:
+            os.killpg(pgid, sig)
+        else:
+            os.kill(pid, sig)
+    except OSError:
+        pass
+
+
+def sweep_orphans(pids, grace=3.0):
+    """Stop orphaned agent processes by their (leaderless) groups.
+
+    Each orphan still carries the group id of the turn that made it, and its own
+    children carry the same one, so signalling the group clears the whole remnant
+    at once — a child re-parented to an orphan would otherwise be orphaned a second
+    time by the very cleanup. Returns the pids that were alive when we started.
+    """
+    import signal as _sig
+    groups = set()
+    for pid in pids:
+        try:
+            groups.add(os.getpgid(pid))
+        except OSError:
+            pass
+    for g in groups:
+        try:
+            os.killpg(g, _sig.SIGTERM)
+        except OSError:
+            pass
+    deadline = time.time() + grace
+    while time.time() < deadline and any(_pid_alive(p) for p in pids):
+        time.sleep(0.25)
+    for g in groups:
+        try:
+            os.killpg(g, _sig.SIGKILL)
+        except OSError:
+            pass
+    return list(pids)
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
 def record_notice(root, title, msg, sent, key=None):
     """Every notification we raise, kept where the architect can read it.
 
@@ -1128,7 +1238,9 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
     dirty = len([l for l in sh("git status --porcelain", cwd=root).split("\n") if l.strip()])
     head = sh("git rev-parse --short HEAD", cwd=root)
 
-    trees = process_trees(pids)
+    # What a finished turn left behind is not a turn. Orphans are cleared by the
+    # watchdog before it counts; here they are simply not counted.
+    trees = process_trees([p for p in pids if p not in set(orphans(root, adapter))])
     if len(trees) > 1 and age < idle_seconds:
         out.append({"kind": "several-turns-active", "roots": trees,
                     "facts": [f"{len(trees)} independent process trees with this repo as "

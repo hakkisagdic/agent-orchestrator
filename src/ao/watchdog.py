@@ -541,7 +541,20 @@ def main():
     # fifteen live agent processes in one repository with four still burning CPU.
     # Each was invisible to a guard that remembered a single pid. Ask the OS which
     # processes have this repo as their cwd, and treat any of them as a writer.
-    running = A.agent_pids(root, adapter)
+    # What an ended turn left behind is cleared before anything is counted. A
+    # wrapper that was reaped by pid — or exited on its own — leaves its runtime
+    # and engine children alive with this repo as their cwd; the implementer
+    # counts them as writers and refuses to write, its empty turns trip the
+    # reaper again, and the reaper makes one more. They are identified by shape
+    # (no terminal, dead group leader), never by age, so nothing a person is in
+    # can match.
+    dead = A.orphans(root, adapter)
+    if dead:
+        print(f"{len(dead)} orphaned agent process(es) left by an ended turn; clearing {dead}")
+        A.record_notice(root, "orphans cleared", f"{len(dead)} leftover process(es): {dead}", False, key="orphans")
+        if not args.dry_run:
+            A.sweep_orphans(dead)
+    running = [p for p in A.agent_pids(root, adapter) if p not in set(dead)]
     if running:
         # A process being alive is not a turn being in flight. An agent can finish
         # its turn and never exit, and the first version of this guard treated that
@@ -569,20 +582,15 @@ def main():
             return 0
         # Reap only what we could have started. A person's interactive session
         # in this tree is silent between their keystrokes, not hung.
+        # By process group: the flag is on the wrapper, the children carry none.
         for pid in A.agent_pids(root, adapter, headless_only=True):
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except OSError:
-                pass
+            A.kill_turn(pid, signal.SIGTERM)
         for _ in range(20):
             if not A.agent_pids(root, adapter, headless_only=True):
                 break
             time.sleep(0.5)
         for pid in A.agent_pids(root, adapter, headless_only=True):
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except OSError:
-                pass
+            A.kill_turn(pid, signal.SIGKILL)
 
     # 1 — still working
     #

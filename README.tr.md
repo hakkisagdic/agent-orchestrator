@@ -85,6 +85,7 @@ gereken tek yetkidir.
 | `ao verify [-p full]` | tanımlı gate'leri koştur, sonucu kaydet |
 | `ao commit-ok` | bu ağaç commit edilebilir mi? kanıttan karar |
 | `ao hold` / `ao hold release --note …` | ağaçtaki tüm ajanları durdur ve durdurulmuş tut |
+| `ao writers` / `ao writers --clean` | ağaçtaki canlı turlar (süreç değil tur başına bir), öksüzler ayrı; `--clean` yalnız öksüzleri durdurur |
 | `ao source import` | takip sistemindeki işleri panoya kabul et |
 | `ao mail` · `ao notices` | koordinasyon mesajları; projenin ürettiği uyarılar |
 | `ao watchdog install` | takılan ajanı yeniden başlatan launchd işi |
