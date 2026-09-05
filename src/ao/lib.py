@@ -1794,6 +1794,24 @@ def slice_started(root):
     return None
 
 
+def respecified_at(root):
+    """When the architect last re-specified the running slice (`ao decide --scope <id>`)."""
+    ids = {(it.get("id") or it.get("key") or "").strip() for it in board(root)["running"]}
+    ids.discard("")
+    p = os.path.join(root, ".ao", "ledger", "decisions.jsonl")
+    if not ids or not os.path.exists(p):
+        return None
+    last = 0
+    for line in open(p, errors="replace"):
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if r.get("by") == "architect" and (r.get("scope") or "").strip() in ids:
+            last = max(last, int(r.get("at") or 0))
+    return last or None
+
+
 def rounds(root, reviews_dir):
     """Review rounds spent on the *current slice*.
 
@@ -1809,6 +1827,15 @@ def rounds(root, reviews_dir):
     re-specification happens, so no separate reset mechanism is needed.
     """
     started = slice_started(root)
+    # An architect decision scoped to the running slice re-specifies it, and a
+    # re-specified slice has a fresh budget — that is what the decision says.
+    # Reading it from the ledger rather than from the board's `since:` means the
+    # rule holds even when the implementer never touched the board: it did not,
+    # and an over-budget anomaly kept firing on rounds the decision had already
+    # written off.
+    respec = respecified_at(root)
+    if respec and (not started or respec > started):
+        started = respec
     n = 0
     for f, v in reviews(root, reviews_dir, limit=50):
         if "APPROVED" in v.upper():

@@ -8,8 +8,8 @@ class AgentOrchestrator < Formula
 
   desc "Attach to the coding agent you are already running: watch, restart, verify, gate"
   homepage "https://hakkisagdic.github.io/agent-orchestrator/"
-  url "https://github.com/hakkisagdic/agent-orchestrator/archive/refs/tags/v0.1.1.tar.gz"
-  sha256 "acf93923e71dcad86ea3a0f02e5b63a8c08950eb1a3da2369a1bec1a2de7c197"
+  url "https://github.com/hakkisagdic/agent-orchestrator/archive/refs/tags/v0.2.1.tar.gz"
+  sha256 "96b19c0c161c5988c792e629c322b2b904fbfa87608c0e083cbc2fdd21a44d1a"
   license "MIT"
   head "https://github.com/hakkisagdic/agent-orchestrator.git", branch: "main"
 
