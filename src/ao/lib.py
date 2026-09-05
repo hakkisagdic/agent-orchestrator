@@ -757,8 +757,12 @@ def _is_agent_process(pid, names):
     if not args:
         return False
     toks = args.split()
-    prog = os.path.basename(toks[0]) if toks else ""
-    runtime = prog in ("node", "bun", "deno", "python", "python3")
+    # The program may live in a path with spaces ("…/Application Support/kiro-cli/node"),
+    # so look at both the first token and everything before the first flag.
+    runtimes = ("node", "bun", "deno", "python", "python3")
+    before_flags = re.split(r"\s+-", args, 1)[0].strip()
+    runtime = (os.path.basename(toks[0]) in runtimes if toks else False) \
+        or os.path.basename(before_flags) in runtimes
 
     def executable(t):
         return "/" in t and os.path.isfile(t) and os.access(t, os.X_OK)
