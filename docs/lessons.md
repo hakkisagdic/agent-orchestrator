@@ -437,3 +437,24 @@ without anyone remembering to ask.
 The general form: never let the *absence* of an answer default to one of the
 answers. "No verdict" is a third state, and every consumer of the verdict has
 to know it exists.
+
+## 25. Borrow the method, not the dependency
+
+Three of the process faults in this catalog — a shell that mentioned the agent
+counted as a turn, a runtime under "Application Support" split into two
+arguments, a writer check that took two minutes — were all the same mistake:
+reading process state through `pgrep -f`, `ps` and `lsof`, tools that print
+text for people, and then parsing that text. The library that solves this is
+psutil, and ao installs nothing.
+
+The answer was to take psutil's *method*: on macOS the public libproc calls
+(`proc_listpids`, `proc_pidinfo` with the BSD and vnode-path info) and
+`sysctl(KERN_PROCARGS2)`, through ctypes; on Linux the `/proc` files. Both
+return the argument vector as a vector and the cwd as a path, in milliseconds
+for the whole table — 573 processes scanned with argv, cwd and parentage in
+0.3 seconds where the shell path took seconds and lied. The old commands stay
+as fallbacks behind a self-check on our own pid, so a platform the native path
+does not know still works, only slower. `procs.py` is under two hundred lines.
+
+When a class of bugs keeps coming from parsing a human-facing output, the fix
+is not a better regex; it is the API the output was rendered from.

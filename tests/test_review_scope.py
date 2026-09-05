@@ -31,20 +31,14 @@ def test_review_sees_the_inventory_and_not_the_coordination_noise(project):
 
 
 def test_helpers_are_not_writers(project, monkeypatch):
+    from ao import procs
     root = project["root"]
     A.helper_register(root, 500, "reviewer")
     monkeypatch.setattr(A, "_pid_alive", lambda pid: True)
     monkeypatch.setattr(A, "_proc_table", lambda: {500: (1, 500, "??"), 501: (500, 500, "??"), 600: (1, 600, "??")})
-    lines = {500: "/x/bin/claude -p review", 501: "/x/lib/node_modules/@anthropic-ai/claude-code/cli.js",
-             600: "/x/bin/kiro-cli chat --no-interactive"}
-
-    def fake_sh(cmd, **kw):
-        if cmd.startswith("pgrep"):
-            return "500\n501\n600"
-        if cmd.startswith("ps -o args= -p"):
-            return lines[int(cmd.split()[-1])]
-        if cmd.startswith("lsof"):
-            return f"p500\nn{root}\np501\nn{root}\np600\nn{root}"
-        return ""
-    monkeypatch.setattr(A, "sh", fake_sh)
+    vectors = {500: ["/x/bin/claude", "-p", "review"], 501: ["node", "/x/lib/node_modules/@anthropic-ai/claude-code/cli.js"],
+               600: ["/x/bin/kiro-cli", "chat", "--no-interactive"]}
+    monkeypatch.setattr(procs, "all_pids", lambda: list(vectors))
+    monkeypatch.setattr(procs, "argv", lambda pid: vectors.get(pid))
+    monkeypatch.setattr(procs, "cwd", lambda pid: root)
     assert A.agent_pids(root, {"resume": {"argv": ["kiro-cli"]}}) == [600]

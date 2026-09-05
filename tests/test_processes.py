@@ -21,36 +21,29 @@ def test_writers_counts_turns_not_processes(monkeypatch):
 
 
 def test_a_process_that_mentions_the_agent_is_not_the_agent(monkeypatch):
-    lines = {9: "/bin/zsh -c cd /repo && ao mail ack x && pwd -P >| /tmp/claude-add3-cwd",
-             1: "zsh (kiro-cli-term)",
-             2: "/Users/x/.local/bin/kiro-cli chat --resume-id s",
-             3: "/Users/x/.local/bin/kiro-cli-chat acp --agent-engine=kas",
-             4: "/Users/x/Library/Application Support/kiro-cli/node --experimental x",
-             5: "/bin/zsh -c cd /repo && ls agent-mail/kiro-to-fable.md",
-             6: "/Applications/Claude.app/Contents/MacOS/Claude Helper",
-             7: "node /Users/x/lib/node_modules/@anthropic-ai/claude-code/cli.js -p hi",
-             8: "claude -p hello"}
-    monkeypatch.setattr(A, "sh", lambda cmd, **kw: lines[int(cmd.split()[-1])])
+    vectors = {9: ["/bin/zsh", "-c", "cd /repo && ao mail ack x && pwd -P >| /tmp/claude-add3-cwd"],
+               1: ["zsh (kiro-cli-term)"],
+               2: ["/Users/x/.local/bin/kiro-cli", "chat", "--resume-id", "s"],
+               3: ["/Users/x/.local/bin/kiro-cli-chat", "acp", "--agent-engine=kas"],
+               4: ["/Users/x/Library/Application Support/kiro-cli/node", "--experimental", "x"],
+               5: ["/bin/zsh", "-c", "cd /repo && ls agent-mail/kiro-to-fable.md"],
+               6: ["/Applications/Claude.app/Contents/MacOS/Claude Helper"],
+               7: ["node", "/Users/x/lib/node_modules/@anthropic-ai/claude-code/cli.js", "-p", "hi"],
+               8: ["claude", "-p", "hello"]}
     monkeypatch.setattr(A.os.path, "isfile", lambda p: p.startswith("/Users/x/.local/bin/"))
     monkeypatch.setattr(A.os, "access", lambda p, m: p.startswith("/Users/x/.local/bin/"))
     names = {"kiro-cli", "claude", "claude-code"}
-    assert sorted(p for p in lines if A._is_agent_process(p, names)) == [2, 3, 4, 7, 8]
+    assert sorted(p for p, av in vectors.items() if A._is_agent_process(p, names, av)) == [2, 3, 4, 7, 8]
 
 
-def test_agent_pids_uses_one_lsof_call(monkeypatch):
-    calls = []
-
-    def fake_sh(cmd, **kw):
-        calls.append(cmd)
-        if cmd.startswith("pgrep"):
-            return "101\n102\n103"
-        if cmd.startswith("ps -o args= -p"):
-            return "/usr/local/bin/claude -p x"
-        if cmd.startswith("lsof"):
-            return "p101\nn/repo\np102\nn/elsewhere\np103\nn/repo"
-        return ""
-    monkeypatch.setattr(A, "sh", fake_sh)
+def test_agent_pids_matches_on_cwd_with_exact_argv(monkeypatch):
+    from ao import procs
+    vectors = {101: ["/usr/local/bin/claude", "-p", "x"], 102: ["/usr/local/bin/claude", "-p", "y"],
+               103: ["/Users/x/Library/Application Support/kiro-cli/node", "--flag"], 104: ["/bin/zsh", "-c", "claude things"]}
+    cwds = {101: "/repo", 102: "/elsewhere", 103: "/repo", 104: "/repo"}
+    monkeypatch.setattr(procs, "all_pids", lambda: list(vectors))
+    monkeypatch.setattr(procs, "argv", lambda pid: vectors.get(pid))
+    monkeypatch.setattr(procs, "cwd", lambda pid: cwds.get(pid))
+    monkeypatch.setattr(A, "helper_pids", lambda root: set())
     monkeypatch.setattr(A.os.path, "realpath", lambda p: p)
-    out = A.agent_pids("/repo", {"resume": {"argv": ["claude"]}})
-    assert out == [101, 103]
-    assert len([c for c in calls if c.startswith("lsof")]) == 1
+    assert A.agent_pids("/repo", {"resume": {"argv": ["claude"]}}) == [101, 103]

@@ -692,31 +692,37 @@ def agent_pids(root, adapter, headless_only=False):
     unreliable — a long resume prompt gets truncated by `ps`, and the binary may
     be a bare `node` under a version manager — whereas the cwd is exactly the
     question being asked: is something editing *this* tree?
+
+    One pass over the process table through the platform API (procs.py): exact
+    argument vectors, cwd and parentage in milliseconds. The shell path this
+    replaced — `pgrep -f`, one `lsof` per candidate, `ps` output split on
+    whitespace — took seconds and mistook a shell that mentioned the agent, and
+    a runtime under "Application Support", for turns.
     """
+    from . import procs
     names = set()
     for key in ("send", "resume"):
         argv = (adapter.get(key) or {}).get("argv") or []
         if argv:
             names.add(os.path.basename(argv[0]))
     names.update({"kiro-cli", "claude", "claude-code", "codex", "cursor-agent"})
-    cands = set()
-    for name in names:
-        for pid in (sh(f"pgrep -f {name}") or "").split():
-            if pid.isdigit() and int(pid) != os.getpid():
-                cands.add(int(pid))
-    # `pgrep -f` matches the whole command line, and a command line can *mention*
-    # an agent without being one: a terminal shell titled "zsh (kiro-cli-term)",
-    # an editor with the transcript open, a grep for the name. One such shell,
-    # cwd in the repository, read as a running turn for thirteen minutes while
-    # the real implementer sat idle with an unread decision. Keep a candidate
-    # only when an agent binary is actually on its command line — as the
-    # program, or as a path component of the runtime it is running under.
-    cands = {p for p in cands if _is_agent_process(p, names)}
+    want = os.path.realpath(root)
+    me = os.getpid()
+    out = []
+    for pid in procs.all_pids():
+        if pid == me:
+            continue
+        av = procs.argv(pid)
+        if not av or not _is_agent_process(pid, names, av):
+            continue
+        cw = procs.cwd(pid)
+        if cw and os.path.realpath(cw) == want:
+            out.append(pid)
     # Processes ao itself started inside the repo — the reviewer above all — are
     # agents by every other test and writers by none. Exclude them and their
     # descendants: a reviewer's runtime child would otherwise surface as a root.
     helpers = helper_pids(root)
-    if helpers and cands:
+    if helpers and out:
         table = _proc_table()
 
         def under_helper(pid, depth=0):
@@ -724,22 +730,7 @@ def agent_pids(root, adapter, headless_only=False):
                 return True
             ppid = table.get(pid, (0, 0, ""))[0]
             return depth < 12 and ppid > 1 and under_helper(ppid, depth + 1)
-        cands = {p for p in cands if not under_helper(p)}
-    out = []
-    if cands:
-        # One lsof for every candidate. A call per pid was fine at ten processes
-        # and took over two minutes at a hundred and fifty — every helper of a
-        # desktop app matches `pgrep -f claude` — and the implementer's writer
-        # check timed out on it. -w drops warnings, -n/-P skip name lookups.
-        want = os.path.realpath(root)
-        cur = None
-        pids = ",".join(str(p) for p in sorted(cands))
-        for line in (sh(f"lsof -w -n -P -a -d cwd -Fpn -p {pids}") or "").split("\n"):
-            if line.startswith("p") and line[1:].isdigit():
-                cur = int(line[1:]) if int(line[1:]) in cands else None   # only what we asked about
-            elif line.startswith("n") and cur is not None:
-                if os.path.realpath(line[1:]) == want:
-                    out.append(cur)
+        out = [p for p in out if not under_helper(p)]
     out = sorted(set(out))
     if headless_only:
         # Never a human's interactive session. `ao hold` once stopped seven
@@ -752,17 +743,20 @@ def agent_pids(root, adapter, headless_only=False):
     return out
 
 
-def _is_agent_process(pid, names):
-    args = sh(f"ps -o args= -p {pid}") or ""
-    if not args:
+def _is_agent_process(pid, names, argv=None):
+    """Is an agent binary actually on this command line?
+
+    Works on the argument *vector*: a path with a space is one argument. The
+    program itself, a sibling executable (kiro-cli-chat), or a runtime (node…)
+    running something under the agent's install directory count; a shell whose
+    command text mentions the agent, or a file named after it, does not.
+    """
+    from . import procs
+    toks = argv if argv is not None else (procs.argv(pid) or [])
+    if not toks:
         return False
-    toks = args.split()
-    # The program may live in a path with spaces ("…/Application Support/kiro-cli/node"),
-    # so look at both the first token and everything before the first flag.
     runtimes = ("node", "bun", "deno", "python", "python3")
-    before_flags = re.split(r"\s+-", args, 1)[0].strip()
-    runtime = (os.path.basename(toks[0]) in runtimes if toks else False) \
-        or os.path.basename(before_flags) in runtimes
+    runtime = os.path.basename(toks[0]) in runtimes
 
     def executable(t):
         return "/" in t and os.path.isfile(t) and os.access(t, os.X_OK)
@@ -772,27 +766,23 @@ def _is_agent_process(pid, names):
             if base == name and (i == 0 or executable(t)):
                 return True                    # the program itself
             if base.startswith(name + "-") and executable(t):
-                return True                    # a sibling binary: kiro-cli-chat — a real executable,
-                                               # not any path that happens to start with the name
-            if runtime and f"/{name}/" in t:
-                return True                    # a runtime (node …) under the agent's install dir
+                return True                    # a sibling binary: kiro-cli-chat — a real executable
+            if runtime and i <= 2 and f"/{name}/" in t:
+                return True                    # a runtime under the agent's install dir
     return False
 
 
 def _is_headless(pid):
     """A turn started non-interactively (-p / --print / --no-interactive)."""
-    args = sh(f"ps -o args= -p {pid}") or ""
-    return any(f in args.split() for f in ("-p", "--print", "--no-interactive"))
+    from . import procs
+    args = procs.argv(pid) or []
+    return any(f in args for f in ("-p", "--print", "--no-interactive"))
 
 
 def _proc_table():
-    """pid -> (ppid, pgid, tty) for every process, from one ps call."""
-    out = {}
-    for line in (sh("ps -eo pid,ppid,pgid,tty") or "").split("\n")[1:]:
-        f = line.split()
-        if len(f) >= 4 and f[0].isdigit() and f[1].isdigit() and f[2].isdigit():
-            out[int(f[0])] = (int(f[1]), int(f[2]), f[3])
-    return out
+    """pid -> (ppid, pgid, tty) for every process, from the platform API (see procs.py)."""
+    from . import procs
+    return procs.table()
 
 
 def orphans(root, adapter, table=None):
