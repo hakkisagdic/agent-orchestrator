@@ -48,12 +48,15 @@ def test_kiro_gets_steering_and_settings(project, monkeypatch):
     assert "ao" in json.load(open(os.path.join(root, ".kiro", "settings", "mcp.json"), encoding="utf-8"))["mcpServers"]
 
 
-def test_agents_md_section_is_replaced_not_duplicated(project):
+def test_rule_files_are_not_written_unless_asked(project):
     root = project["root"]
     p = os.path.join(root, "AGENTS.md")
     open(p, "w", encoding="utf-8").write("# Agents\n\nkeep me\n")
-    skillkit.install_playbook(root, {"generic"})
-    skillkit.install_playbook(root, {"generic"})
+    out = skillkit.install_playbook(root, {"generic"})
+    assert "AGENTS.md" not in out and open(p, encoding="utf-8").read() == "# Agents\n\nkeep me\n"
+    assert out[".ao/PLAYBOOK.md"] == "wrote"
+    out = skillkit.install_playbook(root, {"generic"}, rules=True)
+    out = skillkit.install_playbook(root, {"generic"}, rules=True)
     text = open(p, encoding="utf-8").read()
     assert text.count(skillkit.MARK_START) == 1 and "keep me" in text
 
@@ -73,3 +76,18 @@ def test_doctor_problems_see_a_dead_watchdog(project, monkeypatch, tmp_path):
     os.utime(p, (A.time.time() - 900, A.time.time() - 900))
     keys = [k for k, _ in cli.doctor_problems(project)]
     assert "watchdog-dead" in keys and "no-channel" in keys
+
+
+def test_remove_undoes_init(project, monkeypatch):
+    from types import SimpleNamespace
+    root = project["root"]
+    os.makedirs(os.path.join(root, ".claude"))
+    monkeypatch.setattr(skillkit.shutil, "which", lambda n: None)
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **k: None)
+    _, agents = skillkit.detect_agents(root)
+    skillkit.install_playbook(root, agents)
+    skillkit.register_mcp(root, agents, exe="/x/ao")
+    json.dump({"mcpServers": {"ao": {"command": "/x/ao"}, "other": {"command": "y"}}}, open(os.path.join(root, ".mcp.json"), "w", encoding="utf-8"))
+    cli.cmd_remove(project, SimpleNamespace(yes=True))
+    assert not os.path.exists(os.path.join(root, ".ao")) and not os.path.exists(os.path.join(root, ".claude", "skills", "ao"))
+    assert json.load(open(os.path.join(root, ".mcp.json"), encoding="utf-8"))["mcpServers"] == {"other": {"command": "y"}}

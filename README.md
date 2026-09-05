@@ -94,6 +94,7 @@ scope is the one authority an implementer must not have.
 | `ao pings setup --url …` | dead man's switch: external pings that alarm when the watchdog and its doctor job both die |
 | `ao hooks install` / `ao push allow` | pre-push hook refuses unless a person opened a push window |
 | `ao skill install` / `ao skill show` | the playbook (roles, loop, authority, protocol, alarms, every command) rendered for the agents this repo uses: Claude skill, Kiro steering, AGENTS.md |
+| `ao remove --yes` | take ao off a repository: exactly what init wrote, the MCP entries, the jobs, the local state |
 | `ao init --profile claude-kiro|claude-claude` | write the role blocks: who implements (adapter, model, effort), who reviews (another model), who judges ([profiles.md](docs/profiles.md)) |
 | `ao doctor --check` | quiet doctor for a scheduler: one line per problem, exit 1, alarms raised — installed as a 15-minute launchd job by `ao watchdog install` |
 | `ao email setup` / `ao email test` | the red alarm channel: e-mail via formsubmit.co, no server ([alarms.md](docs/alarms.md)) |

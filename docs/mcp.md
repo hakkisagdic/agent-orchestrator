@@ -198,6 +198,8 @@ one normalised vocabulary either way.
 `ao init` registers the server for every agent it detects — `.mcp.json` for
 Claude Code, `.kiro/settings/mcp.json` for Kiro, a snippet for Codex's
 user-level config — merged into whatever those files already hold, and writes
-the playbook (`ao skill install`) beside it. The one step it cannot do is the
+the playbook (`ao skill install`) into files ao owns — never into CLAUDE.md or
+AGENTS.md unless asked with `--rules`; those are the owner's rule files, and a
+tool appending instructions there is a tool issuing rules nobody authorised. The one step it cannot do is the
 restart: the human starts or restarts the app in the directory so the tools
 load, then runs `ao doctor`. `--no-mcp` skips the registration.

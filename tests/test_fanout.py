@@ -24,3 +24,13 @@ def test_low_window_refuses_and_unreadable_window_is_said(project, monkeypatch):
     monkeypatch.setattr(A, "provider_window", lambda name="claude": None)
     v = A.fanout_verdict(root, project, 3)
     assert v["ok"] and any("unreadable" in r for r in v["reasons"])
+
+
+def test_pipeline_bound_is_gated_not_the_root_count(project, monkeypatch, capsys):
+    from types import SimpleNamespace
+    from ao import cli
+    monkeypatch.setattr(A, "provider_window", lambda name="claude": {"pct": 4, "window": "5h", "resets_in": "4h", "resets_s": 14400})
+    args = SimpleNamespace(action="ok", agents=None, roots=7, per_root=12, per_agent_tokens=None, provider="claude", json=False,
+                           done=None, errors=None, tokens=None, note=None, limit=20)
+    assert cli.cmd_fanout(project, args) == 1
+    assert "91 agents" in capsys.readouterr().out

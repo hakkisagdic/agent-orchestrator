@@ -152,7 +152,8 @@ start. Run anything in a repository whose owner has not approved it.
 | command | one line |
 |---|---|
 | `ao init` | put ao on this project: files, playbook, MCP registration; idempotent |
-| `ao skill install` | (re)write this playbook for the detected agents |
+| `ao skill install` | (re)write this playbook for the detected agents (ao-owned files only; `--rules` for the owner's rule files) |
+| `ao remove --yes` | take ao off the repository: what init wrote, MCP entries, jobs, local state |
 | `ao status` / `ao watch` / `ao watch --all` | the panel: who is working, quota, problems, mail |
 | `ao board` | READY / running / blocked (`needs:`) / verified / done |
 | `ao fleet` | every project on this machine at a glance |
@@ -172,7 +173,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao alarms [test]` | live alarm episodes; ring the channels |
 | `ao email setup|test|status` | the red channel |
 | `ao telegram setup|test|install` | the orange channel and phone decisions |
-| `ao fanout ok|record|history` | budget gate for sub-agent fan-outs |
+| `ao fanout ok|record|history` | budget gate for sub-agent fan-outs; `--roots R --per-root K` for pipelines |
 | `ao credits` | provider credits and windows |
 | `ao features [on|off <key>]` | the switches and what each costs; all off = deterministic ao |
 | `ao waive <gate> --slice S --why …` / `ao catchup` | a person's bypass on the record; catchup reviews the landed range and replays deferred work |

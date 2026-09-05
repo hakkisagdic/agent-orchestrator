@@ -68,25 +68,37 @@ def _write_marked(path, body, header=""):
     return "wrote"
 
 
-def install_playbook(root, agents):
-    """Render the playbook for each agent. Returns {relpath: wrote|updated|kept|appended}."""
+RULE_POINTER = ("## ao\n\nThis repository runs under agent-orchestrator. Load the `ao` playbook "
+                "(`.ao/PLAYBOOK.md`, or the `ao` skill) before coordinating, implementing or reviewing "
+                "here, and start every turn with `ao status` and the mailbox.")
+
+
+def install_playbook(root, agents, rules=False):
+    """Render the playbook for each agent. Returns {relpath: wrote|updated|kept|appended}.
+
+    Only files ao owns are written: a skill file, an `ao-*` steering file, and
+    `.ao/PLAYBOOK.md`. The owner's rule files — CLAUDE.md, AGENTS.md — sit on
+    the authority boundary: a tool that appends instructions to them has, from
+    the reading agent's side, issued rules nobody authorised. A coordinator on
+    the second pilot refused exactly such lines and escalated them, and was
+    right to. With `rules=True` the owner asks for the pointer; otherwise it is
+    printed for them to paste.
+    """
     front, body = playbook()
     out = {}
+    p = os.path.join(root, ".ao", "PLAYBOOK.md")
+    out[".ao/PLAYBOOK.md"] = _write_marked(p, body, header="")
     if "claude-code" in agents:
         p = os.path.join(root, ".claude", "skills", "ao", "SKILL.md")
         out[".claude/skills/ao/SKILL.md"] = _write_marked(p, body, header=front)
-        cm = os.path.join(root, "CLAUDE.md")
-        if os.path.exists(cm):
-            pointer = ("## ao\n\nThis repository runs under agent-orchestrator. Load the `ao` skill "
-                       "(`.claude/skills/ao/SKILL.md`) before coordinating, implementing or reviewing "
-                       "here, and start every turn with `ao status` and the mailbox.")
-            out["CLAUDE.md"] = _write_marked(cm, pointer)
     if "kiro" in agents:
         p = os.path.join(root, ".kiro", "steering", "ao-playbook.md")
         out[".kiro/steering/ao-playbook.md"] = _write_marked(p, body, header="---\ninclusion: always\n---\n\n")
-    if "codex" in agents or "generic" in agents or not ({"claude-code", "kiro"} & set(agents)):
-        p = os.path.join(root, "AGENTS.md")
-        out["AGENTS.md"] = _write_marked(p, body, header="# Agents\n\n")
+    if rules:
+        for name in ("CLAUDE.md", "AGENTS.md"):
+            p = os.path.join(root, name)
+            if os.path.exists(p) or name == "AGENTS.md" and "claude-code" not in agents:
+                out[name] = _write_marked(p, RULE_POINTER, header="# Agents\n\n" if name == "AGENTS.md" else "")
     return out
 
 

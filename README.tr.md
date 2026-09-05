@@ -94,6 +94,7 @@ gereken tek yetkidir.
 | `ao pings setup --url …` | dead man's switch: watchdog ve doctor işi birlikte ölünce alarm veren dış ping |
 | `ao hooks install` / `ao push allow` | pre-push hook, insan bir push penceresi açmadıysa reddeder |
 | `ao skill install` / `ao skill show` | playbook (roller, döngü, yetki, protokol, alarmlar, tüm komutlar) deponun ajanları için: Claude skill, Kiro steering, AGENTS.md |
+| `ao remove --yes` | ao'yu depodan kaldır: init'in yazdıkları, MCP kayıtları, işler, yerel durum |
 | `ao init --profile claude-kiro|claude-claude` | rol bloklarını yaz: kim uygular (adaptör, model, efor), kim review eder (başka model), kim karar verir ([profiles.md](docs/profiles.md)) |
 | `ao doctor --check` | zamanlayıcı için sessiz doctor: problem başına bir satır, exit 1, alarm — `ao watchdog install` 15 dakikalık launchd işi olarak kurar |
 | `ao email setup` / `ao email test` | kırmızı alarm kanalı: formsubmit.co ile e-posta, sunucu yok ([alarms.md](docs/alarms.md)) |

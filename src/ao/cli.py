@@ -1618,18 +1618,12 @@ def cmd_init(cfg, args):
 
     # Steering for whichever agent this repo uses. Kiro reads .kiro/steering;
     # Claude Code and most others read CLAUDE.md / AGENTS.md.
+    # Steering goes only into files ao owns. The owner's rule files (CLAUDE.md,
+    # AGENTS.md) are never appended to unless they ask with --rules: a tool that
+    # writes instructions there has, from the reading agent's side, issued rules
+    # nobody authorised — the second pilot's coordinator refused exactly that.
     if os.path.isdir(os.path.join(root, ".kiro")) or args.agent == "kiro":
         put(".kiro/steering/ao-coordination.md", STEERING_COORD.format())
-    else:
-        for f in ("CLAUDE.md", "AGENTS.md"):
-            p = os.path.join(root, f)
-            if os.path.exists(p) and "ao_inbox" not in open(p, errors="replace", encoding=UTF8).read():
-                with open(p, "a", encoding=UTF8) as fh:
-                    fh.write("\n\n" + STEERING_COORD.split("---\n\n", 2)[-1])
-                wrote.append(f + " (+ao section)")
-                break
-        else:
-            put("AGENTS.md", STEERING_COORD.split("---\n\n", 2)[-1])
 
     for rel in wrote:
         print(f"  {C['green']}wrote{C['reset']}  {rel}")
@@ -1643,9 +1637,19 @@ def cmd_init(cfg, args):
     # the tool itself does not ask.
     from . import skillkit
     _, agents = skillkit.detect_agents(root, args.agent)
-    for rel, what in skillkit.install_playbook(root, agents).items():
+    playbook_files = skillkit.install_playbook(root, agents, rules=getattr(args, "rules", False))
+    for rel, what in playbook_files.items():
         print(f"  {C['green'] if what != 'kept' else C['dim']}{what:<8}{C['reset']} {rel}")
+    if not getattr(args, "rules", False):
+        print(f"  {C['dim']}rule files untouched — paste this into CLAUDE.md / AGENTS.md yourself, or re-run with --rules:{C['reset']}")
+        for line in skillkit.RULE_POINTER.split("\n"):
+            print(f"      {line}")
     registered = {} if args.no_mcp else skillkit.register_mcp(root, agents, exe)
+    # What init wrote, so `ao remove` can take exactly that away again.
+    manifest = {"at": int(time.time()), "wrote": list(wrote) + [r for r, w in playbook_files.items() if w != "kept"],
+                "mcp": [k for k, v in registered.items() if v == "registered"], "gitignore": bool(add)}
+    with open(os.path.join(root, ".ao", "init-manifest.json"), "w", encoding=UTF8) as fh:
+        json.dump(manifest, fh, indent=2)
     for agent, what in registered.items():
         print(f"  {C['green']}mcp{C['reset']}      {agent}: {what.splitlines()[0]}")
         if what.startswith("manual"):
@@ -2082,9 +2086,15 @@ def cmd_fanout(cfg, args):
                   f"errors {r.get('errors','?'):>3}  tokens {r.get('tokens','?')}{flag}"
                   + (f"  — {r['note']}" if r.get('note') else ""))
         return 0
-    if args.agents is None:
-        print("--agents is required"); return 2
-    v = A.fanout_verdict(root, cfg, args.agents, args.per_agent_tokens, args.provider)
+    agents = args.agents
+    if args.roots and args.per_root:
+        # A pipeline's fan-out is not known up front: 7 roots that each may
+        # spawn up to 12 branches is a bound of 7 + 7×12. Gate on the bound.
+        agents = args.roots + args.roots * args.per_root
+        print(f"{C['dim']}pipeline bound: {args.roots} roots + {args.roots}×{args.per_root} branches = {agents} agents{C['reset']}")
+    if agents is None:
+        print("--agents N, or --roots R --per-root K for a pipeline, is required"); return 2
+    v = A.fanout_verdict(root, cfg, agents, args.per_agent_tokens, args.provider)
     if args.json:
         print(json.dumps(v, ensure_ascii=False))
         return 0 if v["ok"] else 1
@@ -2465,6 +2475,68 @@ def cmd_push(cfg, args):
         print(f"push window: {'open, ' + str(int(left // 60)) + 'm left' if left > 0 else 'closed'}")
     except (OSError, ValueError, KeyError):
         print("push window: closed")
+    return 0
+
+
+def cmd_remove(cfg, args):
+    """Take ao off a repository: exactly what init wrote, the MCP entries, the jobs, the local state."""
+    root = cfg["root"]
+    key = os.path.basename(root.rstrip("/")) or "root"
+    mp = os.path.join(root, ".ao", "init-manifest.json")
+    try:
+        manifest = json.load(open(mp, encoding=UTF8))
+    except (OSError, ValueError):
+        manifest = {}
+    plan = [".ao/", "agent-mail/", cfg.get("reviews", "semantic-review") + "/",
+            ".claude/skills/ao/", ".kiro/steering/ao-coordination.md", ".kiro/steering/ao-playbook.md",
+            ".kiro/steering/ao-single-writer.md", ".kiro/steering/ao-machine.md"]
+    mcp_files = [(".mcp.json", "ao"), (os.path.join(".kiro", "settings", "mcp.json"), "ao")]
+    print(f"{C['b']}ao remove{C['reset']} would delete from {root}:")
+    for rel in plan:
+        if os.path.exists(os.path.join(root, rel)):
+            print(f"   {rel}")
+    for f, name in mcp_files:
+        p = os.path.join(root, f)
+        if os.path.exists(p):
+            print(f"   {f}: the `{name}` server entry (other entries stay)")
+    print(f"   launchd jobs, ~/.ao state and logs for {key}, .gitignore lines")
+    print(f"   {C['dim']}not touched: product files, reviews you moved elsewhere, CLAUDE.md / AGENTS.md text (paste-in was yours){C['reset']}")
+    if not args.yes:
+        print(f"\nre-run with {C['b']}--yes{C['reset']} to do it")
+        return 0
+    import shutil as _sh
+    subprocess.run([sys.executable, "-m", "ao", "-C", root, "watchdog", "uninstall"], capture_output=True)
+    for rel in plan:
+        p = os.path.join(root, rel)
+        if os.path.isdir(p):
+            _sh.rmtree(p, ignore_errors=True)
+        elif os.path.exists(p):
+            os.remove(p)
+    for f, name in mcp_files:
+        p = os.path.join(root, f)
+        if os.path.exists(p):
+            try:
+                d = json.load(open(p, encoding=UTF8))
+                if name in (d.get("mcpServers") or {}):
+                    del d["mcpServers"][name]
+                    json.dump(d, open(p, "w", encoding=UTF8), indent=2)
+                if not d.get("mcpServers") and f == ".mcp.json":
+                    os.remove(p)
+            except (OSError, ValueError):
+                pass
+    gi = os.path.join(root, ".gitignore")
+    if os.path.exists(gi):
+        lines = open(gi, encoding=UTF8).read().split("\n")
+        keep = [l for l in lines if l.strip() not in ("agent-mail/*.md", "!agent-mail/README.md", ".ao/inbox/", ".ao/hold")
+                and "agent-orchestrator: mail is transient" not in l]
+        open(gi, "w", encoding=UTF8).write("\n".join(keep))
+    for f in os.listdir(os.path.join(A.HOME, ".ao")) if os.path.isdir(os.path.join(A.HOME, ".ao")) else []:
+        if key in f:
+            try:
+                os.remove(os.path.join(A.HOME, ".ao", f))
+            except OSError:
+                pass
+    print(f"{C['green']}removed{C['reset']} — the repository is as it was, minus ao")
     return 0
 
 
@@ -3001,6 +3073,7 @@ def main():
     ini.add_argument("--agent", choices=["kiro", "claude", "claude-code", "codex", "auto", "all"], default="auto")
     ini.add_argument("--mcp", action="store_true", help="(default) register the MCP server for detected agents")
     ini.add_argument("--no-mcp", action="store_true", help="skip the MCP registration")
+    ini.add_argument("--rules", action="store_true", help="also write the pointer into CLAUDE.md / AGENTS.md (the owner's rule files)")
     ini.add_argument("--profile", choices=sorted(PROFILES), help="write the role blocks: who implements, reviews, judges")
     ini.add_argument("--implementer", help="implementer adapter id (kiro, claude-code, …); overrides the profile")
     ini.add_argument("--model", help="implementer model, passed through the adapter's --model option")
@@ -3123,9 +3196,14 @@ def main():
     ps_.add_argument("action", choices=["status", "allow", "check"], nargs="?", default="status")
     ps_.add_argument("--minutes", type=int, default=30)
     ps_.set_defaults(fn=cmd_push)
+    rm = sub.add_parser("remove", help="take ao off this repository: what init wrote, MCP entries, jobs, local state")
+    rm.add_argument("--yes", action="store_true")
+    rm.set_defaults(fn=cmd_remove)
     fo = sub.add_parser("fanout", help="may a fan-out of N sub-agents start now; record what one cost")
     fo.add_argument("action", choices=["ok", "record", "history"], nargs="?", default="ok")
     fo.add_argument("--agents", type=int)
+    fo.add_argument("--roots", type=int, help="pipeline: number of first-stage agents")
+    fo.add_argument("--per-root", type=int, dest="per_root", help="pipeline: at most this many second-stage agents per root")
     fo.add_argument("--per-agent-tokens", type=int, dest="per_agent_tokens")
     fo.add_argument("--provider", default="claude")
     fo.add_argument("--done", type=int)

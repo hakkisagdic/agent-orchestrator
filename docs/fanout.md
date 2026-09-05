@@ -11,10 +11,15 @@ nothing was asked.
 
 ```bash
 ao fanout ok --agents 47            # exit 1: too many, and why
+ao fanout ok --roots 7 --per-root 12  # a pipeline: gate on the bound, 7 + 7×12 = 91
 ao fanout ok --agents 8             # exit 0 when the facts allow it
 ao fanout record --agents 8 --done 8 --errors 0 --tokens 410000
 ao fanout history
 ```
+
+A pipeline's fan-out is not known up front — seven first-stage agents may each
+spawn up to twelve — so `--roots R --per-root K` gates on the bound `R + R×K`.
+The coordinator that started 47 agents believed it had started 7.
 
 ## The verdict
 
