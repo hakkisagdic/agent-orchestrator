@@ -896,6 +896,19 @@ def sweep_orphans(pids, grace=3.0):
 
 def _pid_alive(pid):
     try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if os.name == "nt":
+        # On Windows signal 0 is CTRL_C_EVENT, not a harmless existence probe.
+        # Sending it to the lock owner interrupts the very gate run whose
+        # liveness we are checking. Use the platform process snapshot instead.
+        from . import procs
+        try:
+            return pid in set(procs.all_pids())
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return False
+    try:
         os.kill(pid, 0)
         return True
     except OSError:
@@ -1267,9 +1280,7 @@ def gate_lock_holder():
         st = json.load(open(GATE_LOCK, encoding=UTF8))
     except Exception:
         return None
-    try:
-        os.kill(st.get("pid", -1), 0)             # stale lock from a killed run
-    except OSError:
+    if not _pid_alive(st.get("pid", -1)):            # stale lock from a killed run
         try:
             os.remove(GATE_LOCK)
         except OSError:

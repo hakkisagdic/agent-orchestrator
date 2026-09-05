@@ -137,6 +137,26 @@ def test_verify_record_does_not_invalidate_its_own_tree(project, tmp_path, monke
     assert record is not None and record["passed"] is True and record["tree"] == after
 
 
+def test_gate_lock_liveness_probe_does_not_signal_windows_process(tmp_path, monkeypatch):
+    from ao import procs
+
+    lock = tmp_path / "gate.lock"
+    lock.write_text(json.dumps({"root": "project", "pid": 4242, "at": 1}), encoding="utf-8")
+    monkeypatch.setattr(A, "GATE_LOCK", str(lock))
+    monkeypatch.setattr(A.os, "name", "nt")
+    monkeypatch.setattr(procs, "all_pids", lambda: [4242])
+
+    def unexpected_signal(*args):
+        raise AssertionError(f"Windows liveness probe sent signal: {args}")
+
+    monkeypatch.setattr(A.os, "kill", unexpected_signal)
+    assert A.gate_lock_holder()["pid"] == 4242
+
+    monkeypatch.setattr(procs, "all_pids", lambda: [])
+    assert A.gate_lock_holder() is None
+    assert not lock.exists()
+
+
 def test_review_artifact_does_not_invalidate_reviewed_tree(project):
     root = project["root"]
     _repo_with_change(root)
