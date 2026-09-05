@@ -458,3 +458,27 @@ does not know still works, only slower. `procs.py` is under two hundred lines.
 
 When a class of bugs keeps coming from parsing a human-facing output, the fix
 is not a better regex; it is the API the output was rendered from.
+
+## 26. Test the decision, not the measurement
+
+Fifty-five unit tests and the watchdog still misjudged a live tree twice in one
+evening, because the tests proved that each measurement was right and nothing
+proved that the *decision built from them* was. A measurement can be correct
+and the guard reading it wrong: `waiting_on_architect` was right that a request
+stood, and the cycle was wrong to stand down while an answer sat unread beside
+it.
+
+The fix is a harness that fabricates a whole world — process table, transcript
+age, mailbox, board, reviews, quota — runs one dry cycle, and asserts the last
+decision line. Twelve scenarios covered the fault catalog on the first day, and
+five of them failed against the harness itself before any code did, which is
+the point: a scenario is cheap to write and expensive to be wrong about. The
+rule now is that a fault gets its scenario before its fix, so that what was
+lived once is never lived twice.
+
+The wider list of methods this project should have started with, and now has:
+structured APIs instead of parsed text (procs.py); the decision under test
+(scenarios); the platform under test (CI on three operating systems); the
+alarm under test (`ao alarms test`, the dead man's ping); the run under a
+budget (`ao features`, `ao cost`); the bypass on the record (`ao waive`, `ao
+catchup`); and nothing pushed untested (the repository's own pre-push hook).

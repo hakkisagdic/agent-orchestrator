@@ -128,6 +128,73 @@ class _Linux:
                 "comm": stat[stat.index("(") + 1:stat.rindex(")")]}
 
 
+# ---------------------------------------------------------------- Windows (CIM via PowerShell, JSON)
+class _Windows:
+    """Win32_Process through PowerShell, as JSON — structured, not parsed text.
+
+    CommandLine is one string on Windows; it is split with the platform's own
+    quoting rules here. The working directory is not exposed by CIM (psutil reads
+    the process environment block for it); agent matching on Windows therefore
+    uses the repository path on the command line (`-C <root>`, or the path as an
+    argument) and reports cwd as None.
+    """
+    _cache = None
+    _cache_at = 0.0
+
+    def _snapshot(self):
+        import json as _json
+        import time as _time
+        if self._cache is not None and _time.time() - self._cache_at < 2.0:
+            return self._cache
+        cmd = ("Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine,"
+               "ExecutablePath,Name,SessionId | ConvertTo-Json -Compress")
+        out = _sh(f'powershell -NoProfile -NonInteractive -Command "{cmd}"')
+        rows = []
+        try:
+            data = _json.loads(out) if out.strip() else []
+            rows = data if isinstance(data, list) else [data]
+        except ValueError:
+            rows = []
+        snap = {}
+        for r in rows:
+            try:
+                pid = int(r.get("ProcessId"))
+            except (TypeError, ValueError):
+                continue
+            snap[pid] = r
+        self._cache, self._cache_at = snap, _time.time()
+        return snap
+
+    @staticmethod
+    def _split(cmdline):
+        # Windows argument splitting: quoted segments keep their spaces.
+        import re as _re
+        return [t.strip('"') for t in _re.findall(r'"[^"]*"|\S+', cmdline or "")]
+
+    def all_pids(self):
+        return list(self._snapshot())
+
+    def argv(self, pid):
+        r = self._snapshot().get(pid)
+        if not r:
+            return None
+        av = self._split(r.get("CommandLine") or "")
+        if not av and r.get("ExecutablePath"):
+            av = [r["ExecutablePath"]]
+        return av or None
+
+    def cwd(self, pid):
+        return None
+
+    def info(self, pid):
+        r = self._snapshot().get(pid)
+        if not r:
+            return None
+        ppid = int(r.get("ParentProcessId") or 0)
+        return {"ppid": ppid, "pgid": pid, "tty": None if int(r.get("SessionId") or 0) == 0 else int(r["SessionId"]),
+                "start": 0, "comm": r.get("Name") or ""}
+
+
 # ---------------------------------------------------------------- shell fallbacks
 class _Shell:
     def all_pids(self):
@@ -161,11 +228,14 @@ def _backend():
             cand = _Darwin()
         elif sys.platform.startswith("linux") and os.path.isdir("/proc"):
             cand = _Linux()
+        elif sys.platform == "win32":
+            cand = _Windows()
         # Self-check against the one process we know everything about: this one.
         if cand is not None:
             me = os.getpid()
-            ok = (cand.cwd(me) == os.getcwd() and (cand.info(me) or {}).get("ppid") == os.getppid()
-                  and bool(cand.argv(me)))
+            info = cand.info(me) or {}
+            ok = info.get("ppid") == os.getppid() and bool(cand.argv(me)) and \
+                (cand.cwd(me) == os.getcwd() or cand.cwd(me) is None)
             if not ok:
                 cand = None
     except Exception:

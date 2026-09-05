@@ -2232,6 +2232,22 @@ def doctor_problems(cfg):
         pass
     if len(A.deferred_open(root)) >= 3:
         out.append(("deferred-pile", f"{len(A.deferred_open(root))} deferred actions waiting — ao catchup"))
+    # Two critical roles on one rate-limited pool fail together: the day the
+    # architect ran dry, so did the reviewer, and the run locked.
+    arch_bin = os.path.basename(((cfg.get("architect") or {}).get("argv") or [""])[0])
+    rv = cfg.get("reviewer") or {}
+    rv_bin = os.path.basename((rv.get("argv") or [""])[0])
+    if arch_bin and arch_bin == rv_bin and not rv.get("fallbacks"):
+        out.append(("shared-pool", f"architect and reviewer both run `{arch_bin}` on one quota pool and the reviewer has no "
+                                   f"fallback — add reviewer.fallbacks or use another model family"))
+    # An implementer with nothing pre-authorised to pick up next stalls the moment
+    # the architect is away; two READY items is the floor.
+    try:
+        ready = len(A.ready(root)) if hasattr(A, "ready") else len(A.board(root)["queued"])
+        if ready < 2 and not A.board(root)["running"]:
+            out.append(("queue-shallow", f"{ready} READY item(s) and nothing running — refill .ao/backlog.md before the architect is away"))
+    except Exception:
+        pass
     return out
 
 
@@ -2601,10 +2617,35 @@ def cmd_notices(cfg, args):
     return 0
 
 
+def _watchdog_windows(cfg, args):
+    """Task Scheduler is Windows' launchd: one task every two minutes, one every fifteen."""
+    root = cfg["root"]
+    key = os.path.basename(root.rstrip("/\\")).lower()
+    tasks = {f"ao-watchdog-{key}": (2, f'"{shutil.which("ao-watchdog") or "ao-watchdog"}" --root "{root}" --idle-minutes {getattr(args, "idle_minutes", 6)}'),
+             f"ao-doctor-{key}": (15, f'"{shutil.which("ao") or "ao"}" -C "{root}" doctor --check')}
+    if args.action == "status":
+        for name in tasks:
+            r = subprocess.run(["schtasks", "/Query", "/TN", name], capture_output=True, text=True)
+            print(f"{name}: {'scheduled' if r.returncode == 0 else 'absent'}")
+        return 0
+    if args.action == "uninstall":
+        for name in tasks:
+            subprocess.run(["schtasks", "/Delete", "/TN", name, "/F"], capture_output=True)
+            print(f"removed {name}")
+        return 0
+    for name, (minutes, cmd) in tasks.items():
+        r = subprocess.run(["schtasks", "/Create", "/F", "/SC", "MINUTE", "/MO", str(minutes), "/TN", name, "/TR", cmd],
+                           capture_output=True, text=True)
+        print(f"{'installed' if r.returncode == 0 else 'FAILED'} {name} (every {minutes}m)" + ("" if r.returncode == 0 else f": {r.stderr.strip()[:120]}"))
+    return 0
+
+
 def cmd_watchdog(cfg, args):
     """Install, remove or inspect the launchd job that restarts a stalled agent."""
     if args.action in ("explain", "trace"):
         return _watchdog_debug(cfg, args)
+    if os.name == "nt":
+        return _watchdog_windows(cfg, args)
     import getpass
     root = cfg["root"]
     key = os.path.basename(root.rstrip("/")).lower()

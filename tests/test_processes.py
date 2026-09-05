@@ -30,8 +30,7 @@ def test_a_process_that_mentions_the_agent_is_not_the_agent(monkeypatch):
                6: ["/Applications/Claude.app/Contents/MacOS/Claude Helper"],
                7: ["node", "/Users/x/lib/node_modules/@anthropic-ai/claude-code/cli.js", "-p", "hi"],
                8: ["claude", "-p", "hello"]}
-    monkeypatch.setattr(A.os.path, "isfile", lambda p: p.startswith("/Users/x/.local/bin/"))
-    monkeypatch.setattr(A.os, "access", lambda p, m: p.startswith("/Users/x/.local/bin/"))
+    monkeypatch.setattr(A, "_executable", lambda p: p.startswith("/Users/x/.local/bin/"))
     names = {"kiro-cli", "claude", "claude-code"}
     assert sorted(p for p, av in vectors.items() if A._is_agent_process(p, names, av)) == [2, 3, 4, 7, 8]
 

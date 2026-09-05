@@ -89,6 +89,7 @@ scope is the one authority an implementer must not have.
 | `ao fanout ok --agents N` / `ao fanout record …` / `ao fanout history` | may a fan-out of N sub-agents start now (hard cap, recent limit hit, provider window); record what one cost |
 | `ao cost --since 24h` | what the coordination itself spends: implementer turns by class (product / analysis / ceremony / coordination), wasted turns, reviews |
 | `ao features [on|off <key>]` | the switches and what each costs; all off = deterministic ao, zero model spend ([features.md](docs/features.md)) |
+| platforms | macOS and Linux native; Windows first cut ([windows.md](docs/windows.md)); tests run on all three in CI |
 | `ao waive review --slice B7 --why …` / `ao catchup` | a person bypasses a gate on the record; catchup reviews the landed range and replays deferred wakes and nudges |
 | `ao pings setup --url …` | dead man's switch: external pings that alarm when the watchdog and its doctor job both die |
 | `ao hooks install` / `ao push allow` | pre-push hook refuses unless a person opened a push window |

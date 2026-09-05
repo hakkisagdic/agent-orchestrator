@@ -89,6 +89,7 @@ gereken tek yetkidir.
 | `ao fanout ok --agents N` / `ao fanout record …` / `ao fanout history` | N alt-ajanlık fan-out şimdi başlayabilir mi (üst sınır, yakın limit vuruşu, sağlayıcı penceresi); bir koşunun maliyetini kaydet |
 | `ao cost --since 24h` | koordinasyonun kendisi ne harcıyor: uygulayıcı turları sınıfa göre (ürün / analiz / tören / koordinasyon), boşa giden turlar, review sayısı |
 | `ao features [on|off <anahtar>]` | anahtarlar ve her birinin maliyeti; hepsi kapalı = deterministik ao, sıfır model harcaması ([features.md](docs/features.md)) |
+| platformlar | macOS ve Linux yerel; Windows ilk sürüm ([windows.md](docs/windows.md)); testler üçünde de CI'da koşar |
 | `ao waive review --slice B7 --why …` / `ao catchup` | insan bir kapıyı kayıtlı biçimde atlar; catchup inen aralığı review eder, ertelenen uyandırma/dürtmeleri yeniden oynatır |
 | `ao pings setup --url …` | dead man's switch: watchdog ve doctor işi birlikte ölünce alarm veren dış ping |
 | `ao hooks install` / `ao push allow` | pre-push hook, insan bir push penceresi açmadıysa reddeder |

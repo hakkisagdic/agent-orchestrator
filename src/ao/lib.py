@@ -716,7 +716,12 @@ def agent_pids(root, adapter, headless_only=False):
         if not av or not _is_agent_process(pid, names, av):
             continue
         cw = procs.cwd(pid)
-        if cw and os.path.realpath(cw) == want:
+        if cw is None:
+            # No cwd on this platform (Windows): the repository path on the command
+            # line is the next best evidence that this turn works in this tree.
+            if any(os.path.realpath(a.rstrip("/\\")) == want for a in av if os.path.isabs(a)):
+                out.append(pid)
+        elif os.path.realpath(cw) == want:
             out.append(pid)
     # Processes ao itself started inside the repo — the reviewer above all — are
     # agents by every other test and writers by none. Exclude them and their
@@ -743,6 +748,11 @@ def agent_pids(root, adapter, headless_only=False):
     return out
 
 
+def _executable(t):
+    """A real executable file at this path (a hook, so scenarios can fabricate a world)."""
+    return "/" in t and os.path.isfile(t) and os.access(t, os.X_OK)
+
+
 def _is_agent_process(pid, names, argv=None):
     """Is an agent binary actually on this command line?
 
@@ -757,9 +767,7 @@ def _is_agent_process(pid, names, argv=None):
         return False
     runtimes = ("node", "bun", "deno", "python", "python3")
     runtime = os.path.basename(toks[0]) in runtimes
-
-    def executable(t):
-        return "/" in t and os.path.isfile(t) and os.access(t, os.X_OK)
+    executable = _executable
     for name in names:
         for i, t in enumerate(toks):
             base = os.path.basename(t)
@@ -831,8 +839,12 @@ def kill_turn(pid, sig):
     Signalling only the wrapper is how orphans are made: it exits, its runtime and
     engine children do not, and they keep the repository as their cwd. A turn we
     started is its own session, so its pid is its group id and one killpg reaches
-    everything it spawned. A pid that leads no group is signalled alone.
+    everything it spawned. A pid that leads no group is signalled alone. On
+    Windows there are no groups to signal; `taskkill /T` kills the tree.
     """
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True)
+        return
     try:
         pgid = os.getpgid(pid)
     except OSError:
@@ -855,6 +867,10 @@ def sweep_orphans(pids, grace=3.0):
     time by the very cleanup. Returns the pids that were alive when we started.
     """
     import signal as _sig
+    if os.name == "nt":
+        for pid in pids:
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True)
+        return list(pids)
     groups = set()
     for pid in pids:
         try:

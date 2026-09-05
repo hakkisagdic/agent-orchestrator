@@ -1,0 +1,6 @@
+#!/bin/sh
+# agent-orchestrator: nothing leaves this machine untested. Twice a push carried
+# a test without its implementation; this is the mechanical answer.
+cd "$(git rev-parse --show-toplevel)" || exit 1
+if [ -x .venv/bin/python ]; then PY=.venv/bin/python; else PY=python3; fi
+$PY -m pytest -q -x 2>&1 | tail -3 || { echo "pre-push: tests failed; push refused"; exit 1; }

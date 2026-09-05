@@ -84,6 +84,17 @@ test that would fail if it came back.
 | F17 | eleven hours of orange nobody saw | no channel beyond the desktop and an unconfigured bot | the ladder: orange → red (e-mail) after an hour; resolved notices; `ao doctor` warns on missing channels | test_guards (ladder) | — |
 | F18 | a dead watchdog is silent | nothing watched the watcher | heartbeat per cycle, sibling check, `last tick` in doctor | test_watchdog_cycle | — |
 
+## Scenarios: testing the decision, not the measurement
+
+Unit tests prove each measurement; `tests/test_scenarios.py` proves the
+*decision*. A `World` fabricates the process table, the transcript's age, the
+mailbox, the board, the reviews and the quota, then runs one dry cycle and
+reads the last decision line. Every fault in the catalog is a world the cycle
+once misread, and each has a scenario now: orphans that looked like writers, a
+shell that mentioned the agent, a request that looked like unread mail, an
+architect at quota. The rule going forward: a fault gets its scenario before
+its fix, and the scenario stays.
+
 ## The instruments
 
 ```bash
