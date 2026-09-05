@@ -484,10 +484,7 @@ def cmd_verify(cfg, args):
            "review_verdict": revs[0][1] if revs else None,
            "head": A.sh("git rev-parse --short HEAD", cwd=root),
            "dirty": len([l for l in A.sh("git status --short", cwd=root).split("\n") if l.strip()])}
-    ledger = os.path.join(root, ".ao", "ledger")
-    os.makedirs(ledger, exist_ok=True)
-    with open(os.path.join(ledger, "verifications.jsonl"), "a", encoding=UTF8) as fh:
-        fh.write(_json.dumps(rec, ensure_ascii=False) + "\n")
+    A.record_verification(root, rec)
 
     A.release_gate_lock()
     print(f"\n{C['b']}{'PASS' if ok else 'FAIL'}{C['reset']}  recorded as {rec['id']}")

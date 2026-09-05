@@ -1237,36 +1237,36 @@ def tree_digest(root, cfg=None):
 
 
 def latest_verification(root):
-    """The newest `ao verify` record, or None."""
-    p = os.path.join(root, ".ao", "ledger", "verifications.jsonl")
-    if not os.path.exists(p):
-        return None
-    last = None
-    for line in open(p, errors="replace", encoding=UTF8):
-        try:
-            last = json.loads(line)
-        except Exception:
-            continue
-    return last
+    """The newest complete `ao verify` record, or None.
+
+    An interrupted append may leave one partial tail. The storage layer ignores
+    only that recoverable suffix and fails closed on corruption anywhere else.
+    """
+    from .storage import read_jsonl
+    rows = read_jsonl(os.path.join(root, ".ao", "ledger", "verifications.jsonl"))
+    return rows[-1] if rows else None
+
+
+def record_verification(root, record):
+    """Durably append one verification before reporting its result."""
+    from .storage import append_jsonl
+    path = os.path.join(root, ".ao", "ledger", "verifications.jsonl")
+    return append_jsonl(path, record)
 
 
 def record_authority(root, granted, reasons, tree, verification, token=None,
                      review=None, reviewer=None):
     """Persist an authority decision, raising when durable recording fails."""
+    from .storage import append_jsonl
     record = {"at": int(time.time()), "granted": bool(granted),
               "token": token, "reasons": reasons, "tree": tree,
               "verification": verification, "review": review,
               "reviewer": reviewer}
-    d = os.path.join(root, ".ao", "ledger")
-    os.makedirs(d, exist_ok=True)
-    with open(os.path.join(d, "authority.jsonl"), "a", encoding=UTF8) as fh:
-        # Keep the reviewer's identity here, not only in the review file.
-        # A grant is not real until this durable record exists; callers must
-        # refuse rather than print GRANTED when append or fsync fails.
-        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
-        fh.flush()
-        os.fsync(fh.fileno())
-    return record
+    path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    # Keep the reviewer's identity here, not only in the review file. A grant is
+    # not real until the locked append, file fsync and (on first creation)
+    # directory fsync have all completed.
+    return append_jsonl(path, record)
 
 
 GATE_LOCK = os.path.join(HOME, ".ao", "gate.lock")
