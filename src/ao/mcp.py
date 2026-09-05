@@ -86,6 +86,19 @@ TOOLS = [
      "inputSchema": {"type": "object",
                      "properties": {"state": {"type": "string",
                                               "enum": ["open", "answered"]}}}},
+    {"name": "ao_fanout",
+     "description": "Before fanning out to sub-agents: may a fan-out of this size "
+                    "start now (hard cap, recent limit hit, provider window)? "
+                    "After: record what it cost so the next estimate is real. "
+                    "47 agents once died at 36 with a session limit; this is the "
+                    "gate that would have refused it.",
+     "inputSchema": {"type": "object", "required": ["agents"],
+                     "properties": {
+                         "action": {"type": "string", "enum": ["ok", "record"]},
+                         "agents": {"type": "integer"},
+                         "per_agent_tokens": {"type": "integer"},
+                         "done": {"type": "integer"}, "errors": {"type": "integer"},
+                         "tokens": {"type": "integer"}, "note": {"type": "string"}}}},
     {"name": "ao_verify",
      "description": "Run the project's declared gates and record the measured result. "
                     "Expensive; disabled unless the server was started with --allow-verify.",
@@ -196,6 +209,11 @@ def call(name, args, cfg, allow_verify):
                 "note": ("the architect is woken on the next watchdog cycle"
                          if kind == "blocked" else "queued for the architect")}
 
+    if name == "ao_fanout":
+        if args.get("action") == "record":
+            return A.record_fanout(root, args["agents"], args.get("done"), args.get("errors"),
+                                   args.get("tokens"), args.get("note"))
+        return A.fanout_verdict(root, cfg, int(args["agents"]), args.get("per_agent_tokens"))
     if name == "ao_ask":
         rec = A.ask(root, args["question"], args.get("options") or [],
                     context=args.get("context"), slice_id=args.get("slice"))

@@ -77,6 +77,7 @@ MCP is an interface to it, not a replacement for it.
 | `ao_inbox` | messages addressed to the implementer, not yet acknowledged |
 | `ao_ack` | confirm delivery by removing one, after applying or rejecting it |
 | `ao_report` | tell the architect something at any point in a turn |
+| `ao_fanout` | may a fan-out of N sub-agents start now; record what one cost ([fanout.md](fanout.md)) |
 
 **They read and write the mailbox files directly.** There is no MCP-side database,
 and that is the whole design: a second store for the same fact is a second thing

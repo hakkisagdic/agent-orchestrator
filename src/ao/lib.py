@@ -1836,3 +1836,156 @@ def git_state(root):
         "dirty": [l for l in sh("git status --short", cwd=root).split("\n") if l.strip()],
         "ahead": sh("git rev-list --count origin/main..HEAD", cwd=root) or "0",
     }
+
+
+# ---- fan-out budget --------------------------------------------------------
+#
+# A coordinator that fans out to sub-agents has no gate of its own. One ran 47
+# verification agents at once: 11 finished, 36 died with "session limit", two
+# million tokens were spent and the answer was mostly missing. The watchdog's
+# quota guard could not have helped — it watches the implementer's pool, and the
+# fan-out was the coordinator's. This is the gate that was missing: a hard cap,
+# the provider window as keyflip reports it, and the project's own record of
+# what fan-outs cost, so the estimate is empirical after the first one.
+
+FANOUT_DEFAULTS = {"max_agents": 12, "per_agent_tokens": 50_000, "window_reserve_pct": 30}
+
+
+def fanout_config(cfg):
+    out = dict(FANOUT_DEFAULTS)
+    out.update(cfg.get("fanout") or {})
+    return out
+
+
+def provider_window(name="claude"):
+    """The machine-wide usage window keyflip reports for a provider, parsed.
+
+    Read through the same adapter command the status panel uses, so the panel and
+    the verdict never disagree. Returns {pct, window, resets_in, resets_s, raw} or
+    None when no readable line exists — and None is reported as "unreadable", not
+    as headroom.
+    """
+    argv = None
+    for aid in ("kiro", "claude-code"):
+        try:
+            spec = (load_adapter(aid).get("telemetry") or {}).get("quota") or {}
+        except Exception:
+            spec = {}
+        if spec.get("argv"):
+            argv = spec["argv"]
+            break
+    if not argv:
+        return None
+    out = sh(" ".join(argv) + " 2>/dev/null", cwd=HOME) or ""
+    for line in out.split("\n"):
+        if name.lower() not in line.lower():
+            continue
+        m = re.search(r"(\d+)\s*%", line)
+        if not m:
+            continue
+        w = re.search(r"\b(\d+[hdw])\b", line)
+        r = re.search(r"resets?\s+(?:in\s+)?([0-9hms ]+)", line)
+        secs = 0
+        if r:
+            for n, u in re.findall(r"(\d+)\s*([hms])", r.group(1)):
+                secs += int(n) * {"h": 3600, "m": 60, "s": 1}[u]
+        return {"pct": int(m.group(1)), "window": w.group(1) if w else "?",
+                "resets_in": r.group(1).strip() if r else "?", "resets_s": secs,
+                "raw": line.strip()}
+    return None
+
+
+def fanout_history(root, limit=20):
+    p = os.path.join(root, ".ao", "ledger", "fanouts.jsonl")
+    if not os.path.exists(p):
+        return []
+    rows = []
+    for line in open(p, errors="replace"):
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            pass
+    return rows[-limit:]
+
+
+def record_fanout(root, agents, done=None, errors=None, tokens=None, note=None):
+    """What a fan-out actually cost. The next verdict is estimated from this."""
+    d = os.path.join(root, ".ao", "ledger")
+    os.makedirs(d, exist_ok=True)
+    rec = {"at": int(time.time()), "agents": int(agents)}
+    if done is not None:
+        rec["done"] = int(done)
+    if errors is not None:
+        rec["errors"] = int(errors)
+    if tokens is not None:
+        rec["tokens"] = int(tokens)
+    if note:
+        rec["note"] = note
+    rec["limit_hit"] = bool(rec.get("errors")) and bool(
+        re.search(r"limit|quota|429|rate", note or "", re.I))
+    with open(os.path.join(d, "fanouts.jsonl"), "a") as fh:
+        fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return rec
+
+
+def observed_per_agent_tokens(root):
+    """Average tokens per agent over recorded fan-outs (errored agents spent too)."""
+    tok = n = 0
+    for r in fanout_history(root, 50):
+        if r.get("tokens") and (r.get("done") or r.get("errors")):
+            tok += r["tokens"]
+            n += (r.get("done") or 0) + (r.get("errors") or 0)
+    return int(tok / n) if n else None
+
+
+def fanout_verdict(root, cfg, agents, per_agent_tokens=None, provider="claude"):
+    """May a fan-out of this size start now?
+
+    Three checks, each a fact the caller can see: the project's hard cap, whether
+    a fan-out already hit this provider's limit inside the current window, and
+    how much of the window keyflip says is left. The token estimate is shown, not
+    gated on — a percentage window cannot be converted to tokens honestly — but
+    it becomes empirical after the first recorded run.
+    """
+    fc = fanout_config(cfg)
+    observed = observed_per_agent_tokens(root)
+    per = per_agent_tokens or observed or fc["per_agent_tokens"]
+    win = provider_window(provider)
+    reasons, verdict = [], "ok"
+    if agents > fc["max_agents"]:
+        verdict = "too-many"
+        reasons.append(f"{agents} agents > max_agents {fc['max_agents']} — run in batches of "
+                       f"{fc['max_agents']} and record each")
+    now = time.time()
+    span = 5 * 3600
+    if win and win.get("window", "").endswith("h"):
+        try:
+            span = int(win["window"][:-1]) * 3600
+        except ValueError:
+            pass
+    window_start = now - (span - win["resets_s"]) if win and win.get("resets_s") else now - span
+    for r in reversed(fanout_history(root, 10)):
+        if r.get("limit_hit") and r["at"] >= window_start:
+            if verdict == "ok":
+                verdict = "limit-hit-recently"
+            reasons.append(f"a fan-out of {r['agents']} hit the provider limit "
+                           f"{int((now - r['at']) / 60)}m ago ({r.get('errors')} errors); "
+                           f"wait for the window to reset"
+                           + (f" (in {win['resets_in']})" if win else ""))
+            break
+    if win:
+        left = 100 - win["pct"]
+        if left < fc["window_reserve_pct"]:
+            if verdict == "ok":
+                verdict = "window-low"
+            reasons.append(f"{provider} window {win['pct']}% used, {left}% left < reserve "
+                           f"{fc['window_reserve_pct']}%; resets in {win['resets_in']}")
+    else:
+        reasons.append(f"{provider} window unreadable (keyflip absent or no line) — "
+                       f"hard cap and history only")
+    spent = sum(r.get("tokens") or 0 for r in fanout_history(root, 50) if r["at"] >= window_start)
+    return {"verdict": verdict, "ok": verdict == "ok", "agents": agents,
+            "per_agent_tokens": per,
+            "per_agent_source": "arg" if per_agent_tokens else ("observed" if observed else "default"),
+            "estimated_tokens": agents * per, "spent_this_window": spent,
+            "window": win, "max_agents": fc["max_agents"], "reasons": reasons}

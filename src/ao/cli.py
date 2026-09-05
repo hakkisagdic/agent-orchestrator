@@ -1847,6 +1847,51 @@ def cmd_writers(cfg, args):
     return 0 if len(roots) <= 1 else 1
 
 
+def cmd_fanout(cfg, args):
+    """May a fan-out of N sub-agents start now — and what did the last one cost.
+
+    `ok` answers from three facts (hard cap, recent limit hit, provider window);
+    `record` writes what a run cost so the next estimate is empirical; `history`
+    lists the runs. Exit 1 on any refusal, so a coordinator can gate on it.
+    """
+    root = cfg["root"]
+    if args.action == "record":
+        if args.agents is None:
+            print("--agents is required"); return 2
+        rec = A.record_fanout(root, args.agents, args.done, args.errors, args.tokens, args.note)
+        print(f"{C['green']}recorded{C['reset']} {json.dumps(rec, ensure_ascii=False)}")
+        return 0
+    if args.action == "history":
+        rows = A.fanout_history(root, args.limit)
+        if not rows:
+            print("no fan-outs recorded"); return 0
+        for r in rows:
+            when = datetime.fromtimestamp(r["at"]).strftime("%d %b %H:%M")
+            flag = f"  {C['red']}limit hit{C['reset']}" if r.get("limit_hit") else ""
+            print(f"  {when}  {r['agents']:>3} agents  done {r.get('done','?'):>3}  "
+                  f"errors {r.get('errors','?'):>3}  tokens {r.get('tokens','?')}{flag}"
+                  + (f"  — {r['note']}" if r.get('note') else ""))
+        return 0
+    if args.agents is None:
+        print("--agents is required"); return 2
+    v = A.fanout_verdict(root, cfg, args.agents, args.per_agent_tokens, args.provider)
+    if args.json:
+        print(json.dumps(v, ensure_ascii=False))
+        return 0 if v["ok"] else 1
+    colour = C['green'] if v["ok"] else C['red']
+    print(f"{colour}{v['verdict'].upper()}{C['reset']}  {v['agents']} agents × ~{v['per_agent_tokens']:,} "
+          f"tokens ({v['per_agent_source']}) ≈ {v['estimated_tokens']:,} tokens")
+    w = v.get("window")
+    if w:
+        print(f"   {args.provider} window: {w['pct']}% used, {w['window']} window, resets in {w['resets_in']}"
+              + (f"; {v['spent_this_window']:,} tokens fanned out in it so far" if v['spent_this_window'] else ""))
+    for r in v["reasons"]:
+        print(f"   {C['yellow'] if not v['ok'] else C['dim']}· {r}{C['reset']}")
+    if v["ok"]:
+        print(f"   {C['dim']}after the run: ao fanout record --agents {v['agents']} --done D --errors E --tokens T{C['reset']}")
+    return 0 if v["ok"] else 1
+
+
 def _alive(pid):
     try:
         os.kill(pid, 0)
@@ -2318,6 +2363,18 @@ def main():
     h.add_argument("--note", help="on release: what changed while the agent was stopped")
     h.add_argument("--grace", type=float, default=10, help="seconds before SIGKILL")
     h.set_defaults(fn=cmd_hold)
+    fo = sub.add_parser("fanout", help="may a fan-out of N sub-agents start now; record what one cost")
+    fo.add_argument("action", choices=["ok", "record", "history"], nargs="?", default="ok")
+    fo.add_argument("--agents", type=int)
+    fo.add_argument("--per-agent-tokens", type=int, dest="per_agent_tokens")
+    fo.add_argument("--provider", default="claude")
+    fo.add_argument("--done", type=int)
+    fo.add_argument("--errors", type=int)
+    fo.add_argument("--tokens", type=int)
+    fo.add_argument("--note")
+    fo.add_argument("--limit", type=int, default=20)
+    fo.add_argument("--json", action="store_true")
+    fo.set_defaults(fn=cmd_fanout)
     w = sub.add_parser("writers", help="live turns in this tree (not processes); orphans set aside")
     w.add_argument("--clean", action="store_true", help="stop orphaned processes left by ended turns")
     w.add_argument("--json", action="store_true")

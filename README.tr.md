@@ -86,6 +86,7 @@ gereken tek yetkidir.
 | `ao commit-ok` | bu ağaç commit edilebilir mi? kanıttan karar |
 | `ao hold` / `ao hold release --note …` | ağaçtaki tüm ajanları durdur ve durdurulmuş tut |
 | `ao writers` / `ao writers --clean` | ağaçtaki canlı turlar (süreç değil tur başına bir), öksüzler ayrı; `--clean` yalnız öksüzleri durdurur |
+| `ao fanout ok --agents N` / `ao fanout record …` / `ao fanout history` | N alt-ajanlık fan-out şimdi başlayabilir mi (üst sınır, yakın limit vuruşu, sağlayıcı penceresi); bir koşunun maliyetini kaydet |
 | `ao source import` | takip sistemindeki işleri panoya kabul et |
 | `ao mail` · `ao notices` | koordinasyon mesajları; projenin ürettiği uyarılar |
 | `ao watchdog install` | takılan ajanı yeniden başlatan launchd işi |
