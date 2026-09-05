@@ -46,3 +46,15 @@ def test_storm_cap(project):
         A.record_notice(root, f"t{i}", "m", sent=True, key=f"k{i}")
     assert W.storm(root) is True
     assert W.storm(root, limit=13) is False
+
+
+def test_turn_ended_reads_the_transcripts_own_word(project, tmp_path, monkeypatch):
+    import json
+    tr = tmp_path / "t.jsonl"
+    rows = [{"payload": {"type": "turn_start"}}, {"payload": {"type": "tool_call"}},
+            {"payload": {"type": "turn_end"}}, {"payload": {"type": "session_metadata"}}]
+    tr.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    monkeypatch.setattr(A, "session_paths", lambda cfg: (str(tr), None))
+    assert A.turn_ended(project) is True
+    tr.write_text("\n".join(json.dumps(r) for r in rows[:2]) + "\n")
+    assert A.turn_ended(project) is False

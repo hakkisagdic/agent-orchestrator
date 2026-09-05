@@ -826,7 +826,9 @@ def _cycle(args, root):
                        f"{br['used']:.0f}/{br['limit']:.0f} at {br['per_day']:.0f}/day; the reset is later. "
                        f"New account (keyflip) or `ao features off …`", root, key="credits-exhaust",
                        window=6 * 3600, audience="human", level="red")
-    fe = A.foreign_edits(root, cfg)
+    # Only meaningful when no implementer turn is running: a sub-agent's writes
+    # do not appear as the parent's tool calls and would read as a stranger's.
+    fe = [] if A.agent_pids(root, adapter) else A.foreign_edits(root, cfg)
     _FACTS["foreign_edits"] = fe
     for sib, age_s in A.stale_siblings(root).items():
         notify(f"{sib}: watchdog silent", f"no heartbeat for {age_s // 60}m — its watchdog is not "
@@ -891,7 +893,12 @@ def _cycle(args, root):
         # Tell them apart by the transcript: a live turn writes to it. Silence far
         # past the idle threshold, with a process still up, is hung, not busy.
         turns = A.process_trees(running)
-        if age < args.idle_minutes * 60 * 3:
+        # The transcript closed the turn and the process is still here past the
+        # idle window: a runtime that forgot to exit, not a turn. Reap now.
+        ended = A.turn_ended(cfg) and age >= args.idle_minutes * 60
+        if ended:
+            print(f"turn ended in the transcript {int(age / 60)}m ago but {len(running)} process(es) linger; reaping")
+        if age < args.idle_minutes * 60 * 3 and not ended:
             print(f"{len(turns)} turn(s) already in this tree "
                   f"(roots {turns}, {len(running)} processes); not starting another")
             if len(turns) > 2:

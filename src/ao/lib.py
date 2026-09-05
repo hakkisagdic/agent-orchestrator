@@ -3080,3 +3080,22 @@ def window_headroom(provider="claude"):
     """(left_pct, reserve_pct) or (None, reserve) when the window is unreadable."""
     w = provider_window(provider)
     return (100 - w["pct"]) if w else None, fleet_reserve()
+
+
+def turn_ended(cfg):
+    """Has the implementer's transcript closed its last turn?
+
+    A process that is alive after its transcript wrote `turn_end` is not
+    working; it is a runtime that forgot to exit. Waiting the full silence
+    threshold for it (three times the idle window) cost twenty minutes per
+    occurrence. The transcript's own word is enough to reap at the idle window."""
+    msgs, _ = session_paths(cfg)
+    if not msgs or not os.path.exists(msgs):
+        return False
+    tail = read_tail(msgs, 200_000)
+    for d in reversed(tail):
+        t = (d.get("payload") or {}).get("type") or d.get("type")
+        if t in ("session_metadata", "usage_summary", "session_event"):
+            continue                                        # bookkeeping after the turn
+        return t in ("turn_end", "result")
+    return False
