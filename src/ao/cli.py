@@ -2190,6 +2190,24 @@ def cmd_doctor(cfg, args):
     from .watchdog import child_path
     reachable = shutil.which("ao", path=child_path())
     if reachable:
+        # The architect is woken through a binary the watchdog resolves by version,
+        # not by PATH order; say which one, and whether the last wake died on it.
+        arch = cfg.get("architect") or {}
+        if arch.get("argv"):
+            from .watchdog import child_path, wake_error, STATE_DIR
+            rb, rv = A.resolve_binary(arch["argv"][0], path=child_path())
+            others = [c for c in A.binary_candidates(arch["argv"][0], child_path()) if c != rb]
+            print(f"architect bin   {C['green'] if rb else C['red']}{rb or 'not found'}{C['reset']} {C['dim']}{rv}{C['reset']}"
+                  + (f"  {C['dim']}({len(others)} older copy: {', '.join(others)}){C['reset']}" if others else ""))
+            key = os.path.basename(root.rstrip("/")) or "root"
+            we = wake_error(os.path.join(STATE_DIR, f"escalate-{key}.log"))
+            if we:
+                text, used, when = we
+                print(f"last wake       {C['red']}failed{C['reset']} {when} [{used or '?'}]: {text[:90]}")
+                if used and used != f"{rb} {rv}":
+                    print(f"                {C['dim']}a different binary resolves now; the next wake will use it{C['reset']}")
+                else:
+                    print(f"                {C['yellow']}same binary — update it (claude update) or remove the stale copy{C['reset']}")
         print(f"ao for agents   {C['green']}{reachable}{C['reset']}")
     else:
         print(f"ao for agents   {C['red']}not on a spawned agent's PATH{C['reset']}")

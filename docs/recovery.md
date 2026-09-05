@@ -75,6 +75,10 @@ the whole reason this system exists is to stop treating "it was true earlier" as
   terminal, dead group leader) are listed separately and are not writers;
   `ao writers --clean` stops them. A single-writer rule that counts processes
   instead of running this once refused to write for hours over three corpses.
+- `ao doctor` — the `architect bin` row shows which `claude` a wake will run and
+  its version; `last wake` shows whether the previous wake failed and on what.
+  A wake that dies with "does not support this model" was running a stale copy;
+  ao now resolves the newest one, but the stale copy is still worth removing.
 
 
 ## What is deliberately not recovered

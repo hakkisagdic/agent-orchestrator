@@ -187,6 +187,22 @@ def call(name, args, cfg, allow_verify):
         # minutes later, which is what used to happen.
         header = "## KARAR GEREKLİ" if kind == "blocked" else f"## {kind.upper()}"
         slug = "".join(c if c.isalnum() else "-" for c in args["summary"].lower())[:40]
+        # The same request twice is one request. An implementer nudged into a
+        # turn with nothing to do reports the same blocker again; eighty copies
+        # of "queue empty" stood in one mailbox after eleven hours, each a fresh
+        # anomaly and a fresh wake. Fold a repeat into the standing report and
+        # keep that file's age — the age is the fact the architect needs.
+        marker = f"-kiro-to-fable-{kind.upper()}-"
+        dup = None
+        for m in A.mailbox(root, box):
+            if marker in m and A._report_summary(os.path.join(root, box, m)) == args["summary"].strip():
+                dup = m
+        if dup:
+            n = A.bump_repeat(os.path.join(root, box, dup))
+            return {"written": dup, "repeated": n, "escalates": kind == "blocked",
+                    "delivered_to_phone": 0,
+                    "note": (f"the same {kind} report is already standing ({n}× now); the architect "
+                             f"sees one file with its original time. Do not report it again; end the turn.")}
         name_ = f"{time.strftime('%Y%m%d-%H%M')}-kiro-to-fable-{kind.upper()}-{slug}.md"
         with open(os.path.join(root, box, name_), "w") as fh:
             fh.write(f"# {args['summary']}\n\n{header}\n\n")

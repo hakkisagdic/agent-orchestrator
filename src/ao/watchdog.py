@@ -68,6 +68,10 @@ def child_path():
     for d in ("~/.local/bin", "~/bin", "/usr/local/bin", "/opt/homebrew/bin",
               "/usr/bin", "/bin", "/usr/sbin", "/sbin"):
         parts.append(os.path.expanduser(d))
+    # Version-manager installs keep node beside the agent binary; a wake that
+    # resolves the newest `claude` there must find that node too.
+    for cand in A.binary_candidates("claude") + A.binary_candidates("node"):
+        parts.append(os.path.dirname(cand))
     # fnm / nvm / asdf style shims: whichever one currently owns `node`
     node = shutil.which("node")
     if node:
@@ -302,7 +306,7 @@ def escalate(root, cfg, adapter, age, args, st):
         if A.notice_recently_sent(root, key, window):
             A.record_notice(root, "Voltrai: anomaly", a["kind"], sent=False, key=key)
             continue
-        name = A.write_report(root, cfg, a["kind"], a["facts"])
+        name = A.write_report(root, cfg, a["kind"], a["facts"], key=a.get("key"))
         # Say what actually happened. "reported to the architect" was untrue
         # whenever no architect was configured or startable, and a notification
         # that overstates its own effect is how a gap stays invisible.
@@ -404,14 +408,33 @@ def escalate(root, cfg, adapter, age, args, st):
         argv = [x.replace("{prompt}", prompt) .replace("{session}", sess or "")
                 for x in arch["argv"]]
         search = child_path()
-        resolved = shutil.which(argv[0], path=search)
+        resolved, ver = A.resolve_binary(argv[0], path=search)
+        key = os.path.basename(root.rstrip("/")) or "root"
+        log_path = os.path.join(STATE_DIR, f"escalate-{key}.log")
+        # Read what the previous wake said before starting another. Same binary,
+        # same error, less than six hours old: the human has been told, and a
+        # retry is the forty-first identical failure.
+        err = wake_error(log_path)
+        if resolved and err:
+            text, used, when = err
+            same = used == f"{resolved} {ver}"
+            prev = st.get("wake_error") or {}
+            if prev.get("text") != text or prev.get("binary") != used:
+                st["wake_error"] = {"at": time.time(), "text": text, "binary": used, "when": when}
+                save_state(root, st)
+                A.record_notice(root, f"{key}: architect wake failed", f"{text} [{used}]", True,
+                                key="architect-wake-failed")
+                notify(f"{key}: mimar uyandırılamadı", f"{text[:120]} — ikili: {used or '?'}; "
+                       f"`claude update` / `ao doctor`", root, key="architect-wake-failed",
+                       window=6 * 3600, audience="human")
+            if same and time.time() - (st.get("wake_error") or {}).get("at", 0) < 6 * 3600:
+                print(f"architect wake failed with this same binary ({used}); not retrying: {text[:90]}")
+                resolved = None
         if resolved:
             argv[0] = resolved
-            key = os.path.basename(root.rstrip("/")) or "root"
-            log_path = os.path.join(STATE_DIR, f"escalate-{key}.log")
             os.makedirs(STATE_DIR, exist_ok=True)
             with open(log_path, "a") as log:
-                log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} escalate ===\n")
+                log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} escalate {resolved} {ver} ===\n")
                 log.flush()
                 # stdin must be closed, not inherited. A detached child holding a
                 # pipe or tty it will never read can wait forever for an EOF that
@@ -437,16 +460,52 @@ def escalate(root, cfg, adapter, age, args, st):
 
 
 def open_work(cfg, root):
-    """Is there something to continue? Cheap signals only."""
+    """Is there something for the implementer to continue? Cheap signals only.
+
+    Only signals that mean *work*. Mail counts when it is addressed to the
+    implementer — its own outgoing reports and the watchdog's anomaly files once
+    counted as "unread mail", so every report the implementer wrote was a reason
+    to nudge it into writing another. Dirty paths count outside the coordination
+    directories; a review counts only if it is newer than HEAD.
+    """
     reasons = []
-    if A.mailbox(root, cfg["mailbox"]):
+    if A.implementer_inbox(root, cfg):
         reasons.append("unread mail")
-    if A.sh("git status --porcelain", cwd=root):
+    if A.product_dirty(root, cfg):
         reasons.append("uncommitted changes")
     revs = A.reviews(root, cfg["reviews"], limit=1)
     if revs and "APPROVED" not in revs[0][1].upper():
-        reasons.append("open review findings")
+        try:
+            rev_at = os.path.getmtime(os.path.join(root, cfg["reviews"], revs[0][0]))
+            head_at = int(A.sh("git log -1 --format=%ct", cwd=root) or 0)
+        except (OSError, ValueError):
+            rev_at, head_at = 1, 0
+        if rev_at > head_at:
+            reasons.append("open review findings")
     return reasons
+
+
+def wake_error(log_path):
+    """What the last architect wake said, if it failed: (text, binary, when).
+
+    The wake is detached, so its outcome can only be read on the next cycle from
+    the log segment it wrote. Forty identical failures went unread because
+    nothing looked.
+    """
+    try:
+        tail = open(log_path, errors="replace").read()[-20000:]
+    except OSError:
+        return None
+    segs = re.split(r"^=== (\S+ \S+) (escalate|refill)(?: (.*?))? ===$", tail, flags=re.M)
+    if len(segs) < 5:
+        return None
+    when, _, binary, body = segs[-4], segs[-3], segs[-2] or "", segs[-1]
+    m = re.search(r"(API Error: \d{3}[^\n]*|does not support this model[^\n]*|"
+                  r"version [^\n]*required[^\n]*|command not found[^\n]*|"
+                  r"No such file or directory[^\n]*|env: node: [^\n]*)", body)
+    if not m:
+        return None
+    return m.group(1).strip()[:300], binary, when
 
 
 def quota_ok(adapter):
@@ -616,6 +675,16 @@ def main():
     # and it needs the *architect*, not the implementer — refilling means pulling
     # from a tracker and deciding what may be worked, and an implementer that
     # chooses its own scope is the one thing this tool exists to prevent.
+    # An implementer that asked for a decision and got no answer is not idle; it
+    # is waiting, and a nudge cannot answer it. Eighty nudged turns once produced
+    # eighty copies of the same request. The wake path above has already told
+    # the architect; the only useful thing here is to say so and stand down.
+    waiting = A.waiting_on_architect(root, cfg)
+    if waiting:
+        name, at = waiting
+        print(f"implementer is waiting on the architect since "
+              f"{time.strftime('%H:%M', time.localtime(at))} ({name}); not nudging")
+        return 0
     reasons = open_work(cfg, root)
     if not reasons:
         sc = A.sources(root)
@@ -644,7 +713,7 @@ def main():
             argv = [x.replace("{prompt}", arch.get("prompt", REFILL_PROMPT)) .replace("{session}", sess or "")
                     for x in arch["argv"]]
             search = child_path()
-            resolved = shutil.which(argv[0], path=search)
+            resolved, ver = A.resolve_binary(argv[0], path=search)
             if not resolved:
                 print(f"architect command {argv[0]} not on PATH")
                 return 0
@@ -653,7 +722,7 @@ def main():
             log_path = os.path.join(STATE_DIR, f"refill-{key}.log")
             os.makedirs(STATE_DIR, exist_ok=True)
             with open(log_path, "a") as log:
-                log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} refill ===\n")
+                log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} refill {resolved} {ver} ===\n")
                 log.flush()
                 proc = subprocess.Popen(argv, cwd=root, env=dict(os.environ, PATH=search),
                                         stdin=subprocess.DEVNULL,   # see escalate()

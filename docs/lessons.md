@@ -378,3 +378,37 @@ The general lesson: when a guard's answer is "someone else is here", make sure
 the someone is not the guard's own debris. A safety mechanism that leaves
 remnants that trip the safety mechanism is a deadlock with extra steps, and
 it hides well because every individual reading is true.
+
+## 22. Three defensible defects, one eleven-hour loop
+
+The implementer finished its last authorised slice at 06:21 and asked, correctly,
+for the next one. Nothing answered until 17:54. In between it wrote the same
+"queue empty" request eighty times, the watchdog raised eighty anomalies, and
+forty wake attempts each died with `Claude Code 2.1.185 does not support this
+model`. Every component did what its own rules said.
+
+The wake resolved `claude` with `which`, which returns the first match, and the
+first match was an npm-global leftover in `/usr/local/bin` whose node had long
+since moved under a version manager — where a current copy sat unused. The
+wake was detached, so nobody read its output; the same failure repeated on a
+fifteen-minute timer because a failed wake and a successful one looked identical
+from outside. The watchdog's "open work" signal counted every file in the
+mailbox as unread mail, including the implementer's own outgoing reports, so
+each report was a reason to nudge the implementer into writing another. And the
+anomaly detector keyed on file name, so eighty files were eighty anomalies rather
+than one condition with a count.
+
+Four fixes, each aimed at the rule rather than the incident. Binaries resolve
+by newest version, not PATH order (`resolve_binary`), and a wake logs which one
+it used. The next cycle reads the previous wake's output; a failure is recorded,
+told to the human once with the binary named, and not retried on the same
+binary for six hours. "Open work" counts only mail addressed to the implementer,
+dirty paths outside the coordination directories, and reviews newer than HEAD —
+and an implementer whose newest report is a standing request, with nothing
+newer addressed to it and nothing queued, is *waiting*, not idle: the watchdog
+says so and stands down. Repeated reports fold into the standing one with a
+repeat count and its original age; anomalies are one per kind with a count.
+
+The pattern to remember: when a system loops, look for the reading each part
+takes of another part's *output as if it were input*. The mailbox is a channel,
+not a to-do list; a report is not work; a failed wake is not a wake.

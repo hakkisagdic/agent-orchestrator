@@ -699,17 +699,26 @@ def agent_pids(root, adapter, headless_only=False):
         if argv:
             names.add(os.path.basename(argv[0]))
     names.update({"kiro-cli", "claude", "claude-code", "codex", "cursor-agent"})
-    out = []
+    cands = set()
     for name in names:
         for pid in (sh(f"pgrep -f {name}") or "").split():
-            if not pid.isdigit() or int(pid) == os.getpid():
-                continue
-            cwd = ""
-            for line in (sh(f"lsof -a -p {pid} -d cwd -Fn") or "").split("\n"):
-                if line.startswith("n"):
-                    cwd = line[1:]
-            if cwd and os.path.realpath(cwd) == os.path.realpath(root):
-                out.append(int(pid))
+            if pid.isdigit() and int(pid) != os.getpid():
+                cands.add(int(pid))
+    out = []
+    if cands:
+        # One lsof for every candidate. A call per pid was fine at ten processes
+        # and took over two minutes at a hundred and fifty — every helper of a
+        # desktop app matches `pgrep -f claude` — and the implementer's writer
+        # check timed out on it. -w drops warnings, -n/-P skip name lookups.
+        want = os.path.realpath(root)
+        cur = None
+        pids = ",".join(str(p) for p in sorted(cands))
+        for line in (sh(f"lsof -w -n -P -a -d cwd -Fpn -p {pids}") or "").split("\n"):
+            if line.startswith("p") and line[1:].isdigit():
+                cur = int(line[1:])
+            elif line.startswith("n") and cur is not None:
+                if os.path.realpath(line[1:]) == want:
+                    out.append(cur)
     out = sorted(set(out))
     if headless_only:
         # Never a human's interactive session. `ao hold` once stopped seven
@@ -1177,6 +1186,7 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
     seven hours the last time something made it.
     """
     out = []
+    groups = {}
 
     # An explicit request outranks every heuristic here. When the implementer
     # writes to the architect it has already decided it is blocked, and waiting
@@ -1224,11 +1234,23 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
                 asking = bool(value) and not value.startswith(
                     ("none", "no ", "yok", "-", "n/a", "hiç"))
                 break
-        out.append({"kind": "decision-requested" if asking else "report-waiting",
-                    "facts": [f"the implementer wrote {m}",
-                              first.lstrip("# ").strip()[:200],
+        kind = "decision-requested" if asking else "report-waiting"
+        g = groups.setdefault(kind, {"n": 0, "first": m})
+        g["n"] += 1
+        g["latest"] = m
+        g["title"] = first.lstrip("# ").strip()[:200]
+    # One anomaly per kind, however many reports carry it. Eighty "queue empty"
+    # reports in eleven hours became eighty anomaly files and forty wake attempts;
+    # the architect needed one line saying "eighty, since 06:31".
+    for kind, g in groups.items():
+        since = g["first"][:13] if re.match(r"\d{8}-\d{4}", g["first"]) else g["first"][:20]
+        head = f"the implementer wrote {g['latest']}"
+        if g["n"] > 1:
+            head += f" — {g['n']} report(s) of this kind standing, the first since {since}"
+        out.append({"kind": kind, "key": "implementer",
+                    "facts": [head, g["title"],
                               "an explicit request — not a symptom needing corroboration"
-                              if asking else "a report, not a blocker"]})
+                              if kind == "decision-requested" else "a report, not a blocker"]})
 
     # Exclude pids the caller knows are not implementer writers — above all the
     # architect the watchdog itself spawned, which resumes with this repo as its
@@ -1277,7 +1299,7 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
     return out
 
 
-def write_report(root, cfg, kind, facts):
+def write_report(root, cfg, kind, facts, key=None):
     """A watchdog-to-architect message: observations, no interpretation.
 
     Deduplicated by what the anomaly is *about*, not by wall-clock time. The name
@@ -1295,8 +1317,8 @@ def write_report(root, cfg, kind, facts):
         # A stable key from the source the facts name (e.g. "the implementer wrote
         # X.md"), falling back to the kind alone for anomalies with no single
         # source. This is what makes the exists-guard actually guard.
-        src = ""
-        for f in facts:
+        src = "-" + re.sub(r"[^A-Za-z0-9]+", "-", key).strip("-") if key else ""
+        for f in [] if key else facts:
             mrk = re.search(r"wrote\s+(\S+\.md)", f)
             if mrk:
                 src = "-" + re.sub(r"[^A-Za-z0-9]+", "-", mrk.group(1)[:-3]).strip("-")
@@ -2016,3 +2038,187 @@ def fanout_verdict(root, cfg, agents, per_agent_tokens=None, provider="claude"):
             "per_agent_source": "arg" if per_agent_tokens else ("observed" if observed else "default"),
             "estimated_tokens": agents * per, "spent_this_window": spent,
             "window": win, "max_agents": fc["max_agents"], "reasons": reasons}
+
+
+
+# ---- binaries ----------------------------------------------------------------
+#
+# The architect was woken forty times in eleven hours and every wake died with
+# "Claude Code 2.1.185 does not support this model". The binary was real, on
+# PATH, and two hundred versions stale — an npm-global leftover in /usr/local
+# whose node had long since moved under a version manager, where a current
+# copy sat unused. `which` answers "the first one", and the first one is the
+# wrong question. Ask "the newest one" and remember what it said.
+
+_BIN_DIRS = ("~/.local/bin", "~/bin", "/usr/local/bin", "/opt/homebrew/bin",
+             "~/.claude/local", "~/.npm-global/bin", "~/.volta/bin", "~/.asdf/shims")
+_BIN_GLOBS = ("~/.local/share/fnm/node-versions/*/installation/bin",
+              "~/.fnm/node-versions/*/installation/bin",
+              "~/.nvm/versions/node/*/bin", "~/.local/share/mise/installs/node/*/bin")
+
+
+def binary_candidates(name, path=None):
+    """Every executable called `name` this machine has, PATH first, deduplicated."""
+    import glob as _glob
+    dirs = [d for d in (path or os.environ.get("PATH", "")).split(":") if d]
+    dirs += [os.path.expanduser(d) for d in _BIN_DIRS]
+    for g in _BIN_GLOBS:
+        dirs += sorted(_glob.glob(os.path.expanduser(g)), reverse=True)
+    seen, out = set(), []
+    for d in dirs:
+        cand = os.path.join(d, name)
+        if not (os.path.isfile(cand) and os.access(cand, os.X_OK)):
+            continue
+        real = os.path.realpath(cand)
+        if real in seen:
+            continue
+        seen.add(real)
+        out.append(cand)
+    return out
+
+
+def binary_version(path):
+    """`path --version`, cached by (path, mtime) so a wake does not pay for it twice."""
+    cache_p = os.path.join(HOME, ".ao", "binaries.json")
+    try:
+        cache = json.load(open(cache_p))
+    except (OSError, ValueError):
+        cache = {}
+    try:
+        mtime = os.path.getmtime(os.path.realpath(path))
+    except OSError:
+        return ""
+    ent = cache.get(path)
+    if ent and ent.get("mtime") == mtime:
+        return ent.get("version", "")
+    out = ""
+    try:
+        r = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=25,
+                           env=dict(os.environ, PATH=os.environ.get("PATH", "") + ":" +
+                                    os.path.dirname(os.path.realpath(path)) + ":" + os.path.dirname(path)))
+        m = re.search(r"(\d+\.\d+\.\d+)", (r.stdout or "") + (r.stderr or ""))
+        out = m.group(1) if m else ""
+    except Exception:
+        out = ""
+    cache[path] = {"mtime": mtime, "version": out, "at": int(time.time())}
+    try:
+        os.makedirs(os.path.dirname(cache_p), exist_ok=True)
+        json.dump(cache, open(cache_p, "w"))
+    except OSError:
+        pass
+    return out
+
+
+def _vtuple(v):
+    return tuple(int(x) for x in v.split(".")) if v else (0,)
+
+
+def resolve_binary(name, path=None):
+    """(path, version) of the newest `name` on this machine; (None, "") if none.
+
+    An absolute path is returned as-is with its version. Ties keep PATH order.
+    """
+    if os.path.isabs(name):
+        return (name if os.access(name, os.X_OK) else None), binary_version(name) if os.path.exists(name) else ""
+    best = (None, "")
+    for cand in binary_candidates(name, path):
+        v = binary_version(cand)
+        if best[0] is None or _vtuple(v) > _vtuple(best[1]):
+            best = (cand, v)
+    return best
+
+
+# ---- implementer reports ------------------------------------------------------
+
+def _report_summary(path):
+    try:
+        for line in open(path, errors="replace"):
+            if line.startswith("#"):
+                return line.lstrip("# ").strip()
+    except OSError:
+        pass
+    return ""
+
+
+def bump_repeat(path):
+    """Fold a repeated report into the standing one; keep its mtime (its age is the fact)."""
+    try:
+        st = os.stat(path)
+        body = open(path, errors="replace").read()
+    except OSError:
+        return 0
+    m = re.search(r"^Tekrar: (\d+)", body, re.M)
+    n = int(m.group(1)) + 1 if m else 2
+    line = f"Tekrar: {n} · son: {time.strftime('%Y-%m-%d %H:%M')}"
+    body = re.sub(r"^Tekrar: .*$", line, body, flags=re.M) if m else body.rstrip("\n") + "\n\n" + line + "\n"
+    try:
+        open(path, "w").write(body)
+        os.utime(path, (st.st_atime, st.st_mtime))
+    except OSError:
+        pass
+    return n
+
+
+def _name_time(name):
+    m = re.match(r"(\d{8})-(\d{4})", name)
+    if not m:
+        return None
+    try:
+        return time.mktime(time.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M"))
+    except ValueError:
+        return None
+
+
+def implementer_inbox(root, cfg):
+    """Mail addressed to the implementer: not its own reports, not the watchdog's."""
+    box = cfg.get("mailbox", "agent-mail")
+    return [m for m in mailbox(root, box)
+            if "-to-fable-" not in m and "-to-architect-" not in m
+            and not m.startswith("watchdog-to-") and "-watchdog-to-" not in m]
+
+
+def product_dirty(root, cfg):
+    """Uncommitted paths outside the coordination directories."""
+    skip = tuple(x.rstrip("/") + "/" for x in (cfg.get("mailbox", "agent-mail"),
+                                                cfg.get("reviews", "semantic-review"), ".ao") if x)
+    out = []
+    for line in (sh("git status --porcelain", cwd=root) or "").split("\n"):
+        if not line.strip():
+            continue
+        path = line[3:].strip().strip('"')
+        if path.startswith(skip):
+            continue
+        out.append(line)
+    return out
+
+
+def waiting_on_architect(root, cfg):
+    """The implementer's standing request the architect has not answered.
+
+    Returns (report, asked_at) when the newest implementer report asks for a
+    decision, nothing addressed to the implementer arrived after it, and the
+    board has nothing queued. Nudging in that state produces reports, not
+    progress: eighty of them, once, at eight-minute intervals.
+    """
+    box = cfg.get("mailbox", "agent-mail")
+    files = mailbox(root, box)
+    reports = [m for m in files if ("-to-fable-" in m or "-to-architect-" in m)
+               and not m.startswith("watchdog-to-") and "-watchdog-to-" not in m]
+    if not reports:
+        return None
+    latest = reports[-1]
+    p = os.path.join(root, box, latest)
+    try:
+        low = open(p, errors="replace").read(4000).lower()
+    except OSError:
+        return None
+    if not any(h in low for h in ("## karar gerekli", "## acil", "## decision required",
+                                   "## urgent", "## blocked")):
+        return None
+    at = _name_time(latest) or os.path.getmtime(p)
+    for m in implementer_inbox(root, cfg):
+        if (_name_time(m) or os.path.getmtime(os.path.join(root, box, m))) > at:
+            return None
+    if board(root)["queued"]:
+        return None
+    return latest, at
