@@ -1469,6 +1469,15 @@ def cmd_init(cfg, args):
           f"acceptance boundary, then {C['b']}ao doctor{C['reset']}.")
     if not (args.mcp and args.watchdog):
         print(f"{C['dim']}Automation is opt-in: ao init --mcp --watchdog{C['reset']}")
+    # Channels are part of setup, not an afterthought: an orange alarm with no
+    # channel beyond the desktop is a silent alarm, and the first stall proves it.
+    from . import telegram as _tg, email as _em
+    if not (_tg.config() or _em.config()):
+        print(f"\n{C['yellow']}No human channel beyond desktop notifications.{C['reset']} Red alarms "
+              f"(stalls over an hour, exhausted quota, failed architect wakes) need one:\n"
+              f"   {C['b']}ao email setup{C['reset']}     e-mail via formsubmit.co, no server (2 minutes)\n"
+              f"   {C['b']}ao telegram setup{C['reset']}  a bot for decisions from your phone\n"
+              f"   docs/alarms.md explains the levels.")
     return 0
 
 
