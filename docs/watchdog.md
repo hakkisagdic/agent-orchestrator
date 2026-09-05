@@ -92,6 +92,7 @@ ao watchdog trace --last 30  # the recorded cycles: time, verdict, the facts tha
 ao writers                   # who is writing (turns, not processes) and what is orphaned
 ao alarms                    # live alarm episodes, their level and age
 ao doctor                    # binaries, last wake, last tick, channels, live alarms
+ao doctor --check            # the same, quiet, exit 1 on problems — runs every 15 min from its own launchd job
 ao mail log                  # every message written and when it was consumed
 ```
 

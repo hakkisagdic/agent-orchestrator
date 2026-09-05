@@ -192,3 +192,12 @@ one normalised vocabulary either way.
 `ao a2a serve` now answers both, verified against itself through this bridge:
 `ListTasks` returns `TASK_STATE_INPUT_REQUIRED` and `tasks/list` returns
 `input-required`, from the same board.
+
+## Registration is part of `ao init`
+
+`ao init` registers the server for every agent it detects — `.mcp.json` for
+Claude Code, `.kiro/settings/mcp.json` for Kiro, a snippet for Codex's
+user-level config — merged into whatever those files already hold, and writes
+the playbook (`ao skill install`) beside it. The one step it cannot do is the
+restart: the human starts or restarts the app in the directory so the tools
+load, then runs `ao doctor`. `--no-mcp` skips the registration.

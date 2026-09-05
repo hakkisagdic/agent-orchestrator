@@ -339,6 +339,18 @@ def cmd_mail(cfg, args):
             print(f"  {when}  {r.get('kind') or '':<9} {r['id'][:60]}  {C['dim']}{r.get('summary', '')[:70]}{C['reset']}")
 
 
+PLIST_CMD = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>{label}</string>
+  <key>ProgramArguments</key><array>{args}</array>
+  <key>StartInterval</key><integer>{interval}</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>{log}</string>
+  <key>StandardErrorPath</key><string>{log}</string>
+</dict></plist>
+"""
+
 PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -1455,30 +1467,30 @@ def cmd_init(cfg, args):
         print(f"  {C['dim']}kept   {rel}{C['reset']}")
 
     exe = shutil.which("ao") or os.path.abspath(sys.argv[0])
-    if args.mcp and shutil.which("kiro-cli"):
-        A.sh(f'kiro-cli mcp add --name ao --scope workspace --command "{exe}" '
-             f'--args \'["-C","{root}","mcp","serve"]\'', cwd=root)
-        print(f"  {C['green']}mcp{C['reset']}    registered `ao` with kiro-cli (workspace)")
+    # The playbook and the MCP registration are the two things an agent needs to
+    # behave like the architect from its first turn; both are written for every
+    # agent this repository is seen to use. Ask the human before running init;
+    # the tool itself does not ask.
+    from . import skillkit
+    _, agents = skillkit.detect_agents(root, args.agent)
+    for rel, what in skillkit.install_playbook(root, agents).items():
+        print(f"  {C['green'] if what != 'kept' else C['dim']}{what:<8}{C['reset']} {rel}")
+    registered = {} if args.no_mcp else skillkit.register_mcp(root, agents, exe)
+    for agent, what in registered.items():
+        print(f"  {C['green']}mcp{C['reset']}      {agent}: {what.splitlines()[0]}")
+        if what.startswith("manual"):
+            print("           " + "\n           ".join(what.splitlines()[1:]))
     if args.watchdog:
         code = subprocess.run([exe, "-C", root, "watchdog", "install"],
                               capture_output=True, text=True).returncode
         print(f"  {C['green'] if code == 0 else C['red']}watchdog{C['reset']} "
               f"{'installed' if code == 0 else 'install failed — run ao watchdog install'}")
 
-    print(f"\n{C['b']}Next:{C['reset']} write the first slice into .ao/backlog.md with an "
-          f"acceptance boundary, then {C['b']}ao doctor{C['reset']}.")
-    if not (args.mcp and args.watchdog):
-        print(f"{C['dim']}Automation is opt-in: ao init --mcp --watchdog{C['reset']}")
-    # Channels are part of setup, not an afterthought: an orange alarm with no
-    # channel beyond the desktop is a silent alarm, and the first stall proves it.
-    from . import telegram as _tg, email as _em
-    if not (_tg.config() or _em.config()):
-        print(f"\n{C['yellow']}No human channel beyond desktop notifications.{C['reset']} Red alarms "
-              f"(stalls over an hour, exhausted quota, failed architect wakes) need one:\n"
-              f"   {C['b']}ao email setup{C['reset']}     e-mail via formsubmit.co, no server (2 minutes)\n"
-              f"   {C['b']}ao telegram setup{C['reset']}  a bot for decisions from your phone\n"
-              f"   docs/alarms.md explains the levels.")
+    print(f"\n{C['b']}Next, for a person:{C['reset']}")
+    for line in skillkit.next_steps(agents, registered):
+        print(f"  · {line}")
     return 0
+
 
 
 def cmd_decide(cfg, args):
@@ -1997,6 +2009,60 @@ def _watchdog_debug(cfg, args):
     return 0
 
 
+def cmd_skill(cfg, args):
+    """The playbook, rendered for the agents this repository uses."""
+    from . import skillkit
+    root = cfg["root"]
+    if args.action == "show":
+        print(skillkit.playbook()[1])
+        return 0
+    _, agents = skillkit.detect_agents(root, args.agent)
+    for rel, what in skillkit.install_playbook(root, agents).items():
+        print(f"  {C['green'] if what != 'kept' else C['dim']}{what:<8}{C['reset']} {rel}")
+    print(f"{C['dim']}agents: {', '.join(sorted(agents))} · regenerate any time; hand edits outside the markers survive{C['reset']}")
+    return 0
+
+
+def doctor_problems(cfg):
+    """What `ao doctor --check` acts on: conditions a person must fix, as (key, text)."""
+    from .watchdog import wake_error, STATE_DIR
+    root = cfg["root"]
+    key = os.path.basename(root.rstrip("/")) or "root"
+    out = []
+    hb = A.heartbeat_age(root)
+    if hb is not None and hb > 360:
+        out.append(("watchdog-dead", f"watchdog silent for {hb // 60}m — launchctl / ao watchdog status"))
+    we = wake_error(os.path.join(STATE_DIR, f"escalate-{key}.log"))
+    if we and we["kind"] in ("binary", "session"):
+        try:
+            when = time.mktime(time.strptime(we["when"], "%Y-%m-%d %H:%M:%S"))
+        except ValueError:
+            when = time.time()
+        if time.time() - when < 24 * 3600:
+            out.append(("wake-failed", f"last architect wake failed ({we['kind']}): {we['text'][:90]}"))
+    from . import telegram as _tg, email as _em
+    if not (_tg.config() or _em.config()):
+        out.append(("no-channel", "no human channel beyond desktop notifications — ao email setup"))
+    for sib, age in A.stale_siblings(root).items():
+        out.append((f"sibling-dead:{sib}", f"{sib}: watchdog silent for {age // 60}m"))
+    return out
+
+
+def _doctor_check(cfg):
+    """Quiet, machine-facing doctor: one line per problem, exit 1 if any, each raised as an alarm."""
+    from .watchdog import notify
+    root = cfg["root"]
+    project = os.path.basename(root.rstrip("/")) or "root"
+    problems = doctor_problems(cfg)
+    if not problems:
+        print(f"ok {time.strftime('%H:%M')} — no problems")
+        return 0
+    for key, text in problems:
+        print(f"PROBLEM {key}: {text}")
+        notify(f"{project}: {key}", text, root, key=f"doctor:{key}", window=3600, audience="human")
+    return 1
+
+
 def _alive(pid):
     try:
         os.kill(pid, 0)
@@ -2172,7 +2238,9 @@ def cmd_watchdog(cfg, args):
 
     if args.action == "status":
         loaded = A.sh(f"launchctl list | grep {label}")
+        dloaded = A.sh(f"launchctl list | grep com.agentorchestrator.doctor.{key}")
         print(f"label   {label}")
+        print(f"doctor  {'loaded' if dloaded else 'not installed'}  (ao doctor --check every 15m)")
         print(f"plist   {'present' if os.path.exists(plist_path) else 'absent'}")
         print(f"loaded  {loaded if loaded else 'no'}")
         if os.path.exists(log):
@@ -2185,6 +2253,12 @@ def cmd_watchdog(cfg, args):
         if os.path.exists(plist_path):
             os.remove(plist_path)
         print(f"removed {label}")
+        dlabel = f"com.agentorchestrator.doctor.{key}"
+        dplist = os.path.expanduser(f"~/Library/LaunchAgents/{dlabel}.plist")
+        A.sh(f"launchctl bootout gui/$(id -u)/{dlabel} 2>/dev/null")
+        if os.path.exists(dplist):
+            os.remove(dplist)
+            print(f"removed {dlabel}")
         return
 
     os.makedirs(os.path.dirname(plist_path), exist_ok=True)
@@ -2196,6 +2270,20 @@ def cmd_watchdog(cfg, args):
     A.sh(f"launchctl bootout gui/$(id -u)/{label} 2>/dev/null")
     out = A.sh(f"launchctl bootstrap gui/$(id -u) {plist_path} 2>&1") or "loaded"
     print(f"installed {label}")
+    # The second, independent check. A watchdog cannot report its own death;
+    # this job runs `ao doctor --check` every fifteen minutes from its own
+    # launchd entry and raises the alarm the watchdog would have.
+    dlabel = f"com.agentorchestrator.doctor.{key}"
+    dplist = os.path.expanduser(f"~/Library/LaunchAgents/{dlabel}.plist")
+    ao_exe = shutil.which("ao") or os.path.join(A.REPO, "bin", "ao")
+    ao_in_repo = os.path.realpath(ao_exe).startswith(os.path.realpath(A.REPO))
+    dargs = ([sys.executable] if ao_in_repo else []) + [ao_exe, "-C", root, "doctor", "--check"]
+    open(dplist, "w").write(PLIST_CMD.format(
+        label=dlabel, args="".join(f"<string>{a}</string>" for a in dargs),
+        interval=900, log=os.path.expanduser(f"~/.ao/doctor-{key}.log")))
+    A.sh(f"launchctl bootout gui/$(id -u)/{dlabel} 2>/dev/null")
+    A.sh(f"launchctl bootstrap gui/$(id -u) {dplist} 2>&1")
+    print(f"installed {dlabel}  (ao doctor --check every 15m — the second, independent check)")
     print(f"  checks every {args.interval}s · nudges after {args.idle_minutes}m idle")
     print(f"  log: {log}")
     print(f"  remove with: ao -C {root} watchdog uninstall")
@@ -2248,6 +2336,8 @@ def cmd_adapters(cfg, args):
 
 
 def cmd_doctor(cfg, args):
+    if getattr(args, "check", False):
+        return _doctor_check(cfg)
     root, impl, adapter = _ctx(cfg)
     ok = lambda b: f"{C['green']}ok{C['reset']}" if b else f"{C['red']}missing{C['reset']}"
 
@@ -2440,8 +2530,9 @@ def main():
     dg.set_defaults(fn=cmd_digest)
     ini = sub.add_parser("init", help="put ao on this project (idempotent)")
     ini.add_argument("--name")
-    ini.add_argument("--agent", choices=["kiro", "claude", "auto"], default="auto")
-    ini.add_argument("--mcp", action="store_true", help="also register the MCP server")
+    ini.add_argument("--agent", choices=["kiro", "claude", "claude-code", "codex", "auto", "all"], default="auto")
+    ini.add_argument("--mcp", action="store_true", help="(default) register the MCP server for detected agents")
+    ini.add_argument("--no-mcp", action="store_true", help="skip the MCP registration")
     ini.add_argument("--watchdog", action="store_true", help="also install the watchdog")
     ini.set_defaults(fn=cmd_init)
     de = sub.add_parser("decide", help="record an architect decision durably")
@@ -2548,7 +2639,13 @@ def main():
     sr.set_defaults(fn=cmd_source)
     sub.add_parser("projects", help="workspaces with a local agent session").set_defaults(fn=cmd_projects)
     sub.add_parser("adapters", help="adapter registry and verification status").set_defaults(fn=cmd_adapters)
-    sub.add_parser("doctor", help="check this workspace's wiring").set_defaults(fn=cmd_doctor)
+    dr = sub.add_parser("doctor", help="check this workspace's wiring")
+    dr.add_argument("--check", action="store_true", help="quiet: one line per problem, exit 1 if any, alarms raised")
+    dr.set_defaults(fn=cmd_doctor)
+    sk = sub.add_parser("skill", help="the playbook, rendered for the agents this repository uses")
+    sk.add_argument("action", choices=["install", "show"], nargs="?", default="install")
+    sk.add_argument("--agent", choices=["kiro", "claude", "claude-code", "codex", "auto", "all"], default="auto")
+    sk.set_defaults(fn=cmd_skill)
 
     args = p.parse_args()
     if not getattr(args, "fn", None):
