@@ -44,8 +44,7 @@ def test_helpers_are_not_writers(project, monkeypatch):
         if cmd.startswith("ps -o args= -p"):
             return lines[int(cmd.split()[-1])]
         if cmd.startswith("lsof"):
-            return "p500\nn/repo\np501\nn/repo\np600\nn/repo"
+            return f"p500\nn{root}\np501\nn{root}\np600\nn{root}"
         return ""
     monkeypatch.setattr(A, "sh", fake_sh)
-    monkeypatch.setattr(A.os.path, "realpath", lambda p: p)
-    assert A.agent_pids("/repo", {"resume": {"argv": ["kiro-cli"]}}) == [600]
+    assert A.agent_pids(root, {"resume": {"argv": ["kiro-cli"]}}) == [600]

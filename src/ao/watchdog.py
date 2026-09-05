@@ -590,6 +590,7 @@ def escalate(root, cfg, adapter, age, args, st):
                                         start_new_session=True)
             st["arch_pid"] = proc.pid
             st["last_arch_wake"] = time.time()
+            A.helper_register(root, proc.pid, "architect")   # a judge, not a writer
             save_state(root, st)
             try:
                 from . import telegram
@@ -964,6 +965,7 @@ def _cycle(args, root):
                                         stdout=log, stderr=subprocess.STDOUT,
                                         start_new_session=True)
             st.update(arch_pid=proc.pid, last_refill=time.time())
+            A.helper_register(root, proc.pid, "architect")   # a judge, not a writer
             save_state(root, st)
             print(f"queue low ({depth} < {threshold}); woke the architect")
             return 0
