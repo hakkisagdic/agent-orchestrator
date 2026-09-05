@@ -2215,10 +2215,11 @@ def waiting_on_architect(root, cfg):
     if not any(h in low for h in ("## karar gerekli", "## acil", "## decision required",
                                    "## urgent", "## blocked")):
         return None
-    at = _name_time(latest) or os.path.getmtime(p)
-    for m in implementer_inbox(root, cfg):
-        if (_name_time(m) or os.path.getmtime(os.path.join(root, box, m))) > at:
-            return None
+    # Delivery is by deletion, so any file addressed to the implementer is
+    # unread — whatever its timestamp. An answer written while the implementer
+    # was repeating its request is older than the repeat and still the answer.
+    if implementer_inbox(root, cfg):
+        return None
     if board(root)["queued"]:
         return None
-    return latest, at
+    return latest, _name_time(latest) or os.path.getmtime(p)
