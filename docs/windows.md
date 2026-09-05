@@ -12,9 +12,11 @@ What works, what does not, and how it is tested without a Windows machine.
 | desktop notifications | not on Windows yet — Telegram and e-mail carry the orange and red levels |
 | pre-push hook | works under Git's own shell |
 
-Every push runs the test suite on `windows-latest` beside macOS and Ubuntu
-(`.github/workflows/tests.yml`), including the process backend's self-check on
-its own pid. That is how Windows is developed here: the runner is the machine.
+The suite runs on every push locally (the repository's pre-push hook, on a Mac);
+the hosted `tests` workflow is manual — `gh workflow run tests -f os=windows-latest`
+— because macOS minutes bill at 10x and Windows at 2x. It runs the same suite,
+including the process backend's self-check on its own pid. That is how Windows is
+developed here: the runner is the machine, on demand.
 Faults found there get a scenario in `tests/test_scenarios.py` like any other.
 
 Not yet done, in order of value: cwd via the process environment block (psutil's
