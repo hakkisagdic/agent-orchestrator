@@ -30,7 +30,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from ao import lib as A  # noqa: E402
+from ao import __version__, lib as A  # noqa: E402
 UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 PROTOCOL = "2025-06-18"
@@ -268,7 +268,7 @@ def main():
         try:
             if method == "initialize":
                 result = {"protocolVersion": PROTOCOL, "capabilities": {"tools": {}},
-                          "serverInfo": {"name": "ao-a2a-mcp", "version": "0.1.1"}}
+                          "serverInfo": {"name": "ao-a2a-mcp", "version": __version__}}
             elif method in ("notifications/initialized", "initialized"):
                 continue
             elif method == "tools/list":
