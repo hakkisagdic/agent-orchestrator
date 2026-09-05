@@ -131,14 +131,23 @@ directory so the `ao` tools load, then run `ao doctor`.* Add `--watchdog` (or
 `ao watchdog install`) for unattended runs; it installs a companion job that runs
 `ao doctor --check` every fifteen minutes as the second, independent check.
 
-## 10. Never
+## 10. When the run degrades
+
+A reviewer out of quota is exit 3, not a verdict; the architect out of quota
+means wakes wait for the reset and the queue must already hold work; the
+implementer out of credits is a red alarm days ahead (`ao doctor` shows the
+burn rate). A person may bypass a gate with `ao waive` — on the record — and
+`ao catchup` reconciles it when the way is clear. Nothing is skipped silently
+and nothing is lost.
+
+## 11. Never
 
 Push. Open a PR. Force-push or bypass hooks. Tick an epic box. Change an
 architectural contract (write `KARAR GEREKLİ` instead). Present fixture evidence
 as production-qualified. Touch another repository. Kill a process you did not
 start. Run anything in a repository whose owner has not approved it.
 
-## 11. Commands
+## 12. Commands
 
 | command | one line |
 |---|---|
@@ -165,6 +174,9 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao telegram setup|test|install` | the orange channel and phone decisions |
 | `ao fanout ok|record|history` | budget gate for sub-agent fan-outs |
 | `ao credits` | provider credits and windows |
+| `ao features [on|off <key>]` | the switches and what each costs; all off = deterministic ao |
+| `ao waive <gate> --slice S --why …` / `ao catchup` | a person's bypass on the record; catchup reviews the landed range and replays deferred work |
+| `ao pings setup --url …` / `ao hooks install` / `ao push allow` | dead man's switch; pre-push hook with a human push window |
 | `ao cost [--since 24h]` | what the coordination spends: implementer turns by class, wasted turns, review counts |
 | `ao since last|2h|<ref>` | what happened since |
 | `ao digest` | landed work, gates, reviews, decisions in one page |
@@ -175,7 +187,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao mcp serve` / `ao mcp config` | the MCP server and its client config |
 | `ao a2a serve` / `ao a2a-mcp serve` | A2A: serve the board; bridge remote agents into MCP |
 
-## 12. Read further
+## 13. Read further
 
 `docs/` in the ao repository: roles, protocol, gates, safety, recovery,
 watchdog (the contract and the fault catalog), alarms, fanout, mcp, telegram,

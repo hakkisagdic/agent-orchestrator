@@ -2781,3 +2781,302 @@ def turn_costs(cfg, since=None):
             b["wasted_usage"] += tn["usage"]
         out["total"] += tn["usage"]
     return out
+
+
+# ---- deferred work: what could not run, so it can run later ----------------------
+#
+# A quota window closing must not lose anything. Every action ao could not take
+# — a nudge, a wake, a review — is written down with why, and `ao catchup`
+# replays the queue when the way is clear. This is the "bypass now, reconcile
+# later" the human asked for: the run degrades, it never forgets.
+
+def deferred_append(root, kind, **fields):
+    d = os.path.join(root, ".ao", "ledger")
+    rec = {"event": "deferred", "id": f"DF-{int(time.time())}-{kind}", "kind": kind, "at": int(time.time())}
+    rec.update(fields)
+    try:
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "deferred.jsonl"), "a") as fh:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+    return rec
+
+
+def deferred_close(root, did, outcome="done"):
+    d = os.path.join(root, ".ao", "ledger")
+    try:
+        with open(os.path.join(d, "deferred.jsonl"), "a") as fh:
+            fh.write(json.dumps({"event": "closed", "id": did, "at": int(time.time()), "outcome": outcome}) + "\n")
+    except OSError:
+        pass
+
+
+def deferred_open(root):
+    p = os.path.join(root, ".ao", "ledger", "deferred.jsonl")
+    if not os.path.exists(p):
+        return []
+    rows, closed = {}, set()
+    for line in open(p, errors="replace"):
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if r.get("event") == "deferred":
+            rows[r["id"]] = r
+        elif r.get("event") == "closed":
+            closed.add(r["id"])
+    return [r for i, r in rows.items() if i not in closed]
+
+
+def recently_deferred(root, kind, within=3600):
+    cut = time.time() - within
+    return any(r["kind"] == kind and r["at"] >= cut for r in deferred_open(root))
+
+
+# ---- waivers: the human's bypass, on the record ---------------------------------
+
+def waive(root, gate, slice_id, why, by="human"):
+    """Record that a person waived a gate for a slice. commit-ok honours it; catchup reconciles it."""
+    d = os.path.join(root, ".ao", "ledger")
+    os.makedirs(d, exist_ok=True)
+    rec = {"event": "waived", "id": f"W-{int(time.time())}", "gate": gate, "slice": slice_id,
+           "why": why, "by": by, "at": int(time.time()),
+           "head": sh("git rev-parse HEAD", cwd=root), "tree": tree_digest(root)}
+    with open(os.path.join(d, "waivers.jsonl"), "a") as fh:
+        fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return rec
+
+
+def close_waiver(root, wid, outcome):
+    d = os.path.join(root, ".ao", "ledger")
+    try:
+        with open(os.path.join(d, "waivers.jsonl"), "a") as fh:
+            fh.write(json.dumps({"event": "closed", "id": wid, "at": int(time.time()), "outcome": outcome}) + "\n")
+    except OSError:
+        pass
+
+
+def open_waivers(root, gate=None, slice_id=None):
+    p = os.path.join(root, ".ao", "ledger", "waivers.jsonl")
+    if not os.path.exists(p):
+        return []
+    rows, closed = {}, set()
+    for line in open(p, errors="replace"):
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if r.get("event") == "waived":
+            rows[r["id"]] = r
+        elif r.get("event") == "closed":
+            closed.add(r["id"])
+    out = [r for i, r in rows.items() if i not in closed]
+    if gate:
+        out = [r for r in out if r["gate"] == gate]
+    if slice_id:
+        out = [r for r in out if r.get("slice") in (slice_id, "*")]
+    return out
+
+
+# ---- credits: burn rate and the day the work stops -------------------------------
+
+def record_credit_sample(root, used, limit, reset_at=None):
+    d = os.path.join(root, ".ao", "ledger")
+    try:
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "credits.jsonl"), "a") as fh:
+            fh.write(json.dumps({"at": int(time.time()), "used": float(used), "limit": float(limit),
+                                 "reset_at": reset_at}) + "\n")
+    except OSError:
+        pass
+
+
+def credit_samples(root, limit=500):
+    p = os.path.join(root, ".ao", "ledger", "credits.jsonl")
+    if not os.path.exists(p):
+        return []
+    rows = []
+    for line in open(p, errors="replace"):
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            pass
+    return rows[-limit:]
+
+
+def burn_rate(root, window=72 * 3600, now=None):
+    """From the samples: credits per day, days left, and whether the plan runs out
+    before it resets. None when there are not two samples a few hours apart."""
+    now = now or time.time()
+    rows = [r for r in credit_samples(root) if r["at"] >= now - window]
+    if len(rows) < 2:
+        return None
+    first, last = rows[0], rows[-1]
+    span = last["at"] - first["at"]
+    if span < 3 * 3600:
+        return None
+    per_day = max(0.0, (last["used"] - first["used"]) / span * 86400)
+    remaining = max(0.0, last["limit"] - last["used"])
+    days_left = remaining / per_day if per_day > 0 else None
+    exhausts_at = now + days_left * 86400 if days_left is not None else None
+    reset_at = last.get("reset_at")
+    before_reset = bool(exhausts_at and reset_at and exhausts_at < reset_at)
+    return {"per_day": per_day, "remaining": remaining, "days_left": days_left,
+            "exhausts_at": exhausts_at, "reset_at": reset_at, "before_reset": before_reset,
+            "used": last["used"], "limit": last["limit"]}
+
+
+# ---- external ping: the dead man's switch --------------------------------------------
+
+def pings_path():
+    return os.path.join(HOME, ".ao", "pings.json")
+
+
+def ping_url(root):
+    try:
+        d = json.load(open(pings_path()))
+    except (OSError, ValueError):
+        return None
+    key = os.path.basename(root.rstrip("/"))
+    return d.get(key) or d.get("*")
+
+
+def set_ping_url(root, url, all_projects=False):
+    try:
+        d = json.load(open(pings_path()))
+    except (OSError, ValueError):
+        d = {}
+    d["*" if all_projects else os.path.basename(root.rstrip("/"))] = url
+    os.makedirs(os.path.dirname(pings_path()), exist_ok=True)
+    json.dump(d, open(pings_path(), "w"), indent=2)
+    os.chmod(pings_path(), 0o600)
+    return d
+
+
+def ping(root, opener=None):
+    """One GET to the project's ping URL. A service that expects it every N
+    minutes alarms when it stops — which is the only way anyone learns that both
+    the watchdog and its doctor job have died."""
+    url = ping_url(root)
+    if not url:
+        return None
+    import urllib.request
+    try:
+        (opener or urllib.request.urlopen)(url, timeout=5)
+        return True
+    except Exception:
+        return False
+
+
+# ---- architect lock: one judge at a time --------------------------------------------
+
+def architect_lock_path(root):
+    key = os.path.basename(root.rstrip("/")) or "root"
+    return os.path.join(HOME, ".ao", f"architect-{key}.lock")
+
+
+def architect_lock_holder(root):
+    try:
+        d = json.load(open(architect_lock_path(root)))
+    except (OSError, ValueError):
+        return None
+    if d.get("pid") and not _pid_alive(int(d["pid"])):
+        return None                                        # stale: holder died
+    if time.time() - d.get("at", 0) > 3 * 3600:
+        return None                                        # stale: forgotten
+    return d
+
+
+def acquire_architect(root, pid, who):
+    """Take the lock unless a live holder has it. Two architect copies deciding at
+    once — a desktop resume beside a watchdog wake — contradict each other."""
+    holder = architect_lock_holder(root)
+    if holder and holder.get("pid") != pid:
+        return None
+    d = {"pid": pid, "who": who, "at": int(time.time())}
+    try:
+        os.makedirs(os.path.dirname(architect_lock_path(root)), exist_ok=True)
+        json.dump(d, open(architect_lock_path(root), "w"))
+    except OSError:
+        pass
+    return d
+
+
+def release_architect(root, pid=None):
+    try:
+        d = json.load(open(architect_lock_path(root)))
+        if pid is None or d.get("pid") == pid:
+            os.remove(architect_lock_path(root))
+    except (OSError, ValueError):
+        pass
+
+
+# ---- foreign edits: a person in the same files -------------------------------------
+
+def implementer_recent_writes(cfg, minutes=15):
+    """Paths the implementer's tools wrote in the last N minutes, from its transcript."""
+    msgs, _ = session_paths(cfg)
+    if not msgs or not os.path.exists(msgs):
+        return set()
+    cut = time.time() - minutes * 60
+    out = set()
+    for d in read_tail(msgs, 3_000_000):
+        pl = d.get("payload") or {}
+        if pl.get("type") != "tool_call":
+            continue
+        try:
+            import datetime as _dt
+            at = _dt.datetime.fromisoformat(d.get("timestamp", "").replace("Z", "+00:00")).timestamp()
+        except Exception:
+            continue
+        if at < cut:
+            continue
+        args = pl.get("args") or {}
+        path = args.get("path") or args.get("file_path") if isinstance(args, dict) else None
+        if path:
+            out.add(os.path.realpath(str(path)))
+    return out
+
+
+def foreign_edits(root, cfg, minutes=15):
+    """Product files changed in the last N minutes that the implementer did not write.
+
+    `ao writers` sees agents; it cannot see a person in an editor. This is the
+    nearest thing: a dirty product file whose mtime is recent and which the
+    implementer's own tool calls never touched. Named in the nudge so the
+    implementer keeps away from it."""
+    mine = implementer_recent_writes(cfg, minutes)
+    cut = time.time() - minutes * 60
+    out = []
+    for line in product_dirty(root, cfg):
+        rel = line[3:].strip().strip('"')
+        p = os.path.join(root, rel)
+        files = []
+        if os.path.isdir(p):                                    # git lists an untracked dir as one entry
+            for dp, _, fn in os.walk(p):
+                files += [os.path.join(dp, x) for x in fn]
+        elif os.path.isfile(p):
+            files = [p]
+        for f in files:
+            try:
+                if os.path.getmtime(f) >= cut and os.path.realpath(f) not in mine:
+                    out.append(os.path.relpath(f, root))
+            except OSError:
+                pass
+    return sorted(out)
+
+
+# ---- fleet reserve: the machine's shared windows ----------------------------------
+
+def fleet_reserve():
+    try:
+        return int(json.load(open(os.path.join(HOME, ".ao", "fleet.json"))).get("window_reserve_pct", 20))
+    except (OSError, ValueError):
+        return 20
+
+
+def window_headroom(provider="claude"):
+    """(left_pct, reserve_pct) or (None, reserve) when the window is unreadable."""
+    w = provider_window(provider)
+    return (100 - w["pct"]) if w else None, fleet_reserve()

@@ -71,7 +71,7 @@ def test_commits_range_reviews_landed_work(project, tmp_path):
     _repo_with_change(root)
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-am", "b"], cwd=root, check=True)
     seen = tmp_path / "seen.txt"
-    rec = _script(tmp_path / "rec", f"printf '%s' \"$1\" > {seen}; echo 'BLOCKER: 0'; echo 'HIGH: 0'; echo 'VERDICT: APPROVED'")
+    rec = _script(tmp_path / "rec", f"printf '%s' \"$1\" > {seen}; echo 'BLOCKER: 0'; echo 'HIGH: 0'; echo 'MEDIUM: 0'; echo 'LOW: 0'; echo 'VERDICT: APPROVED'")
     cfg = dict(project, reviewer={"id": "r1", "family": "x", "argv": [str(rec), "{prompt}"]})
     assert cli.cmd_review(cfg, _args(commits="HEAD~1..HEAD")) == 0
     assert "x = 2" in seen.read_text()

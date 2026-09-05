@@ -197,5 +197,10 @@
       "note": "usage_summary reports the running total of the turn in progress; a turn costs the peak it reached before the next turn resets it. Summing every record over-counts ~3x, taking only the last under-counts ~18x.",
       "accuracy": "a floor — measured at 69% of the account figure, since sessions on other machines are invisible"
     }
+  },
+  "models": {
+    "default": null,
+    "review": null,
+    "_note": "Kiro picks its own model; --model passes one through when set"
   }
 }

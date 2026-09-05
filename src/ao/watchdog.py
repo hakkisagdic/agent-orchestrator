@@ -492,6 +492,23 @@ def escalate(root, cfg, adapter, age, args, st):
     if woke and A.architect_present(arch.get("cwd") or root):
         print("reports pending, but the architect is already at the keyboard")
         woke = False
+    from . import features as F
+    if woke and not F.enabled(cfg, "architect_wake"):
+        print("reports pending; architect_wake feature is off — recorded and alarmed, not woken")
+        notify(f"{os.path.basename(root)}: needs you", f"{len(stale)} report(s) waiting and architect wakes are off",
+               root, key="reports-no-wake", window=3600, audience="human")
+        woke = False
+    if woke:
+        left, reserve = A.window_headroom("claude")
+        urgent = any(a.get("kind") == "decision-requested" for a in (found or []))
+        if left is not None and left < reserve and not urgent:
+            print(f"reports pending, but the machine's Claude window has {left}% left (< reserve {reserve}%); not waking")
+            woke = False
+    if woke:
+        holder = A.architect_lock_holder(root)
+        if holder:
+            print(f"reports pending, but an architect turn holds the lock ({holder.get('who')}, pid {holder.get('pid')})")
+            woke = False
     if woke and arch.get("argv") and not args.dry_run and not arch_alive(st):
         prompt = (
             "Sen bu deponun mimarısın ve watchdog tarafından uyandırıldın. "
@@ -543,6 +560,7 @@ def escalate(root, cfg, adapter, age, args, st):
                     # the human once (orange), and remember that the desktop app may
                     # resume the session itself when its auto-continue is on.
                     st["arch_quota_until"] = err.get("resets_at") or time.time() + 3600
+                    A.deferred_append(root, "wake", reason="architect quota", until=st["arch_quota_until"])
                 save_state(root, st)
                 A.record_notice(root, f"{key}: architect wake failed", f"{kind}: {text} [{used}]",
                                 True, key="architect-wake-failed")
@@ -591,6 +609,7 @@ def escalate(root, cfg, adapter, age, args, st):
             st["arch_pid"] = proc.pid
             st["last_arch_wake"] = time.time()
             A.helper_register(root, proc.pid, "architect")   # a judge, not a writer
+            A.acquire_architect(root, proc.pid, "watchdog wake")   # one judge at a time
             save_state(root, st)
             try:
                 from . import telegram
@@ -788,6 +807,27 @@ def _cycle(args, root):
     # has stood four hours is a person who forgot, which is a red.
     for e in A.expire_alarms(project):
         _announce_resolved(root, e)
+    # The dead man's switch: an external service that alarms when this stops.
+    _FACTS["ping"] = A.ping(root)
+    # Credits: one sample per half hour, and a red alarm when the burn rate says
+    # the plan runs out before it resets — the day everything stops.
+    if time.time() - st.get("last_credit_sample", 0) > 1800:
+        try:
+            acct = A.kiro_account_usage() if (adapter.get("billing") or {}).get("api") else None
+        except Exception:
+            acct = None
+        if acct and acct.get("limit"):
+            A.record_credit_sample(root, acct.get("used", 0), acct["limit"], acct.get("reset_at"))
+            st["last_credit_sample"] = time.time()
+            save_state(root, st)
+            br = A.burn_rate(root)
+            if br and br["before_reset"]:
+                notify(f"{project}: credits run out {time.strftime('%d %b', time.localtime(br['exhausts_at']))}",
+                       f"{br['used']:.0f}/{br['limit']:.0f} at {br['per_day']:.0f}/day; the reset is later. "
+                       f"New account (keyflip) or `ao features off …`", root, key="credits-exhaust",
+                       window=6 * 3600, audience="human", level="red")
+    fe = A.foreign_edits(root, cfg)
+    _FACTS["foreign_edits"] = fe
     for sib, age_s in A.stale_siblings(root).items():
         notify(f"{sib}: watchdog silent", f"no heartbeat for {age_s // 60}m — its watchdog is not "
                f"running; launchctl / ao watchdog status", root, key=f"watchdog-dead:{sib}",
@@ -922,6 +962,15 @@ def _cycle(args, root):
         # spec. This project had no source, so the empty queue was never a
         # refill and the only signal was the implementer's own blocked report.
         threshold = sc.get("refill_below", 3) if sc else 1
+        from . import features as F
+        if arch.get("argv") and depth < threshold and not F.enabled(cfg, "refill"):
+            print(f"queue low ({depth}); refill feature is off — alarming instead")
+            notify(f"{os.path.basename(root)}: needs you", f"queue has {depth} item(s) and refill wakes are off — add slices to .ao/backlog.md",
+                   root, key="queue-empty-no-refill", window=3600, audience="human")
+            return 0
+        if arch.get("argv") and depth < threshold and A.architect_lock_holder(root):
+            print("queue low, but an architect turn holds the lock")
+            return 0
         if arch.get("argv") and depth < threshold:
             if args.dry_run:
                 print(f"queue low ({depth}); would wake the architect to refill")
@@ -969,6 +1018,7 @@ def _cycle(args, root):
                                         start_new_session=True)
             st.update(arch_pid=proc.pid, last_refill=time.time())
             A.helper_register(root, proc.pid, "architect")   # a judge, not a writer
+            A.acquire_architect(root, proc.pid, "watchdog refill")
             save_state(root, st)
             print(f"queue low ({depth} < {threshold}); woke the architect")
             return 0
@@ -1000,6 +1050,8 @@ def _cycle(args, root):
     # the transport is HTTP, so a pending question reaches a phone even now. What
     # stops is deciding — so hand the state to whoever can.
     if not quota_ok(adapter):
+        if not A.recently_deferred(root, "nudge"):
+            A.deferred_append(root, "nudge", reason="implementer quota")
         if time.time() - st.get("last_handoff", 0) > 3600:
             try:
                 import subprocess as _sp
@@ -1068,6 +1120,15 @@ def _cycle(args, root):
                 continue
             argv += [x.replace("{" + key + "}", str(val)) for x in opts[key]]
 
+    from . import features as F
+    if not F.enabled(cfg, "nudge"):
+        print(f"idle {int(age)}s · {', '.join(reasons)} · nudge feature off; not starting a turn")
+        return 0
+    if fe:
+        # A person is in these files right now. Say so in the prompt; the
+        # implementer keeps away from them for this turn.
+        argv = [a.replace(args.prompt, args.prompt + " İnsan şu dosyaları düzenliyor, bu turda dokunma: "
+                          + ", ".join(fe[:8])) if a == args.prompt else a for a in argv]
     print(f"idle {int(age)}s · {', '.join(reasons)} · nudging")
     if args.dry_run:
         print("DRY RUN:", " ".join(argv[:4]), "…")

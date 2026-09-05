@@ -88,6 +88,10 @@ scope is the one authority an implementer must not have.
 | `ao writers` / `ao writers --clean` | live turns in the tree (one per turn, not per process), orphans set aside; `--clean` stops only the orphans |
 | `ao fanout ok --agents N` / `ao fanout record …` / `ao fanout history` | may a fan-out of N sub-agents start now (hard cap, recent limit hit, provider window); record what one cost |
 | `ao cost --since 24h` | what the coordination itself spends: implementer turns by class (product / analysis / ceremony / coordination), wasted turns, reviews |
+| `ao features [on|off <key>]` | the switches and what each costs; all off = deterministic ao, zero model spend ([features.md](docs/features.md)) |
+| `ao waive review --slice B7 --why …` / `ao catchup` | a person bypasses a gate on the record; catchup reviews the landed range and replays deferred wakes and nudges |
+| `ao pings setup --url …` | dead man's switch: external pings that alarm when the watchdog and its doctor job both die |
+| `ao hooks install` / `ao push allow` | pre-push hook refuses unless a person opened a push window |
 | `ao skill install` / `ao skill show` | the playbook (roles, loop, authority, protocol, alarms, every command) rendered for the agents this repo uses: Claude skill, Kiro steering, AGENTS.md |
 | `ao init --profile claude-kiro|claude-claude` | write the role blocks: who implements (adapter, model, effort), who reviews (another model), who judges ([profiles.md](docs/profiles.md)) |
 | `ao doctor --check` | quiet doctor for a scheduler: one line per problem, exit 1, alarms raised — installed as a 15-minute launchd job by `ao watchdog install` |

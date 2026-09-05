@@ -76,5 +76,10 @@
     "steering_format": "markdown, always included",
     "hooks": ".claude/settings.json (hooks key)",
     "skills_dir": ".claude/skills"
+  },
+  "models": {
+    "default": "claude-sonnet-5",
+    "review": "claude-opus-5",
+    "_note": "ao init --profile and the reviewer default read these; change here when Anthropic ships new ids"
   }
 }

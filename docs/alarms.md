@@ -47,3 +47,11 @@ Some conditions ring red at once, because waiting cannot help:
 ```
 
 in `.ao/config.json`. Optional.
+
+## When the alarm itself can die
+
+Every channel above runs on the machine that is failing. `ao pings setup --url
+…` adds the one that does not: the watchdog and the doctor job ping an external
+check (healthchecks.io) every cycle, and that service e-mails you when the pings
+stop. The credit burn rate (`ao doctor`) turns "the plan runs out before it
+resets" into a red alarm days ahead rather than a silent stop on the day.
