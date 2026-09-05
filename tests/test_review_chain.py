@@ -14,10 +14,10 @@ def _fake(*lines):
 
 def _repo_with_change(root):
     os.makedirs(os.path.join(root, "src"), exist_ok=True)
-    open(os.path.join(root, "src", "a.py"), "w").write("x = 1\n")
+    open(os.path.join(root, "src", "a.py"), "w", encoding="utf-8").write("x = 1\n")
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], cwd=root, check=True)
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "a"], cwd=root, check=True)
-    open(os.path.join(root, "src", "a.py"), "w").write("x = 2\n")
+    open(os.path.join(root, "src", "a.py"), "w", encoding="utf-8").write("x = 2\n")
 
 
 def _args(**kw):
@@ -32,7 +32,7 @@ def test_quota_error_is_not_a_verdict(project, tmp_path, capsys):
     cfg = dict(project, reviewer={"id": "r1", "family": "x", "argv": _fake("You've hit your session limit · resets 9:50pm (Europe/Istanbul)")})
     assert cli.cmd_review(cfg, _args()) == 3
     files = os.listdir(os.path.join(root, "semantic-review"))
-    assert len(files) == 1 and "VERDICT: UNAVAILABLE" in open(os.path.join(root, "semantic-review", files[0])).read()
+    assert len(files) == 1 and "VERDICT: UNAVAILABLE" in open(os.path.join(root, "semantic-review", files[0]), encoding="utf-8").read()
     assert A.reviews(root, "semantic-review") == [(files[0], "UNAVAILABLE")]
     assert A.rounds(root, "semantic-review") == 0
     st = A.reviewer_state(root)
@@ -47,7 +47,7 @@ def test_fallback_reviewer_takes_over(project, tmp_path):
                                                  "argv": _fake("Findings: none.", "BLOCKER: 0", "HIGH: 0", "MEDIUM: 0", "LOW: 0", "VERDICT: APPROVED")}]})
     assert cli.cmd_review(cfg, _args()) == 0
     files = os.listdir(os.path.join(root, "semantic-review"))
-    body = open(os.path.join(root, "semantic-review", files[0])).read()
+    body = open(os.path.join(root, "semantic-review", files[0]), encoding="utf-8").read()
     assert "VERDICT: APPROVED" in body and "fallback" in body and "`r2`" in body
     assert A.reviewer_state(root).get("pending_review") is False
 
@@ -74,7 +74,7 @@ def test_commits_range_reviews_landed_work(project, tmp_path):
     assert cli.cmd_review(cfg, _args(commits="HEAD~1..HEAD")) == 0
     assert "x = 2" in seen.read_text(encoding="utf-8")
     files = os.listdir(os.path.join(root, "semantic-review"))
-    assert "- commits: HEAD~1..HEAD" in open(os.path.join(root, "semantic-review", files[0])).read()
+    assert "- commits: HEAD~1..HEAD" in open(os.path.join(root, "semantic-review", files[0]), encoding="utf-8").read()
 
 
 def test_reopened_window_is_open_work(project):

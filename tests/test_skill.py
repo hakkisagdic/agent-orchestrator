@@ -24,15 +24,15 @@ def test_init_registers_mcp_and_writes_playbook(project, monkeypatch):
     assert "claude-code" in agents
     assert skillkit.install_playbook(root, agents)[".claude/skills/ao/SKILL.md"] == "wrote"
     assert skillkit.register_mcp(root, agents, exe="/usr/local/bin/ao")["claude-code"] == "registered"
-    cfg = json.load(open(os.path.join(root, ".mcp.json")))
+    cfg = json.load(open(os.path.join(root, ".mcp.json"), encoding="utf-8"))
     assert cfg["mcpServers"]["ao"]["args"] == ["-C", root, "mcp", "serve"]
     # idempotent, and other servers survive
     cfg["mcpServers"]["other"] = {"command": "x"}
-    json.dump(cfg, open(os.path.join(root, ".mcp.json"), "w"))
+    json.dump(cfg, open(os.path.join(root, ".mcp.json"), "w", encoding="utf-8"))
     assert skillkit.register_mcp(root, agents, exe="/usr/local/bin/ao")["claude-code"] == "kept"
-    assert "other" in json.load(open(os.path.join(root, ".mcp.json")))["mcpServers"]
+    assert "other" in json.load(open(os.path.join(root, ".mcp.json"), encoding="utf-8"))["mcpServers"]
     assert skillkit.install_playbook(root, agents)[".claude/skills/ao/SKILL.md"] == "kept"
-    skill = open(os.path.join(root, ".claude", "skills", "ao", "SKILL.md")).read()
+    skill = open(os.path.join(root, ".claude", "skills", "ao", "SKILL.md"), encoding="utf-8").read()
     assert skill.startswith("---\nname: ao\n") and skillkit.MARK_START in skill
 
 
@@ -43,18 +43,18 @@ def test_kiro_gets_steering_and_settings(project, monkeypatch):
     _, agents = skillkit.detect_agents(root)
     out = skillkit.install_playbook(root, agents)
     assert out[".kiro/steering/ao-playbook.md"] == "wrote"
-    assert open(os.path.join(root, ".kiro", "steering", "ao-playbook.md")).read().startswith("---\ninclusion: always")
+    assert open(os.path.join(root, ".kiro", "steering", "ao-playbook.md"), encoding="utf-8").read().startswith("---\ninclusion: always")
     skillkit.register_mcp(root, agents, exe="/x/ao")
-    assert "ao" in json.load(open(os.path.join(root, ".kiro", "settings", "mcp.json")))["mcpServers"]
+    assert "ao" in json.load(open(os.path.join(root, ".kiro", "settings", "mcp.json"), encoding="utf-8"))["mcpServers"]
 
 
 def test_agents_md_section_is_replaced_not_duplicated(project):
     root = project["root"]
     p = os.path.join(root, "AGENTS.md")
-    open(p, "w").write("# Agents\n\nkeep me\n")
+    open(p, "w", encoding="utf-8").write("# Agents\n\nkeep me\n")
     skillkit.install_playbook(root, {"generic"})
     skillkit.install_playbook(root, {"generic"})
-    text = open(p).read()
+    text = open(p, encoding="utf-8").read()
     assert text.count(skillkit.MARK_START) == 1 and "keep me" in text
 
 

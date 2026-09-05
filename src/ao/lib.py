@@ -2626,7 +2626,7 @@ def review_diff(root, cfg, paths=None, budget=1_500_000):
         if os.path.isdir(p):
             for dp, _, fn in os.walk(p):
                 for x in fn:
-                    rel = os.path.relpath(os.path.join(dp, x), root)
+                    rel = os.path.relpath(os.path.join(dp, x), root).replace(os.sep, "/")
                     if not paths or any(rel == q or rel.startswith(q.rstrip("/") + "/") for q in paths):
                         files.append(rel)
         elif os.path.isfile(p):
@@ -3080,7 +3080,7 @@ def foreign_edits(root, cfg, minutes=15):
         for f in files:
             try:
                 if os.path.getmtime(f) >= cut and os.path.realpath(f) not in mine:
-                    out.append(os.path.relpath(f, root))
+                    out.append(os.path.relpath(f, root).replace(os.sep, "/"))     # git's slashes, everywhere
             except OSError:
                 pass
     return sorted(out)

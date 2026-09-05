@@ -5,7 +5,7 @@ from ao import watchdog as W
 
 def _log(tmp_path, *segments):
     p = tmp_path / "escalate-x.log"
-    p.write_text("".join(segments))
+    p.write_text("".join(segments), encoding="utf-8")
     return str(p)
 
 

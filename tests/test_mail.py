@@ -14,7 +14,7 @@ def test_write_mail_adds_envelope_and_ledger(project):
     assert meta["kind"] == "blocked" and meta["slice"] == "B7" and meta["id"] == name
     rows = A.mail_log(root)
     assert rows[-1]["event"] == "written" and rows[-1]["summary"] == "x"
-    body = open(os.path.join(root, "agent-mail", name)).read()
+    body = open(os.path.join(root, "agent-mail", name), encoding="utf-8").read()
     assert body.startswith("---\nao: 1\n") and "# x" in body
 
 
@@ -36,15 +36,15 @@ def test_repeated_report_folds_into_one_file(project):
     assert r2["written"] == r1["written"] and r2["repeated"] == 2
     assert len(os.listdir(os.path.join(root, "agent-mail"))) == 1
     assert os.path.getmtime(first) == 1_700_000_000           # age preserved
-    assert "Tekrar: 2" in open(first).read()
+    assert "Tekrar: 2" in open(first, encoding="utf-8").read()
 
 
 def test_anomalies_group_reports_by_kind(project, monkeypatch):
     root = project["root"]
     for i in range(5):
-        open(os.path.join(root, "agent-mail", f"20260905-06{i}1-kiro-to-fable-BLOCKED-q.md"), "w").write(
+        open(os.path.join(root, "agent-mail", f"20260905-06{i}1-kiro-to-fable-BLOCKED-q.md"), "w", encoding="utf-8").write(
             "# queue empty\n\n## KARAR GEREKLİ\n")
-    open(os.path.join(root, "agent-mail", "20260905-0621-kiro-to-fable-DONE-b6.md"), "w").write(
+    open(os.path.join(root, "agent-mail", "20260905-0621-kiro-to-fable-DONE-b6.md"), "w", encoding="utf-8").write(
         "# b6 done\n\nBlockers: none\n")
     monkeypatch.setattr(A, "agent_pids", lambda *a, **k: [])
     out = A.anomalies(root, project, {}, 0, 60)
@@ -69,5 +69,5 @@ def test_configured_names_are_honoured(project):
     r = mcp.call("ao_report", {"kind": "status", "summary": "hi"}, cfg, False)
     assert "-dev-to-lead-STATUS-" in r["written"]
     assert A.implementer_inbox(root, cfg) == []
-    open(os.path.join(root, "agent-mail", "20260905-1800-lead-to-dev-DECISION-x.md"), "w").write("# x\n")
+    open(os.path.join(root, "agent-mail", "20260905-1800-lead-to-dev-DECISION-x.md"), "w", encoding="utf-8").write("# x\n")
     assert len(A.implementer_inbox(root, cfg)) == 1

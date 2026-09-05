@@ -12,17 +12,17 @@ def _git(root, *args):
 def test_review_sees_the_inventory_and_not_the_coordination_noise(project):
     root = project["root"]
     os.makedirs(os.path.join(root, "src"))
-    open(os.path.join(root, "src", "a.py"), "w").write("x = 1\n")
+    open(os.path.join(root, "src", "a.py"), "w", encoding="utf-8").write("x = 1\n")
     os.makedirs(os.path.join(root, ".kiro", "steering"))
-    open(os.path.join(root, ".kiro", "steering", "s.md"), "w").write("rule\n")
+    open(os.path.join(root, ".kiro", "steering", "s.md"), "w", encoding="utf-8").write("rule\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "base")
-    open(os.path.join(root, "src", "a.py"), "w").write("x = 2\n")                     # product change
-    open(os.path.join(root, ".kiro", "steering", "s.md"), "w").write("rule changed\n")  # coordination noise
+    open(os.path.join(root, "src", "a.py"), "w", encoding="utf-8").write("x = 2\n")                     # product change
+    open(os.path.join(root, ".kiro", "steering", "s.md"), "w", encoding="utf-8").write("rule changed\n")  # coordination noise
     for i in range(30):                                                                # review artefacts
-        open(os.path.join(root, "semantic-review", f"r{i:02d}.md"), "w").write("VERDICT: NEEDS_CHANGES\n")
+        open(os.path.join(root, "semantic-review", f"r{i:02d}.md"), "w", encoding="utf-8").write("VERDICT: NEEDS_CHANGES\n")
     os.makedirs(os.path.join(root, "evidence"))
-    open(os.path.join(root, "evidence", "inventory.md"), "w").write("# inventory\nO1..O15\n")
+    open(os.path.join(root, "evidence", "inventory.md"), "w", encoding="utf-8").write("# inventory\nO1..O15\n")
     diff, included = A.review_diff(root, project)
     assert "x = 2" in diff and "rule changed" not in diff
     assert included == ["evidence/inventory.md"] and "O1..O15" in diff

@@ -20,7 +20,7 @@ def test_turn_costs_classifies_and_sums(project, tmp_path, monkeypatch):
         _rec("turn_start"), _rec("tool_call", toolName="fs_read", args={"path": "/r/src/a.ts"}),
         _rec("usage_summary", promptTurnSummaries=[{"unit": "credit", "usage": 1.0}]), _rec("turn_end"),
     ]
-    tr.write_text("\n".join(lines) + "\n")
+    tr.write_text("\n".join(lines) + "\n", encoding="utf-8")
     monkeypatch.setattr(A, "session_paths", lambda cfg: (str(tr), None))
     c = A.turn_costs(project)
     by = c["by_class"]

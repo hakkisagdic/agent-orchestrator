@@ -30,8 +30,8 @@ def test_deferred_queue_roundtrip(project):
 def test_waiver_is_honoured_by_commit_ok_and_recorded(project, monkeypatch, capsys):
     root = project["root"]
     b = os.path.join(root, ".ao", "board.md")
-    t = open(b).read()
-    open(b, "w").write(t.replace("## running\n", "## running\n- [B7] slice · since: 2026-09-05 10:00\n"))
+    t = open(b, encoding="utf-8").read()
+    open(b, "w", encoding="utf-8").write(t.replace("## running\n", "## running\n- [B7] slice · since: 2026-09-05 10:00\n"))
     now = A.tree_digest(root)
     monkeypatch.setattr(A, "latest_verification", lambda r: {"id": "V-1", "passed": True, "tree": now, "gates": []})
     monkeypatch.setattr(A, "plan_drift", lambda r: [])
@@ -68,10 +68,10 @@ def test_burn_rate_projects_exhaustion(project):
     reset = now + 20 * 86400
     A.record_credit_sample(root, 6000, 10000, reset)
     p = os.path.join(root, ".ao", "ledger", "credits.jsonl")
-    rows = [json.loads(l) for l in open(p)]
+    rows = [json.loads(l) for l in open(p, encoding="utf-8")]
     rows[0]["at"] = now - 2 * 86400
     rows.append({"at": now, "used": 7000, "limit": 10000, "reset_at": reset})
-    open(p, "w").write("\n".join(json.dumps(r) for r in rows) + "\n")
+    open(p, "w", encoding="utf-8").write("\n".join(json.dumps(r) for r in rows) + "\n")
     br = A.burn_rate(root, now=now)
     assert round(br["per_day"]) == 500 and round(br["days_left"]) == 6 and br["before_reset"] is True
 
@@ -99,12 +99,12 @@ def test_foreign_edits_ignore_the_implementers_own_writes(project, tmp_path, mon
     os.makedirs(os.path.join(root, "src"))
     mine = os.path.join(root, "src", "mine.py")
     theirs = os.path.join(root, "src", "theirs.py")
-    open(mine, "w").write("x")
-    open(theirs, "w").write("y")
+    open(mine, "w", encoding="utf-8").write("x")
+    open(theirs, "w", encoding="utf-8").write("y")
     tr = tmp_path / "t.jsonl"
     stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + "Z"
     tr.write_text(json.dumps({"timestamp": stamp, "payload": {"type": "tool_call", "toolName": "fs_write",
-                                                             "args": {"path": mine}}}) + "\n")
+                                                             "args": {"path": mine}}}) + "\n", encoding="utf-8")
     monkeypatch.setattr(A, "session_paths", lambda cfg: (str(tr), None))
     assert A.foreign_edits(root, project) == ["src/theirs.py"]
 
@@ -116,7 +116,7 @@ def test_push_window_and_hook(project, capsys):
     assert cli.cmd_push(project, SimpleNamespace(action="check", minutes=30)) == 0
     assert cli.cmd_hooks(project, SimpleNamespace(action="install")) == 0
     hook = os.path.join(root, ".git", "hooks", "pre-push")
-    assert os.path.exists(hook) and "push check" in open(hook).read() and os.access(hook, os.X_OK)
+    assert os.path.exists(hook) and "push check" in open(hook, encoding="utf-8").read() and os.access(hook, os.X_OK)
     cli.cmd_hooks(project, SimpleNamespace(action="uninstall"))
     assert not os.path.exists(hook)
 
@@ -124,10 +124,10 @@ def test_push_window_and_hook(project, capsys):
 def test_verdict_without_counts_is_invalid(project, tmp_path):
     root = project["root"]
     os.makedirs(os.path.join(root, "src"), exist_ok=True)
-    open(os.path.join(root, "src", "a.py"), "w").write("x = 1\n")
+    open(os.path.join(root, "src", "a.py"), "w", encoding="utf-8").write("x = 1\n")
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], cwd=root, check=True)
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "a"], cwd=root, check=True)
-    open(os.path.join(root, "src", "a.py"), "w").write("x = 2\n")
+    open(os.path.join(root, "src", "a.py"), "w", encoding="utf-8").write("x = 2\n")
     import sys
     cfg = dict(project, reviewer={"id": "r", "family": "x", "argv": [sys.executable, "-c", "print('VERDICT: APPROVED')", "{prompt}"]})
     assert cli.cmd_review(cfg, SimpleNamespace(boundary="b", timeout=30, paths=None, commits=None)) == 3
@@ -137,11 +137,11 @@ def test_verdict_without_counts_is_invalid(project, tmp_path):
 def test_catchup_reviews_the_landed_range_and_closes_the_waiver(project, tmp_path, monkeypatch):
     root = project["root"]
     os.makedirs(os.path.join(root, "src"), exist_ok=True)
-    open(os.path.join(root, "src", "a.py"), "w").write("x = 1\n")
+    open(os.path.join(root, "src", "a.py"), "w", encoding="utf-8").write("x = 1\n")
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], cwd=root, check=True)
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "a"], cwd=root, check=True)
     w = A.waive(root, "review", "B7", "quota", by="h")
-    open(os.path.join(root, "src", "a.py"), "w").write("x = 2\n")
+    open(os.path.join(root, "src", "a.py"), "w", encoding="utf-8").write("x = 2\n")
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-am", "b7"], cwd=root, check=True)
     import sys
     cfg = dict(project, reviewer={"id": "r", "family": "x", "argv": [sys.executable, "-c",
@@ -150,5 +150,5 @@ def test_catchup_reviews_the_landed_range_and_closes_the_waiver(project, tmp_pat
     monkeypatch.setattr(W, "run", lambda ns: 0)
     assert cli.cmd_catchup(cfg, SimpleNamespace(boundary=None)) == 0
     assert A.open_waivers(root) == []
-    body = open(os.path.join(root, "semantic-review", os.listdir(os.path.join(root, "semantic-review"))[0])).read()
+    body = open(os.path.join(root, "semantic-review", os.listdir(os.path.join(root, "semantic-review"))[0]), encoding="utf-8").read()
     assert "- commits:" in body and "VERDICT: APPROVED" in body

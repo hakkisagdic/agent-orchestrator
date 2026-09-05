@@ -24,7 +24,7 @@ class World:
         self.notices = []
         self.procs = {}                 # pid -> {"argv", "cwd", "ppid", "pgid", "tty", "headless"}
         self.transcript = tmp_path / "transcript.jsonl"
-        self.transcript.write_text(json.dumps({"payload": {"type": "turn_end"}}) + "\n")
+        self.transcript.write_text(json.dumps({"payload": {"type": "turn_end"}}) + "\n", encoding="utf-8")
         self.transcript_age(0)
         self.turn_ended = False
         self.arch_present = False
@@ -43,19 +43,19 @@ class World:
         return self
 
     def mail(self, name, body):
-        open(os.path.join(self.root, self.cfg["mailbox"], name), "w").write(body)
+        open(os.path.join(self.root, self.cfg["mailbox"], name), "w", encoding="utf-8").write(body)
         return self
 
     def board(self, section, line):
         p = os.path.join(self.root, ".ao", "board.md")
-        s = open(p).read()
-        open(p, "w").write(s.replace(f"## {section}\n", f"## {section}\n{line}\n", 1))
+        s = open(p, encoding="utf-8").read()
+        open(p, "w", encoding="utf-8").write(s.replace(f"## {section}\n", f"## {section}\n{line}\n", 1))
         return self
 
     def review(self, verdict, age=0):
         d = os.path.join(self.root, self.cfg["reviews"])
         p = os.path.join(d, f"r-{len(os.listdir(d)):03d}.md")
-        open(p, "w").write(f"# review\n\nVERDICT: {verdict}\n")
+        open(p, "w", encoding="utf-8").write(f"# review\n\nVERDICT: {verdict}\n")
         t = time.time() - age
         os.utime(p, (t, t))
         return self

@@ -6,7 +6,7 @@ from ao import lib as A
 
 def _write(root, name, body):
     p = os.path.join(root, "agent-mail", name)
-    open(p, "w").write(body)
+    open(p, "w", encoding="utf-8").write(body)
     return p
 
 
@@ -28,8 +28,8 @@ def test_queued_work_means_not_waiting(project):
     root = project["root"]
     _write(root, "20260905-0631-kiro-to-fable-BLOCKED-queue.md", "# x\n\n## KARAR GEREKLİ\n")
     b = os.path.join(root, ".ao", "board.md")
-    _t = open(b).read()
-    open(b, "w").write(_t.replace("## queued\n", "## queued\n- [B7] next · acceptance: #7\n"))
+    _t = open(b, encoding="utf-8").read()
+    open(b, "w", encoding="utf-8").write(_t.replace("## queued\n", "## queued\n- [B7] next · acceptance: #7\n"))
     assert A.waiting_on_architect(root, project) is None
 
 
@@ -42,9 +42,9 @@ def test_status_report_is_not_waiting(project):
 def test_product_dirty_ignores_coordination_dirs(project):
     root = project["root"]
     _write(root, "20260905-0631-kiro-to-fable-BLOCKED-q.md", "# q\n")
-    open(os.path.join(root, ".ao", "x.json"), "w").write("{}")
+    open(os.path.join(root, ".ao", "x.json"), "w", encoding="utf-8").write("{}")
     assert A.product_dirty(root, project) == []
-    open(os.path.join(root, "src.py"), "w").write("x")
+    open(os.path.join(root, "src.py"), "w", encoding="utf-8").write("x")
     assert len(A.product_dirty(root, project)) == 1
 
 
@@ -57,15 +57,15 @@ def test_name_time_parses_mailbox_stamps():
 def test_respecified_slice_restarts_round_budget(project, monkeypatch):
     root = project["root"]
     b = os.path.join(root, ".ao", "board.md")
-    _t = open(b).read()
-    open(b, "w").write(_t.replace("## running\n", "## running\n- [B6] slice · since: 2026-09-04 10:00\n"))
+    _t = open(b, encoding="utf-8").read()
+    open(b, "w", encoding="utf-8").write(_t.replace("## running\n", "## running\n- [B6] slice · since: 2026-09-04 10:00\n"))
     rev = os.path.join(root, "semantic-review")
     for i, verdict in enumerate(["NEEDS_CHANGES"] * 3):
         p = os.path.join(rev, f"2026-09-04-1{i}0000-x.md")
-        open(p, "w").write(f"# review\n\nVerdict: {verdict}\n")
+        open(p, "w", encoding="utf-8").write(f"# review\n\nVerdict: {verdict}\n")
     monkeypatch.setattr(A, "reviews", lambda root, d, limit=50: [(f, "NEEDS_CHANGES") for f in sorted(os.listdir(rev), reverse=True)])
     assert A.rounds(root, "semantic-review") == 3
-    with open(os.path.join(root, ".ao", "ledger", "decisions.jsonl"), "a") as fh:
+    with open(os.path.join(root, ".ao", "ledger", "decisions.jsonl"), "a", encoding="utf-8") as fh:
         fh.write('{"id":"AD-1","at":%d,"scope":"B6","by":"architect"}\n' % int(time.time() + 5))
     assert A.rounds(root, "semantic-review") == 0
 
@@ -105,6 +105,6 @@ def test_running_slice_is_open_work(project):
     root = project["root"]
     assert W.open_work(project, root) == []
     b = os.path.join(root, ".ao", "board.md")
-    _t = open(b).read()
-    open(b, "w").write(_t.replace("## running\n", "## running\n- [B7] slice · since: 2026-09-05 18:17\n"))
+    _t = open(b, encoding="utf-8").read()
+    open(b, "w", encoding="utf-8").write(_t.replace("## running\n", "## running\n- [B7] slice · since: 2026-09-05 18:17\n"))
     assert "slice running" in W.open_work(project, root)

@@ -35,7 +35,7 @@ def test_stale_sibling_heartbeats(project, tmp_path):
     os.makedirs(d, exist_ok=True)
     for name, age in (("heartbeat-proj", 10), ("heartbeat-other", 2000), ("heartbeat-fresh", 30)):
         p = os.path.join(d, name)
-        open(p, "w").write("x")
+        open(p, "w", encoding="utf-8").write("x")
         os.utime(p, (A.time.time() - age, A.time.time() - age))
     assert A.stale_siblings(project["root"]) == {"other": 2000} or list(A.stale_siblings(project["root"])) == ["other"]
 

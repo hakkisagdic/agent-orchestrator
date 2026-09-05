@@ -24,9 +24,9 @@ def project(tmp_path, monkeypatch):
     cfg = {"project": "proj", "mailbox": "agent-mail", "reviews": "semantic-review",
            "implementer": {"adapter": "kiro", "session": "s1", "name": "kiro"},
            "architect": {"name": "fable", "argv": ["claude", "-p", "{prompt}"]}}
-    (root / ".ao" / "config.json").write_text(json.dumps(cfg))
+    (root / ".ao" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
     (root / ".ao" / "board.md").write_text(
-        "# Board\n\n## running\n\n## blocked\n\n## queued\n\n## inbox\n\n## verified\n\n## done\n")
+        "# Board\n\n## running\n\n## blocked\n\n## queued\n\n## inbox\n\n## verified\n\n## done\n", encoding="utf-8")
     (root / "agent-mail").mkdir()
     (root / "semantic-review").mkdir()
     # keep every test's ~/.ao away from the real one
