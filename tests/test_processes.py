@@ -21,7 +21,8 @@ def test_writers_counts_turns_not_processes(monkeypatch):
 
 
 def test_a_process_that_mentions_the_agent_is_not_the_agent(monkeypatch):
-    lines = {1: "zsh (kiro-cli-term)",
+    lines = {9: "/bin/zsh -c cd /repo && ao mail ack x && pwd -P >| /tmp/claude-add3-cwd",
+             1: "zsh (kiro-cli-term)",
              2: "/Users/x/.local/bin/kiro-cli chat --resume-id s",
              3: "/Users/x/.local/bin/kiro-cli-chat acp --agent-engine=kas",
              4: "/Users/x/Library/Application Support/kiro-cli/node --experimental x",
@@ -30,8 +31,10 @@ def test_a_process_that_mentions_the_agent_is_not_the_agent(monkeypatch):
              7: "node /Users/x/lib/node_modules/@anthropic-ai/claude-code/cli.js -p hi",
              8: "claude -p hello"}
     monkeypatch.setattr(A, "sh", lambda cmd, **kw: lines[int(cmd.split()[-1])])
+    monkeypatch.setattr(A.os.path, "isfile", lambda p: p.startswith("/Users/x/.local/bin/"))
+    monkeypatch.setattr(A.os, "access", lambda p, m: p.startswith("/Users/x/.local/bin/"))
     names = {"kiro-cli", "claude", "claude-code"}
-    assert [p for p in lines if A._is_agent_process(p, names)] == [2, 3, 4, 7, 8]
+    assert sorted(p for p in lines if A._is_agent_process(p, names)) == [2, 3, 4, 7, 8]
 
 
 def test_agent_pids_uses_one_lsof_call(monkeypatch):

@@ -757,15 +757,21 @@ def _is_agent_process(pid, names):
     if not args:
         return False
     toks = args.split()
+    prog = os.path.basename(toks[0]) if toks else ""
+    runtime = prog in ("node", "bun", "deno", "python", "python3")
+
+    def executable(t):
+        return "/" in t and os.path.isfile(t) and os.access(t, os.X_OK)
     for name in names:
         for i, t in enumerate(toks):
             base = os.path.basename(t)
-            if base == name and (i == 0 or "/" in t):
+            if base == name and (i == 0 or executable(t)):
                 return True                    # the program itself
-            if base.startswith(name + "-") and "/" in t:
-                return True                    # a sibling binary: kiro-cli-chat
-            if f"/{name}/" in t:
-                return True                    # a runtime under the agent's install dir
+            if base.startswith(name + "-") and executable(t):
+                return True                    # a sibling binary: kiro-cli-chat — a real executable,
+                                               # not any path that happens to start with the name
+            if runtime and f"/{name}/" in t:
+                return True                    # a runtime (node …) under the agent's install dir
     return False
 
 
