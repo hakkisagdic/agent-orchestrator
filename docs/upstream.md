@@ -21,3 +21,7 @@ so a later re-sync is a diff against a known commit, not a guess.
 - `env -u VAR cmd` (unsetting a variable) is reported as "dumps environment variables".
 - A deny rule that *mentions* `--no-verify` is reported as a dangerous flag; the port must inspect the
   rule's list (allow vs deny) before scoring.
+
+## Overlap watch
+
+- ECC 2.0 (`ecc2/`, Rust alpha) is a multi-session control plane: SQLite session store, daemon, worktree-aware sessions, risk scoring, orchestration and review controls. That is ao's layer, not the skills layer. Re-check on every re-sync; ao's differentiators stay authority, receipts and independent review of the exact candidate.
