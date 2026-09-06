@@ -2,3 +2,9 @@ agent-mail/
 node_modules/
 *.log
 .DS_Store
+
+# Python bytecode is never source
+__pycache__/
+*.pyc
+# ledger lock sidecars (ao storage)
+.ao/ledger/*.lock
