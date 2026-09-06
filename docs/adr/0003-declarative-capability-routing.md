@@ -80,5 +80,5 @@ cross-authorize.
 - Evidence: [`tests/test_capability_matrix.py`](../../tests/test_capability_matrix.py)
 - Background: [capability matrix](../capability-matrix.md), [roles](../roles.md), and
   [adapters](../adapters.md)
-- Landed in commit `c2ed480` (`feat: add capability-based reviewer routing`)
+- Landed in commit `ed03184` (`feat: add capability-based reviewer routing`)
 - Supersedes: none

@@ -12,8 +12,9 @@ What works, what does not, and how hosted runners exercise it.
 | desktop notifications | not on Windows yet — Telegram and e-mail carry the orange and red levels |
 | pre-push hook | works under Git's own shell |
 
-The hosted `tests` workflow runs automatically for pull requests and pushes to
-`main`, and remains available through manual `workflow_dispatch`. Python 3.11 runs
+The hosted `tests` workflow runs only through manual `workflow_dispatch`, one
+environment and interpreter at a time, on the maintainer's word (macOS minutes cost
+10x, Windows 2x). Python 3.11 runs
 on Ubuntu, Windows and macOS; Ubuntu also carries the Python 3.9 support-floor and
 Python 3.12 release/newer lanes. Every lane runs the same suite, and each supported
 runner must pass the process backend's native self-check rather than silently use

@@ -74,5 +74,5 @@ but does not mutate the index or worktree.
   [`tests/test_commit_authority.py`](../../tests/test_commit_authority.py), and
   [`tests/test_review_scope.py`](../../tests/test_review_scope.py)
 - Background: [safety model](../safety.md) and [features](../features.md)
-- Landed in commit `00423ca` (`feat: bind authority to staged candidates`)
+- Landed in commit `56ea557` (`feat: bind authority to staged candidates`)
 - Supersedes: none

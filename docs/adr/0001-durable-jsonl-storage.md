@@ -69,5 +69,5 @@ shape that an interrupted append can produce.
   verification integration in [`src/ao/lib.py`](../../src/ao/lib.py)
 - Evidence: [`tests/test_storage_durability.py`](../../tests/test_storage_durability.py)
 - Background: [the ledger](../ledger.md) and [Windows support](../windows.md)
-- Landed in commit `623a60c` (`feat: add crash-safe JSONL ledger storage`)
+- Landed in commit `6e089cb` (`feat: add crash-safe JSONL ledger storage`)
 - Supersedes: none
