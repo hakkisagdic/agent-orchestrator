@@ -482,3 +482,28 @@ structured APIs instead of parsed text (procs.py); the decision under test
 alarm under test (`ao alarms test`, the dead man's ping); the run under a
 budget (`ao features`, `ao cost`); the bypass on the record (`ao waive`, `ao
 catchup`); and nothing pushed untested (the repository's own pre-push hook).
+
+## 27. A hook inherits the repository
+
+The repository's own pre-push hook ran the test suite — the right instinct
+after two untested pushes. Git exports `GIT_DIR` to hooks. With it in the
+environment, every git command the fixtures ran — `git init` in a temp
+directory, `git commit` in a fixture project — acted on *this* repository:
+twelve commits by the test identity ("init", "product base", "track
+verification ledger") landed on main across two pushes, and a `git init` from
+a temp directory rewrote the shared config to `bare = true`, which took the
+second developer's checkout offline twice. The push that carried the fix ran
+the old hook one last time and reproduced the whole thing, which is how the
+mechanism was finally certain.
+
+Three lines fix it and all three are now in place: the hook unsets `GIT_DIR`,
+`GIT_WORK_TREE`, `GIT_INDEX_FILE` and their siblings before running anything;
+conftest drops them again at import, because a shell can leak them too; and
+an autouse fixture snapshots the repository's HEAD, status and `core.bare`
+around every test and fails the test that changes them, by name.
+
+The general form: anything that runs *inside* a git operation — a hook, a
+filter, a merge driver — inherits that operation's view of the repository, and
+the code it runs was written assuming a clean environment. Strip the
+environment at the boundary, and make the test suite prove it cannot touch
+the repository it lives in.
