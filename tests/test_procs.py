@@ -1,6 +1,8 @@
 import os
 import sys
 
+import pytest
+
 from ao import procs
 
 
@@ -13,6 +15,15 @@ def test_self_consistency_on_this_platform():
     assert me in procs.all_pids()
     t = procs.table()
     assert t[me][0] == os.getppid()
+
+
+def test_supported_host_uses_native_backend():
+    supported = sys.platform in ("darwin", "win32") or (
+        sys.platform.startswith("linux") and os.path.isdir("/proc")
+    )
+    if not supported:
+        pytest.skip("native process backend is unsupported on this platform")
+    assert procs.native()
 
 
 def test_argv_is_a_vector_not_split_text():

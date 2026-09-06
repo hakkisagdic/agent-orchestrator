@@ -1,6 +1,6 @@
 # Windows
 
-What works, what does not, and how it is tested without a Windows machine.
+What works, what does not, and how hosted runners exercise it.
 
 | layer | status |
 |---|---|
@@ -12,13 +12,18 @@ What works, what does not, and how it is tested without a Windows machine.
 | desktop notifications | not on Windows yet — Telegram and e-mail carry the orange and red levels |
 | pre-push hook | works under Git's own shell |
 
-The suite runs on every push locally (the repository's pre-push hook, on a Mac);
-the hosted `tests` workflow is manual and per environment — `gh workflow run tests
--f os=windows-latest` (or macos-latest, ubuntu-latest, all) — because macOS minutes
-bill at 10x and Windows at 2x. It runs the same suite,
-including the process backend's self-check on its own pid. That is how Windows is
-developed here: the runner is the machine, on demand.
-Faults found there get a scenario in `tests/test_scenarios.py` like any other.
+The hosted `tests` workflow runs automatically for pull requests and pushes to
+`main`, and remains available through manual `workflow_dispatch`. Python 3.11 runs
+on Ubuntu, Windows and macOS; Ubuntu also carries the Python 3.9 support-floor and
+Python 3.12 release/newer lanes. Every lane runs the same suite, and each supported
+runner must pass the process backend's native self-check rather than silently use
+the shell fallback.
+
+Hosted runners cover platform API behavior and deterministic process crashes: the
+durability tests kill real child processes around storage barriers and use temporary
+paths. They do not provide physical power-loss, storage-controller or filesystem
+qualification, including unsupported and network filesystems. Faults found on a
+hosted runner get a scenario in `tests/test_scenarios.py` like any other.
 
 Not yet done, in order of value: cwd via the process environment block (psutil's
 method, `NtQueryInformationProcess` + `ReadProcessMemory`), a toast notification,

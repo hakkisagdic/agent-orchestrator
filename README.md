@@ -164,10 +164,18 @@ These are not style preferences. Each one is a failure that cost real hours.
 even when the CLI does not. Adding one is a JSON file; see
 [`docs/adapters.md`](docs/adapters.md).
 
+Pull requests and pushes to `main` automatically run Python 3.11 on Ubuntu,
+Windows and macOS, plus the Python 3.9 support floor and Python 3.12 release/newer
+lane on Ubuntu; manual `workflow_dispatch` remains available. Hosted runs cover OS
+API behavior and deterministic process crashes with real child processes and
+temporary paths. They are not physical power-loss, storage-controller or filesystem
+qualification, including unsupported and network filesystems.
+
 ## Documentation
 
 [protocol](docs/protocol.md) · [safety](docs/safety.md) · [roles](docs/roles.md) ·
 [capability matrix](docs/capability-matrix.md) ·
+[architecture decisions](docs/adr/README.md) ·
 [slices](docs/slices.md) · [gates](docs/gates.md) · [sources](docs/sources.md) ·
 [adapters](docs/adapters.md) · [parallel](docs/parallel.md) · [cloud](docs/cloud.md) ·
 [models](docs/models.md) · [telegram](docs/telegram.md) · [mcp](docs/mcp.md) · [telemetry](docs/telemetry.md) ·
