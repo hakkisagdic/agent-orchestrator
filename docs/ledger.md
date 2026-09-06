@@ -16,6 +16,7 @@ The ledger is the fix: an append-only record that outlives the messages.
 .ao/ledger/
 ├── decisions.jsonl      # why we chose things
 ├── verifications.jsonl  # what was actually measured, and by whom
+├── authority.jsonl      # hash-chained commit grants and refusals
 ├── slices.jsonl         # slice lifecycle transitions
 └── INDEX.md             # rendered, human-readable, regenerated on write
 ```
@@ -61,6 +62,28 @@ Commit authority means nothing if it rests on "I saw the tests pass" in a chat l
 The rule that makes this worth writing: **commit authority is granted against a
 verification id, not against a report.** Afterwards, "why was this allowed to land" has a
 row, with the numbers, and the name of whoever measured them.
+
+## Authority chain
+
+`.ao/ledger/authority.jsonl` is stricter than the other ledgers because its newest grant
+is executable authority. Every committed JSON object carries `previous`: `null` on the
+genesis row and, after that, the `sha256:` digest of the complete preceding object. The
+digest is computed from canonical JSON (sorted keys, fixed separators, ASCII escapes)
+under the `ao-authority-row-v1` domain. Grants and refusals share the same chain.
+
+The append operation repairs only an uncommitted partial tail, validates the complete
+existing chain, selects the predecessor and writes the successor while holding one
+cross-platform ledger lock, then fsyncs before returning. `ao commit-check` validates the
+whole chain before looking for a grant. Missing links, semantic edits, middle deletion,
+reordering and wrong-predecessor appends therefore fail closed. A non-empty legacy ledger
+without `previous` fields also fails closed; AO never rewrites historical authority in
+place. Preserve/archive such a ledger explicitly and obtain fresh verification, review
+and authority in a new ledger rather than silently treating old rows as chained.
+
+This is tamper-evidence, not authentication. Same-user write access can recompute a suffix,
+append a correctly linked forged row, or replace/truncate a valid tail because AO has no
+external trusted head or signing key. See the exact security boundary in
+[`safety.md`](safety.md).
 
 ## Slices
 

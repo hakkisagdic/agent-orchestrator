@@ -1,22 +1,24 @@
 """Crash-safe local persistence primitives for AO's append-only ledgers.
 
-The ledgers are authority evidence, not logging.  A caller may act on a row as
+The ledgers are authority evidence, not logging. A caller may act on a row as
 soon as this module returns, so returning means all bytes reached ``fsync`` and,
-for a newly-created file, the containing directory entry did too.  The API stays
+for a newly-created file, the containing directory entry did too. The API stays
 standard-library-only and uses an OS lock to keep independent AO processes from
-interleaving JSON records.
+interleaving JSON records or selecting competing hash-chain predecessors.
 """
 from contextlib import contextmanager
 import errno
+import hashlib
 import json
 import os
 import time
 
 UTF8 = "utf-8"
+CHAIN_PREVIOUS_FIELD = "previous"
 
 
 class LedgerCorruption(RuntimeError):
-    """A complete JSONL record is malformed; silently skipping it is unsafe."""
+    """A committed ledger record is malformed or violates its hash chain."""
 
 
 class LedgerLockTimeout(TimeoutError):
@@ -108,6 +110,63 @@ def read_jsonl(path, allow_partial_tail=True, timeout=10.0):
         return _read_jsonl_unlocked(path, allow_partial_tail)
 
 
+def chained_row_digest(record, chain):
+    """Canonical, domain-separated SHA-256 digest of one chained JSON object."""
+    if not isinstance(record, dict):
+        raise TypeError("a chained ledger row must be a JSON object")
+    if not isinstance(chain, str) or not chain:
+        raise ValueError("a chained ledger requires a non-empty domain")
+    canonical = json.dumps(
+        record,
+        ensure_ascii=True,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    domain = chain.encode(UTF8)
+    digest = hashlib.sha256()
+    digest.update(domain)
+    digest.update(b"\0")
+    digest.update(canonical)
+    return "sha256:" + digest.hexdigest()
+
+
+def _validate_chained_rows(path, rows, chain, previous_field):
+    expected = None
+    for index, row in enumerate(rows, 1):
+        if not isinstance(row, dict):
+            raise LedgerCorruption(
+                f"chained JSONL record {index} in {path} is not an object"
+            )
+        if previous_field not in row:
+            raise LedgerCorruption(
+                f"chained JSONL record {index} in {path} has no {previous_field!r} field"
+            )
+        actual = row.get(previous_field)
+        if actual != expected:
+            raise LedgerCorruption(
+                f"broken hash chain at record {index} in {path}: "
+                f"expected {expected!r}, got {actual!r}"
+            )
+        try:
+            expected = chained_row_digest(row, chain)
+        except (TypeError, ValueError) as exc:
+            raise LedgerCorruption(
+                f"cannot digest chained JSONL record {index} in {path}: {exc}"
+            ) from exc
+    return rows
+
+
+def read_chained_jsonl(path, chain, allow_partial_tail=True, timeout=10.0, *,
+                       previous_field=CHAIN_PREVIOUS_FIELD):
+    """Read and validate every committed row in one predecessor hash chain."""
+    if not os.path.exists(path):
+        return []
+    with _exclusive_lock(path + ".lock", timeout=timeout):
+        rows = _read_jsonl_unlocked(path, allow_partial_tail)
+        return _validate_chained_rows(path, rows, chain, previous_field)
+
+
 def _sync_directory(directory, fsync):
     """Persist a newly-created directory entry where the platform supports it."""
     if os.name == "nt":
@@ -117,7 +176,7 @@ def _sync_directory(directory, fsync):
     try:
         fsync(fd)
     except OSError as exc:
-        # Some filesystems expose directories but reject fsync.  This is a
+        # Some filesystems expose directories but reject fsync. This is a
         # platform capability limit, not evidence that data was persisted.
         if exc.errno in (errno.EINVAL, errno.ENOTSUP, getattr(errno, "EOPNOTSUPP", -1)):
             return False
@@ -162,43 +221,92 @@ def _repair_partial_tail(path, fsync, checkpoint):
     return action
 
 
+def _encode_jsonl(record):
+    return (json.dumps(
+        record, ensure_ascii=False, separators=(",", ":")
+    ) + "\n").encode(UTF8)
+
+
+def _append_payload_unlocked(path, parent, payload, write, fsync, checkpoint):
+    """Append one encoded row while the caller owns the sidecar lock."""
+    created = not os.path.exists(path)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags, 0o644)
+    try:
+        _call(checkpoint, "opened")
+        remaining = memoryview(payload)
+        while remaining:
+            try:
+                count = write(fd, remaining)
+            except InterruptedError:
+                continue
+            if not isinstance(count, int) or count <= 0 or count > len(remaining):
+                raise OSError(errno.EIO, "append made no forward progress")
+            remaining = remaining[count:]
+        _call(checkpoint, "written")
+        fsync(fd)
+        _call(checkpoint, "fsynced")
+    finally:
+        os.close(fd)
+
+    if created and _sync_directory(parent, fsync):
+        _call(checkpoint, "directory-fsynced")
+
+
 def append_jsonl(path, record, timeout=10.0, *, _checkpoint=None,
                  _write=None, _fsync=None):
     """Append one JSON object and durably persist it before returning.
 
     ``_checkpoint``, ``_write`` and ``_fsync`` are deliberately private test
-    seams.  They let the suite stop a real subprocess between storage barriers
+    seams. They let the suite stop a real subprocess between storage barriers
     and inject short writes or I/O failures without a production crash switch.
     """
     parent = os.path.dirname(path) or "."
     os.makedirs(parent, exist_ok=True)
-    payload = (json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n").encode(UTF8)
+    payload = _encode_jsonl(record)
     write = _write or os.write
     fsync = _fsync or os.fsync
 
     with _exclusive_lock(path + ".lock", timeout=timeout):
         _call(_checkpoint, "locked")
         _repair_partial_tail(path, fsync, _checkpoint)
-        created = not os.path.exists(path)
-        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_BINARY", 0)
-        fd = os.open(path, flags, 0o644)
-        try:
-            _call(_checkpoint, "opened")
-            remaining = memoryview(payload)
-            while remaining:
-                try:
-                    count = write(fd, remaining)
-                except InterruptedError:
-                    continue
-                if not isinstance(count, int) or count <= 0 or count > len(remaining):
-                    raise OSError(errno.EIO, "append made no forward progress")
-                remaining = remaining[count:]
-            _call(_checkpoint, "written")
-            fsync(fd)
-            _call(_checkpoint, "fsynced")
-        finally:
-            os.close(fd)
-
-        if created and _sync_directory(parent, fsync):
-            _call(_checkpoint, "directory-fsynced")
+        _append_payload_unlocked(
+            path, parent, payload, write, fsync, _checkpoint
+        )
     return record
+
+
+def append_chained_jsonl(path, record, chain, timeout=10.0, *,
+                         previous_field=CHAIN_PREVIOUS_FIELD,
+                         _checkpoint=None, _write=None, _fsync=None):
+    """Atomically select a predecessor, append, and persist one chained row.
+
+    Existing committed rows are validated before a successor is constructed.
+    Predecessor selection and append share one lock, so concurrent writers form
+    one linear chain instead of siblings that name the same predecessor.
+    """
+    if not isinstance(record, dict):
+        raise TypeError("a chained ledger row must be a JSON object")
+    if not isinstance(previous_field, str) or not previous_field:
+        raise ValueError("previous_field must be a non-empty string")
+    if previous_field in record:
+        raise ValueError(f"caller must not set the {previous_field!r} chain field")
+
+    parent = os.path.dirname(path) or "."
+    os.makedirs(parent, exist_ok=True)
+    write = _write or os.write
+    fsync = _fsync or os.fsync
+
+    with _exclusive_lock(path + ".lock", timeout=timeout):
+        _call(_checkpoint, "locked")
+        _repair_partial_tail(path, fsync, _checkpoint)
+        rows = _read_jsonl_unlocked(path, allow_partial_tail=False)
+        _validate_chained_rows(path, rows, chain, previous_field)
+        previous = chained_row_digest(rows[-1], chain) if rows else None
+        chained = {previous_field: previous}
+        chained.update(record)
+        payload = _encode_jsonl(chained)
+        _append_payload_unlocked(
+            path, parent, payload, write, fsync, _checkpoint
+        )
+    return chained

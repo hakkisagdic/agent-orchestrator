@@ -226,3 +226,69 @@ for i in range(20): append_jsonl(path, {"worker":worker,"i":i})
     assert {(row["worker"], row["i"]) for row in rows} == {
         (worker, i) for worker in range(4) for i in range(20)
     }
+
+
+
+CHAIN = "test-authority-chain-v1"
+
+
+def test_chained_rows_link_to_the_canonical_previous_digest(tmp_path):
+    path = str(tmp_path / "authority.jsonl")
+    first = storage.append_chained_jsonl(path, {"id": "first"}, CHAIN)
+    second = storage.append_chained_jsonl(path, {"id": "second"}, CHAIN)
+
+    assert first["previous"] is None
+    assert second["previous"] == storage.chained_row_digest(first, CHAIN)
+    assert storage.read_chained_jsonl(path, CHAIN) == [first, second]
+
+
+def test_chained_append_refuses_legacy_or_broken_prefix_without_writing(tmp_path):
+    path = tmp_path / "authority.jsonl"
+    path.write_text('{"id":"legacy"}\n', encoding="utf-8")
+    before = path.read_bytes()
+
+    with pytest.raises(storage.LedgerCorruption, match="has no 'previous' field"):
+        storage.append_chained_jsonl(str(path), {"id": "must-not-land"}, CHAIN)
+
+    assert path.read_bytes() == before
+
+
+def test_chained_append_repairs_only_an_uncommitted_partial_tail(tmp_path):
+    path = tmp_path / "authority.jsonl"
+    first = storage.append_chained_jsonl(str(path), {"id": "first"}, CHAIN)
+    with open(path, "ab") as handle:
+        handle.write(b'{"previous":"sha256:partial"')
+
+    assert storage.read_chained_jsonl(str(path), CHAIN) == [first]
+    second = storage.append_chained_jsonl(str(path), {"id": "second"}, CHAIN)
+    assert storage.read_chained_jsonl(str(path), CHAIN) == [first, second]
+    assert second["previous"] == storage.chained_row_digest(first, CHAIN)
+
+    with open(path, "ab") as handle:
+        handle.write(b'not-json\n')
+    with pytest.raises(storage.LedgerCorruption):
+        storage.read_chained_jsonl(str(path), CHAIN)
+
+
+def test_concurrent_chained_appends_form_one_linear_history(tmp_path):
+    path = tmp_path / "authority.jsonl"
+    script = r'''
+import sys
+from ao.storage import append_chained_jsonl
+path, worker, chain = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+for i in range(12): append_chained_jsonl(path, {"worker":worker,"i":i}, chain)
+'''
+    children = [_child(script, path, worker, CHAIN) for worker in range(4)]
+    for proc in children:
+        stdout, stderr = proc.communicate(timeout=20)
+        assert proc.returncode == 0, stdout + stderr
+
+    rows = storage.read_chained_jsonl(str(path), CHAIN, allow_partial_tail=False)
+    assert len(rows) == 48
+    assert {(row["worker"], row["i"]) for row in rows} == {
+        (worker, i) for worker in range(4) for i in range(12)
+    }
+    expected = None
+    for row in rows:
+        assert row["previous"] == expected
+        expected = storage.chained_row_digest(row, CHAIN)

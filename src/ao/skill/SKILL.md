@@ -61,10 +61,11 @@ Anything not forbidden there and inside the slice's scope is allowed.
 7. `ao commit-ok --verify` — runs the quick gates itself when verification is
    stale, then persists a grant only for the exact staged index candidate when
    its verification and newest matching prospective review approve, no urgent
-   mail is unacknowledged, and no plan drift exists. The AO pre-commit hook runs
-   `ao commit-check` to revalidate that persisted grant against Git's active
-   index without issuing or consuming authority. Then one local commit. **No
-   push.**
+   mail is unacknowledged, and no plan drift exists. Authority rows form a
+   predecessor hash chain; `ao commit-check` refuses a malformed or broken chain
+   before it considers a grant. The AO pre-commit hook runs `ao commit-check` to
+   revalidate that persisted grant against Git's active index without issuing or
+   consuming authority. Then one local commit. **No push.**
 8. `ao_report {kind: "done"}`, board `running → done` with the gates named,
    next item. Blocked by a decision? `ao_ask` with options, board `blocked` with
    `needs:`, and move to the next READY item — park and continue.

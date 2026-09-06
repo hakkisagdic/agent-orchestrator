@@ -138,14 +138,20 @@ def test_newest_matching_structured_review_is_authoritative(project):
 
 
 def test_latest_authority_decision_uses_only_actual_boolean_rows(project):
-    from ao.storage import append_jsonl
+    from ao.storage import append_chained_jsonl
 
     path = os.path.join(project["root"], ".ao", "ledger", "authority.jsonl")
-    append_jsonl(path, {"granted": True, "token": "older"})
-    append_jsonl(path, {"granted": "yes", "token": "not-a-decision"})
+    append_chained_jsonl(
+        path, {"granted": True, "token": "older"}, A.AUTHORITY_CHAIN
+    )
+    append_chained_jsonl(
+        path, {"granted": "yes", "token": "not-a-decision"}, A.AUTHORITY_CHAIN
+    )
     assert A.latest_authority_decision(project["root"])["token"] == "older"
 
-    append_jsonl(path, {"granted": False, "token": "newest"})
+    append_chained_jsonl(
+        path, {"granted": False, "token": "newest"}, A.AUTHORITY_CHAIN
+    )
     assert A.latest_authority_decision(project["root"])["token"] == "newest"
 
 

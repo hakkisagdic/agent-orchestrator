@@ -80,12 +80,24 @@ awake. The implementer first stages the exact candidate. A grant is issued only 
   not held.
 
 Every refusal names its missing condition, and every grant or refusal is appended to the
-authority ledger with the candidate and scope it rested on. `ao commit-check` is the
-non-mutating enforcement half: the optional AO pre-commit hook runs it against Git's
-active index and revalidates the latest persisted grant, its exact verification and
-review or live waiver, plus current plan drift, holds, and urgent mail. It neither issues
-nor consumes a grant. A retrospective `ao review --commits` artifact can reconcile
-landed work but can never authorize a candidate.
+authority ledger with the candidate and scope it rested on. Each authority row has a
+`previous` field: `null` for the first row, then the domain-separated SHA-256 digest of
+the preceding canonical JSON object. `ao commit-check` validates the complete committed
+chain before selecting the newest decision and refuses a missing or incorrect link. A
+non-empty legacy ledger without links is unreadable and is never rewritten implicitly.
+`ao commit-check` is the non-mutating enforcement half: the optional AO pre-commit hook
+runs it against Git's active index and revalidates the latest persisted grant, its exact
+verification and review or live waiver, plus current plan drift, holds, and urgent mail.
+It neither issues nor consumes a grant. A retrospective `ao review --commits` artifact
+can reconcile landed work but can never authorize a candidate.
+
+The chain is tamper-evidence, not writer authentication. It detects an edit, deletion,
+reorder, or append whose successor/predecessor links were not recomputed. It cannot
+cryptographically exclude a process with the same user's write access: that process can
+append with the correct predecessor, recompute a replacement suffix, or truncate a valid
+tail. There is no trusted external head anchor, signing key, or authenticated append
+service in AO, so the ledger must not be described as proving who wrote a row or as
+detecting every same-user rewrite.
 
 The grant never covers `push`, and no configuration makes it. Deciding and acting stay
 in different hands, which is the only reason the decision is worth anything.
