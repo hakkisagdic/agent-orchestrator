@@ -32,3 +32,23 @@ def test_argv_is_a_vector_not_split_text():
         return
     me = os.getpid()
     assert all(isinstance(a, str) for a in procs.argv(me))
+
+
+
+def test_windows_backend_exposes_creation_date_as_process_identity():
+    backend = object.__new__(procs._Windows)
+    backend._cache = {
+        42: {
+            "ProcessId": 42,
+            "ParentProcessId": 1,
+            "CommandLine": r"C:\\Tools\\claude.exe -p x",
+            "Name": "claude.exe",
+            "SessionId": 1,
+            "CreationDate": "20260906183012.123456+180",
+        }
+    }
+    backend._cache_at = float("inf")
+
+    assert backend.info(42)["start"] == "20260906183012.123456+180"
+    backend.invalidate()
+    assert backend._cache is None and backend._cache_at == 0.0
