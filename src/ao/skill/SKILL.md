@@ -47,19 +47,24 @@ Anything not forbidden there and inside the slice's scope is allowed.
    the **surface inventory first** (`evidence/…-surface-v1.md`: every path, its
    entry point, its binding, its proof), get it `ao review`ed as APPROVED, then
    close every path in one pass. Ten review rounds once became one this way.
-5. Work. Gates through the lock: `ao lock -- <gate command>` (holds the writer
-   lock, runs the gate, records it). `ao verify -p quick|full` records a
-   verification.
-6. `ao review --boundary "…"` — independent, on the boundary, never your own.
-   Fix findings; re-review. Over the round budget? The architect re-specifies;
-   do not grind. Exit 3 means no reviewer could review (quota, login): not a
-   round, not a verdict — park the review, continue with the next READY item;
-   the watchdog nudges when the window reopens. Landed work is reviewed after
-   the fact with `ao review --commits <range>`.
-7. `ao commit-ok --verify` — runs the quick gates itself when the verification is
-   stale, then grants a token only when the tree digest matches the
-   verification and an APPROVED review by someone else, no urgent mail is
-   unacknowledged, no plan drift. Then one local commit. **No push.**
+5. Work, then stage exactly the candidate you intend to land. Gates through the
+   lock: `ao lock -- <gate command>` (holds the writer lock, runs the gate,
+   records it). `ao verify -p quick|full` records a verification bound to that
+   isolated index candidate.
+6. `ao review --boundary "…"` — independent, on the same staged candidate and
+   boundary, never your own. Fix findings, restage, reverify and re-review. Over
+   the round budget? The architect re-specifies; do not grind. Exit 3 means no
+   reviewer could review (quota, login): not a round, not a verdict — park the
+   review, continue with the next READY item; the watchdog nudges when the
+   window reopens. `ao review --commits <range>` is retrospective evidence only
+   and never authorizes a candidate.
+7. `ao commit-ok --verify` — runs the quick gates itself when verification is
+   stale, then persists a grant only for the exact staged index candidate when
+   its verification and newest matching prospective review approve, no urgent
+   mail is unacknowledged, and no plan drift exists. The AO pre-commit hook runs
+   `ao commit-check` to revalidate that persisted grant against Git's active
+   index without issuing or consuming authority. Then one local commit. **No
+   push.**
 8. `ao_report {kind: "done"}`, board `running → done` with the gates named,
    next item. Blocked by a decision? `ao_ask` with options, board `blocked` with
    `needs:`, and move to the next READY item — park and continue.
@@ -164,8 +169,10 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao ask` / `ao answer` / `ao decisions` | questions with options; the answers unpark slices |
 | `ao lock -- <cmd>` | hold the writer lock, run a gate, record it |
 | `ao verify -p quick|full` | run the declared gates and record the measured result |
-| `ao review --boundary "…" [--paths …]` | independent review by a different actor; `--paths` narrows it to the slice files, untracked included |
-| `ao commit-ok` | may this tree land? digest, verification, review, urgent ack |
+| `ao review --boundary "…" [--paths …]` | independent prospective review of the exact staged candidate; `--paths` narrows its staged scope |
+| `ao review --commits <range>` | retrospective review of landed work; never authorizes a candidate |
+| `ao commit-ok` | persist authority for the exact isolated index candidate, verification and prospective review |
+| `ao commit-check` | revalidate the latest persisted grant against Git's active index without issuing or consuming one |
 | `ao writers [--clean]` | live turns (not processes); orphans set aside |
 | `ao hold` / `ao hold release` | stop unattended turns and keep them stopped |
 | `ao watchdog install|uninstall|status|explain|trace` | the unattended loop and its instruments |
@@ -177,7 +184,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao credits` | provider credits and windows |
 | `ao features [on|off <key>]` | the switches and what each costs; all off = deterministic ao |
 | `ao waive <gate> --slice S --why …` / `ao catchup` | a person's bypass on the record; catchup reviews the landed range and replays deferred work |
-| `ao pings setup --url …` / `ao hooks install` / `ao push allow` | dead man's switch; pre-push hook with a human push window |
+| `ao pings setup --url …` / `ao hooks install` / `ao push allow` | dead man's switch; AO pre-commit grant check; pre-push human window |
 | `ao cost [--since 24h]` | what the coordination spends: implementer turns by class, wasted turns, review counts |
 | `ao since last|2h|<ref>` | what happened since |
 | `ao digest` | landed work, gates, reviews, decisions in one page |

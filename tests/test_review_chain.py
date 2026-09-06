@@ -18,6 +18,7 @@ def _repo_with_change(root):
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], cwd=root, check=True)
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "a"], cwd=root, check=True)
     open(os.path.join(root, "src", "a.py"), "w", encoding="utf-8").write("x = 2\n")
+    subprocess.run(["git", "add", "src/a.py"], cwd=root, check=True, capture_output=True)
 
 
 def _args(**kw):
@@ -84,3 +85,46 @@ def test_reopened_window_is_open_work(project):
     assert any("reviewer window" in r for r in W.open_work(project, root))
     A.set_reviewer_state(root, until=A.time.time() + 3600)
     assert not any("reviewer window" in r for r in W.open_work(project, root))
+
+
+def test_reviewer_index_mutation_invalidates_prospective_review(project):
+    import sys
+
+    root = project["root"]
+    _repo_with_change(root)
+    reviewed = A.index_candidate(root)
+    script = (
+        "import subprocess; "
+        "open('src/a.py', 'w', encoding='utf-8').write('x = 3\\n'); "
+        "subprocess.run(['git', 'add', 'src/a.py'], check=True); "
+        "print('VERDICT: APPROVED'); "
+        "print('BLOCKER: 0'); "
+        "print('HIGH: 0'); "
+        "print('MEDIUM: 0'); "
+        "print('LOW: 0')"
+    )
+    reviewer = [sys.executable, "-c", script, "{prompt}"]
+    cfg = dict(project, reviewer={"id": "r1", "family": "test", "argv": reviewer})
+
+    assert cli.cmd_review(cfg, _args()) == 1
+    current = A.index_candidate(root)
+    assert current["digest"] != reviewed["digest"]
+
+    names = [name for name in os.listdir(os.path.join(root, cfg["reviews"])) if name.endswith(".md")]
+    assert len(names) == 1
+    body = open(os.path.join(root, cfg["reviews"], names[0]), encoding="utf-8").read()
+    evidence = A.review_evidence(body)
+    reason = (
+        "index changed during review: expected "
+        f"{reviewed['index_tree']}, got {current['index_tree']}"
+    )
+
+    assert evidence["candidate"] == reviewed
+    assert evidence["authorizable"] is False
+    assert evidence["invalid_reasons"] == [reason]
+    assert "VERDICT: NEEDS_CHANGES" in body
+    assert "VERDICT: APPROVED" not in body
+    assert "BLOCKER: 1" in body
+    assert "- [BLOCKER] candidate changed during review" in body
+    assert A.reviews(root, cfg["reviews"]) == [(names[0], "NEEDS_CHANGES")]
+    assert A.latest_candidate_review(root, cfg["reviews"], reviewed["digest"]) is None

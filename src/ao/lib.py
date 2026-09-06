@@ -1236,6 +1236,240 @@ def tree_digest(root, cfg=None):
     return "sha256:" + digest.hexdigest()
 
 
+CANDIDATE_FORMAT = "ao-index-candidate-v1"
+REVIEW_EVIDENCE_PREFIX = "<!-- ao-evidence: "
+
+
+def index_candidate(root):
+    """Measure the exact tree Git would commit from the active index.
+
+    ``git write-tree`` honors ``GIT_INDEX_FILE``, so this also measures the
+    temporary index exposed by ``git commit -a`` and path-limited commits. The
+    resulting tree object is immutable even if the live index changes later.
+    """
+    head = _git_output(root, "rev-parse", "HEAD").strip()
+    index_tree = _git_output(root, "write-tree").strip()
+    if not head or not index_tree:
+        raise RuntimeError("cannot measure index candidate: missing object id")
+    head_s = head.decode("ascii", "strict")
+    tree_s = index_tree.decode("ascii", "strict")
+    status = _git_output(
+        root, "diff-tree", "-r", "--no-commit-id", "--name-status", "-z",
+        "--no-renames", head_s, tree_s, "--",
+    )
+    names = _git_output(
+        root, "diff-tree", "-r", "--no-commit-id", "--name-only", "-z",
+        "--no-renames", head_s, tree_s, "--",
+    )
+    changed_paths = sorted(
+        {os.fsdecode(raw) for raw in names.split(b"\0") if raw}, key=os.fsencode
+    )
+    digest = hashlib.sha256()
+    _digest_field(digest, b"format", CANDIDATE_FORMAT.encode("ascii"))
+    _digest_field(digest, b"head", head)
+    _digest_field(digest, b"index-tree", index_tree)
+    _digest_field(digest, b"status", status)
+    return {
+        "format": CANDIDATE_FORMAT,
+        "digest": "sha256:" + digest.hexdigest(),
+        "head": head_s,
+        "index_tree": tree_s,
+        "changed_paths": changed_paths,
+        "changed_count": len(changed_paths),
+        "status_digest": "sha256:" + hashlib.sha256(status).hexdigest(),
+    }
+
+
+def _normal_scope_paths(paths):
+    out = []
+    for value in paths or []:
+        raw = str(value or "").replace("\\", "/")
+        if not raw or raw.startswith("/") or re.match(r"^[A-Za-z]:/", raw):
+            raise ValueError(f"scope path must be repository-relative: {value}")
+        normal = os.path.normpath(raw).replace("\\", "/")
+        if normal in ("", ".", "..") or normal.startswith("../"):
+            raise ValueError(f"scope path escapes the repository: {value}")
+        if normal not in out:
+            out.append(normal)
+    return sorted(out, key=os.fsencode)
+
+
+def _path_in_scope(path, scope_paths):
+    return any(path == base or path.startswith(base.rstrip("/") + "/")
+               for base in scope_paths)
+
+
+def candidate_scope(candidate, paths=None):
+    """Bind a literal review scope to a candidate, rejecting staged extras."""
+    scope_paths = _normal_scope_paths(paths)
+    kind = "paths" if scope_paths else "full-index"
+    outside = [p for p in candidate["changed_paths"]
+               if scope_paths and not _path_in_scope(p, scope_paths)]
+    digest = hashlib.sha256()
+    _digest_field(digest, b"format", b"ao-candidate-scope-v1")
+    _digest_field(digest, b"candidate", candidate["digest"].encode("ascii"))
+    _digest_field(digest, b"kind", kind.encode("ascii"))
+    for path in scope_paths:
+        _digest_field(digest, b"path", os.fsencode(path))
+    return {
+        "kind": kind,
+        "paths": scope_paths,
+        "digest": "sha256:" + digest.hexdigest(),
+        "outside_paths": outside,
+    }
+
+
+def candidate_diff(root, candidate, scope=None):
+    """Render the immutable staged candidate, never the mutable worktree."""
+    scope = scope or candidate_scope(candidate)
+    args = [
+        "--literal-pathspecs", "diff-tree", "-p", "--binary", "--full-index",
+        "--no-ext-diff", "--no-renames", "--no-commit-id",
+        candidate["head"], candidate["index_tree"], "--",
+    ]
+    args.extend(scope.get("paths") or [])
+    return _git_output(root, *args, timeout=60)
+
+
+def candidate_worktree_issues(root, cfg, candidate=None):
+    """State that would make gates execute bytes other than the staged candidate."""
+    candidate = candidate or index_candidate(root)
+    unstaged = {
+        os.fsdecode(raw)
+        for raw in _git_output(
+            root, "diff", "--name-only", "-z", "--no-renames", "--"
+        ).split(b"\0")
+        if raw and not _is_coordination_path(os.fsdecode(raw), cfg)
+    }
+    untracked = {
+        os.fsdecode(raw)
+        for raw in _git_output(
+            root, "ls-files", "--others", "--exclude-standard", "-z", "--"
+        ).split(b"\0")
+        if raw and not _is_coordination_path(os.fsdecode(raw), cfg)
+    }
+    coordination = {
+        path for path in candidate["changed_paths"] if _is_coordination_path(path, cfg)
+    }
+    return {
+        "unstaged": sorted(unstaged, key=os.fsencode),
+        "untracked": sorted(untracked, key=os.fsencode),
+        "staged_coordination": sorted(coordination, key=os.fsencode),
+    }
+
+
+def candidate_issue_messages(issues):
+    labels = (
+        ("unstaged", "unstaged product changes differ from the index"),
+        ("untracked", "untracked product files are outside the index"),
+        ("staged_coordination", "coordination paths must not share a product commit"),
+    )
+    return [f"{label}: {', '.join(issues[key])}" for key, label in labels
+            if issues.get(key)]
+
+
+def review_evidence(body):
+    """Structured evidence embedded in a human-readable review artifact."""
+    for line in str(body or "").splitlines():
+        if line.startswith(REVIEW_EVIDENCE_PREFIX) and line.endswith(" -->"):
+            try:
+                value = json.loads(line[len(REVIEW_EVIDENCE_PREFIX):-4])
+            except (TypeError, ValueError):
+                return None
+            return value if isinstance(value, dict) else None
+    return None
+
+
+def review_evidence_line(value):
+    return REVIEW_EVIDENCE_PREFIX + json.dumps(
+        value, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+    ) + " -->"
+
+
+def candidate_review_integrity(root, candidate, evidence):
+    """Return the canonical reviewed scope and any exact-candidate refusals."""
+    reasons = []
+    if not isinstance(evidence, dict):
+        return None, ["review evidence is not a structured object"]
+    if evidence.get("candidate") != candidate:
+        reasons.append(
+            "review evidence candidate does not exactly match the current index candidate"
+        )
+
+    recorded_scope = evidence.get("scope")
+    if not isinstance(recorded_scope, dict):
+        reasons.append("review evidence has no structured candidate scope")
+        return None, reasons
+    paths = recorded_scope.get("paths")
+    if not isinstance(paths, list):
+        reasons.append("review evidence candidate scope paths must be a list")
+        return None, reasons
+    try:
+        scope = candidate_scope(candidate, paths)
+    except (KeyError, TypeError, ValueError, UnicodeError) as exc:
+        reasons.append(f"review evidence has an invalid candidate scope: {exc}")
+        return None, reasons
+
+    if scope["outside_paths"]:
+        reasons.append(
+            "review evidence scope excludes staged paths: "
+            + ", ".join(scope["outside_paths"])
+        )
+    if recorded_scope != scope:
+        reasons.append(
+            "review evidence scope does not exactly match the current candidate"
+        )
+
+    try:
+        diff_digest = "sha256:" + hashlib.sha256(
+            candidate_diff(root, candidate, scope)
+        ).hexdigest()
+    except (KeyError, OSError, RuntimeError, TypeError, ValueError, UnicodeError) as exc:
+        reasons.append(f"review evidence candidate diff cannot be reproduced: {exc}")
+    else:
+        if evidence.get("diff_digest") != diff_digest:
+            reasons.append(
+                "review evidence diff digest does not match the exact candidate diff: "
+                f"expected {diff_digest}, got {evidence.get('diff_digest') or '<missing>'}"
+            )
+    return scope, reasons
+
+
+def latest_candidate_review(root, review_dir, candidate_digest, limit=40):
+    """Return approval only when the newest matching prospective review approves."""
+    for name, verdict in reviews(root, review_dir, limit=limit):
+        try:
+            body = open(
+                os.path.join(root, review_dir, name), errors="replace", encoding=UTF8
+            ).read(100_000)
+        except OSError:
+            continue
+        evidence = review_evidence(body)
+        if not evidence or evidence.get("kind") != "index-candidate" \
+                or (evidence.get("candidate") or {}).get("digest") != candidate_digest:
+            # Legacy, retrospective, unavailable-without-evidence, and reviews
+            # for other candidates say nothing about this candidate.
+            continue
+        # The first matching structured artifact is authoritative. A newer
+        # rejection or invalidated review must never expose an older approval.
+        if verdict == "APPROVED" and evidence.get("authorizable") is True:
+            return name, verdict, body, evidence
+        return None
+    return None
+
+
+def latest_authority_decision(root):
+    """Newest complete authority row whose ``granted`` value is a real bool."""
+    from .storage import read_jsonl
+    path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    rows = read_jsonl(path)
+    return next(
+        (row for row in reversed(rows)
+         if isinstance(row, dict) and type(row.get("granted")) is bool),
+        None,
+    )
+
+
 def latest_verification(root):
     """The newest complete `ao verify` record, or None.
 
@@ -1255,13 +1489,15 @@ def record_verification(root, record):
 
 
 def record_authority(root, granted, reasons, tree, verification, token=None,
-                     review=None, reviewer=None):
+                     review=None, reviewer=None, candidate=None, scope=None):
     """Persist an authority decision, raising when durable recording fails."""
     from .storage import append_jsonl
     record = {"at": int(time.time()), "granted": bool(granted),
               "token": token, "reasons": reasons, "tree": tree,
               "verification": verification, "review": review,
               "reviewer": reviewer}
+    if candidate is not None:
+        record.update({"schema": 2, "candidate": candidate, "scope": scope})
     path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
     # Keep the reviewer's identity here, not only in the review file. A grant is
     # not real until the locked append, file fsync and (on first creation)

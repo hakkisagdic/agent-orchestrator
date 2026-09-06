@@ -78,7 +78,7 @@ def test_doctor_problems_see_a_dead_watchdog(project, monkeypatch, tmp_path):
     assert "watchdog-dead" in keys and "no-channel" in keys
 
 
-def test_remove_undoes_init(project, monkeypatch):
+def test_remove_undoes_init_and_only_removes_ao_owned_hooks(project, monkeypatch):
     from types import SimpleNamespace
     root = project["root"]
     os.makedirs(os.path.join(root, ".claude"))
@@ -88,6 +88,46 @@ def test_remove_undoes_init(project, monkeypatch):
     skillkit.install_playbook(root, agents)
     skillkit.register_mcp(root, agents, exe="/x/ao")
     json.dump({"mcpServers": {"ao": {"command": "/x/ao"}, "other": {"command": "y"}}}, open(os.path.join(root, ".mcp.json"), "w", encoding="utf-8"))
+
+    hooks = os.path.join(root, ".git", "hooks")
+    os.makedirs(hooks, exist_ok=True)
+    pre_commit = os.path.join(hooks, "pre-commit")
+    pre_push = os.path.join(hooks, "pre-push")
+    open(pre_commit, "w", encoding="utf-8").write(
+        "#!/bin/sh\n# agent-orchestrator: fixture-owned hook\n"
+    )
+    foreign = "#!/bin/sh\necho foreign\n"
+    open(pre_push, "w", encoding="utf-8").write(foreign)
+
+    cli.cmd_remove(project, SimpleNamespace(yes=False))
+    assert os.path.exists(os.path.join(root, ".ao"))
+    assert os.path.exists(pre_commit)
+    assert open(pre_push, encoding="utf-8").read() == foreign
+
     cli.cmd_remove(project, SimpleNamespace(yes=True))
     assert not os.path.exists(os.path.join(root, ".ao")) and not os.path.exists(os.path.join(root, ".claude", "skills", "ao"))
+    assert not os.path.exists(pre_commit)
+    assert open(pre_push, encoding="utf-8").read() == foreign
     assert json.load(open(os.path.join(root, ".mcp.json"), encoding="utf-8"))["mcpServers"] == {"other": {"command": "y"}}
+
+
+def test_doctor_reports_both_hook_states_with_safe_ownership_check(
+    project, monkeypatch, capsys
+):
+    from types import SimpleNamespace
+
+    root = project["root"]
+    paths = cli._ao_hook_paths(root)
+    open(paths["pre-commit"], "w", encoding="utf-8").write(
+        "#!/bin/sh\n# agent-orchestrator: fixture-owned hook\n"
+    )
+    open(paths["pre-push"], "w", encoding="utf-8").write(
+        "#!/bin/sh\necho foreign\n"
+    )
+    monkeypatch.setattr(cli.shutil, "which", lambda *args, **kwargs: None)
+
+    cli.cmd_doctor(project, SimpleNamespace(check=False))
+    output = re.sub(r"\033\[[0-9;]*m", "", capsys.readouterr().out)
+
+    assert re.search(r"^commit hook\s+installed$", output, re.M)
+    assert re.search(r"^push hook\s+foreign$", output, re.M)

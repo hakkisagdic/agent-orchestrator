@@ -42,3 +42,49 @@ def test_helpers_are_not_writers(project, monkeypatch):
     monkeypatch.setattr(procs, "argv", lambda pid: vectors.get(pid))
     monkeypatch.setattr(procs, "cwd", lambda pid: root)
     assert A.agent_pids(root, {"resume": {"argv": ["kiro-cli"]}}) == [600]
+
+
+def test_scoped_prospective_review_refuses_staged_paths_outside_scope_before_reviewer(
+    project, monkeypatch, capsys
+):
+    import sys
+    from types import SimpleNamespace
+
+    from ao import cli
+
+    root = project["root"]
+    os.makedirs(os.path.join(root, "src"))
+    src = os.path.join(root, "src", "a.py")
+    other = os.path.join(root, "other.txt")
+    open(src, "w", encoding="utf-8").write("x = 1\n")
+    open(other, "w", encoding="utf-8").write("base\n")
+    _git(root, "add", "src/a.py", "other.txt")
+    _git(root, "commit", "-q", "-m", "base")
+    open(src, "w", encoding="utf-8").write("x = 2\n")
+    open(other, "w", encoding="utf-8").write("outside\n")
+    _git(root, "add", "src/a.py", "other.txt")
+
+    reviewer_calls = []
+
+    def unexpected_reviewer(*args, **kwargs):
+        reviewer_calls.append((args, kwargs))
+        raise AssertionError("reviewer invoked for refused candidate")
+
+    monkeypatch.setattr(cli, "_run_reviewer", unexpected_reviewer)
+    cfg = dict(
+        project,
+        reviewer={
+            "id": "r1",
+            "family": "test",
+            "argv": [sys.executable, "-c", "print('VERDICT: APPROVED')", "{prompt}"],
+        },
+    )
+    args = SimpleNamespace(boundary="src only", timeout=30, paths=["src"], commits=None)
+
+    assert cli.cmd_review(cfg, args) == 2
+    output = capsys.readouterr().out
+
+    assert "CANDIDATE REFUSED" in output
+    assert "review scope excludes staged paths: other.txt" in output
+    assert reviewer_calls == []
+    assert os.listdir(os.path.join(root, cfg["reviews"])) == []
