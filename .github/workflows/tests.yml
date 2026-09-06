@@ -32,6 +32,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 12
     env:
+      PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUTF8: "1"
       PYTHONIOENCODING: utf-8
     steps:

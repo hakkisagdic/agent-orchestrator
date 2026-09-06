@@ -8,5 +8,18 @@
 # repository's config flipped to bare=true before this line existed.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_PREFIX GIT_OBJECT_DIRECTORY
 cd "$(git rev-parse --show-toplevel)" || exit 1
-if [ -x .venv/bin/python ]; then PY=.venv/bin/python; else PY=python3; fi
-$PY -m pytest -q -x 2>&1 | tail -3 || { echo "pre-push: tests failed; push refused"; exit 1; }
+if [ -x .venv/bin/python ]; then
+  PY=.venv/bin/python
+elif [ -x .venv/Scripts/python.exe ]; then
+  PY=.venv/Scripts/python.exe
+elif command -v python3 >/dev/null 2>&1; then
+  PY=python3
+else
+  PY=python
+fi
+# No pipe: a pipe to tail would hide pytest's exit status and let a missing
+# pytest or a red suite pass the hook vacuously.
+if ! PYTHONDONTWRITEBYTECODE=1 "$PY" -m pytest -q -x; then
+  echo "pre-push: tests failed; push refused"
+  exit 1
+fi
