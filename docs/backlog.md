@@ -18,6 +18,7 @@ Nothing here is authorised until it is queued on a project board.
 | 10 | **Measured feature costs** | `features.md` percentages are estimates | `ao cost` attributes implementer spend per feature from ledgers; the doc shows measured values with the sample window, and the estimate column is removed |
 | 11 | **Scenario fuzzing of the guard chain** | contradictions in the guard chain were found one at a time | The scenario World is randomised over N seeds; any cycle whose verdict contradicts a documented invariant (F1–F18) fails the run with the seed printed |
 | 12 | **Release 0.5.0** | the installed tool already runs main; PyPI and Homebrew lag | After one landed slice under candidate-bound authority on Voltrai: version bump, changelog, tag, Homebrew formula; README EN and TR rows match the CLI |
+| 13 | **Tandem mode (optional)** | the owner asked whether roles may rotate per slice or per project | Roles may rotate per slice on tool repositories; the invariant `reviewer ≠ author of the candidate` holds for every grant regardless of who holds which role; product repositories keep fixed roles (architect never implements beyond hotfixes) |
 
 Two policies stay outside the queue: hosted CI runs only on the maintainer's word, one
 environment at a time; nothing in this repository lands without an independent review
