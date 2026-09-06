@@ -75,6 +75,21 @@ recorded, and work moves to the next pre-authorised item. When the queue runs dr
 *architect* is woken to refill it — never the implementer, because choosing your own
 scope is the one authority an implementer must not have.
 
+
+## Setup, step by step
+
+1. `pip install ao-orchestrator` (or `uv tool install ao-orchestrator`, or the Homebrew tap).
+2. In the repository: `ao init --profile claude-kiro` (or `claude-claude`). Writes `.ao/`, the mailbox,
+   the playbook, and registers the MCP server for the agents it detects.
+3. **Wire the rules.** ao does not write your `CLAUDE.md` / `AGENTS.md`: paste the printed pointer
+   there, or re-run `ao init --rules`. Until then `ao doctor` says `rules-not-wired` — the playbook
+   is written but no agent reads it. (A Claude Code skill file is discovered on its own.)
+4. Start or restart the agent's app in the directory so the `ao` MCP tools load.
+5. `ao doctor`. Then `ao email setup` and, if you want it, `ao telegram setup`; `ao pings setup --url`
+   for the dead man's switch.
+6. `ao watchdog install` for unattended runs (a doctor job comes with it). `ao features` to choose
+   what you pay for; `ao remove --yes` takes everything off again.
+
 ## Commands
 
 | | |

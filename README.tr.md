@@ -75,6 +75,20 @@ sonraki önceden-yetkilendirilmiş maddeye geçer. Kuyruk boşalınca **mimar** 
 — uygulayıcı değil, çünkü kendi kapsamını seçmek bir uygulayıcının sahip olmaması
 gereken tek yetkidir.
 
+
+## Kurulum, adım adım
+
+1. `pip install ao-orchestrator` (ya da `uv tool install ao-orchestrator`, ya da Homebrew tap).
+2. Depoda: `ao init --profile claude-kiro` (ya da `claude-claude`). `.ao/`, posta kutusu, playbook yazılır,
+   tespit edilen ajanlar için MCP sunucusu kaydedilir.
+3. **Kuralları bağla.** ao `CLAUDE.md` / `AGENTS.md` dosyana yazmaz: basılan işaretçiyi oraya yapıştır ya da
+   `ao init --rules` çalıştır. O zamana kadar `ao doctor` `rules-not-wired` der: playbook yazılmış ama hiçbir
+   ajan okumuyor. (Claude Code skill dosyasını ajan kendi bulur.)
+4. Ajanın uygulamasını bu dizinde başlat/yeniden başlat ki `ao` MCP araçları yüklensin.
+5. `ao doctor`. Sonra `ao email setup`, istersen `ao telegram setup`; dead man's switch için `ao pings setup --url`.
+6. Gözetimsiz koşu için `ao watchdog install` (doctor işi birlikte gelir). Neye para ödediğini `ao features` ile
+   seç; `ao remove --yes` her şeyi geri alır.
+
 ## Komutlar
 
 | | |

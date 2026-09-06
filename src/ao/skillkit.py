@@ -87,7 +87,10 @@ def install_playbook(root, agents, rules=False):
     front, body = playbook()
     out = {}
     p = os.path.join(root, ".ao", "PLAYBOOK.md")
-    out[".ao/PLAYBOOK.md"] = _write_marked(p, body, header="")
+    note = ("<!-- No agent reads this file until a rule file points at it. Paste into CLAUDE.md or AGENTS.md: "
+            + RULE_POINTER.split("\n\n", 1)[1].replace("\n", " ")
+            + " (or run `ao init --rules`). `ao doctor` reports rules-not-wired until then. -->\n\n")
+    out[".ao/PLAYBOOK.md"] = _write_marked(p, body, header=note)
     if "claude-code" in agents:
         p = os.path.join(root, ".claude", "skills", "ao", "SKILL.md")
         out[".claude/skills/ao/SKILL.md"] = _write_marked(p, body, header=front)
@@ -160,3 +163,28 @@ def next_steps(agents, registered):
     lines.append("Then `ao doctor` — binaries, channels, watchdog — and `ao email setup` if it says no channel.")
     lines.append("Write the first slice into .ao/backlog.md with an acceptance boundary; the agent takes it from there.")
     return lines
+
+
+def rules_wired(root):
+    """Does any file the agents read point at the playbook?
+
+    True when a rule file mentions the playbook or the skill, None when no
+    playbook has been installed (nothing to wire), False when the playbook is
+    there and nothing references it — written, not in force.
+    """
+    if not os.path.exists(os.path.join(root, ".ao", "PLAYBOOK.md")):
+        return None
+    needles = ("PLAYBOOK.md", "skills/ao", "ao-playbook", "ao-coordination", "agent-orchestrator")
+    candidates = [os.path.join(root, "CLAUDE.md"), os.path.join(root, "AGENTS.md")]
+    steering = os.path.join(root, ".kiro", "steering")
+    if os.path.isdir(steering):
+        candidates += [os.path.join(steering, f) for f in os.listdir(steering)]
+    if os.path.isdir(os.path.join(root, ".claude", "skills", "ao")):
+        return True                      # a skill is discovered by the agent on its own
+    for p in candidates:
+        try:
+            if any(n in open(p, encoding="utf-8", errors="replace").read() for n in needles):
+                return True
+        except OSError:
+            continue
+    return False

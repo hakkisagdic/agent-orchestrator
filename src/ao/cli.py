@@ -2257,6 +2257,12 @@ def doctor_problems(cfg):
         pass
     if len(A.deferred_open(root)) >= 3:
         out.append(("deferred-pile", f"{len(A.deferred_open(root))} deferred actions waiting — ao catchup"))
+    # The playbook exists but nothing the agent reads points at it: the rules are
+    # written and not in force. init prints the pointer; this is the reminder.
+    from . import skillkit
+    if skillkit.rules_wired(root) is False:
+        out.append(("rules-not-wired", "no rule file (CLAUDE.md, AGENTS.md, .kiro/steering) points at the ao playbook — "
+                                       "paste the pointer or run `ao init --rules`"))
     # Two critical roles on one rate-limited pool fail together: the day the
     # architect ran dry, so did the reviewer, and the run locked.
     arch_bin = os.path.basename(((cfg.get("architect") or {}).get("argv") or [""])[0])
