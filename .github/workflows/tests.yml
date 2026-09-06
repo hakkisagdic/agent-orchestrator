@@ -14,8 +14,17 @@ on:
         default: windows-latest
         type: choice
         options: [windows-latest, macos-latest, ubuntu-latest, all]
+      python:
+        description: "interpreter: 3.9 (support floor) | 3.11 | 3.12"
+        default: "3.11"
+        type: choice
+        options: ["3.9", "3.11", "3.12"]
+permissions:
+  contents: read
+
 jobs:
   pytest:
+    name: ${{ matrix.os }} / Python ${{ inputs.python }}
     strategy:
       fail-fast: false
       matrix:
@@ -29,6 +38,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - run: pip install -e ".[dev]"
+          python-version: ${{ inputs.python }}
+      - run: python -m pip install -e ".[dev]"
       - run: python -m pytest -q

@@ -3,8 +3,8 @@
 ao's cost is a menu. Everything that spends a model's quota is a switch in
 `.ao/config.json` (`"features": {…}`), and `ao features` prints the estimate
 for the current switches. All off, ao is a deterministic monitor — board,
-mailbox, gates under the lock, commit authority by digest, alarms, pings, hooks
-— and spends nothing. All on, about a quarter of the implementer's spend.
+mailbox, gates under the lock, commit authority bound to an immutable index
+candidate, alarms, pings, hooks — and spends nothing. All on, about a quarter of the implementer's spend.
 
 | switch | on by default | share | what it spends |
 |---|---|---|---|
@@ -23,14 +23,15 @@ guard.
 
 ```bash
 ao features                      # the table and the estimate
-ao features off review           # commit-ok then needs gates and digest only
+ao features off review           # candidate-bound gates still decide; review is skipped
 ao features off architect_wake   # anomalies are written and alarmed, nobody is woken
 ```
 
 What each switch changes when off:
 
-- `review` off — `ao commit-ok` no longer requires an APPROVED review; `ao
-  review` still works when asked.
+- `review` off — `ao commit-ok` no longer requires an APPROVED review; the
+  staged candidate must still be isolated and exactly match its verification,
+  and `ao review` still works when asked.
 - `inventory_review` off — the playbook and backlog rule stop asking for an
   inventory review; the surface inventory itself is still good practice.
 - `nudge` off — the watchdog measures, alarms and records, but never starts an
@@ -43,10 +44,13 @@ What each switch changes when off:
 
 Sometimes the switch is not the answer: the reviewer is out of quota for two
 hours and the slice is ready. `ao waive review --slice B7 --why "…"` records a
-waiver; `ao commit-ok` honours it and names it; `ao catchup` later reviews the
-landed range with `ao review --commits` and closes the waiver, or writes the
-architect a decision request when the retro review finds problems. Nothing is
-skipped silently, and nothing is lost when the run degrades:
+waiver; `ao commit-ok` honours it only for a matching running slice, and the
+pre-commit `ao commit-check` requires that waiver to remain open when the grant
+names no review. `ao catchup` later reviews the landed range with `ao review
+--commits` and closes the waiver, or writes the architect a decision request when
+the retrospective review finds problems. Retrospective evidence reconciles the
+record; it never authorizes a candidate. Nothing is skipped silently, and
+nothing is lost when the run degrades:
 
 - deferred nudges and wakes (quota) are queued in `.ao/ledger/deferred.jsonl`
   and replayed by `ao catchup`;
@@ -55,5 +59,7 @@ skipped silently, and nothing is lost when the run degrades:
 - `ao pings setup --url …` gives an external service (healthchecks.io) a
   heartbeat from the watchdog and the doctor job — when both die, that service
   e-mails you, which nothing on the dead machine can;
-- `ao hooks install` makes push a human window: `ao push allow` opens it for
-  thirty minutes, the pre-push hook refuses otherwise.
+- `ao hooks install` installs AO-owned pre-commit and pre-push hooks: pre-commit
+  revalidates the persisted grant against Git's active index, while `ao push
+  allow` opens the human push window for thirty minutes; foreign hooks are never
+  overwritten.

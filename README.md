@@ -164,9 +164,20 @@ These are not style preferences. Each one is a failure that cost real hours.
 even when the CLI does not. Adding one is a JSON file; see
 [`docs/adapters.md`](docs/adapters.md).
 
+The hosted `tests` workflow runs only on demand, one environment at a time
+(`gh workflow run tests -f os=windows-latest -f python=3.11`), because GitHub bills
+macOS minutes at 10x and Windows at 2x; the pre-push hook already runs the suite
+locally on every push. Lanes: Python 3.11 on Ubuntu, Windows and macOS, plus the
+Python 3.9 support floor and Python 3.12 on Ubuntu. Hosted runs cover OS
+API behavior and deterministic process crashes with real child processes and
+temporary paths. They are not physical power-loss, storage-controller or filesystem
+qualification, including unsupported and network filesystems.
+
 ## Documentation
 
 [protocol](docs/protocol.md) · [safety](docs/safety.md) · [roles](docs/roles.md) ·
+[capability matrix](docs/capability-matrix.md) ·
+[architecture decisions](docs/adr/README.md) ·
 [slices](docs/slices.md) · [gates](docs/gates.md) · [sources](docs/sources.md) ·
 [adapters](docs/adapters.md) · [parallel](docs/parallel.md) · [cloud](docs/cloud.md) ·
 [models](docs/models.md) · [telegram](docs/telegram.md) · [mcp](docs/mcp.md) · [telemetry](docs/telemetry.md) ·

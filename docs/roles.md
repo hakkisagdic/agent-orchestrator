@@ -136,9 +136,16 @@ producing any.
 `reviewer.fallbacks` in `.ao/config.json` is a list of further reviewer blocks
 tried in order when the primary is unavailable — out of quota, not logged in,
 timed out, or silent. The identity of whoever actually reviewed is recorded in
-the review file, marked as a fallback. A reviewer from a different family is
-preferred; a fresh session of the implementer's family with no tools is an
-acceptable last resort and still not the implementer reviewing itself.
+the review file, marked as a fallback.
+
+Legacy configs prefer a different family but permit a fresh session of the
+implementer's family as a last resort. Projects that opt into the version-1
+[capability matrix](capability-matrix.md) use the stronger rule: a reviewer with
+the implementer's binding **or bound model family** is ineligible and is never
+spawned. Family comes only from the bound model declaration, so inline family
+fields cannot spoof independence. Runtime-unavailable eligible reviewers still
+advance in order; malformed substantive output is `INVALID` and does not trigger
+approval shopping.
 
 If no reviewer is available, `ao review` exits 3 and writes a file whose verdict
 is `UNAVAILABLE`. That file is not a round and never becomes NEEDS_CHANGES; the

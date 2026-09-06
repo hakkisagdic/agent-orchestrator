@@ -68,21 +68,27 @@ The agent that writes the code does not decide when it is good enough.
 Reports from implementers are usually accurate. The point is not to catch liars; it is that
 a system whose correctness depends on self-reporting has no independent check at all.
 
-`ao commit-ok` is that step made mechanical, so work can land while nobody is awake. It
-grants only when four things hold at once:
+`ao commit-ok` is that decision made mechanical, so work can land while nobody is
+awake. The implementer first stages the exact candidate. A grant is issued only when:
 
-- the newest verification passed, and
-- its **tree digest still matches** the working tree — a pass measured before the last
-  three edits describes a tree that no longer exists, and
-- no plan was edited after admission, and
-- the newest review is APPROVED and the project is not held.
+- the index candidate is non-empty and isolated from unstaged or untracked product changes;
+- the newest verification passed, marked that candidate ready, and names the exact same
+  immutable index candidate;
+- no plan was edited after admission; and
+- the newest structured prospective review for that candidate is APPROVED (unless review
+  is currently disabled or a matching running-slice waiver is open), and the project is
+  not held.
 
-Every refusal names its missing condition so an agent can act instead of asking again,
-and every decision — granted or refused — is appended to an authority ledger with the
-evidence it rested on. The grant never covers `push`, and no configuration makes it.
+Every refusal names its missing condition, and every grant or refusal is appended to the
+authority ledger with the candidate and scope it rested on. `ao commit-check` is the
+non-mutating enforcement half: the optional AO pre-commit hook runs it against Git's
+active index and revalidates the latest persisted grant, its exact verification and
+review or live waiver, plus current plan drift, holds, and urgent mail. It neither issues
+nor consumes a grant. A retrospective `ao review --commits` artifact can reconcile
+landed work but can never authorize a candidate.
 
-It decides; it does not commit. Deciding and acting stay in different hands, which is
-the only reason the decision is worth anything.
+The grant never covers `push`, and no configuration makes it. Deciding and acting stay
+in different hands, which is the only reason the decision is worth anything.
 
 ## 4. Separation of duties
 
@@ -155,13 +161,18 @@ required only that a review say APPROVED, and authority was granted on a verdict
 the implementer had produced about itself. A model reviewing its own output shares
 its own blind spots, so that verdict measured nothing it did not already believe.
 
-`ao review` runs a separate actor against the diff and the slice's acceptance
-boundary. It records who reviewed, against which tree digest, and `commit-ok` now
-refuses when:
+`ao review` runs a separate actor against the immutable staged candidate and the
+slice's acceptance boundary. It records who reviewed and embeds structured candidate
+and scope evidence. `commit-ok` refuses when:
 
 - the review names no reviewer — nobody can tell who wrote it;
 - the reviewer is the implementer;
-- the review's tree digest no longer matches, so it described different code.
+- the newest structured prospective artifact for that candidate is not APPROVED or is
+  marked non-authorizable; or
+- the candidate or scope no longer matches the active index.
+
+Unrelated and retrospective artifacts do not supersede a candidate review, and a
+retrospective review never grants commit authority.
 
 The first independent run returned NEEDS_CHANGES with a BLOCKER on work whose
 self-review had been APPROVED with zero findings: three of the acceptance
