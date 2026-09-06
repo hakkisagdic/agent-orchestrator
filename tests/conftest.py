@@ -5,6 +5,11 @@ import sys
 
 import pytest
 
+# A hook (or a shell) may hand us GIT_DIR; with it set, every git command in a
+# fixture acts on the real repository instead of the temp one. Drop it first.
+for _var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_PREFIX", "GIT_OBJECT_DIRECTORY"):
+    os.environ.pop(_var, None)
+
 SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
 sys.path.insert(0, SRC)
 
@@ -37,3 +42,23 @@ def project(tmp_path, monkeypatch):
     monkeypatch.setattr(W, "STATE_DIR", str(home / ".ao"))   # bound at import from the real HOME
     full = dict(cfg, root=str(root))
     return full
+
+
+@pytest.fixture(autouse=True)
+def _repo_untouched(request):
+    """No test may change the repository it lives in.
+
+    Six commits once landed on a maintainer's branch from a test that ran git
+    in the wrong directory; the repository's config even ended up `bare`. This
+    guard names the test that does it, the first time it does it.
+    """
+    repo = os.path.dirname(SRC)
+    def snap():
+        h = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True).stdout.strip()
+        s = subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True).stdout
+        b = subprocess.run(["git", "config", "--bool", "core.bare"], cwd=repo, capture_output=True, text=True).stdout.strip()
+        return h, s, b
+    before = snap()
+    yield
+    after = snap()
+    assert after == before, f"{request.node.nodeid} changed the repository it runs in: {before} -> {after}"
