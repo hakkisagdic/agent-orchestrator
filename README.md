@@ -167,6 +167,7 @@ even when the CLI does not. Adding one is a JSON file; see
 ## Documentation
 
 [protocol](docs/protocol.md) · [safety](docs/safety.md) · [roles](docs/roles.md) ·
+[capability matrix](docs/capability-matrix.md) ·
 [slices](docs/slices.md) · [gates](docs/gates.md) · [sources](docs/sources.md) ·
 [adapters](docs/adapters.md) · [parallel](docs/parallel.md) · [cloud](docs/cloud.md) ·
 [models](docs/models.md) · [telegram](docs/telegram.md) · [mcp](docs/mcp.md) · [telemetry](docs/telemetry.md) ·

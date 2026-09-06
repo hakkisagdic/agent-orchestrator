@@ -57,16 +57,81 @@ def find_root(start=None):
     return top or os.path.abspath(start or os.getcwd())
 
 
+def _has_top_level_json_key(raw, wanted):
+    """Recognize a top-level JSON object key even when the document is truncated.
+
+    Config parse failure cannot be allowed to erase an opt-in authority boundary.
+    Scan only complete depth-one string tokens followed by ``:``; decoding each
+    token with the JSON decoder also recognizes escaped spellings such as
+    ``capability\\u005fmatrix`` without mistaking nested keys or string values for
+    a top-level declaration. Invalid UTF-8 elsewhere is retained as surrogate
+    text and does not hide an ASCII key.
+    """
+    if not isinstance(raw, (bytes, bytearray)):
+        return False
+    text = bytes(raw).decode(UTF8, "surrogateescape")
+    length = len(text)
+    index = 1 if text.startswith("\ufeff") else 0
+    while index < length and text[index].isspace():
+        index += 1
+    if index >= length or text[index] != "{":
+        return False
+    depth = 1
+    index += 1
+    while index < length and depth:
+        char = text[index]
+        if char == '"':
+            start = index
+            index += 1
+            escaped = False
+            while index < length:
+                current = text[index]
+                if escaped:
+                    escaped = False
+                elif current == "\\":
+                    escaped = True
+                elif current == '"':
+                    index += 1
+                    break
+                index += 1
+            else:
+                return False
+            if depth == 1:
+                after = index
+                while after < length and text[after].isspace():
+                    after += 1
+                if after < length and text[after] == ":":
+                    try:
+                        key = json.loads(text[start:index])
+                    except (TypeError, ValueError, UnicodeError):
+                        key = None
+                    if key == wanted:
+                        return True
+            continue
+        if char in "[{":
+            depth += 1
+        elif char in "]}":
+            depth -= 1
+        index += 1
+    return False
+
+
 def load_config(root):
     """.ao/config.json — the docs show YAML for readability; the reference
     scripts read JSON so they stay dependency-free."""
     p = os.path.join(root, ".ao", "config.json")
     cfg = {}
     if os.path.exists(p):
+        raw = b""
         try:
-            cfg = json.load(open(p, encoding=UTF8))
+            raw = open(p, "rb").read()
+            cfg = json.loads(raw.decode(UTF8))
         except Exception:
-            cfg = {}
+            # Legacy malformed config has historically degraded to discovery.
+            # Once the strict key is present, however, a parse failure must not
+            # erase the opt-in and silently reactivate legacy authority.
+            cfg = ({"_capability_matrix_error": True}
+                   if _has_top_level_json_key(raw, "capability_matrix") else {})
     cfg.setdefault("root", root)
     cfg.setdefault("mailbox", "agent-mail")
     cfg.setdefault("reviews", "semantic-review")
@@ -1450,6 +1515,11 @@ def latest_candidate_review(root, review_dir, candidate_digest, limit=40):
             # Legacy, retrospective, unavailable-without-evidence, and reviews
             # for other candidates say nothing about this candidate.
             continue
+        if evidence.get("schema") == 3 and evidence.get("review_status") == "unavailable":
+            # Strict mode records safe route attempts even when no review took
+            # place. Like the legacy unstructured artifact, that is not a round
+            # and must not mask an earlier completed review of the same bytes.
+            continue
         # The first matching structured artifact is authoritative. A newer
         # rejection or invalidated review must never expose an older approval.
         if verdict == "APPROVED" and evidence.get("authorizable") is True:
@@ -1489,14 +1559,26 @@ def record_verification(root, record):
 
 
 def record_authority(root, granted, reasons, tree, verification, token=None,
-                     review=None, reviewer=None, candidate=None, scope=None):
+                     review=None, reviewer=None, candidate=None, scope=None,
+                     matrix=None, role_bindings=None, implementer_identity=None,
+                     reviewer_identity=None):
     """Persist an authority decision, raising when durable recording fails."""
     from .storage import append_jsonl
     record = {"at": int(time.time()), "granted": bool(granted),
               "token": token, "reasons": reasons, "tree": tree,
               "verification": verification, "review": review,
               "reviewer": reviewer}
-    if candidate is not None:
+    if matrix is not None:
+        record.update({
+            "schema": 3,
+            "candidate": candidate,
+            "scope": scope,
+            "matrix": matrix,
+            "role_bindings": role_bindings,
+            "implementer_identity": implementer_identity,
+            "reviewer_identity": reviewer_identity,
+        })
+    elif candidate is not None:
         record.update({"schema": 2, "candidate": candidate, "scope": scope})
     path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
     # Keep the reviewer's identity here, not only in the review file. A grant is

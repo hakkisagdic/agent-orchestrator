@@ -21,6 +21,7 @@ import time
 from datetime import datetime
 
 from . import lib as A
+from . import matrix as M
 UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 C = A.C
@@ -544,6 +545,18 @@ def cmd_verify(cfg, args):
 def cmd_commit_ok(cfg, args):
     """Grant authority only for the exact, isolated tree in Git's index."""
     root = cfg["root"]
+    strict = M.is_strict(cfg)
+    matrix_resolution = None
+    if strict:
+        try:
+            # A waiver may bypass a review, but never malformed declarations or
+            # a runtime implementer that disagrees with its bound identity.
+            matrix_resolution = M.resolve(cfg, require_independent=False)
+        except M.MatrixError as exc:
+            print(f"{C['red']}{C['b']}REFUSED{C['reset']}")
+            for problem in exc.problems:
+                print(f"  {C['red']}·{C['reset']} capability matrix: {problem}")
+            return 1
     try:
         candidate = A.index_candidate(root)
         issues = A.candidate_worktree_issues(root, cfg, candidate)
@@ -603,12 +616,15 @@ def cmd_commit_ok(cfg, args):
     review_required = F.enabled(cfg, "review")
     match = A.latest_candidate_review(root, cfg["reviews"], candidate["digest"])
     review_name, rbody, evidence, rwho = None, "", None, None
+    strict_reviewer_identity = None
     scope = A.candidate_scope(candidate)
     if not review_required:
         pass
     elif waiver:
         print(f"{C['yellow']}review waived{C['reset']} by {waiver['by']} ({waiver['id']}): "
               f"{waiver['why'][:80]} — reconcile with `ao catchup`")
+    elif strict and not any(route["eligible"] for route in matrix_resolution["reviewers"]):
+        reasons.append("capability matrix has no independently eligible reviewer")
     elif not match:
         reasons.append("no APPROVED prospective review is bound to this staged candidate")
     else:
@@ -619,13 +635,23 @@ def cmd_commit_ok(cfg, args):
         reasons.extend(f"{review_name}: {reason}" for reason in integrity_reasons)
         if reviewed_scope is not None:
             scope = reviewed_scope
-        m = A.re.search(r"reviewer:\s*`([^`]+)`", rbody)
-        rwho = m.group(1) if m else None
-        impl_id = (cfg.get("implementer") or {}).get("session") or ""
-        if not rwho:
-            reasons.append(f"{review_name} names no reviewer — cannot tell who wrote it")
-        elif impl_id and (rwho in impl_id or impl_id in rwho):
-            reasons.append(f"the review was written by the implementer ({rwho})")
+        if strict:
+            reasons.extend(
+                f"{review_name}: {reason}"
+                for reason in M.review_evidence_problems(matrix_resolution, evidence)
+            )
+            strict_reviewer_identity = evidence.get("reviewer_identity") \
+                if isinstance(evidence, dict) else None
+            rwho = (strict_reviewer_identity or {}).get("binding") \
+                if isinstance(strict_reviewer_identity, dict) else None
+        else:
+            m = A.re.search(r"reviewer:\s*`([^`]+)`", rbody)
+            rwho = m.group(1) if m else None
+            impl_id = (cfg.get("implementer") or {}).get("session") or ""
+            if not rwho:
+                reasons.append(f"{review_name} names no reviewer — cannot tell who wrote it")
+            elif impl_id and (rwho in impl_id or impl_id in rwho):
+                reasons.append(f"the review was written by the implementer ({rwho})")
 
     held = A.hold_state(root)
     if held:
@@ -635,6 +661,9 @@ def cmd_commit_ok(cfg, args):
             f"urgent message unacknowledged: {message['id']} — {message['title']}"
         )
 
+    strict_authority = M.authority_fields(
+        matrix_resolution, strict_reviewer_identity
+    ) if strict else {}
     if reasons:
         print(f"{C['red']}{C['b']}REFUSED{C['reset']}")
         for reason in reasons:
@@ -642,7 +671,7 @@ def cmd_commit_ok(cfg, args):
         try:
             A.record_authority(
                 root, False, reasons, now, (ver or {}).get("id"),
-                candidate=candidate, scope=scope,
+                candidate=candidate, scope=scope, **strict_authority,
             )
         except OSError as exc:
             print(f"  {C['dim']}authority refusal could not be recorded: {exc}{C['reset']}")
@@ -653,6 +682,7 @@ def cmd_commit_ok(cfg, args):
         A.record_authority(
             root, True, [], now, ver["id"], token,
             review=review_name, reviewer=rwho, candidate=candidate, scope=scope,
+            **strict_authority,
         )
     except OSError as exc:
         print(f"{C['red']}{C['b']}REFUSED{C['reset']}")
@@ -671,6 +701,13 @@ def cmd_commit_check(cfg, args):
     """Revalidate the latest persisted grant against Git's exact active index."""
     root = cfg["root"]
     reasons = []
+    strict = M.is_strict(cfg)
+    matrix_resolution = None
+    if strict:
+        try:
+            matrix_resolution = M.resolve(cfg, require_independent=False)
+        except M.MatrixError as exc:
+            reasons.extend("capability matrix: " + problem for problem in exc.problems)
     candidate = None
     try:
         candidate = A.index_candidate(root)
@@ -693,7 +730,16 @@ def cmd_commit_check(cfg, args):
     elif grant.get("granted") is not True:
         reasons.append("latest authority decision refused this commit")
     else:
-        if grant.get("schema") != 2:
+        if strict:
+            if matrix_resolution is not None:
+                reasons.extend(M.authority_problems(matrix_resolution, grant))
+            elif grant.get("schema") != 3:
+                reasons.append("strict mode requires a schema-3 capability-matrix grant")
+        elif grant.get("schema") == 3 or grant.get("matrix") is not None:
+            reasons.append(
+                "capability_matrix was removed after this strict authority grant"
+            )
+        elif grant.get("schema") != 2:
             reasons.append("latest grant predates index-candidate binding")
         if candidate is not None and grant.get("candidate") != candidate:
             reasons.append("latest grant does not match the current index candidate")
@@ -761,7 +807,30 @@ def cmd_commit_check(cfg, args):
                     reasons.append(
                         "granted review scope does not exactly match the persisted authority grant"
                     )
+                if strict and matrix_resolution is not None:
+                    reasons.extend(
+                        f"{match[0]}: {reason}"
+                        for reason in M.review_evidence_problems(
+                            matrix_resolution, match[3]
+                        )
+                    )
+                    evidence_reviewer = match[3].get("reviewer_identity")
+                    if grant.get("reviewer_identity") != evidence_reviewer:
+                        reasons.append(
+                            "granted reviewer identity does not match the review artifact"
+                        )
+                    binding = (evidence_reviewer or {}).get("binding") \
+                        if isinstance(evidence_reviewer, dict) else None
+                    if grant.get("reviewer") != binding:
+                        reasons.append(
+                            "granted reviewer binding does not match the review artifact"
+                        )
         else:
+            if strict and (
+                grant.get("reviewer_identity") is not None
+                or grant.get("reviewer") is not None
+            ):
+                reasons.append("review-bypassed strict grant unexpectedly names a reviewer")
             from . import features as F
             if F.enabled(cfg, "review"):
                 try:
@@ -1332,19 +1401,30 @@ def cmd_review(cfg, args):
     root = cfg["root"]
     impl = cfg.get("implementer") or {}
     rv = cfg.get("reviewer") or {}
-    if not rv.get("argv"):
-        print(f"{C['yellow']}No reviewer configured.{C['reset']} Add to .ao/config.json:")
-        print(json.dumps({"reviewer": {
-            "id": "claude-reviewer", "family": "anthropic",
-            "argv": ["claude", "-p", "{prompt}", "--model", "claude-opus-5",
-                     "--allowedTools", "Read,Grep,Glob"]}}, indent=2))
-        print(f"\n{C['dim']}It must not be the implementer. A model reviewing its own")
-        print(f"output shares its own blind spots.{C['reset']}")
-        return 1
-    if rv.get("id") and rv["id"] == impl.get("session"):
-        print(f"{C['red']}The reviewer is the implementer.{C['reset']} That is the one "
-              f"configuration this refuses.")
-        return 2
+    strict = M.is_strict(cfg)
+    matrix_resolution = None
+    if strict:
+        try:
+            matrix_resolution = M.resolve(cfg, require_independent=True)
+        except M.MatrixError as exc:
+            print(f"{C['red']}{C['b']}CONFIGURATION ERROR{C['reset']}")
+            for problem in exc.problems:
+                print(f"  {C['red']}·{C['reset']} {problem}")
+            return 2
+    else:
+        if not rv.get("argv"):
+            print(f"{C['yellow']}No reviewer configured.{C['reset']} Add to .ao/config.json:")
+            print(json.dumps({"reviewer": {
+                "id": "claude-reviewer", "family": "anthropic",
+                "argv": ["claude", "-p", "{prompt}", "--model", "claude-opus-5",
+                         "--allowedTools", "Read,Grep,Glob"]}}, indent=2))
+            print(f"\n{C['dim']}It must not be the implementer. A model reviewing its own")
+            print(f"output shares its own blind spots.{C['reset']}")
+            return 1
+        if rv.get("id") and rv["id"] == impl.get("session"):
+            print(f"{C['red']}The reviewer is the implementer.{C['reset']} That is the one "
+                  f"configuration this refuses.")
+            return 2
 
     candidate, scope, included = None, None, []
     if args.commits:
@@ -1394,6 +1474,9 @@ def cmd_review(cfg, args):
             "candidate": candidate, "scope": scope,
             "diff_digest": "sha256:" + __import__("hashlib").sha256(diff_bytes).hexdigest(),
         }
+    strict_attempts = M.initial_attempts(matrix_resolution) if strict else None
+    if strict:
+        M.add_evidence_context(evidence, matrix_resolution, strict_attempts)
     if not diff_bytes.strip():
         print(f"{C['dim']}Nothing to review.{C['reset']}")
         return 0
@@ -1411,23 +1494,42 @@ def cmd_review(cfg, args):
     boundary = boundary or "not declared — say so as a finding"
 
     prompt = REVIEW_PROMPT.format(boundary=boundary) + "\n\n--- DIFF ---\n" + diff
-    # The reviewer chain: the configured reviewer first, then its fallbacks in
-    # order. A reviewer that is out of quota is not a verdict — it is the next
-    # reviewer's turn, and the identity of whoever actually reviewed is recorded.
-    chain = [rv] + [f for f in (rv.get("fallbacks") or []) if f.get("argv")]
+    # Strict mode resolves and validates the complete declared chain before this
+    # point. Ineligible routes are evidence, never subprocess candidates.
+    if strict:
+        chain = [route for route in matrix_resolution["reviewers"] if route["eligible"]]
+    else:
+        # Legacy selection remains byte-for-byte compatible when no matrix exists.
+        chain = [rv] + [f for f in (rv.get("fallbacks") or []) if f.get("argv")]
     out, used, unavailable = "", None, []
     for cand in chain:
-        argv = [x.replace("{prompt}", prompt) for x in cand["argv"]]
+        if strict:
+            argv = M.expand_argv(cand, prompt)
+            label = cand["identity"]["binding"]
+            fallback = cand["index"] > 0
+        else:
+            argv = [x.replace("{prompt}", prompt) for x in cand["argv"]]
+            label = cand.get("id") or argv[0]
+            fallback = cand is not rv
         exe, _ = A.resolve_binary(argv[0])
         if not exe:
-            unavailable.append((cand.get("id") or argv[0], "not installed"))
+            unavailable.append((label, "not installed"))
+            if strict:
+                M.set_attempt(strict_attempts, cand, "unavailable", "tool not installed")
             continue
         argv[0] = exe
-        attempt = _run_reviewer(root, argv, args.timeout, cand is not rv)
+        attempt = _run_reviewer(root, argv, args.timeout, fallback)
         if attempt["ok"]:
             out, used = attempt["out"], cand
+            if strict:
+                M.set_attempt(strict_attempts, cand, "responded")
             break
-        unavailable.append((cand.get("id") or argv[0], attempt["reason"]))
+        if strict:
+            safe_reason = M.safe_unavailable_reason(attempt["reason"])
+            M.set_attempt(strict_attempts, cand, "unavailable", safe_reason)
+            unavailable.append((label, safe_reason))
+        else:
+            unavailable.append((label, attempt["reason"]))
     if not used:
         why = "; ".join(f"{i}: {r}" for i, r in unavailable) or "no reviewer"
         until = A.reviewer_state(root).get("until")
@@ -1435,8 +1537,24 @@ def cmd_review(cfg, args):
         os.makedirs(d, exist_ok=True)
         head = A.sh("git rev-parse --short HEAD", cwd=root)
         name = f"{datetime.now():%Y-%m-%d-%H%M%S}-{head}.md"
+        if strict:
+            evidence["authorizable"] = False
+            M.add_evidence_context(
+                evidence, matrix_resolution, strict_attempts,
+                reviewer_identity=None, review_status="unavailable",
+            )
+            unavailable_body = (
+                f"# Review {name}\n\nVERDICT: UNAVAILABLE\n\n"
+                + A.review_evidence_line(evidence)
+                + f"\n- boundary: {boundary}\n- reviewers tried: {why}\n"
+            )
+        else:
+            unavailable_body = (
+                f"# Review {name}\n\nVERDICT: UNAVAILABLE\n\n"
+                f"- boundary: {boundary}\n- reviewers tried: {why}\n"
+            )
         open(os.path.join(d, name), "w", encoding=UTF8).write(
-            f"# Review {name}\n\nVERDICT: UNAVAILABLE\n\n- boundary: {boundary}\n- reviewers tried: {why}\n"
+            unavailable_body
             + (f"- window resets: {time.strftime('%H:%M', time.localtime(until))}\n" if until else "")
             + "\nNo review took place. This file is not a round.\n")
         A.set_reviewer_state(root, pending_review=True, boundary=boundary[:200], at=int(time.time()))
@@ -1447,6 +1565,11 @@ def cmd_review(cfg, args):
               f"the watchdog nudges when the window reopens.{C['reset']}")
         return 3
     rv = used
+    if strict:
+        M.add_evidence_context(
+            evidence, matrix_resolution, strict_attempts,
+            reviewer_identity=used["identity"], review_status="pending",
+        )
     A.set_reviewer_state(root, pending_review=False)
     verdict = "NEEDS_CHANGES"
     m = A.re.search(r"VERDICT:\s*(APPROVED|NEEDS_CHANGES)", out)
@@ -1462,6 +1585,15 @@ def cmd_review(cfg, args):
         invalid_reason = "reviewer returned no valid verdict/count schema"
         evidence["authorizable"] = False
         evidence["invalid_reasons"] = [invalid_reason]
+        if strict:
+            M.set_attempt(strict_attempts, used, "invalid-output", invalid_reason)
+            M.add_evidence_context(
+                evidence, matrix_resolution, strict_attempts,
+                reviewer_identity=used["identity"], review_status="invalid",
+            )
+            reviewer_label = used["identity"]["binding"]
+        else:
+            reviewer_label = rv.get("id") or argv[0]
         d = os.path.join(root, cfg["reviews"])
         os.makedirs(d, exist_ok=True)
         head = A.sh("git rev-parse --short HEAD", cwd=root)
@@ -1472,7 +1604,7 @@ def cmd_review(cfg, args):
             "VERDICT: INVALID",
             "",
             A.review_evidence_line(evidence),
-            f"- reviewer: `{rv.get('id') or argv[0]}`",
+            f"- reviewer: `{reviewer_label}`",
             f"- boundary: {boundary}",
         ]
         if candidate is not None:
@@ -1491,6 +1623,12 @@ def cmd_review(cfg, args):
         print(f"{C['yellow']}{C['b']}INVALID REVIEW{C['reset']}  "
               "no valid VERDICT/count schema — not a round; re-run")
         return 3
+    if strict:
+        M.set_attempt(strict_attempts, used, "reviewed")
+        M.add_evidence_context(
+            evidence, matrix_resolution, strict_attempts,
+            reviewer_identity=used["identity"], review_status="complete",
+        )
     sev = {k: int(A.re.search(rf"{k}:\s*(\d+)", out).group(1))
            if A.re.search(rf"{k}:\s*(\d+)", out) else 0
            for k in ("BLOCKER", "HIGH", "MEDIUM", "LOW")}
@@ -1525,12 +1663,30 @@ def cmd_review(cfg, args):
     os.makedirs(d, exist_ok=True)
     head = A.sh("git rev-parse --short HEAD", cwd=root)
     name = f"{datetime.now():%Y-%m-%d-%H%M%S}-{head}.md"
-    primary = cfg.get("reviewer") or {}
+    if strict:
+        reviewer_identity = used["identity"]
+        reviewer_line = (
+            f"- reviewer: `{reviewer_identity['binding']}`  "
+            f"family: `{reviewer_identity['family']}`"
+            + ("  (fallback — an earlier reviewer was unavailable or ineligible)"
+               if used["index"] > 0 else "")
+        )
+        implementer_line = (
+            f"- implementer: `{matrix_resolution['implementer_identity']['binding']}`"
+        )
+    else:
+        primary = cfg.get("reviewer") or {}
+        reviewer_line = (
+            f"- reviewer: `{rv.get('id') or argv[0]}`  family: `{rv.get('family', '?')}`"
+            + ("  (fallback — the primary reviewer was unavailable)" if rv is not primary else "")
+        )
+        implementer_line = (
+            f"- implementer: `{impl.get('adapter')}/{(impl.get('session') or '')[:20]}`"
+        )
     header = [f"# Review {name}", "",
               A.review_evidence_line(evidence),
-              f"- reviewer: `{rv.get('id') or argv[0]}`  family: `{rv.get('family', '?')}`"
-              + ("  (fallback — the primary reviewer was unavailable)" if rv is not primary else ""),
-              f"- implementer: `{impl.get('adapter')}/{(impl.get('session') or '')[:20]}`",
+              reviewer_line,
+              implementer_line,
               f"- tree: `{A.tree_digest(root, cfg)}`",
               f"- boundary: {boundary}"]
     if candidate is not None:
@@ -2525,6 +2681,18 @@ def doctor_problems(cfg):
     root = cfg["root"]
     key = os.path.basename(root.rstrip("/")) or "root"
     out = []
+    strict_matrix = M.is_strict(cfg)
+    if strict_matrix:
+        try:
+            matrix_resolution = M.resolve(cfg, require_independent=False)
+        except M.MatrixError as exc:
+            out.append(("capability-matrix", "; ".join(exc.problems[:3])))
+        else:
+            if not any(route["eligible"] for route in matrix_resolution["reviewers"]):
+                out.append((
+                    "no-independent-reviewer",
+                    "capability matrix reviewer chain has no binding outside the implementer binding and model family",
+                ))
     hb = A.heartbeat_age(root)
     if hb is not None and hb > 360:
         out.append(("watchdog-dead", f"watchdog silent for {hb // 60}m — launchctl / ao watchdog status"))
@@ -2565,7 +2733,7 @@ def doctor_problems(cfg):
     arch_bin = os.path.basename(((cfg.get("architect") or {}).get("argv") or [""])[0])
     rv = cfg.get("reviewer") or {}
     rv_bin = os.path.basename((rv.get("argv") or [""])[0])
-    if arch_bin and arch_bin == rv_bin and not rv.get("fallbacks"):
+    if not strict_matrix and arch_bin and arch_bin == rv_bin and not rv.get("fallbacks"):
         out.append(("shared-pool", f"architect and reviewer both run `{arch_bin}` on one quota pool and the reviewer has no "
                                    f"fallback — add reviewer.fallbacks or use another model family"))
     # An implementer with nothing pre-authorised to pick up next stalls the moment
@@ -2699,6 +2867,8 @@ def cmd_catchup(cfg, args):
             did += 1
         elif code == 3:
             print(f"  reviewer still unavailable; {w['id']} stays open")
+        elif code == 2 and M.is_strict(cfg):
+            print(f"  reviewer configuration invalid; {w['id']} stays open")
         else:
             A.close_waiver(root, w["id"], "reviewed: NEEDS_CHANGES — fix slice needed")
             impl, arch = A.mail_names(cfg)
