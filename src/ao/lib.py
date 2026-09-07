@@ -2509,26 +2509,45 @@ def note(root, cfg, to, title, body, urgent=False):
     return write_mail(root, cfg, name, text, {"kind": kind.lower(), "from": arch, "to": to})
 
 
-def slice_started(root):
-    """When the running slice began, from the board's `since:` note."""
-    for it in board(root)["running"]:
-        raw = it["notes"].get("since")
-        if not raw:
+def running_slice(root):
+    """The one board item review accounting treats as current.
+
+    A malformed board may contain several running entries. Preserve the board's
+    established first-entry behavior, but resolve it once so review attribution,
+    start time and re-specification cannot silently select different slices.
+    """
+    items = board(root)["running"]
+    return items[0] if items else None
+
+
+def slice_boundary(item):
+    """The declared review boundary for a parsed board item."""
+    if not item:
+        return ""
+    notes = item.get("notes") or {}
+    return notes.get("acceptance") or notes.get("scope") or item.get("title") or ""
+
+
+def slice_started(root, item=None):
+    """When the current running slice began, from its board `since:` note."""
+    item = item or running_slice(root)
+    raw = (item.get("notes") or {}).get("since") if item else None
+    if not raw:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return time.mktime(time.strptime(raw.strip()[:len(time.strftime(fmt))], fmt))
+        except ValueError:
             continue
-        for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
-            try:
-                return time.mktime(time.strptime(raw.strip()[:len(time.strftime(fmt))], fmt))
-            except ValueError:
-                continue
     return None
 
 
-def respecified_at(root):
-    """When the architect last re-specified the running slice (`ao decide --scope <id>`)."""
-    ids = {(it.get("id") or it.get("key") or "").strip() for it in board(root)["running"]}
-    ids.discard("")
+def respecified_at(root, item=None):
+    """When the architect last re-specified the current slice (`ao decide --scope <id>`)."""
+    item = item or running_slice(root)
+    item_id = ((item or {}).get("id") or (item or {}).get("key") or "").strip()
     p = os.path.join(root, ".ao", "ledger", "decisions.jsonl")
-    if not ids or not os.path.exists(p):
+    if not item_id or not os.path.exists(p):
         return None
     last = 0
     for line in open(p, errors="replace", encoding=UTF8):
@@ -2536,47 +2555,58 @@ def respecified_at(root):
             r = json.loads(line)
         except ValueError:
             continue
-        if r.get("by") == "architect" and (r.get("scope") or "").strip() in ids:
+        if r.get("by") == "architect" and (r.get("scope") or "").strip() == item_id:
             last = max(last, int(r.get("at") or 0))
     return last or None
 
 
 def rounds(root, reviews_dir):
-    """Review rounds spent on the *current slice*.
+    """Completed prospective review rounds spent on the current slice.
 
-    Counting back to the last APPROVED was wrong: a round budget is a statement
-    about one slice, and reviews from a previous slice keep counting against the
-    next one forever. Worse, rounds burned on environmental failure — a
-    double-writer incident, a provider outage — are indistinguishable from rounds
-    burned on the work, so the budget starts measuring the harness rather than the
-    agent, and the guard that reads it stops nudging for the wrong reason.
-
-    A slice declares its start on the board. Count reviews after that, and the
-    counter resets exactly when a new slice begins — which is also when
-    re-specification happens, so no separate reset mechanism is needed.
+    HEAD and candidate bytes are not slice identity: two slices may intentionally
+    review the same tree. Only structured index-candidate evidence attributed to
+    the running board item's exact ID may count or reset its budget. Unscoped,
+    retrospective, unavailable, invalid and foreign-slice artifacts are ignored.
     """
-    started = slice_started(root)
-    # An architect decision scoped to the running slice re-specifies it, and a
-    # re-specified slice has a fresh budget — that is what the decision says.
-    # Reading it from the ledger rather than from the board's `since:` means the
-    # rule holds even when the implementer never touched the board: it did not,
-    # and an over-budget anomaly kept firing on rounds the decision had already
-    # written off.
-    respec = respecified_at(root)
+    current = running_slice(root)
+    slice_id = ((current or {}).get("id") or (current or {}).get("key") or "").strip()
+    if not slice_id:
+        return 0
+
+    started = slice_started(root, current)
+    # An architect decision scoped to this exact running item re-specifies it and
+    # starts a fresh budget. Other running entries on a malformed board cannot
+    # reset the item selected above.
+    respec = respecified_at(root, current)
     if respec and (not started or respec > started):
         started = respec
+
     n = 0
-    for f, v in reviews(root, reviews_dir, limit=50):
-        if v in ("UNAVAILABLE", "INVALID"):
-            continue                          # not a round: nobody reviewed anything
-        if "APPROVED" in v.upper():
-            break
+    # Scan the directory rather than the newest N global artifacts: reviews from
+    # other slices must not crowd this slice's evidence out of the accounting
+    # window merely by being newer.
+    for f, v in reviews(root, reviews_dir, limit=None):
+        path = os.path.join(root, reviews_dir, f)
         if started:
             try:
-                if os.path.getmtime(os.path.join(root, reviews_dir, f)) < started:
+                if os.path.getmtime(path) < started:
                     break
             except OSError:
-                pass
+                continue
+        if v in ("UNAVAILABLE", "INVALID"):
+            continue                          # not a round: nobody completed a review
+        try:
+            body = open(path, errors="replace", encoding=UTF8).read(100_000)
+        except OSError:
+            continue
+        evidence = review_evidence(body)
+        if not evidence or evidence.get("kind") != "index-candidate" \
+                or (evidence.get("slice") or "").strip() != slice_id:
+            continue
+        if evidence.get("review_status") in ("unavailable", "invalid"):
+            continue
+        if "APPROVED" in v.upper():
+            break
         n += 1
     return n
 

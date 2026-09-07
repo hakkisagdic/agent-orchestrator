@@ -43,13 +43,20 @@ def test_quota_error_is_not_a_verdict(project, tmp_path, capsys):
 def test_fallback_reviewer_takes_over(project, tmp_path):
     root = project["root"]
     _repo_with_change(root)
+    board = os.path.join(root, ".ao", "board.md")
+    text = open(board, encoding="utf-8").read()
+    open(board, "w", encoding="utf-8").write(
+        text.replace("## running\n", "## running\n- [B2] slice · acceptance: b\n")
+    )
     cfg = dict(project, reviewer={"id": "r1", "family": "x", "argv": _fake("usage limit reached, resets in 1h 0m"),
                                   "fallbacks": [{"id": "r2", "family": "y",
                                                  "argv": _fake("Findings: none.", "BLOCKER: 0", "HIGH: 0", "MEDIUM: 0", "LOW: 0", "VERDICT: APPROVED")}]})
     assert cli.cmd_review(cfg, _args()) == 0
     files = os.listdir(os.path.join(root, "semantic-review"))
     body = open(os.path.join(root, "semantic-review", files[0]), encoding="utf-8").read()
+    evidence = A.review_evidence(body)
     assert "VERDICT: APPROVED" in body and "fallback" in body and "`r2`" in body
+    assert evidence["slice"] == "B2" and evidence["boundary"] == "b"
     assert A.reviewer_state(root).get("pending_review") is False
 
 

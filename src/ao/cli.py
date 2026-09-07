@@ -1486,12 +1486,14 @@ def cmd_review(cfg, args):
         return 2
     diff = diff_bytes.decode(UTF8, "replace")
 
-    boundary = args.boundary or ""
-    if not boundary:
-        for it in A.board(root)["running"]:
-            boundary = it["notes"].get("acceptance") or it["notes"].get("scope") or it["title"]
-            break
+    running = A.running_slice(root)
+    boundary = args.boundary or A.slice_boundary(running)
     boundary = boundary or "not declared — say so as a finding"
+    # Candidate/HEAD identity is deliberately insufficient here: two slices can
+    # review the same bytes. Persist the board item ID and the reviewed boundary
+    # in every structured artifact so round accounting has an explicit owner.
+    evidence["slice"] = (running or {}).get("id")
+    evidence["boundary"] = boundary
 
     prompt = REVIEW_PROMPT.format(boundary=boundary) + "\n\n--- DIFF ---\n" + diff
     # Strict mode resolves and validates the complete declared chain before this

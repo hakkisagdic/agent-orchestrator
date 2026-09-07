@@ -56,8 +56,12 @@ Anything not forbidden there and inside the slice's scope is allowed.
    the round budget? The architect re-specifies; do not grind. Exit 3 means no
    reviewer could review (quota, login): not a round, not a verdict — park the
    review, continue with the next READY item; the watchdog nudges when the
-   window reopens. `ao review --commits <range>` is retrospective evidence only
-   and never authorizes a candidate.
+   window reopens. Every structured review records the running slice ID and
+   reviewed boundary; round accounting accepts only completed prospective
+   reviews for that exact slice. A review for another slice at the same HEAD can
+   neither consume nor reset this slice's budget. `ao review --commits <range>`
+   is retrospective evidence only, never a round in the prospective budget and
+   never authority for a candidate.
 7. `ao commit-ok --verify` — runs the quick gates itself when verification is
    stale, then persists a grant only for the exact staged index candidate when
    its verification and newest matching prospective review approve, no urgent

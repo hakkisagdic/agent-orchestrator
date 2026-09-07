@@ -54,19 +54,80 @@ def test_name_time_parses_mailbox_stamps():
     assert A._name_time("watchdog-to-fable-ANOMALY-x.md") is None
 
 
-def test_respecified_slice_restarts_round_budget(project, monkeypatch):
+def _round_review(root, name, slice_id, verdict, stamp, head, kind="index-candidate"):
+    evidence = {
+        "schema": 2,
+        "kind": kind,
+        "authorizable": kind == "index-candidate",
+        "slice": slice_id,
+        "boundary": f"{slice_id} boundary",
+        "diff_digest": "sha256:test",
+    }
+    if kind == "index-candidate":
+        evidence["candidate"] = {"head": head}
+    else:
+        evidence["commits"] = "HEAD..HEAD"
+    path = os.path.join(root, "semantic-review", name)
+    open(path, "w", encoding="utf-8").write(
+        "# review\n\n" + A.review_evidence_line(evidence)
+        + f"\n- boundary: {evidence['boundary']}\n\nVERDICT: {verdict}\n"
+    )
+    os.utime(path, (stamp, stamp))
+    return path
+
+
+def test_respecified_slice_restarts_round_budget(project):
     root = project["root"]
     b = os.path.join(root, ".ao", "board.md")
     _t = open(b, encoding="utf-8").read()
-    open(b, "w", encoding="utf-8").write(_t.replace("## running\n", "## running\n- [B6] slice · since: 2026-09-04 10:00\n"))
-    rev = os.path.join(root, "semantic-review")
-    for i, verdict in enumerate(["NEEDS_CHANGES"] * 3):
-        p = os.path.join(rev, f"2026-09-04-1{i}0000-x.md")
-        open(p, "w", encoding="utf-8").write(f"# review\n\nVerdict: {verdict}\n")
-    monkeypatch.setattr(A, "reviews", lambda root, d, limit=50: [(f, "NEEDS_CHANGES") for f in sorted(os.listdir(rev), reverse=True)])
+    open(b, "w", encoding="utf-8").write(
+        _t.replace("## running\n", "## running\n- [B6] slice · since: 2026-09-04 10:00\n")
+    )
+    head = A.sh("git rev-parse HEAD", cwd=root)
+    base = time.time() - 10
+    for i in range(3):
+        _round_review(
+            root, f"2026-09-04-1{i}0000-x.md", "B6", "NEEDS_CHANGES",
+            base + i, head,
+        )
     assert A.rounds(root, "semantic-review") == 3
     with open(os.path.join(root, ".ao", "ledger", "decisions.jsonl"), "a", encoding="utf-8") as fh:
         fh.write('{"id":"AD-1","at":%d,"scope":"B6","by":"architect"}\n' % int(time.time() + 5))
+    assert A.rounds(root, "semantic-review") == 0
+
+
+def test_rounds_are_scoped_to_running_slice_at_the_same_head(project):
+    root = project["root"]
+    b = os.path.join(root, ".ao", "board.md")
+    _t = open(b, encoding="utf-8").read()
+    open(b, "w", encoding="utf-8").write(
+        _t.replace("## running\n", "## running\n- [B2] second slice · since: 2000-01-01\n")
+    )
+    head = A.sh("git rev-parse HEAD", cwd=root)
+    base = time.time() - 20
+    for index in range(3):
+        _round_review(
+            root,
+            f"r-0{index + 1}.md",
+            "B1",
+            "NEEDS_CHANGES",
+            base + index + 1,
+            head,
+        )
+    _round_review(
+        root,
+        "r-04.md",
+        "B2",
+        "NEEDS_CHANGES",
+        base + 4,
+        head,
+    )
+
+    # The pre-fix implementation counted all four reviews at this HEAD; the
+    # running-slice implementation counts only B2's one review.
+    assert A.rounds(root, "semantic-review") == 1
+
+    _round_review(root, "r-05.md", "B2", "APPROVED", base + 5, head)
     assert A.rounds(root, "semantic-review") == 0
 
 

@@ -46,6 +46,14 @@ legitimate outcome and should be recorded rather than quietly dropped.
 
 Count review rounds per slice. Default budget: **5**.
 
+Every completed prospective review records the running board item's structured slice ID
+and reviewed boundary. `rounds()` uses that slice ID—not HEAD or candidate bytes—as the
+accounting key: a review attributed to another slice can neither consume nor reset the
+current slice's budget, even when both slices review the same HEAD. Unscoped legacy
+artifacts are not charged to a slice because their owner cannot be established. Retrospective
+reviews are outside the prospective fix/re-review budget, and `UNAVAILABLE` or `INVALID`
+attempts are not rounds.
+
 This exists because of a measured failure. One slice in the source run went through **nine
 review rounds** — nine cycles of finding, fix, re-review — and nothing in the system
 noticed. Each round was individually reasonable. The ninth was not.
