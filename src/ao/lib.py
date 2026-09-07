@@ -796,11 +796,15 @@ def agent_pids(root, adapter, headless_only=False):
     if helpers and out:
         table = _proc_table()
 
-        def under_helper(pid, depth=0):
-            if pid in helpers:
-                return True
-            ppid = table.get(pid, (0, 0, ""))[0]
-            return depth < 12 and ppid > 1 and under_helper(ppid, depth + 1)
+        def under_helper(pid):
+            seen = set()
+            current = pid
+            while current > 1 and current not in seen:
+                if current in helpers:
+                    return True
+                seen.add(current)
+                current = table.get(current, (0, 0, ""))[0]
+            return False
         out = [p for p in out if not under_helper(p)]
     out = sorted(set(out))
     if headless_only:
@@ -819,30 +823,68 @@ def _executable(t):
     return "/" in t and os.path.isfile(t) and os.access(t, os.X_OK)
 
 
+def _program_name(token):
+    """Case-folded command basename without a Windows PATHEXT suffix."""
+    base = os.path.basename(str(token).replace("\\", "/")).lower()
+    for suffix in (".exe", ".cmd", ".bat", ".com"):
+        if base.endswith(suffix):
+            return base[:-len(suffix)]
+    return base
+
+
 def _is_agent_process(pid, names, argv=None):
     """Is an agent binary actually on this command line?
 
     Works on the argument *vector*: a path with a space is one argument. The
     program itself, a sibling executable (kiro-cli-chat), or a runtime (node…)
     running something under the agent's install directory count; a shell whose
-    command text mentions the agent, or a file named after it, does not.
+    command text mentions the agent, or a file named after it, does not. Windows
+    PATHEXT suffixes and separators are normalized before matching.
     """
     from . import procs
     toks = argv if argv is not None else (procs.argv(pid) or [])
     if not toks:
         return False
     runtimes = ("node", "bun", "deno", "python", "python3")
-    runtime = os.path.basename(toks[0]) in runtimes
+    runtime = _program_name(toks[0]) in runtimes
     executable = _executable
-    for name in names:
-        for i, t in enumerate(toks):
-            base = os.path.basename(t)
-            if base == name and (i == 0 or executable(t)):
+    normalized_names = {_program_name(name) for name in names if name}
+    for name in normalized_names:
+        for i, token in enumerate(toks):
+            base = _program_name(token)
+            path = str(token).replace("\\", "/").lower()
+            if base == name and (i == 0 or executable(token)):
                 return True                    # the program itself
-            if base.startswith(name + "-") and executable(t):
+            if base.startswith(name + "-") and executable(token):
                 return True                    # a sibling binary: kiro-cli-chat — a real executable
-            if runtime and i <= 2 and f"/{name}/" in t:
+            if runtime and i <= 2 and f"/{name}/" in path:
                 return True                    # a runtime under the agent's install dir
+    return False
+
+
+def _is_configured_agent_process(names, argv):
+    """Exact configured launcher or runtime-package identity for one agent role.
+
+    Writer discovery intentionally accepts sibling tools such as
+    ``kiro-cli-chat``. Architect presence must not: a reviewer or monitor that
+    shares a prefix is a different role and cannot suppress a wake.
+    """
+    if not argv:
+        return False
+    wanted = {_program_name(name) for name in names if name}
+    if _program_name(argv[0]) in wanted:
+        return True
+    runtimes = {"node", "bun", "deno", "python", "python3"}
+    if _program_name(argv[0]) not in runtimes:
+        return False
+    for token in argv[:3]:
+        components = {
+            _program_name(component)
+            for component in str(token).replace("\\", "/").split("/")
+            if component
+        }
+        if components & wanted:
+            return True
     return False
 
 
@@ -978,6 +1020,24 @@ def _pid_alive(pid):
         return True
     except OSError:
         return False
+
+
+def _process_start(pid, refresh=False):
+    """Stable process-start identity, optionally forcing a fresh backend scan."""
+    from . import procs
+    attempts = 3 if refresh else 1
+    for attempt in range(attempts):
+        try:
+            if refresh:
+                procs.refresh()
+            start = (procs.info(int(pid)) or {}).get("start")
+        except (OSError, TypeError, ValueError):
+            start = None
+        if start not in (None, 0, ""):
+            return start
+        if refresh and attempt + 1 < attempts:
+            time.sleep(0.02)
+    return None
 
 
 def record_notice(root, title, msg, sent, key=None):
@@ -2061,21 +2121,136 @@ def discover_architect(cwd):
             "age": int(time.time() - best_mt)} if best else None
 
 
-def architect_present(cwd, idle_seconds=600):
-    """Is a human-driven architect session currently active?
+def _architect_process_roots(root, architect=None, helper_only=False):
+    """Configured architect roots, optionally restricted to proven AO helpers."""
+    from . import procs
 
-    The two-writer rule applied to the architect's own session. Resuming it while
-    it is live does not corrupt anything — Claude Code forks a copy — but it
-    produces a second architect that inherits the first one's task and continues
-    *that* instead of the triage it was woken for. Observed directly: a woken copy
-    picked up the conversation in progress and reported on it rather than reading
-    the anomaly queue.
+    if architect is None:
+        try:
+            architect = (load_config(root).get("architect") or {})
+        except (OSError, TypeError, ValueError):
+            architect = {}
+    architect = architect or {}
+    configured = architect.get("argv") or []
+    if not configured:
+        return []
 
-    So wake only into absence. A transcript written recently means someone is
-    already there and does not need a duplicate of themselves.
+    command = _program_name(configured[0])
+    names = {command} if command else set()
+    # CLI launchers commonly exec a runtime under the package's other public
+    # name. These are aliases of the configured command, not a generic list of
+    # agents: a Kiro implementer must not become a Claude architect merely
+    # because both are interactive in the same tree.
+    aliases = {
+        "claude": {"claude", "claude-code"},
+        "claude-code": {"claude", "claude-code"},
+        "kiro": {"kiro", "kiro-cli"},
+        "kiro-cli": {"kiro", "kiro-cli"},
+    }
+    names.update(aliases.get(command, set()))
+    if not names:
+        return []
+
+    def normal_path(path):
+        raw = str(path).replace("\\", "/")
+        if re.match(r"^[A-Za-z]:/", raw):
+            return raw.rstrip("/").lower()
+        return os.path.normcase(os.path.realpath(raw))
+
+    def absolute_path(path):
+        raw = str(path).replace("\\", "/")
+        return os.path.isabs(raw) or bool(re.match(r"^[A-Za-z]:/", raw))
+
+    targets = {normal_path(architect.get("cwd") or root)}
+    if helper_only:
+        # Watchdog helpers are spawned in the project root even when the human
+        # architect works in a configured worktree.
+        targets.add(normal_path(root))
+    table = _proc_table()
+    parents = {pid: row[0] for pid, row in table.items()}
+    helpers = helper_pids(root, "architect" if helper_only else None)
+
+    def under_helper(pid):
+        current = pid
+        seen = set()
+        while current > 1 and current not in seen:
+            if current in helpers:
+                return True
+            seen.add(current)
+            current = parents.get(current, 0)
+        return False
+
+    candidates = set()
+    vectors = {}
+    for pid in procs.all_pids():
+        helper = under_helper(pid)
+        if pid == os.getpid() or (helper_only and not helper) \
+                or (not helper_only and helper):
+            continue
+        argv = procs.argv(pid)
+        if not argv or not _is_configured_agent_process(names, argv):
+            continue
+        cwd = procs.cwd(pid)
+        if cwd is None:
+            # Windows' existing process backend cannot read cwd. Keep the same
+            # fail-closed fallback as agent_pids(): an exact absolute repository
+            # argument is required until backlog #9 adds PEB cwd support.
+            in_project = any(
+                normal_path(arg.rstrip("/\\")) in targets
+                for arg in argv if absolute_path(arg)
+            )
+        else:
+            in_project = normal_path(cwd) in targets
+        if not in_project:
+            continue
+        candidates.add(pid)
+        vectors[pid] = argv
+
+    # Preserve ancestry through nonmatching intermediaries. Filtering first and
+    # looking only at an immediate parent turns `claude -p -> shell -> runtime`
+    # into two roots; the flagless runtime then looks interactive. Walk the full
+    # parent graph and assign every matching process to its highest matching
+    # ancestor, with cycle detection for a corrupt or racing process snapshot.
+    roots = set()
+    for pid in candidates:
+        root_pid = pid
+        current = pid
+        seen = set()
+        while current not in seen:
+            seen.add(current)
+            parent = parents.get(current, 0)
+            if parent in candidates:
+                root_pid = parent
+            if parent <= 1 or parent not in parents:
+                break
+            current = parent
+        roots.add(root_pid)
+    return [(pid, vectors[pid]) for pid in sorted(roots)]
+
+
+def architect_present(root, architect=None):
+    """Is a human-driven architect process alive for this project?
+
+    Presence is a process fact, not transcript recency. Match only the configured
+    architect command in its configured cwd, exclude AO helpers and descendants,
+    and classify headlessness at the full process-tree root. No positive result
+    is cached, so process exit releases presence on the next scan.
     """
-    found = discover_architect(cwd)
-    return bool(found and found["age"] < idle_seconds)
+    headless_flags = ("-p", "--print", "--no-interactive")
+    return any(
+        not any(flag in argv for flag in headless_flags)
+        for _, argv in _architect_process_roots(root, architect)
+    )
+
+
+def architect_turn_present(root, architect=None):
+    """Is a configured architect process alive in a proven AO helper tree?
+
+    This is the duplicate-wake guard. It revalidates the registered helper's
+    process-start identity and current process tree; an unrelated same-binary
+    implementer, remembered pid, or lock file cannot postpone a wake.
+    """
+    return bool(_architect_process_roots(root, architect, helper_only=True))
 
 
 DECISION_DIR = ".ao/decisions"
@@ -3104,12 +3279,17 @@ def helpers_path(root):
 
 
 def helper_register(root, pid, what):
-    """A reviewer, a probe: started by ao inside the repo, never a writer."""
+    """A reviewer, a probe: started by ao inside the repo, never a writer.
+
+    Bind the declaration to process start identity. PID existence alone is not
+    identity: after reuse it would exclude an unrelated process indefinitely.
+    """
     try:
         d = json.load(open(helpers_path(root), encoding=UTF8))
     except (OSError, ValueError):
         d = {}
-    d[str(pid)] = {"what": what, "at": int(time.time())}
+    d[str(pid)] = {"what": what, "at": int(time.time()),
+                   "start": _process_start(pid, refresh=True)}
     try:
         os.makedirs(os.path.dirname(helpers_path(root)), exist_ok=True)
         json.dump(d, open(helpers_path(root), "w", encoding=UTF8))
@@ -3126,17 +3306,27 @@ def helper_release(root, pid):
         pass
 
 
-def helper_pids(root):
+def helper_pids(root, what=None):
     try:
         d = json.load(open(helpers_path(root), encoding=UTF8))
     except (OSError, ValueError):
         return set()
     live = set()
-    for k in list(d):
-        if _pid_alive(int(k)):
-            live.add(int(k))
+    for key in list(d):
+        try:
+            pid = int(key)
+        except (TypeError, ValueError):
+            d.pop(key, None)
+            continue
+        recorded = d.get(key) if isinstance(d.get(key), dict) else {}
+        current_start = _process_start(pid)
+        if current_start is not None and recorded.get("start") == current_start:
+            if what is None or recorded.get("what") == what:
+                live.add(pid)
         else:
-            d.pop(k)
+            # Dead, reused, or legacy/unprovable pid: never let declaration alone
+            # exclude a process. Conservative writer checks may count it once.
+            d.pop(key, None)
     try:
         json.dump(d, open(helpers_path(root), "w", encoding=UTF8))
     except OSError:

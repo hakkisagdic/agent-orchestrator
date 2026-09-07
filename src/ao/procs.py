@@ -142,13 +142,17 @@ class _Windows:
     _cache = None
     _cache_at = 0.0
 
+    def invalidate(self):
+        self._cache = None
+        self._cache_at = 0.0
+
     def _snapshot(self):
         import json as _json
         import time as _time
         if self._cache is not None and _time.time() - self._cache_at < 2.0:
             return self._cache
         cmd = ("Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine,"
-               "ExecutablePath,Name,SessionId | ConvertTo-Json -Compress")
+               "ExecutablePath,Name,SessionId,CreationDate | ConvertTo-Json -Compress")
         out = _sh(f'powershell -NoProfile -NonInteractive -Command "{cmd}"')
         rows = []
         try:
@@ -193,7 +197,7 @@ class _Windows:
             return None
         ppid = int(r.get("ParentProcessId") or 0)
         return {"ppid": ppid, "pgid": pid, "tty": None if int(r.get("SessionId") or 0) == 0 else int(r["SessionId"]),
-                "start": 0, "comm": r.get("Name") or ""}
+                "start": r.get("CreationDate") or 0, "comm": r.get("Name") or ""}
 
 
 # ---------------------------------------------------------------- shell fallbacks
@@ -243,6 +247,13 @@ def _backend():
         cand = None
     _NATIVE = cand or _Shell()
     return _NATIVE
+
+
+def refresh():
+    """Invalidate a cached process snapshot before observing a just-spawned pid."""
+    invalidate = getattr(_backend(), "invalidate", None)
+    if invalidate:
+        invalidate()
 
 
 def native():

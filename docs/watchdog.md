@@ -24,9 +24,14 @@ nothing else:
    detached, so the next cycle reads the log segment it wrote: a stale binary,
    an exhausted quota, a dead session each get their own consequence, and none
    is retried blindly.
-5. **It wakes the architect into absence, once per condition, within quota.**
-   A present architect is not woken; a paused one (quota) is not woken until the
-   reset; a wake that failed on a binary is not retried on that binary.
+5. **It wakes the architect into measured absence, once per condition, within
+   quota.** Presence means a live interactive process for the configured
+   architect binary at the configured project cwd — never transcript age, a
+   remembered pid, lock file, or declaration. Headless and AO-helper trees do
+   not count as human presence; a fresh process-start-validated AO helper tree
+   registered specifically as `architect` prevents two watchdog helpers. Process
+   exit releases both checks on the next tick, and dry-run reports the same
+   suppression decision as a live cycle.
 6. **It refills.** An empty queue with an idle implementer wakes the architect
    to refill, with or without a source bound, at most every thirty minutes.
 7. **Every decision is traceable.** Each cycle records its measurements and the
@@ -47,7 +52,7 @@ Order matters: each guard sees only what the ones above left standing.
 | 1 | idle | transcript age vs `--idle-minutes` | not idle yet: stand down |
 | 2 | waiting on architect | newest implementer report is a request, inbox empty, queue empty | stand down and say so — a nudge cannot answer it |
 | 2 | open work | inbox mail, product dirt outside coordination dirs, review newer than HEAD | nothing open: refill (2b) or stand down |
-| 2b | refill | queued < threshold (source's, else 1), implementer idle, ≥30 min since last | wake the architect to refill |
+| 2b | refill | queued < threshold (source's, else 1), implementer idle, ≥30 min since last, configured architect process absent | wake the architect to refill |
 | 3 | round budget | reviews since the slice began or was re-specified | over budget: anomaly, not a nudge |
 | 4 | quota | implementer window / credits | no headroom: handoff once an hour, stand down |
 | 4b | provider degraded | tail of the last nudge segment | 5xx/overload: back off |
@@ -83,6 +88,7 @@ test that would fail if it came back.
 | F16 | architect at quota: wakes failed, and the desktop app resumed the session on its own | no notion of the architect's quota; a second resume path nobody modelled | `wake_error` kind `quota` → wait until reset, orange once; resume rule in the architect's standing instructions | test_wake | — |
 | F17 | eleven hours of orange nobody saw | no channel beyond the desktop and an unconfigured bot | the ladder: orange → red (e-mail) after an hour; resolved notices; `ao doctor` warns on missing channels | test_guards (ladder) | — |
 | F18 | a dead watchdog is silent | nothing watched the watcher | heartbeat per cycle, sibling check, `last tick` in doctor | test_watchdog_cycle | — |
+| F19 | an old transcript caused a second live architect, while a fresh transcript or reused remembered pid kept a dead one "present" | transcript mtime/pid state was treated as liveness; refill lacked a guard; filtered PIDs broke ancestry; generic agent/Windows matching blurred role identity | exact configured launcher/runtime + cwd over full parent graph; interactive root only; cycle-safe helper exclusion; fresh process-start + `architect`-role duplicate guard; identical dry/live verdicts | test_processes, test_scenarios | — |
 
 ## Scenarios: testing the decision, not the measurement
 

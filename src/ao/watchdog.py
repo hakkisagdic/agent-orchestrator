@@ -284,22 +284,14 @@ def save_state(root, st):
     json.dump(st, open(state_path(root), "w", encoding=UTF8), indent=2)
 
 
-def arch_alive(st):
-    """Is an architect turn we started still running?
+def arch_alive(root, architect):
+    """Is any configured architect turn currently alive?
 
-    Separate from the implementer's pid, and the separation matters: gating the
-    architect on `child_alive` meant it was never woken while the implementer was
-    working, which is exactly when anomalies happen. Two actors, two guards --
-    the same lesson as one threshold doing two jobs, in a different disguise.
+    A remembered pid or lock can be reused after its process dies. Measure the
+    configured binary and cwd again instead; this still prevents two headless
+    watchdog helpers while releasing a dead one on the next scan.
     """
-    pid = st.get("arch_pid")
-    if not pid:
-        return False
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
+    return A.architect_turn_present(root, architect)
 
 
 def child_alive(st):
@@ -490,7 +482,7 @@ def escalate(root, cfg, adapter, age, args, st):
     # Wake into absence, never alongside. A live architect does not need a copy of
     # itself: the copy inherits the conversation in progress and continues that
     # rather than the triage it was started for.
-    if woke and A.architect_present(arch.get("cwd") or root):
+    if woke and A.architect_present(root, arch):
         print("reports pending, but the architect is already at the keyboard")
         woke = False
     from . import features as F
@@ -505,12 +497,10 @@ def escalate(root, cfg, adapter, age, args, st):
         if left is not None and left < reserve and not urgent:
             print(f"reports pending, but the machine's Claude window has {left}% left (< reserve {reserve}%); not waking")
             woke = False
-    if woke:
-        holder = A.architect_lock_holder(root)
-        if holder:
-            print(f"reports pending, but an architect turn holds the lock ({holder.get('who')}, pid {holder.get('pid')})")
-            woke = False
-    if woke and arch.get("argv") and not args.dry_run and not arch_alive(st):
+    if woke and arch_alive(root, arch):
+        print("reports pending, but an architect wake is already running")
+        woke = False
+    if woke and arch.get("argv") and not args.dry_run:
         prompt = (
             "Sen bu deponun mimarısın ve watchdog tarafından uyandırıldın. "
             "`agent-mail/` içindeki `*-watchdog-to-fable-ANOMALY-*.md` ve "
@@ -798,7 +788,7 @@ def _cycle(args, root):
                       queued=len(bd["queued"]), running=len(bd["running"]), blocked=len(bd["blocked"]),
                       hold=bool(A.hold_state(root)),
                       arch_quota_until=st.get("arch_quota_until") or None,
-                      arch_present=A.architect_present((cfg.get("architect") or {}).get("cwd") or root),
+                      arch_present=A.architect_present(root, cfg.get("architect") or {}),
                       last_wake_error=(st.get("wake_error") or {}).get("kind"))
     except Exception as exc:                                  # facts must never stop a cycle
         _FACTS["facts_error"] = str(exc)[:120]
@@ -976,10 +966,13 @@ def _cycle(args, root):
             notify(f"{os.path.basename(root)}: needs you", f"queue has {depth} item(s) and refill wakes are off — add slices to .ao/backlog.md",
                    root, key="queue-empty-no-refill", window=3600, audience="human")
             return 0
-        if arch.get("argv") and depth < threshold and A.architect_lock_holder(root):
-            print("queue low, but an architect turn holds the lock")
+        if arch.get("argv") and depth < threshold and A.architect_present(root, arch):
+            print("queue low, but the architect is already at the keyboard")
             return 0
         if arch.get("argv") and depth < threshold:
+            if arch_alive(root, arch):
+                print("queue low, but an architect wake is already running")
+                return 0
             if args.dry_run:
                 print(f"queue low ({depth}); would wake the architect to refill")
                 return 0

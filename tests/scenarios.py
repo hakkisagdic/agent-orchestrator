@@ -23,11 +23,11 @@ class World:
         self.tmp = tmp_path
         self.notices = []
         self.procs = {}                 # pid -> {"argv", "cwd", "ppid", "pgid", "tty", "headless"}
+        self.helpers = {}                 # pid -> AO helper role
         self.transcript = tmp_path / "transcript.jsonl"
         self.transcript.write_text(json.dumps({"payload": {"type": "turn_end"}}) + "\n", encoding="utf-8")
         self.transcript_age(0)
         self.turn_ended = False
-        self.arch_present = False
         self.quota = True
         self._patch()
 
@@ -40,6 +40,24 @@ class World:
     def process(self, pid, argv, cwd=None, ppid=1, pgid=None, tty=None, headless=True):
         self.procs[pid] = {"argv": argv, "cwd": cwd or self.root, "ppid": ppid,
                            "pgid": pid if pgid is None else pgid, "tty": tty, "headless": headless}
+        return self
+
+    def architect(self, pid=700, argv=None, cwd=None):
+        target = cwd or (self.cfg.get("architect") or {}).get("cwd") or self.root
+        return self.process(pid, argv or ["/agents/claude"], cwd=target, headless=False)
+
+    def architect_cwd(self, cwd):
+        target = str(cwd)
+        os.makedirs(target, exist_ok=True)
+        self.cfg.setdefault("architect", {})["cwd"] = target
+        stored = dict(self.cfg)
+        stored.pop("root", None)
+        with open(os.path.join(self.root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+            json.dump(stored, fh)
+        return self
+
+    def helper(self, pid, what="architect"):
+        self.helpers[pid] = what
         return self
 
     def mail(self, name, body):
@@ -82,13 +100,18 @@ class World:
             pid = 99999
         mp.setattr(W.subprocess, "Popen", lambda argv, **kw: w.spawned.append(argv) or _Proc())
         mp.setattr(A, "turn_ended", lambda cfg: w.turn_ended)
-        mp.setattr(A, "architect_present", lambda cwd, idle_seconds=600: w.arch_present)
         mp.setattr(A, "discover_architect", lambda cwd: {"session": "sess-1", "age": 9999})
         mp.setattr(A, "provider_window", lambda name="claude": None)
         mp.setattr(A, "kiro_account_usage", lambda timeout=20: None)
         mp.setattr(A, "ping", lambda root, opener=None: None)
         mp.setattr(A, "quota", lambda adapter, ttl=300: [])
-        mp.setattr(A, "helper_pids", lambda root: set())
+        mp.setattr(
+            A,
+            "helper_pids",
+            lambda root, what=None: {
+                pid for pid, role in w.helpers.items() if what is None or role == what
+            },
+        )
         mp.setattr(W, "quota_ok", lambda adapter: w.quota)
         mp.setattr(W, "notify", lambda title, msg, root=None, key=None, window=1800, audience="human", level=None:
                    w.notices.append((title, msg, audience, level)) or True)

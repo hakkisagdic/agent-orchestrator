@@ -33,6 +33,11 @@ def test_review_sees_the_inventory_and_not_the_coordination_noise(project):
 def test_helpers_are_not_writers(project, monkeypatch):
     from ao import procs
     root = project["root"]
+    monkeypatch.setattr(
+        A,
+        "_process_start",
+        lambda pid, refresh=False: "start-500" if pid == 500 else None,
+    )
     A.helper_register(root, 500, "reviewer")
     monkeypatch.setattr(A, "_pid_alive", lambda pid: True)
     monkeypatch.setattr(A, "_proc_table", lambda: {500: (1, 500, "??"), 501: (500, 500, "??"), 600: (1, 600, "??")})
