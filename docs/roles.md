@@ -60,6 +60,31 @@ ao role preset pair                  # apply a named preset
 A reassignment takes effect on the next slice. Work already in flight keeps its actor, so
 you never orphan a half-finished lane.
 
+## Address roles, never names
+
+**The role is the address. The actor's name is display, and the adapter's name is a
+launch detail. Neither belongs in routing.**
+
+Reassignment is the whole point of the table above, and it is worthless if the plumbing
+has an actor's name baked in. It had: the urgent-message filter tested for the literal
+string `-to-fable-`, so a message to the architect was recognised only while the
+architect happened to be a model called Fable; the same literal appeared in the watchdog's
+wake prompt, in the hold-release filename and in the Telegram bridge, and `ao note --to`
+defaulted to `kiro`. Swap either actor and the routing silently addresses nobody.
+
+The line to hold:
+
+| may name an actor or a model | must resolve through the role |
+|---|---|
+| adapter identity (`adapter: "kiro"`, the `kiro-cli` binary, its session store, its account/usage probes) | who a message is for or from |
+| what a report displays to a human | which messages a filter selects |
+| a preset's default assignment | the default of `--to` and friends |
+| test fixtures that pin one concrete actor | any prompt ao generates |
+
+Adapters are named on purpose: launching `kiro-cli` requires knowing it is `kiro-cli`.
+That is a statement about a *tool*, not about who holds a *role*, and swapping the
+implementer must never require touching it.
+
 ## Presets
 
 ```yaml
