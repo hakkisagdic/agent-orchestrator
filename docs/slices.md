@@ -42,6 +42,34 @@ Two states people forget to model: **blocked** (waiting on a human decision or s
 input — see escalation in [`protocol.md`](protocol.md)) and **abandoned**, which is a
 legitimate outcome and should be recorded rather than quietly dropped.
 
+## Before adding a mechanism, walk the ladder
+
+Slices grow because every finding is answered by building something. B8 took twelve review
+rounds that way: a late gate check produced a resume machine, a consume race produced a
+callback held under two locks, and each new mechanism gave the next round a new hole to
+find. It ended with a decision that said, in effect, *delete, do not add*.
+
+So before writing a new mechanism, answer these in order and stop at the first yes:
+
+1. **Does this need to exist at all?** A finding can be a boundary that was written wrong.
+   Correcting the contract is a legitimate fix and usually the cheapest one.
+2. **Does the repository already do it?** The same guarantee is often already enforced
+   somewhere else in the chain.
+3. **Does the standard library do it?** ao ships with no runtime dependencies; the answer
+   is in the standard library or it is written by hand and owned by our tests.
+4. **Does ordering solve it instead of machinery?** Several races here dissolved by fixing
+   the order of two writes rather than adding a guard around them.
+5. **Can it be deleted instead?** Removing the surface that produced the finding is a fix,
+   and it is the only one that cannot itself be defective.
+6. **Can it be one function with a table of golden values?** Parsers, projections and
+   counters belong here, not in new subsystems.
+7. **Only then:** the smallest mechanism that satisfies the invariant.
+
+A slice that adds a mechanism records in its report which rung it stopped at and why the
+ones above it did not apply. The ladder is borrowed from [ponytail](https://github.com/DietrichGebert/ponytail)
+(MIT), whose measured claim is roughly half the code for the same task; nothing of it is
+installed here — see [`upstream.md`](upstream.md).
+
 ## Round budget
 
 Count review rounds per slice. Default budget: **5**.
