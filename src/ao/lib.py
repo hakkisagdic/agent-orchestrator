@@ -3162,11 +3162,14 @@ def save_alarms(d):
         pass
 
 
-def alarm_touch(project, key, level, now=None, red_after=ALARM_RED_AFTER, title=None):
-    """Record a raise of `key` at `level`; return (level to ring at, episode).
+def alarm_touch(project, key, level, now=None, red_after=ALARM_RED_AFTER, title=None,
+                persist=True):
+    """Calculate a raise of `key` at `level`; return (level to ring at, episode).
 
     An orange raised repeatedly for `red_after` seconds rings red. `red_due` on
     the episode says whether a mail should go now (once per ALARM_RED_REPEAT).
+    ``persist=False`` runs the identical calculation against the current ledger
+    without writing it, so watchdog explain can preview the live verdict safely.
     """
     now = now or time.time()
     d = load_alarms()
@@ -3187,7 +3190,8 @@ def alarm_touch(project, key, level, now=None, red_after=ALARM_RED_AFTER, title=
         e["red_due"] = e.get("red_sent") is None or now - e["red_sent"] >= ALARM_RED_REPEAT
     e["ring"] = ring
     d[k] = e
-    save_alarms(d)
+    if persist:
+        save_alarms(d)
     return ring, e
 
 
