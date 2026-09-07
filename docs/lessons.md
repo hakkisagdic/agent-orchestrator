@@ -13,7 +13,7 @@ defect — one standing condition producing a fresh report every cycle — and r
 
 The fix was plausible and wrong. It keyed the report filename on a source string
 scraped from the facts ("the implementer wrote X.md"), while the anomaly scanner
-counted the watchdog's own `watchdog-to-fable-ANOMALY-*.md` files as reports
+counted the watchdog's own `watchdog-to-<architect>-ANOMALY-*.md` files as reports
 awaiting the architect. Each cycle read the last report as a new one, built a
 filename from it, and wrote a longer name — a feedback loop that filled the
 mailbox with names hundreds of characters long.

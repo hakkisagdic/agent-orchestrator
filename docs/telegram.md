@@ -35,7 +35,7 @@ surface open to whoever finds the bot.
 A message that is not a command becomes an urgent architect message:
 
 ```
-agent-mail/<ts>-fable-to-kiro-ACIL-<slug>.md
+agent-mail/<ts>-<architect>-to-<implementer>-ACIL-<slug>.md
 ```
 
 Marked `## ACİL`, so it reaches the implementer through all three delivery

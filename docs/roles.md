@@ -66,11 +66,11 @@ you never orphan a half-finished lane.
 launch detail. Neither belongs in routing.**
 
 Reassignment is the whole point of the table above, and it is worthless if the plumbing
-has an actor's name baked in. It had: the urgent-message filter tested for the literal
-string `-to-fable-`, so a message to the architect was recognised only while the
-architect happened to be a model called Fable; the same literal appeared in the watchdog's
-wake prompt, in the hold-release filename and in the Telegram bridge, and `ao note --to`
-defaulted to `kiro`. Swap either actor and the routing silently addresses nobody.
+has an actor's name baked in. It had: the urgent-message filter tested for a literal spelled
+from the architect actor's own name, so a message to the architect was recognised only while
+that particular actor held the role; the same literal appeared in the watchdog's wake prompt,
+in the hold-release filename and in the Telegram bridge, and `ao note --to` defaulted to a
+hardcoded implementer name. Swap either actor and the routing silently addresses nobody.
 
 The line to hold:
 
