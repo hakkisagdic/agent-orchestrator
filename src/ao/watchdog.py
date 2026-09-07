@@ -27,6 +27,7 @@ Run it from cron/launchd every couple of minutes, or once by hand.
     ao-watchdog --root ~/work/project --dry-run  # decide, change nothing
 """
 import argparse
+from contextvars import ContextVar
 import json
 import os
 import re
@@ -39,6 +40,7 @@ import time
 from . import lib as A
 
 STATE_DIR = os.path.join(A.HOME, ".ao")
+_DRY_RUN = ContextVar("ao_watchdog_dry_run", default=False)
 
 # Every decision line this module prints is also kept, so a cycle can be read
 # back as a trace: what was measured, what was decided, in what order. The one
@@ -156,10 +158,9 @@ def child_path():
     return ":".join(out)
 
 
-# Who each alert is actually for. Severity was the wrong axis: an anomaly is
-# urgent *and* entirely the architect's business, and ringing a human about it
-# teaches them to ignore the channel before the one alert that needs them
-# arrives. A human hears only what a human can fix.
+# Legacy call sites that do not declare an audience are classified by title.
+# Explicit audience is authoritative: wording and localization must never turn a
+# human alarm into an architect-only ledger row (or vice versa).
 HUMAN_AUDIENCE = ("out of quota", "agent stuck", "nudge failed", "watchdog",
                   "turns piling up", "needs you", "provider degraded")
 
@@ -168,8 +169,11 @@ def for_human(title):
     return any(k in title.lower() for k in HUMAN_AUDIENCE)
 
 
-def notify(title, msg, root=None, key=None, window=1800, audience="human", level=None):
+def notify(title, msg, root=None, key=None, window=1800, audience=None, level=None):
     """Raise an alert at most once per window, and always record that we did.
+
+    An explicit audience is a routing decision and is never inferred again from
+    the title.  Title inference exists only for legacy callers that omit it.
 
     The watchdog runs every two minutes. A guard that notifies on each run turns
     a single ongoing condition into thirty alerts an hour, and a human who learns
@@ -180,18 +184,18 @@ def notify(title, msg, root=None, key=None, window=1800, audience="human", level
     of them says the condition has held for a long time.
     """
     key = key or title
+    if audience is None:
+        audience = "human" if for_human(title) else "architect"
+    if audience not in ("architect", "human"):
+        raise ValueError("unknown notification audience: %s" % audience)
+    dry_run = _DRY_RUN.get()
     # Architect-audience alerts are recorded and delivered through the mailbox and
-    # the wake; they do not ring a phone.
-    if audience == "architect" or not for_human(title):
-        if root:
+    # the wake; they never use a human channel.
+    if audience == "architect":
+        if dry_run:
+            print(f"DRY RUN: would record architect notice: {title}")
+        elif root:
             A.record_notice(root, title, msg, sent=False, key=key)
-            try:
-                from . import telegram
-                if not A.notice_recently_sent(root, "tg:" + key, window):
-                    if telegram.send(f"*{title}*\n{msg}", root):
-                        A.record_notice(root, title, msg, sent=True, key="tg:" + key)
-            except Exception:
-                pass
         return False
     # The ladder: this is an orange (a person must act). Standing an hour, it
     # rings red and goes to mail — the channel people open when they wake up.
@@ -202,29 +206,48 @@ def notify(title, msg, root=None, key=None, window=1800, audience="human", level
             red_after = int((A.load_config(root).get("alarms") or {}).get("red_after_minutes", 60)) * 60
         except Exception:
             pass
-    ring, episode = A.alarm_touch(project, key, level or "orange", red_after=red_after, title=title)
+    # Dry-run uses the same alarm state and calculation as a live cycle, but the
+    # preview is deliberately not persisted.
+    ring, episode = A.alarm_touch(
+        project, key, level or "orange", red_after=red_after, title=title,
+        persist=not dry_run,
+    )
     if ring == "red" and episode.get("red_due"):
-        try:
-            from . import email
-            since = time.strftime("%d %b %H:%M", time.localtime(episode.get("first", time.time())))
-            if email.send(f"{title}", f"{msg}\n\nDuruyor: {since}'den beri ({episode.get('count', 1)} kez). "
-                          f"Proje: {root or '?'}\n`ao alarms` merdiveni, `ao status` durumu gösterir.", root):
-                A.alarm_mailed(project, key)
-                if root:
-                    A.record_notice(root, title, msg, sent=True, key="mail:" + key)
-        except Exception:
-            pass
+        if dry_run:
+            print(f"DRY RUN: would send red e-mail: {title}")
+        else:
+            try:
+                from . import email
+                since = time.strftime("%d %b %H:%M", time.localtime(episode.get("first", time.time())))
+                if email.send(f"{title}", f"{msg}\n\nDuruyor: {since}'den beri ({episode.get('count', 1)} kez). "
+                              f"Proje: {root or '?'}\n`ao alarms` merdiveni, `ao status` durumu gösterir.", root):
+                    A.alarm_mailed(project, key)
+                    if root:
+                        A.record_notice(root, title, msg, sent=True, key="mail:" + key)
+            except Exception:
+                pass
     if root and A.notice_recently_sent(root, key, window):
-        A.record_notice(root, title, msg, sent=False, key=key)
+        if dry_run:
+            print(f"DRY RUN: would suppress {ring} desktop/Telegram channels "
+                  f"(recent notice): {title}")
+        else:
+            A.record_notice(root, title, msg, sent=False, key=key)
         return False
     if root and storm(root):
-        A.record_notice(root, title, msg, sent=False, key=key)
-        if not A.notice_recently_sent(root, "storm", 3600):
-            A.record_notice(root, f"{project}: alert storm", "12+ alerts in an hour; further ones "
-                            "are recorded only — ao notices", sent=True, key="storm")
-            subprocess.run(["osascript", "-e", f'display notification "12+ alerts in an hour; further '
-                            f'ones recorded only (ao notices)" with title "{project}: alert storm"'],
-                           capture_output=True)
+        if dry_run:
+            print(f"DRY RUN: would suppress {ring} desktop/Telegram channels "
+                  f"(alert storm): {title}")
+        else:
+            A.record_notice(root, title, msg, sent=False, key=key)
+            if not A.notice_recently_sent(root, "storm", 3600):
+                A.record_notice(root, f"{project}: alert storm", "12+ alerts in an hour; further ones "
+                                "are recorded only — ao notices", sent=True, key="storm")
+                subprocess.run(["osascript", "-e", f'display notification "12+ alerts in an hour; further '
+                                f'ones recorded only (ao notices)" with title "{project}: alert storm"'],
+                               capture_output=True)
+        return False
+    if dry_run:
+        print(f"DRY RUN: would ring {ring} desktop/Telegram channels: {title}")
         return False
     safe = msg.replace('"', "'")[:200]
     subprocess.run(["osascript", "-e",
@@ -238,6 +261,29 @@ def notify(title, msg, root=None, key=None, window=1800, audience="human", level
     if root:
         A.record_notice(root, title, msg, sent=True, key=key)
     return True
+
+
+def touch_architect_quota(root, st):
+    """Keep a standing architect-quota alarm alive until its reset window.
+
+    ``notify`` touches the alarm episode before applying its desktop rate limit,
+    so calling this on every watchdog cycle rings orange once, advances to red
+    after the configured interval, and does not create a notification storm.
+    """
+    until = st.get("arch_quota_until", 0)
+    if until <= time.time():
+        return False
+    text = (st.get("wake_error") or {}).get("text") or "architect quota exhausted"
+    reset = time.strftime("%H:%M", time.localtime(until))
+    return notify(
+        f"{os.path.basename(root.rstrip('/')) or 'root'}: mimar kotada",
+        f"{text[:100]} — uyandırma {reset}'e kadar bekletiliyor; Claude Desktop "
+        "auto-continue açıksa oturum kendi devam eder",
+        root,
+        key="architect-quota",
+        window=6 * 3600,
+        audience="human",
+    )
 
 
 def _announce_resolved(root, e):
@@ -280,6 +326,8 @@ def load_state(root):
 
 
 def save_state(root, st):
+    if _DRY_RUN.get():
+        return
     os.makedirs(STATE_DIR, exist_ok=True)
     json.dump(st, open(state_path(root), "w", encoding=UTF8), indent=2)
 
@@ -420,8 +468,19 @@ def escalate(root, cfg, adapter, age, args, st):
         window = 600 if a["kind"] == "decision-requested" else 3600
         if a["kind"] == "report-waiting" and not open_work(cfg, root):
             continue                     # nothing is stuck; it can wait for a human
+        # Suppression is read-only and therefore part of explain's decision path.
+        # A dry-run must not claim it would write a report that a live cycle would
+        # suppress; it merely skips the suppressed-notice ledger write.
         if A.notice_recently_sent(root, key, window):
-            A.record_notice(root, "Voltrai: anomaly", a["kind"], sent=False, key=key)
+            if args.dry_run:
+                print(f"DRY RUN: would suppress anomaly {a['kind']} "
+                      f"(reported within {window}s)")
+            else:
+                A.record_notice(root, "Voltrai: anomaly", a["kind"], sent=False, key=key)
+            continue
+        if args.dry_run:
+            print(f"DRY RUN: would report anomaly {a['kind']} to the architect")
+            woke = True
             continue
         name = A.write_report(root, cfg, a["kind"], a["facts"], key=a.get("key"))
         # Say what actually happened. "reported to the architect" was untrue
@@ -451,15 +510,18 @@ def escalate(root, cfg, adapter, age, args, st):
     # later word on whether anything came of it, is what makes someone check by
     # hand — which is the work the alert was supposed to save.
     if st.get("arch_pending") and not pending:
-        try:
-            from . import telegram
-            telegram.send(f"✅ *Mimar bitirdi* — {st['arch_pending']} rapor kapandı, "
-                          f"kuyruk boş", root)
-        except Exception:
-            pass
-        st["arch_pending"] = 0
-        save_state(root, st)
-    elif pending:
+        if args.dry_run:
+            print(f"DRY RUN: would announce {st['arch_pending']} completed architect report(s)")
+        else:
+            try:
+                from . import telegram
+                telegram.send(f"✅ *Mimar bitirdi* — {st['arch_pending']} rapor kapandı, "
+                              f"kuyruk boş", root)
+            except Exception:
+                pass
+            st["arch_pending"] = 0
+            save_state(root, st)
+    elif pending and not args.dry_run:
         st["arch_pending"] = len(pending)
     last_wake = st.get("last_arch_wake", 0)
     stale = [m for m in pending
@@ -474,7 +536,7 @@ def escalate(root, cfg, adapter, age, args, st):
     # that could have waited must not burn the window the implementer needs.
     if woke and arch.get("argv") and not quota_ok(adapter):
         print("reports pending, but no quota headroom to wake the architect")
-        if time.time() - st.get("last_handoff", 0) > 3600:
+        if not args.dry_run and time.time() - st.get("last_handoff", 0) > 3600:
             try:
                 exe = shutil.which("ao", path=child_path())
                 if exe:
@@ -566,11 +628,7 @@ def escalate(root, cfg, adapter, age, args, st):
                 A.record_notice(root, f"{key}: architect wake failed", f"{kind}: {text} [{used}]",
                                 True, key="architect-wake-failed")
                 if kind == "quota":
-                    until = time.strftime("%H:%M", time.localtime(st["arch_quota_until"]))
-                    notify(f"{key}: mimar kotada", f"{text[:100]} — uyandırma {until}'e kadar "
-                           f"bekletiliyor; Claude Desktop auto-continue açıksa oturum kendi "
-                           f"devam eder", root, key="architect-quota", window=6 * 3600,
-                           audience="human")
+                    touch_architect_quota(root, st)
                 else:
                     notify(f"{key}: mimar uyandırılamadı", f"{kind}: {text[:110]} — ikili: "
                            f"{used or '?'}; `ao doctor`", root, key="architect-wake-failed",
@@ -772,6 +830,15 @@ def run(args):
 
 
 def _cycle(args, root):
+    """Run one cycle with dry-run effects suppressed across nested helpers."""
+    token = _DRY_RUN.set(bool(args.dry_run))
+    try:
+        return _cycle_impl(args, root)
+    finally:
+        _DRY_RUN.reset(token)
+
+
+def _cycle_impl(args, root):
     cfg = A.load_config(root)
     impl = cfg.get("implementer") or {}
     if not impl:
@@ -786,9 +853,10 @@ def _cycle(args, root):
     age = time.time() - os.path.getmtime(msgs)
     size = os.path.getsize(msgs)
     st = load_state(root)
-    A.heartbeat(root)                 # the only proof this watchdog is alive
-    A.reconcile_mail_ledger(root, cfg)  # deleted mail becomes a consumed row
-    A.record_progress(root, cfg)      # history of what moved, for the spin check
+    if not args.dry_run:
+        A.heartbeat(root)                 # the only proof this watchdog is alive
+        A.reconcile_mail_ledger(root, cfg)  # deleted mail becomes a consumed row
+        A.record_progress(root, cfg)      # history of what moved, for the spin check
     project = os.path.basename(root.rstrip("/")) or "root"
     try:
         bd = A.board(root)
@@ -802,17 +870,21 @@ def _cycle(args, root):
                       last_wake_error=(st.get("wake_error") or {}).get("kind"))
     except Exception as exc:                                  # facts must never stop a cycle
         _FACTS["facts_error"] = str(exc)[:120]
-    # Alarm hygiene, every cycle: close episodes that went quiet (and say so, once —
-    # an alert with no "over" teaches people to keep worrying), watch the sibling
-    # watchdogs' heartbeats (a dead watchdog cannot report itself), and a hold that
-    # has stood four hours is a person who forgot, which is a red.
-    for e in A.expire_alarms(project):
-        _announce_resolved(root, e)
-    # The dead man's switch: an external service that alarms when this stops.
-    _FACTS["ping"] = A.ping(root)
+    # Alarm hygiene, every cycle: keep durable conditions raised before closing
+    # episodes that went quiet, then say so once.  A quota window lives in state,
+    # so unlike a transient notice it must keep aging toward red while it stands.
+    # In dry-run, notify previews that same touch without persisting it.
+    touch_architect_quota(root, st)
+    if not args.dry_run:
+        for e in A.expire_alarms(project):
+            _announce_resolved(root, e)
+        # The dead man's switch is a real external ping, not an explain probe.
+        _FACTS["ping"] = A.ping(root)
+    else:
+        _FACTS["ping"] = "dry-run"
     # Credits: one sample per half hour, and a red alarm when the burn rate says
     # the plan runs out before it resets — the day everything stops.
-    if time.time() - st.get("last_credit_sample", 0) > 1800:
+    if not args.dry_run and time.time() - st.get("last_credit_sample", 0) > 1800:
         try:
             acct = A.kiro_account_usage() if (adapter.get("billing") or {}).get("api") else None
         except Exception:
@@ -879,8 +951,8 @@ def _cycle(args, root):
     dead = A.orphans(root, adapter)
     if dead:
         print(f"{len(dead)} orphaned agent process(es) left by an ended turn; clearing {dead}")
-        A.record_notice(root, "orphans cleared", f"{len(dead)} leftover process(es): {dead}", False, key="orphans")
         if not args.dry_run:
+            A.record_notice(root, "orphans cleared", f"{len(dead)} leftover process(es): {dead}", False, key="orphans")
             A.sweep_orphans(dead)
     running = [p for p in A.agent_pids(root, adapter) if p not in set(dead)]
     _FACTS.update(writers=len(A.process_trees(running)) if running else 0, orphans=len(dead))
@@ -1058,20 +1130,21 @@ def _cycle(args, root):
     # the transport is HTTP, so a pending question reaches a phone even now. What
     # stops is deciding — so hand the state to whoever can.
     if not quota_ok(adapter):
-        if not A.recently_deferred(root, "nudge"):
-            A.deferred_append(root, "nudge", reason="implementer quota")
-        if time.time() - st.get("last_handoff", 0) > 3600:
-            try:
-                import subprocess as _sp
-                exe = shutil.which("ao", path=child_path())
-                if exe:
-                    _sp.run([exe, "-C", root, "handoff", "--reason",
-                             "sağlayıcı kotası tükendi"],
-                            capture_output=True, timeout=120)
-                    st["last_handoff"] = time.time()
-                    save_state(root, st)
-            except Exception:
-                pass
+        if not args.dry_run:
+            if not A.recently_deferred(root, "nudge"):
+                A.deferred_append(root, "nudge", reason="implementer quota")
+            if time.time() - st.get("last_handoff", 0) > 3600:
+                try:
+                    import subprocess as _sp
+                    exe = shutil.which("ao", path=child_path())
+                    if exe:
+                        _sp.run([exe, "-C", root, "handoff", "--reason",
+                                 "sağlayıcı kotası tükendi"],
+                                capture_output=True, timeout=120)
+                        st["last_handoff"] = time.time()
+                        save_state(root, st)
+                except Exception:
+                    pass
         notify("Voltrai: out of quota",
                "provider window exhausted; handoff note sent", root)
         print("provider out of headroom; not nudging")

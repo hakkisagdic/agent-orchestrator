@@ -92,6 +92,8 @@ def test_implementer_quota_defers_the_nudge(world):
     world.board("running", "- [B8] slice · since: 2026-09-05 10:00").transcript_age(700)
     world.quota = False
     world.cycle()
+    assert not any(r["kind"] == "nudge" for r in A.deferred_open(world.root))
+    world.cycle(dry_run=False)
     assert any(r["kind"] == "nudge" for r in A.deferred_open(world.root))
 
 

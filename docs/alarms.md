@@ -8,7 +8,15 @@ Three levels, named by who has to act.
 | **orange** | the human | desktop notification + Telegram | a decision only a person can make, a quota, a hold, a failed wake, a stuck agent |
 | **red** | the human, now | **e-mail** (plus the orange channels) | an orange condition standing for an hour, or one that will not clear on its own |
 
-The distinction that matters is orange → red. Orange assumes the person is
+The distinction that matters is orange → red. Alert call sites declare who
+must act; that explicit audience is authoritative and title wording or
+localization never changes its route. Legacy calls that omit an audience retain
+title inference for compatibility, and regression coverage preserves both sides
+of that boundary. `ao watchdog explain`/`--dry-run` computes the same routing
+and verdicts but never writes a notice or alarm episode and never invokes the
+desktop, Telegram, e-mail, or dead-man-switch ping channels.
+
+Orange assumes the person is
 near a screen. On 2026-09-05 they were asleep: a queue sat empty for eleven
 hours, forty architect wakes failed, and every alert went to a notification
 centre nobody looked at. Red assumes nothing — it lands in the inbox people
