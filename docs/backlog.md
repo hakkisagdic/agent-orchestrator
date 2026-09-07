@@ -47,6 +47,18 @@ Nothing here is authorised until it is queued on a project board.
 | 39 | **Merging is gated on a green run of the merge result** | 2026-09-07: four individually green branches were merged and main went red — PR #3 changed `architect_present`'s signature while PR #6 stubbed the old one; hosted CI never runs on push or PR by policy, so nothing caught it but a manual suite run afterwards | Before a merge, the suite runs on the merge result (main + branch, locally) and the exit code and summary are recorded as the merge's evidence; a merge without that evidence is reported by `ao doctor` as unverified, and the recorded run names both parents so a stale run cannot be reused; hosted CI stays manual-dispatch only — the gate is local and costs no Actions minutes |
 | 40 | **A standing advisory never becomes a red e-mail** | 2026-09-07 23:4x: three red e-mails arrived within a minute — `architect-quota` (a session-limit reset parsed as a *day* later, so a lapsed block looked live while the architect was demonstrably at the keyboard), `credits-exhaust` (stale samples from a replaced account, #36) and `shared-pool` (a true but standing configuration advisory). `cmd_doctor_check` notifies **every** finding with `audience="human"` on a one-hour window and the job runs every 15 minutes, so any condition that is simply true forever escalates to e-mail forever | Findings carry a severity: an advisory about configuration is yellow and reaches the architect, never the human channels; red is reserved for work that has stopped and that only a human can restart; a reset time parsed from a provider message is never projected further ahead than that limit's own window, and a lapsed reset clears the block instead of rolling to the next day; measured presence of the actor contradicts a cached quota block and clears it; an alarm whose condition can no longer be verified is resolved rather than re-raised; tests cover the day-rollover parse, the presence contradiction and the advisory-severity routing |
 
+**Operational debt held against #40.** On 2026-09-07 the Voltrai doctor job was unloaded
+(`launchctl bootout gui/501/com.agentorchestrator.doctor.voltrai`) because every finding it
+produced went to the human channels every fifteen minutes, and three false red e-mails arrived
+in one minute. Nothing is watching the doctor checks on that project until it is loaded again:
+
+```
+launchctl bootstrap gui/501 ~/Library/LaunchAgents/com.agentorchestrator.doctor.voltrai.plist
+```
+
+Owner's instruction, same day: reload it once #40 lands. Landing #40 without reloading the job
+leaves the fix unproven and the project unwatched.
+
 Two policies stay outside the queue: hosted CI runs only on the maintainer's word, one
 environment at a time; nothing in this repository lands without an independent review
 of the exact candidate.
