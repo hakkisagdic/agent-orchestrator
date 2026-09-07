@@ -154,7 +154,7 @@ def test_cycle_previews_and_persists_quota_ladder_until_reset(
     )
     monkeypatch.setattr(A, "session_paths", lambda cfg: (str(transcript), None))
     monkeypatch.setattr(A, "load_adapter", lambda name: {})
-    monkeypatch.setattr(A, "architect_present", lambda target: False)
+    monkeypatch.setattr(A, "architect_present", lambda target, architect=None: False)
     monkeypatch.setattr(A, "agent_pids", lambda target, adapter: [])
     monkeypatch.setattr(A, "foreign_edits", lambda target, cfg: [])
     monkeypatch.setattr(A, "stale_siblings", lambda target: {})
@@ -278,7 +278,7 @@ def test_dry_cycle_escalation_has_no_alarm_or_channel_side_effects(
         A, "notice_recently_sent",
         lambda target, key, window: key == "anomaly:decision-requested",
     )
-    monkeypatch.setattr(A, "architect_present", lambda target: False)
+    monkeypatch.setattr(A, "architect_present", lambda target, architect=None: False)
     monkeypatch.setattr(A, "agent_pids", lambda target, adapter, **kw: [])
     monkeypatch.setattr(A, "foreign_edits", lambda target, cfg: [])
     monkeypatch.setattr(A, "stale_siblings", lambda target: {})
