@@ -691,6 +691,8 @@ def cmd_commit_ok(cfg, args):
         # durable chained row means no authority exists.
         print(f"{C['red']}{C['b']}REFUSED{C['reset']}")
         print(f"  {C['red']}·{C['reset']} could not persist authority grant: {exc}")
+        if "has no 'previous' field" in str(exc):
+            print("  legacy ledger — archive .ao/ledger/authority.jsonl and re-run ao commit-ok (docs/ledger.md)")
         return 1
 
     print(f"{C['green']}{C['b']}GRANTED{C['reset']}  {token}")

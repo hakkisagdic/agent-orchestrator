@@ -636,6 +636,10 @@ def test_commit_ok_refuses_to_append_to_an_unchained_legacy_ledger(
     assert "REFUSED" in output
     assert "could not persist authority grant" in output
     assert "has no 'previous' field" in output
+    assert (
+        "legacy ledger — archive .ao/ledger/authority.jsonl and re-run "
+        "ao commit-ok (docs/ledger.md)"
+    ) in output
     assert "GRANTED" not in output
     assert open(ledger, "rb").read() == before
 
