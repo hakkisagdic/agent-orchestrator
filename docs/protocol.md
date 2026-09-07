@@ -34,6 +34,25 @@ Consequences worth internalising:
 - A rejected directive is still deleted, but the rejection must be recorded in the reply
   first. Silent deletion is a protocol violation.
 
+### Why not put the mailbox in git
+
+It comes up whenever a message is missed, so here is the answer once. Git would give
+durable history, ordering, conflict detection and cross-machine sync. None of those are
+the failure we actually have. On 2026-09-07 an implementer report sat unread for four
+hours and an answered decision waited three: in both cases the file was written correctly,
+durably, in the right place, and **nobody looked**. A commit on a branch is exactly as
+unread as a file in a directory.
+
+Git would also cost something real: a second history to keep out of the product's, a
+commit per acknowledgement, and locking between concurrent writers where today a
+file rename is atomic.
+
+So the mailbox stays on the filesystem, and the missed-message problem is solved where it
+actually lives — in **notification and receipt**: an urgent message is carried by the CLI
+the recipient already runs (see below), unread age escalates on the alarm ladder, and
+"seen" is recorded separately from "handled". Revisit git only when mailboxes must span
+machines, which is a sync problem, not a delivery one.
+
 ## Message types
 
 | Type | Direction | Purpose |
