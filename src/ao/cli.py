@@ -673,7 +673,9 @@ def cmd_commit_ok(cfg, args):
                 root, False, reasons, now, (ver or {}).get("id"),
                 candidate=candidate, scope=scope, **strict_authority,
             )
-        except OSError as exc:
+        except Exception as exc:
+            # A broken predecessor chain is itself a refusal condition. Never
+            # traceback into ambiguity or imply that the refusal was recorded.
             print(f"  {C['dim']}authority refusal could not be recorded: {exc}{C['reset']}")
         return 1
 
@@ -684,9 +686,13 @@ def cmd_commit_ok(cfg, args):
             review=review_name, reviewer=rwho, candidate=candidate, scope=scope,
             **strict_authority,
         )
-    except OSError as exc:
+    except Exception as exc:
+        # Corruption and lock failures are as decisive as an I/O failure: no
+        # durable chained row means no authority exists.
         print(f"{C['red']}{C['b']}REFUSED{C['reset']}")
         print(f"  {C['red']}·{C['reset']} could not persist authority grant: {exc}")
+        if "has no 'previous' field" in str(exc):
+            print("  legacy ledger — archive .ao/ledger/authority.jsonl and re-run ao commit-ok (docs/ledger.md)")
         return 1
 
     print(f"{C['green']}{C['b']}GRANTED{C['reset']}  {token}")
@@ -1772,7 +1778,12 @@ def cmd_digest(cfg, args):
     ar = f", {C['yellow']}{a['refused']} reddedildi{C['reset']}" if a["refused"] else ""
     print(f"  doğrulama  {C['green']}{v['passed']} geçti{C['reset']}{vf}")
     print(f"  review     {C['green']}{r['approved']} APPROVED{C['reset']}{rc}")
-    print(f"  commit-ok  {C['green']}{a['granted']} verildi{C['reset']}{ar}")
+    if a.get("integrity") == "broken":
+        print(f"  commit-ok  {C['red']}YETKİ DEFTERİ BÜTÜNLÜĞÜ BOZUK{C['reset']}")
+        if a.get("error"):
+            print(f"    {C['dim']}{a['error'][:110]}{C['reset']}")
+    else:
+        print(f"  commit-ok  {C['green']}{a['granted']} verildi{C['reset']}{ar}")
     # A refusal repeated all week is a process problem, not an incident.
     for reason, n in d["refusal_reasons"]:
         if n > 1:

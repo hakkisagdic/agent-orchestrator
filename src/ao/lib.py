@@ -1129,34 +1129,55 @@ def digest(root, cfg, since_days=1.0):
         if sh("git rev-parse --abbrev-ref @{u} 2>/dev/null", cwd=root) else \
         len([l for l in (sh("git log --branches --not --remotes --pretty=%h", cwd=root) or "").split("\n") if l])
 
+    def _window(rows):
+        fresh = []
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            # The ledgers disagree on the type of `at`: verifications write an
+            # ISO string, everything else an epoch. Read both.
+            at = r.get("at", 0)
+            if isinstance(at, str):
+                try:
+                    at = datetime.fromisoformat(at.replace("Z", "+00:00")).timestamp()
+                except ValueError:
+                    at = 0
+            if at >= cut:
+                fresh.append(r)
+        return fresh
+
     def _jsonl(rel):
         p = os.path.join(root, rel)
         rows = []
         if os.path.exists(p):
             for line in open(p, errors="replace", encoding=UTF8):
                 try:
-                    r = json.loads(line)
+                    rows.append(json.loads(line))
                 except Exception:
                     continue
-                # The ledgers disagree on the type of `at`: verifications write an
-                # ISO string, everything else an epoch. Read both.
-                at = r.get("at", 0)
-                if isinstance(at, str):
-                    try:
-                        at = datetime.fromisoformat(at.replace("Z", "+00:00")).timestamp()
-                    except ValueError:
-                        at = 0
-                if at >= cut:
-                    rows.append(r)
-        return rows
+        return _window(rows)
 
     ver = _jsonl(".ao/ledger/verifications.jsonl")
     out["verifications"] = {"total": len(ver),
                             "passed": sum(1 for v in ver if v.get("passed")),
                             "failed": sum(1 for v in ver if not v.get("passed"))}
-    auth = _jsonl(".ao/ledger/authority.jsonl")
-    out["authority"] = {"granted": sum(1 for a in auth if a.get("granted")),
-                        "refused": sum(1 for a in auth if not a.get("granted"))}
+    try:
+        auth = _window(authority_rows(root))
+    except Exception as exc:
+        # This view cannot authorize, but it must not summarize manipulated
+        # authority as trustworthy counts. Preserve the rest of the digest and
+        # make the integrity failure explicit instead of skipping bad rows.
+        auth = []
+        out["authority"] = {
+            "granted": 0, "refused": 0,
+            "integrity": "broken", "error": str(exc),
+        }
+    else:
+        out["authority"] = {
+            "granted": sum(1 for a in auth if a.get("granted")),
+            "refused": sum(1 for a in auth if not a.get("granted")),
+            "integrity": "valid",
+        }
     # Why authority was withheld is the actionable half — a refusal repeated all
     # week is a process problem, not an incident.
     reasons = {}
@@ -1588,11 +1609,24 @@ def latest_candidate_review(root, review_dir, candidate_digest, limit=40):
     return None
 
 
-def latest_authority_decision(root):
-    """Newest complete authority row whose ``granted`` value is a real bool."""
-    from .storage import read_jsonl
+AUTHORITY_CHAIN = "ao-authority-row-v1"
+
+
+def authority_rows(root):
+    """All committed authority rows after validating the complete hash chain.
+
+    A non-empty legacy ledger without predecessor fields is deliberately
+    unreadable. Rewriting old authority in place would turn an append-only audit
+    trail into evidence manufactured by the reader.
+    """
+    from .storage import read_chained_jsonl
     path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
-    rows = read_jsonl(path)
+    return read_chained_jsonl(path, AUTHORITY_CHAIN)
+
+
+def latest_authority_decision(root):
+    """Newest real boolean decision, only after the full chain validates."""
+    rows = authority_rows(root)
     return next(
         (row for row in reversed(rows)
          if isinstance(row, dict) and type(row.get("granted")) is bool),
@@ -1622,8 +1656,8 @@ def record_authority(root, granted, reasons, tree, verification, token=None,
                      review=None, reviewer=None, candidate=None, scope=None,
                      matrix=None, role_bindings=None, implementer_identity=None,
                      reviewer_identity=None):
-    """Persist an authority decision, raising when durable recording fails."""
-    from .storage import append_jsonl
+    """Persist one hash-chained authority decision, raising on any broken prefix."""
+    from .storage import append_chained_jsonl
     record = {"at": int(time.time()), "granted": bool(granted),
               "token": token, "reasons": reasons, "tree": tree,
               "verification": verification, "review": review,
@@ -1642,9 +1676,9 @@ def record_authority(root, granted, reasons, tree, verification, token=None,
         record.update({"schema": 2, "candidate": candidate, "scope": scope})
     path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
     # Keep the reviewer's identity here, not only in the review file. A grant is
-    # not real until the locked append, file fsync and (on first creation)
-    # directory fsync have all completed.
-    return append_jsonl(path, record)
+    # not real until the chain prefix validates and the locked append, file
+    # fsync and (on first creation) directory fsync have all completed.
+    return append_chained_jsonl(path, record, AUTHORITY_CHAIN)
 
 
 GATE_LOCK = os.path.join(HOME, ".ao", "gate.lock")

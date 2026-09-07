@@ -269,6 +269,7 @@ def test_record_authority_persists_the_complete_grant(project):
     path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
     row = json.loads(open(path, encoding="utf-8").read().splitlines()[-1])
     assert row == {
+        "previous": None,
         "at": row["at"],
         "granted": True,
         "token": "C-1",
@@ -559,3 +560,130 @@ def test_commit_check_refuses_changed_index_without_mutating_ledger(project, cap
     assert "COMMIT REFUSED" in output
     assert "latest grant does not match the current index candidate" in output
     assert open(ledger, "rb").read() == before
+
+
+
+def _persist_three_authority_decisions(project):
+    root = project["root"]
+    A.record_authority(
+        root, False, ["older refusal"], "sha256:older-1", "V-old-1", "R-1"
+    )
+    A.record_authority(
+        root, False, ["newer refusal"], "sha256:older-2", "V-old-2", "R-2"
+    )
+    return _persist_exact_candidate_grant(project)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["middle-edit", "middle-delete", "reorder", "wrong-predecessor-append"],
+)
+def test_commit_check_refuses_a_broken_authority_chain_without_mutating_it(
+    project, capsys, mutation
+):
+    root = project["root"]
+    _repo_with_change(root)
+    _persist_three_authority_decisions(project)
+    ledger = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    rows = [json.loads(line) for line in open(ledger, encoding="utf-8")]
+
+    if mutation == "middle-edit":
+        rows[1]["tree"] = "sha256:tampered"
+    elif mutation == "middle-delete":
+        del rows[1]
+    elif mutation == "reorder":
+        rows[0], rows[1] = rows[1], rows[0]
+    else:
+        forged = dict(rows[-1])
+        forged["previous"] = "sha256:forged-predecessor"
+        forged["token"] = "C-forged"
+        rows.append(forged)
+
+    with open(ledger, "w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, separators=(",", ":")) + "\n")
+    before = open(ledger, "rb").read()
+
+    code = cli.cmd_commit_check(project, SimpleNamespace())
+    output = capsys.readouterr().out
+
+    assert code == 1
+    assert "COMMIT REFUSED" in output
+    assert "authority ledger is unreadable: broken hash chain" in output
+    assert "AUTHORIZED" not in output
+    assert open(ledger, "rb").read() == before
+
+
+def test_commit_ok_refuses_to_append_to_an_unchained_legacy_ledger(
+    project, monkeypatch, capsys
+):
+    root = project["root"]
+    _repo_with_change(root)
+    tree = A.tree_digest(root, project)
+    candidate = A.index_candidate(root)
+    _write_approved_review(project, tree, candidate)
+    _allow_commit_prerequisites(monkeypatch, tree, candidate)
+    ledger = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    open(ledger, "w", encoding="utf-8").write(
+        '{"granted":false,"token":"legacy"}\n'
+    )
+    before = open(ledger, "rb").read()
+
+    code = cli.cmd_commit_ok(project, SimpleNamespace(verify=False, profile=None))
+    output = capsys.readouterr().out
+
+    assert code == 1
+    assert "REFUSED" in output
+    assert "could not persist authority grant" in output
+    assert "has no 'previous' field" in output
+    assert (
+        "legacy ledger — archive .ao/ledger/authority.jsonl and re-run "
+        "ao commit-ok (docs/ledger.md)"
+    ) in output
+    assert "GRANTED" not in output
+    assert open(ledger, "rb").read() == before
+
+
+def test_digest_surfaces_broken_authority_chain_without_trusting_counts(
+    project, monkeypatch, capsys
+):
+    root = project["root"]
+    A.record_authority(
+        root, False, ["expected refusal"], "sha256:first", "V-1", "R-1"
+    )
+    A.record_authority(
+        root, True, [], "sha256:second", "V-2", "C-2"
+    )
+    ledger = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    rows = [json.loads(line) for line in open(ledger, encoding="utf-8")]
+    rows[0]["tree"] = "sha256:tampered"
+    with open(ledger, "w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, separators=(",", ":")) + "\n")
+
+    monkeypatch.setattr(A, "sh", lambda *args, **kwargs: "")
+    monkeypatch.setattr(A, "decisions", lambda root, state=None: [])
+    monkeypatch.setattr(
+        A,
+        "board",
+        lambda root: {state: [] for state in A.BOARD_STATES},
+    )
+    monkeypatch.setattr(A, "reviews", lambda *args, **kwargs: [])
+    monkeypatch.setattr(A, "kiro_account_usage", lambda: None)
+    monkeypatch.setattr(A, "credit_usage", lambda: {"days": {}})
+
+    result = A.digest(root, project)
+    assert result["authority"]["integrity"] == "broken"
+    assert result["authority"]["granted"] == 0
+    assert result["authority"]["refused"] == 0
+    assert "broken hash chain" in result["authority"]["error"]
+
+    monkeypatch.setattr(A, "digest", lambda *args, **kwargs: result)
+    monkeypatch.setattr(A, "busy", lambda *args, **kwargs: ("idle", 0, ""))
+    monkeypatch.setattr(A, "spinning", lambda root: None)
+    code = cli.cmd_digest(project, SimpleNamespace(days=1, n=5))
+    output = capsys.readouterr().out
+
+    assert code == 0
+    assert "YETKİ DEFTERİ BÜTÜNLÜĞÜ BOZUK" in output
+    assert "commit-ok  \x1b[32m0 verildi" not in output
