@@ -83,15 +83,34 @@ review with unanswered sections has no verdict at all and is not a round.
 of total, reviewer id, child pid. `ao reviews` shows it. Silence is a symptom, and today
 there is no way to tell a working reviewer from a dead one.
 
-## 3 — Size is a precondition, not a surprise
+## 3 — No deadline on thinking; a deadline on silence
 
-**Invariant Z1.** Before spawning anything, ao measures the candidate. Over the slice
+Once nobody is waiting, a wall-clock cap on the whole review has no purpose left. It was
+never a quality control — it was a way to stop a blocked implementer waiting forever, and
+§1 removes the waiting. So:
+
+**Invariant Z0.** A review has no total deadline. It runs until every section is
+answered, however long that takes. `--timeout` as a cap on the whole review is gone.
+
+What still needs a deadline is *silence*, not thought. A section that is producing output
+is working; a section that has produced nothing for a long time is stuck, and killing it
+is the only way to find out.
+
+**Invariant Z1.** A section is killed only when it **stalls** — no output and no
+heartbeat for `review.stall_minutes` (default 10) — never for having taken a long time.
+A stalled section is recorded as unanswered with its partial output kept as evidence; the
+rest of the review is untouched and `ao review resume` retries just that one.
+
+**Invariant Z2.** Total work is bounded by structure, not by a clock: a review has a
+finite number of sections, each bounded by the stall detector. `ao reviews` shows
+cumulative elapsed and, where the adapter reports it, spend — so an expensive review is
+visible while it runs rather than after the bill.
+
+**Invariant Z3.** Before spawning anything, ao measures the candidate. Over the slice
 budget (≤5 paths, ≤400 changed lines) it is refused with the measurement and the budget
-side by side: the answer to a too-large candidate is to split it, never to wait longer.
-
-**Invariant Z2.** The per-section timeout comes from the measured size, and
-`review.timeout` in `.ao/config.json` overrides it. A killed section keeps its partial
-output next to the artifact as evidence.
+side by side. This is now a *quality* rule, not a scheduling one: a 5,592-line candidate
+under one boundary gets a shallow review no matter how long it is given. The answer to a
+too-large candidate is to split it — never to wait longer, and never to raise a limit.
 
 ## 4 — How the implementer works once reviews are asynchronous
 
@@ -123,7 +142,7 @@ with a decision request and does not hold a slot.
 
 | slice | what it is | depends on |
 |---|---|---|
-| A | size precondition and size-derived timeouts (Z1, Z2) | — |
+| A | no total deadline, stall detection, size precondition (Z0–Z3) | — |
 | B | sectioned execution with a durable journal and heartbeat (P1–P4) | A |
 | C | submit/collect/resume with tree-pinned grants (S1–S3) | B |
 | D | implementer pipeline rule and the unattended-review anomaly (W1, W2) | C |
