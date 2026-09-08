@@ -102,6 +102,50 @@ clones. Two conditions, both non-negotiable:
 The honest limit is stated rather than implied: a private remote is a third party holding the
 project's decisions. That is the owner's choice to make, and it should be made deliberately.
 
+## Derived, not added
+
+The temptation with a message store is to add features. Almost everything worth having here is
+already implied by the three records, and costs no new writing:
+
+- **Threads.** `in_reply_to` is a content digest, so a thread is a DAG and a reply cannot dangle
+  or be re-pointed at different content. A thread is *open* while its root is a `needs-decision`
+  with no handling record — derived, not a field.
+- **Supersession.** A decision answered by a later one closes by reference: the new record names
+  the old digest. This is why `D-1788813100` sat open for a day after a later decision replaced
+  it — nothing could express "this one is finished because that one happened".
+- **Metrics.** Time to first `seen`, time to `handled`, the age distribution per class, and — the
+  one that matters — messages with no `seen` at all. Every figure is a subtraction over records
+  already stored. These are exactly the failures of 2026-09-07/08: a report unread for four hours,
+  a decision unanswered for three, another open for two days. Measuring them belongs in #49, not
+  in a new subsystem.
+- **Cross-project addressing.** A recipient is a role in a project; a message may name another
+  project's role, which is what an implementer needed when it had to file a finding about
+  agent-orchestrator into a different project's mailbox.
+
+What deliberately stays out: reactions, presence, priorities beyond the four classes, read
+receipts finer than `seen`, attachments. Those are chat features. This is a coordination log, and
+every field in it must answer "which failure does this prevent".
+
+## Why not a blockchain
+
+The ledgers already carry a hash chain, and #62 adds a checkpoint committing to the log's size —
+together those detect modification, insertion and truncation. A blockchain would add exactly one
+thing beyond that: **consensus among parties who do not trust each other**, which protects against
+someone who controls the machine rewriting history.
+
+That protection cannot be bought locally. It requires independent witnesses — other parties, a
+network, availability, and a service to run — and this project is local-first and single-machine
+by design, with `docs/safety.md` already conceding that a process running as the same user can be
+*detected*, not excluded. A chain of blocks on one disk, signed by a key on the same disk, is a
+longer hash chain with ceremony: whoever can rewrite the log can rewrite the chain.
+
+The affordable form of the same idea is already in the plan. When `refs/ao/mail` and the ledgers
+are pushed (#83), **the remote is the witness**: it holds what the local machine published, and a
+later attempt to rewrite that history shows up as a non-fast-forward push rather than a silent
+edit. One honest sentence of protection, for the cost of a `git push`, and it fails visibly rather
+than pretending. If real multi-party guarantees are ever wanted, the shape to adopt is a
+transparency log with external witnesses — not a chain of our own.
+
 ## What this module is not
 
 It is not a bus, a broker, or a service — nothing runs. It is not the alarm ladder: routing
