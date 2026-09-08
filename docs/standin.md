@@ -26,9 +26,48 @@ A stand-in has exactly the authority the role has, and no more:
   written into the artefact rather than hidden, and it is the reason the *different family* rule
   above is the person's responsibility, not the tool's.
 
+## The implementer hands you the text; you do not write it
+
+When the implementer blocks on a review it must produce the paste-ready request itself, in the
+mailbox, filled in. The person should never have to reconstruct what the reviewer needs to know —
+they open a session and paste. The implementer fills this in:
+
+```
+Sen bu deponun bağımsız reviewer'ısın. Uygulayıcı değilsin: hiçbir şeyi düzenleme, stage etme
+veya commit etme — okur ve yargılarsın. Dizin: <mutlak yol>
+
+Dilim: <id> — <bir cümlelik ne yaptığı>
+Aday: tam olarak <n> yol, digest <sha256:…>
+  <yol 1>
+  <yol 2>
+Adayı gör: git -C <yol> diff --cached
+Gate durumu: <ne koştu, sonucu ne>
+
+Kabul sınırı — YALNIZ buna karşı yargıla:
+<sınırın tam metni; numaralı senaryolar varsa hepsi>
+
+Şu biçimde cevap ver, ilk satır ilk:
+
+VERDICT: APPROVED | NEEDS_CHANGES
+BLOCKER: n
+HIGH: n
+MEDIUM: n
+LOW: n
+
+Sonra madde başına bir bulgu: `- [SEVERITY] dosya:satır — ne kırılıyor ve onu kıran dizi`.
+Kararı yalnız BLOCKER ve HIGH belirler; MEDIUM ve LOW takip notudur. Adayın dışındaki
+endişeler NOT'tur, bulgu değil. İlk düzyazı satırında hangi model olduğunu söyle — kayda
+öyle geçecek.
+```
+
+Two things the implementer must get right, because the person cannot check them: the boundary must
+be the **whole** boundary, and the candidate must be the one actually staged — if the tree moved
+since, the request is stale and must be regenerated.
+
 ## Opening a stand-in reviewer
 
-Start a session with a different model in the project directory, and paste:
+If the implementer has already handed you a filled-in request, paste that. Otherwise, start a
+session with a different model in the project directory and paste:
 
 > You are the independent reviewer for this repository. You are not the implementer and must never
 > edit, stage or commit anything — you read and you judge.
