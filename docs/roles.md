@@ -65,6 +65,14 @@ you never orphan a half-finished lane.
 **The role is the address. The actor's name is display, and the adapter's name is a
 launch detail. Neither belongs in routing.**
 
+This is not a rule against naming products. `src/ao/adapters/` names seventeen of them on
+purpose, and that list is the point: ao is not written between one particular pair of tools,
+it has to work between whichever pair someone runs — and a third party must be able to add
+the eighteenth without forking (#77). Naming a harness is correct exactly where a harness is
+what you mean: an adapter definition, a support matrix, a launch argv. What is forbidden is
+core logic that knows *which* harness it is talking to (#76), and routing that knows *which*
+actor holds a role.
+
 Reassignment is the whole point of the table above, and it is worthless if the plumbing
 has an actor's name baked in. It had: the urgent-message filter tested for a literal spelled
 from the architect actor's own name, so a message to the architect was recognised only while
