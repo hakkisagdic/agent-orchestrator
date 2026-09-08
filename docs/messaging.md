@@ -89,18 +89,43 @@ Two rules that come from this project's own scars: a command a person or an agen
 pages anyone (notification belongs to the scheduled watcher), and a resolution is never louder
 than the raise. Escalation by age belongs to `needs-decision` alone.
 
-## Sync, and what leaving the machine costs
+## Sync: local ref, separate private repository
 
-A project may push `refs/ao/mail` to a **private** remote. Then history is unbounded and
-off-machine, the mailbox satisfies the backup requirement for free, and search works across
-clones. Two conditions, both non-negotiable:
+Two layers, because they answer different questions.
 
-- the credential scan runs on every record before it is pushed, because messages carry diffs,
-  boundaries and decision text;
-- pushing is per-project opt-in with the remote named in configuration, never a default.
+**Local — `refs/ao/mail` in the project itself.** Works offline, needs no configuration, and is
+never pushed to the product's own remote. That last clause is not caution, it is a fact about this
+repository: `hakkisagdic/agent-orchestrator` is **public**. Pushing a mail ref to a project's own
+remote would publish every decision, boundary, refusal and diff excerpt in its coordination — for
+this project, to the world. A side ref feels private and is not.
 
-The honest limit is stated rather than implied: a private remote is a third party holding the
-project's decisions. That is the owner's choice to make, and it should be made deliberately.
+**Synced — one dedicated private repository, holding every project's mail** under its own
+namespace (`refs/mail/<project>`). This is what makes the model worth the change:
+
+- **Cross-project addressing stops being a hack.** The reason a room is wanted at all is that mail
+  is trapped per repository — an implementer had to file an agent-orchestrator finding into
+  another project's mailbox because that was the only one it had. Per-project refs inside each
+  product repo keep that trap; one mail repository removes it, and `ao room search` spans
+  everything by construction.
+- **Visibility is decided once, correctly.** One private repository, no dependence on each product
+  repo happening to be private.
+- **A contributor cloning the product gets none of it.** Coordination is ours; the code is
+  everyone's.
+- **Retention is independent.** Compaction and pruning follow the mail's own policy, not the
+  product's history.
+
+The cost, stated plainly: one repository now concentrates every project's decisions, so if it
+leaks, everything leaks. That is the reason the credential scan is a precondition and not a
+nicety, and the reason the repository must be private and stay private.
+
+Three conditions, none of them advisory:
+
+- **the target is verified private at push time**, by asking the host, not by trusting the
+  configuration — and a push to a public or unknown-visibility remote is refused, named, and
+  logged;
+- the credential scan (#48) runs on every record before it leaves the machine;
+- syncing is opt-in per project, with the mail repository named in configuration and never
+  defaulted.
 
 ## Derived, not added
 
@@ -169,3 +194,6 @@ never the source of truth, and nothing reads back from it.
   pages a human.
 - **M7.** Nothing leaves the machine without the credential scan and an explicit per-project
   opt-in.
+- **M8.** The mail ref is never pushed to a product's own remote, and never to a remote whose
+  visibility is not verified private at push time. Configuration is not evidence: the check asks
+  the host.
