@@ -2406,6 +2406,42 @@ def recent_errors(recs, limit=3, adapter=None):
 
 # ── repository signals ────────────────────────────────────────────────────────
 
+def _review_verdict(body):
+    """Return one explicit top-level verdict value, otherwise INVALID."""
+    allowed = {"APPROVED", "NEEDS_CHANGES", "UNAVAILABLE", "INVALID"}
+    values = []
+    malformed = False
+    for line in str(body or "").splitlines():
+        if line.startswith((" ", "\t")):
+            continue
+        if not re.match(r"^(?:\*\*)?verdict\b", line, re.I):
+            continue
+        prefix = re.match(
+            r"^(?:\*\*verdict[ \t]*:\*\*|verdict[ \t]*:)", line, re.I
+        )
+        if not prefix:
+            malformed = True
+            continue
+        value = line[prefix.end():].strip(" \t")
+        if value.startswith("**") and value.endswith("**") and len(value) >= 4:
+            value = value[2:-2].strip(" \t")
+        if not re.fullmatch(r"[A-Za-z_]+", value or ""):
+            malformed = True
+            continue
+        value = value.upper()
+        if value not in allowed:
+            malformed = True
+            continue
+        if value not in values:
+            values.append(value)
+    return values[0] if not malformed and len(values) == 1 else "INVALID"
+
+
+def _has_verdict_marker(body):
+    """Whether output contains any verdict-like marker; authority stays stricter."""
+    return bool(re.search(r"\bverdict\b", str(body or ""), re.I))
+
+
 def reviews(root, reviews_dir, limit=4):
     d = os.path.join(root, reviews_dir)
     if not os.path.isdir(d):
@@ -2414,27 +2450,19 @@ def reviews(root, reviews_dir, limit=4):
                    reverse=True)[:limit]
     out = []
     for f in files:
-        verdict = ""
+        verdict = "INVALID"
         try:
             body = open(os.path.join(d, f), errors="ignore", encoding=UTF8).read()
-            # A reviewer that could not review has no verdict. Twelve one-line
-            # "session limit" files once counted as twelve NEEDS_CHANGES rounds
-            # and put a slice 12/5 over a budget it had never spent.
-            if REVIEW_UNAVAILABLE_RE.search(body) or "VERDICT: UNAVAILABLE" in body:
-                out.append((f, "UNAVAILABLE"))
-                continue
-            for line in body.split("\n"):
-                # Case-insensitive on purpose. The implementer's reviews wrote
-                # "**Verdict:**" and `ao review` writes "VERDICT:", and a match on
-                # the capitalised form alone left every ao-review verdict empty —
-                # so commit-ok could never accept the independent reviewer's
-                # APPROVED, the one verdict it was built to require.
-                if "verdict" in line.lower():
-                    verdict = re.sub(r".*:\s*", "", line).replace("*", "").strip()
-                    break
+            verdict = _review_verdict(body)
+            # Preserve legacy one-line quota/auth artifacts, but never let that
+            # heuristic override an explicit (even malformed) verdict line.
+            has_verdict_line = _has_verdict_marker(body)
+            if verdict == "INVALID" and not has_verdict_line \
+                    and REVIEW_UNAVAILABLE_RE.search(body):
+                verdict = "UNAVAILABLE"
         except Exception:
             pass
-        out.append((f, verdict or "INVALID"))
+        out.append((f, verdict))
     return out
 
 
