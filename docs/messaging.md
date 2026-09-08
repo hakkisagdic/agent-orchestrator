@@ -118,6 +118,13 @@ The cost, stated plainly: one repository now concentrates every project's decisi
 leaks, everything leaks. That is the reason the credential scan is a precondition and not a
 nicety, and the reason the repository must be private and stay private.
 
+**One repository per trust boundary, not one globally.** Projects that belong to different owners
+must not share a mail store: a client's coordination in the same repository as personal work is a
+governance problem no scan fixes, and access to one becomes access to both. So the mail
+repository is named per project in configuration, and projects that share an owner share a store.
+For a single owner that is one repository and the paragraph above holds unchanged; the moment a
+client project appears, it gets its own.
+
 Three conditions, none of them advisory:
 
 - **the target is verified private at push time**, by asking the host, not by trusting the
