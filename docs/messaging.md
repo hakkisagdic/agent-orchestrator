@@ -118,6 +118,12 @@ The cost, stated plainly: one repository now concentrates every project's decisi
 leaks, everything leaks. That is the reason the credential scan is a precondition and not a
 nicety, and the reason the repository must be private and stay private.
 
+**Decided, 2026-09-09.** The store for this owner's projects is a private repository on the
+personal account — no organisation. It is created when #83 is implemented, not before: an empty
+repository waiting for a feature is just something else to forget. A second local mirror on
+external storage is wanted and deferred until that disk is attached, at which point the choice is
+`git remote add` and nothing else changes.
+
 **One repository per trust boundary, not one globally.** Projects that belong to different owners
 must not share a mail store: a client's coordination in the same repository as personal work is a
 governance problem no scan fixes, and access to one becomes access to both. So the mail
