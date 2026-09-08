@@ -96,8 +96,8 @@ whatever the project board says. As of 2026-09-09 the order is:
    [Merkle checkpoint](upstream.md) design closes it with no dependency.
 3. **Do not stop when a reviewer cannot be reached** — #75, then #74, because the human-carried
    review needs settings to exist.
-4. **Find what we have not thought of** — #7 and #11 (Hypothesis, dev-only), then #41's golden
-   tables. Moved up on 2026-09-07's evidence and confirmed on 09-08: twelve lenses found 110
+4. **Find what we have not thought of** — #7 and #11 (a seeded loop from `random`, plus a
+   shrinker of our own), then #41's golden tables. Moved up on 2026-09-07's evidence and confirmed on 09-08: twelve lenses found 110
    sites, 91% of them seen by exactly one lens.
 5. **Stop paying the same costs** — #26, #27, #28 (the review pipeline), then #51 and #52 (the
    measurement filter, in that order), #42, #29, #30, #37, #36, #40, #20, #19.
@@ -106,7 +106,10 @@ whatever the project board says. As of 2026-09-09 the order is:
 
 The five borrowings in [upstream.md](upstream.md) are placed by the gap they close, not adopted
 as a batch: `graphlib` with #33, the Merkle checkpoint with #62, gitleaks' rules with #48,
-Hypothesis with #11, in-toto's statement shape with #61.
+shrinking with #11, in-toto's statement shape with #61. **None of them adds a package.** Four are
+designs, formats or rule sets we write ourselves against the standard library; `graphlib` is the
+standard library. `dependencies = []` holds, and so does the reason behind it — this runs on
+machines where nothing is installed.
 
 **Operational debt held against #40.** On 2026-09-07 the Voltrai doctor job was unloaded
 (`launchctl bootout gui/501/com.agentorchestrator.doctor.voltrai`) because every finding it
