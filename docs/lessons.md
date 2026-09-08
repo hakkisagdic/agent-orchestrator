@@ -325,10 +325,10 @@ sentence: nothing runs in this repository without asking.
 
 Stopping that was the second mistake. `ao hold` terminated every agent process
 whose cwd was the repository — seven of them. Two were the unapproved
-implementer. Five were the owner's own interactive Claude sessions, cut off
-mid-turn. The hold was designed on a project whose only agent was a headless
-Kiro; on a repository where the owner works interactively it is a weapon pointed
-at the owner.
+implementer. Five were the owner's own interactive sessions, cut off mid-turn.
+The hold was designed on a project whose only agent was a headless implementer;
+on a repository where the owner works interactively it is a weapon pointed at
+the owner.
 
 Two rules, one from each mistake:
 
@@ -347,9 +347,9 @@ actor was pointed at a different one and behaved as designed, which was wrong.
 
 ## 21. The reaper made the writers it was counting
 
-Kiro stopped writing for three and a half hours. Its single-writer rule said "more
-than one agent process in this tree → do not edit", it measured four, and it was
-right about the four: `kiro-cli-chat acp`, two `node … kas` engines and a child,
+The implementer stopped writing for three and a half hours. Its single-writer rule
+said "more than one agent process in this tree → do not edit", it measured four, and
+it was right about the four: `kiro-cli-chat acp`, two `node … kas` engines and a child,
 all with the repository as their cwd. What it could not see was that every one
 of them was a corpse. Their parent was init, their controlling terminal was
 gone, and the process group each still belonged to had a leader that no longer
@@ -359,7 +359,7 @@ The chain was: the watchdog nudges; a turn hangs; the reaper sends SIGTERM to
 the one pid that carries the `--no-interactive` flag — the wrapper — and the
 wrapper exits. Its runtime and engine children carry no such flag, so the
 reaper never addresses them, and they are re-parented to init at 0% CPU with
-the repo as cwd. The next nudge starts a turn; Kiro counts the process table,
+the repo as cwd. The next nudge starts a turn; the implementer counts the process table,
 finds the remnant, refuses to write, and ends the turn early. An early empty
 turn looks like a hung one to a silence threshold, so the reaper fires again
 and leaves one more remnant. Three nudges, three orphans, a rule that was
@@ -430,7 +430,8 @@ verdict: the file says `UNAVAILABLE`, nothing counts it as a round, and the
 command exits 3 so the implementer parks the review and continues. The
 reviewer is a chain, not a name: when the primary is out of quota the next one
 is tried, and whoever actually reviewed is recorded — on this project a fresh
-Kiro session with no tools, whose credits are a different pool. And the
+session of the implementer's own engine with no tools, whose credits are a
+different pool. And the
 watchdog treats a reopened window as open work, so the parked review is re-run
 without anyone remembering to ask.
 

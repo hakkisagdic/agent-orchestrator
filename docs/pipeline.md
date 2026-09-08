@@ -56,7 +56,7 @@ two digests printed; the implementer either restores it or re-reviews. Nothing a
 
 **Invariant S2.** One slice, one worktree, one index. Parallel slices never share a
 working copy, so a pinned tree cannot be disturbed by the next slice's edits. This is the
-existing `kiro/<slice>` branch-per-slice rule, now load-bearing.
+existing `<implementer>/<slice>` branch-per-slice rule, now load-bearing.
 
 **Invariant S3.** At most `review.max_inflight` reviews run at once (default 2). Submit
 beyond that is refused, naming what to collect first. The reviewer shares the human's

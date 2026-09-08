@@ -12,6 +12,11 @@ until a round produced nothing new.
 end to end against a scratch repository. `1/3` means one could — read those again before acting,
 but do not dismiss them.
 
+**On the actor names below.** Several findings quote a literal the source contains — a filename
+pattern or a comparison spelled from a particular actor's name. Those quotes stay verbatim: they are
+the evidence, and paraphrasing them would make the finding unverifiable against the code. The defect
+they describe is exactly that a proper name appears where a role belongs, and fixing it is #31.
+
 **Threat model.** `docs/safety.md` concedes that a process running as the same user cannot be
 cryptographically excluded, only detected. Several findings below show that the detection which
 remains is weaker than the docs claim; those are the ones worth the most.
