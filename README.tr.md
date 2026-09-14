@@ -108,8 +108,8 @@ gereken tek yetkidir.
 | `ao pings setup --url …` | dead man's switch: watchdog ve doctor işi birlikte ölünce alarm veren dış ping |
 | `ao hooks [status|install|uninstall] [--allow-shared-hooks]` / `ao push allow` | Git'in etkin hook yolunu çöz; roller bağımsızdır, paylaşılan/harici/global mutasyonlar komutun tamamı için açık yetki ister |
 | `ao skill install` / `ao skill show` | playbook (roller, döngü, yetki, protokol, alarmlar, tüm komutlar) deponun ajanları için: Claude skill, Kiro steering, AGENTS.md |
-| `ao remove --yes [--allow-shared-hooks]` | AO durumunu ancak tam hook-topolojisi ön kontrolünden sonra kaldır; yabancı ve korunan hook'lara dokunma |
-| `ao init --profile claude-kiro|claude-claude` | rol bloklarını yaz: kim uygular (adaptör, model, efor), kim review eder (başka model), kim karar verir ([profiles.md](docs/profiles.md)) |
+| `ao remove --yes [--allow-shared-hooks]` | iki aşamalı kaldırma: dayatma etkinken `.ao-project` dosyasını silip commit et, HEAD ve index artık taşımayınca AO durumunu kaldır; yabancı/korunan hook'lara dokunma |
+| `ao init --profile claude-kiro|claude-claude` | rol bloklarını ve exact `.ao-project` kayıt işaretini yaz, ama stage etme ([profiles.md](docs/profiles.md)) |
 | `ao doctor --check` | zamanlayıcı için sessiz doctor: problem başına bir satır, exit 1, alarm — `ao watchdog install` 15 dakikalık launchd işi olarak kurar |
 | `ao email setup` / `ao email test` | kırmızı alarm kanalı: formsubmit.co ile e-posta, sunucu yok ([alarms.md](docs/alarms.md)) |
 | `ao alarms` / `ao alarms test --level red` | canlı alarm bölümleri ve seviyeleri; test tüm kanalları çaldırır |
@@ -130,12 +130,27 @@ gereken tek yetkidir.
 | `ao prune` | biriken kayıt ve logları buda |
 | `ao doctor` · `ao adapters` | bağlantıları denetle; ne destekleniyor ve ne kadar |
 
-Hook durumu bilinçli olarak statiktir: `current-local (behavior unverified)` ve
-`current-scoped (behavior unverified)`, baytların AO'nun amaçlanan rolünü ifade
-ettiğini söyler; Git'in hook'u çalıştırdığını kanıtlamaz. Çalıştırma kanıtı #59
-backlog maddesindedir. `status`; etkin yolu, yol sınıfını, kazanan
-`core.hooksPath` scope/origin/value bilgisini, track durumunu ve yanlış yerdeki
-AO biçimlerini gösterir. Install, pre-commit ile pre-push rollerini bağımsız ele
+Hook durumu statik niyeti çalıştırılabilir dayatmadan ayırır. AO dayatması yalnız
+HEAD'de veya etkin index'te exact `ao-project-v1\n` baytları bulunan kök
+`.ao-project` ile açılır; tesadüfi `.ao/` dizini etkisizdir. Stage edilmiş işaret
+ilk kaydı açar, stage edilmiş silme ise silme commit edilene kadar HEAD üzerinden
+dayatmayı korur. Kayıtlı projede `.ao/config.json` geçerli, boş olmayan üst seviye
+JSON nesnesi olmalıdır. AO en fazla 1.048.576 bayt okur ve 64'ten derin container
+yapısını recursive JSON ayrıştırmasından önce reddeder; komut yönlendirmesi
+öncesindeki yükleme ile commit dayatması aynı bounded sonucu kullanır. Eksik ya da
+okunamayan durum tek satırlık `ao init --profile claude-kiro` düzeltmesiyle
+birlikte reddedilir.
+
+`current-local (behavior unverified)` ve `current-scoped (behavior unverified)`
+yalnız baytların AO'nun amaçlanan rolünü ifade ettiğini söyler. `pre-commit
+execution: installed (execution proved)` ancak Git etkin hook'u yalıtılmış geçici
+index ile çözüp çalıştırdığında ve AO aynı nonce'a bağlı reddi döndürdüğünde
+yazılır. Prob gerçek index'i, worktree'yi, ref'leri veya Git object store'u
+değiştirmez. Eksik, yanlış yerde, çalıştırılamayan, bayat, yabancı ya da fail-open
+hook `not installed` olur; status, doctor, `doctor --check` ve init aynı sonucu
+kullanır. `status`; etkin yolu, yol sınıfını, kazanan `core.hooksPath`
+scope/origin/value bilgisini, track durumunu ve yanlış yerdeki AO biçimlerini
+gösterir. Install, pre-commit ile pre-push rollerini bağımsız ele
 alır; uygun pre-commit'i kurup özel pre-push'ı bayt düzeyinde koruyabilir,
 push-window hook'unun kullanılamadığını söyleyebilir ve 1 dönebilir. Uygun
 hedeflerden biri paylaşılan, harici ya da global/system config ile seçilmişse

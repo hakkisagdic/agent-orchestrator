@@ -22,8 +22,10 @@ def project(tmp_path, monkeypatch):
     root = tmp_path / "proj"
     root.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    (root / ".ao-project").write_bytes(b"ao-project-v1\n")
+    subprocess.run(["git", "add", ".ao-project"], cwd=root, check=True)
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q",
-                    "--allow-empty", "-m", "init"], cwd=root, check=True)
+                    "-m", "init"], cwd=root, check=True)
     (root / ".ao").mkdir()
     (root / ".ao" / "ledger").mkdir()
     cfg = {"project": "proj", "mailbox": "agent-mail", "reviews": "semantic-review",

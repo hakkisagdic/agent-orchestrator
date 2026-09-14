@@ -1,12 +1,15 @@
 #!/bin/sh
-# agent-orchestrator: ao-hook-v2 role=pre-commit binding=project-local
+# agent-orchestrator: ao-hook-v3 role=pre-commit binding=project-local
 initial_cwd=$(CDPATH= cd -- . && pwd -P)
 root="$initial_cwd"
-[ -d "$root/.ao" ] || exit 0
 case ${GIT_INDEX_FILE-} in
   ""|/*) ;;
   *) GIT_INDEX_FILE="$initial_cwd/$GIT_INDEX_FILE"; export GIT_INDEX_FILE ;;
 esac
-unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_PREFIX GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_PREFIX GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_CEILING_DIRECTORIES GIT_DISCOVERY_ACROSS_FILESYSTEM GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
+if ! git --literal-pathspecs -C "$root" ls-files --error-unmatch -- .ao-project >/dev/null 2>&1 &&
+   ! git --literal-pathspecs -C "$root" cat-file -e HEAD:.ao-project 2>/dev/null; then
+  exit 0
+fi
 ao=$(command -v ao) || { echo 'agent-orchestrator: ao not found' >&2; exit 1; }
 exec "$ao" -C "$root" commit-check

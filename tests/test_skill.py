@@ -114,6 +114,18 @@ def test_remove_undoes_init_and_only_removes_ao_owned_hooks(project, monkeypatch
     assert cli.cmd_remove(
         project, SimpleNamespace(yes=True, allow_shared_hooks=False)
     ) == 0
+    assert os.path.exists(os.path.join(root, ".ao"))
+    assert not os.path.exists(os.path.join(root, cli.PROJECT_MARKER))
+    real_run(["git", "add", "-u", "--", cli.PROJECT_MARKER], cwd=root, check=True)
+    real_run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm",
+         "remove ao marker"],
+        cwd=root,
+        check=True,
+    )
+    assert cli.cmd_remove(
+        project, SimpleNamespace(yes=True, allow_shared_hooks=False)
+    ) == 0
     assert not os.path.exists(os.path.join(root, ".ao")) and not os.path.exists(os.path.join(root, ".claude", "skills", "ao"))
     assert not os.path.exists(pre_commit)
     assert open(pre_push, encoding="utf-8").read() == foreign

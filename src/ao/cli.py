@@ -703,9 +703,267 @@ def cmd_commit_ok(cfg, args):
     return 0
 
 
+PROJECT_MARKER = ".ao-project"
+PROJECT_MARKER_BYTES = b"ao-project-v1\n"
+PROJECT_INIT_COMMAND = "ao init --profile claude-kiro"
+
+
+def _project_refusal(problem):
+    return (
+        f"{PROJECT_MARKER} marks AO enrollment, but AO project state is "
+        f"missing/unreadable: {problem}; run: {PROJECT_INIT_COMMAND}"
+    )
+
+
+def _project_index_env(root, index_file=None):
+    """Return Git's active-index override without other inherited bindings."""
+    if index_file is None:
+        if "GIT_INDEX_FILE" not in os.environ:
+            return None, None
+        value = os.environ["GIT_INDEX_FILE"]
+    else:
+        value = index_file
+    if not value:
+        return None, "GIT_INDEX_FILE is set but empty"
+    if not os.path.isabs(value):
+        # The Git query below runs with ``cwd=root``. Resolve its relative index
+        # exactly there before the sanitized environment is constructed, so a
+        # direct ``ao commit-check`` and the installed hook measure the same
+        # active candidate.
+        value = os.path.abspath(os.path.join(root, value))
+    return {"GIT_INDEX_FILE": value}, None
+
+
+def _marker_blob(root, oid, extra_env):
+    result = _hook_git(root, "cat-file", "blob", oid, extra_env=extra_env)
+    if result.returncode:
+        detail = result.stderr.decode(UTF8, "replace").strip()[:160]
+        return None, detail or f"git cat-file exited {result.returncode}"
+    return result.stdout, None
+
+
+def _index_project_marker(root, index_file=None):
+    extra_env, problem = _project_index_env(root, index_file)
+    if problem:
+        return {"status": "invalid", "detail": problem}
+    result = _hook_git(
+        root, "ls-files", "--stage", "-z", "--", PROJECT_MARKER,
+        extra_env=extra_env,
+    )
+    if result.returncode:
+        detail = result.stderr.decode(UTF8, "replace").strip()[:160]
+        return {
+            "status": "invalid",
+            "detail": "active index marker query failed: "
+                      + (detail or f"git exit {result.returncode}"),
+        }
+    rows = [row for row in result.stdout.split(b"\0") if row]
+    if not rows:
+        return {"status": "absent"}
+    if len(rows) != 1 or b"\t" not in rows[0]:
+        return {"status": "invalid", "detail": "active index marker is unmerged"}
+    metadata, path = rows[0].split(b"\t", 1)
+    fields = metadata.split()
+    if len(fields) != 3 or fields[2] != b"0" or path != PROJECT_MARKER.encode("ascii"):
+        return {"status": "invalid", "detail": "active index marker entry is malformed"}
+    try:
+        mode, oid = fields[0].decode("ascii"), fields[1].decode("ascii")
+    except UnicodeError:
+        return {"status": "invalid", "detail": "active index marker entry is not ASCII"}
+    if mode not in ("100644", "100755"):
+        return {"status": "invalid", "detail": f"active index marker has type/mode {mode}"}
+    data, error = _marker_blob(root, oid, extra_env)
+    if error:
+        return {"status": "invalid", "detail": "active index marker blob is unreadable: " + error}
+    if data != PROJECT_MARKER_BYTES:
+        return {"status": "invalid", "detail": "active index marker bytes are not ao-project-v1"}
+    return {"status": "canonical", "mode": mode, "oid": oid}
+
+
+def _head_project_marker(root):
+    head = _hook_git(root, "rev-parse", "--verify", "--quiet", "HEAD")
+    if head.returncode:
+        if not head.stdout and not head.stderr:
+            return {"status": "absent"}
+        detail = head.stderr.decode(UTF8, "replace").strip()[:160]
+        return {
+            "status": "invalid",
+            "detail": "HEAD marker query failed: "
+                      + (detail or f"git exit {head.returncode}"),
+        }
+    result = _hook_git(root, "ls-tree", "-z", "HEAD", "--", PROJECT_MARKER)
+    if result.returncode:
+        detail = result.stderr.decode(UTF8, "replace").strip()[:160]
+        return {
+            "status": "invalid",
+            "detail": "HEAD marker query failed: "
+                      + (detail or f"git exit {result.returncode}"),
+        }
+    rows = [row for row in result.stdout.split(b"\0") if row]
+    if not rows:
+        return {"status": "absent"}
+    if len(rows) != 1 or b"\t" not in rows[0]:
+        return {"status": "invalid", "detail": "HEAD marker entry is malformed"}
+    metadata, path = rows[0].split(b"\t", 1)
+    fields = metadata.split()
+    if len(fields) != 3 or path != PROJECT_MARKER.encode("ascii"):
+        return {"status": "invalid", "detail": "HEAD marker entry is malformed"}
+    try:
+        mode = fields[0].decode("ascii")
+        kind = fields[1].decode("ascii")
+        oid = fields[2].decode("ascii")
+    except UnicodeError:
+        return {"status": "invalid", "detail": "HEAD marker entry is not ASCII"}
+    if kind != "blob" or mode not in ("100644", "100755"):
+        return {"status": "invalid", "detail": f"HEAD marker has type/mode {kind}/{mode}"}
+    data, error = _marker_blob(root, oid, None)
+    if error:
+        return {"status": "invalid", "detail": "HEAD marker blob is unreadable: " + error}
+    if data != PROJECT_MARKER_BYTES:
+        return {"status": "invalid", "detail": "HEAD marker bytes are not ao-project-v1"}
+    return {"status": "canonical", "mode": mode, "oid": oid}
+
+
+def _project_config_problem(root):
+    """The marker is authority; validate the bounded local state it activates."""
+    return A.project_config_document(root)["problem"]
+
+
+def _worktree_project_marker_problem(root):
+    import stat
+    path = os.path.join(root, PROJECT_MARKER)
+    try:
+        mode = os.lstat(path).st_mode
+    except OSError as exc:
+        return f"{PROJECT_MARKER} is missing or unreadable ({exc})"
+    if not stat.S_ISREG(mode) or os.path.islink(path):
+        return f"{PROJECT_MARKER} is not a regular file"
+    try:
+        data = open(path, "rb").read()
+    except OSError as exc:
+        return f"{PROJECT_MARKER} is unreadable ({exc})"
+    if data != PROJECT_MARKER_BYTES:
+        return f"{PROJECT_MARKER} bytes are not ao-project-v1"
+    return None
+
+
+def _project_enrollment(root, index_file=None):
+    """Measure the tracked marker in the active index and HEAD, then local state.
+
+    The active index wins when it has an entry, so a malformed staged replacement
+    cannot disable a canonical HEAD marker.  An absent index entry still consults
+    HEAD, which keeps enforcement active while an authorized marker deletion is
+    staged.  A canonical staged marker permits first adoption before the first
+    marker-bearing commit.
+    """
+    root = os.path.realpath(os.path.abspath(root))
+    try:
+        indexed = _index_project_marker(root, index_file=index_file)
+        headed = _head_project_marker(root)
+    except _HookResolutionError as exc:
+        return {"state": "broken", "detail": _project_refusal(str(exc))}
+
+    if indexed["status"] == "invalid":
+        return {"state": "broken", "detail": _project_refusal(indexed["detail"])}
+    if indexed["status"] == "canonical":
+        source, marker = "index", indexed
+    elif headed["status"] == "invalid":
+        return {"state": "broken", "detail": _project_refusal(headed["detail"])}
+    elif headed["status"] == "canonical":
+        source, marker = "head", headed
+    else:
+        return {
+            "state": "uninitialized",
+            "detail": f"no canonical {PROJECT_MARKER} exists in HEAD or the active index",
+            "index": indexed,
+            "head": headed,
+        }
+
+    problem = _project_config_problem(root)
+    if problem:
+        return {
+            "state": "broken", "detail": _project_refusal(problem),
+            "source": source, "marker": marker,
+            "index": indexed, "head": headed,
+        }
+    return {
+        "state": "enrolled", "detail": f"canonical {PROJECT_MARKER} via {source}",
+        "source": source, "marker": marker,
+        "index": indexed, "head": headed,
+    }
+
+
+def _commit_hook_probe_response(root):
+    """Refuse a nonce-bound synthetic index without touching the object store.
+
+    The execution probe reaches this branch through Git's own hook runner.  It
+    stages one gitlink in a temporary index, pointing at the existing HEAD
+    commit, so validating the challenge needs no ``write-tree`` and leaves no
+    loose object behind.  All four namespaced challenge fields must be present
+    before this branch activates, so a partial inherited environment cannot
+    intercept a real commit.  The namespaced index must also bind exactly to
+    Git's active index.  Once active, a missing index or malformed challenge
+    fails closed without emitting the success marker the parent process
+    requires.
+    """
+    nonce = os.environ.get("AO_HOOK_PROBE_NONCE")
+    path = os.environ.get("AO_HOOK_PROBE_PATH")
+    head = os.environ.get("AO_HOOK_PROBE_HEAD")
+    probe_index = os.environ.get("AO_HOOK_PROBE_INDEX")
+    index = os.environ.get("GIT_INDEX_FILE")
+    challenge = (nonce, path, head, probe_index)
+    if any(value is None for value in challenge):
+        return None
+
+    values = challenge + (index,)
+    problem = None
+    if not all(values):
+        problem = "incomplete hook execution challenge"
+    elif len(nonce) != 32 or any(ch not in "0123456789abcdef" for ch in nonce):
+        problem = "invalid hook execution challenge nonce"
+    elif path != ".ao-hook-probe-" + nonce:
+        problem = "hook execution challenge path does not match its nonce"
+    elif len(head) not in (40, 64) or any(ch not in "0123456789abcdef" for ch in head):
+        problem = "invalid hook execution challenge object"
+    elif not os.path.isabs(index):
+        problem = "hook execution challenge index is not absolute"
+    elif probe_index != index:
+        problem = "hook execution challenge index does not match Git's active index"
+
+    if problem is None:
+        try:
+            measured = _hook_git(
+                root, "ls-files", "--stage", "-z", "--", path,
+                extra_env={"GIT_INDEX_FILE": index},
+            )
+        except _HookResolutionError as exc:
+            problem = f"cannot inspect hook execution challenge: {exc}"
+        else:
+            expected = f"160000 {head} 0\t{path}\0".encode("ascii")
+            if measured.returncode or measured.stdout != expected:
+                problem = "hook execution challenge does not match the synthetic index"
+
+    print(f"{C['red']}{C['b']}COMMIT REFUSED{C['reset']}")
+    if problem is not None:
+        print(f"  {C['red']}·{C['reset']} {problem}")
+    else:
+        print(f"AO-HOOK-PROBE-REFUSED {nonce} {head} {path}")
+    return 1
+
+
 def cmd_commit_check(cfg, args):
     """Revalidate the latest persisted grant against Git's exact active index."""
     root = cfg["root"]
+    enrollment = _project_enrollment(root)
+    if enrollment["state"] == "uninitialized":
+        return 0
+    if enrollment["state"] == "broken":
+        print(f"{C['red']}{C['b']}COMMIT REFUSED{C['reset']}")
+        print(f"  {C['red']}·{C['reset']} {enrollment['detail']}")
+        return 1
+    probe_code = _commit_hook_probe_response(root)
+    if probe_code is not None:
+        return probe_code
     reasons = []
     strict = M.is_strict(cfg)
     matrix_resolution = None
@@ -2078,7 +2336,7 @@ def cmd_init(cfg, args):
 
     def put(rel, content, mode=None):
         p = os.path.join(root, rel)
-        if os.path.exists(p):
+        if os.path.lexists(p):
             kept.append(rel)
             return
         os.makedirs(os.path.dirname(p), exist_ok=True)
@@ -2089,6 +2347,15 @@ def cmd_init(cfg, args):
         wrote.append(rel)
 
     put(".ao/config.json", json.dumps({"project": name, "round_budget": 5}, indent=2) + "\n")
+    config_problem = _project_config_problem(root)
+    if config_problem:
+        print(f"{C['red']}init refused{C['reset']}: {_project_refusal(config_problem)}")
+        return 1
+    put(PROJECT_MARKER, PROJECT_MARKER_BYTES.decode("ascii"))
+    marker_problem = _worktree_project_marker_problem(root)
+    if marker_problem:
+        print(f"{C['red']}init refused{C['reset']}: {_project_refusal(marker_problem)}")
+        return 1
     # Roles are configuration, and a project's answer to "who implements, who
     # reviews, who judges" differs per project: Claude + Kiro here, Claude +
     # Claude worktrees there, another model as the reviewer somewhere else. A
@@ -2096,6 +2363,13 @@ def cmd_init(cfg, args):
     added = _apply_profile(root, args)
     if added:
         wrote.append(".ao/config.json (+" + ", ".join(added) + ")")
+    # Profile application can enlarge or reshape config.json. Revalidate the
+    # resulting document before init writes any remaining state or reports
+    # success; an enrolled project with invalid local state must fail closed.
+    config_problem = _project_config_problem(root)
+    if config_problem:
+        print(f"{C['red']}init refused{C['reset']}: {_project_refusal(config_problem)}")
+        return 1
     put(".ao/board.md", BOARD_TEMPLATE)
     put(".ao/backlog.md", BACKLOG_TEMPLATE.format(name=name))
     put(".ao/authority.md", AUTHORITY_TEMPLATE)
@@ -2158,6 +2432,10 @@ def cmd_init(cfg, args):
                               capture_output=True, text=True, encoding=UTF8, errors="replace").returncode
         print(f"  {C['green'] if code == 0 else C['red']}watchdog{C['reset']} "
               f"{'installed' if code == 0 else 'install failed — run ao watchdog install'}")
+
+    hook_proof = _hook_execution_probe(_ao_hook_inventory(root))
+    tone = C["green"] if hook_proof["installed"] else C["yellow"]
+    print(f"  {tone}commit hook{C['reset']} {_hook_probe_text(hook_proof)}")
 
     print(f"\n{C['b']}Next, for a person:{C['reset']}")
     for line in skillkit.next_steps(agents, registered):
@@ -2777,19 +3055,17 @@ def doctor_problems(cfg):
     except Exception:
         pass
 
-    # Static recognition proves intended hook bytes, not that Git executes them.
-    # Only commit enforcement is an alarm: pre-push remains informational because
-    # a repository may deliberately keep its own push hook.
+    # Static intent is only the safety precondition for running a hook.  A green
+    # commit-hook result requires Git itself to resolve the active path, execute
+    # it with an isolated synthetic index, and return AO's nonce-bound refusal.
+    # Pre-push remains informational: #59 is about commit authority.
     hook_inventory = _ao_hook_inventory(root)
+    proof = _hook_execution_probe(hook_inventory)
     if hook_inventory["error"]:
-        out.append((
-            "commit-hook",
-            f"hook topology cannot be resolved: {hook_inventory['error']} — ao hooks status",
-        ))
+        out.append(("commit-hook", proof["detail"] + " — ao hooks status"))
     else:
         active = _active_hook_targets(hook_inventory)
         commit = active["pre-commit"]
-        commit_base = _state_base(commit["static_state"])
         misplaced = [
             target for target in hook_inventory["targets"]
             if not target["active"]
@@ -2800,10 +3076,8 @@ def doctor_problems(cfg):
             )
         ]
         reasons = []
-        if commit_base not in ("current-local", "current-scoped"):
-            reasons.append(
-                f"active pre-commit is {commit['static_state']} / {commit['track_state']}"
-            )
+        if not proof["installed"]:
+            reasons.append("execution proof failed: " + proof["detail"])
         if misplaced:
             reasons.append(
                 "potentially-effective misplaced pre-commit: "
@@ -2820,18 +3094,14 @@ def doctor_problems(cfg):
                     for target in misplaced
                 )
                 flag = " --allow-shared-hooks" if needs_allow else ""
-                repair = (
-                    f"ao hooks uninstall{flag}, then ao hooks install{flag}"
-                )
-            else:
+                repair = f"ao hooks uninstall{flag}, then ao hooks install{flag}"
+            elif _state_base(commit["static_state"]) not in (
+                "current-local", "current-scoped"
+            ):
                 repair = "ao hooks install (restore tracked hooks with Git)"
+            else:
+                repair = "ensure the hook can resolve this AO executable, then ao hooks status"
             out.append(("commit-hook", "; ".join(reasons) + f" — {repair}"))
-        if commit_base == "current-scoped":
-            out.append((
-                "commit-hook-routing-unverified",
-                "shared/external pre-commit intent is current, but its fail-open family routing "
-                "is behavior unverified until backlog #59 probes execution",
-            ))
     return out
 
 
@@ -3038,12 +3308,15 @@ def _hook_git_env():
     return env
 
 
-def _hook_git(cwd, *args, timeout=15):
+def _hook_git(cwd, *args, timeout=15, extra_env=None):
     """Run one literal-path Git query without a shell; return the byte result."""
+    env = _hook_git_env()
+    if extra_env:
+        env.update(extra_env)
     try:
         return subprocess.run(
             ["git", "--literal-pathspecs", "-C", str(cwd), *args],
-            env=_hook_git_env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             timeout=timeout,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -3298,8 +3571,8 @@ def _role_command(role):
     return "commit-check" if role == "pre-commit" else "push check"
 
 
-def _render_local_hook(role, root_rel):
-    """Portable bytes for one project-local hook; no machine/family binding."""
+def _render_v2_local_hook(role, root_rel):
+    """Exact project-local body emitted before tracked project enrollment."""
     import shlex
     suffix = "" if root_rel in ("", ".") else "/" + shlex.quote(root_rel)
     command = _role_command(role)
@@ -3320,8 +3593,8 @@ def _render_local_hook(role, root_rel):
     ).encode(UTF8)
 
 
-def _render_scoped_hook(role, root_rel, family, directory_class):
-    """Family-bound bytes for a shared/external target; unknown routing is fail-open."""
+def _render_v2_scoped_hook(role, root_rel, family, directory_class):
+    """Exact shared/external body emitted before tracked project enrollment."""
     import shlex
     suffix = "" if root_rel in ("", ".") else "/" + shlex.quote(root_rel)
     command = _role_command(role)
@@ -3347,6 +3620,78 @@ def _render_scoped_hook(role, root_rel, family, directory_class):
         "[ -d \"$root/.ao\" ] || exit 0\n"
         "ao=$(command -v ao) || { echo 'agent-orchestrator: ao not found' >&2; exit 1; }\n"
         f"exec \"$ao\" -C \"$root\" {command}\n"
+    ).encode(UTF8)
+
+
+def _hook_repository_unset():
+    return (
+        "unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_PREFIX "
+        "GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES "
+        "GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT GIT_CONFIG_GLOBAL "
+        "GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_CEILING_DIRECTORIES "
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS "
+        "GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS\n"
+    )
+
+
+def _hook_project_marker_guard():
+    return (
+        "if ! git --literal-pathspecs -C \"$root\" ls-files --error-unmatch -- "
+        ".ao-project >/dev/null 2>&1 &&\n"
+        "   ! git --literal-pathspecs -C \"$root\" cat-file -e "
+        "HEAD:.ao-project 2>/dev/null; then\n"
+        "  exit 0\n"
+        "fi\n"
+    )
+
+
+def _render_local_hook(role, root_rel):
+    """Portable bytes for one project-local hook; no machine/family binding."""
+    import shlex
+    suffix = "" if root_rel in ("", ".") else "/" + shlex.quote(root_rel)
+    command = _role_command(role)
+    return (
+        "#!/bin/sh\n"
+        f"# agent-orchestrator: ao-hook-v3 role={role} binding=project-local\n"
+        "initial_cwd=$(CDPATH= cd -- . && pwd -P)\n"
+        f"root=\"$initial_cwd\"{suffix}\n"
+        "case ${GIT_INDEX_FILE-} in\n"
+        "  \"\"|/*) ;;\n"
+        "  *) GIT_INDEX_FILE=\"$initial_cwd/$GIT_INDEX_FILE\"; export GIT_INDEX_FILE ;;\n"
+        "esac\n"
+        + _hook_repository_unset()
+        + _hook_project_marker_guard()
+        + "ao=$(command -v ao) || { echo 'agent-orchestrator: ao not found' >&2; exit 1; }\n"
+        + f"exec \"$ao\" -C \"$root\" {command}\n"
+    ).encode(UTF8)
+
+
+def _render_scoped_hook(role, root_rel, family, directory_class):
+    """Family-bound bytes for a shared/external target; unknown routing is fail-open."""
+    import shlex
+    suffix = "" if root_rel in ("", ".") else "/" + shlex.quote(root_rel)
+    command = _role_command(role)
+    return (
+        "#!/bin/sh\n"
+        f"# agent-orchestrator: ao-hook-v3 role={role} binding={directory_class}\n"
+        "initial_cwd=$(CDPATH= cd -- . && pwd -P)\n"
+        "case ${GIT_INDEX_FILE-} in\n"
+        "  \"\"|/*) ;;\n"
+        "  *) GIT_INDEX_FILE=\"$initial_cwd/$GIT_INDEX_FILE\"; export GIT_INDEX_FILE ;;\n"
+        "esac\n"
+        + _hook_repository_unset()
+        + "common=$(git --literal-pathspecs rev-parse --git-common-dir 2>/dev/null) || exit 0\n"
+        + "case $common in /*) ;; *) common=\"$initial_cwd/$common\" ;; esac\n"
+        + "common=$(CDPATH= cd \"$common\" 2>/dev/null && pwd -P) || exit 0\n"
+        + f"expected={shlex.quote(os.path.realpath(family))}\n"
+        + "[ \"$common\" = \"$expected\" ] || exit 0\n"
+        + "top=$(git --literal-pathspecs rev-parse --show-toplevel 2>/dev/null) || exit 0\n"
+        + "case $top in /*) ;; *) top=\"$initial_cwd/$top\" ;; esac\n"
+        + "top=$(CDPATH= cd \"$top\" 2>/dev/null && pwd -P) || exit 0\n"
+        + f"root=\"$top\"{suffix}\n"
+        + _hook_project_marker_guard()
+        + "ao=$(command -v ao) || { echo 'agent-orchestrator: ao not found' >&2; exit 1; }\n"
+        + f"exec \"$ao\" -C \"$root\" {command}\n"
     ).encode(UTF8)
 
 
@@ -3385,12 +3730,14 @@ def _legacy_hook_role(data):
         if legacy is not None and data == legacy:
             return role
 
-    marker_prefix = "# agent-orchestrator: ao-hook-v2 role="
+    marker_prefix = "# agent-orchestrator: ao-hook-v"
     markers = [line for line in lines if line.startswith(marker_prefix)]
-    if len(markers) != 1 or " binding=" not in markers[0]:
+    if len(markers) != 1 or " role=" not in markers[0] or " binding=" not in markers[0]:
         return None
-    marker = markers[0][len(marker_prefix):]
-    role, binding = marker.split(" binding=", 1)
+    version, declaration = markers[0][len(marker_prefix):].split(" role=", 1)
+    if version not in ("2", "3"):
+        return None
+    role, binding = declaration.split(" binding=", 1)
     if role not in _HOOK_ROLES or binding not in ("project-local", "shared", "external"):
         return None
 
@@ -3417,12 +3764,18 @@ def _legacy_hook_role(data):
         return None
 
     if binding == "project-local":
-        rendered = _render_local_hook(role, root_rel)
+        rendered = (
+            _render_v2_local_hook(role, root_rel)
+            if version == "2" else _render_local_hook(role, root_rel)
+        )
     else:
         family = assignment("expected")
         if not family:
             return None
-        rendered = _render_scoped_hook(role, root_rel, family, binding)
+        rendered = (
+            _render_v2_scoped_hook(role, root_rel, family, binding)
+            if version == "2" else _render_scoped_hook(role, root_rel, family, binding)
+        )
     prior = rendered.replace(
         b"initial_cwd=$(CDPATH= cd -- . && pwd -P)\n",
         b"initial_cwd=$PWD\n",
@@ -3650,6 +4003,107 @@ def _active_hook_targets(inv):
     return {target["role"]: target for target in inv["targets"] if target["active"]}
 
 
+def _hook_execution_probe(inv):
+    """Prove that Git resolves and executes AO's active pre-commit hook.
+
+    Static classification is only a safety precondition: it prevents status and
+    doctor from executing foreign hook content.  The positive result comes only
+    from ``git hook run pre-commit`` carrying a temporary synthetic index into
+    ``cmd_commit_check`` and receiving its nonce-bound refusal marker.
+    """
+    failed = lambda detail, code=None: {
+        "installed": False, "state": "not installed", "detail": detail,
+        "exit": code,
+    }
+    if inv.get("error"):
+        return failed("hook topology cannot be resolved: " + inv["error"])
+    try:
+        target = _active_hook_targets(inv)["pre-commit"]
+    except KeyError:
+        return failed("Git resolved no active pre-commit target")
+    base = _state_base(target["static_state"])
+    if base not in ("current-local", "current-scoped"):
+        return failed(
+            f"active pre-commit intent is {target['static_state']} / "
+            f"{target['track_state']}"
+        )
+    enrollment = _project_enrollment(inv["root"])
+    if enrollment["state"] == "uninitialized":
+        return failed(enrollment["detail"])
+    if enrollment["state"] == "broken":
+        return failed(enrollment["detail"])
+
+    head_result = _hook_git(inv["top"], "rev-parse", "--verify", "HEAD")
+    if head_result.returncode:
+        return failed("HEAD cannot supply the synthetic gitlink object")
+    try:
+        head = head_result.stdout.strip().decode("ascii", "strict")
+    except UnicodeError:
+        return failed("HEAD object id is not ASCII")
+    if len(head) not in (40, 64) or any(ch not in "0123456789abcdef" for ch in head):
+        return failed("HEAD returned an invalid object id")
+
+    import tempfile
+    nonce = os.urandom(16).hex()
+    path = ".ao-hook-probe-" + nonce
+    marker = f"AO-HOOK-PROBE-REFUSED {nonce} {head} {path}".encode("ascii")
+    try:
+        with tempfile.TemporaryDirectory(prefix="ao-hook-probe-") as temporary:
+            index = os.path.abspath(os.path.join(temporary, "index"))
+            extra = {"GIT_INDEX_FILE": index}
+            prepared = _hook_git(inv["top"], "read-tree", "HEAD", extra_env=extra)
+            if prepared.returncode:
+                return failed("cannot initialize the temporary probe index")
+            if enrollment["source"] == "index":
+                project_marker = enrollment["marker"]
+                carried = _hook_git(
+                    inv["top"], "update-index", "--add", "--cacheinfo",
+                    f"{project_marker['mode']},{project_marker['oid']},{PROJECT_MARKER}",
+                    extra_env=extra,
+                )
+                if carried.returncode:
+                    return failed("cannot carry the staged .ao-project into the probe index")
+            staged = _hook_git(
+                inv["top"], "update-index", "--add", "--cacheinfo",
+                f"160000,{head},{path}", extra_env=extra,
+            )
+            if staged.returncode:
+                return failed("cannot stage the synthetic probe candidate")
+            extra.update({
+                "AO_HOOK_PROBE_NONCE": nonce,
+                "AO_HOOK_PROBE_PATH": path,
+                "AO_HOOK_PROBE_HEAD": head,
+                "AO_HOOK_PROBE_INDEX": index,
+            })
+            result = _hook_git(
+                inv["top"], "hook", "run", "pre-commit",
+                timeout=15, extra_env=extra,
+            )
+    except _HookResolutionError as exc:
+        return failed(f"Git could not execute the pre-commit probe: {exc}")
+
+    channels = result.stdout.splitlines() + result.stderr.splitlines()
+    if result.returncode and marker in channels:
+        return {
+            "installed": True,
+            "state": "installed",
+            "detail": "Git executed pre-commit and AO refused the synthetic candidate",
+            "exit": result.returncode,
+        }
+    if result.returncode == 0:
+        return failed("Git or the resolved hook allowed the synthetic candidate", 0)
+    return failed(
+        f"the hook exited {result.returncode} without AO's nonce-bound refusal proof",
+        result.returncode,
+    )
+
+
+def _hook_probe_text(probe):
+    if probe["installed"]:
+        return "installed (execution proved)"
+    return "not installed — " + probe["detail"]
+
+
 def _authorization_refusal(targets, allow):
     needed = [target for target in targets if target.get("needs_authorization")]
     if needed and not allow:
@@ -3684,8 +4138,10 @@ def _atomic_hook_write(path, data):
 
 
 def _print_hook_status(inv):
+    proof = _hook_execution_probe(inv)
     if inv["error"]:
         print(f"resolver failure: {inv['error']}")
+        print(f"pre-commit execution: {_hook_probe_text(proof)}")
         return
     print(f"effective hooks: {inv['active_dir']}")
     facts = []
@@ -3708,6 +4164,7 @@ def _print_hook_status(inv):
         ):
             note = " — AO push-window hook unavailable"
         print(f"{role}: {target['static_state']} / {target['track_state']}{note}")
+    print(f"pre-commit execution: {_hook_probe_text(proof)}")
     for target in inv["targets"]:
         if target["active"] or _state_base(target["static_state"]) in ("absent", "foreign"):
             continue
@@ -3823,7 +4280,7 @@ def cmd_hooks(cfg, args):
              in ("current-local", "current-scoped") for role in _HOOK_ROLES)
     if ok:
         print(f"{C['green']}current (behavior unverified){C['reset']} — static hook intent installed; "
-              "runtime execution proof belongs to backlog #59")
+              "run `ao hooks status` for execution proof")
     return 0 if ok else 1
 
 
@@ -3905,7 +4362,7 @@ def cmd_remove(cfg, args):
     """Take ao off only after every reachable hook target passes one preflight."""
     root = cfg["root"]
     key = os.path.basename(root.rstrip("/")) or "root"
-    plan = [".ao/", "agent-mail/", cfg.get("reviews", "semantic-review") + "/",
+    plan = [PROJECT_MARKER, ".ao/", "agent-mail/", cfg.get("reviews", "semantic-review") + "/",
             ".claude/skills/ao/", ".kiro/steering/ao-coordination.md", ".kiro/steering/ao-playbook.md",
             ".kiro/steering/ao-single-writer.md", ".kiro/steering/ao-machine.md"]
     mcp_files = [(".mcp.json", "ao"), (os.path.join(".kiro", "settings", "mcp.json"), "ao")]
@@ -3924,6 +4381,30 @@ def cmd_remove(cfg, args):
           f"CLAUDE.md / AGENTS.md text (paste-in was yours){C['reset']}")
     if not args.yes:
         print(f"\nre-run with {C['b']}--yes{C['reset']} to do it")
+        return 0
+
+    enrollment = _project_enrollment(root)
+    if enrollment["state"] == "broken":
+        print(f"{C['red']}remove refused; AO state kept intact{C['reset']}: "
+              f"{enrollment['detail']}")
+        return 1
+    if enrollment["state"] == "enrolled":
+        marker_path = os.path.join(root, PROJECT_MARKER)
+        if os.path.lexists(marker_path):
+            if os.path.isdir(marker_path) and not os.path.islink(marker_path):
+                print(f"{C['red']}remove refused; AO state kept intact{C['reset']}: "
+                      f"{PROJECT_MARKER} is a directory")
+                return 1
+            try:
+                os.remove(marker_path)
+            except OSError as exc:
+                print(f"{C['red']}remove refused; AO state kept intact{C['reset']}: "
+                      f"cannot remove {PROJECT_MARKER}: {exc}")
+                return 1
+            print(f"removed working-tree {PROJECT_MARKER}")
+        print(f"{C['yellow']}phase 1/2{C['reset']} — AO project state and enforcement remain active")
+        print(f"  stage the marker deletion: git add -u -- {PROJECT_MARKER}")
+        print("  authorize and commit that deletion, then run: ao remove --yes")
         return 0
 
     allow = bool(getattr(args, "allow_shared_hooks", False))
@@ -3981,7 +4462,7 @@ def cmd_remove(cfg, args):
                 os.remove(os.path.join(A.HOME, ".ao", f))
             except OSError:
                 pass
-    print(f"{C['green']}removed{C['reset']} — AO state is gone; preserved local source hooks are inert")
+    print(f"{C['green']}removed{C['reset']} — phase 2/2 complete; AO state is gone and preserved local source hooks are inert")
     return 0
 
 
@@ -4352,8 +4833,6 @@ def cmd_doctor(cfg, args):
             current = base in ("current-local", "current-scoped")
             tone = C["green"] if current else C["yellow"]
             notes = []
-            if base == "current-scoped":
-                notes.append("routing unprobed; backlog #59 owns runtime proof")
             if role == "pre-commit" and not current:
                 notes.append("ao hooks install")
             if role == "pre-push" and not current:
@@ -4375,6 +4854,9 @@ def cmd_doctor(cfg, args):
                 f"{target['track_state']} / {target['directory_class']} — "
                 f"{target['path']}{C['reset']}  ao hooks uninstall, then ao hooks install"
             )
+    hook_proof = _hook_execution_probe(hook_inventory)
+    proof_tone = C["green"] if hook_proof["installed"] else C["yellow"]
+    print(f"{'commit proof':<16}{proof_tone}{_hook_probe_text(hook_proof)}{C['reset']}")
     # Can the *agent* run `ao`? A shell alias is invisible to a non-interactive
     # process, so steering that says "run your gates through ao lock" is an
     # instruction the agent cannot follow — and a disciplined agent then parks the
