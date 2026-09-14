@@ -1,0 +1,12 @@
+#!/bin/sh
+# agent-orchestrator: ao-hook-v2 role=pre-commit binding=project-local
+initial_cwd=$(CDPATH= cd -- . && pwd -P)
+root="$initial_cwd"
+[ -d "$root/.ao" ] || exit 0
+case ${GIT_INDEX_FILE-} in
+  ""|/*) ;;
+  *) GIT_INDEX_FILE="$initial_cwd/$GIT_INDEX_FILE"; export GIT_INDEX_FILE ;;
+esac
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_PREFIX GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+ao=$(command -v ao) || { echo 'agent-orchestrator: ao not found' >&2; exit 1; }
+exec "$ao" -C "$root" commit-check

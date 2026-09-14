@@ -59,7 +59,19 @@ nothing is lost when the run degrades:
 - `ao pings setup --url …` gives an external service (healthchecks.io) a
   heartbeat from the watchdog and the doctor job — when both die, that service
   e-mails you, which nothing on the dead machine can;
-- `ao hooks install` installs AO-owned pre-commit and pre-push hooks: pre-commit
-  revalidates the persisted grant against Git's active index, while `ao push
-  allow` opens the human push window for thirty minutes; foreign hooks are never
-  overwritten.
+- `ao hooks status` asks Git for the effective hook path and reports its class,
+  winning `core.hooksPath` scope/origin/value, each role's static and track
+  state, and misplaced AO forms. `current-local (behavior unverified)` and
+  `current-scoped (behavior unverified)` are byte-level intent labels; backlog
+  #59 owns proof that Git actually executes the hook and that scoped routing
+  reaches AO.
+- `ao hooks install` treats pre-commit and pre-push independently. Pre-commit
+  intends to revalidate the persisted grant against Git's active index; `ao
+  push allow` opens the human push window for thirty minutes. Foreign,
+  ambiguous, symlinked, tracked, and indeterminate targets are never
+  overwritten. One eligible role may be installed while a custom other role is
+  preserved, reported unavailable, and makes install return 1.
+- Install, uninstall, and `ao remove --yes` preflight their complete mutation
+  sets. If any eligible target is shared, external, or selected by global/system
+  config, the command refuses every mutation unless `--allow-shared-hooks` is
+  explicit. The flag never authorizes foreign or protected content.
