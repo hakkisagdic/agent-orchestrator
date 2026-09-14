@@ -1,5 +1,14 @@
 # Stand-in sessions
 
+> **A stand-in review cannot authorise a commit, and this page originally implied it could.**
+> Corrected 2026-09-14, after the implementer proved it: `commit-ok` accepts an artefact **ao
+> itself produced**, or an open human waiver — there is no supported path for importing a review
+> ao did not invoke, and hand-writing the evidence block would forge provenance. So a stand-in
+> gives you a real, useful judgement, and the slice still cannot land on it alone: either a human
+> records a waiver (`ao waive review`, which is honest — it says *a person vouched*, not *a review
+> happened*), or the review is re-run through ao (#75, and the reviewer adapter in #86). Use this
+> page to get the judgement; use one of those two to land it.
+
 When the architect or the reviewer cannot be reached — out of quota, asleep, away for a weekend —
 the work does not have to stop. The person opens a second session with **a different model**,
 points it at the same checkout, and it takes that role for as long as it is needed. The two agents
