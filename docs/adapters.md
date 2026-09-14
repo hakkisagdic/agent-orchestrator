@@ -96,6 +96,37 @@ A session counts as safe to inject into only when the status is not running **an
 last write is older than the idle threshold (default 240s). This conservative AND is
 deliberate: a false "idle" corrupts a session, a false "busy" only delays a nudge.
 
+## Capabilities, not flags
+
+The point of an adapter is that ao never learns which harness it is talking to. That only
+holds if ao asks in **its own vocabulary** and the adapter answers in the harness's. Four rules
+make that work, and each exists because a real harness broke the naive version:
+
+**Ask for the capability; let the adapter spell it.** ao asks *run this with no tools*. One
+harness spells that `--trust-tools=`, another `--allowedTools ""`, another a read-only sandbox
+mode. ao must not know which. It reads `options.trust_none` and uses whatever is there.
+
+**An absent capability is declared, not guessed.** `trae` has no documented tool-less mode, so
+its `trust_none` is `null` with a reason, and its `roles` block says
+`reviewer: ineligible: cannot be run without tools`. That is the honest outcome: the harness
+is a fine implementer and cannot hold the reviewer role, and ao refuses the binding instead of
+inventing a flag. Silence would mean guessing, and a reviewer that can write is not a reviewer.
+
+**Values are mapped and clamped, never passed through.** Effort ladders differ — one harness
+accepts `minimal|low|medium|high`, another `low|medium|high|xhigh|max`. ao asks for its own
+level; the adapter declares what it supports in `effort_values`; the resolver picks the nearest
+available and **records that it clamped**, because a run at `high` reported as `max` is a lie
+about how hard the model tried.
+
+**Shape differs, so declare the shape.** Some harnesses take one model id; `trae` takes a
+provider *and* a model. A setting may arrive as a flag, an environment variable or a config
+file key, and the adapter says which. Where the family matters — reviewer independence is a
+family rule — it is read from what the adapter declares, never inferred from a model string.
+
+The test that keeps this honest is the one in #88: compose an invocation for **every** shipped
+adapter and assert none of them grants a tool. An adapter that cannot answer a capability fails
+that test by declaring itself ineligible, which is a pass.
+
 ## Writing an adapter
 
 ```jsonc

@@ -1,0 +1,30 @@
+{
+  "id": "trae", "name": "Trae Agent (ByteDance)", "verified": "untested",
+  "disclaimer": "Written from the documented interface, not verified against an install. Flags drift; correct and open a PR.",
+  "send":   { "argv": ["trae-cli", "run", "{prompt}"], "cwd_matters": true },
+  "options": {
+    "provider": ["--provider", "{provider}"],
+    "provider_values": ["openai", "anthropic", "google", "openrouter", "doubao", "ollama"],
+    "model": ["--model", "{model}"],
+    "cwd": ["--working-dir", "{cwd}"],
+    "max_steps": ["--max-steps", "{max_steps}"],
+    "trace_file": ["--trajectory-file", "{path}"],
+    "trust_none": null,
+    "trust_none_why": "No documented read-only or tool-less mode. Until one exists this adapter is ineligible for the reviewer role: a reviewer that can write is not a reviewer, and guessing a flag would be worse than refusing.",
+    "trust_all": null,
+    "trust_all_why": "Tools are on by default; there is no flag to widen or narrow them."
+  },
+  "roles": {
+    "implementer": "eligible",
+    "reviewer": "ineligible: cannot be run without tools",
+    "architect": "untested: no resume, so a woken architect would start without its history"
+  },
+  "model_selection": {
+    "shape": "provider-and-model",
+    "why": "Unlike harnesses that take a single model id, this one names the provider separately, so a role binding here carries both and the family is read from the provider rather than inferred from the model string."
+  },
+  "resume": { "argv": null, "why": "No documented resume or continue; each run starts fresh." },
+  "transcript": { "kind": "json", "path": "trajectories/trajectory_*.json", "cwd_relative": true, "todo": "confirm record shape against an install" },
+  "busy": { "mtime_glob": "trajectories/trajectory_*.json", "cwd_relative": true, "idle_seconds": 240 },
+  "directives": { "config": "trae_config.yaml", "legacy_config": "trae_config.json" }
+}
