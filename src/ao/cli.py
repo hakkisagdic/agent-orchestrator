@@ -1382,7 +1382,7 @@ def _run_reviewer(root, argv, timeout, fallback=False):
     out = (stdout or stderr or "").strip()
     if not out:
         return {"ok": False, "out": "", "reason": f"produced nothing (exit {proc.returncode})"}
-    if A.REVIEW_UNAVAILABLE_RE.search(out) and not A.re.search(r"VERDICT:\s*(APPROVED|NEEDS_CHANGES)", out):
+    if A.REVIEW_UNAVAILABLE_RE.search(out) and not A._has_verdict_marker(out):
         from .watchdog import parse_reset
         until = parse_reset(out)
         A.set_reviewer_state(root, until=until, reason=out[:200], at=int(time.time()))
@@ -1579,13 +1579,17 @@ def cmd_review(cfg, args):
             reviewer_identity=used["identity"], review_status="pending",
         )
     A.set_reviewer_state(root, pending_review=False)
-    verdict = "NEEDS_CHANGES"
-    m = A.re.search(r"VERDICT:\s*(APPROVED|NEEDS_CHANGES)", out)
-    if m:
-        verdict = m.group(1)
-    if m and not all(A.re.search(rf"^{k}:\s*\d+", out, A.re.M) for k in ("BLOCKER", "HIGH", "MEDIUM", "LOW")):
-        m = None                       # a verdict without its counts is not the schema; treat as no verdict
-    if not m:
+    verdict = A._review_verdict(out)
+    severity_values = {
+        key: A.re.findall(
+            rf"^{key}:[ \t]*([0-9]{{1,9}})[ \t]*\r?$", out, A.re.M
+        )
+        for key in ("BLOCKER", "HIGH", "MEDIUM", "LOW")
+    }
+    valid_schema = verdict in ("APPROVED", "NEEDS_CHANGES") and all(
+        len(values) == 1 for values in severity_values.values()
+    )
+    if not valid_schema:
         # No valid verdict/count schema is not NEEDS_CHANGES. It is a reviewer
         # that did not do the job. Persist the measured evidence so a newer
         # matching INVALID candidate cannot expose an older approval; an
@@ -1624,7 +1628,9 @@ def cmd_review(cfg, args):
         if args.commits:
             header.append(f"- commits: {args.commits}")
         if args.paths:
-            header.append(f"- paths: {' '.join(args.paths)}")
+            header.append(
+                "- paths: " + json.dumps(args.paths, ensure_ascii=True)
+            )
         open(os.path.join(d, name), "w", encoding=UTF8).write(
             "\n".join(header) + f"\n\n{invalid_reason}:\n\n{out[:4000]}\n"
         )
@@ -1637,9 +1643,7 @@ def cmd_review(cfg, args):
             evidence, matrix_resolution, strict_attempts,
             reviewer_identity=used["identity"], review_status="complete",
         )
-    sev = {k: int(A.re.search(rf"{k}:\s*(\d+)", out).group(1))
-           if A.re.search(rf"{k}:\s*(\d+)", out) else 0
-           for k in ("BLOCKER", "HIGH", "MEDIUM", "LOW")}
+    sev = {key: int(values[0]) for key, values in severity_values.items()}
     # A verdict that contradicts its own findings is not a verdict.
     if verdict == "APPROVED" and (sev["BLOCKER"] or sev["HIGH"]):
         verdict = "NEEDS_CHANGES"
@@ -1663,9 +1667,22 @@ def cmd_review(cfg, args):
             evidence["invalid_reasons"] = invalid
             verdict = "NEEDS_CHANGES"
             sev["BLOCKER"] = max(1, sev["BLOCKER"])
-            out = A.re.sub(r"VERDICT:\s*APPROVED", "VERDICT: NEEDS_CHANGES", out, count=1)
-            out = A.re.sub(r"^BLOCKER:\s*\d+", "BLOCKER: 1", out, count=1, flags=A.re.M)
             out += "\n\n- [BLOCKER] candidate changed during review — " + "; ".join(invalid)
+
+    detail_lines = [
+        line for line in out.splitlines()
+        if A._review_verdict(line) not in ("APPROVED", "NEEDS_CHANGES")
+        and not A.re.fullmatch(
+            r"(?:BLOCKER|HIGH|MEDIUM|LOW):[ \t]*\d+[ \t]*", line
+        )
+    ]
+    out = "\n".join([
+        f"VERDICT: {verdict}",
+        f"BLOCKER: {sev['BLOCKER']}",
+        f"HIGH: {sev['HIGH']}",
+        f"MEDIUM: {sev['MEDIUM']}",
+        f"LOW: {sev['LOW']}",
+    ] + ([""] + detail_lines if detail_lines else []))
 
     d = os.path.join(root, cfg["reviews"])
     os.makedirs(d, exist_ok=True)
@@ -1706,7 +1723,9 @@ def cmd_review(cfg, args):
     if args.commits:
         header.append(f"- commits: {args.commits}")
     if args.paths:
-        header.append(f"- paths: {' '.join(args.paths)}")
+        header.append(
+            "- paths: " + json.dumps(args.paths, ensure_ascii=True)
+        )
     if included:
         header.append(f"- new files: {', '.join(included)}")
     open(os.path.join(d, name), "w", encoding=UTF8).write("\n".join(header) + f"\n\n{out}\n")
