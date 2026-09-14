@@ -83,7 +83,14 @@ def test_remove_undoes_init_and_only_removes_ao_owned_hooks(project, monkeypatch
     root = project["root"]
     os.makedirs(os.path.join(root, ".claude"))
     monkeypatch.setattr(skillkit.shutil, "which", lambda n: None)
-    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **k: None)
+    real_run = cli.subprocess.run
+
+    def fake_watchdog(argv, *args, **kwargs):
+        if isinstance(argv, (list, tuple)) and "watchdog" in argv and "uninstall" in argv:
+            return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_watchdog)
     _, agents = skillkit.detect_agents(root)
     skillkit.install_playbook(root, agents)
     skillkit.register_mcp(root, agents, exe="/x/ao")
@@ -94,17 +101,19 @@ def test_remove_undoes_init_and_only_removes_ao_owned_hooks(project, monkeypatch
     pre_commit = os.path.join(hooks, "pre-commit")
     pre_push = os.path.join(hooks, "pre-push")
     open(pre_commit, "w", encoding="utf-8").write(
-        "#!/bin/sh\n# agent-orchestrator: fixture-owned hook\n"
+        cli.PRE_COMMIT_HOOK.format(ao="/x/ao", root=root)
     )
     foreign = "#!/bin/sh\necho foreign\n"
     open(pre_push, "w", encoding="utf-8").write(foreign)
 
-    cli.cmd_remove(project, SimpleNamespace(yes=False))
+    cli.cmd_remove(project, SimpleNamespace(yes=False, allow_shared_hooks=False))
     assert os.path.exists(os.path.join(root, ".ao"))
     assert os.path.exists(pre_commit)
     assert open(pre_push, encoding="utf-8").read() == foreign
 
-    cli.cmd_remove(project, SimpleNamespace(yes=True))
+    assert cli.cmd_remove(
+        project, SimpleNamespace(yes=True, allow_shared_hooks=False)
+    ) == 0
     assert not os.path.exists(os.path.join(root, ".ao")) and not os.path.exists(os.path.join(root, ".claude", "skills", "ao"))
     assert not os.path.exists(pre_commit)
     assert open(pre_push, encoding="utf-8").read() == foreign
@@ -118,8 +127,8 @@ def test_doctor_reports_both_hook_states_with_safe_ownership_check(
 
     root = project["root"]
     paths = cli._ao_hook_paths(root)
-    open(paths["pre-commit"], "w", encoding="utf-8").write(
-        "#!/bin/sh\n# agent-orchestrator: fixture-owned hook\n"
+    open(paths["pre-commit"], "wb").write(
+        cli._render_local_hook("pre-commit", ".")
     )
     open(paths["pre-push"], "w", encoding="utf-8").write(
         "#!/bin/sh\necho foreign\n"
@@ -129,5 +138,13 @@ def test_doctor_reports_both_hook_states_with_safe_ownership_check(
     cli.cmd_doctor(project, SimpleNamespace(check=False))
     output = re.sub(r"\033\[[0-9;]*m", "", capsys.readouterr().out)
 
-    assert re.search(r"^commit hook\s+installed$", output, re.M)
-    assert re.search(r"^push hook\s+foreign$", output, re.M)
+    assert re.search(
+        r"^commit hook\s+current-local \(behavior unverified\) / untracked$",
+        output,
+        re.M,
+    )
+    assert re.search(
+        r"^push hook\s+foreign / untracked  AO push-window hook unavailable$",
+        output,
+        re.M,
+    )

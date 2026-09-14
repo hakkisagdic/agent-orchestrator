@@ -67,9 +67,14 @@ Anything not forbidden there and inside the slice's scope is allowed.
    its verification and newest matching prospective review approve, no urgent
    mail is unacknowledged, and no plan drift exists. Authority rows form a
    predecessor hash chain; `ao commit-check` refuses a malformed or broken chain
-   before it considers a grant. The AO pre-commit hook runs `ao commit-check` to
-   revalidate that persisted grant against Git's active index without issuing or
-   consuming authority. Then one local commit. **No push.**
+   before it considers a grant. An exact AO pre-commit body expresses the static
+   intent to run `ao commit-check` against Git's active index without issuing or
+   consuming authority; it remains `behavior unverified` until backlog #59
+   proves Git executes it. `ao hooks` resolves Git's effective path, never
+   overwrites foreign/protected content, and requires explicit
+   `--allow-shared-hooks` for the whole mutation set when any eligible target is
+   shared, external, or selected by global/system config. Then one local commit.
+   **No push.**
 8. `ao_report {kind: "done"}`, board `running → done` with the gates named,
    next item. Blocked by a decision? `ao_ask` with options, board `blocked` with
    `needs:`, and move to the next READY item — park and continue.
@@ -189,7 +194,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao credits` | provider credits and windows |
 | `ao features [on|off <key>]` | the switches and what each costs; all off = deterministic ao |
 | `ao waive <gate> --slice S --why …` / `ao catchup` | a person's bypass on the record; catchup reviews the landed range and replays deferred work |
-| `ao pings setup --url …` / `ao hooks install` / `ao push allow` | dead man's switch; AO pre-commit grant check; pre-push human window |
+| `ao pings setup --url …` / `ao hooks [status|install|uninstall] [--allow-shared-hooks]` / `ao push allow` | dead man's switch; static AO hook intent at Git's effective path (`behavior unverified`); explicit authorization for shared/external/global mutation; human push window |
 | `ao cost [--since 24h]` | what the coordination spends: implementer turns by class, wasted turns, review counts |
 | `ao since last|2h|<ref>` | what happened since |
 | `ao digest` | landed work, gates, reviews, decisions in one page |

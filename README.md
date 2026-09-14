@@ -107,9 +107,9 @@ scope is the one authority an implementer must not have.
 | platforms | macOS and Linux native; Windows first cut ([windows.md](docs/windows.md)); tests run on all three in CI |
 | `ao waive review --slice B7 --why …` / `ao catchup` | a person bypasses a gate on the record; catchup reviews the landed range and replays deferred wakes and nudges |
 | `ao pings setup --url …` | dead man's switch: external pings that alarm when the watchdog and its doctor job both die |
-| `ao hooks install` / `ao push allow` | pre-push hook refuses unless a person opened a push window |
+| `ao hooks [status|install|uninstall] [--allow-shared-hooks]` / `ao push allow` | resolve Git's effective hook path; each role is independent, and shared/external/global mutations require explicit command-wide authorization |
 | `ao skill install` / `ao skill show` | the playbook (roles, loop, authority, protocol, alarms, every command) rendered for the agents this repo uses: Claude skill, Kiro steering, AGENTS.md |
-| `ao remove --yes` | take ao off a repository: exactly what init wrote, the MCP entries, the jobs, the local state |
+| `ao remove --yes [--allow-shared-hooks]` | remove AO state only after a complete hook-topology preflight; foreign and protected hooks stay untouched |
 | `ao init --profile claude-kiro|claude-claude` | write the role blocks: who implements (adapter, model, effort), who reviews (another model), who judges ([profiles.md](docs/profiles.md)) |
 | `ao doctor --check` | quiet doctor for a scheduler: one line per problem, exit 1, alarms raised — installed as a 15-minute launchd job by `ao watchdog install` |
 | `ao email setup` / `ao email test` | the red alarm channel: e-mail via formsubmit.co, no server ([alarms.md](docs/alarms.md)) |
@@ -130,6 +130,17 @@ scope is the one authority an implementer must not have.
 | `ao a2a-mcp serve` | reach A2A agents from an MCP-only client |
 | `ao prune` | trim accumulated records and logs |
 | `ao doctor` · `ao adapters` | check the wiring; what is supported and how well |
+
+Hook status is deliberately static: `current-local (behavior unverified)` and
+`current-scoped (behavior unverified)` mean that the bytes express AO's intended
+role, not that Git executed them. Runtime execution proof remains backlog #59.
+`status` names the effective path, path class, winning `core.hooksPath`
+scope/origin/value, track state, and misplaced AO forms. Install handles
+pre-commit and pre-push independently, so it may install an eligible pre-commit,
+preserve a custom pre-push byte-for-byte, report the push-window hook unavailable,
+and return 1. Install, uninstall, and remove refuse the entire mutation set when
+any eligible target is shared, external, or selected by global/system config
+unless `--allow-shared-hooks` is explicit.
 
 ## The rules it enforces
 

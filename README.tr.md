@@ -106,9 +106,9 @@ gereken tek yetkidir.
 | platformlar | macOS ve Linux yerel; Windows ilk sürüm ([windows.md](docs/windows.md)); testler üçünde de CI'da koşar |
 | `ao waive review --slice B7 --why …` / `ao catchup` | insan bir kapıyı kayıtlı biçimde atlar; catchup inen aralığı review eder, ertelenen uyandırma/dürtmeleri yeniden oynatır |
 | `ao pings setup --url …` | dead man's switch: watchdog ve doctor işi birlikte ölünce alarm veren dış ping |
-| `ao hooks install` / `ao push allow` | pre-push hook, insan bir push penceresi açmadıysa reddeder |
+| `ao hooks [status|install|uninstall] [--allow-shared-hooks]` / `ao push allow` | Git'in etkin hook yolunu çöz; roller bağımsızdır, paylaşılan/harici/global mutasyonlar komutun tamamı için açık yetki ister |
 | `ao skill install` / `ao skill show` | playbook (roller, döngü, yetki, protokol, alarmlar, tüm komutlar) deponun ajanları için: Claude skill, Kiro steering, AGENTS.md |
-| `ao remove --yes` | ao'yu depodan kaldır: init'in yazdıkları, MCP kayıtları, işler, yerel durum |
+| `ao remove --yes [--allow-shared-hooks]` | AO durumunu ancak tam hook-topolojisi ön kontrolünden sonra kaldır; yabancı ve korunan hook'lara dokunma |
 | `ao init --profile claude-kiro|claude-claude` | rol bloklarını yaz: kim uygular (adaptör, model, efor), kim review eder (başka model), kim karar verir ([profiles.md](docs/profiles.md)) |
 | `ao doctor --check` | zamanlayıcı için sessiz doctor: problem başına bir satır, exit 1, alarm — `ao watchdog install` 15 dakikalık launchd işi olarak kurar |
 | `ao email setup` / `ao email test` | kırmızı alarm kanalı: formsubmit.co ile e-posta, sunucu yok ([alarms.md](docs/alarms.md)) |
@@ -129,6 +129,18 @@ gereken tek yetkidir.
 | `ao a2a-mcp serve` | MCP-only istemciden A2A ajanlarına ulaş |
 | `ao prune` | biriken kayıt ve logları buda |
 | `ao doctor` · `ao adapters` | bağlantıları denetle; ne destekleniyor ve ne kadar |
+
+Hook durumu bilinçli olarak statiktir: `current-local (behavior unverified)` ve
+`current-scoped (behavior unverified)`, baytların AO'nun amaçlanan rolünü ifade
+ettiğini söyler; Git'in hook'u çalıştırdığını kanıtlamaz. Çalıştırma kanıtı #59
+backlog maddesindedir. `status`; etkin yolu, yol sınıfını, kazanan
+`core.hooksPath` scope/origin/value bilgisini, track durumunu ve yanlış yerdeki
+AO biçimlerini gösterir. Install, pre-commit ile pre-push rollerini bağımsız ele
+alır; uygun pre-commit'i kurup özel pre-push'ı bayt düzeyinde koruyabilir,
+push-window hook'unun kullanılamadığını söyleyebilir ve 1 dönebilir. Uygun
+hedeflerden biri paylaşılan, harici ya da global/system config ile seçilmişse
+install, uninstall ve remove işlemlerinin tamamı açık `--allow-shared-hooks`
+olmadan reddedilir.
 
 ## Dayattığı kurallar
 

@@ -158,15 +158,15 @@ def test_push_window_and_hooks(project, capsys):
 
     assert cli.cmd_hooks(project, SimpleNamespace(action="status")) == 0
     status_output = capsys.readouterr().out
-    assert "pre-commit: installed" in status_output
-    assert "pre-push: installed" in status_output
+    assert "pre-commit: current-local (behavior unverified) / untracked" in status_output
+    assert "pre-push: current-local (behavior unverified) / untracked" in status_output
 
     assert cli.cmd_hooks(project, SimpleNamespace(action="uninstall")) == 0
     assert not os.path.exists(pre_commit)
     assert not os.path.exists(pre_push)
 
 
-def test_hook_install_preflight_is_atomic_and_uninstall_preserves_foreign_hook(
+def test_hook_install_roles_are_independent_and_uninstall_preserves_foreign_hook(
     project, capsys
 ):
     root = project["root"]
@@ -179,8 +179,8 @@ def test_hook_install_preflight_is_atomic_and_uninstall_preserves_foreign_hook(
 
     assert cli.cmd_hooks(project, SimpleNamespace(action="install")) == 1
     output = capsys.readouterr().out
-    assert "not installing either AO hook" in output
-    assert not os.path.exists(pre_commit)
+    assert "AO push-window hook unavailable" in output
+    assert os.path.exists(pre_commit)
     assert open(pre_push, encoding="utf-8").read() == foreign
 
     assert cli.cmd_hooks(project, SimpleNamespace(action="uninstall")) == 0
