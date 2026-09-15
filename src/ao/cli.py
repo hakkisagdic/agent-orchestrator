@@ -1686,6 +1686,11 @@ REVIEW_ATTEMPTS = 2
 REVIEW_RETRY_SECONDS = 30
 REVIEW_PROBE_TIMEOUT = 90
 REVIEW_VERSION_TIMEOUT = 25
+REVIEW_DISCOVERY_TOTAL_SECONDS = 30
+REVIEW_DISCOVERY_MAX_PATH_DIRS = 64
+REVIEW_DISCOVERY_MAX_FALLBACK_DIRS = 32
+REVIEW_DISCOVERY_MAX_CANDIDATES = 8
+REVIEW_DISCOVERY_MAX_EXTENSIONS = 16
 REVIEW_KILL_DRAIN_SECONDS = 5
 
 
@@ -1884,7 +1889,7 @@ def _run_reviewer(root, argv, timeout, fallback=False):
         }
 
 
-def _reviewer_binary_version(root, path):
+def _reviewer_binary_version(root, path, timeout=REVIEW_VERSION_TIMEOUT):
     """Measure one candidate version under reviewer cwd/Git isolation."""
     import tempfile
 
@@ -1904,18 +1909,88 @@ def _reviewer_binary_version(root, path):
         A.helper_register(root, proc.pid, "reviewer-version")
         try:
             try:
-                stdout, stderr = proc.communicate(timeout=REVIEW_VERSION_TIMEOUT)
+                stdout, stderr = proc.communicate(timeout=timeout)
             except (OSError, subprocess.TimeoutExpired):
-                _reviewer_kill_and_drain(proc)
+                stdout, stderr = _reviewer_kill_and_drain(proc)
+                _reviewer_terminal_output(stdout, stderr)
                 return ""
         finally:
             A.helper_release(root, proc.pid)
         if proc.returncode != 0:
+            _reviewer_terminal_output(stdout, stderr)
             return ""
         match = A.re.search(
             r"(\d+\.\d+\.\d+)", (stdout or "") + (stderr or "")
         )
         return match.group(1) if match else ""
+
+
+def _reviewer_candidate_paths(name, deadline=None):
+    """Return a bounded ordered executable set without unbounded PATH scans."""
+    import glob as _glob
+
+    directories, seen_directories = [], set()
+
+    def expired():
+        return deadline is not None and time.monotonic() >= deadline
+
+    def add_directory(raw):
+        if not raw:
+            return False
+        directory = os.path.abspath(os.path.expanduser(raw))
+        key = os.path.normcase(directory)
+        if key in seen_directories:
+            return False
+        seen_directories.add(key)
+        directories.append(directory)
+        return True
+
+    path_entries = os.environ.get("PATH", "").split(os.pathsep)
+    for raw in path_entries[:REVIEW_DISCOVERY_MAX_PATH_DIRS]:
+        if expired():
+            break
+        add_directory(raw)
+
+    fallback_count = 0
+    for raw in getattr(A, "_BIN_DIRS", ()):
+        if expired() or fallback_count >= REVIEW_DISCOVERY_MAX_FALLBACK_DIRS:
+            break
+        fallback_count += int(add_directory(raw))
+    for pattern in getattr(A, "_BIN_GLOBS", ()):
+        if expired() or fallback_count >= REVIEW_DISCOVERY_MAX_FALLBACK_DIRS:
+            break
+        for raw in _glob.iglob(os.path.expanduser(pattern)):
+            if expired() or fallback_count >= REVIEW_DISCOVERY_MAX_FALLBACK_DIRS:
+                break
+            fallback_count += int(add_directory(raw))
+
+    extensions = [""]
+    if os.name == "nt":
+        for extension in os.environ.get(
+            "PATHEXT", ".EXE;.CMD;.BAT;.COM"
+        ).split(";")[:REVIEW_DISCOVERY_MAX_EXTENSIONS]:
+            extension = extension.lower()
+            if extension and extension not in extensions:
+                extensions.append(extension)
+
+    candidates, seen_candidates = [], set()
+    for directory in directories:
+        if expired():
+            break
+        for extension in extensions:
+            if expired():
+                break
+            candidate = os.path.join(directory, name + extension)
+            if not os.path.isfile(candidate) or not os.access(candidate, os.X_OK):
+                continue
+            identity = os.path.normcase(os.path.realpath(candidate))
+            if identity in seen_candidates:
+                continue
+            seen_candidates.add(identity)
+            candidates.append(os.path.abspath(candidate))
+            if len(candidates) >= REVIEW_DISCOVERY_MAX_CANDIDATES:
+                return candidates
+    return candidates
 
 
 def _reviewer_version_key(version):
@@ -1926,8 +2001,9 @@ def _reviewer_version_key(version):
 
 
 def _reviewer_resolve_binary(root, name):
-    """Resolve the newest candidate without executing it outside isolation."""
+    """Resolve a bounded candidate set within one shared discovery deadline."""
     name = str(name)
+    deadline = time.monotonic() + REVIEW_DISCOVERY_TOTAL_SECONDS
     if os.path.isabs(name):
         candidates = (
             [name]
@@ -1935,14 +2011,24 @@ def _reviewer_resolve_binary(root, name):
             else []
         )
     else:
-        candidates = A.binary_candidates(name)
-    best = (None, "")
+        candidates = _reviewer_candidate_paths(name, deadline=deadline)
+    candidates = candidates[:REVIEW_DISCOVERY_MAX_CANDIDATES]
+    if not candidates:
+        return None, ""
+
+    best = (os.path.abspath(candidates[0]), "")
     for candidate in candidates:
+        remaining = deadline - time.monotonic()
+        # Reserve the bounded kill/drain allowance before starting a subprocess.
+        if remaining <= REVIEW_KILL_DRAIN_SECONDS:
+            break
+        wait = min(
+            REVIEW_VERSION_TIMEOUT,
+            remaining - REVIEW_KILL_DRAIN_SECONDS,
+        )
         absolute = os.path.abspath(candidate)
-        version = _reviewer_binary_version(root, absolute)
-        if best[0] is None or (
-            _reviewer_version_key(version) > _reviewer_version_key(best[1])
-        ):
+        version = _reviewer_binary_version(root, absolute, timeout=wait)
+        if _reviewer_version_key(version) > _reviewer_version_key(best[1]):
             best = (absolute, version)
     return best
 

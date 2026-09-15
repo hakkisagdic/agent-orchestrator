@@ -180,6 +180,15 @@ numbers, and unknown OS errors remain permanently closed. AO retries transient
 route positions once after 30 seconds. Reviewer prose never changes that
 classification.
 
+Reviewer executable discovery is bounded independently of environment cardinality:
+AO examines at most the first 64 `PATH` directories, 32 built-in/version-manager
+fallback directories, 16 Windows `PATHEXT` suffixes, and 8 distinct executable
+candidates. A 30-second monotonic deadline starts before directory discovery; all
+candidate `--version` waits share what remains, reserve the 5-second kill/drain
+allowance, and retain the existing 25-second per-process ceiling. If the deadline
+expires, AO keeps the first absolute executable already found rather than starting
+another version subprocess.
+
 Each invocation runs from a disposable non-repository directory with inherited Git
 bindings removed, which prevents an accidental relative `git stash`, `git add`, or
 file write from changing the live candidate. This is mutation containment, not a

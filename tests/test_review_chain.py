@@ -983,3 +983,89 @@ def test_unknown_os_error_without_errno_is_permanently_closed():
 
     assert failure["kind"] == "spawn-unknown"
     assert failure["retryable"] is False
+
+
+
+def test_reviewer_candidate_discovery_caps_directories_and_candidates(
+    tmp_path, monkeypatch,
+):
+    name = "bounded-reviewer"
+    late_name = "late-reviewer"
+    directories = []
+    for index in range(cli.REVIEW_DISCOVERY_MAX_PATH_DIRS + 1):
+        directory = tmp_path / ("path-%03d" % index)
+        directory.mkdir()
+        directories.append(directory)
+    for directory in directories[:cli.REVIEW_DISCOVERY_MAX_CANDIDATES + 2]:
+        binary = directory / name
+        binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        binary.chmod(0o755)
+    late = directories[-1] / late_name
+    late.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    late.chmod(0o755)
+
+    monkeypatch.setenv("PATH", os.pathsep.join(str(item) for item in directories))
+    monkeypatch.setattr(A, "_BIN_DIRS", ())
+    monkeypatch.setattr(A, "_BIN_GLOBS", ())
+
+    candidates = cli._reviewer_candidate_paths(name)
+
+    assert candidates == [
+        str((directory / name).resolve())
+        for directory in directories[:cli.REVIEW_DISCOVERY_MAX_CANDIDATES]
+    ]
+    assert cli._reviewer_candidate_paths(late_name) == []
+
+
+def test_reviewer_candidate_discovery_caps_fallback_directories(
+    tmp_path, monkeypatch,
+):
+    name = "late-fallback-reviewer"
+    directories = []
+    for index in range(cli.REVIEW_DISCOVERY_MAX_FALLBACK_DIRS + 1):
+        directory = tmp_path / ("fallback-%03d" % index)
+        directory.mkdir()
+        directories.append(directory)
+    late = directories[-1] / name
+    late.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    late.chmod(0o755)
+
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.setattr(A, "_BIN_DIRS", tuple(str(item) for item in directories))
+    monkeypatch.setattr(A, "_BIN_GLOBS", ())
+
+    assert cli._reviewer_candidate_paths(name) == []
+
+
+def test_reviewer_resolver_shares_one_aggregate_version_deadline(
+    project, tmp_path, monkeypatch,
+):
+    candidates = [str(tmp_path / ("candidate-%02d" % index)) for index in range(20)]
+    clock = [100.0]
+    calls = []
+
+    monkeypatch.setattr(
+        cli,
+        "_reviewer_candidate_paths",
+        lambda _name, deadline=None: candidates,
+    )
+    monkeypatch.setattr(cli.time, "monotonic", lambda: clock[0])
+
+    def version(_root, path, timeout=cli.REVIEW_VERSION_TIMEOUT):
+        calls.append((path, timeout))
+        if len(calls) == 1:
+            clock[0] += 20.0
+            return "1.0.0"
+        clock[0] += timeout + cli.REVIEW_KILL_DRAIN_SECONDS
+        return "2.0.0"
+
+    monkeypatch.setattr(cli, "_reviewer_binary_version", version)
+
+    resolved, selected_version = cli._reviewer_resolve_binary(
+        project["root"], "reviewer"
+    )
+
+    assert calls == [(candidates[0], 25), (candidates[1], 5.0)]
+    assert resolved == candidates[1]
+    assert selected_version == "2.0.0"
+    assert clock[0] == 100.0 + cli.REVIEW_DISCOVERY_TOTAL_SECONDS
