@@ -1069,3 +1069,52 @@ def test_reviewer_resolver_shares_one_aggregate_version_deadline(
     assert resolved == candidates[1]
     assert selected_version == "2.0.0"
     assert clock[0] == 100.0 + cli.REVIEW_DISCOVERY_TOTAL_SECONDS
+
+
+
+def test_reviewer_candidate_discovery_stops_during_directory_enumeration_deadline(
+    tmp_path, monkeypatch,
+):
+    directories = [
+        str(tmp_path / ("deadline-path-%02d" % index))
+        for index in range(6)
+    ]
+    fallback = str(tmp_path / "deadline-fallback")
+    observed_directories = []
+    scanned_candidates = []
+    clock = [-1.0]
+    real_abspath = cli.os.path.abspath
+
+    def monotonic():
+        clock[0] += 1.0
+        return clock[0]
+
+    def observed_abspath(value):
+        observed_directories.append(str(value))
+        return real_abspath(value)
+
+    def unexpected_candidate_scan(path):
+        scanned_candidates.append(path)
+        return False
+
+    monkeypatch.setenv("PATH", os.pathsep.join(directories))
+    monkeypatch.setattr(A, "_BIN_DIRS", (fallback,))
+    monkeypatch.setattr(A, "_BIN_GLOBS", ())
+    monkeypatch.setattr(cli.time, "monotonic", monotonic)
+    monkeypatch.setattr(cli.os.path, "abspath", observed_abspath)
+    monkeypatch.setattr(cli.os.path, "isfile", unexpected_candidate_scan)
+
+    # This calls the committed production helper, not a test reimplementation.
+    # Its six monotonic observations are: three accepted PATH entries, the first
+    # expired PATH entry, the untouched fallback boundary, and the candidate-scan
+    # boundary. Any <= comparison or extra per-directory clock read breaks this.
+    candidates = cli._reviewer_candidate_paths(
+        "reviewer", deadline=3.0
+    )
+
+    assert candidates == []
+    assert clock[0] == 5.0
+    assert observed_directories == directories[:3]
+    assert directories[3] not in observed_directories
+    assert fallback not in observed_directories
+    assert scanned_candidates == []
