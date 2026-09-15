@@ -402,3 +402,48 @@ def test_launchd_job_templates_carry_the_path():
     doctor = cli.PLIST_CMD.format(label="l", args="<string>ao</string>", interval=900, log="x", path="/p")
     for body in (watchdog, doctor):
         assert "<key>EnvironmentVariables</key><dict><key>PATH</key><string>/p</string></dict>" in body
+
+
+def _escalate_once(project, monkeypatch, present=None, resolve=None):
+    root = project["root"]
+    sent = []
+    monkeypatch.setattr(W, "notify", lambda title, msg, root=None, **kw: sent.append((title, msg, kw.get("audience"))))
+    monkeypatch.setattr(A, "anomalies", lambda *a, **k: [
+        {"kind": "decision-requested", "facts": {"decision": "D-1"}, "key": "D-1"}])
+    monkeypatch.setattr(A, "write_report", lambda *a, **k: "report.md")
+    monkeypatch.setattr(A, "notice_recently_sent", lambda *a, **k: False)
+    monkeypatch.setattr(A, "mailbox", lambda *a, **k: [])
+    monkeypatch.setattr(W, "quota_ok", lambda adapter: True)
+    monkeypatch.setattr(W, "arch_alive", lambda root, arch: False)
+    monkeypatch.setattr(A, "window_headroom", lambda provider="claude": (None, 10))
+    monkeypatch.setattr(A, "architect_present", present or (lambda root, architect=None: False))
+    monkeypatch.setattr(A, "resolve_binary", resolve or (lambda name, path=None: ("/usr/bin/true", "1.0")))
+    W.escalate(root, project, {}, 0, SimpleNamespace(idle_minutes=6.0, dry_run=False), {})
+    return sent
+
+
+def test_anomaly_reaches_a_person_when_the_architect_is_interactive(project, monkeypatch):
+    sent = _escalate_once(project, monkeypatch, present=lambda root, architect=None: True)
+
+    assert [(title, audience) for title, _, audience in sent] == [("proj: needs you", "human")]
+    assert "interactive" in sent[0][1]
+
+
+def test_anomaly_reaches_a_person_when_the_architect_binary_is_missing(project, monkeypatch):
+    sent = _escalate_once(project, monkeypatch, resolve=lambda name, path=None: (None, ""))
+
+    assert [audience for _, _, audience in sent] == ["human"]
+    assert "claude cannot be found" in sent[0][1]
+
+
+def test_anomaly_is_held_only_for_an_architect_that_will_be_woken(project, monkeypatch):
+    sent = _escalate_once(project, monkeypatch)
+
+    assert [(title, audience) for title, _, audience in sent] == [("proj: anomaly", "architect")]
+    assert "will be woken" in sent[0][1]
+
+
+def test_title_inference_reads_the_subject_not_the_project_name():
+    assert W.for_human("watchdog-lab: over budget") is False
+    assert W.for_human("watchdog-lab: agent stuck") is True
+    assert W.for_human("proj: watchdog") is True

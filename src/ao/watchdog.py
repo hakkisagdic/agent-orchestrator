@@ -166,7 +166,11 @@ HUMAN_AUDIENCE = ("out of quota", "agent stuck", "nudge failed", "watchdog",
 
 
 def for_human(title):
-    return any(k in title.lower() for k in HUMAN_AUDIENCE)
+    # Match the words after the "<project>: " prefix only. Titles name the project,
+    # and a project called, say, "watchdog-lab" must not turn every alert it raises
+    # into a human one by its name alone.
+    subject = title.split(": ", 1)[1] if ": " in title else title
+    return any(k in subject.lower() for k in HUMAN_AUDIENCE)
 
 
 def notify(title, msg, root=None, key=None, window=1800, audience=None, level=None):
@@ -411,6 +415,62 @@ def provider_degraded(root, window=900):
     return None
 
 
+def architect_hold_reason(root, cfg, adapter, st, found=None, now=None):
+    """May a notice be held for the architect? {"holdable", "code", "reason"}.
+
+    A notice addressed to the architect reaches no person, so holding it is honest
+    only when an architect is going to read it: a wake already in flight, or one
+    this cycle will start. The rule this replaces held whenever an architect argv
+    was configured, and on 2026-09-14 seven notices in a row sat held behind
+    "architect will be woken" while the only architect was an interactive session
+    that acts when someone prompts it.
+
+    Built from the predicates the wake in escalate() uses, and pure: it starts
+    nothing and writes nothing. Blockers are checked before in-flight wakes, so a
+    wake that has already failed is never counted as one that is coming.
+    """
+    from . import features as F
+    now = now or time.time()
+    arch = cfg.get("architect") or {}
+    argv = arch.get("argv") or []
+
+    def no(code, reason):
+        return {"holdable": False, "code": code, "reason": reason}
+
+    if not argv:
+        return no("no-architect", "no architect is configured")
+    if A.architect_present(root, arch):
+        return no("interactive", "the architect session is interactive and acts only when someone prompts it")
+    if not F.enabled(cfg, "architect_wake"):
+        return no("wake-off", "architect wakes are switched off")
+    if not quota_ok(adapter):
+        return no("no-quota", "there is no quota headroom to wake the architect")
+    if st.get("arch_quota_until", 0) > now:
+        return no("quota-block", "the architect is at quota until "
+                  + time.strftime("%H:%M", time.localtime(st["arch_quota_until"])))
+    if arch_alive(root, arch):
+        return {"holdable": True, "code": "wake-running", "reason": "an architect wake is already running"}
+    left, reserve = A.window_headroom("claude")
+    urgent = any(item.get("kind") == "decision-requested" for item in (found or []))
+    if left is not None and left < reserve and not urgent:
+        return no("window-reserve", f"the machine's Claude window has {left}% left, below the {reserve}% reserve")
+    if "{session}" in " ".join(argv) and arch.get("session") in (None, "auto") \
+            and not (A.discover_architect(arch.get("cwd") or root) or {}).get("session"):
+        return no("session-unresolved", "the architect session cannot be resolved")
+    resolved, ver = A.resolve_binary(argv[0], path=child_path())
+    if not resolved:
+        return no("binary-missing", f"{argv[0]} cannot be found")
+    key = os.path.basename(root.rstrip("/")) or "root"
+    err = wake_error(os.path.join(STATE_DIR, f"escalate-{key}.log"))
+    if err and err.get("kind") == "binary" and err.get("binary") == f"{resolved} {ver}" \
+            and now - (st.get("wake_error") or {}).get("at", 0) < 6 * 3600:
+        return no("binary-failed", f"the last wake failed with this binary: {err.get('text', '')[:80]}")
+    if now - st.get("last_arch_wake", 0) < 900:
+        return {"holdable": True, "code": "recent-wake",
+                "reason": f"the architect was woken {int((now - st.get('last_arch_wake', 0)) / 60)}m ago"}
+    return {"holdable": True, "code": "wakeable", "reason": "architect will be woken"}
+
+
 def escalate(root, cfg, adapter, age, args, st):
     """Hand every judgement call to the architect, once per condition per hour.
 
@@ -455,6 +515,8 @@ def escalate(root, cfg, adapter, age, args, st):
         return False
 
     woke = False
+    project = os.path.basename(root.rstrip("/")) or "root"
+    hold = None
     for a in found:
         key = f"anomaly:{a['kind']}"
         window = 600 if a["kind"] == "decision-requested" else 3600
@@ -468,7 +530,7 @@ def escalate(root, cfg, adapter, age, args, st):
                 print(f"DRY RUN: would suppress anomaly {a['kind']} "
                       f"(reported within {window}s)")
             else:
-                A.record_notice(root, "Voltrai: anomaly", a["kind"], sent=False, key=key)
+                A.record_notice(root, f"{project}: anomaly", a["kind"], sent=False, key=key)
             continue
         if args.dry_run:
             print(f"DRY RUN: would report anomaly {a['kind']} to the architect")
@@ -478,10 +540,16 @@ def escalate(root, cfg, adapter, age, args, st):
         # Say what actually happened. "reported to the architect" was untrue
         # whenever no architect was configured or startable, and a notification
         # that overstates its own effect is how a gap stays invisible.
-        reach = "architect will be woken" if (cfg.get("architect") or {}).get("argv") \
-            else "written to the mailbox; no architect configured"
-        notify("Voltrai: anomaly", f"{a['kind']} — {reach}", root,
-               key=key, window=window, audience="architect")
+        # Hold for the architect only when a wake is actually coming; decided from the
+        # wake's own predicates, not from whether an argv is configured.
+        hold = hold or architect_hold_reason(root, cfg, adapter, st, found)
+        if hold["holdable"]:
+            notify(f"{project}: anomaly", f"{a['kind']} — {hold['reason']}", root,
+                   key=key, window=window, audience="architect")
+        else:
+            notify(f"{project}: needs you",
+                   f"{a['kind']} — no architect will act on it: {hold['reason']}", root,
+                   key=key, window=window, audience="human")
         print(f"anomaly {a['kind']}: {'reported as ' + name if name else 'already reported'}")
         woke = True
     arch = cfg.get("architect") or {}
@@ -940,7 +1008,7 @@ def _cycle_impl(args, root):
     # would add a turn to a loop that is already spending them.
     spin = A.spinning(root)
     if spin and time.time() - st.get("last_spin_notice", 0) > 1800:
-        notify("Voltrai: agent spinning", f"{spin}m busy, nothing committed or changed — needs re-specifying", root, audience="architect")
+        notify(f"{project}: agent spinning", f"{spin}m busy, nothing committed or changed — needs re-specifying", root, audience="architect")
         st["last_spin_notice"] = time.time()
         save_state(root, st)
         print(f"spinning: {spin}m active with no artifact change")
@@ -997,13 +1065,13 @@ def _cycle_impl(args, root):
             print(f"{len(turns)} turn(s) already in this tree "
                   f"(roots {turns}, {len(running)} processes); not starting another")
             if len(turns) > 2:
-                notify("Voltrai: turns piling up",
+                notify(f"{project}: turns piling up",
                        f"{len(turns)} concurrent turns — `ao hold` to clear", root)
             return 0
         # Reaping is an action, so it keeps the conservative bound even though
         # reporting no longer does.
         print(f"{len(running)} process(es) alive but silent {int(age / 60)}m; reaping")
-        notify("Voltrai: reaping hung turn",
+        notify(f"{project}: reaping hung turn",
                f"{len(running)} process(es) silent {int(age / 60)}m — cleaning up", root, audience="architect")
         if args.dry_run:
             print("DRY RUN: would reap", running)
@@ -1145,7 +1213,7 @@ def _cycle_impl(args, root):
                 intervened = True
                 break
     if rn > budget and not intervened:
-        notify("Voltrai: over budget", f"round {rn}/{budget} — re-specify, split or change actor", root, audience="architect")
+        notify(f"{project}: over budget", f"round {rn}/{budget} — re-specify, split or change actor", root, audience="architect")
         print(f"over budget ({rn}/{budget}); notified instead of nudging")
         return 0
     if rn > budget and intervened:
@@ -1170,7 +1238,7 @@ def _cycle_impl(args, root):
                         save_state(root, st)
                 except Exception:
                     pass
-        notify("Voltrai: out of quota",
+        notify(f"{project}: out of quota",
                "provider window exhausted; handoff note sent", root)
         print("provider out of headroom; not nudging")
         return 0
@@ -1179,13 +1247,13 @@ def _cycle_impl(args, root):
     # and, while the stalled turn is still retrying, costs a second writer.
     degraded = provider_degraded(root)
     if degraded:
-        notify("Voltrai: provider degraded", f"{degraded} — waiting, not nudging", root)
+        notify(f"{project}: provider degraded", f"{degraded} — waiting, not nudging", root)
         print(f"provider degraded ({degraded}); waiting rather than nudging")
         return 0
 
     # 5 — the previous nudge changed nothing
     if st.get("attempts", 0) >= MAX_ATTEMPTS:
-        notify("Voltrai: agent stuck", f"{MAX_ATTEMPTS} nudges, no progress — needs a human", root)
+        notify(f"{project}: agent stuck", f"{MAX_ATTEMPTS} nudges, no progress — needs a human", root)
         print("backoff exhausted; notified a human")
         return 0
     if st.get("last_nudge") and size == st.get("last_size"):
@@ -1204,7 +1272,7 @@ def _cycle_impl(args, root):
     search = child_path()
     resolved = shutil.which(argv[0], path=search)
     if not resolved:
-        notify("Voltrai: watchdog", f"{argv[0]} not on PATH; cannot nudge", root)
+        notify(f"{project}: watchdog", f"{argv[0]} not on PATH; cannot nudge", root)
         print(f"{argv[0]} not found on PATH ({search})")
         return 1
     argv[0] = resolved
@@ -1275,7 +1343,7 @@ def _cycle_impl(args, root):
             pass
         st.pop("child_pid", None)                 # it is gone; do not guard on a dead pid
         st["last_error"] = {"at": time.time(), "code": early, "tail": tail}
-        notify("Voltrai: nudge failed", f"exit {early}: {tail[-120:] or 'see nudge log'}", root)
+        notify(f"{project}: nudge failed", f"exit {early}: {tail[-120:] or 'see nudge log'}", root)
         print(f"nudge failed (exit {early}): {tail}")
     else:
         st.pop("last_error", None)
