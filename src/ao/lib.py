@@ -116,22 +116,146 @@ def _has_top_level_json_key(raw, wanted):
     return False
 
 
+PROJECT_CONFIG_MAX_BYTES = 1_048_576
+PROJECT_CONFIG_MAX_CONTAINER_DEPTH = 64
+
+
+def _json_container_depth_problem(raw, max_depth=PROJECT_CONFIG_MAX_CONTAINER_DEPTH):
+    """Return a bounded lexical depth error before the recursive JSON decoder.
+
+    JSON structural characters are ASCII, so scanning bytes is sufficient and
+    avoids decoding or recursively parsing a document whose container nesting is
+    already outside the project-state contract. Braces inside strings and escaped
+    quotes do not affect depth; all other syntax validation remains json.loads's
+    job.
+    """
+    depth = 0
+    in_string = False
+    escaped = False
+    for byte in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif byte == 0x5C:  # backslash
+                escaped = True
+            elif byte == 0x22:  # quote
+                in_string = False
+            continue
+        if byte == 0x22:
+            in_string = True
+        elif byte in (0x5B, 0x7B):  # [ {
+            depth += 1
+            if depth > max_depth:
+                return (
+                    f".ao/config.json exceeds the {max_depth}-level "
+                    "container depth"
+                )
+        elif byte in (0x5D, 0x7D):  # ] }
+            depth -= 1
+    return None
+
+
+def project_config_document(root):
+    """Read one bounded, regular, non-empty-object project config document.
+
+    The returned raw prefix is always at most PROJECT_CONFIG_MAX_BYTES. Keeping
+    the parse result and its problem together gives pre-dispatch loading and
+    commit enforcement one state table instead of two subtly different readers.
+    """
+    import stat
+
+    path = os.path.join(root, ".ao", "config.json")
+    raw = b""
+    try:
+        listed = os.lstat(path)
+    except OSError as exc:
+        return {
+            "config": None,
+            "raw": raw,
+            "problem": f".ao/config.json is missing or unreadable ({exc})",
+        }
+    if not stat.S_ISREG(listed.st_mode):
+        return {
+            "config": None,
+            "raw": raw,
+            "problem": ".ao/config.json is not a regular file",
+        }
+
+    try:
+        with open(path, "rb") as fh:
+            opened = os.fstat(fh.fileno())
+            if not stat.S_ISREG(opened.st_mode) or (
+                listed.st_dev,
+                listed.st_ino,
+            ) != (opened.st_dev, opened.st_ino):
+                return {
+                    "config": None,
+                    "raw": raw,
+                    "problem": ".ao/config.json changed before it could be read",
+                }
+            raw = fh.read(PROJECT_CONFIG_MAX_BYTES)
+            finished = os.fstat(fh.fileno())
+    except OSError as exc:
+        return {
+            "config": None,
+            "raw": raw,
+            "problem": f".ao/config.json is missing or unreadable ({exc})",
+        }
+
+    if max(opened.st_size, finished.st_size) > PROJECT_CONFIG_MAX_BYTES:
+        return {
+            "config": None,
+            "raw": raw,
+            "problem": (
+                ".ao/config.json exceeds the "
+                f"{PROJECT_CONFIG_MAX_BYTES:,}-byte limit"
+            ),
+        }
+    if opened.st_size != finished.st_size or len(raw) != finished.st_size:
+        return {
+            "config": None,
+            "raw": raw,
+            "problem": ".ao/config.json changed while it was being read",
+        }
+
+    problem = _json_container_depth_problem(raw)
+    if problem:
+        return {"config": None, "raw": raw, "problem": problem}
+    try:
+        parsed = json.loads(raw.decode(UTF8))
+    except (UnicodeError, ValueError, RecursionError) as exc:
+        return {
+            "config": None,
+            "raw": raw,
+            "problem": f".ao/config.json is not readable valid JSON ({exc})",
+        }
+    if not isinstance(parsed, dict) or not parsed:
+        return {
+            "config": None,
+            "raw": raw,
+            "problem": ".ao/config.json must be a non-empty top-level JSON object",
+        }
+    return {"config": parsed, "raw": raw, "problem": None}
+
+
 def load_config(root):
-    """.ao/config.json — the docs show YAML for readability; the reference
-    scripts read JSON so they stay dependency-free."""
+    """Load bounded project config; malformed legacy state degrades explicitly.
+
+    Missing config remains optional for discovery and ``ao init``. When a config
+    path exists but cannot satisfy the project-state contract, callers receive
+    defaults plus ``_config_problem`` instead of an exception or unbounded parse.
+    Enrollment enforcement consumes the same ``project_config_document`` result.
+    """
     p = os.path.join(root, ".ao", "config.json")
-    cfg = {}
-    if os.path.exists(p):
-        raw = b""
-        try:
-            raw = open(p, "rb").read()
-            cfg = json.loads(raw.decode(UTF8))
-        except Exception:
-            # Legacy malformed config has historically degraded to discovery.
-            # Once the strict key is present, however, a parse failure must not
-            # erase the opt-in and silently reactivate legacy authority.
-            cfg = ({"_capability_matrix_error": True}
-                   if _has_top_level_json_key(raw, "capability_matrix") else {})
+    document = project_config_document(root)
+    cfg = document["config"] or {}
+    if document["problem"] is not None and os.path.lexists(p):
+        cfg["_config_problem"] = document["problem"]
+        # Legacy malformed config has historically degraded to discovery. Once
+        # the strict key is present, however, a parse failure must not erase the
+        # opt-in and silently reactivate legacy authority. ``raw`` is bounded.
+        if _has_top_level_json_key(document["raw"], "capability_matrix"):
+            cfg["_capability_matrix_error"] = True
     cfg.setdefault("root", root)
     cfg.setdefault("mailbox", "agent-mail")
     cfg.setdefault("reviews", "semantic-review")

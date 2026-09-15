@@ -59,19 +59,32 @@ nothing is lost when the run degrades:
 - `ao pings setup --url …` gives an external service (healthchecks.io) a
   heartbeat from the watchdog and the doctor job — when both die, that service
   e-mails you, which nothing on the dead machine can;
+- `.ao-project` is the tracked enrollment boundary: only exact
+  `ao-project-v1\n` bytes in HEAD or the active index activate enforcement. An
+  incidental `.ao/` directory stays inert. A staged marker supports first
+  adoption; a staged deletion remains enrolled through HEAD. Once enrolled,
+  `.ao/config.json` must be a valid, non-empty top-level JSON object or every
+  commit is refused with an `ao init --profile claude-kiro` repair. Its shared
+  pre-dispatch/enforcement reader consumes at most 1,048,576 bytes and rejects
+  container nesting deeper than 64 before recursive JSON decoding.
 - `ao hooks status` asks Git for the effective hook path and reports its class,
   winning `core.hooksPath` scope/origin/value, each role's static and track
-  state, and misplaced AO forms. `current-local (behavior unverified)` and
-  `current-scoped (behavior unverified)` are byte-level intent labels; backlog
-  #59 owns proof that Git actually executes the hook and that scoped routing
-  reaches AO.
+  state, and misplaced AO forms. Exact current bytes remain labelled `behavior
+  unverified`; a separate `installed (execution proved)` result exists only when
+  `git hook run pre-commit` carries AO's isolated synthetic index to
+  `commit-check` and receives the nonce-bound fail-closed response. Status,
+  doctor, `doctor --check`, and init all use that same runtime result.
 - `ao hooks install` treats pre-commit and pre-push independently. Pre-commit
   intends to revalidate the persisted grant against Git's active index; `ao
   push allow` opens the human push window for thirty minutes. Foreign,
   ambiguous, symlinked, tracked, and indeterminate targets are never
   overwritten. One eligible role may be installed while a custom other role is
   preserved, reported unavailable, and makes install return 1.
-- Install, uninstall, and `ao remove --yes` preflight their complete mutation
-  sets. If any eligible target is shared, external, or selected by global/system
-  config, the command refuses every mutation unless `--allow-shared-hooks` is
-  explicit. The flag never authorizes foreign or protected content.
+- Install and uninstall preflight their complete mutation sets. `ao remove --yes`
+  is additionally two-phase: while the canonical marker remains in HEAD or the
+  active index it removes only the working-tree `.ao-project` and keeps state and
+  enforcement; after the authorized marker-deletion commit, a second invocation
+  may remove state. If any eligible hook target is shared, external, or selected
+  by global/system config, the command refuses every hook mutation unless
+  `--allow-shared-hooks` is explicit. The flag never authorizes foreign or
+  protected content.

@@ -67,10 +67,16 @@ Anything not forbidden there and inside the slice's scope is allowed.
    its verification and newest matching prospective review approve, no urgent
    mail is unacknowledged, and no plan drift exists. Authority rows form a
    predecessor hash chain; `ao commit-check` refuses a malformed or broken chain
-   before it considers a grant. An exact AO pre-commit body expresses the static
-   intent to run `ao commit-check` against Git's active index without issuing or
-   consuming authority; it remains `behavior unverified` until backlog #59
-   proves Git executes it. `ao hooks` resolves Git's effective path, never
+   before it considers a grant. Enforcement is enrolled only when the root
+   `.ao-project` has exact `ao-project-v1\n` bytes in HEAD or the active index;
+   `.ao/config.json` must then be a valid, non-empty top-level JSON object. Its
+   shared pre-dispatch/enforcement reader consumes at most 1,048,576 bytes and
+   rejects container nesting deeper than 64 before recursive JSON decoding. An
+   exact AO pre-commit body expresses only the static intent to run
+   `ao commit-check` against Git's active index. `ao hooks
+   status`, doctor, and init call Git's hook runner with an isolated synthetic
+   index; only AO's nonce-bound refusal is `installed (execution proved)`.
+   `ao hooks` resolves Git's effective path, never
    overwrites foreign/protected content, and requires explicit
    `--allow-shared-hooks` for the whole mutation set when any eligible target is
    shared, external, or selected by global/system config. Then one local commit.
@@ -138,12 +144,17 @@ window). After: `ao fanout record --agents N --done D --errors E --tokens T`.
 ## 9. Setup, once per repository
 
 `ao init --profile claude-kiro|claude-claude` writes `.ao/` (config with the role
-blocks: who implements, reviews, judges; board, backlog, authority, gates), the mailbox,
-this playbook for the agents it detects, and **registers the ao MCP server** for
-them (`.mcp.json` for Claude Code, `.kiro/settings/mcp.json` for Kiro). Ask the
-human before running it; afterwards tell them: *start or restart the app in this
-directory so the `ao` tools load, then run `ao doctor`.* Add `--watchdog` (or
-`ao watchdog install`) for unattended runs; it installs a companion job that runs
+blocks: who implements, reviews, judges; board, backlog, authority, gates), the exact
+root `.ao-project` marker, the mailbox, this playbook, and the MCP registration. It
+never stages `.ao-project`: a person includes that marker in the first authorized
+candidate. Enforcement begins when its exact `ao-project-v1\n` bytes reach HEAD or
+the active index. Removal is two-phase: commit the marker deletion while state still
+enforces, then run `ao remove --yes` again to remove the remaining state.
+
+The MCP server is registered for detected agents (`.mcp.json` for Claude Code,
+`.kiro/settings/mcp.json` for Kiro). Ask the human before running init; afterwards
+tell them to restart the app in this directory and run `ao doctor`. Add `--watchdog`
+(or `ao watchdog install`) for unattended runs; it installs a companion job that runs
 `ao doctor --check` every fifteen minutes as the second, independent check.
 
 ## 10. When the run degrades
@@ -166,9 +177,9 @@ start. Run anything in a repository whose owner has not approved it.
 
 | command | one line |
 |---|---|
-| `ao init` | put ao on this project: files, playbook, MCP registration; idempotent |
+| `ao init` | write AO state plus an exact unstaged `.ao-project` enrollment marker; idempotent |
 | `ao skill install` | (re)write this playbook for the detected agents (ao-owned files only; `--rules` for the owner's rule files) |
-| `ao remove --yes` | take ao off the repository: what init wrote, MCP entries, jobs, local state |
+| `ao remove --yes` | two phases: commit `.ao-project` deletion under enforcement, then remove AO-owned state |
 | `ao status` / `ao watch` / `ao watch --all` | the panel: who is working, quota, problems, mail |
 | `ao board` | READY / running / blocked (`needs:`) / verified / done |
 | `ao fleet` | every project on this machine at a glance |
@@ -194,7 +205,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao credits` | provider credits and windows |
 | `ao features [on|off <key>]` | the switches and what each costs; all off = deterministic ao |
 | `ao waive <gate> --slice S --why …` / `ao catchup` | a person's bypass on the record; catchup reviews the landed range and replays deferred work |
-| `ao pings setup --url …` / `ao hooks [status|install|uninstall] [--allow-shared-hooks]` / `ao push allow` | dead man's switch; static AO hook intent at Git's effective path (`behavior unverified`); explicit authorization for shared/external/global mutation; human push window |
+| `ao pings setup --url …` / `ao hooks [status|install|uninstall] [--allow-shared-hooks]` / `ao push allow` | dead man's switch; static AO hook intent plus Git-executed, nonce-bound pre-commit proof; explicit authorization for shared/external/global mutation; human push window |
 | `ao cost [--since 24h]` | what the coordination spends: implementer turns by class, wasted turns, review counts |
 | `ao since last|2h|<ref>` | what happened since |
 | `ao digest` | landed work, gates, reviews, decisions in one page |

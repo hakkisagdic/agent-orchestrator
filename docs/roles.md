@@ -167,18 +167,54 @@ producing any.
 ## When the reviewer cannot review
 
 `reviewer.fallbacks` in `.ao/config.json` is a list of further reviewer blocks
-tried in order when the primary is unavailable — out of quota, not logged in,
-timed out, or silent. The identity of whoever actually reviewed is recorded in
-the review file, marked as a fallback.
+tried in order when the primary invocation is structurally unavailable. AO reports
+permanent failures—missing/inaccessible executables, ordinary nonzero exits,
+silence, and unknown failures—on the first occurrence and immediately advances.
+Known non-transient spawn errnos (`ENOENT`, `ENOTDIR`, `EACCES`, `EPERM`,
+`ENOEXEC`) map to the permanent spawn class; every other unrecognized OS error
+maps to a separate unknown class that is also permanent and non-retryable. Only
+timeouts, exit 75, `BlockingIOError`, and resource errnos that the running
+platform actually exposes (`EAGAIN`, `EWOULDBLOCK`, `ENOMEM`, `EMFILE`, `ENFILE`,
+`ETXTBSY`) are transient. Missing errno symbols are never assigned substitute
+numbers, and unknown OS errors remain permanently closed. AO retries transient
+route positions once after 30 seconds. Reviewer prose never changes that
+classification.
+
+Reviewer executable discovery is bounded independently of environment cardinality:
+AO examines at most the first 64 `PATH` directories, 32 built-in/version-manager
+fallback directories, 16 Windows `PATHEXT` suffixes, and 8 distinct executable
+candidates. A 30-second monotonic deadline starts before directory discovery; all
+candidate `--version` waits share what remains, reserve the 5-second kill/drain
+allowance, and retain the existing 25-second per-process ceiling. If the deadline
+expires, AO keeps the first absolute executable already found rather than starting
+another version subprocess.
+
+Each invocation runs from a disposable non-repository directory with inherited Git
+bindings removed, which prevents an accidental relative `git stash`, `git add`, or
+file write from changing the live candidate. This is mutation containment, not a
+sandbox. The selected reviewer's identity is still recorded in the review artifact
+and marked when it came from a fallback. `ao init` and manual `ao doctor`
+additionally issue an exact-nonce probe and report the selected route, resolved
+binary, version, and reason; scheduled `doctor --check` stays static and spends no
+reviewer quota.
 
 Legacy configs prefer a different family but permit a fresh session of the
-implementer's family as a last resort. Projects that opt into the version-1
-[capability matrix](capability-matrix.md) use the stronger rule: a reviewer with
-the implementer's binding **or bound model family** is ineligible and is never
+implementer's family as a last resort. In that mode, `reviewer.id` is the
+operator's actor declaration: AO refuses an exact match with the implementer
+session, while the nonce probe proves transport liveness only—not runtime actor
+attestation. Comparing launcher binaries would wrongly collapse independent
+sessions that share one CLI. Projects that need enforced declared separation opt
+into the version-1 [capability matrix](capability-matrix.md): a reviewer with the
+implementer's binding **or bound model family** is ineligible and is never
 spawned. Family comes only from the bound model declaration, so inline family
 fields cannot spoof independence. Runtime-unavailable eligible reviewers still
 advance in order; malformed substantive output is `INVALID` and does not trigger
-approval shopping.
+approval shopping. A schema-valid reviewer response is the review artifact. Every
+unsuccessful response is terminal-only: repository review files, reviewer state,
+notices, and strict evidence persist only AO-generated closed metadata such as kind,
+exit code, binary, timeout, and attempt position. AO does not derive reset hints or
+failure reasons from subprocess prose, and pattern-based diagnostic redaction is not
+an authority mechanism.
 
 If no reviewer is available, `ao review` exits 3 and writes a file whose verdict
 is `UNAVAILABLE`. That file is not a round and never becomes NEEDS_CHANGES; the

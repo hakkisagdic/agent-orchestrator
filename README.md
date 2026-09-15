@@ -109,8 +109,8 @@ scope is the one authority an implementer must not have.
 | `ao pings setup --url …` | dead man's switch: external pings that alarm when the watchdog and its doctor job both die |
 | `ao hooks [status|install|uninstall] [--allow-shared-hooks]` / `ao push allow` | resolve Git's effective hook path; each role is independent, and shared/external/global mutations require explicit command-wide authorization |
 | `ao skill install` / `ao skill show` | the playbook (roles, loop, authority, protocol, alarms, every command) rendered for the agents this repo uses: Claude skill, Kiro steering, AGENTS.md |
-| `ao remove --yes [--allow-shared-hooks]` | remove AO state only after a complete hook-topology preflight; foreign and protected hooks stay untouched |
-| `ao init --profile claude-kiro|claude-claude` | write the role blocks: who implements (adapter, model, effort), who reviews (another model), who judges ([profiles.md](docs/profiles.md)) |
+| `ao remove --yes [--allow-shared-hooks]` | two-phase removal: delete and commit `.ao-project` while enforcement remains active, then remove AO state after HEAD and index no longer contain it; foreign/protected hooks stay untouched |
+| `ao init --profile claude-kiro|claude-claude` | write role blocks and exact `.ao-project` enrollment marker without staging it ([profiles.md](docs/profiles.md)) |
 | `ao doctor --check` | quiet doctor for a scheduler: one line per problem, exit 1, alarms raised — installed as a 15-minute launchd job by `ao watchdog install` |
 | `ao email setup` / `ao email test` | the red alarm channel: e-mail via formsubmit.co, no server ([alarms.md](docs/alarms.md)) |
 | `ao alarms` / `ao alarms test --level red` | live alarm episodes and their level; test rings every channel |
@@ -131,10 +131,25 @@ scope is the one authority an implementer must not have.
 | `ao prune` | trim accumulated records and logs |
 | `ao doctor` · `ao adapters` | check the wiring; what is supported and how well |
 
-Hook status is deliberately static: `current-local (behavior unverified)` and
-`current-scoped (behavior unverified)` mean that the bytes express AO's intended
-role, not that Git executed them. Runtime execution proof remains backlog #59.
-`status` names the effective path, path class, winning `core.hooksPath`
+Hook status separates static intent from executable enforcement. AO enforcement is
+opted in only by a root `.ao-project` whose exact `ao-project-v1\n` bytes exist in
+HEAD or the active index; an incidental `.ao/` directory is inert. A staged marker
+enables first adoption, while a staged deletion remains enrolled through HEAD until
+that deletion is committed. An enrolled project requires `.ao/config.json` to be a
+valid, non-empty top-level JSON object. AO reads at most 1,048,576 bytes and
+rejects container nesting deeper than 64 before recursive JSON decoding;
+pre-dispatch loading and commit enforcement use the same bounded result. Missing
+or unreadable state refuses with the one-line `ao init --profile claude-kiro`
+repair.
+
+The `current-local (behavior unverified)` and `current-scoped (behavior unverified)`
+labels describe bytes only; `pre-commit execution: installed (execution proved)`
+is printed only after Git resolves and runs the active hook with an isolated
+synthetic index and AO returns the nonce-bound refusal for that exact challenge.
+The probe never commits, changes the real index, or writes a Git object. A missing,
+misplaced, non-executable, stale, foreign, or fail-open hook is `not installed`, and
+`hooks status`, `doctor`, `doctor --check`, and `init` consume the same result.
+`status` also names the effective path, path class, winning `core.hooksPath`
 scope/origin/value, track state, and misplaced AO forms. Install handles
 pre-commit and pre-push independently, so it may install an eligible pre-commit,
 preserve a custom pre-push byte-for-byte, report the push-window hook unavailable,
