@@ -64,11 +64,16 @@ def cycles_path(root):
     return os.path.join(STATE_DIR, f"cycles-{key}.jsonl")
 
 
-def record_cycle(root, args):
+def record_cycle(root, args, started=None):
     if getattr(args, "dry_run", False):
         return
-    rec = {"at": int(time.time()), "verdict": _TRACE[-1] if _TRACE else "",
+    now = time.time()
+    rec = {"at": int(now), "verdict": _TRACE[-1] if _TRACE else "",
            "trace": list(_TRACE), "facts": dict(_FACTS)}
+    if started is not None:
+        # Without a start, a cycle that ran for minutes and a machine that ran
+        # none leave the same gap in this log.
+        rec.update(started=int(started), seconds=round(now - started, 1))
     try:
         p = cycles_path(root)
         os.makedirs(STATE_DIR, exist_ok=True)
@@ -114,6 +119,35 @@ REFILL_PROMPT = (
     "proje boyutundaysa acceptance'ı boş bırak ve shape alanına sebebini yaz — "
     "kabul sınırı olmayan madde inbox'ta kalır, kuyruğa girmez. "
     "Uygulama YAPMA; yalnız çek, sınıflandır, kabul et.")
+
+
+def cycle_health(root, last=720):
+    """How long recent cycles took, and the longest silence between two of them.
+
+    A gap in the cycle log has two causes - no cycle ran, or one ran for minutes
+    and held the next back - and a row that carries only its end time cannot tell
+    them apart. On 2026-09-15 the Voltrai log showed gaps of 5 to 27 minutes
+    between 12:02 and 16:33 with no sleep recorded, and nothing on disk could say
+    which it was. Rows written before `started` existed count by their end times.
+    """
+    rows = [r for r in cycles(root, last) if isinstance(r.get("at"), (int, float))]
+    if not rows:
+        return None
+    timed = [r for r in rows if isinstance(r.get("seconds"), (int, float))]
+    longest = max(timed, key=lambda r: r["seconds"]) if timed else None
+    gap, gap_at = 0, None
+    for previous, current in zip(rows, rows[1:]):
+        silence = current.get("started", current["at"]) - previous["at"]
+        if silence > gap:
+            gap, gap_at = silence, current["at"]
+
+    def when(t):
+        return time.strftime("%d %b %H:%M", time.localtime(t))
+
+    return {"count": len(rows),
+            "longest_seconds": longest["seconds"] if longest else None,
+            "longest_at": when(longest["at"]) if longest else None,
+            "gap_minutes": gap / 60, "gap_at": when(gap_at) if gap_at else None}
 
 
 def child_path():
@@ -881,10 +915,11 @@ def run(args):
     _TRACE.clear()
     _FACTS.clear()
     root = os.path.abspath(os.path.expanduser(args.root))
+    started = time.time()
     try:
         return _cycle(args, root)
     finally:
-        record_cycle(root, args)
+        record_cycle(root, args, started)
 
 
 def _cycle(args, root):

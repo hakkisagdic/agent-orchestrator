@@ -5691,6 +5691,14 @@ def cmd_watchdog(cfg, args):
         print(f"doctor  {'loaded' if dloaded else 'not installed'}  (ao doctor --check every 15m)")
         print(f"plist   {'present' if os.path.exists(plist_path) else 'absent'}")
         print(f"loaded  {loaded if loaded else 'no'}")
+        from .watchdog import cycle_health
+        health = cycle_health(root)
+        if health:
+            took = (f"longest took {health['longest_seconds']:.0f}s at {health['longest_at']}"
+                    if health["longest_seconds"] is not None else "durations not recorded yet")
+            gap = (f"longest gap {health['gap_minutes']:.0f}m before {health['gap_at']}"
+                   if health["gap_at"] else "no gaps")
+            print(f"cycles  {health['count']} recorded · {took} · {gap}")
         if os.path.exists(log):
             print(f"\nlast lines of {log}:")
             print(A.sh(f"tail -5 {log}"))
