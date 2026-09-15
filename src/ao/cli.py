@@ -1874,6 +1874,30 @@ REVIEW_DISCOVERY_MAX_FALLBACK_DIRS = 32
 REVIEW_DISCOVERY_MAX_CANDIDATES = 8
 REVIEW_DISCOVERY_MAX_EXTENSIONS = 16
 REVIEW_KILL_DRAIN_SECONDS = 5
+REVIEW_TIMEOUT_DEFAULT = 900
+
+
+def _review_chain_budget(timeout):
+    """The most one walk of the reviewer chain may take (#100).
+
+    Each route used to run with the full timeout and every transient one ran a
+    second time, so a chain's worst case grew with its length and nothing said
+    what it was. One walk now fits two full attempts - each with room for
+    reviewer discovery and the kill drain - and the retry wait between them: a
+    single reviewer keeps exactly the time and the retry it had, and a longer
+    chain shares that time instead of multiplying it.
+    """
+    attempt = float(timeout) + REVIEW_KILL_DRAIN_SECONDS + REVIEW_DISCOVERY_TOTAL_SECONDS
+    return 2 * attempt + REVIEW_RETRY_SECONDS
+
+
+def _review_budget_text(review_timeout=REVIEW_TIMEOUT_DEFAULT, probe_timeout=None):
+    def span(seconds):
+        return f"{int(seconds // 60)}m {int(seconds % 60)}s"
+
+    probe = REVIEW_PROBE_TIMEOUT if probe_timeout is None else probe_timeout
+    return (f"a review takes at most {span(_review_chain_budget(review_timeout))} and the reviewer "
+            f"probe at most {span(_review_chain_budget(probe))}, whatever the length of the chain")
 
 
 def _review_retry_wait(seconds):
@@ -2304,13 +2328,39 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary):
 
 def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
                            validate=None):
-    """Walk fallbacks now; retry only structurally transient route positions."""
-    failures, transient, labels = {}, [], {}
+    """Walk fallbacks now; retry only structurally transient route positions.
 
-    def invoke(position):
+    The whole walk shares one deadline (#100). A route starts only while the
+    deadline leaves room for reviewer discovery and the kill drain, and it gets
+    no more time than remains; a route the budget never reached, and a transient
+    one it cannot retry, is recorded as such, so an exhausted budget closes as
+    UNAVAILABLE naming the budget rather than running on.
+    """
+    failures, transient, labels = {}, [], {}
+    budget = _review_chain_budget(timeout)
+    deadline = time.monotonic() + budget
+
+    def room():
+        return (deadline - time.monotonic()
+                - REVIEW_KILL_DRAIN_SECONDS - REVIEW_DISCOVERY_TOTAL_SECONDS)
+
+    def not_reached(position):
+        failures[position] = {
+            "ok": False, "out": "", "returncode": None, "kind": "timeout", "retryable": False,
+            "reason": f"not tried: the review chain budget of {budget:.0f}s was spent",
+        }
+
+    def not_retried(position):
+        failure = dict(failures[position])
+        failure["reason"] = (f"{failure.get('reason')}; not retried: the review chain budget "
+                             f"of {budget:.0f}s was spent")
+        failure["retryable"] = False
+        failures[position] = failure
+
+    def invoke(position, route_timeout):
         cand = chain[position]
         label, binary, version, attempt = _reviewer_route_invocation(
-            root, cand, prompt, timeout, strict, primary
+            root, cand, prompt, route_timeout, strict, primary
         )
         labels[position] = label
         if attempt["ok"] and validate is not None:
@@ -2332,22 +2382,35 @@ def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
         return None
 
     for position in range(len(chain)):
-        result = invoke(position)
+        if room() <= 0:
+            for skipped in range(position, len(chain)):
+                not_reached(skipped)
+            print(f"{C['dim']}review chain budget of {budget:.0f}s spent; "
+                  f"{len(chain) - position} route(s) not tried.{C['reset']}")
+            break
+        result = invoke(position, min(float(timeout), room()))
         if result is not None:
             return result
         if failures[position].get("retryable") is True:
             transient.append(position)
 
     if transient and REVIEW_ATTEMPTS > 1:
-        print(
-            f"{C['dim']}{len(transient)} transient reviewer route(s) unavailable; "
-            f"retrying once in {REVIEW_RETRY_SECONDS}s.{C['reset']}"
-        )
-        _review_retry_wait(REVIEW_RETRY_SECONDS)
-        for position in transient:
-            result = invoke(position)
-            if result is not None:
-                return result
+        if room() - REVIEW_RETRY_SECONDS <= 0:
+            for position in transient:
+                not_retried(position)
+        else:
+            print(
+                f"{C['dim']}{len(transient)} transient reviewer route(s) unavailable; "
+                f"retrying once in {REVIEW_RETRY_SECONDS}s.{C['reset']}"
+            )
+            _review_retry_wait(REVIEW_RETRY_SECONDS)
+            for position in transient:
+                if room() <= 0:
+                    not_retried(position)
+                    continue
+                result = invoke(position, min(float(timeout), room()))
+                if result is not None:
+                    return result
 
     return {
         "used": None, "used_position": None, "attempt": None,
@@ -5876,6 +5939,7 @@ def cmd_doctor(cfg, args):
         f"reviewer probe  {probe_tone}{_reviewer_probe_text(reviewer_probe)}"
         f"{C['reset']}"
     )
+    print(f"review budget   {C['dim']}{_review_budget_text()}{C['reset']}")
     print(f"quota source    {'keyflip' if A.sh('command -v keyflip') else '—'}")
     key = os.path.basename(root.rstrip("/")).lower()
     wd = A.sh(f"launchctl list | grep com.agentorchestrator.watchdog.{key}")
@@ -6162,7 +6226,7 @@ def main():
     rw.add_argument("--boundary", help="acceptance boundary; defaults to the running slice")
     rw.add_argument("--paths", nargs="*", help="narrow a prospective review to these staged paths")
     rw.add_argument("--commits", help="review landed work retrospectively; never authorizes a commit")
-    rw.add_argument("--timeout", type=int, default=900)
+    rw.add_argument("--timeout", type=int, default=REVIEW_TIMEOUT_DEFAULT)
     rw.set_defaults(fn=cmd_review)
     tg = sub.add_parser("telegram", help="phone channel: alerts out, decisions in")
     tg.add_argument("action", nargs="?", default="status",
