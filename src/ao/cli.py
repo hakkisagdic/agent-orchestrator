@@ -52,6 +52,15 @@ def _checkout_position(g):
     return text
 
 
+def _idle_answer_text(idle, now=None):
+    """How long the implementer has had nothing to do, and what would change that (#96)."""
+    since = idle.get("since") or 0
+    minutes = max(0, int(((now or time.time()) - since) / 60))
+    return (f"since {time.strftime('%H:%M', time.localtime(since))} ({minutes // 60}h {minutes % 60}m): "
+            "answered a nudge without changing anything; waiting for the board, the backlog, "
+            "a decision or mail")
+
+
 def render(cfg, msg_count=8, width=None, max_lines=None):
     """Render the panel. When max_lines is given the output never exceeds it:
     the fixed sections are laid out first and the message log — the only elastic
@@ -127,8 +136,13 @@ def render(cfg, msg_count=8, width=None, max_lines=None):
         nudge_err = A.last_nudge_error(root)
         errs = A.recent_errors(recs, 2, adapter)
         spin = A.spinning(root)
-        if nudge_err or errs or spin:
+        from .watchdog import load_state as _load_state
+        idle_answer = (_load_state(root) or {}).get("idle_answer")
+        if nudge_err or errs or spin or idle_answer:
             a(f"\n{C['b']}{C['red']}── PROBLEMS {'─' * max(0, w - 13)}{C['reset']}")
+            if idle_answer:
+                a(f"   {C['yellow']}nothing to do{C['reset']} "
+                  f"{C['dim']}{_idle_answer_text(idle_answer)}{C['reset']}")
             if spin:
                 a(f"   {C['red']}spinning{C['reset']} {C['dim']}{spin}m busy, nothing committed "
                   f"or changed{C['reset']}")

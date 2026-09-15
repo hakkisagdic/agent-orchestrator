@@ -1100,9 +1100,22 @@ def _cycle_impl(args, root):
     if st.get("attempts") and fp != st.get("last_fingerprint"):
         st.update(attempts=0, last_fingerprint=fp)
         save_state(root, st)
+    # An implementer that answered a nudge with nothing is not asked again until
+    # something it is given, or something it produces, moves (#96).
+    idle = st.get("idle_answer")
+    if idle and (fp != idle.get("work") or A.nudge_inputs(root, cfg) != idle.get("inputs")):
+        for key in ("idle_answer", "nudge_size", "nudge_fingerprint", "nudge_inputs"):
+            st.pop(key, None)
+        st["attempts"] = 0
+        save_state(root, st)
+        print("the board, the backlog, a decision, mail or the work moved since the "
+              "implementer had nothing to do; nudges resume")
     if age < args.idle_minutes * 60:
-        if st.get("attempts"):
-            st.update(attempts=0, last_size=size)   # it moved; forget the backoff
+        if st.get("attempts") and size != st.get("last_size"):
+            # The transcript moving is not the work moving: a nudged turn that finds
+            # nothing to do writes its answer too. Only the fingerprint above resets
+            # the backoff.
+            st.update(last_size=size)
             save_state(root, st)
         print(f"working ({int(age)}s since last write)")
         return 0
@@ -1251,6 +1264,29 @@ def _cycle_impl(args, root):
         print(f"provider degraded ({degraded}); waiting rather than nudging")
         return 0
 
+    # 4c — the implementer answered the last nudge and changed nothing while nothing
+    # it is given moved: it has no work it can see, whatever the board says. Asking
+    # again every idle window cost 29 turns in one morning (#96). This reads what
+    # the turn did, not the wording of its report.
+    if (st.get("nudge_size") is not None and size > st["nudge_size"] and A.turn_ended(cfg)
+            and fp == st.get("nudge_fingerprint")
+            and A.nudge_inputs(root, cfg) == st.get("nudge_inputs")
+            and (st.get("last_error") or {}).get("at", 0) < st.get("last_nudge", 0)):
+        idle = st.get("idle_answer")
+        if not idle:
+            idle = {"since": st.get("last_nudge") or time.time(), "work": fp,
+                    "inputs": st.get("nudge_inputs")}
+            st["idle_answer"] = idle
+            save_state(root, st)
+            notify(f"{project}: implementer has nothing to do",
+                   "it answered the last nudge without changing anything; no more nudges until "
+                   "the board, the backlog, a decision or its mail changes", root,
+                   key="idle-answer", window=12 * 3600, audience="human")
+        since = time.strftime("%H:%M", time.localtime(idle["since"]))
+        print(f"idle since {since}: the implementer answered the last nudge without changing "
+              f"anything; waiting for the board, the backlog, a decision or mail; not nudging")
+        return 0
+
     # 5 — the previous nudge changed nothing
     if st.get("attempts", 0) >= MAX_ATTEMPTS:
         notify(f"{project}: agent stuck", f"{MAX_ATTEMPTS} nudges, no progress — needs a human", root)
@@ -1331,9 +1367,11 @@ def _cycle_impl(args, root):
             early = proc.returncode
             break
 
+    nudged_fp = A.work_fingerprint(root)
     st.update(attempts=st.get("attempts", 0) + 1, last_nudge=time.time(),
-              last_size=size, child_pid=proc.pid,
-              last_fingerprint=A.work_fingerprint(root))
+              last_size=size, child_pid=proc.pid, last_fingerprint=nudged_fp,
+              nudge_size=size, nudge_fingerprint=nudged_fp,
+              nudge_inputs=A.nudge_inputs(root, cfg))
     if early not in (None, 0):
         tail = ""
         try:

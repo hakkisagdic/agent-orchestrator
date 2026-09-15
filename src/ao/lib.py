@@ -774,20 +774,16 @@ def record_progress(root, cfg):
     single snapshot cannot tell activity from progress.
     """
     msgs, _ = session_paths(cfg)
-    porcelain = [l for l in sh("git status --porcelain", cwd=root).split("\n") if l.strip()]
+    # Coordination state is left out: the watchdog appends to this very ledger and
+    # to its notices every cycle, and while those writes counted as editing the
+    # spin check could never see a frozen run (#96).
+    porcelain, churn = _product_changes(root, cfg)
     # Content churn, not file count. A slice deep in editing its established file
     # set holds the dirty *count* stable for many minutes — same eight files, new
     # content each cycle — and a count-only check reads that as frozen and cries
     # spin. The newest mtime across the changed set advances on every edit, so it
     # tells editing apart from a genuine stall. A long gate run writes nothing, so
     # it correctly stays frozen, and the minute threshold covers that case.
-    churn = 0
-    for l in porcelain:
-        f = l[3:].split(" -> ")[-1].strip().strip('"')
-        try:
-            churn = max(churn, int(os.path.getmtime(os.path.join(root, f))))
-        except OSError:
-            pass
     rec = {"at": int(time.time()),
            "head": sh("git rev-parse --short HEAD", cwd=root),
            "dirty": len(porcelain), "churn": churn,
@@ -1352,19 +1348,43 @@ def digest(root, cfg, since_days=1.0):
     return out
 
 
-def work_fingerprint(root):
+AGENT_LEDGERS = ("authority.jsonl", "decisions.jsonl", "fanouts.jsonl", "verifications.jsonl",
+                 "waivers.jsonl")
+
+
+def _product_changes(root, cfg):
+    """(porcelain lines, newest mtime) for uncommitted paths outside coordination state."""
+    lines = product_dirty(root, cfg)
+    churn = 0
+    for line in lines:
+        name = line[3:].split(" -> ")[-1].strip().strip('"')
+        try:
+            churn = max(churn, int(os.path.getmtime(os.path.join(root, name))))
+        except OSError:
+            pass
+    return lines, churn
+
+
+def work_fingerprint(root, cfg=None):
     """Everything that moves when work is happening, in one short string.
 
     A commit is one shape of progress, not the only one. A slice whose review
     found real defects withholds its commit *because it is behaving correctly*,
     and a HEAD-only progress check cannot tell that apart from an agent that
     died — so the backoff exhausted itself on a live slice and stood down for two
-    hours. Count the working tree, the reviews and the decisions too: if any of
-    them moved, something is being done.
+    hours. Count the product tree and its content, the reviews and the decisions
+    too: if any of them moved, something is being done.
+
+    Only what an agent produces counts. The watchdog appends to its own ledgers
+    every cycle - progress, notices, credits, the mail ledger - and while those
+    counted, the fingerprint changed on every cycle and a nudge's backoff reset
+    before it could grow: between 07:00 and 12:00 on 2026-09-15 the watchdog
+    nudged 29 times and never once backed off (#96).
     """
-    parts = [sh("git rev-parse --short HEAD", cwd=root) or "",
-             sh("git status --porcelain", cwd=root) or ""]
-    for sub in ("semantic-review", ".ao/decisions", ".ao/ledger"):
+    cfg = cfg if cfg is not None else load_config(root)
+    lines, churn = _product_changes(root, cfg)
+    parts = [sh("git rev-parse --short HEAD", cwd=root) or "", "\n".join(lines), str(churn)]
+    for sub in (cfg.get("reviews") or "semantic-review", DECISION_DIR):
         d = os.path.join(root, sub)
         if os.path.isdir(d):
             try:
@@ -1373,6 +1393,37 @@ def work_fingerprint(root):
                     for f in os.listdir(d))))
             except OSError:
                 pass
+    ledger = os.path.join(root, ".ao", "ledger")
+    for name in AGENT_LEDGERS:
+        try:
+            parts.append(f"{name}:{int(os.path.getmtime(os.path.join(ledger, name)))}")
+        except OSError:
+            pass
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
+
+
+def nudge_inputs(root, cfg):
+    """What an idle implementer could act on, in one short string (#96).
+
+    work_fingerprint measures what an agent produces; this measures what it is
+    given: the board, the backlog, the decisions and mail addressed to it. An
+    implementer that answered a nudge by changing nothing is not asked again
+    until one of these, or its work, moves.
+    """
+    parts = []
+    for rel in (".ao/board.md", ".ao/backlog.md"):
+        try:
+            with open(os.path.join(root, rel), "rb") as fh:
+                parts.append(hashlib.sha256(fh.read()).hexdigest())
+        except OSError:
+            parts.append("-")
+    d = os.path.join(root, DECISION_DIR)
+    try:
+        parts.append("|".join(sorted(f"{f}:{int(os.path.getmtime(os.path.join(d, f)))}"
+                                     for f in os.listdir(d))))
+    except OSError:
+        parts.append("-")
+    parts.append("|".join(sorted(implementer_inbox(root, cfg))))
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
 
 
@@ -3341,7 +3392,16 @@ def implementer_inbox(root, cfg):
 def product_dirty(root, cfg):
     """Uncommitted paths outside the coordination directories."""
     out = []
-    for line in (sh("git status --porcelain", cwd=root) or "").split("\n"):
+    # Not sh(): it strips its output, and the first line's leading status column
+    # went with it - " M .ao/ledger/notices.jsonl" became "M .ao/...", the path
+    # lost its first character, and a coordination file read as a product change.
+    # A failure still reads as no uncommitted paths, as it did through sh(); no
+    # caller decides authority from this.
+    try:
+        status = _git_output(root, "status", "--porcelain").decode(UTF8, "replace")
+    except Exception:
+        status = ""
+    for line in status.split("\n"):
         if not line.strip():
             continue
         raw = line[3:].strip().strip('"')

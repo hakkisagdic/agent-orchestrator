@@ -116,6 +116,7 @@ TOOLS = [
 
 
 def status_payload(cfg):
+    from . import watchdog as W
     root = cfg["root"]
     impl = cfg.get("implementer") or {}
     adapter = A.load_adapter(impl.get("adapter", "")) if impl else {}
@@ -128,6 +129,7 @@ def status_payload(cfg):
     return {"project": cfg.get("project") or os.path.basename(root), "root": root,
             "adapter": impl.get("adapter"), "state": state, "seconds_since_write": age,
             "doing": desc, "spinning_minutes": A.spinning(root),
+            "nothing_to_do_since": (W.load_state(root).get("idle_answer") or {}).get("since"),
             "context_percent": tel.get("ctx"), "turns": tel.get("turns"),
             "cost_total": tel.get("total"), "cost_unit": tel.get("unit"),
             "head": g["log"][0] if g["log"] else None,
