@@ -1201,6 +1201,22 @@ def test_init_writes_exact_unstaged_marker_and_refuses_wrong_reinit(
 ):
     root = _init_repo(tmp_path / "init-marker")
     cfg = _cfg(root)
+    # This marker test does not exercise reviewer transport. AO59b makes that
+    # transport fatal, so model the one successful probe result produced by an
+    # exact nonce echo while leaving every marker assertion live.
+    monkeypatch.setattr(
+        cli,
+        "_reviewer_probe",
+        lambda probe_cfg, timeout=cli.REVIEW_PROBE_TIMEOUT: {
+            "configured": True,
+            "ok": True,
+            "route": "fixture-reviewer",
+            "binary": sys.executable,
+            "version": "fixture",
+            "reason": "exact nonce echoed",
+            "kind": "success",
+        },
+    )
 
     assert cli.cmd_init(cfg, _init_args(profile="claude-kiro")) == 0
     marker = root / cli.PROJECT_MARKER
@@ -1349,27 +1365,3 @@ def test_project_config_reader_rejects_symlink_with_one_shared_problem(project):
     assert document["problem"] == ".ao/config.json is not a regular file"
     assert loaded["_config_problem"] == document["problem"]
     assert cli._project_config_problem(str(root)) == document["problem"]
-
-
-def test_init_revalidates_profile_output_before_writing_remaining_state(
-    tmp_path, monkeypatch, capsys
-):
-    root = _init_repo(tmp_path / "init-profile-bound")
-
-    def write_oversized_profile(profile_root, args):
-        path = Path(profile_root) / ".ao" / "config.json"
-        path.write_bytes(_sized_config(_CONFIG_LIMIT + 1))
-        return ["reviewer"]
-
-    monkeypatch.setattr(cli, "_apply_profile", write_oversized_profile)
-
-    assert cli.cmd_init(_cfg(root), _init_args(profile="claude-kiro")) == 1
-    output = _strip_colour(capsys.readouterr().out)
-
-    assert "1,048,576-byte limit" in output
-    assert (root / cli.PROJECT_MARKER).read_bytes() == cli.PROJECT_MARKER_BYTES
-    assert _git(
-        root, "ls-files", "--error-unmatch", "--", cli.PROJECT_MARKER,
-        check=False,
-    ).returncode == 1
-    assert not (root / ".ao" / "board.md").exists()

@@ -16,7 +16,7 @@ APPROVED_SCRIPT = (
     "print('LOW: 0'); print('VERDICT: APPROVED')"
 )
 INVALID_SCRIPT = "print('looks fine')"
-QUOTA_SCRIPT = "print('usage limit reached, resets in 1h 0m')"
+QUOTA_SCRIPT = "print('usage limit reached'); raise SystemExit(17)"
 
 
 def _tool(script, adapter):
@@ -294,6 +294,55 @@ def test_unavailable_eligible_reviewer_advances_to_fallback(project):
     assert evidence["reviewer_identity"]["binding"] == "binding.fallback"
 
 
+def test_strict_retry_resets_final_pass_attempt_evidence(project, monkeypatch):
+    cfg = _strict_config(project)
+    _stage_change(cfg["root"])
+    sleeps = []
+    calls = []
+    monkeypatch.setattr(cli, "_review_retry_wait", sleeps.append)
+
+    approved = "\n".join([
+        "VERDICT: APPROVED",
+        "BLOCKER: 0",
+        "HIGH: 0",
+        "MEDIUM: 0",
+        "LOW: 0",
+    ])
+
+    def sequenced_reviewer(*args, **kwargs):
+        calls.append((args, kwargs))
+        if len(calls) <= 2:
+            return {
+                "ok": False,
+                "out": "temporary invocation failure",
+                "reason": "exited 75: temporary invocation failure",
+                "returncode": 75,
+                "kind": "temporary-exit",
+                "retryable": True,
+            }
+        return {
+            "ok": True,
+            "out": approved,
+            "reason": "",
+            "returncode": 0,
+            "kind": "success",
+            "retryable": False,
+        }
+
+    monkeypatch.setattr(cli, "_run_reviewer", sequenced_reviewer)
+
+    assert cli.cmd_review(cfg, _args()) == 0
+    assert len(calls) == 3
+    assert sleeps == [30]
+    _, body = _review_body(cfg)
+    evidence = A.review_evidence(body)
+    assert evidence["reviewer_identity"]["binding"] == "binding.primary"
+    assert evidence["reviewer_attempts"] == [
+        {"binding": "binding.primary", "outcome": "reviewed", "reason": ""},
+        {"binding": "binding.fallback", "outcome": "not-attempted", "reason": ""},
+    ]
+
+
 def test_invalid_output_does_not_approval_shop_fallback(project, tmp_path):
     marker = tmp_path / "fallback-spawned"
     fallback = "open(%r, 'w').write('bad'); %s" % (str(marker), APPROVED_SCRIPT)
@@ -559,3 +608,23 @@ def test_strict_retrospective_evidence_is_never_authorizable(project):
     assert evidence["kind"] == "commit-range"
     assert evidence["authorizable"] is False
     assert evidence["review_status"] == "complete"
+
+
+
+@pytest.mark.parametrize(
+    "kind,expected",
+    [
+        ("missing-binary", "tool not installed"),
+        ("timeout", "timeout"),
+        ("silence", "no output"),
+        ("nonzero-exit", "runtime unavailable"),
+        ("spawn-resource", "runtime unavailable"),
+        ("spawn-permanent", "runtime unavailable"),
+        ("spawn-unknown", "runtime unavailable"),
+        ("communication-error", "runtime unavailable"),
+        ("unexpected-probe-response", "runtime unavailable"),
+        ("free-form timeout after 1s", "runtime unavailable"),
+    ],
+)
+def test_unavailable_reason_uses_only_closed_failure_kind(kind, expected):
+    assert M.safe_unavailable_reason(kind) == expected

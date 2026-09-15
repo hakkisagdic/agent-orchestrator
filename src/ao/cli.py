@@ -829,22 +829,82 @@ def _project_config_problem(root):
     return A.project_config_document(root)["problem"]
 
 
-def _worktree_project_marker_problem(root):
+def _worktree_project_marker_document(root):
+    """Read one bounded marker snapshot whose fingerprint detects replacement."""
     import stat
+
     path = os.path.join(root, PROJECT_MARKER)
     try:
-        mode = os.lstat(path).st_mode
+        listed = os.lstat(path)
+    except FileNotFoundError as exc:
+        return {
+            "exists": False,
+            "fingerprint": ("absent",),
+            "problem": f"{PROJECT_MARKER} is missing or unreadable ({exc})",
+        }
     except OSError as exc:
-        return f"{PROJECT_MARKER} is missing or unreadable ({exc})"
-    if not stat.S_ISREG(mode) or os.path.islink(path):
-        return f"{PROJECT_MARKER} is not a regular file"
+        return {
+            "exists": True,
+            "fingerprint": ("unreadable", type(exc).__name__, exc.errno),
+            "problem": f"{PROJECT_MARKER} is missing or unreadable ({exc})",
+        }
+    if not stat.S_ISREG(listed.st_mode) or os.path.islink(path):
+        return {
+            "exists": True,
+            "fingerprint": (
+                "not-regular", listed.st_dev, listed.st_ino, listed.st_mode
+            ),
+            "problem": f"{PROJECT_MARKER} is not a regular file",
+        }
     try:
-        data = open(path, "rb").read()
+        with open(path, "rb") as fh:
+            opened = os.fstat(fh.fileno())
+            data = fh.read(len(PROJECT_MARKER_BYTES) + 1)
+            finished = os.fstat(fh.fileno())
     except OSError as exc:
-        return f"{PROJECT_MARKER} is unreadable ({exc})"
+        return {
+            "exists": True,
+            "fingerprint": ("unreadable", type(exc).__name__, exc.errno),
+            "problem": f"{PROJECT_MARKER} is unreadable ({exc})",
+        }
+
+    def identity(value):
+        return (
+            value.st_dev,
+            value.st_ino,
+            value.st_mode,
+            value.st_size,
+            getattr(value, "st_mtime_ns", int(value.st_mtime * 1_000_000_000)),
+            getattr(value, "st_ctime_ns", int(value.st_ctime * 1_000_000_000)),
+        )
+
+    listed_identity = identity(listed)
+    opened_identity = identity(opened)
+    finished_identity = identity(finished)
+    fingerprint = ("regular", finished_identity, data)
+    if listed_identity != opened_identity:
+        return {
+            "exists": True,
+            "fingerprint": fingerprint,
+            "problem": f"{PROJECT_MARKER} changed before it could be read",
+        }
+    if opened_identity != finished_identity:
+        return {
+            "exists": True,
+            "fingerprint": fingerprint,
+            "problem": f"{PROJECT_MARKER} changed while it was being read",
+        }
     if data != PROJECT_MARKER_BYTES:
-        return f"{PROJECT_MARKER} bytes are not ao-project-v1"
-    return None
+        return {
+            "exists": True,
+            "fingerprint": fingerprint,
+            "problem": f"{PROJECT_MARKER} bytes are not ao-project-v1",
+        }
+    return {"exists": True, "fingerprint": fingerprint, "problem": None}
+
+
+def _worktree_project_marker_problem(root):
+    return _worktree_project_marker_document(root)["problem"]
 
 
 def _project_enrollment(root, index_file=None):
@@ -1622,30 +1682,528 @@ LOW: <n>
 BLOCKER veya HIGH varsa VERDICT mutlaka NEEDS_CHANGES olmalı."""
 
 
-def _run_reviewer(root, argv, timeout, fallback=False):
-    """One reviewer attempt. {"ok", "out", "reason"}; quota and auth errors are reasons, not output."""
-    import subprocess
-    print(f"{C['dim']}reviewer: {os.path.basename(argv[0])}{' (fallback)' if fallback else ''}{C['reset']}")
-    # The reviewer runs inside the repository and is an agent by every other
-    # test; register it as a helper so no writer count takes it for a turn.
-    proc = subprocess.Popen(argv, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding=UTF8, errors="replace")
-    A.helper_register(root, proc.pid, "reviewer")
+REVIEW_ATTEMPTS = 2
+REVIEW_RETRY_SECONDS = 30
+REVIEW_PROBE_TIMEOUT = 90
+REVIEW_VERSION_TIMEOUT = 25
+REVIEW_KILL_DRAIN_SECONDS = 5
+
+
+def _review_retry_wait(seconds):
+    time.sleep(seconds)
+
+
+def _reviewer_environment(cwd):
+    """Preserve account/runtime state while removing inherited Git bindings."""
+    env = os.environ.copy()
+    for key in list(env):
+        if key.upper().startswith("GIT_"):
+            env.pop(key, None)
+    env["PWD"] = cwd
+    env.pop("OLDPWD", None)
+    # The fresh directory contains no repository.  The ceiling also prevents a
+    # Git command issued by a reviewer from discovering a repository above it.
+    env["GIT_CEILING_DIRECTORIES"] = cwd
+    return env
+
+
+def _reviewer_terminal_output(stdout="", stderr=""):
+    """Expose unsuccessful process output to this terminal, never repository state."""
+    for channel, text in (("stdout", stdout), ("stderr", stderr)):
+        if not text:
+            continue
+        print(
+            f"{C['dim']}reviewer {channel} (terminal only):{C['reset']}",
+            file=sys.stderr,
+        )
+        sys.stderr.write(text)
+        if not text.endswith("\n"):
+            sys.stderr.write("\n")
+    sys.stderr.flush()
+
+
+def _reviewer_os_failure(exc, action, returncode=None):
+    """Classify an OS failure by errno; unknowns are permanently closed."""
+    import errno
+    transient = {
+        value for value in (
+            getattr(errno, "EAGAIN", None),
+            getattr(errno, "EWOULDBLOCK", None),
+            getattr(errno, "ENOMEM", None),
+            getattr(errno, "EMFILE", None),
+            getattr(errno, "ENFILE", None),
+            getattr(errno, "ETXTBSY", None),
+        ) if value is not None
+    }
+    permanent = {
+        value for value in (
+            getattr(errno, "ENOENT", None), getattr(errno, "ENOTDIR", None),
+            getattr(errno, "EACCES", None), getattr(errno, "EPERM", None),
+            getattr(errno, "ENOEXEC", None),
+        ) if value is not None
+    }
+    code = getattr(exc, "errno", None)
+    retryable = isinstance(exc, BlockingIOError) or code in transient
+    if retryable:
+        kind = "spawn-resource"
+    elif code in permanent or isinstance(
+        exc, (FileNotFoundError, NotADirectoryError, PermissionError)
+    ):
+        kind = "spawn-permanent"
+    else:
+        kind = "spawn-unknown"
+    suffix = ""
+    if code is not None:
+        suffix = ": " + (errno.errorcode.get(code) or str(code))
+    return {
+        "ok": False,
+        "out": "",
+        "reason": f"{action} ({type(exc).__name__}){suffix}",
+        "returncode": returncode,
+        "kind": kind,
+        "retryable": retryable,
+    }
+
+
+def _reviewer_temp_is_inside(root, temp_cwd):
     try:
-        stdout, stderr = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
+        resolved_root = os.path.realpath(root)
+        resolved_temp = os.path.realpath(temp_cwd)
+    except (OSError, ValueError):
+        return True
+    try:
+        return os.path.commonpath(
+            (resolved_root, resolved_temp)
+        ) == resolved_root
+    except ValueError:
+        # On Windows, disjoint drive letters and UNC/local roots have no common
+        # path. Treat only those demonstrably different roots as outside; any
+        # other comparison error remains fail-closed.
+        root_drive = os.path.normcase(os.path.splitdrive(resolved_root)[0])
+        temp_drive = os.path.normcase(os.path.splitdrive(resolved_temp)[0])
+        if root_drive and temp_drive and root_drive != temp_drive:
+            return False
+        return True
+
+
+def _reviewer_kill_and_drain(proc):
+    """Kill one reviewer process and bound pipe draining after termination."""
+    try:
         proc.kill()
-        return {"ok": False, "out": "", "reason": f"timeout after {timeout}s"}
-    finally:
-        A.helper_release(root, proc.pid)
-    out = (stdout or stderr or "").strip()
-    if not out:
-        return {"ok": False, "out": "", "reason": f"produced nothing (exit {proc.returncode})"}
-    if A.REVIEW_UNAVAILABLE_RE.search(out) and not A._has_verdict_marker(out):
-        from .watchdog import parse_reset
-        until = parse_reset(out)
-        A.set_reviewer_state(root, until=until, reason=out[:200], at=int(time.time()))
-        return {"ok": False, "out": out, "reason": out.split("\n")[0][:120]}
-    return {"ok": True, "out": out, "reason": ""}
+    except OSError:
+        pass
+    try:
+        return proc.communicate(timeout=REVIEW_KILL_DRAIN_SECONDS)
+    except (OSError, subprocess.TimeoutExpired):
+        # A descendant can retain inherited pipe descriptors after the direct
+        # process exits. Close our ends rather than waiting without a bound.
+        for stream in (proc.stdout, proc.stderr):
+            if stream is None:
+                continue
+            try:
+                stream.close()
+            except OSError:
+                pass
+        return "", ""
+
+
+def _run_reviewer(root, argv, timeout, fallback=False):
+    """Run one reviewer outside the repository and classify invocation status."""
+    import tempfile
+    print(f"{C['dim']}reviewer: {os.path.basename(argv[0])}{' (fallback)' if fallback else ''}{C['reset']}")
+    with tempfile.TemporaryDirectory(prefix="ao-reviewer-") as fresh:
+        fresh = os.path.realpath(fresh)
+        if _reviewer_temp_is_inside(root, fresh):
+            return {
+                "ok": False, "out": "",
+                "reason": "could not create reviewer cwd outside the repository",
+                "returncode": None, "kind": "isolation-error",
+                "retryable": False,
+            }
+        try:
+            proc = subprocess.Popen(
+                argv, cwd=fresh, env=_reviewer_environment(fresh),
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding=UTF8, errors="replace",
+            )
+        except OSError as exc:
+            return _reviewer_os_failure(exc, "could not start")
+        except Exception as exc:
+            return {
+                "ok": False, "out": "",
+                "reason": f"could not start ({type(exc).__name__})",
+                "returncode": None, "kind": "spawn-unknown",
+                "retryable": False,
+            }
+
+        A.helper_register(root, proc.pid, "reviewer")
+        try:
+            try:
+                stdout, stderr = proc.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                stdout, stderr = _reviewer_kill_and_drain(proc)
+                _reviewer_terminal_output(stdout, stderr)
+                return {
+                    "ok": False, "out": "",
+                    "reason": f"timeout after {timeout}s",
+                    "returncode": proc.returncode,
+                    "kind": "timeout",
+                    "retryable": True,
+                }
+            except OSError as exc:
+                stdout, stderr = _reviewer_kill_and_drain(proc)
+                _reviewer_terminal_output(stdout, stderr)
+                return {
+                    "ok": False, "out": "",
+                    "reason": f"reviewer communication failed ({type(exc).__name__})",
+                    "returncode": proc.returncode,
+                    "kind": "communication-error", "retryable": False,
+                }
+        finally:
+            A.helper_release(root, proc.pid)
+
+        out = (stdout if (stdout or "").strip() else stderr or "").strip()
+        if proc.returncode != 0:
+            temporary = proc.returncode == 75
+            _reviewer_terminal_output(stdout, stderr)
+            return {
+                "ok": False, "out": "", "reason": f"exited {proc.returncode}",
+                "returncode": proc.returncode,
+                "kind": "temporary-exit" if temporary else "nonzero-exit",
+                "retryable": temporary,
+            }
+        if not out:
+            return {
+                "ok": False, "out": "",
+                "reason": "produced nothing (exit 0)", "returncode": 0,
+                "kind": "silence", "retryable": False,
+            }
+        return {
+            "ok": True, "out": out, "reason": "", "returncode": 0,
+            "kind": "success", "retryable": False,
+        }
+
+
+def _reviewer_binary_version(root, path):
+    """Measure one candidate version under reviewer cwd/Git isolation."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="ao-reviewer-version-") as fresh:
+        fresh = os.path.realpath(fresh)
+        if _reviewer_temp_is_inside(root, fresh):
+            return ""
+        try:
+            proc = subprocess.Popen(
+                [path, "--version"], cwd=fresh,
+                env=_reviewer_environment(fresh),
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding=UTF8, errors="replace",
+            )
+        except OSError:
+            return ""
+        A.helper_register(root, proc.pid, "reviewer-version")
+        try:
+            try:
+                stdout, stderr = proc.communicate(timeout=REVIEW_VERSION_TIMEOUT)
+            except (OSError, subprocess.TimeoutExpired):
+                _reviewer_kill_and_drain(proc)
+                return ""
+        finally:
+            A.helper_release(root, proc.pid)
+        if proc.returncode != 0:
+            return ""
+        match = A.re.search(
+            r"(\d+\.\d+\.\d+)", (stdout or "") + (stderr or "")
+        )
+        return match.group(1) if match else ""
+
+
+def _reviewer_version_key(version):
+    try:
+        return tuple(int(part) for part in version.split(".")) if version else (0,)
+    except (AttributeError, TypeError, ValueError):
+        return (0,)
+
+
+def _reviewer_resolve_binary(root, name):
+    """Resolve the newest candidate without executing it outside isolation."""
+    name = str(name)
+    if os.path.isabs(name):
+        candidates = (
+            [name]
+            if os.path.isfile(name) and os.access(name, os.X_OK)
+            else []
+        )
+    else:
+        candidates = A.binary_candidates(name)
+    best = (None, "")
+    for candidate in candidates:
+        absolute = os.path.abspath(candidate)
+        version = _reviewer_binary_version(root, absolute)
+        if best[0] is None or (
+            _reviewer_version_key(version) > _reviewer_version_key(best[1])
+        ):
+            best = (absolute, version)
+    return best
+
+
+def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary):
+    """Resolve and invoke one declared route without a shell."""
+    if strict:
+        label = "reviewer"
+        fallback = False
+        try:
+            label = cand["identity"]["binding"]
+            fallback = cand["index"] > 0
+        except (KeyError, TypeError, AttributeError) as exc:
+            attempt = {
+                "ok": False, "out": "", "reason": str(exc),
+                "returncode": None, "kind": "configuration-error",
+                "retryable": False,
+            }
+            return label, None, None, attempt
+        try:
+            argv = M.expand_argv(cand, prompt)
+        except M.MatrixError as exc:
+            attempt = {
+                "ok": False, "out": "", "reason": str(exc),
+                "returncode": None, "kind": "configuration-error",
+                "retryable": False,
+            }
+            return label, None, None, attempt
+        except Exception as exc:
+            # ``expand_argv`` is pure and receives a validated route, but an
+            # unexpected structural failure must still close as configuration
+            # rather than escaping the invocation boundary.
+            attempt = {
+                "ok": False, "out": "",
+                "reason": f"reviewer argv expansion failed ({type(exc).__name__})",
+                "returncode": None, "kind": "configuration-error",
+                "retryable": False,
+            }
+            return label, None, None, attempt
+    else:
+        raw = cand.get("argv") or []
+        label = cand.get("id") or (str(raw[0]) if raw else "reviewer")
+        fallback = cand is not primary
+        try:
+            argv = [part.replace("{prompt}", prompt) for part in raw]
+        except (AttributeError, TypeError) as exc:
+            attempt = {
+                "ok": False, "out": "",
+                "reason": f"invalid reviewer argv ({type(exc).__name__})",
+                "returncode": None, "kind": "configuration-error",
+                "retryable": False,
+            }
+            return label, None, None, attempt
+    if not argv or not argv[0]:
+        return label, None, None, {
+            "ok": False, "out": "", "reason": "reviewer argv is empty",
+            "returncode": None, "kind": "configuration-error",
+            "retryable": False,
+        }
+    declared_binary = str(argv[0])
+    try:
+        exe, version = _reviewer_resolve_binary(root, argv[0])
+    except Exception as exc:
+        return label, declared_binary, None, {
+            "ok": False, "out": "", "binary": declared_binary,
+            "reason": f"could not resolve reviewer ({type(exc).__name__})",
+            "returncode": None, "kind": "resolver-error",
+            "retryable": False,
+        }
+    if not exe:
+        return label, declared_binary, version, {
+            "ok": False, "out": "", "binary": declared_binary,
+            "reason": "not installed",
+            "returncode": None, "kind": "missing-binary",
+            "retryable": False,
+        }
+    argv[0] = exe
+    try:
+        attempt = _run_reviewer(root, argv, timeout, fallback)
+    except Exception as exc:
+        attempt = {
+            "ok": False, "out": "",
+            "reason": f"reviewer invocation failed ({type(exc).__name__})",
+            "returncode": None, "kind": "invocation-unknown",
+            "retryable": False,
+        }
+    attempt["binary"] = exe
+    attempt["version"] = version
+    return label, exe, version, attempt
+
+
+def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
+                           validate=None):
+    """Walk fallbacks now; retry only structurally transient route positions."""
+    failures, transient, labels = {}, [], {}
+
+    def invoke(position):
+        cand = chain[position]
+        label, binary, version, attempt = _reviewer_route_invocation(
+            root, cand, prompt, timeout, strict, primary
+        )
+        labels[position] = label
+        if attempt["ok"] and validate is not None:
+            problem = validate(attempt)
+            if problem:
+                _reviewer_terminal_output(attempt.get("out") or "", "")
+                attempt = dict(
+                    attempt, ok=False, out="", reason=problem,
+                    kind="unexpected-probe-response", retryable=False,
+                )
+        if attempt["ok"]:
+            failures.pop(position, None)
+            return {
+                "used": cand, "used_position": position, "attempt": attempt,
+                "failures": failures, "labels": labels, "chain": chain,
+            }
+        failures[position] = attempt
+        print(f"{C['dim']}{label} unavailable: {attempt['reason']}{C['reset']}")
+        return None
+
+    for position in range(len(chain)):
+        result = invoke(position)
+        if result is not None:
+            return result
+        if failures[position].get("retryable") is True:
+            transient.append(position)
+
+    if transient and REVIEW_ATTEMPTS > 1:
+        print(
+            f"{C['dim']}{len(transient)} transient reviewer route(s) unavailable; "
+            f"retrying once in {REVIEW_RETRY_SECONDS}s.{C['reset']}"
+        )
+        _review_retry_wait(REVIEW_RETRY_SECONDS)
+        for position in transient:
+            result = invoke(position)
+            if result is not None:
+                return result
+
+    return {
+        "used": None, "used_position": None, "attempt": None,
+        "failures": failures, "labels": labels, "chain": chain,
+    }
+
+
+def _strict_attempt_snapshot(resolution, invocation):
+    """Build evidence from the final selecting pass, not abandoned first passes."""
+    attempts = M.initial_attempts(resolution)
+    selected = invocation["used_position"]
+    for position, route in enumerate(invocation["chain"]):
+        if selected is not None and position > selected:
+            # Make the final-pass invariant local rather than relying on the
+            # initializer's current default for routes selection never reached.
+            M.set_attempt(attempts, route, "not-attempted")
+            continue
+        if selected is not None and position == selected:
+            # This is the selected response. Invalid-schema handling may still
+            # overwrite it with ``invalid-output`` before evidence is persisted;
+            # completed evidence uses the one canonical success outcome.
+            M.set_attempt(attempts, route, "reviewed")
+            continue
+        failure = invocation["failures"].get(position) or {"kind": "unknown"}
+        M.set_attempt(
+            attempts, route, "unavailable",
+            M.safe_unavailable_reason(failure.get("kind")),
+        )
+    return attempts
+
+
+def _reviewer_probe_nonce():
+    import secrets
+    return "AO-REVIEWER-PROBE-" + secrets.token_hex(16)
+
+
+def _reviewer_probe(cfg, timeout=REVIEW_PROBE_TIMEOUT):
+    """Actually invoke the configured chain and require one exact nonce line."""
+    root = cfg["root"]
+    rv = cfg.get("reviewer") or {}
+    strict = M.is_strict(cfg)
+    resolution = None
+    if strict:
+        try:
+            resolution = M.resolve(cfg, require_independent=True)
+        except M.MatrixError as exc:
+            return {
+                "configured": True, "ok": False, "route": None,
+                "binary": None, "version": None,
+                "reason": "configuration error: " + "; ".join(exc.problems[:3]),
+                "kind": "configuration-error",
+            }
+        chain = [route for route in resolution["reviewers"] if route["eligible"]]
+        primary = None
+    else:
+        if not rv.get("argv"):
+            return {
+                "configured": False, "ok": True, "route": None,
+                "binary": None, "version": None, "reason": "not configured",
+                "kind": "not-configured",
+            }
+        impl = cfg.get("implementer") or {}
+        if rv.get("id") and rv["id"] == impl.get("session"):
+            return {
+                "configured": True, "ok": False, "route": rv.get("id"),
+                "binary": None, "version": None,
+                "reason": "reviewer is the implementer",
+                "kind": "configuration-error",
+            }
+        chain = [rv] + [
+            item for item in (rv.get("fallbacks") or []) if item.get("argv")
+        ]
+        primary = rv
+
+    expected = _reviewer_probe_nonce()
+    prompt = (
+        "Reviewer invocation probe. Reply with exactly the following single line "
+        "and nothing else:\n" + expected
+    )
+    invocation = _invoke_reviewer_chain(
+        root, chain, prompt, timeout, strict, primary=primary,
+        validate=lambda attempt: (
+            "unexpected probe response" if attempt["out"] != expected else None
+        ),
+    )
+    if invocation["used"] is not None:
+        position = invocation["used_position"]
+        attempt = invocation["attempt"]
+        return {
+            "configured": True, "ok": True,
+            "route": invocation["labels"][position],
+            "binary": attempt.get("binary"), "version": attempt.get("version"),
+            "reason": "exact nonce echoed", "kind": "success",
+        }
+
+    details = []
+    first = None
+    for position in range(len(chain)):
+        attempt = invocation["failures"].get(position)
+        if attempt is None:
+            continue
+        first = first or (position, attempt)
+        details.append(
+            f"{invocation['labels'].get(position, 'reviewer')}: {attempt['reason']}"
+        )
+    position, attempt = first if first is not None else (None, {})
+    return {
+        "configured": True, "ok": False,
+        "route": invocation["labels"].get(position) if position is not None else None,
+        "binary": attempt.get("binary"), "version": attempt.get("version"),
+        "reason": "; ".join(details)[:400] or "no eligible reviewer route",
+        "kind": attempt.get("kind", "unknown"),
+    }
+
+
+def _reviewer_probe_text(probe):
+    if not probe["configured"]:
+        return "not configured"
+    route = probe.get("route") or "reviewer"
+    binary = probe.get("binary") or "unresolved binary"
+    version = probe.get("version") or "version unknown"
+    if probe["ok"]:
+        return f"ok — {route} via {binary} ({version}); {probe['reason']}"
+    return f"failed — {route} via {binary} ({version}); {probe['reason']}"
 
 
 def cmd_review(cfg, args):
@@ -1767,38 +2325,26 @@ def cmd_review(cfg, args):
     else:
         # Legacy selection remains byte-for-byte compatible when no matrix exists.
         chain = [rv] + [f for f in (rv.get("fallbacks") or []) if f.get("argv")]
-    out, used, unavailable = "", None, []
-    for cand in chain:
-        if strict:
-            argv = M.expand_argv(cand, prompt)
-            label = cand["identity"]["binding"]
-            fallback = cand["index"] > 0
-        else:
-            argv = [x.replace("{prompt}", prompt) for x in cand["argv"]]
-            label = cand.get("id") or argv[0]
-            fallback = cand is not rv
-        exe, _ = A.resolve_binary(argv[0])
-        if not exe:
-            unavailable.append((label, "not installed"))
-            if strict:
-                M.set_attempt(strict_attempts, cand, "unavailable", "tool not installed")
-            continue
-        argv[0] = exe
-        attempt = _run_reviewer(root, argv, args.timeout, fallback)
-        if attempt["ok"]:
-            out, used = attempt["out"], cand
-            if strict:
-                M.set_attempt(strict_attempts, cand, "responded")
-            break
-        if strict:
-            safe_reason = M.safe_unavailable_reason(attempt["reason"])
-            M.set_attempt(strict_attempts, cand, "unavailable", safe_reason)
-            unavailable.append((label, safe_reason))
-        else:
-            unavailable.append((label, attempt["reason"]))
-    if not used:
-        why = "; ".join(f"{i}: {r}" for i, r in unavailable) or "no reviewer"
-        until = A.reviewer_state(root).get("until")
+    invocation = _invoke_reviewer_chain(
+        root, chain, prompt, args.timeout, strict, primary=rv if not strict else None
+    )
+    used = invocation["used"]
+    if strict:
+        strict_attempts = _strict_attempt_snapshot(matrix_resolution, invocation)
+    if used is None:
+        unavailable = []
+        for position in range(len(chain)):
+            attempt = invocation["failures"].get(position)
+            if attempt is None:
+                continue
+            label = invocation["labels"].get(position, "reviewer")
+            reason = (
+                M.safe_unavailable_reason(attempt.get("kind"))
+                if strict else attempt["reason"]
+            )
+            unavailable.append((label, reason))
+        why = "; ".join(f"{label}: {reason}" for label, reason in unavailable) \
+            or "no reviewer"
         d = os.path.join(root, cfg["reviews"])
         os.makedirs(d, exist_ok=True)
         head = A.sh("git rev-parse --short HEAD", cwd=root)
@@ -1820,23 +2366,29 @@ def cmd_review(cfg, args):
                 f"- boundary: {boundary}\n- reviewers tried: {why}\n"
             )
         open(os.path.join(d, name), "w", encoding=UTF8).write(
-            unavailable_body
-            + (f"- window resets: {time.strftime('%H:%M', time.localtime(until))}\n" if until else "")
-            + "\nNo review took place. This file is not a round.\n")
-        A.set_reviewer_state(root, pending_review=True, boundary=boundary[:200], at=int(time.time()))
+            unavailable_body + "\nNo review took place. This file is not a round.\n"
+        )
+        A.set_reviewer_state(
+            root, pending_review=True, boundary=boundary[:200],
+            until=None, reason=why[:200], at=int(time.time()),
+        )
         A.record_notice(root, "review unavailable", why[:200], sent=False, key="review-unavailable")
-        print(f"{C['yellow']}{C['b']}REVIEWER UNAVAILABLE{C['reset']}  {why}"
-              + (f" — window resets {time.strftime('%H:%M', time.localtime(until))}" if until else ""))
-        print(f"{C['dim']}Not a verdict, not a round. Park the review, continue with the next READY item; "
-              f"the watchdog nudges when the window reopens.{C['reset']}")
+        print(f"{C['yellow']}{C['b']}REVIEWER UNAVAILABLE{C['reset']}  {why}")
+        print(f"{C['dim']}Not a verdict, not a round. Permanent failures were "
+              "reported immediately; only structurally transient routes were "
+              f"retried once. Park the review and request human help.{C['reset']}")
         return 3
+    out = invocation["attempt"]["out"]
+    reviewer_executable = invocation["attempt"].get("binary") or "reviewer"
     rv = used
     if strict:
         M.add_evidence_context(
             evidence, matrix_resolution, strict_attempts,
             reviewer_identity=used["identity"], review_status="pending",
         )
-    A.set_reviewer_state(root, pending_review=False)
+    A.set_reviewer_state(
+        root, pending_review=False, until=None, reason=None, at=int(time.time())
+    )
     verdict = A._review_verdict(out)
     severity_values = {
         key: A.re.findall(
@@ -1863,7 +2415,7 @@ def cmd_review(cfg, args):
             )
             reviewer_label = used["identity"]["binding"]
         else:
-            reviewer_label = rv.get("id") or argv[0]
+            reviewer_label = rv.get("id") or reviewer_executable
         d = os.path.join(root, cfg["reviews"])
         os.makedirs(d, exist_ok=True)
         head = A.sh("git rev-parse --short HEAD", cwd=root)
@@ -1889,8 +2441,9 @@ def cmd_review(cfg, args):
             header.append(
                 "- paths: " + json.dumps(args.paths, ensure_ascii=True)
             )
+        _reviewer_terminal_output(out, "")
         open(os.path.join(d, name), "w", encoding=UTF8).write(
-            "\n".join(header) + f"\n\n{invalid_reason}:\n\n{out[:4000]}\n"
+            "\n".join(header) + f"\n\n{invalid_reason}.\n"
         )
         print(f"{C['yellow']}{C['b']}INVALID REVIEW{C['reset']}  "
               "no valid VERDICT/count schema — not a round; re-run")
@@ -1902,9 +2455,9 @@ def cmd_review(cfg, args):
             reviewer_identity=used["identity"], review_status="complete",
         )
     sev = {key: int(values[0]) for key, values in severity_values.items()}
-    # A verdict that contradicts its own findings is not a verdict.
-    if verdict == "APPROVED" and (sev["BLOCKER"] or sev["HIGH"]):
-        verdict = "NEEDS_CHANGES"
+    # Finding counts are the decision input; reviewer prose cannot quietly
+    # override the published rule. MEDIUM and LOW remain non-blocking notes.
+    verdict = "NEEDS_CHANGES" if (sev["BLOCKER"] or sev["HIGH"]) else "APPROVED"
 
     if candidate is not None:
         invalid = []
@@ -1960,7 +2513,7 @@ def cmd_review(cfg, args):
     else:
         primary = cfg.get("reviewer") or {}
         reviewer_line = (
-            f"- reviewer: `{rv.get('id') or argv[0]}`  family: `{rv.get('family', '?')}`"
+            f"- reviewer: `{rv.get('id') or reviewer_executable}`  family: `{rv.get('family', '?')}`"
             + ("  (fallback — the primary reviewer was unavailable)" if rv is not primary else "")
         )
         implementer_line = (
@@ -2279,21 +2832,13 @@ ARCHITECT_TOOLS = ("Read,Grep,Glob,Bash(ao:*),Bash(git status:*),Bash(git log:*)
                    "Bash(find:*),Bash(ps:*),Bash(lsof:*),Bash(rm agent-mail/*)")
 
 
-def _apply_profile(root, args):
-    """Write the implementer / reviewer / architect blocks a profile implies.
-
-    Returns the names of the blocks it added. A block that already exists is
-    the project's own decision and is left alone.
-    """
+def _profile_config(root, args, base):
+    """Return the profile's intended config and added block names without writing."""
+    cfg = dict(base) if isinstance(base, dict) else {}
     prof = PROFILES.get(getattr(args, "profile", None) or "")
     impl_adapter = getattr(args, "implementer", None) or (prof or {}).get("implementer")
     if not impl_adapter and not prof:
-        return []
-    p = os.path.join(root, ".ao", "config.json")
-    try:
-        cfg = json.load(open(p, encoding=UTF8))
-    except (OSError, ValueError):
-        cfg = {}
+        return cfg, []
     added = []
     if "implementer" not in cfg:
         block = {"adapter": impl_adapter or "kiro", "session": "auto",
@@ -2317,9 +2862,52 @@ def _apply_profile(root, args):
                                      "--allowedTools", ARCHITECT_TOOLS],
                             "_why": "resumable and woken only into absence; read-only tools plus ao"}
         added.append("architect")
+    return cfg, added
+
+
+def _apply_profile(root, args):
+    """Write missing profile blocks while preserving existing project choices."""
+    p = os.path.join(root, ".ao", "config.json")
+    try:
+        cfg = json.load(open(p, encoding=UTF8))
+    except (OSError, ValueError):
+        cfg = {}
+    planned, added = _profile_config(root, args, cfg)
     if added:
-        json.dump(cfg, open(p, "w", encoding=UTF8), indent=2, ensure_ascii=False)
+        json.dump(planned, open(p, "w", encoding=UTF8), indent=2,
+                  ensure_ascii=False)
     return added
+
+
+def _planned_project_config_text(cfg):
+    """Serialize and validate one in-memory config against the disk contract."""
+    if not isinstance(cfg, dict) or not cfg:
+        return None, ".ao/config.json must be a non-empty top-level JSON object"
+    try:
+        text = json.dumps(cfg, indent=2, ensure_ascii=False) + "\n"
+        raw = text.encode(UTF8)
+    except (TypeError, ValueError, UnicodeError, RecursionError) as exc:
+        return None, f".ao/config.json is not readable valid JSON ({exc})"
+    if len(raw) > A.PROJECT_CONFIG_MAX_BYTES:
+        return None, (
+            ".ao/config.json exceeds the "
+            f"{A.PROJECT_CONFIG_MAX_BYTES:,}-byte limit"
+        )
+    problem = A._json_container_depth_problem(raw)
+    return (None, problem) if problem else (text, None)
+
+
+def _planned_runtime_config(root, cfg):
+    """Apply load_config's runtime-only defaults to an in-memory document."""
+    runtime = dict(cfg)
+    runtime.setdefault("root", root)
+    runtime.setdefault("mailbox", "agent-mail")
+    runtime.setdefault("reviews", "semantic-review")
+    if "implementer" not in runtime:
+        found = A.discover_session(root)
+        if found:
+            runtime["implementer"] = found
+    return runtime
 
 
 def cmd_init(cfg, args):
@@ -2332,6 +2920,80 @@ def cmd_init(cfg, args):
     """
     root = cfg["root"]
     name = args.name or os.path.basename(root)
+    config_path = os.path.join(root, ".ao", "config.json")
+    marker_path = os.path.join(root, PROJECT_MARKER)
+
+    # Resolve every project-local decision before creating anything. A failed
+    # reviewer probe is a clean refusal, not a half-initialized installation.
+    marker_document = _worktree_project_marker_document(root)
+    marker_fingerprint = marker_document["fingerprint"]
+    if marker_document["exists"] and marker_document["problem"]:
+        print(
+            f"{C['red']}init refused{C['reset']}: "
+            f"{_project_refusal(marker_document['problem'])}"
+        )
+        return 1
+
+    config_existed = os.path.lexists(config_path)
+    existing_raw = None
+    if config_existed:
+        document = A.project_config_document(root)
+        if document["problem"]:
+            print(
+                f"{C['red']}init refused{C['reset']}: "
+                f"{_project_refusal(document['problem'])}"
+            )
+            return 1
+        base_config = document["config"]
+        existing_raw = document["raw"]
+    else:
+        base_config = {"project": name, "round_budget": 5}
+
+    planned_config, added = _profile_config(root, args, base_config)
+    config_text, config_problem = _planned_project_config_text(planned_config)
+    if config_problem:
+        print(f"{C['red']}init refused{C['reset']}: {_project_refusal(config_problem)}")
+        return 1
+    runtime_cfg = _planned_runtime_config(root, planned_config)
+    reviewer_probe = _reviewer_probe(runtime_cfg)
+    if not reviewer_probe["ok"]:
+        print(
+            f"{C['red']}init refused{C['reset']}: reviewer probe "
+            f"{_reviewer_probe_text(reviewer_probe)}"
+        )
+        return 1
+
+    # The probe may take time. Revalidate both planning inputs immediately
+    # before the first write; never apply a plan to marker/config state that
+    # moved while the reviewer was running.
+    if config_existed:
+        current_config = A.project_config_document(root)
+        if current_config["problem"] or current_config["raw"] != existing_raw:
+            problem = (
+                current_config["problem"]
+                or ".ao/config.json changed while reviewer probe ran"
+            )
+            print(f"{C['red']}init refused{C['reset']}: {_project_refusal(problem)}")
+            return 1
+    elif os.path.lexists(config_path):
+        print(
+            f"{C['red']}init refused{C['reset']}: "
+            ".ao/config.json appeared while reviewer probe ran"
+        )
+        return 1
+
+    # Keep the marker read last: the concurrent-init boundary that authorizes
+    # project writes is then the final observation before mutation begins.
+    current_marker = _worktree_project_marker_document(root)
+    if current_marker["fingerprint"] != marker_fingerprint:
+        problem = (
+            current_marker["problem"]
+            if current_marker["exists"] and current_marker["problem"]
+            else f"{PROJECT_MARKER} changed while reviewer probe ran"
+        )
+        print(f"{C['red']}init refused{C['reset']}: {_project_refusal(problem)}")
+        return 1
+
     wrote, kept = [], []
 
     def put(rel, content, mode=None):
@@ -2346,7 +3008,17 @@ def cmd_init(cfg, args):
             os.chmod(p, mode)
         wrote.append(rel)
 
-    put(".ao/config.json", json.dumps({"project": name, "round_budget": 5}, indent=2) + "\n")
+    if config_existed:
+        kept.append(".ao/config.json")
+        if added:
+            with open(config_path, "w", encoding=UTF8) as fh:
+                fh.write(config_text)
+            wrote.append(".ao/config.json (+" + ", ".join(added) + ")")
+    else:
+        put(".ao/config.json", config_text)
+        if added:
+            wrote.append(".ao/config.json (+" + ", ".join(added) + ")")
+
     config_problem = _project_config_problem(root)
     if config_problem:
         print(f"{C['red']}init refused{C['reset']}: {_project_refusal(config_problem)}")
@@ -2355,20 +3027,6 @@ def cmd_init(cfg, args):
     marker_problem = _worktree_project_marker_problem(root)
     if marker_problem:
         print(f"{C['red']}init refused{C['reset']}: {_project_refusal(marker_problem)}")
-        return 1
-    # Roles are configuration, and a project's answer to "who implements, who
-    # reviews, who judges" differs per project: Claude + Kiro here, Claude +
-    # Claude worktrees there, another model as the reviewer somewhere else. A
-    # profile writes the three blocks; existing blocks are never overwritten.
-    added = _apply_profile(root, args)
-    if added:
-        wrote.append(".ao/config.json (+" + ", ".join(added) + ")")
-    # Profile application can enlarge or reshape config.json. Revalidate the
-    # resulting document before init writes any remaining state or reports
-    # success; an enrolled project with invalid local state must fail closed.
-    config_problem = _project_config_problem(root)
-    if config_problem:
-        print(f"{C['red']}init refused{C['reset']}: {_project_refusal(config_problem)}")
         return 1
     put(".ao/board.md", BOARD_TEMPLATE)
     put(".ao/backlog.md", BACKLOG_TEMPLATE.format(name=name))
@@ -2436,6 +3094,12 @@ def cmd_init(cfg, args):
     hook_proof = _hook_execution_probe(_ao_hook_inventory(root))
     tone = C["green"] if hook_proof["installed"] else C["yellow"]
     print(f"  {tone}commit hook{C['reset']} {_hook_probe_text(hook_proof)}")
+
+    probe_tone = C["green"] if reviewer_probe["ok"] else C["red"]
+    print(
+        f"  {probe_tone}reviewer probe{C['reset']} "
+        f"{_reviewer_probe_text(reviewer_probe)}"
+    )
 
     print(f"\n{C['b']}Next, for a person:{C['reset']}")
     for line in skillkit.next_steps(agents, registered):
@@ -4778,6 +5442,8 @@ def cmd_adapters(cfg, args):
 
 def cmd_doctor(cfg, args):
     if getattr(args, "check", False):
+        # Scheduled checks return through the existing static helper here;
+        # only the manual path below invokes the reviewer nonce probe.
         return _doctor_check(cfg)
     root, impl, adapter = _ctx(cfg)
     ok = lambda b: f"{C['green']}ok{C['reset']}" if b else f"{C['red']}missing{C['reset']}"
@@ -4808,6 +5474,12 @@ def cmd_doctor(cfg, args):
     print(f"transcript      {ok(bool(msgs and os.path.exists(msgs)))}")
     print(f"mailbox         {ok(os.path.isdir(os.path.join(root, cfg['mailbox'])))}")
     print(f"reviews         {ok(os.path.isdir(os.path.join(root, cfg['reviews'])))}")
+    reviewer_probe = _reviewer_probe(cfg)
+    probe_tone = C["green"] if reviewer_probe["ok"] else C["red"]
+    print(
+        f"reviewer probe  {probe_tone}{_reviewer_probe_text(reviewer_probe)}"
+        f"{C['reset']}"
+    )
     print(f"quota source    {'keyflip' if A.sh('command -v keyflip') else '—'}")
     key = os.path.basename(root.rstrip("/")).lower()
     wd = A.sh(f"launchctl list | grep com.agentorchestrator.watchdog.{key}")
@@ -4967,6 +5639,7 @@ def cmd_doctor(cfg, args):
             print(f"                {C['dim']}{c} → {os.path.realpath(c)}{C['reset']}")
         print(f"                {C['dim']}keep one: drop the shell alias, or "
               f"uv tool uninstall ao-orchestrator{C['reset']}")
+    return 0 if reviewer_probe["ok"] else 1
 
 
 def main():

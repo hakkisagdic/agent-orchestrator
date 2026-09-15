@@ -474,14 +474,19 @@ def set_attempt(attempts, route, outcome, reason=""):
     raise MatrixError(("reviewer attempt binding %s is not in the resolved chain" % binding,))
 
 
-def safe_unavailable_reason(reason):
-    """Collapse arbitrary process text to a credential-safe persisted reason."""
-    text = str(reason or "").lower()
-    if text.startswith("timeout after"):
-        return "timeout"
-    if text.startswith("produced nothing"):
-        return "no output"
-    return "runtime unavailable"
+def safe_unavailable_reason(kind):
+    """Collapse invocation kinds to the closed, non-diagnostic evidence vocabulary.
+
+    Retry and fallback decisions consume the full ``kind`` before this boundary.
+    Evidence intentionally preserves only three actionable, content-free reasons;
+    every other closed or unknown kind becomes ``runtime unavailable`` rather than
+    persisting process diagnostics or growing an open-ended authority schema.
+    """
+    return {
+        "missing-binary": "tool not installed",
+        "timeout": "timeout",
+        "silence": "no output",
+    }.get(str(kind or ""), "runtime unavailable")
 
 
 def _role_bindings(resolution):
