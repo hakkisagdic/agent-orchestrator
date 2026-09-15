@@ -705,6 +705,10 @@ def cmd_commit_ok(cfg, args):
 
 PROJECT_MARKER = ".ao-project"
 PROJECT_MARKER_BYTES = b"ao-project-v1\n"
+PROJECT_ADOPT_HINT = (
+    "adopt the marker: printf 'ao-project-v1\\n' > .ao-project && git add .ao-project, "
+    "then land that commit through ao commit-ok"
+)
 PROJECT_INIT_COMMAND = "ao init --profile claude-kiro"
 
 
@@ -907,6 +911,59 @@ def _worktree_project_marker_problem(root):
     return _worktree_project_marker_document(root)["problem"]
 
 
+def _legacy_enrollment(root):
+    """A project set up before .ao-project existed stays governed by its config.
+
+    The tracked marker is the right authority for a new project and for a
+    deliberate two-phase removal, and it left one case out: a project initialised
+    before the marker existed. That project has a real .ao/config.json, an
+    enforcing commit hook, and no marker anywhere in its history. Calling it
+    uninitialised turns its hook into a silent pass the moment the tool is
+    upgraded, which is the fail-open the marker was introduced to close.
+
+    Two neighbours must stay unenforced and are told apart here: an incidental
+    .ao/ directory has no config, and a completed removal has a commit in HEAD's
+    history that touched the marker. A shallow clone that lost the removal commit
+    reads as legacy, which errs on the enforcing side. Returns None when the
+    project is not legacy.
+    """
+    if not os.path.lexists(os.path.join(root, ".ao", "config.json")):
+        return None
+    head = _hook_git(root, "rev-parse", "--verify", "--quiet", "HEAD")
+    if head.returncode == 0:
+        touched = _hook_git(root, "rev-list", "-n", "1", "HEAD", "--", PROJECT_MARKER)
+        if touched.returncode:
+            detail = touched.stderr.decode(UTF8, "replace").strip()[:160]
+            return {
+                "state": "broken",
+                "detail": f"cannot read {PROJECT_MARKER} history: "
+                          + (detail or f"git exit {touched.returncode}"),
+            }
+        if touched.stdout.strip():
+            return None
+    elif head.stdout or head.stderr:
+        detail = head.stderr.decode(UTF8, "replace").strip()[:160]
+        return {
+            "state": "broken",
+            "detail": "HEAD query failed: " + (detail or f"git exit {head.returncode}"),
+        }
+    problem = _project_config_problem(root)
+    if problem:
+        return {
+            "state": "broken",
+            "detail": f"this project has AO state but it is unreadable: {problem}",
+        }
+    return {
+        "state": "legacy",
+        "detail": (
+            f"set up before {PROJECT_MARKER} existed: .ao/config.json governs commits "
+            f"and no {PROJECT_MARKER} has ever been tracked — {PROJECT_ADOPT_HINT}"
+        ),
+        "source": None,
+        "marker": None,
+    }
+
+
 def _project_enrollment(root, index_file=None):
     """Measure the tracked marker in the active index and HEAD, then local state.
 
@@ -932,6 +989,10 @@ def _project_enrollment(root, index_file=None):
     elif headed["status"] == "canonical":
         source, marker = "head", headed
     else:
+        legacy = _legacy_enrollment(root)
+        if legacy is not None:
+            legacy.update({"index": indexed, "head": headed})
+            return legacy
         return {
             "state": "uninitialized",
             "detail": f"no canonical {PROJECT_MARKER} exists in HEAD or the active index",
@@ -1200,6 +1261,8 @@ def cmd_commit_check(cfg, args):
         print(f"{C['red']}{C['b']}COMMIT REFUSED{C['reset']}")
         for reason in reasons:
             print(f"  {C['red']}·{C['reset']} {reason}")
+        if enrollment["state"] == "legacy":
+            print(f"  {C['dim']}{enrollment['detail']}{C['reset']}")
         return 1
 
     token = grant.get("token") or "recorded grant"
@@ -3845,6 +3908,8 @@ def doctor_problems(cfg):
                 )
                 flag = " --allow-shared-hooks" if needs_allow else ""
                 repair = f"ao hooks uninstall{flag}, then ao hooks install{flag}"
+            elif _project_enrollment(root)["state"] == "legacy":
+                repair = PROJECT_ADOPT_HINT + ", then ao hooks install"
             elif _state_base(commit["static_state"]) not in (
                 "current-local", "current-scoped"
             ):
@@ -4782,6 +4847,10 @@ def _hook_execution_probe(inv):
         return failed(enrollment["detail"])
     if enrollment["state"] == "broken":
         return failed(enrollment["detail"])
+    if enrollment["state"] == "legacy":
+        # A current hook in a legacy project exits in its shell guard before AO
+        # runs, so it governs nothing until the marker is adopted.
+        return failed(enrollment["detail"])
 
     head_result = _hook_git(inv["top"], "rev-parse", "--verify", "HEAD")
     if head_result.returncode:
@@ -4974,6 +5043,15 @@ def cmd_hooks(cfg, args):
         return 0
     if action == "uninstall":
         return _hooks_uninstall(inv, allow)
+
+    enrollment = _project_enrollment(root)
+    if enrollment["state"] == "legacy":
+        # The current hooks exit in their shell guard when no marker is tracked, so
+        # installing them over a legacy project's enforcing hook would turn commit
+        # authority off at exactly the moment someone meant to repair it.
+        print(f"{C['red']}hooks install refused{C['reset']}: this project was {enrollment['detail']}")
+        print("  then run: ao hooks install")
+        return 1
 
     active = _active_hook_targets(inv)
     plan, unavailable = [], []
@@ -5585,6 +5663,7 @@ def cmd_doctor(cfg, args):
         print(f"{'push hook':<16}{C['yellow']}{detail}{C['reset']}  AO push-window hook unavailable")
     else:
         active = _active_hook_targets(hook_inventory)
+        legacy_project = _project_enrollment(root)["state"] == "legacy"
         for role, label in (("pre-commit", "commit hook"), ("pre-push", "push hook")):
             target = active[role]
             base = _state_base(target["static_state"])
@@ -5592,7 +5671,10 @@ def cmd_doctor(cfg, args):
             tone = C["green"] if current else C["yellow"]
             notes = []
             if role == "pre-commit" and not current:
-                notes.append("ao hooks install")
+                notes.append(
+                    "adopt .ao-project first, then ao hooks install"
+                    if legacy_project else "ao hooks install"
+                )
             if role == "pre-push" and not current:
                 notes.append("AO push-window hook unavailable")
             suffix = "  " + "; ".join(notes) if notes else ""

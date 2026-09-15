@@ -1365,3 +1365,118 @@ def test_project_config_reader_rejects_symlink_with_one_shared_problem(project):
     assert document["problem"] == ".ao/config.json is not a regular file"
     assert loaded["_config_problem"] == document["problem"]
     assert cli._project_config_problem(str(root)) == document["problem"]
+
+
+def _legacy_project(tmp_path, monkeypatch, name="legacy"):
+    """A project initialised before .ao-project existed: config, and no marker, ever."""
+    import json
+    root = _init_repo(tmp_path / name)
+    (root / ".ao" / "ledger").mkdir(parents=True)
+    cfg = {
+        "project": name, "mailbox": "agent-mail", "reviews": "semantic-review",
+        "implementer": {"adapter": "kiro", "session": "s1", "name": "kiro"},
+        "architect": {"name": "fable", "argv": ["claude", "-p", "{prompt}"]},
+    }
+    (root / ".ao" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+    (root / ".ao" / "board.md").write_text(
+        "# Board\n\n## running\n\n## blocked\n\n## queued\n\n## inbox\n\n## verified\n\n## done\n",
+        encoding="utf-8",
+    )
+    (root / "agent-mail").mkdir()
+    (root / "semantic-review").mkdir()
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    monkeypatch.setattr(A, "HOME", str(home))
+    from ao import watchdog as W
+    monkeypatch.setattr(W, "STATE_DIR", str(home / ".ao"))
+    return root, dict(cfg, root=str(root))
+
+
+def _legacy_absolute_hook(root):
+    """The hook an early ao init wrote: exec ao commit-check, with no guard at all."""
+    path = Path(_git(root, "rev-parse", "--git-path", "hooks/pre-commit").stdout.strip())
+    if not path.is_absolute():
+        path = Path(root) / path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(
+        b"#!/bin/sh\n"
+        b"# agent-orchestrator: commit authority is bound to Git's exact active index.\n"
+        + f"exec ao -C {root} commit-check\n".encode("utf-8")
+    )
+    path.chmod(0o755)
+    return path
+
+
+def test_project_set_up_before_the_marker_is_governed_by_its_config(tmp_path, monkeypatch, capsys):
+    root, cfg = _legacy_project(tmp_path, monkeypatch)
+
+    state = cli._project_enrollment(str(root))
+    assert state["state"] == "legacy"
+    assert cli.PROJECT_MARKER in state["detail"] and "ao-project-v1" in state["detail"]
+
+    (root / "product.txt").write_text("change\n", encoding="utf-8")
+    _git(root, "add", "product.txt")
+    capsys.readouterr()
+    assert cli.cmd_commit_check(cfg, SimpleNamespace()) == 1
+    out = _strip_colour(capsys.readouterr().out)
+    assert "COMMIT REFUSED" in out
+    assert "no recorded authority decision" in out
+    assert "ao-project-v1" in out
+
+
+def test_adopting_the_marker_enrolls_a_legacy_project(tmp_path, monkeypatch):
+    root, _ = _legacy_project(tmp_path, monkeypatch)
+
+    _enroll_project(root, commit=False)
+    state = cli._project_enrollment(str(root))
+
+    assert state["state"] == "enrolled"
+    assert state["source"] == "index"
+
+
+def test_completed_removal_leaves_the_remaining_config_unenforced(tmp_path, monkeypatch):
+    root, _ = _legacy_project(tmp_path, monkeypatch)
+    _enroll_project(root, commit=True)
+    _git(root, "rm", "-q", "--", cli.PROJECT_MARKER)
+    _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "decommission ao marker")
+
+    assert (root / ".ao" / "config.json").exists()
+    assert cli._project_enrollment(str(root))["state"] == "uninitialized"
+
+
+def test_legacy_project_with_unreadable_config_is_broken(tmp_path, monkeypatch, capsys):
+    root, cfg = _legacy_project(tmp_path, monkeypatch)
+    (root / ".ao" / "config.json").write_text("{", encoding="utf-8")
+
+    state = cli._project_enrollment(str(root))
+    assert state["state"] == "broken"
+    assert "unreadable" in state["detail"]
+
+    capsys.readouterr()
+    assert cli.cmd_commit_check(cfg, SimpleNamespace()) == 1
+    assert "COMMIT REFUSED" in _strip_colour(capsys.readouterr().out)
+
+
+def test_hooks_install_refuses_to_replace_a_legacy_projects_hook(tmp_path, monkeypatch, capsys):
+    root, cfg = _legacy_project(tmp_path, monkeypatch)
+    hook = _legacy_absolute_hook(root)
+    before = hook.read_bytes()
+
+    capsys.readouterr()
+    assert cli.cmd_hooks(cfg, _args("install")) == 1
+    out = _strip_colour(capsys.readouterr().out)
+
+    assert hook.read_bytes() == before
+    assert "hooks install refused" in out
+    assert "ao-project-v1" in out
+
+
+def test_doctor_advises_adopting_the_marker_before_reinstalling_hooks(tmp_path, monkeypatch):
+    root, cfg = _legacy_project(tmp_path, monkeypatch)
+    _legacy_absolute_hook(root)
+
+    problems = dict(cli.doctor_problems(cfg))
+
+    assert "commit-hook" in problems
+    assert "ao-project-v1" in problems["commit-hook"]
+    assert "restore tracked hooks with Git" not in problems["commit-hook"]
