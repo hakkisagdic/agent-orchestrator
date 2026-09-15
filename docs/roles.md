@@ -180,6 +180,15 @@ numbers, and unknown OS errors remain permanently closed. AO retries transient
 route positions once after 30 seconds. Reviewer prose never changes that
 classification.
 
+An OS error that carries no errno stays in the unknown class on purpose. Without an
+errno nothing tells a resource shortage that would clear from a fault that would
+repeat, and a retry would spend a reviewer call and part of the review's budget on
+a guess. Closing it costs one UNAVAILABLE review that a person or a later run can
+repeat, which is the safe direction for a gate. The one errno-less failure treated
+as transient is `BlockingIOError`, recognised by its type, because the type itself
+names the resource condition. This is a decision with that cost, recorded here
+rather than left to the order of the checks (backlog #101).
+
 Reviewer executable discovery is bounded independently of environment cardinality:
 AO examines at most the first 64 `PATH` directories, 32 built-in/version-manager
 fallback directories, 16 Windows `PATHEXT` suffixes, and 8 distinct executable
