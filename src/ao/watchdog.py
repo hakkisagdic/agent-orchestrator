@@ -246,6 +246,16 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
             pass
     # Dry-run uses the same alarm state and calculation as a live cycle, but the
     # preview is deliberately not persisted.
+    # A snoozed alarm is recorded, not rung: off the channels and off the ladder, so
+    # it neither turns red nor mails until its snooze ends.
+    snoozed = A.alarm_snoozed(project, key)
+    if snoozed:
+        until = time.strftime("%d %b", time.localtime(snoozed["until"]))
+        if dry_run:
+            print(f"DRY RUN: would hold {title}: snoozed until {until} by {snoozed.get('by')}")
+        elif root:
+            A.record_notice(root, title, f"{msg} [snoozed until {until}]", sent=False, key=key)
+        return False
     ring, episode = A.alarm_touch(
         project, key, level or "orange", red_after=red_after, title=title,
         persist=not dry_run,

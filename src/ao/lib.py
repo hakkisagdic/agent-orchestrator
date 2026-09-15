@@ -3710,6 +3710,54 @@ def save_alarms(d):
         pass
 
 
+def alarm_snoozes_path():
+    return os.path.join(HOME, ".ao", "alarm-snoozes.json")
+
+
+def load_alarm_snoozes():
+    try:
+        return json.load(open(alarm_snoozes_path(), encoding=UTF8))
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_alarm_snoozes(d):
+    os.makedirs(os.path.dirname(alarm_snoozes_path()), exist_ok=True)
+    with open(alarm_snoozes_path(), "w", encoding=UTF8) as fh:
+        json.dump(d, fh, indent=1)
+
+
+def alarm_snooze(project, key, until, by="human", why=""):
+    """Keep one alarm off the human channels until a date; it stays on the record.
+
+    A snooze is for a condition that is real, known and waiting on someone. On
+    2026-09-15 the doctor check reported Voltrai's legacy commit hook, whose fix
+    only the owner can make and not before 1 October; left alone it would ring red
+    and mail every six hours about something nobody could act on yet. The snooze
+    names who set it and why, and it ends by itself on the date.
+    """
+    d = load_alarm_snoozes()
+    d[f"{project}:{key}"] = {"until": int(until), "by": by, "why": why, "at": int(time.time())}
+    _save_alarm_snoozes(d)
+    return d[f"{project}:{key}"]
+
+
+def alarm_unsnooze(project, key):
+    d = load_alarm_snoozes()
+    gone = d.pop(f"{project}:{key}", None)
+    if gone is not None:
+        _save_alarm_snoozes(d)
+    return gone
+
+
+def alarm_snoozed(project, key, now=None):
+    """The snooze standing for this alarm, or None; an expired snooze is no snooze."""
+    entry = load_alarm_snoozes().get(f"{project}:{key}")
+    if isinstance(entry, dict) and float(entry.get("until") or 0) > (now or time.time()):
+        return entry
+    return None
+
+
 def alarm_touch(project, key, level, now=None, red_after=ALARM_RED_AFTER, title=None,
                 persist=True):
     """Calculate a raise of `key` at `level`; return (level to ring at, episode).

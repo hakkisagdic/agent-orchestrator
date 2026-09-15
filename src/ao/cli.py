@@ -3869,6 +3869,32 @@ def cmd_alarms(cfg, args):
     """Live alarm episodes and their level; `test` rings every channel."""
     root = cfg["root"]
     project = os.path.basename(root.rstrip("/"))
+    if args.action in ("snooze", "unsnooze"):
+        key = getattr(args, "key", None)
+        if not key:
+            print(f"usage: ao alarms {args.action} <key>"
+                  + (" --until YYYY-MM-DD --why '…'" if args.action == "snooze" else ""))
+            return 2
+        if args.action == "unsnooze":
+            gone = A.alarm_unsnooze(project, key)
+            print(f"{'unsnoozed' if gone else 'no snooze for'} {key}")
+            return 0
+        try:
+            until = time.mktime(time.strptime(getattr(args, "until", None) or "", "%Y-%m-%d"))
+        except ValueError:
+            print("snooze needs --until YYYY-MM-DD")
+            return 2
+        if until <= time.time():
+            print("--until must be a date in the future")
+            return 2
+        why = (getattr(args, "why", None) or "").strip()
+        if not why:
+            print("snooze needs --why: a snoozed alarm says why nobody can act on it yet")
+            return 2
+        A.alarm_snooze(project, key, until, by=getattr(args, "by", None) or "human", why=why)
+        print(f"snoozed {key} until {time.strftime('%d %b %Y', time.localtime(until))} — "
+              "it stays in ao alarms and rings again from that date")
+        return 0
     if args.action == "test":
         from .watchdog import notify
         lvl = args.level or "orange"
@@ -3878,6 +3904,12 @@ def cmd_alarms(cfg, args):
               + (" · e-mail attempted (see ao notices)" if lvl == "red" else ""))
         return 0
     alive = A.active_alarms(project)
+    for full, snooze in sorted(A.load_alarm_snoozes().items()):
+        owner, _, key = full.partition(":")
+        if owner == project and A.alarm_snoozed(project, key):
+            print(f"  {C['dim']}snoozed{C['reset']} {key:<32} until "
+                  f"{datetime.fromtimestamp(snooze['until']).strftime('%d %b')}  "
+                  f"{C['dim']}by {snooze.get('by')}: {(snooze.get('why') or '')[:60]}{C['reset']}")
     if not alive:
         print(f"{C['green']}no live alarms{C['reset']}"); return 0
     for e in alive:
@@ -6190,8 +6222,12 @@ def main():
     em.add_argument("--to")
     em.set_defaults(fn=cmd_email)
     al = sub.add_parser("alarms", help="live alarm episodes (yellow/orange/red); test rings the channels")
-    al.add_argument("action", choices=["list", "test"], nargs="?", default="list")
+    al.add_argument("action", choices=["list", "test", "snooze", "unsnooze"], nargs="?", default="list")
+    al.add_argument("key", nargs="?", help="snooze/unsnooze: the alarm key as ao alarms lists it")
     al.add_argument("--level", choices=["yellow", "orange", "red"])
+    al.add_argument("--until", help="snooze: YYYY-MM-DD; the alarm rings again from that date")
+    al.add_argument("--why", help="snooze: why nobody can act on it before then")
+    al.add_argument("--by", default="human", help="snooze: who decided it")
     al.set_defaults(fn=cmd_alarms)
     co = sub.add_parser("cost", help="what the coordination spends: implementer turns by class (product/analysis/ceremony/coordination)")
     co.add_argument("--since", help="window such as 24h or 7d (default: whole transcript)")
