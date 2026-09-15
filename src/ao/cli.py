@@ -4025,15 +4025,24 @@ def cmd_catchup(cfg, args):
     from types import SimpleNamespace
     root = cfg["root"]
     did = 0
-    for w in A.open_waivers(root, gate="review"):
-        rng = f"{w['head'][:12]}..HEAD"
-        moved = A.sh(f"git rev-list --count {w['head']}..HEAD", cwd=root)
-        if not moved or moved == "0":
-            print(f"  {w['id']} ({w['slice']}): nothing landed yet after the waiver; keeping it open")
+    for item in A.review_waiver_ranges(root):
+        w = item["waiver"]
+        label = f"{w['id']} ({w['slice']})"
+        if item["problem"]:
+            print(f"  {label}: {item['problem']}; keeping it open")
             continue
-        print(f"  {w['id']} ({w['slice']}): reviewing landed range {rng}")
+        if not item["landed"]:
+            if item["newest"]:
+                print(f"  {label}: nothing landed yet after the waiver; keeping it open")
+            else:
+                A.close_waiver(root, w["id"], "no commits landed before the next waiver was opened")
+                print(f"  {label}: no commits landed before the next waiver; closed")
+                did += 1
+            continue
+        rng = f"{item['start'][:12]}..{item['end'][:12]}"
+        print(f"  {label}: reviewing its own landed range {rng} ({item['landed']} commit(s))")
         ns = SimpleNamespace(boundary=args.boundary or f"waived review for {w['slice']}: {w['why']}",
-                             timeout=900, paths=None, commits=rng)
+                             timeout=900, paths=None, commits=f"{item['start']}..{item['end']}")
         code = cmd_review(cfg, ns)
         if code == 0:
             A.close_waiver(root, w["id"], "reviewed: APPROVED")
@@ -4054,9 +4063,14 @@ def cmd_catchup(cfg, args):
         print(f"  deferred {r['kind']} ({r.get('reason', '')}) since {time.strftime('%d %b %H:%M', time.localtime(r['at']))}")
         A.deferred_close(root, r["id"], "replayed by catchup")
         did += 1
-    print(f"{C['dim']}running one watchdog cycle to act on what is now possible{C['reset']}")
-    from . import watchdog as W
-    W.run(SimpleNamespace(root=root, idle_minutes=6.0, dry_run=False, prompt=W.NUDGE_PROMPT))
+    if A.heartbeat_age(root) is None:
+        # A cycle writes this project's heartbeat. Where no watchdog runs, that file
+        # goes stale within minutes and every sibling watchdog reports it as dead.
+        print(f"{C['dim']}no watchdog runs for this project; skipping the cycle{C['reset']}")
+    else:
+        print(f"{C['dim']}running one watchdog cycle to act on what is now possible{C['reset']}")
+        from . import watchdog as W
+        W.run(SimpleNamespace(root=root, idle_minutes=6.0, dry_run=False, prompt=W.NUDGE_PROMPT))
     print(f"{C['green']}catchup{C['reset']} handled {did} item(s)")
     return 0
 

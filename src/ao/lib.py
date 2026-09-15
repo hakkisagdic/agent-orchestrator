@@ -3754,6 +3754,76 @@ def open_waivers(root, gate=None, slice_id=None):
     return out
 
 
+_OBJECT_ID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
+def review_waiver_ranges(root):
+    """Each open review waiver with the commits that landed while it was the newest.
+
+    A waiver records the HEAD it was opened on and nothing else, so reviewing
+    head..HEAD for every open waiver reviews each later slice again under the
+    first slice's boundary: with one waiver per slice, N waivers become N
+    overlapping reviews and the earliest carries every slice after it. A slice's
+    commits run from its waiver's head to the head of the next review waiver
+    opened after it, open or closed, and the newest waiver runs to HEAD.
+
+    Heads come from a ledger file anyone on the machine can edit, so each is
+    required to be a full object id and git runs without a shell.
+
+    Returns dicts: waiver, start, end, landed (commit count), newest, problem.
+    """
+    p = os.path.join(root, ".ao", "ledger", "waivers.jsonl")
+    if not os.path.exists(p):
+        return []
+    waived, closed = [], set()
+    for line in open(p, errors="replace", encoding=UTF8):
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if r.get("event") == "waived" and r.get("gate") == "review":
+            waived.append(r)
+        elif r.get("event") == "closed":
+            closed.add(r.get("id"))
+    try:
+        current = _git_output(root, "rev-parse", "--verify", "HEAD").decode("ascii").strip()
+    except (RuntimeError, UnicodeError):
+        current = None
+    out = []
+    for i, w in enumerate(waived):
+        if w.get("id") in closed:
+            continue
+        later = waived[i + 1] if i + 1 < len(waived) else None
+        start = str(w.get("head") or "")
+        end = str(later.get("head") or "") if later else (current or "")
+        item = {"waiver": w, "start": start, "end": end, "landed": 0,
+                "newest": later is None, "problem": None}
+        if not _OBJECT_ID.fullmatch(start):
+            item["problem"] = "its recorded head is not a full object id"
+        elif not _OBJECT_ID.fullmatch(end):
+            item["problem"] = ("the next waiver's recorded head is not a full object id"
+                               if later else "HEAD cannot be resolved")
+        else:
+            try:
+                ancestor = subprocess.run(
+                    ["git", "merge-base", "--is-ancestor", start, end], cwd=root,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60,
+                ).returncode
+            except (OSError, subprocess.TimeoutExpired):
+                ancestor = 2
+            if ancestor == 1:
+                item["problem"] = "its head is not an ancestor of the range end; history was rewritten"
+            elif ancestor:
+                item["problem"] = "git cannot compare its head with the range end"
+            else:
+                try:
+                    item["landed"] = int(_git_output(root, "rev-list", "--count", f"{start}..{end}").strip() or 0)
+                except (RuntimeError, ValueError):
+                    item["problem"] = "git cannot count the commits in its range"
+        out.append(item)
+    return out
+
+
 # ---- credits: burn rate and the day the work stops -------------------------------
 
 def record_credit_sample(root, used, limit, reset_at=None):

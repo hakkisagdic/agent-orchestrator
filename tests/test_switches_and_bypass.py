@@ -251,3 +251,101 @@ def test_catchup_reviews_the_landed_range_and_closes_the_waiver(project, tmp_pat
     assert A.open_waivers(root) == []
     body = open(os.path.join(root, "semantic-review", os.listdir(os.path.join(root, "semantic-review"))[0]), encoding="utf-8").read()
     assert "- commits:" in body and "VERDICT: APPROVED" in body
+
+
+def _commit_all(root, message):
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-am", message],
+                   cwd=root, check=True)
+
+
+def _catchup_with_recorded_ranges(project, monkeypatch):
+    seen = []
+    def fake_review(cfg, ns):
+        seen.append(ns.commits)
+        return 0
+    monkeypatch.setattr(cli, "cmd_review", fake_review)
+    from ao import watchdog as W
+    monkeypatch.setattr(W, "run", lambda ns: (_ for _ in ()).throw(AssertionError("no watchdog cycle expected")))
+    assert cli.cmd_catchup(project, SimpleNamespace(boundary=None)) == 0
+    return seen
+
+
+def _head(root):
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def _seed_tracked_file(root):
+    os.makedirs(os.path.join(root, "src"), exist_ok=True)
+    open(os.path.join(root, "src", "a.py"), "w", encoding="utf-8").write("x = 1\n")
+    subprocess.run(["git", "add", "src/a.py"], cwd=root, check=True)
+    _commit_all(root, "a")
+
+
+def _bump(root, value, message):
+    open(os.path.join(root, "src", "a.py"), "w", encoding="utf-8").write(f"x = {value}\n")
+    _commit_all(root, message)
+
+
+def test_catchup_gives_each_waiver_only_its_own_slices_commits(project, monkeypatch):
+    root = project["root"]
+    _seed_tracked_file(root)
+    first = A.waive(root, "review", "B7", "quota", by="h")
+    _bump(root, 2, "b7")
+    second = A.waive(root, "review", "B8", "quota", by="h")
+    _bump(root, 3, "b8")
+
+    seen = _catchup_with_recorded_ranges(project, monkeypatch)
+
+    assert seen == [f"{first['head']}..{second['head']}", f"{second['head']}..{_head(root)}"]
+    assert A.open_waivers(root) == []
+
+
+def test_catchup_closes_a_waiver_that_covered_no_commits(project, monkeypatch):
+    root = project["root"]
+    _seed_tracked_file(root)
+    empty = A.waive(root, "review", "B7", "quota", by="h")
+    kept = A.waive(root, "review", "B8", "quota", by="h")
+    _bump(root, 2, "b8")
+
+    seen = _catchup_with_recorded_ranges(project, monkeypatch)
+
+    assert seen == [f"{kept['head']}..{_head(root)}"]
+    assert A.open_waivers(root) == []
+    ledger = open(os.path.join(root, ".ao", "ledger", "waivers.jsonl"), encoding="utf-8").read()
+    assert empty["id"] in ledger and "no commits landed before the next waiver" in ledger
+
+
+def test_catchup_keeps_the_newest_waiver_open_until_something_lands(project, monkeypatch):
+    root = project["root"]
+    _seed_tracked_file(root)
+    waiver = A.waive(root, "review", "B7", "quota", by="h")
+
+    seen = _catchup_with_recorded_ranges(project, monkeypatch)
+
+    assert seen == []
+    assert [w["id"] for w in A.open_waivers(root)] == [waiver["id"]]
+
+
+def test_catchup_refuses_a_forged_waiver_head_without_a_shell(project, monkeypatch, tmp_path):
+    root = project["root"]
+    _seed_tracked_file(root)
+    canary = tmp_path / "pwned"
+    forged = {"event": "waived", "id": "W-forged", "gate": "review", "slice": "B7", "why": "x", "by": "h",
+              "at": 1, "head": f"HEAD; touch {canary}", "tree": "t"}
+    with open(os.path.join(root, ".ao", "ledger", "waivers.jsonl"), "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(forged) + "\n")
+    _bump(root, 2, "b7")
+
+    seen = _catchup_with_recorded_ranges(project, monkeypatch)
+
+    assert seen == []
+    assert not canary.exists()
+    assert [w["id"] for w in A.open_waivers(root)] == ["W-forged"]
+
+
+def test_catchup_without_a_watchdog_writes_no_heartbeat(project, monkeypatch):
+    root = project["root"]
+
+    _catchup_with_recorded_ranges(project, monkeypatch)
+
+    assert A.heartbeat_age(root) is None
