@@ -349,3 +349,19 @@ def test_catchup_without_a_watchdog_writes_no_heartbeat(project, monkeypatch):
     _catchup_with_recorded_ranges(project, monkeypatch)
 
     assert A.heartbeat_age(root) is None
+
+
+def test_review_listing_ignores_the_placeholder_init_leaves(project):
+    reviews = os.path.join(project["root"], "semantic-review")
+    real = os.path.join(reviews, "2026-09-15-000000-abc1234.md")
+    with open(real, "w", encoding="utf-8") as fh:
+        fh.write("VERDICT: APPROVED\nBLOCKER: 0\nHIGH: 0\nMEDIUM: 0\nLOW: 0\n")
+    placeholder = os.path.join(reviews, ".gitkeep")
+    open(placeholder, "w", encoding="utf-8").close()
+    os.makedirs(os.path.join(reviews, "archive"))
+    os.utime(real, (1, 1))
+    os.utime(placeholder, (2, 2))
+
+    assert [entry[0] for entry in A.reviews(project["root"], "semantic-review", limit=4)] == [
+        "2026-09-15-000000-abc1234.md"
+    ]

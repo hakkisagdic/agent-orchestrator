@@ -2570,8 +2570,12 @@ def reviews(root, reviews_dir, limit=4):
     d = os.path.join(root, reviews_dir)
     if not os.path.isdir(d):
         return []
-    files = sorted(os.listdir(d), key=lambda f: os.path.getmtime(os.path.join(d, f)),
-                   reverse=True)[:limit]
+    # Review artefacts only. `ao init` leaves semantic-review/.gitkeep, and as the
+    # newest file it was reported as an INVALID review and written into every
+    # verification record as the review the tree had been measured against.
+    files = sorted((f for f in os.listdir(d)
+                    if not f.startswith(".") and os.path.isfile(os.path.join(d, f))),
+                   key=lambda f: os.path.getmtime(os.path.join(d, f)), reverse=True)[:limit]
     out = []
     for f in files:
         verdict = "INVALID"
