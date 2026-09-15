@@ -61,7 +61,30 @@ def _idle_answer_text(idle, now=None):
             "a decision or mail")
 
 
-def render(cfg, msg_count=8, width=None, max_lines=None):
+def _window_label(hours):
+    return f"{hours:g}h" if hours < 48 else f"{hours / 24:g}d"
+
+
+def _throughput_lines(tp):
+    """The throughput section as two plain lines: the counts, then the state and why (#91)."""
+    counts = (f"staged {tp['staged']} · landed {tp['landed']} · decisions {tp['decisions_asked']} asked, "
+              f"{tp['decisions_open']} waiting")
+    if tp.get("oldest_open_minutes") is not None:
+        counts += f" (oldest {tp['oldest_open_minutes'] // 60}h {tp['oldest_open_minutes'] % 60}m)"
+    stall = tp.get("stall")
+    if tp["state"] == "stalled" and stall:
+        paths = ", ".join(stall["paths"][:3]) + (" …" if len(stall["paths"]) > 3 else "")
+        state = (f"stalled {stall['minutes'] // 60}h {stall['minutes'] % 60}m on a staged candidate "
+                 f"({paths or 'no paths recorded'}) — {stall['reason']}")
+    else:
+        state = {"landing": "landing: candidates are reaching commits",
+                 "staging": "staging: candidates verified, none landed yet",
+                 "busy": "busy: the implementer took turns and staged nothing",
+                 "idle": "idle: no turns in this window"}[tp["state"]]
+    return counts, state
+
+
+def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0):
     """Render the panel. When max_lines is given the output never exceeds it:
     the fixed sections are laid out first and the message log — the only elastic
     part — takes whatever is left. A panel taller than the window scrolls, and a
@@ -175,6 +198,19 @@ def render(cfg, msg_count=8, width=None, max_lines=None):
             col = C["green"] if "APPROVED" in v.upper() else C["yellow"]
             a(f"   {f.split('-pr')[0]}   {col}{v}{C['reset']}")
 
+    # throughput: what the window produced, so busy-and-landing-nothing shows (#91)
+    if impl:
+        tp = A.throughput(root, cfg, hours=window_hours)
+        label = _window_label(window_hours)
+        a(f"\n{C['b']}{C['mag']}── THROUGHPUT {label} {'─' * max(0, w - 16 - len(label))}{C['reset']}")
+        counts, state = _throughput_lines(tp)
+        colour = {"stalled": C["red"], "busy": C["yellow"], "idle": C["dim"],
+                  "landing": C["green"]}.get(tp["state"], "")
+        a(f"   {C['dim']}{counts}{C['reset']}")
+        # A stall names paths and a reason; keep it to two lines so a bounded panel stays bounded.
+        for i, ln in enumerate(textwrap.wrap(state, w - 6, break_on_hyphens=False)[:2]):
+            a(f"   {colour}{ln}{C['reset']}" if i == 0 else f"     {C['dim']}{ln}{C['reset']}")
+
     # git + mail
     g = A.git_state(root)
     a(f"\n{C['b']}{C['mag']}── REPOSITORY {'─' * max(0, w - 15)}{C['reset']}")
@@ -232,7 +268,7 @@ def render(cfg, msg_count=8, width=None, max_lines=None):
 
 
 def cmd_status(cfg, args):
-    print(render(cfg, args.messages))
+    print(render(cfg, args.messages, window_hours=getattr(args, "window", None) or 24.0))
 
 
 def cmd_watch(cfg, args):
@@ -5990,6 +6026,8 @@ def main():
 
     s = sub.add_parser("status", help="one-shot summary")
     s.add_argument("-m", "--messages", type=int, default=6)
+    s.add_argument("--window", type=float, default=24.0,
+                   help="hours of throughput to report (default 24)")
     s.set_defaults(fn=cmd_status)
 
     w = sub.add_parser("watch", help="live panel; leave it in a background terminal")

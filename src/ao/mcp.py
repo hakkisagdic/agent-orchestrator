@@ -137,6 +137,7 @@ def status_payload(cfg):
             "behind": g.get("behind"), "base": g.get("base"), "merged": g.get("merged"),
             "mailbox": A.mailbox(root, cfg["mailbox"]),
             "reviews": [{"file": f, "verdict": v} for f, v in revs],
+            "throughput": A.throughput(root, cfg),
             "held": A.hold_state(root),
             "agent_processes": len(A.agent_pids(root, adapter)) if impl else 0}
 

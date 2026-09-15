@@ -1225,6 +1225,108 @@ def notice_recently_sent(root, key, window):
     return False
 
 
+def _ledger_time(value):
+    """Epoch seconds from a ledger `at`: verifications write ISO text, the rest epochs."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def _stall_reason(root, cfg, candidate, waiting):
+    """Why the newest staged candidate has not landed, from what was recorded."""
+    try:
+        for row in reversed(authority_rows(root)):
+            if isinstance(row, dict) and row.get("granted") is False \
+                    and (row.get("candidate") or {}).get("digest") == candidate.get("digest"):
+                return "commit refused: " + "; ".join(str(r) for r in (row.get("reasons") or [])[:2])
+    except Exception:
+        pass
+    reviews_dir = cfg.get("reviews") or "semantic-review"
+    for name, verdict in reviews(root, reviews_dir, limit=20):
+        try:
+            with open(os.path.join(root, reviews_dir, name), encoding=UTF8, errors="replace") as fh:
+                head = fh.read(4000)
+        except OSError:
+            continue
+        if candidate.get("digest", "-") in head:
+            if "APPROVED" in (verdict or "").upper():
+                return f"review approved ({name}) but nothing committed"
+            return f"review {verdict} ({name})"
+    if waiting:
+        oldest = min(waiting, key=lambda d: d.get("asked_at") or 0)
+        return f"waiting on decision {oldest.get('id')}: {str(oldest.get('question') or '')[:80]}"
+    return "verified, then neither committed, refused nor reviewed"
+
+
+def throughput(root, cfg, hours=24.0, now=None):
+    """Candidates staged and landed, decisions asked and waiting, and what that makes the implementer (#91).
+
+    Busy-detection asks whether a process exists, so an implementer that is alive
+    and lands nothing reads as busy forever. On 2026-09-14 one ran full work
+    cycles for an hour - a candidate reached 255 passed and was staged - and
+    produced four blocked reports, three decision requests and one landing while
+    every surface read healthy. The ratio that would have shown it, candidates
+    staged against candidates landed, was computed nowhere.
+
+    A candidate is staged when `ao verify` recorded it ready, and landed when a
+    commit's tree is its index tree. The state is read in order: stalled (the
+    newest staged candidate has not landed for `stall_minutes`, default 60),
+    landing (a candidate landed in the window), staging (staged, none landed yet),
+    busy (the transcript moved, nothing staged) and idle (nothing moved). None of
+    it reads the mailbox.
+    """
+    from .storage import read_jsonl
+    now = now or time.time()
+    cut = now - hours * 3600
+    try:
+        rows = read_jsonl(os.path.join(root, ".ao", "ledger", "verifications.jsonl"))
+    except Exception:
+        rows = []
+    ready = []
+    for row in rows:
+        candidate = row.get("candidate") if isinstance(row, dict) else None
+        if isinstance(candidate, dict) and row.get("candidate_ready") and candidate.get("index_tree"):
+            ready.append((_ledger_time(row.get("at")), candidate))
+    trees = {}
+    try:
+        log = _git_output(root, "log", "-n", "400", "--format=%T %ct").decode(UTF8, "replace")
+    except RuntimeError:
+        log = ""
+    for line in log.split("\n"):
+        parts = line.split()
+        if len(parts) == 2 and parts[1].isdigit():
+            trees.setdefault(parts[0], int(parts[1]))
+    staged = {candidate["digest"] for at, candidate in ready if at >= cut}
+    landed = {candidate["index_tree"] for _, candidate in ready
+              if trees.get(candidate["index_tree"], 0) >= cut}
+    every = decisions(root)
+    asked = [d for d in every if (d.get("asked_at") or 0) >= cut]
+    waiting = [d for d in every if d.get("state") == "open"]
+    oldest = min((d.get("asked_at") or now for d in waiting), default=None)
+    stall = None
+    if ready:
+        at, newest = max(ready, key=lambda item: item[0])
+        minutes = (now - at) / 60
+        if newest["index_tree"] not in trees and minutes >= float(cfg.get("stall_minutes") or 60):
+            stall = {"minutes": int(minutes), "candidate": newest.get("digest"),
+                     "paths": list(newest.get("changed_paths") or []),
+                     "reason": _stall_reason(root, cfg, newest, waiting)}
+    msgs, _ = session_paths(cfg)
+    try:
+        moved = bool(msgs) and os.path.getmtime(msgs) >= cut
+    except OSError:
+        moved = False
+    state = ("stalled" if stall else "landing" if landed else "staging" if staged
+             else "busy" if moved else "idle")
+    return {"hours": hours, "staged": len(staged), "landed": len(landed),
+            "decisions_asked": len(asked), "decisions_open": len(waiting),
+            "oldest_open_minutes": int((now - oldest) / 60) if oldest is not None else None,
+            "state": state, "stall": stall}
+
+
 def digest(root, cfg, since_days=1.0):
     """What actually happened in a window, from the ledgers rather than memory.
 
