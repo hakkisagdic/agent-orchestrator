@@ -3932,15 +3932,11 @@ def doctor_problems(cfg):
     for sib, age in A.stale_siblings(root).items():
         out.append((f"sibling-dead:{sib}", f"{sib}: watchdog silent for {age // 60}m"))
     br = A.burn_rate(root)
-    if br and br["before_reset"]:
-        out.append(("credits-exhaust", f"credits run out {time.strftime('%d %b', time.localtime(br['exhausts_at']))}, "
-                                       f"before the reset ({br['per_day']:.0f}/day) — new account or fewer features"))
     samples = A.credit_samples(root)
     last = samples[-1] if samples else None
-    if last and last.get("limit") and float(last.get("used") or 0) >= float(last["limit"]) \
-            and not (br and br["before_reset"]):
-        out.append(("credits-exhaust", f"credits exhausted at the last reading: "
-                                       f"{float(last['used']):.0f}/{float(last['limit']):.0f}"))
+    credits = _credits_problem(br, last)
+    if credits:
+        out.append(credits)
     from . import features as _features
     try:
         from .watchdog import load_state as _load_state
@@ -4038,6 +4034,31 @@ def doctor_problems(cfg):
     return out
 
 
+# Conditions the watchdog raises itself, by the key it raises them under. Two
+# alarms for one condition double the ladder - two ids, two levels, two mails -
+# and they cannot share an id, because every touch rewrites the level. So the
+# doctor rings these only while the watchdog's own alarm is quiet: a stopped
+# watchdog, which is what the doctor check is for, lets it go quiet.
+DOCTOR_WATCHDOG_ALARMS = {"credits-exhaust": "credits-exhaust",
+                          "wake-failed": "architect-wake-failed"}
+
+
+def _credits_problem(br, last):
+    """The one credits problem the readings show: exhausted outranks a projection.
+
+    At 12503/10000 the doctor still said "credits run out 15 Sep, before the
+    reset", because the projection was checked first and a date that had already
+    passed read like one still ahead.
+    """
+    if last and last.get("limit") and float(last.get("used") or 0) >= float(last["limit"]):
+        return ("credits-exhaust", f"credits exhausted at the last reading: "
+                                   f"{float(last['used']):.0f}/{float(last['limit']):.0f}")
+    if br and br.get("before_reset"):
+        return ("credits-exhaust", f"credits run out {time.strftime('%d %b', time.localtime(br['exhausts_at']))}, "
+                                   f"before the reset ({br['per_day']:.0f}/day) — new account or fewer features")
+    return None
+
+
 def _doctor_check(cfg):
     """Quiet, machine-facing doctor: one line per problem, exit 1 if any, each raised as an alarm."""
     from .watchdog import notify
@@ -4047,8 +4068,11 @@ def _doctor_check(cfg):
     if not problems:
         print(f"ok {time.strftime('%H:%M')} — no problems")
         return 0
+    ringing = {alarm["key"] for alarm in A.active_alarms(project)}
     for key, text in problems:
         print(f"PROBLEM {key}: {text}")
+        if DOCTOR_WATCHDOG_ALARMS.get(key) in ringing:
+            continue
         notify(f"{project}: {key}", text, root, key=f"doctor:{key}", window=3600, audience="human")
     return 1
 
@@ -5899,13 +5923,16 @@ def cmd_doctor(cfg, args):
         except Exception:
             pass
         br = A.burn_rate(root)
-        if br:
+        _last = (A.credit_samples(root) or [None])[-1]
+        # A reading already over the limit is exhausted; a date ahead would say otherwise.
+        _over = bool(_last and _last.get("limit")
+                     and float(_last.get("used") or 0) >= float(_last["limit"]))
+        if br and not _over:
             when = time.strftime('%d %b', time.localtime(br['exhausts_at'])) if br['exhausts_at'] else '—'
             tone = C['red'] if br['before_reset'] else C['green']
             print(f"credits         {br['used']:.0f}/{br['limit']:.0f} · {br['per_day']:.0f}/day · runs out {tone}{when}{C['reset']}"
                   + (f"  {C['red']}before the reset — new account / ao features off{C['reset']}" if br['before_reset'] else ""))
-        _last = (A.credit_samples(root) or [None])[-1]
-        if not br and _last and _last.get("limit"):
+        if (_over or not br) and _last and _last.get("limit"):
             _used, _limit = float(_last.get("used") or 0), float(_last["limit"])
             print(f"credits         {C['red'] if _used >= _limit else C['green']}{_used:.0f}/{_limit:.0f}{C['reset']} at the last reading"
                   + (f"  {C['red']}exhausted{C['reset']}" if _used >= _limit else ""))
