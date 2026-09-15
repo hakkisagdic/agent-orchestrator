@@ -40,6 +40,18 @@ def _bar(pct, width=20):
     return f"{col}{'█' * filled}{'░' * (width - filled)}{C['reset']} {pct:.0f}%"
 
 
+def _checkout_position(g):
+    """One line for where a checkout stands: never an ahead count on its own (#89)."""
+    if g.get("base") is None:
+        return f"{C['yellow']}no remote default branch to compare against{C['reset']}"
+    text = f"{C['dim']}{g['ahead']} ahead / {g['behind']} behind {g['base']}{C['reset']}"
+    if g.get("merged"):
+        return text + f"  {C['yellow']}already merged; this checkout is {g['behind']} commits old{C['reset']}"
+    if g.get("behind"):
+        return text + f"  {C['yellow']}behind{C['reset']}"
+    return text
+
+
 def render(cfg, msg_count=8, width=None, max_lines=None):
     """Render the panel. When max_lines is given the output never exceeds it:
     the fixed sections are laid out first and the message log — the only elastic
@@ -155,7 +167,7 @@ def render(cfg, msg_count=8, width=None, max_lines=None):
     for ln in g["log"][:3]:
         if ln:
             a(f"   {ln[:w-5]}")
-    a(f"   {C['dim']}{len(g['dirty'])} files uncommitted · {g['ahead']} commits unpushed{C['reset']}")
+    a(f"   {C['dim']}{len(g['dirty'])} files uncommitted · {C['reset']}{_checkout_position(g)}")
 
     mail = A.mailbox(root, cfg["mailbox"])
     a(f"\n   {C['b']}Mailbox:{C['reset']} " +
@@ -1682,7 +1694,8 @@ def cmd_handoff(cfg, args):
     lines += ["## Şu an", f"- uygulayıcı: **{state}**"
               + (f", son yazım {age // 60}dk önce" if age is not None else ""),
               f"- HEAD `{(g['log'][0] if g['log'] else '?')[:60]}`",
-              f"- {len(g['dirty'])} dosya commit'siz, {g['ahead']} commit push'suz"]
+              f"- {len(g['dirty'])} dosya commit'siz, {g['ahead']} commit push'suz, "
+              f"{g['behind'] if g.get('behind') is not None else '?'} commit geride ({g.get('base') or 'karşılaştırılacak uzak dal yok'})"]
     if revs:
         lines.append(f"- son review: {revs[0][1]} ({revs[0][0]})")
     if doing:
@@ -5753,6 +5766,7 @@ def cmd_doctor(cfg, args):
     hook_proof = _hook_execution_probe(hook_inventory)
     proof_tone = C["green"] if hook_proof["installed"] else C["yellow"]
     print(f"{'commit proof':<16}{proof_tone}{_hook_probe_text(hook_proof)}{C['reset']}")
+    print(f"{'checkout':<16}{_checkout_position(A.git_state(root))}")
     # Can the *agent* run `ao`? A shell alias is invisible to a non-interactive
     # process, so steering that says "run your gates through ao lock" is an
     # instruction the agent cannot follow — and a disciplined agent then parks the

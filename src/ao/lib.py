@@ -2818,11 +2818,71 @@ def mailbox(root, mail_dir):
     return [f for f in sorted(os.listdir(d)) if f != "README.md" and f.endswith(".md")]
 
 
+REMOTE_PREFIX = "refs/remotes/origin/"
+
+
+def _default_remote_branch(root):
+    """The remote default branch to measure a checkout against, as a full ref, or None.
+
+    origin/HEAD can still name a branch the remote has since deleted, so a candidate
+    is used only when it resolves to a commit.
+    """
+    candidates = []
+    try:
+        ref = _git_output(root, "symbolic-ref", "--quiet",
+                          "refs/remotes/origin/HEAD").decode(UTF8, "replace").strip()
+        if ref.startswith(REMOTE_PREFIX):
+            candidates.append(ref)
+    except RuntimeError:
+        pass
+    for candidate in (*candidates, REMOTE_PREFIX + "main", REMOTE_PREFIX + "master"):
+        try:
+            _git_output(root, "rev-parse", "--verify", "--quiet", candidate + "^{commit}")
+            return candidate
+        except RuntimeError:
+            continue
+    return None
+
+
 def git_state(root):
+    """Where this checkout stands, not only what it holds.
+
+    An ahead count alone reads as current on a checkout that is weeks behind. On
+    2026-09-14 `ao status` printed "0 commits unpushed" for a branch 77 commits
+    behind main and already merged into it, and two backlog rows were written from
+    measurements taken in that checkout. So measure against the remote default
+    branch, report behind as well as ahead, say when the branch is already merged,
+    and say "?" when there is nothing to compare against instead of "0".
+
+    "ahead" stays a string for existing readers; "behind" is an int or None.
+    """
+    ref = _default_remote_branch(root)
+    ahead = behind = None
+    if ref:
+        try:
+            counts = _git_output(root, "rev-list", "--left-right", "--count",
+                                 f"{ref}...HEAD").decode(UTF8, "replace").split()
+            if len(counts) == 2 and all(c.isdigit() for c in counts):
+                behind, ahead = int(counts[0]), int(counts[1])
+        except RuntimeError:
+            pass
+    merged = False
+    if ahead == 0 and behind:
+        # The default branch itself, checked out behind its remote, needs a pull; it
+        # is not a merged branch. A detached head inside the base counts as merged.
+        try:
+            head = _git_output(root, "symbolic-ref", "--quiet", "HEAD").decode(UTF8, "replace").strip()
+        except RuntimeError:
+            head = ""
+        merged = head != "refs/heads/" + ref[len(REMOTE_PREFIX):]
+    known = ahead is not None
     return {
         "log": sh("git log --oneline -4", cwd=root).split("\n"),
         "dirty": [l for l in sh("git status --short", cwd=root).split("\n") if l.strip()],
-        "ahead": sh("git rev-list --count origin/main..HEAD", cwd=root) or "0",
+        "ahead": str(ahead) if known else "?",
+        "behind": behind,
+        "base": ref[len("refs/remotes/"):] if known else None,
+        "merged": merged,
     }
 
 

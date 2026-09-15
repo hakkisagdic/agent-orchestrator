@@ -132,6 +132,7 @@ def status_payload(cfg):
             "cost_total": tel.get("total"), "cost_unit": tel.get("unit"),
             "head": g["log"][0] if g["log"] else None,
             "dirty_files": len(g["dirty"]), "unpushed": g["ahead"],
+            "behind": g.get("behind"), "base": g.get("base"), "merged": g.get("merged"),
             "mailbox": A.mailbox(root, cfg["mailbox"]),
             "reviews": [{"file": f, "verdict": v} for f, v in revs],
             "held": A.hold_state(root),
