@@ -1601,6 +1601,166 @@ def candidate_diff(root, candidate, scope=None):
     return _git_output(root, *args, timeout=60)
 
 
+REVIEW_CONTEXT_BUDGET = 100_000
+
+
+def _is_test_path(path):
+    parts = str(path).replace("\\", "/").split("/")
+    name = parts[-1]
+    return (any(part in ("tests", "test") for part in parts[:-1])
+            or name.startswith("test_") or name.endswith("_test.py") or name == "conftest.py")
+
+
+def _review_definitions(root, rev, path, cache):
+    """Top-level definitions of one committed Python file: (lines, name -> (start, end))."""
+    import ast
+    if path not in cache:
+        cache[path] = None
+        try:
+            source = _git_output(root, "show", f"{rev}:{path}", timeout=30).decode(UTF8, "replace")
+            tree = ast.parse(source)
+        except (RuntimeError, SyntaxError, ValueError):
+            return None
+        spans = {}
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                spans[node.name] = (min([node.lineno] + [d.lineno for d in node.decorator_list]),
+                                    node.end_lineno)
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                for target in (node.targets if isinstance(node, ast.Assign) else [node.target]):
+                    if isinstance(target, ast.Name):
+                        spans[target.id] = (node.lineno, node.end_lineno)
+        cache[path] = (source.splitlines(), spans)
+    return cache[path]
+
+
+def review_context(root, paths, read_rev, context_rev, budget=REVIEW_CONTEXT_BUDGET):
+    """Committed source a test-only candidate exercises, for the reviewer to read (#97).
+
+    The candidate is what may land; this is what it is judged against. None of it
+    enters the diff or the candidate digest, so supplying it widens the authority
+    binding by nothing. Context is attached only when every Python file in the
+    candidate is a test: a test cannot be judged without the code it runs, while
+    a source change carries its own subject.
+
+    The tests are read at ``read_rev`` (the index tree for a staged candidate) and
+    the source at ``context_rev``. A definition the tests name through an import -
+    an attribute of an imported module, an imported name, or a name handed to
+    ``setattr`` as a string - is copied whole, in the order the tests first name
+    it, while the budget lasts. What does not fit is named, never cut, and the
+    whole text stays within the budget unless the names alone exceed it. Python only.
+    """
+    import ast
+    py = [path for path in paths or [] if path.endswith(".py")]
+    if not py or not all(_is_test_path(path) for path in py):
+        return None
+    try:
+        listing = _git_output(root, "ls-tree", "-r", "--name-only", "-z", context_rev, "--")
+    except RuntimeError:
+        return None
+    committed = {os.fsdecode(raw) for raw in listing.split(b"\0") if raw}
+    refs = []
+    for path in py:
+        try:
+            tree = ast.parse(_git_output(root, "show", f"{read_rev}:{path}", timeout=30))
+        except (RuntimeError, SyntaxError, ValueError):
+            continue
+        modules, names = {}, {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.asname:
+                        modules[alias.asname] = alias.name
+            elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                for alias in node.names:
+                    bound = alias.asname or alias.name
+                    modules[bound] = f"{node.module}.{alias.name}"
+                    names[bound] = (node.module, alias.name)
+        for node in ast.walk(tree):
+            at = (path, getattr(node, "lineno", 0), getattr(node, "col_offset", 0))
+            if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                    and node.value.id in modules):
+                refs.append((at, modules[node.value.id], node.attr))
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in names:
+                refs.append((at, *names[node.id]))
+            elif (isinstance(node, ast.Call) and len(node.args) >= 2
+                  and isinstance(node.args[0], ast.Name) and node.args[0].id in modules
+                  and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str)):
+                refs.append((at, modules[node.args[0].id], node.args[1].value))
+    cache, seen, order, blocks = {}, set(), [], {}
+    for _, module, name in sorted(refs):
+        qualified = f"{module}.{name}"
+        if qualified in seen:
+            continue
+        seen.add(qualified)
+        base = module.replace(".", "/")
+        path = next((candidate for candidate in (f"src/{base}.py", f"{base}.py",
+                                                 f"src/{base}/__init__.py", f"{base}/__init__.py")
+                     if candidate in committed), None)
+        found = _review_definitions(root, context_rev, path, cache) if path else None
+        if not found or name not in found[1]:
+            continue
+        start, end = found[1][name]
+        order.append(qualified)
+        blocks[qualified] = (path, f"# {path}:{start}-{end}  {qualified}\n"
+                                   + "\n".join(found[0][start - 1:end]) + "\n")
+    files = list(dict.fromkeys(blocks[qualified][0] for qualified in order))
+
+    def render(kept):
+        omitted = [qualified for qualified in order if qualified not in kept]
+        lines = [f"committed at {context_rev[:12]}; read-only; not under review",
+                 "files: " + (", ".join(files) or "none resolved from the tests' imports")]
+        if omitted:
+            shown = []
+            for qualified in omitted:
+                if sum(len(name) + 2 for name in shown) + len(qualified) > 2_000:
+                    break
+                shown.append(qualified)
+            more = len(omitted) - len(shown)
+            lines.append("not inlined for size, read them from the committed tree: "
+                         + ", ".join(shown) + (f" and {more} more" if more else ""))
+        return {"rev": context_rev, "paths": files, "names": list(kept), "omitted": omitted,
+                "text": "\n".join(lines) + "".join("\n\n" + blocks[q][1] for q in kept)}
+
+    kept, spent = [], 0
+    for qualified in order:
+        size = len(blocks[qualified][1].encode(UTF8)) + 2
+        if spent + size <= budget:
+            kept.append(qualified)
+            spent += size
+    result = render(kept)
+    while kept and len(result["text"].encode(UTF8)) > budget:
+        kept.pop()
+        result = render(kept)
+    return result
+
+
+def review_range_context(root, commits, budget=REVIEW_CONTEXT_BUDGET):
+    """The same context for a retrospective range, read at the range's end commit."""
+    if ".." not in commits:
+        return None
+    end = commits.split("..", 1)[1].lstrip(".") or "HEAD"
+    if end.startswith("-"):
+        return None
+    try:
+        rev = _git_output(root, "rev-parse", "--verify", "--quiet",
+                          end + "^{commit}").decode("ascii").strip()
+        names = _git_output(root, "diff", "--name-only", "-z", "--no-renames", commits, "--")
+    except (RuntimeError, UnicodeError):
+        return None
+    paths = sorted({os.fsdecode(raw) for raw in names.split(b"\0") if raw}, key=os.fsencode)
+    return review_context(root, paths, rev, rev, budget)
+
+
+def review_context_line(context):
+    files = ", ".join(context["paths"]) or "none resolved from the tests' imports"
+    line = (f"- context: read-only at `{context['rev'][:12]}`: {files}; "
+            f"{len(context['names'])} definitions")
+    if context["omitted"]:
+        line += f", {len(context['omitted'])} not inlined for size"
+    return line
+
+
 def candidate_worktree_issues(root, cfg, candidate=None):
     """State that would make gates execute bytes other than the staged candidate."""
     candidate = candidate or index_candidate(root)
