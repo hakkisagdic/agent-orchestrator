@@ -310,3 +310,95 @@ def test_dry_cycle_escalation_has_no_alarm_or_channel_side_effects(
     assert "architect_wake" in feature_checks
     assert desktop == [] and phone == [] and mailed == []
     assert A.active_alarms("proj") == []
+
+
+def _billing_adapter():
+    return {"billing": {"api": {"target": "GetUsageLimits"}}}
+
+
+def test_kiro_usage_names_a_missing_cli_instead_of_returning_nothing(tmp_path, monkeypatch):
+    import json, shutil, sqlite3, time
+    import pytest
+    if not shutil.which("sqlite3"):
+        pytest.skip("the sqlite3 CLI reads the token store")
+    store = tmp_path / "home" / "Library" / "Application Support" / "kiro-cli"
+    store.mkdir(parents=True)
+    db = sqlite3.connect(str(store / "data.sqlite3"))
+    db.execute("CREATE TABLE auth_kv (key TEXT, value TEXT)")
+    db.execute("INSERT INTO auth_kv VALUES (?, ?)",
+               ("kirocli:odic:token", json.dumps({"access_token": "t", "expires_at": time.time() + 3600})))
+    db.commit()
+    db.close()
+    monkeypatch.setattr(A, "HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(A, "binary_candidates", lambda name, path=None: [])
+
+    result = A.kiro_account_usage()
+
+    assert result and "kiro-cli" in result.get("error", "")
+
+
+def test_credit_sampler_records_a_broken_check_and_waits_before_retrying(project, monkeypatch):
+    root = project["root"]
+    calls, alerts = [], []
+    def usage(timeout=20):
+        calls.append(1)
+        return {"error": "kiro-cli is not on PATH or in the usual install directories"}
+    monkeypatch.setattr(A, "kiro_account_usage", usage)
+    monkeypatch.setattr(W, "notify", lambda *a, **k: alerts.append(k))
+    st = {}
+
+    W._sample_credits(root, st, _billing_adapter(), "proj", now=10_000)
+
+    assert st["credit_check_problem"]["reason"].startswith("kiro-cli is not on PATH")
+    assert W.load_state(root).get("credit_check_problem") == st["credit_check_problem"]
+    assert A.credit_samples(root) == [] and alerts == []
+    W._sample_credits(root, st, _billing_adapter(), "proj", now=10_060)
+    assert len(calls) == 1
+
+
+def test_credit_sampler_raises_exhaustion_on_the_first_reading(project, monkeypatch):
+    root = project["root"]
+    alerts = []
+    monkeypatch.setattr(A, "kiro_account_usage",
+                        lambda timeout=20: {"used": 10200.0, "limit": 10000.0, "reset_at": None})
+    monkeypatch.setattr(W, "notify", lambda title, msg, root=None, **k: alerts.append((title, k)))
+    st = {"credit_check_problem": {"at": 1, "reason": "an earlier failure"}}
+
+    W._sample_credits(root, st, _billing_adapter(), "proj", now=10_000)
+
+    assert len(alerts) == 1
+    title, kwargs = alerts[0]
+    assert "exhausted" in title and kwargs["level"] == "red" and kwargs["key"] == "credits-exhaust"
+    assert "credit_check_problem" not in st
+    assert len(A.credit_samples(root)) == 1
+
+
+def test_doctor_pages_a_blind_credit_check_only_while_the_implementer_is_driven(project):
+    from ao import cli, features as F
+    root = project["root"]
+    W.save_state(root, {"credit_check_problem": {"at": 1, "reason": "kiro-cli is not on PATH"}})
+
+    assert "credits-check" in dict(cli.doctor_problems(A.load_config(root)))
+    F.set_switch(root, "nudge", False)
+    assert "credits-check" not in dict(cli.doctor_problems(A.load_config(root)))
+
+
+def test_launchd_path_keeps_stable_dirs_and_drops_shell_bound_ones(tmp_path, monkeypatch):
+    from ao import cli
+    first, second = tmp_path / "a", tmp_path / "b"
+    shell_bound = tmp_path / ".local" / "state" / "fnm_multishells" / "123_456" / "bin"
+    for d in (first, second, shell_bound):
+        d.mkdir(parents=True)
+    monkeypatch.setattr(W, "child_path", lambda: os.pathsep.join(
+        [str(first), str(shell_bound), str(first), str(tmp_path / "missing"), str(second)]))
+
+    assert cli._launchd_path() == os.pathsep.join([str(first), str(second)])
+
+
+def test_launchd_job_templates_carry_the_path():
+    from ao import cli
+    watchdog = cli.PLIST.format(label="l", python_arg="", script="s", root="r", idle=6,
+                                interval=120, log="x", path="/p")
+    doctor = cli.PLIST_CMD.format(label="l", args="<string>ao</string>", interval=900, log="x", path="/p")
+    for body in (watchdog, doctor):
+        assert "<key>EnvironmentVariables</key><dict><key>PATH</key><string>/p</string></dict>" in body

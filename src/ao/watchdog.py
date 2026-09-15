@@ -828,6 +828,53 @@ def _cycle(args, root):
         _DRY_RUN.reset(token)
 
 
+def _sample_credits(root, st, adapter, project, now=None):
+    """Read the provider's credit figure at most once per half hour and act on it.
+
+    Exhaustion is reported from the reading itself, on the first observation: a
+    projection has nothing to say once the plan has already run out, which is the
+    moment it matters. The burn rate still warns ahead of it. A reading that cannot
+    be taken is recorded as a broken check, which `ao doctor` shows, instead of
+    being skipped: a silent check and a passing check must never look the same. A
+    failed attempt waits the same half hour before the next one.
+    """
+    now = now or time.time()
+    if now - max(st.get("last_credit_sample", 0), st.get("last_credit_attempt", 0)) <= 1800:
+        return
+    if not (adapter.get("billing") or {}).get("api"):
+        return
+    try:
+        acct = A.kiro_account_usage()
+    except Exception as exc:
+        acct = {"error": f"the usage check raised {type(exc).__name__}"}
+    if acct is None:
+        return
+    st["last_credit_attempt"] = now
+    if not acct.get("limit"):
+        reason = acct.get("error") or ("the CLI's token has expired" if acct.get("expired")
+                                       else "the provider returned no credit limit")
+        st["credit_check_problem"] = {"at": int(now), "reason": reason}
+        save_state(root, st)
+        return
+    st.pop("credit_check_problem", None)
+    A.record_credit_sample(root, acct.get("used", 0), acct["limit"], acct.get("reset_at"))
+    st["last_credit_sample"] = now
+    save_state(root, st)
+    used, limit = float(acct.get("used") or 0), float(acct["limit"])
+    if used >= limit:
+        notify(f"{project}: credits exhausted",
+               f"{used:.0f}/{limit:.0f} used; the plan is spent and only overage, if enabled, runs "
+               f"until the reset. New account (keyflip) or `ao features off …`", root,
+               key="credits-exhaust", window=6 * 3600, audience="human", level="red")
+        return
+    br = A.burn_rate(root)
+    if br and br["before_reset"]:
+        notify(f"{project}: credits run out {time.strftime('%d %b', time.localtime(br['exhausts_at']))}",
+               f"{br['used']:.0f}/{br['limit']:.0f} at {br['per_day']:.0f}/day; the reset is later. "
+               f"New account (keyflip) or `ao features off …`", root, key="credits-exhaust",
+               window=6 * 3600, audience="human", level="red")
+
+
 def _cycle_impl(args, root):
     cfg = A.load_config(root)
     impl = cfg.get("implementer") or {}
@@ -872,23 +919,8 @@ def _cycle_impl(args, root):
         _FACTS["ping"] = A.ping(root)
     else:
         _FACTS["ping"] = "dry-run"
-    # Credits: one sample per half hour, and a red alarm when the burn rate says
-    # the plan runs out before it resets — the day everything stops.
-    if not args.dry_run and time.time() - st.get("last_credit_sample", 0) > 1800:
-        try:
-            acct = A.kiro_account_usage() if (adapter.get("billing") or {}).get("api") else None
-        except Exception:
-            acct = None
-        if acct and acct.get("limit"):
-            A.record_credit_sample(root, acct.get("used", 0), acct["limit"], acct.get("reset_at"))
-            st["last_credit_sample"] = time.time()
-            save_state(root, st)
-            br = A.burn_rate(root)
-            if br and br["before_reset"]:
-                notify(f"{project}: credits run out {time.strftime('%d %b', time.localtime(br['exhausts_at']))}",
-                       f"{br['used']:.0f}/{br['limit']:.0f} at {br['per_day']:.0f}/day; the reset is later. "
-                       f"New account (keyflip) or `ao features off …`", root, key="credits-exhaust",
-                       window=6 * 3600, audience="human", level="red")
+    if not args.dry_run:
+        _sample_credits(root, st, adapter, project)
     # Only meaningful when no implementer turn is running: a sub-agent's writes
     # do not appear as the parent's tool calls and would read as a stranger's.
     fe = [] if A.agent_pids(root, adapter) else A.foreign_edits(root, cfg)

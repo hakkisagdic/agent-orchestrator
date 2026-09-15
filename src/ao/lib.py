@@ -2076,6 +2076,8 @@ def kiro_account_usage(timeout=20):
     Returns None when there is no usable token; the caller falls back rather than
     presenting an error as a balance. The token is used and never stored, logged
     or returned.
+    When the CLI cannot be found or run it returns {"error": ...} naming the step,
+    so a caller can report a broken check instead of a silent one.
     """
     db = os.path.join(HOME, "Library", "Application Support", "kiro-cli", "data.sqlite3")
     if not os.path.exists(db):
@@ -2102,13 +2104,21 @@ def kiro_account_usage(timeout=20):
         except Exception:
             pass
 
-    arn = ""
-    prof = sh("kiro-cli whoami 2>/dev/null")
-    for line in (prof or "").split("\n"):
-        if line.strip().startswith("arn:aws:codewhisperer"):
-            arn = line.strip()
+    # Resolve the CLI through the harness binary search, not the ambient PATH: under
+    # launchd that PATH is /usr/bin:/bin:/usr/sbin:/sbin, kiro-cli was never found,
+    # and a `2>/dev/null` turned the miss into None, so the watchdog never recorded
+    # a sample and the exhaustion alarm could not fire. Say which step failed.
+    found = binary_candidates("kiro-cli")
+    if not found:
+        return {"error": "kiro-cli is not on PATH or in the usual install directories"}
+    try:
+        prof = subprocess.run([found[0], "whoami"], capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"error": f"{found[0]} whoami could not run ({type(exc).__name__})"}
+    arn = next((line.strip() for line in (prof.stdout or "").splitlines()
+                if line.strip().startswith("arn:aws:codewhisperer")), "")
     if not arn:
-        return None
+        return {"error": f"{found[0]} whoami returned no profile ARN (exit {prof.returncode})"}
 
     import urllib.error
     import urllib.request

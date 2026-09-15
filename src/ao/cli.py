@@ -353,12 +353,33 @@ def cmd_mail(cfg, args):
             print(f"  {when}  {r.get('kind') or '':<9} {r['id'][:60]}  {C['dim']}{r.get('summary', '')[:70]}{C['reset']}")
 
 
+
+def _launchd_path():
+    """The PATH a launchd job runs with, fixed when the job is installed.
+
+    launchd starts jobs with /usr/bin:/bin:/usr/sbin:/sbin, which does not reach
+    ~/.local/bin, where kiro-cli, ao and the watchdog live; the credit sampler ran
+    blind for its whole life because of it. Take the watchdog's child PATH, keep
+    directories that exist, and drop per-shell version-manager directories that
+    disappear when the shell that created them exits.
+    """
+    from xml.sax.saxutils import escape
+    from .watchdog import child_path
+    seen, keep = set(), []
+    for d in child_path().split(os.pathsep):
+        if not d or d in seen or "fnm_multishells" in d or not os.path.isdir(d):
+            continue
+        seen.add(d)
+        keep.append(d)
+    return escape(os.pathsep.join(keep))
+
 PLIST_CMD = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>{label}</string>
   <key>ProgramArguments</key><array>{args}</array>
   <key>StartInterval</key><integer>{interval}</integer>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>{path}</string></dict>
   <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>{log}</string>
   <key>StandardErrorPath</key><string>{log}</string>
@@ -374,6 +395,7 @@ PLIST = """<?xml version="1.0" encoding="UTF-8"?>
     <string>--root</string><string>{root}</string>
     <string>--idle-minutes</string><string>{idle}</string></array>
   <key>StartInterval</key><integer>{interval}</integer>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>{path}</string></dict>
   <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>{log}</string>
   <key>StandardErrorPath</key><string>{log}</string>
@@ -1534,6 +1556,7 @@ def cmd_telegram(cfg, args):
             '  <key>ProgramArguments</key>\n'
             f'  <array><string>{exe}</string><string>-C</string><string>{cfg["root"]}</string>\n'
             '    <string>telegram</string><string>poll</string></array>\n'
+            f'  <key>EnvironmentVariables</key><dict><key>PATH</key><string>{_launchd_path()}</string></dict>\n'
             '  <key>KeepAlive</key><true/>\n  <key>RunAtLoad</key><true/>\n'
             f'  <key>StandardOutPath</key><string>{log}</string>\n'
             f'  <key>StandardErrorPath</key><string>{log}</string>\n'
@@ -3836,6 +3859,25 @@ def doctor_problems(cfg):
     if br and br["before_reset"]:
         out.append(("credits-exhaust", f"credits run out {time.strftime('%d %b', time.localtime(br['exhausts_at']))}, "
                                        f"before the reset ({br['per_day']:.0f}/day) — new account or fewer features"))
+    samples = A.credit_samples(root)
+    last = samples[-1] if samples else None
+    if last and last.get("limit") and float(last.get("used") or 0) >= float(last["limit"]) \
+            and not (br and br["before_reset"]):
+        out.append(("credits-exhaust", f"credits exhausted at the last reading: "
+                                       f"{float(last['used']):.0f}/{float(last['limit']):.0f}"))
+    from . import features as _features
+    try:
+        from .watchdog import load_state as _load_state
+        blind = (_load_state(root) or {}).get("credit_check_problem")
+    except Exception:
+        blind = None
+    # Paged only while the implementer is being driven: a check that cannot read
+    # usage matters because exhaustion stops the work, and an owner who stopped the
+    # work on purpose does not need an hourly page saying so. Plain doctor always
+    # prints it.
+    if blind and _features.enabled(cfg, "nudge"):
+        out.append(("credits-check", f"credit usage cannot be read ({blind.get('reason')}) — "
+                                     f"the exhaustion alarm is blind until it reads again"))
     try:
         msgs_p, _ = A.session_paths(cfg)
         if msgs_p and os.path.exists(msgs_p) and time.time() - os.path.getmtime(msgs_p) < 3600 \
@@ -5534,7 +5576,7 @@ def cmd_watchdog(cfg, args):
     os.makedirs(os.path.dirname(plist_path), exist_ok=True)
     os.makedirs(os.path.expanduser("~/.ao"), exist_ok=True)
     open(plist_path, "w", encoding=UTF8).write(PLIST.format(
-        label=label, python_arg=(f"<string>{python}</string>" if python else ""),
+        path=_launchd_path(), label=label, python_arg=(f"<string>{python}</string>" if python else ""),
         script=script, root=root,
         idle=args.idle_minutes, interval=args.interval, log=log))
     A.sh(f"launchctl bootout gui/$(id -u)/{label} 2>/dev/null")
@@ -5562,7 +5604,7 @@ def cmd_watchdog(cfg, args):
     ao_in_repo = os.path.realpath(ao_exe).startswith(os.path.realpath(A.REPO))
     dargs = ([sys.executable] if ao_in_repo else []) + [ao_exe, "-C", root, "doctor", "--check"]
     open(dplist, "w", encoding=UTF8).write(PLIST_CMD.format(
-        label=dlabel, args="".join(f"<string>{a}</string>" for a in dargs),
+        path=_launchd_path(), label=dlabel, args="".join(f"<string>{a}</string>" for a in dargs),
         interval=900, log=os.path.expanduser(f"~/.ao/doctor-{key}.log")))
     A.sh(f"launchctl bootout gui/$(id -u)/{dlabel} 2>/dev/null")
     A.sh(f"launchctl bootstrap gui/$(id -u) {dplist} 2>&1")
@@ -5785,6 +5827,19 @@ def cmd_doctor(cfg, args):
             tone = C['red'] if br['before_reset'] else C['green']
             print(f"credits         {br['used']:.0f}/{br['limit']:.0f} · {br['per_day']:.0f}/day · runs out {tone}{when}{C['reset']}"
                   + (f"  {C['red']}before the reset — new account / ao features off{C['reset']}" if br['before_reset'] else ""))
+        _last = (A.credit_samples(root) or [None])[-1]
+        if not br and _last and _last.get("limit"):
+            _used, _limit = float(_last.get("used") or 0), float(_last["limit"])
+            print(f"credits         {C['red'] if _used >= _limit else C['green']}{_used:.0f}/{_limit:.0f}{C['reset']} at the last reading"
+                  + (f"  {C['red']}exhausted{C['reset']}" if _used >= _limit else ""))
+        try:
+            from .watchdog import load_state as _load_state
+            _blind = (_load_state(root) or {}).get("credit_check_problem")
+        except Exception:
+            _blind = None
+        if _blind:
+            print(f"credits check   {C['red']}cannot read usage{C['reset']} — {_blind.get('reason')}  "
+                  f"{C['dim']}the exhaustion alarm is blind until it reads again{C['reset']}")
         print(f"ping            {C['green'] + 'configured' + C['reset'] if A.ping_url(root) else C['yellow'] + 'off' + C['reset'] + '  ao pings setup'}")
         from . import features as _F
         print(f"features        {sum(_F.switches(cfg).values())}/{len(_F.ORDER)} on · est. ~{_F.estimate(cfg)}% of implementer spend  {C['dim']}ao features{C['reset']}")
