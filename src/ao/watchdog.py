@@ -112,6 +112,24 @@ NUDGE_PROMPT = (
         "agent-mail'e '## KARAR GEREKLİ' bırak ve .ao/backlog.md'deki ilk açık maddeye geç. "
         "Kuyruk dışına çıkma. Kullanıcı beklemesi yok.")
 
+# The wake names the role it wakes and reads that role's mail through ao, never a
+# glob spelled from an actor's name: reassigning the architect must not silence it (#31).
+WAKE_PROMPT = (
+    "Sen bu deponun mimarısın ve watchdog tarafından uyandırıldın. "
+    "Mimar rolüne gelen mesajları `ao mail list` ile oku (bu tur AO_ROLE=architect ile çalışıyor): "
+    "watchdog'un ANOMALY raporları ve uygulayıcının raporları. Watchdog'unkiler olgudur, yorum "
+    "değil — kendi kararını sen ver. Durumu `ao status`, `ao board`, "
+    "`ao doctor` ile doğrula; ölçmeden sonuç çıkarma.\n\n"
+    "Gerçekten müdahale gerekiyorsa yap: uygulayıcı rolüne karar mesajını `ao note` ile yaz, "
+    "gerekiyorsa `.ao/board.md`'yi güncelle. Acil bir şeyse "
+    "mesaja `## ACİL` başlığı koy — o zaman uygulayıcıya `ao lock`, `ao verify` "
+    "ve `ao commit-ok` üzerinden ulaşır.\n\n"
+    "Sonra işlediğin mesajı `ao mail ack <dosya-veya-glob>` ile sil; teslim onayı "
+    "budur. Normal bir durumsa yalnız sil ve bir şey yapma.\n\n"
+    "Yapmayacakların: push, PR, force-push, epic kutusu işaretleme, mimari "
+    "sözleşme değiştirme. Bunlar insana aittir. Emin değilsen dokunma ve "
+    "kullanıcıya bırak.")
+
 REFILL_PROMPT = (
     "Kuyruk boşaldı. .ao/sources.json'daki kaynaklardan yeni işleri çek, "
     "normalize edip .ao/inbox/<source-id>.json'a yaz, sonra `ao source import` çalıştır. "
@@ -737,21 +755,7 @@ def escalate(root, cfg, adapter, age, args, st):
         print("reports pending, but an architect wake is already running")
         woke = False
     if woke and arch.get("argv") and not args.dry_run:
-        prompt = (
-            "Sen bu deponun mimarısın ve watchdog tarafından uyandırıldın. "
-            "`agent-mail/` içindeki `*-watchdog-to-fable-ANOMALY-*.md` ve "
-            "`*-kiro-to-fable-*.md` mesajlarını oku. Watchdog'unkiler olgudur, yorum "
-            "değil — kendi kararını sen ver. Durumu `ao status`, `ao board`, "
-            "`ao doctor` ile doğrula; ölçmeden sonuç çıkarma.\n\n"
-            "Gerçekten müdahale gerekiyorsa yap: `agent-mail/`'e uygulayıcı için "
-            "karar mesajı yaz, gerekiyorsa `.ao/board.md`'yi güncelle. Acil bir şeyse "
-            "mesaja `## ACİL` başlığı koy — o zaman uygulayıcıya `ao lock`, `ao verify` "
-            "ve `ao commit-ok` üzerinden ulaşır.\n\n"
-            "Sonra işlediğin mesajı `ao mail ack <dosya-veya-glob>` ile sil; teslim onayı "
-            "budur. Normal bir durumsa yalnız sil ve bir şey yapma.\n\n"
-            "Yapmayacakların: push, PR, force-push, epic kutusu işaretleme, mimari "
-            "sözleşme değiştirme. Bunlar insana aittir. Emin değilsen dokunma ve "
-            "kullanıcıya bırak.")
+        prompt = WAKE_PROMPT
         # Resolve the session at wake time. A resumed architect carries the whole
         # history -- what was decided and why -- where a fresh one knows only what
         # is on disk. Claude Code forks a copy rather than double-writing when the

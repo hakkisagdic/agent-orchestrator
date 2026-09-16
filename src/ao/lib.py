@@ -260,11 +260,82 @@ def load_config(root):
     cfg.setdefault("root", root)
     cfg.setdefault("mailbox", "agent-mail")
     cfg.setdefault("reviews", "semantic-review")
+    resolve_roles(root, cfg)
     if "implementer" not in cfg:
         found = discover_session(root)
         if found:
             cfg["implementer"] = found
     return cfg
+
+
+# ---- the role table is real, and messages are addressed to roles (#79, #31) -------------
+
+ROLE_BLOCKS = ("implementer", "architect", "reviewer")
+
+
+def effective_roles(root, cfg):
+    """The role → actor assignment in force: `roles`, or `roles_next` once the slice it waits on left running (#79)."""
+    roles = dict(cfg.get("roles") or {})
+    pending = cfg.get("roles_next")
+    if isinstance(pending, dict) and isinstance(pending.get("roles"), dict):
+        running = {item["id"] for item in board(root)["running"]} if root else set()
+        if pending.get("after") not in running:
+            roles.update(pending["roles"])
+    return roles
+
+
+def resolve_roles(root, cfg):
+    """Fill each role's block from the actor table, when the project keeps one (#79).
+
+    `docs/roles.md` described actors, roles and `ao role set` long before any of it
+    existed. The table lives in `.ao/config.json` as `actors` and `roles`; every
+    reader keeps reading the role blocks it always read, now resolved from it.
+    """
+    actors = cfg.get("actors")
+    if not isinstance(actors, dict) or not isinstance(cfg.get("roles"), dict):
+        return cfg
+    for role, actor in effective_roles(root, cfg).items():
+        if role in ROLE_BLOCKS and isinstance(actors.get(actor), dict):
+            cfg[role] = dict(actors[actor], actor=actor)
+    return cfg
+
+
+def role_table(cfg):
+    """(actors, roles, pending) as configured, or bootstrapped from the role blocks when there is no table yet."""
+    actors = {name: dict(block) for name, block in (cfg.get("actors") or {}).items() if isinstance(block, dict)}
+    roles = dict(cfg.get("roles") or {})
+    if not actors:
+        for role in ROLE_BLOCKS:
+            block = cfg.get(role)
+            if isinstance(block, dict) and block:
+                name = str(block.get("actor") or block.get("name") or block.get("id") or role)
+                actors[name] = {key: value for key, value in block.items() if key != "actor"}
+                roles[role] = name
+    return actors, roles, cfg.get("roles_next")
+
+
+def assignment_problem(actors, roles):
+    """Why an assignment would break separation of duties, or None (#79)."""
+    implementer, reviewer = roles.get("implementer"), roles.get("reviewer")
+    if implementer and reviewer and implementer == reviewer:
+        return f"the reviewer and the implementer would both be {implementer}; no actor reviews its own work"
+    families = [str((actors.get(actor) or {}).get("family") or "").lower() for actor in (implementer, reviewer)]
+    if all(families) and families[0] == families[1]:
+        return f"the reviewer and the implementer would both be of the {families[0]} family"
+    return None
+
+
+def role_of(name, cfg):
+    """The role a name in a message stands for: architect, implementer, watchdog or human (#31)."""
+    implementer, architect = mail_names(cfg)
+    lowered = str(name or "").strip().lower()
+    if lowered in (architect.lower(), "architect"):
+        return "architect"
+    if lowered in (implementer.lower(), "implementer"):
+        return "implementer"
+    if lowered == "watchdog":
+        return "watchdog"
+    return "human" if lowered in ("human", "person", "owner") else None
 
 
 def write_project_config(root, text):
@@ -3346,7 +3417,7 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
         if not to_architect(m, cfg):
             continue
         # The watchdog must not read its own outbox as an inbox. Its anomaly
-        # reports are addressed to the architect ("watchdog-to-fable-…"), so they
+        # reports are addressed to the architect ("watchdog-to-<architect>-…"), so they
         # matched this filter and were re-escalated as fresh "report-waiting"
         # anomalies — each new report's name concatenating the last, a runaway
         # that filled the mailbox with names hundreds of characters long. What
@@ -4878,7 +4949,7 @@ def note(root, cfg, to, title, body, urgent=False):
     slug = safe_slug(title.lower(), "not")
     kind = "ACIL" if urgent else "DECISION"
     impl, arch = mail_names(cfg)
-    to = safe_slug(to, impl)
+    to = safe_slug(to or impl, impl)          # the implementer's role by default, whoever holds it (#31)
     name = f"{time.strftime('%Y%m%d-%H%M')}-{arch}-to-{to}-{kind}-{slug}.md"
     text = f"# {title}\n\n" + ("## ACİL\n\n" if urgent else "") + body.rstrip() + "\n"
     return write_mail(root, cfg, name, text, {"kind": kind.lower(), "from": arch, "to": to})
@@ -5647,14 +5718,14 @@ def mail_names(cfg):
 
 def to_architect(name, cfg):
     _, arch = mail_names(cfg)
-    return f"-to-{arch}-" in name or "-to-fable-" in name or "-to-architect-" in name
+    return f"-to-{arch}-" in name or "-to-architect-" in name
 
 
 def from_architect(name, cfg):
     """Whether a mail was written by the architect, read from its sender field (#18)."""
     _, arch = mail_names(cfg)
     found = re.match(r"^\d{8}-\d{4}-(.+?)-to-", name)
-    return bool(found) and found.group(1).lower() in {arch.lower(), "fable", "architect"}
+    return bool(found) and found.group(1).lower() in {arch.lower(), "architect"}
 
 
 def notice_recently_recorded(root, key, window):
@@ -5786,7 +5857,10 @@ def write_mail(root, cfg, name, body, meta=None):
     meta.setdefault("ao", 1)
     meta.setdefault("id", name)
     meta.setdefault("at", time.strftime("%Y-%m-%dT%H:%M:%S%z"))
-    order = ["ao", "id", "kind", "from", "to", "slice", "at"]
+    # The address is the role; the name beside it is display (#31).
+    meta.setdefault("from_role", role_of(meta.get("from"), cfg))
+    meta.setdefault("to_role", role_of(meta.get("to"), cfg))
+    order = ["ao", "id", "kind", "from", "from_role", "to", "to_role", "slice", "at"]
     keys = [k for k in order if k in meta] + [k for k in meta if k not in order]
     meta = scan_record(meta)
     body = scan_evidence(body)[0]                     # scanned before it is written (#48)

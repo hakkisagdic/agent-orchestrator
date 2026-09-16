@@ -446,7 +446,7 @@ def cmd_mail(cfg, args):
         import fnmatch
         pattern = args.type if args.type and args.type != "INFO" else None
         if not pattern:
-            print("usage: ao mail ack <file-or-glob>   e.g. ao mail ack 'watchdog-to-fable-ANOMALY-*'"); return 2
+            print("usage: ao mail ack <file-or-glob>   e.g. ao mail ack 'watchdog-to-*-ANOMALY-*'"); return 2
         hits = [f for f in A.mailbox(root, cfg["mailbox"]) if f == pattern or fnmatch.fnmatch(f, pattern)]
         if not hits:
             print(f"no message matches {pattern}"); return 1
@@ -2015,6 +2015,52 @@ def cmd_stats(cfg, args):
     return 0
 
 
+def cmd_role(cfg, args):
+    """Show the role table, or reassign a role; separation of duties is enforced on assignment (#79)."""
+    root = cfg["root"]
+    try:
+        with open(os.path.join(root, ".ao", "config.json"), encoding=UTF8) as fh:
+            stored = json.load(fh)
+    except (OSError, ValueError):
+        stored = {}
+    actors, roles, pending = A.role_table(stored or cfg)
+    action = getattr(args, "action", None) or "show"
+    if action == "show":
+        for role in A.ROLE_BLOCKS:
+            actor = roles.get(role)
+            block = actors.get(actor) or {}
+            detail = " · ".join(str(block[key]) for key in ("adapter", "model", "family") if block.get(key))
+            print(f"  {role:<12} {C['b']}{actor or '—'}{C['reset']}  {C['dim']}{detail}{C['reset']}")
+        if isinstance(pending, dict):
+            print(f"  {C['yellow']}next{C['reset']}  {pending.get('roles')} once {pending.get('after')} leaves running")
+        return 0
+    new = dict(roles)
+    if action == "set":
+        if args.actor not in actors:
+            print(f"{C['red']}no actor {args.actor}{C['reset']}; actors: {', '.join(sorted(actors))}")
+            return 2
+        new[args.role] = args.actor
+    else:
+        new[args.role], new[args.actor] = roles.get(args.actor), roles.get(args.role)
+    problem = A.assignment_problem(actors, new)
+    if problem:
+        print(f"{C['red']}refused{C['reset']}: {problem}")
+        return 2
+    stored = dict(stored, actors=actors)
+    running = A.running_slice(root)
+    changed = {role: actor for role, actor in new.items() if roles.get(role) != actor}
+    if running:
+        # Work in flight keeps its actor; the next slice gets the new one.
+        stored.update(roles=roles, roles_next={"after": running["id"], "roles": changed})
+        print(f"takes effect once {running['id']} leaves running: {changed}")
+    else:
+        stored.update(roles=new)
+        stored.pop("roles_next", None)
+        print(f"assigned: {changed}")
+    A.write_project_config(root, json.dumps(stored, indent=2, ensure_ascii=False) + "\n")
+    return 0
+
+
 def cmd_ask(cfg, args):
     """Pose a decision the implementer cannot make for itself.
 
@@ -2149,7 +2195,7 @@ def cmd_handoff(cfg, args):
 
     text = "\n".join(lines)
     path = os.path.join(root, cfg["mailbox"],
-                        f"{datetime.now():%Y%m%d-%H%M}-fable-to-anyone-DEVIR.md")
+                        f"{datetime.now():%Y%m%d-%H%M}-{A.mail_names(cfg)[1]}-to-anyone-DEVIR.md")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     open(path, "w", encoding=UTF8).write(text + "\n")
     print(text)
@@ -4762,7 +4808,8 @@ def cmd_hold(cfg, args):
             # spends its first turns rediscovering it — or worse, mistrusting it.
             box = os.path.join(root, cfg["mailbox"])
             os.makedirs(box, exist_ok=True)
-            name = f"{datetime.now():%Y%m%d-%H%M}-fable-to-kiro-INFO-hold-released.md"
+            impl, arch = A.mail_names(cfg)
+            name = f"{datetime.now():%Y%m%d-%H%M}-{arch}-to-{impl}-INFO-hold-released.md"
             with open(os.path.join(box, name), "w", encoding=UTF8) as fh:
                 fh.write(f"# INFO — hold released\n\nDuruldu: {st.get('minutes',0)} dakika\n"
                          f"Sebep: {st.get('reason','')}\n\n## Bu sürede ne değişti\n\n"
@@ -7944,6 +7991,11 @@ def main():
     wt.add_argument("action", nargs="?", choices=["list", "prune"], default="list")
     wt.add_argument("--yes", action="store_true", help="apply the prune (default is a dry run)")
     wt.set_defaults(fn=cmd_worktrees)
+    ro = sub.add_parser("role", help="the role table: show, or reassign a role to an actor")
+    ro.add_argument("action", nargs="?", choices=["show", "set", "swap"], default="show")
+    ro.add_argument("role", nargs="?", choices=list(A.ROLE_BLOCKS))
+    ro.add_argument("actor", nargs="?", help="set: an actor; swap: the other role")
+    ro.set_defaults(fn=cmd_role)
     dg = sub.add_parser("digest", help="what happened, read from the ledgers")
     dg.add_argument("--days", type=float, default=1.0)
     dg.add_argument("-n", type=int, default=6)
@@ -7974,7 +8026,7 @@ def main():
     de.add_argument("--why")
     de.add_argument("--answers", help="open decision id this settles, e.g. D-123")
     de.add_argument("--scope")
-    de.add_argument("--to", default="kiro")
+    de.add_argument("--to", default=None, help="a name; default: whoever holds the implementer role")
     de.add_argument("--urgent", action="store_true")
     de.add_argument("--list", action="store_true")
     de.add_argument("-n", type=int, default=10)
@@ -7986,7 +8038,7 @@ def main():
     nt = sub.add_parser("note", help="write an architect message into the mailbox")
     nt.add_argument("title")
     nt.add_argument("--body")
-    nt.add_argument("--to", default="kiro")
+    nt.add_argument("--to", default=None, help="a name; default: whoever holds the implementer role")
     nt.add_argument("--urgent", action="store_true")
     nt.add_argument("--stdin", action="store_true", help="read the body from stdin")
     nt.set_defaults(fn=cmd_note)

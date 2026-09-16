@@ -52,10 +52,16 @@ roles:
 ```bash
 ao role                              # current assignment table
 ao role set implementer self         # take development yourself
-ao role set bug-hunter kiro          # push bug-hunting to the sub-agent
 ao role swap implementer reviewer    # exchange two roles' actors
-ao role preset pair                  # apply a named preset
 ```
+
+What the code resolves today is the table in `.ao/config.json`, `actors` and `roles`, for
+the three roles it runs - implementer, architect and reviewer. A project without a table
+gets one from its role blocks the first time a role is set. `ao role set` refuses an
+assignment that breaks separation of duties (the reviewer the same actor, or the same
+declared family, as the implementer). The YAML above, the other roles and presets are
+the shape it grows into; each new role must name the failure it catches that no existing
+role catches.
 
 A reassignment takes effect on the next slice. Work already in flight keeps its actor, so
 you never orphan a half-finished lane.

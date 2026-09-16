@@ -167,7 +167,8 @@ def poll(root, cfg_project, seconds=25):
             continue
         # Everything a person types is urgent. They reached for a phone to say it.
         slug = A.safe_slug(text.lower(), "mesaj")
-        name = f"{time.strftime('%Y%m%d-%H%M%S')}-fable-to-kiro-ACIL-{slug}.md"
+        # From a person, to whoever holds the implementer role (#31).
+        name = f"{time.strftime('%Y%m%d-%H%M%S')}-human-to-{A.mail_names(A.load_config(root))[0]}-ACIL-{slug}.md"
         who = (m.get("from") or {}).get("username") or chat
         with open(os.path.join(root, box, name), "w", encoding=UTF8) as fh:
             fh.write(f"# {text.splitlines()[0][:120]}\n\n## ACİL\n\n{text}\n\n"
