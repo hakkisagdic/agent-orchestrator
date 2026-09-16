@@ -7398,6 +7398,131 @@ def _worktree_lines(cfg):
     return lines
 
 
+PROVE_BOUNDARY = ("ao prove: a throwaway candidate that adds one line to ao-prove.txt and nothing else. "
+                  "Approve it if the diff is exactly that.")
+
+
+def _prove_throwaway(cfg):
+    """A one-line slice through verify, review and commit-ok in a temporary worktree; nothing lands (#85).
+
+    Returns (ok, what failed or None, what would fix it or None). The worktree's
+    coordination state and review go to ~/.ao/archive/<project>/prove-<stamp>/.
+    """
+    import contextlib
+    import io
+    import shutil
+    import tempfile
+    from types import SimpleNamespace
+    root = cfg["root"]
+    scratch = tempfile.mkdtemp(prefix="ao-prove-")
+    tree = os.path.join(scratch, "tree")
+    links, heard = [], io.StringIO()
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    try:
+        added = subprocess.run([A.git_binary(), "worktree", "add", "--detach", "--quiet", tree, "HEAD"], cwd=root,
+                               capture_output=True)
+        if added.returncode:
+            return False, "a temporary worktree could not be made: " + added.stderr.decode(UTF8, "replace").strip(), \
+                "a repository with at least one commit"
+        os.makedirs(os.path.join(tree, ".ao"), exist_ok=True)
+        for name in ("config.json", "gates.json"):
+            if os.path.exists(os.path.join(root, ".ao", name)):
+                shutil.copy2(os.path.join(root, ".ao", name), os.path.join(tree, ".ao", name))
+        with open(os.path.join(tree, ".ao", "board.md"), "w", encoding=UTF8) as fh:
+            fh.write(f"# Board\n\n## running\n- [AO-PROVE] a throwaway one-line change · acceptance: {PROVE_BOUNDARY}\n"
+                     "\n## blocked\n\n## queued\n\n## verified\n\n## done\n")
+        for name in S.get(cfg, "merge.link_paths"):
+            source, target = os.path.join(root, name), os.path.join(tree, name)
+            if os.path.exists(source) and not os.path.lexists(target):
+                try:
+                    os.symlink(source, target)
+                    links.append(target)
+                except OSError:
+                    pass
+        with open(os.path.join(tree, "ao-prove.txt"), "a", encoding=UTF8) as fh:
+            fh.write(f"ao prove {stamp}\n")
+        subprocess.run([A.git_binary(), "add", "ao-prove.txt"], cwd=tree, check=True, capture_output=True)
+        tree_cfg = A.load_config(tree)
+        with contextlib.redirect_stdout(heard):
+            verified = cmd_verify(tree_cfg, SimpleNamespace(profile="quick", wait=900))
+        if verified != 0:
+            return False, "the quick gates did not pass a one-line change", \
+                "run `ao verify -p quick` and read the failing gate:\n" + _last_lines(heard.getvalue())
+        with contextlib.redirect_stdout(heard):
+            reviewed = cmd_review(tree_cfg, SimpleNamespace(action=None, rid=None, any=False, run=None, boundary=None,
+                                                            paths=None, commits=None, timeout=None))
+        if reviewed != 0:
+            return False, "the reviewer did not approve a trivial candidate", \
+                "read the review it wrote (archived below); exit 3 means no reviewer could review:\n" \
+                + _last_lines(heard.getvalue())
+        with contextlib.redirect_stdout(heard):
+            granted = cmd_commit_ok(tree_cfg, SimpleNamespace(verify=False, profile=None, review=None))
+        if granted != 0:
+            return False, "ao commit-ok refused the approved candidate", _last_lines(heard.getvalue())
+        return True, None, None
+    finally:
+        for link in links:
+            try:
+                os.unlink(link)
+            except OSError:
+                pass
+        archive = os.path.join(A.HOME, ".ao", "archive", A.project_key(root), f"prove-{stamp}")
+        for part in (".ao", cfg.get("reviews", "semantic-review")):
+            if os.path.isdir(os.path.join(tree, part)):
+                shutil.copytree(os.path.join(tree, part), os.path.join(archive, part), symlinks=True,
+                                dirs_exist_ok=True)
+        subprocess.run([A.git_binary(), "worktree", "remove", "--force", tree], cwd=root, capture_output=True)
+        shutil.rmtree(scratch, ignore_errors=True)
+        subprocess.run([A.git_binary(), "worktree", "prune"], cwd=root, capture_output=True)
+
+
+def _last_lines(text, count=6):
+    lines = [A.re.sub(r"\x1b\[[0-9;]*m", "", line) for line in text.strip().splitlines() if line.strip()]
+    return "\n".join("      " + line for line in lines[-count:])
+
+
+def cmd_prove(cfg, args):
+    """Run the guarantees instead of describing them, and say what would fix each one that fails (#85).
+
+    The hook must refuse a synthetic candidate, the reviewer must answer and be
+    another actor than the implementer, and a throwaway slice must go through
+    verify, review and commit-ok in a temporary worktree. Nothing is committed.
+    """
+    root = cfg["root"]
+    results = []
+    probe = _hook_execution_probe(_ao_hook_inventory(root))
+    results.append(("hook refuses an unauthorised commit", probe["installed"],
+                    None if probe["installed"] else f"{_hook_probe_text(probe)} — ao hooks install"))
+    reviewer = _reviewer_probe(cfg)
+    reviewer_ok = reviewer["ok"] and reviewer["configured"]
+    results.append(("reviewer answers and is another actor", reviewer_ok, None if reviewer_ok else
+                    f"{_reviewer_probe_text(reviewer)} — name a reviewer of another model family in .ao/config.json "
+                    "(docs/roles.md)"))
+    if getattr(args, "no_review", False):
+        results.append(("a throwaway slice lands end to end", False, "skipped with --no-review: not proven"))
+    elif not reviewer_ok:
+        results.append(("a throwaway slice lands end to end", False, "not tried: no reviewer can review"))
+    else:
+        ok, failed, fix = _prove_throwaway(cfg)
+        results.append(("a throwaway slice lands end to end", ok, None if ok else f"{failed} — {fix}"))
+    for claim, ok, fix in results:
+        print(f"  {C['green'] + 'proven' if ok else C['red'] + 'NOT PROVEN'}{C['reset']}  {claim}")
+        if fix:
+            print(f"      {fix}")
+    proven = all(ok for _, ok, _ in results)
+    print(f"\n{C['b']}{'PROVEN' if proven else 'NOT PROVEN'}{C['reset']}  "
+          f"{C['dim']}nothing was committed; the throwaway worktree is gone{C['reset']}")
+    return 0 if proven else 1
+
+
+def _init_then_prove(cfg, args):
+    code = cmd_init(cfg, args)
+    if code or not getattr(args, "prove", False):
+        return code
+    print(f"\n{C['b']}proving the guarantees{C['reset']}")
+    return cmd_prove(A.load_config(cfg["root"]), args)
+
+
 def cmd_doctor(cfg, args):
     if getattr(args, "check", False):
         # Scheduled checks return through the existing static helper here;
@@ -7748,7 +7873,13 @@ def main():
     ini.add_argument("--watchdog", action="store_true", help="also install the watchdog")
     ini.add_argument("--allow-uncovered-gates", action="store_true",
                      help="write quick gates that exercise none of the detected toolchains")
-    ini.set_defaults(fn=cmd_init)
+    ini.add_argument("--prove", action="store_true", help="finish by running ao prove")
+    ini.add_argument("--no-review", action="store_true", help="with --prove: skip the throwaway review")
+    ini.set_defaults(fn=_init_then_prove)
+    pv = sub.add_parser("prove", help="run the guarantees: the hook refuses, the reviewer answers, a slice lands")
+    pv.add_argument("--no-review", action="store_true",
+                    help="skip the throwaway slice, which spends one short review")
+    pv.set_defaults(fn=cmd_prove)
     de = sub.add_parser("decide", help="record an architect decision durably")
     de.add_argument("decision", nargs="?")
     de.add_argument("--why")

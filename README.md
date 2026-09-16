@@ -89,6 +89,10 @@ scope is the one authority an implementer must not have.
    for the dead man's switch.
 6. `ao watchdog install` for unattended runs (a doctor job comes with it). `ao features` to choose
    what you pay for; `ao remove --yes` takes everything off again.
+7. `ao prove`. It runs the guarantees instead of describing them: the hook must refuse a synthetic
+   candidate, the reviewer must answer as another actor, and a throwaway slice must pass verify,
+   review and commit-ok. Nothing is committed. [Getting started](docs/getting-started.md) is the
+   whole sequence.
 
 ## Commands
 
@@ -201,6 +205,7 @@ qualification, including unsupported and network filesystems.
 
 ## Documentation
 
+**[getting started](docs/getting-started.md)** ·
 [protocol](docs/protocol.md) · [safety](docs/safety.md) · [roles](docs/roles.md) ·
 [capability matrix](docs/capability-matrix.md) ·
 [architecture decisions](docs/adr/README.md) ·

@@ -210,6 +210,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao remove --yes` | two phases: commit `.ao-project` deletion under enforcement, then remove AO-owned state |
 | `ao status` / `ao watch` / `ao watch --all` | the panel: who is working, quota, problems, mail |
 | `ao board` | READY / running / blocked (`needs:`) / verified / done |
+| `ao prove [--no-review]` | run the guarantees: the hook refuses, the reviewer answers, a throwaway slice lands |
 | `ao worktrees [prune --yes]` | each worktree and what keeps it; retire merged or rejected ones, state archived |
 | `ao recall <words>` | decisions, answers, waivers, review findings and lessons from every project that share the words |
 | `ao board ready` | exactly the items that may start now; exit 1 names a broken `needs:` edge |
