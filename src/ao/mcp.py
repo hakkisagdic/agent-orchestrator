@@ -144,7 +144,9 @@ def status_payload(cfg):
 
 def board_payload(root):
     b = A.board(root)
+    graph = A.board_graph(root)
     return {"states": {k: v for k, v in b.items() if v},
+            "ready": [item["id"] for item in graph["ready"]], "problems": graph["problems"],
             "a2a": {k: A.A2A_STATE.get(k) for k in b if b[k]},
             "counts": {k: len(v) for k, v in b.items()}}
 

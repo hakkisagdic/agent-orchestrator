@@ -110,7 +110,12 @@ consuming an afternoon.
 ## The board carries edges, and the review loop is measured
 
 `needs: B3, B4` on a queued item is a dependency: the item becomes READY the moment
-those land. `unlocks:` is the same edge written from the other end. This is the
+those land. `unlocks:` is the same edge written from the other end. The ids are
+checked every time the board is read: one that is not on the board, one listed twice
+and a cycle are named by `ao board`, `ao board ready` and `ao doctor`, and no item they
+touch is READY; neither is an item marked `waiting:` on someone. READY is only ever
+derived - `ao board ready` prints exactly that set - so a hand-written `## ready`
+section is refused. On a blocked item `needs:` stays the reason in words. This is the
 useful core of "backend done, now the frontend" — the next item becomes eligible
 without the implementer choosing its own scope, which is the one authority it must
 not hold. `role:` tags an item for a particular actor; routing is a detail on top

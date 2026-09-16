@@ -4366,8 +4366,17 @@ def cmd_board(cfg, args):
                "verified": C["cyan"], "done": C["dim"]}
     # Eligible work first: queued items whose `needs:` are all done. This is the
     # dependency graph answering "what is next" without the implementer choosing
-    # its own scope.
-    rd = A.ready(root)
+    # its own scope. A broken edge is named before anything else (#33).
+    graph = A.board_graph(root)
+    if getattr(args, "view", None) == "ready":
+        for problem in graph["problems"]:
+            print(f"{C['red']}board: {problem}{C['reset']}")
+        for it in graph["ready"]:
+            print(f"{it['id']}  {it['title']}")
+        return 1 if graph["problems"] else 0
+    for problem in graph["problems"]:
+        print(f"{C['red']}{C['b']}BOARD{C['reset']}  {C['red']}{problem}{C['reset']}")
+    rd = graph["ready"]
     if rd:
         print(f"\n{C['b']}{C['green']}READY{C['reset']} {C['dim']}({len(rd)}) — "
               f"dependencies satisfied{C['reset']}")
@@ -4969,6 +4978,15 @@ def doctor_problems(cfg):
     if not strict_matrix and arch_bin and arch_bin == rv_bin and not rv.get("fallbacks"):
         out.append(("shared-pool", f"architect and reviewer both run `{arch_bin}` on one quota pool and the reviewer has no "
                                    f"fallback — add reviewer.fallbacks or use another model family"))
+    # A dependency the board cannot resolve makes READY wrong without a word (#33).
+    try:
+        graph_problems = A.board_graph(root)["problems"]
+    except Exception:
+        graph_problems = []
+    if graph_problems:
+        out.append(("board-graph", "; ".join(graph_problems[:3])
+                    + (f" and {len(graph_problems) - 3} more" if len(graph_problems) > 3 else "")
+                    + " — ao board"))
     # An implementer with nothing pre-authorised to pick up next stalls the moment
     # the architect is away; two READY items is the floor.
     try:
@@ -7381,7 +7399,10 @@ def main():
     wd.add_argument("--last", type=int, default=20)
     wd.set_defaults(fn=cmd_watchdog)
 
-    sub.add_parser("board", help="where each pre-authorised item is").set_defaults(fn=cmd_board)
+    bd = sub.add_parser("board", help="where each pre-authorised item is")
+    bd.add_argument("view", nargs="?", choices=["ready"],
+                    help="ready: exactly the items that may start now, exit 1 on a broken edge")
+    bd.set_defaults(fn=cmd_board)
     ak = sub.add_parser("ask", help="pose a decision, answerable in one tap")
     ak.add_argument("question", nargs="?")
     ak.add_argument("options", nargs="*")

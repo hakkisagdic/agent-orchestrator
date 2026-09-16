@@ -643,9 +643,10 @@ def board(root):
     state = None
     for line in open(p, errors="replace", encoding=UTF8):
         line = line.rstrip()
-        m = re.match(r"^##\s+([a-z]+)\s*$", line.strip())
-        if m:
-            state = m.group(1) if m.group(1) in out else None
+        if line.lstrip().startswith("##"):
+            # Every heading ends a section; only a state's own heading starts one (#33).
+            m = re.match(r"^##\s+([a-z]+)\s*$", line.strip())
+            state = m.group(1) if m and m.group(1) in out else None
             continue
         if not state or not line.lstrip().startswith("- "):
             continue
@@ -3881,34 +3882,91 @@ def set_reviewer_state(root, **fields):
     return st
 
 
-def ready(root):
-    """Queued items whose dependencies are done.
+def _edge_ids(item, field):
+    """Board ids a note names; a parenthesised word is a remark, not an id."""
+    return [token for token in re.split(r"[,\s]+", item["notes"].get(field, ""))
+            if token and not token.startswith("(")]
+
+
+def board_graph(root):
+    """READY, derived from the board's dependency edges, and what is wrong with them (#33).
 
     A dependency graph, not a handoff mechanism. The valuable part of "backend
     done, now the frontend" is that the second item becomes eligible the moment
-    the first lands — and *who* picks it up is a routing detail. Putting the edge
-    on the board keeps the implementer from choosing its own scope, which is the
-    one authority it must not hold; the board decides what is next.
+    the first lands, and putting the edge on the board keeps the implementer from
+    choosing its own scope, the one authority it must not hold.
 
-    `needs: B3, B4` on a queued line is the edge. `unlocks:` is the same edge
-    written from the other end, kept because people think in both directions.
+    `needs: B3, B4` on a queued item names the board items it waits for;
+    `unlocks:` on any item is the same edge written from the other end. `needs:`
+    on a blocked item stays its reason in words. On 2026-09-07 the architect
+    decided what was actionable by reading the board as prose, and a dependency
+    named there was never checked against anything. So an id that is not on the
+    board, an id listed twice and a cycle are problems naming both ends, never a
+    silent skip, and no item they touch is READY; neither is one `waiting:` on
+    someone. READY is derived here and nowhere else: a hand-written `## ready`
+    section is a problem too.
+
+    Returns {"ready": [item with its role], "problems": [text]}.
     """
     b = board(root)
-    done = {i["id"] for st in ("done", "verified") for i in b[st]}
-    unlocked = set()
-    for st in ("done", "verified"):
-        for i in b[st]:
-            for u in re.split(r"[,\s]+", i["notes"].get("unlocks", "")):
-                if u:
-                    unlocked.add(u)
-    out = []
-    for i in b["queued"]:
-        needs = [n for n in re.split(r"[,\s]+", i["notes"].get("needs", "")) if n]
-        # a `needs:` on a *queued* item is a dependency, not a human blocker
-        missing = [n for n in needs if n not in done and not n.startswith("(")]
-        if not missing or i["id"] in unlocked:
-            out.append({**i, "role": i["notes"].get("role", "")})
-    return out
+    problems, where = [], {}
+    for state in BOARD_STATES:
+        for item in b[state]:
+            if item["id"] in where:
+                problems.append(f"{item['id']} is on the board twice, under {where[item['id']]} and {state}")
+            where.setdefault(item["id"], state)
+    try:
+        with open(os.path.join(root, ".ao", "board.md"), encoding=UTF8, errors="replace") as fh:
+            if any(re.match(r"^\s*##\s+ready\s*$", line, re.I) for line in fh):
+                problems.append("the board has a hand-written READY section; READY is derived from `needs:`, "
+                                "so its items belong under `## queued`")
+    except OSError:
+        pass
+    edges = {item["id"]: set(_edge_ids(item, "needs")) for item in b["queued"]}
+    for state in BOARD_STATES:
+        for item in b[state]:
+            for target in _edge_ids(item, "unlocks"):
+                if target not in where:
+                    problems.append(f"{item['id']} unlocks {target}, which is not on the board")
+                else:
+                    edges.setdefault(target, set()).add(item["id"])
+    broken = set()
+    for item_id in sorted(edges):
+        for dep in sorted(edges[item_id]):
+            if dep not in where:
+                problems.append(f"{item_id} needs {dep}, which is not on the board")
+                broken.add(item_id)
+    colour, trail, cycles = {}, [], set()
+
+    def visit(node):
+        colour[node] = "open"
+        trail.append(node)
+        for dep in sorted(edges.get(node, ())):
+            if colour.get(dep) == "open":
+                cycle = trail[trail.index(dep):]
+                if frozenset(cycle) not in cycles:
+                    cycles.add(frozenset(cycle))
+                    problems.append("a cycle: " + ", ".join(
+                        f"{first} needs {then}" for first, then in zip(cycle, cycle[1:] + [dep])))
+                broken.update(cycle)
+            elif dep not in colour and dep in edges:
+                visit(dep)
+        trail.pop()
+        colour[node] = "closed"
+
+    for node in sorted(edges):
+        if node not in colour:
+            visit(node)
+    done = {item["id"] for state in ("done", "verified") for item in b[state]}
+    ready_items = [{**item, "role": item["notes"].get("role", "")} for item in b["queued"]
+                   if item["id"] not in broken and "waiting" not in item["notes"]
+                   and all(dep in done for dep in edges.get(item["id"], ()))]
+    return {"ready": ready_items, "problems": problems}
+
+
+def ready(root):
+    """Queued items whose dependencies are all done and which wait on no one (#33)."""
+    return board_graph(root)["ready"]
 
 
 def review_loop(root, reviews_dir, min_repeats=3):
