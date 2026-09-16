@@ -123,6 +123,9 @@ def test_a_present_architect_is_told_about_waiting_reports(world):
     world.transcript_age(900)
     world.mail("20260916-1200-kiro-to-fable-BLOCKED-queue.md", BLOCKED)
     world.architect()
+    # A second older than the anomaly the cycle writes, as when a slow cycle crosses a second.
+    blocked = os.path.join(world.root, world.cfg["mailbox"], "20260916-1200-kiro-to-fable-BLOCKED-queue.md")
+    os.utime(blocked, (time.time() - 60, time.time() - 60))
 
     world.cycle(dry_run=False)
 

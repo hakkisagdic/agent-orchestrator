@@ -733,7 +733,9 @@ def escalate(root, cfg, adapter, age, args, st):
         # Suppressing the wake must not silence the reports (#23): the session acts
         # when someone prompts it, so tell that someone, once per newest report.
         if not args.dry_run:
-            newest = max(stale, key=lambda m: mtimes.get(m, 0))
+            # The report that asks, not the watchdog's echo of it written this cycle: mtimes are whole
+            # seconds, so the echo won only when the cycle crossed a second.
+            newest = max(stale, key=lambda m: (not A.from_watchdog(m), mtimes.get(m, 0)))
             notify(f"{project}: reports wait for the architect",
                    f"{len(stale)} report(s) in {cfg['mailbox']}/, newest {newest}; the "
                    "architect session is interactive and reads them when prompted",
