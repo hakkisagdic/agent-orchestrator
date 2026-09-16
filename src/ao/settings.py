@@ -33,6 +33,9 @@ SETTINGS = {
     "gates.default_timeout": Setting(
         600, int, 1, None, "project",
         "seconds a gate may run when its own definition names no timeout"),
+    "gates.coverage_min_files": Setting(
+        5, int, 1, None, "project",
+        "source files of one toolchain a top-level tree must hold before a gate must exercise it"),
     "watchdog.idle_minutes": Setting(
         6.0, float, 1, None, "project",
         "minutes of implementer silence before the watchdog acts"),

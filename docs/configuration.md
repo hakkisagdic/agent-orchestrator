@@ -29,6 +29,7 @@ machine setting written into a project.
 | `review_timeout` | `900` | project | seconds one reviewer may take; never taken from the command line |
 | `stall_minutes` | `60` | project | minutes a staged candidate may wait to land before throughput calls the slice stalled |
 | `gates.default_timeout` | `600` | project | seconds a gate may run when its own definition names no timeout |
+| `gates.coverage_min_files` | `5` | project | source files of one toolchain a top-level tree must hold before a gate must exercise it |
 | `watchdog.idle_minutes` | `6.0` | project | minutes of implementer silence before the watchdog acts |
 | `watchdog.max_attempts` | `3` | project | nudges without progress before a person is told the implementer is stuck |
 | `decisions.human_after_minutes` | `15` | project | minutes an open decision waits before it rings a person |

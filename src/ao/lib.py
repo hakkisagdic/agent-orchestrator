@@ -1929,6 +1929,71 @@ def review_context_line(context):
     return line
 
 
+# ---- gate coverage: a source tree no gate exercises (#5) ------------------------------
+
+TOOLCHAINS = {
+    "python": {"ext": (".py",), "runners": ("pytest", "python", "python3", "ruff", "mypy", "tox", "uv")},
+    "node": {"ext": (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"),
+             "runners": ("npm", "npx", "pnpm", "yarn", "node", "vitest", "jest", "tsc", "bun", "deno")},
+    "dotnet": {"ext": (".cs", ".fs", ".vb"), "runners": ("dotnet", "msbuild")},
+    "go": {"ext": (".go",), "runners": ("go",)},
+    "rust": {"ext": (".rs",), "runners": ("cargo",)},
+    "jvm": {"ext": (".java", ".kt", ".scala"), "runners": ("mvn", "gradle", "gradlew", "sbt")},
+    "swift": {"ext": (".swift",), "runners": ("swift", "xcodebuild")},
+}
+
+
+def source_trees(root, minimum):
+    """{top-level tree: {toolchain: files}} for every tree holding at least `minimum` of one toolchain's files.
+
+    Tracked and untracked-but-not-ignored files, as git lists them; files at the top
+    level count as the tree ".".
+    """
+    try:
+        listed = _git_output(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+    except RuntimeError:
+        return {}
+    counts = {}
+    for raw in listed.split(b"\0"):
+        path = os.fsdecode(raw)
+        if not path:
+            continue
+        tree = path.split("/", 1)[0] if "/" in path else "."
+        chain = next((name for name, spec in TOOLCHAINS.items() if path.endswith(spec["ext"])), None)
+        if chain:
+            counts.setdefault(tree, {}).setdefault(chain, 0)
+            counts[tree][chain] += 1
+    return {tree: {chain: n for chain, n in chains.items() if n >= minimum}
+            for tree, chains in counts.items() if any(n >= minimum for n in chains.values())}
+
+
+def _gate_covers(gate, tree, chain):
+    """Whether one gate exercises a toolchain's files in one tree: it runs that toolchain's
+    runner and, when it declares inputs, one of them reaches into the tree."""
+    import fnmatch
+    run = str((gate or {}).get("run") or "")
+    runners = TOOLCHAINS[chain]["runners"]
+    if not any(re.search(rf"(?:^|[\s/;&|(]){re.escape(runner)}(?:$|[\s.;&|)])", run) for runner in runners):
+        return False
+    inputs = (gate or {}).get("inputs")
+    if not isinstance(inputs, list) or not inputs:
+        return True
+    probe = "x" + TOOLCHAINS[chain]["ext"][0] if tree == "." else f"{tree}/x{TOOLCHAINS[chain]['ext'][0]}"
+    return any(fnmatch.fnmatchcase(probe, str(glob)) or str(glob).startswith(f"{tree}/") for glob in inputs)
+
+
+def gate_coverage_gaps(root, spec, minimum, names=None):
+    """(tree, toolchain, files) for every tree's toolchain that no gate - or none of `names` - exercises."""
+    gates = (spec or {}).get("gates") or {}
+    chosen = [gate for name, gate in gates.items() if names is None or name in names]
+    gaps = []
+    for tree, chains in sorted(source_trees(root, minimum).items()):
+        for chain, files in sorted(chains.items()):
+            if not any(_gate_covers(gate, tree, chain) for gate in chosen):
+                gaps.append((tree, chain, files))
+    return gaps
+
+
 def gate_inputs(root):
     """The paths the declared gates read, as globs, or None for the whole tree (#16).
 

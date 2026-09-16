@@ -3539,7 +3539,12 @@ itself. Authority lives in `.ao/authority.md`, not in mail. `push` is never your
 def _detect_gates(root):
     """Guess the project's gates from what is already there. A wrong guess costs a
     failed verify, which is visible; no guess costs an empty gate file nobody
-    notices, which is not."""
+    notices, which is not.
+
+    Every toolchain found gets its gates (#5): a repository with a JavaScript
+    workspace and a .NET backend got npm gates only, and nothing verified the
+    backend.
+    """
     gates, quick = {}, []
     pj = os.path.join(root, "package.json")
     if os.path.exists(pj):
@@ -3555,18 +3560,34 @@ def _detect_gates(root):
                     quick.append(name)
         if "test" in gates:
             gates["test"]["serialise"] = True
-    elif any(os.path.exists(os.path.join(root, f)) for f in ("pyproject.toml", "setup.py")):
-        gates["test"] = {"run": "python -m pytest -q", "expect": "exit_zero",
-                         "timeout": 2400, "serialise": True}
+    if any(os.path.exists(os.path.join(root, f)) for f in ("pyproject.toml", "setup.py")):
+        gates["pytest"] = {"run": "python -m pytest -q", "expect": "exit_zero",
+                           "timeout": 2400, "serialise": True}
+        # Collecting imports every test module: cheap, and it exercises the code.
+        gates["pytest-collect"] = {"run": "python -m pytest --collect-only -q", "expect": "exit_zero",
+                                   "timeout": 300}
+        quick.append("pytest-collect")
         if shutil.which("ruff"):
-            gates["lint"] = {"run": "ruff check .", "expect": "exit_zero", "timeout": 300}
-            quick.append("lint")
+            gates["ruff"] = {"run": "ruff check .", "expect": "exit_zero", "timeout": 300}
+            quick.append("ruff")
+    if any(name.endswith((".sln", ".csproj", ".fsproj")) for name in os.listdir(root)):
+        gates["dotnet-build"] = {"run": "dotnet build --nologo -v q", "expect": "exit_zero", "timeout": 1200}
+        gates["dotnet-test"] = {"run": "dotnet test --nologo", "expect": "exit_zero", "timeout": 2400,
+                                "serialise": True}
+        quick.append("dotnet-build")
+    if os.path.exists(os.path.join(root, "go.mod")):
+        gates["go-vet"] = {"run": "go vet ./...", "expect": "exit_zero", "timeout": 600}
+        gates["go-test"] = {"run": "go test ./...", "expect": "exit_zero", "timeout": 2400, "serialise": True}
+        quick.append("go-vet")
+    if os.path.exists(os.path.join(root, "Cargo.toml")):
+        gates["cargo-check"] = {"run": "cargo check", "expect": "exit_zero", "timeout": 1200}
+        gates["cargo-test"] = {"run": "cargo test", "expect": "exit_zero", "timeout": 2400, "serialise": True}
+        quick.append("cargo-check")
     gates["diff-check"] = {"run": "git diff --check", "expect": "exit_zero", "timeout": 60}
     quick.append("diff-check")
     return {"gates": gates,
             "profiles": {"quick": quick, "full": list(gates)},
             "default_profile": "quick"}
-
 
 def _models(adapter_id):
     try:
@@ -3719,6 +3740,21 @@ def cmd_init(cfg, args):
     if config_problem:
         print(f"{C['red']}init refused{C['reset']}: {_project_refusal(config_problem)}")
         return 1
+    # A quick profile that exercises none of the code gives every verify a green it did
+    # not earn (#5). Checked while planning, before anything is written.
+    detected_gates = _detect_gates(root)
+    if not os.path.lexists(os.path.join(root, ".ao", "gates.json")):
+        minimum = S.default("gates.coverage_min_files")
+        trees = A.source_trees(root, minimum)
+        quick = detected_gates["profiles"]["quick"]
+        uncovered = A.gate_coverage_gaps(root, detected_gates, minimum, names=quick)
+        if trees and len(uncovered) == sum(len(chains) for chains in trees.values()) \
+                and not getattr(args, "allow_uncovered_gates", False):
+            chains = sorted({chain for chains in trees.values() for chain in chains})
+            print(f"{C['red']}init refused{C['reset']}: the quick gates ({', '.join(quick)}) exercise none of "
+                  f"the detected toolchains ({', '.join(chains)}); declare gates in .ao/gates.json first, "
+                  "or pass --allow-uncovered-gates")
+            return 1
     runtime_cfg = _planned_runtime_config(root, planned_config)
     reviewer_probe = _reviewer_probe(runtime_cfg)
     if not reviewer_probe["ok"]:
@@ -3801,7 +3837,7 @@ def cmd_init(cfg, args):
     put(".ao/board.md", BOARD_TEMPLATE)
     put(".ao/backlog.md", BACKLOG_TEMPLATE.format(name=name))
     put(".ao/authority.md", AUTHORITY_TEMPLATE)
-    put(".ao/gates.json", json.dumps(_detect_gates(root), indent=2) + "\n")
+    put(".ao/gates.json", json.dumps(detected_gates, indent=2) + "\n")
     put(".ao/ledger/.gitkeep", "")
     put(".ao/decisions/.gitkeep", "")
     put("semantic-review/.gitkeep", "")
@@ -4601,6 +4637,16 @@ def doctor_problems(cfg):
             out.append(("transcript-blind", "fresh transcript, nothing parsed — the agent CLI's format changed"))
     except Exception:
         pass
+    # A source tree no gate exercises is a tree nothing verifies (#5).
+    try:
+        with open(os.path.join(root, ".ao", "gates.json"), encoding=UTF8) as fh:
+            gate_spec = json.load(fh)
+    except (OSError, ValueError):
+        gate_spec = None
+    if gate_spec is not None:
+        for tree, chain, files in A.gate_coverage_gaps(root, gate_spec, S.get(cfg, "gates.coverage_min_files")):
+            out.append((f"gate-uncovered:{tree}", f"{tree}/ holds {files} {chain} files that no gate in "
+                                                  ".ao/gates.json exercises"))
     # A setting that is written but not used says one thing and does another (#74).
     for name, text in S.problems(cfg):
         out.append((f"setting:{name}", text))
@@ -6946,6 +6992,8 @@ def main():
     ini.add_argument("--effort", help="implementer effort, where the adapter has one (kiro: low…max)")
     ini.add_argument("--reviewer-model", dest="reviewer_model", help="reviewer model (default claude-opus-5)")
     ini.add_argument("--watchdog", action="store_true", help="also install the watchdog")
+    ini.add_argument("--allow-uncovered-gates", action="store_true",
+                     help="write quick gates that exercise none of the detected toolchains")
     ini.set_defaults(fn=cmd_init)
     de = sub.add_parser("decide", help="record an architect decision durably")
     de.add_argument("decision", nargs="?")
