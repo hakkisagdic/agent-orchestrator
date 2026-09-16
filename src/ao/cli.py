@@ -1652,6 +1652,10 @@ def cmd_credits(cfg, args):
         print(f"\n   {col}{'█' * filled}{'░' * (20 - filled)}{C['reset']} {pct:5.1f}%"
               f"   {C['b']}{used:,.2f}{C['reset']} of {limit:,.0f}")
         print(f"   {C['b']}{limit - used:,.2f}{C['reset']} remaining")
+        # Whose spend this is: the whole account's, with ao's transcript share beside it (#95).
+        for line in _account_beside_share(cfg, since=datetime.now().replace(day=1, hour=0, minute=0,
+                                                                             second=0, microsecond=0).timestamp())[1:]:
+            print(f"   {line}")
         if acct.get("overage_status") == "DISABLED":
             print(f"\n   {C['dim']}overage disabled — work stops at the limit, it does not "
                   f"bill on{C['reset']}")
@@ -5108,6 +5112,32 @@ def _doctor_check(cfg, page=False):
     return 1
 
 
+# A credit pool is shared: what ao reads is ao's share, what the account says is everyone's (#95).
+SHARED_POOL_NOTE = ("the account's figure counts every session on it - another project's CLI, an IDE, "
+                    "a tool like Traycer - and ao's transcript holds only ao's own turns")
+
+
+def _account_beside_share(cfg, since=None):
+    """Lines setting the account's figure beside ao's own transcript share, labelled as such."""
+    try:
+        acct = A.kiro_account_usage()
+    except Exception:
+        acct = None
+    if not acct or acct.get("error") or acct.get("expired") or not acct.get("limit"):
+        return [f"{C['dim']}the account's figure could not be read; what follows is ao's transcript "
+                f"only{C['reset']}"]
+    lines = [f"the account: {float(acct['used']):,.0f} of {float(acct['limit']):,.0f} used"]
+    try:
+        mine = A.turn_costs(cfg, since=since)
+    except Exception:
+        mine = None
+    if mine and mine.get("turns") and float(acct["used"] or 0) > 0:
+        lines.append(f"ao's own share, from its transcript: {mine['total']:,.0f} {mine['unit']} "
+                     f"({100 * mine['total'] / float(acct['used']):.0f}% of the account's used)")
+    lines.append(f"{C['dim']}{SHARED_POOL_NOTE}{C['reset']}")
+    return lines
+
+
 def cmd_cost(cfg, args):
     """What the coordination spends: the implementer's turns by what they did.
 
@@ -5136,6 +5166,8 @@ def cmd_cost(cfg, args):
         print(f"  {cls:<14}{b['turns']:>6}{b['usage']:>10.0f}{100 * b['usage'] / tot:>6.0f}%   {w:>12}")
     print(f"  {'total':<14}{sum(b['turns'] for b in c['by_class'].values()):>6}{tot:>10.0f}")
     overhead = sum(c["by_class"].get(k, {}).get("usage", 0) for k in ("ceremony", "coordination"))
+    for line in _account_beside_share(cfg, since):
+        print(f"  {line}")
     print(f"\n  coordination + ceremony: {C['b']}{100 * overhead / tot:.0f}%{C['reset']} of spend"
           f"  ·  ao commands: {', '.join(f'{k} {v}' for k, v in c['ao_commands'].most_common(6))}")
     # the reviewer's side: files, wasted, sizes
