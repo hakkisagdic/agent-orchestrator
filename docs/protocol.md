@@ -160,6 +160,23 @@ not a defence against someone who already controls that machine. Its purpose is 
 — it stops an agent from inventing authority for itself, and it leaves a recorded human
 decision behind for anyone reading the history afterwards.
 
+## Before the same price is paid twice
+
+Everything worth remembering is already on disk: questions and their answers, architect
+decisions, waivers, review findings with their verdicts, and `docs/lessons.md`. `ao recall`
+reads it back, across every project registered on the machine:
+
+```bash
+ao recall path boundary conflict model.ts
+```
+
+Each result names its project, date, kind and outcome, and the file and row it came from,
+so an answer can be checked against its source. It is plain words over those files: no
+index, no service, no network. Opening a decision runs the same search - `ao ask` prints a
+near match ("asked or decided before") and the phone message carries it - so a question
+answered last week in another project reaches the human with that answer beside it,
+rather than being answered from scratch.
+
 ## Standing directives
 
 The mailbox only works if the implementer looks in it. Two mechanisms, in order of

@@ -1934,12 +1934,30 @@ def _decision_text(rec):
         lines.append(f"\n_{rec['context']}_")
     if rec.get("slice"):
         lines.append(f"\ndilim: `{rec['slice']}`")
+    for found in rec.get("precedents") or []:
+        lines.append(f"\nönceden: {found['project']} {found['kind']} {found['id']} — {found['outcome']}")
     lines.append("")
     for o in rec["options"]:
         lines.append(f"*{o['key']})* {o['label']}")
     lines.append(f"\nCevap: butona bas, ya da `{rec['id']} <harf>` yaz. "
                  f"Serbest metin için `{rec['id']} x <cevabın>`.")
     return "\n".join(lines)
+
+
+def cmd_recall(cfg, args):
+    """What was decided, found or learned before, in every project on this machine (#43)."""
+    results = A.recall(" ".join(args.text), cfg["root"], limit=args.limit)
+    if not results:
+        print(f"{C['dim']}nothing recorded shares those words{C['reset']}")
+        return 1
+    for found in results:
+        when = time.strftime("%Y-%m-%d", time.localtime(found["at"])) if found.get("at") else "—"
+        text = " ".join(str(found["text"]).split())
+        print(f"{C['b']}{found['project']}{C['reset']}  {when}  {found['kind']} {found['id']}  "
+              f"{C['dim']}{found['outcome']}{C['reset']}")
+        print(f"   {text[:160]}{'…' if len(text) > 160 else ''}")
+        print(f"   {C['dim']}{found['source']}{C['reset']}")
+    return 0
 
 
 def cmd_ask(cfg, args):
@@ -1958,6 +1976,9 @@ def cmd_ask(cfg, args):
     print(f"{C['b']}{rec['id']}{C['reset']}  {rec['question']}")
     for o in rec["options"]:
         print(f"   {C['b']}{o['key']}){C['reset']} {o['label']}")
+    for found in rec.get("precedents") or []:
+        print(f"   {C['yellow']}asked or decided before{C['reset']}: {found['project']} {found['kind']} "
+              f"{found['id']} — {found['outcome']}  {C['dim']}{found['source']}{C['reset']}")
     try:
         from . import telegram
         kb = [[{"text": f"{o['key']}) {o['label'][:40]}",
@@ -7604,6 +7625,10 @@ def main():
     dc = sub.add_parser("decisions", help="open and answered questions")
     dc.add_argument("-n", type=int, default=10)
     dc.set_defaults(fn=cmd_decisions)
+    rc = sub.add_parser("recall", help="what was decided, found or learned before, across projects")
+    rc.add_argument("text", nargs="+")
+    rc.add_argument("-n", "--limit", type=int, default=10)
+    rc.set_defaults(fn=cmd_recall)
     dg = sub.add_parser("digest", help="what happened, read from the ledgers")
     dg.add_argument("--days", type=float, default=1.0)
     dg.add_argument("-n", type=int, default=6)

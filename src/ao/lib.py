@@ -3852,9 +3852,16 @@ def ask(root, question, options, context=None, slice_id=None):
     did = f"D-{int(time.time())}"
     opts = [{"key": chr(ord('a') + i), "label": o} for i, o in enumerate(options[:8])]
     opts.append({"key": "x", "label": "Başka (serbest metin)", "free_text": True})
+    # The same question answered before, here or in another project, travels with it (#43).
+    try:
+        precedents = [{key: found.get(key) for key in ("project", "kind", "id", "at", "outcome", "source")}
+                      for found in recall(f"{question} {context or ''}", root, limit=3, share=0.4)]
+    except Exception:
+        precedents = []
     rec = scan_record({"asked_at": int(time.time()), "question": question, "context": context,
                        "slice": slice_id, "options": opts, "state": "open",
-                       "answer": None, "answered_at": None, "answered_by": None})
+                       "answer": None, "answered_at": None, "answered_by": None,
+                       "precedents": precedents})
     json.dump(rec, open(os.path.join(d, did + ".json"), "w", encoding=UTF8),
               ensure_ascii=False, indent=2)
     rec["id"] = did
@@ -4148,6 +4155,135 @@ def review_loop(root, reviews_dir, min_repeats=3):
             seen[key]["reviews"].append(f)
     return [{"file": k[0], "clause": k[1], **v}
             for k, v in seen.items() if v["count"] >= min_repeats]
+
+
+# ---- recall: what was decided, found or learned before, in every project (#43) ----------
+
+_RECALL_STOP = frozenset(
+    "the and for with that this from into have has had was were are not but then than when what which who why how "
+    "its our your their there here been being will would could should about after before over under only also just "
+    "very more most some such each other same one two can may must does did done yet still any all bir ve ile için "
+    "bu şu da de mi ne gibi daha çok".split())
+_FINDING_LINE = re.compile(r"^\s*- \[(BLOCKER|HIGH|MEDIUM|LOW)\]\s*(.+)$")
+
+
+def _recall_words(text):
+    words = (word.strip("._-") for word in re.findall(r"[a-zçğıöşü0-9][a-zçğıöşü0-9_.-]*", str(text or "").lower()))
+    return {word for word in words if len(word) >= 3 and word not in _RECALL_STOP}
+
+
+def _epoch(value):
+    """A recorded time as seconds, whether ao wrote it as a number or as ISO text."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    try:
+        return datetime.fromisoformat(str(value)).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def recall_roots(root=None):
+    """(project, root) for every project this machine has registered, the one asking first."""
+    out, seen = [], set()
+    if root:
+        out.append((project_key(root), root))
+        seen.add(os.path.realpath(root))
+    for name, row in sorted(project_registry().items()):
+        path = row.get("root")
+        if path and os.path.isdir(path) and os.path.realpath(path) not in seen:
+            seen.add(os.path.realpath(path))
+            out.append((name, path))
+    return out
+
+
+def recall_entries(project, root):
+    """What one project remembers, each with the file and row it came from (#43).
+
+    Questions asked and their answers, architect decisions, waivers, review
+    findings with their review's verdict, and lessons. A source that cannot be
+    read is passed over; the rest still answer.
+    """
+    entries = []
+
+    def add(kind, ident, at, text, outcome, source):
+        entries.append({"project": project, "kind": kind, "id": ident, "at": _epoch(at), "text": text,
+                        "outcome": outcome, "source": source})
+
+    for rec in decisions(root):
+        add("question", rec.get("id"), rec.get("answered_at") or rec.get("asked_at"),
+            " ".join(str(rec.get(key) or "") for key in ("question", "context", "answer")),
+            f"answered: {rec['answer']}" if rec.get("answer") else rec.get("state") or "open",
+            f"{DECISION_DIR}/{rec.get('id')}.json")
+    readers = ((decision_rows, "decision", ("decision", "why", "scope"), ".ao/ledger/decisions.jsonl"),
+               (waiver_rows, "waiver", ("gate", "slice", "why"), ".ao/ledger/waivers.jsonl"))
+    for reader, kind, fields, source in readers:
+        try:
+            rows = reader(root)
+        except Exception:
+            continue
+        for number, row in enumerate(rows, 1):
+            if isinstance(row, dict):
+                add(kind, row.get("id"), row.get("at"), " ".join(str(row.get(key) or "") for key in fields),
+                    row.get("event") or ("recorded by " + str(row.get("by") or "architect")), f"{source}:{number}")
+    reviews_dir = "semantic-review"
+    try:
+        with open(os.path.join(root, ".ao", "config.json"), encoding=UTF8) as fh:
+            reviews_dir = json.load(fh).get("reviews") or reviews_dir
+    except (OSError, ValueError, AttributeError):
+        pass
+    directory = os.path.join(root, reviews_dir)
+    for name in sorted(os.listdir(directory)) if os.path.isdir(directory) else []:
+        path = os.path.join(directory, name)
+        if name.startswith(".") or not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding=UTF8, errors="replace") as fh:
+                body = fh.read()
+        except OSError:
+            continue
+        verdict = _review_verdict(body)
+        for number, line in enumerate(body.splitlines(), 1):
+            found = _FINDING_LINE.match(line)
+            if found:
+                add("finding", name, os.path.getmtime(path), found.group(2), f"{found.group(1)} in a {verdict} review",
+                    f"{reviews_dir}/{name}:{number}")
+    try:
+        with open(os.path.join(root, "docs", "lessons.md"), encoding=UTF8, errors="replace") as fh:
+            lessons = fh.read().splitlines()
+    except OSError:
+        lessons = []
+    starts = [number for number, line in enumerate(lessons) if line.startswith("## ")]
+    for index, start in enumerate(starts):
+        end = starts[index + 1] if index + 1 < len(starts) else len(lessons)
+        add("lesson", lessons[start][3:].strip(), None, "\n".join(lessons[start:end]), "a lesson",
+            f"docs/lessons.md:{start + 1}")
+    return entries
+
+
+def recall(text, root=None, limit=10, exclude=(), share=0.5):
+    """Records in every registered project that share the words of `text`, best first (#43).
+
+    Plain words over the files ao already keeps: no index, no service, no network.
+    One or two words must all appear; longer text needs `share` of its words.
+    """
+    words = _recall_words(text)
+    if not words:
+        return []
+    need = len(words) if len(words) <= 2 else max(2, int(len(words) * share + 0.999))
+    found = []
+    for project, path in recall_roots(root):
+        try:
+            entries = recall_entries(project, path)
+        except Exception:
+            continue
+        for entry in entries:
+            if entry["id"] in exclude:
+                continue
+            score = len(words & _recall_words(entry["text"]))
+            if score >= need:
+                found.append(dict(entry, score=score))
+    found.sort(key=lambda entry: (-entry["score"], -(entry["at"] or 0)))
+    return found[:limit]
 
 
 def safe_slug(text, fallback="note", limit=40):
