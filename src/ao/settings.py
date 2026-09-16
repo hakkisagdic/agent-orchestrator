@@ -69,6 +69,12 @@ SETTINGS = {
     "mail.unseen_red_minutes": Setting(
         240, int, 1, None, "project",
         "minutes unseen before it rings red and goes to e-mail"),
+    "retention.observation_kb": Setting(
+        2048, int, 64, None, "project",
+        "kilobytes an observation store (notices, progress, cycles, logs) keeps before its oldest records go"),
+    "retention.evidence_keep": Setting(
+        500, int, 1, None, "project",
+        "newest rows a chained evidence ledger keeps live when ao prune --evidence seals the rest"),
     "gates.default_timeout": Setting(
         600, int, 1, None, "project",
         "seconds a gate may run when its own definition names no timeout"),

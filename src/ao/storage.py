@@ -159,12 +159,19 @@ def _load_committed_lengths():
     return data if isinstance(data, dict) else {}
 
 
-def _record_committed_length(path, count, digest):
+def _record_committed_length(path, count, digest, sealed=None):
     store = checkpoint_path()
     os.makedirs(os.path.dirname(store) or ".", exist_ok=True)
     with _exclusive_lock(store + ".lock"):
         data = _load_committed_lengths()
-        data[os.path.realpath(path)] = {"count": count, "digest": digest, "at": int(time.time())}
+        key = os.path.realpath(path)
+        mark = {"count": count, "digest": digest, "at": int(time.time())}
+        previous = data.get(key) if isinstance(data.get(key), dict) else {}
+        # A seal is recorded outside the repository too, so one written inside it
+        # cannot retire rows this machine never retired (#50).
+        if sealed is not None or previous.get("sealed"):
+            mark["sealed"] = sealed if sealed is not None else previous["sealed"]
+        data[key] = mark
         temporary = f"{store}.{os.getpid()}.tmp"
         with open(temporary, "w", encoding="utf-8") as handle:
             json.dump(data, handle, indent=1, sort_keys=True)
@@ -173,27 +180,135 @@ def _record_committed_length(path, count, digest):
         os.replace(temporary, store)
 
 
-def _check_committed_length(path, rows, chain):
-    """Refuse a ledger shorter than its recorded length, or diverging from it (#62)."""
+def _check_committed_length(path, rows, chain, seal=None):
+    """Refuse a ledger shorter than its recorded length, or diverging from it (#62), across a seal (#50)."""
     mark = _load_committed_lengths().get(os.path.realpath(path))
     if not isinstance(mark, dict) or not isinstance(mark.get("count"), int) or mark["count"] <= 0:
         return
+    recorded = mark.get("sealed")
+    if recorded or seal:
+        same = bool(recorded and seal) and recorded.get("retired") == seal.get("retired") \
+            and recorded.get("digest") == seal.get("digest")
+        if not same:
+            raise LedgerCorruption(
+                f"{path} carries a seal this machine did not record, or lost the one it did "
+                f"(the record is kept in {checkpoint_path()})"
+            )
+    retired = seal["retired"] if seal else 0
     count = mark["count"]
-    if len(rows) < count:
+    if retired + len(rows) < count:
         raise LedgerCorruption(
-            f"{path} holds {len(rows)} committed rows but recorded {count}: rows were removed from its end"
+            f"{path} holds {retired + len(rows)} committed rows but recorded {count}: rows were removed from its end"
             f" (the count is kept in {checkpoint_path()})"
         )
-    if chained_row_digest(rows[count - 1], chain) != mark.get("digest"):
+    if count <= retired:
+        if count == retired and seal.get("digest") == mark.get("digest"):
+            return
+        raise LedgerCorruption(f"{path} row {count} is sealed but does not match the digest recorded for it")
+    if chained_row_digest(rows[count - retired - 1], chain) != mark.get("digest"):
         raise LedgerCorruption(
             f"{path} row {count} does not match the digest recorded for it in {checkpoint_path()}"
         )
 
 
-def _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix=False):
+def seal_path(path):
+    return path + ".seal.json"
+
+
+def _load_seal(path):
+    """The seal that retired a ledger's prefix, or None (#50)."""
+    try:
+        with open(seal_path(path), encoding="utf-8") as handle:
+            seal = json.load(handle)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        raise LedgerCorruption(f"the seal of {path} cannot be read: {exc}") from exc
+    if not isinstance(seal, dict) or not isinstance(seal.get("retired"), int) or seal["retired"] < 1 \
+            or not isinstance(seal.get("digest"), str):
+        raise LedgerCorruption(f"the seal of {path} is malformed")
+    return seal
+
+
+def _settle_seal(path, chain, previous_field):
+    """Finish or undo a seal a crash interrupted; the caller holds the ledger lock (#50).
+
+    A seal writes its intent before it rewrites the ledger. If the ledger already
+    starts after the retired rows, the seal is completed; otherwise the intent is
+    dropped and the ledger is as it was.
+    """
+    pending = seal_path(path) + ".pending"
+    if not os.path.exists(pending):
+        return
+    with open(pending, encoding="utf-8") as handle:
+        intent = json.load(handle)
+    rows = _read_jsonl_unlocked(path, allow_partial_tail=False) if os.path.exists(path) else []
+    if rows and isinstance(rows[0], dict) and rows[0].get(previous_field) == intent["digest"]:
+        last = rows[-1]
+        _record_committed_length(path, intent["retired"] + len(rows), chained_row_digest(last, chain),
+                                 sealed={"retired": intent["retired"], "digest": intent["digest"]})
+        os.replace(pending, seal_path(path))
+        _sync_directory(os.path.dirname(path) or ".", os.fsync)
+    else:
+        os.remove(pending)
+
+
+def seal_chained_jsonl(path, chain, keep, *, previous_field=CHAIN_PREVIOUS_FIELD, legacy_prefix=False):
+    """Retire all but the newest `keep` rows of a chained ledger into an archive, never deleting one (#50).
+
+    The retired rows are written whole to `sealed/<ledger>.<first>-<last>.jsonl`
+    beside the ledger. The seal names how many rows it retired and the digest of
+    the last of them, which becomes the genesis the first kept row links to, and
+    the same seal is recorded outside the repository with the committed length.
+    A sealed ledger and the unsealed one give every reader the same newest rows.
+    Returns the seal, or None when there is nothing to retire.
+    """
+    if keep < 1:
+        raise ValueError("a seal keeps at least one row")
+    with _exclusive_lock(path + ".lock"):
+        _settle_seal(path, chain, previous_field)
+        if not os.path.exists(path):
+            return None
+        rows = _read_jsonl_unlocked(path, allow_partial_tail=False)
+        seal = _load_seal(path)
+        _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix, seal=seal)
+        _check_committed_length(path, rows, chain, seal=seal)
+        if len(rows) <= keep:
+            return None
+        retire, kept = rows[:-keep], rows[-keep:]
+        if any(not isinstance(row, dict) or previous_field not in row for row in kept):
+            return None                        # rows from before the chain cannot start a sealed ledger
+        base = seal["retired"] if seal else 0
+        first, last = base + 1, base + len(retire)
+        archive = os.path.join(os.path.dirname(path) or ".", "sealed", f"{os.path.basename(path)}.{first}-{last}.jsonl")
+        replace_file_durably(archive, b"".join(_encode_jsonl(row) for row in retire))
+        intent = {"chain": chain, "retired": last, "digest": chained_row_digest(retire[-1], chain),
+                  "archives": list((seal or {}).get("archives") or []) + [os.path.basename(archive)],
+                  "at": int(time.time())}
+        replace_file_durably(seal_path(path) + ".pending", (json.dumps(intent, sort_keys=True) + "\n").encode(UTF8))
+        replace_file_durably(path, b"".join(_encode_jsonl(row) for row in kept))
+        _settle_seal(path, chain, previous_field)
+        return _load_seal(path)
+
+
+def sealed_rows(path):
+    """Every row a seal retired from a ledger, oldest first, read from its archives (#50)."""
+    seal = _load_seal(path)
+    rows = []
+    for name in (seal or {}).get("archives") or []:
+        rows.extend(_read_jsonl_unlocked(os.path.join(os.path.dirname(path) or ".", "sealed", name),
+                                         allow_partial_tail=False))
+    return rows
+
+
+def _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix=False, seal=None):
     expected = None
     start = 0
-    if legacy_prefix:
+    offset = 0
+    if seal is not None:
+        # A sealed ledger's first row links to the last row the seal retired (#50).
+        expected, offset = seal["digest"], seal["retired"]
+    elif legacy_prefix:
         # Rows written before a ledger was chained carry no link. They may only
         # come first, and the first linked row names the digest of the last one.
         while start < len(rows) and isinstance(rows[start], dict) \
@@ -206,7 +321,7 @@ def _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix=Fals
                 raise LedgerCorruption(
                     f"cannot digest chained JSONL record {start} in {path}: {exc}"
                 ) from exc
-    for index, row in enumerate(rows[start:], start + 1):
+    for index, row in enumerate(rows[start:], start + 1 + offset):
         if not isinstance(row, dict):
             raise LedgerCorruption(
                 f"chained JSONL record {index} in {path} is not an object"
@@ -241,13 +356,15 @@ def read_chained_jsonl(path, chain, allow_partial_tail=True, timeout=10.0, *,
     The chain proves no row was changed or inserted; the recorded length proves
     none was cut off the end, including all of them (#62).
     """
-    if not os.path.exists(path):
-        _check_committed_length(path, [], chain)
+    if not os.path.exists(path) and not os.path.exists(seal_path(path) + ".pending"):
+        _check_committed_length(path, [], chain, seal=_load_seal(path))
         return []
     with _exclusive_lock(path + ".lock", timeout=timeout):
-        rows = _read_jsonl_unlocked(path, allow_partial_tail)
-        _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix)
-        _check_committed_length(path, rows, chain)
+        _settle_seal(path, chain, previous_field)
+        seal = _load_seal(path)
+        rows = _read_jsonl_unlocked(path, allow_partial_tail) if os.path.exists(path) else []
+        _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix, seal=seal)
+        _check_committed_length(path, rows, chain, seal=seal)
         return rows
 
 
@@ -457,12 +574,15 @@ def append_chained_jsonl(path, record, chain, timeout=10.0, *,
 
     with _exclusive_lock(path + ".lock", timeout=timeout):
         _call(_checkpoint, "locked")
+        _settle_seal(path, chain, previous_field)
         _repair_partial_tail(path, fsync, _checkpoint)
         rows = _read_jsonl_unlocked(path, allow_partial_tail=False)
-        _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix)
-        _check_committed_length(path, rows, chain)
-        previous = chained_row_digest(rows[-1], chain) if rows else None
-        chained = {previous_field: previous, "ordinal": len(rows) + 1}
+        seal = _load_seal(path)
+        _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix, seal=seal)
+        _check_committed_length(path, rows, chain, seal=seal)
+        retired = seal["retired"] if seal else 0
+        previous = chained_row_digest(rows[-1], chain) if rows else (seal["digest"] if seal else None)
+        chained = {previous_field: previous, "ordinal": retired + len(rows) + 1}
         chained.update(record)
         payload = _encode_jsonl(chained)
         digest = chained_row_digest(chained, chain)
@@ -470,7 +590,7 @@ def append_chained_jsonl(path, record, chain, timeout=10.0, *,
             path, parent, payload, write, fsync, _checkpoint
         )
         try:
-            _record_committed_length(path, len(rows) + 1, digest)
+            _record_committed_length(path, retired + len(rows) + 1, digest)
         except BaseException:
             # A row whose length could not be recorded is taken back, so the
             # caller's failure and the file agree (#68).

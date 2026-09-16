@@ -1122,6 +1122,10 @@ def run(args):
         os.makedirs(STATE_DIR, exist_ok=True)
         with _exclusive_lock(os.path.join(STATE_DIR, CYCLE_LOCK.format(key=key)), timeout=0):
             try:
+                A.bound_observation_logs(root, STATE_DIR)       # every store is bounded (#50)
+            except OSError:
+                pass
+            try:
                 return _cycle(args, root)
             finally:
                 record_cycle(root, args, started)

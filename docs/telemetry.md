@@ -130,7 +130,7 @@ tool becomes the thing someone turns off.
 ```bash
 ao prune                 # dry run: what would go
 ao prune --yes           # operational records older than 7 days, logs trimmed to 64KB tails
-ao prune --evidence --yes   # also verification records and plan hashes
+ao prune --evidence --yes   # also seal the verification and authority ledgers past their bound
 ```
 
 Evidence is excluded by default and takes an explicit flag. Verification records

@@ -126,6 +126,24 @@ holder is dead, and a review ao archived with nothing recording where.
 was authorised, reviewed or verified is reported and never changed; no repair rewrites an
 authority row.
 
+## Every store is bounded
+
+Each store has a retention by kind, enforced as it is written rather than on request, because a
+cleanup that waits to be asked is never run. Observation - notices, progress samples, cycle
+records, and the nudge, watchdog, refill and wake logs - keeps the newest
+`retention.observation_kb` and drops the oldest records at a line boundary; the notices ledger
+does this on each write and the watchdog holds the rest every cycle. `ao doctor` names a store
+that is over its bound anyway.
+
+Evidence is never trimmed. A chained ledger past its bound is **sealed**: `ao prune --evidence
+--yes` moves all but its newest `retention.evidence_keep` rows whole into `.ao/ledger/sealed/`,
+and a seal records how many rows it retired and the digest of the last of them. That digest is
+the genesis the first kept row links to, and the same seal is recorded outside the repository
+with the committed length, so a seal written by hand, or a sealed prefix removed, is refused
+like any broken chain. `ao commit-check` reads the same newest rows from a sealed ledger as from
+an unsealed one. A verification a grant names stays readable by its id from the sealed archive,
+and review artefacts are kept by reference ([telemetry](telemetry.md)).
+
 ## Rules
 
 - **Append-only.** Corrections are new entries. A ledger you can rewrite is a ledger you

@@ -7008,11 +7008,16 @@ def cmd_prune(cfg, args):
     total = 0
     for name, kind, rel, desc in STORES:
         if kind == "evidence" and args.evidence:
-            # Verification rows and plan baselines are what authority was granted
-            # against, and the verification ledger is chained: dropping its oldest
-            # rows would break it. Retention of evidence is sealing, not pruning (#50).
+            # Evidence is never pruned. A chained ledger past its bound is sealed:
+            # its oldest rows move whole to .ao/ledger/sealed/ and stay readable (#50).
+            keep = S.get(cfg, "retention.evidence_keep")
+            sealed = None
+            if name == "verifications" and not dry:
+                from .storage import seal_chained_jsonl
+                sealed = seal_chained_jsonl(os.path.join(root, rel), A.VERIFICATION_CHAIN, keep, legacy_prefix=True)
             print(f"  {C['dim']}keep  {name:<14} evidence is never pruned; "
-                  f"sealing old rows is #50{C['reset']}")
+                  + (f"sealed through row {sealed['retired']} into .ao/ledger/sealed/" if sealed
+                     else f"rows past the newest {keep} are sealed, not dropped") + f"{C['reset']}")
             continue
         if kind == "evidence" and not args.evidence:
             path = os.path.join(root, rel)
@@ -7066,6 +7071,14 @@ def cmd_prune(cfg, args):
             print(f"  {C['dim']}keep  {'reviews':<14} {len(outcome['kept'])} referenced"
                   + (f" ({detail})" if detail else "") + f", {outcome['recent']} recent{C['reset']}")
 
+    # The authority chain is never truncated by deletion: past its bound it is sealed (#50).
+    if args.evidence and not dry:
+        from .storage import seal_chained_jsonl
+        sealed = seal_chained_jsonl(os.path.join(root, ".ao", "ledger", "authority.jsonl"), A.AUTHORITY_CHAIN,
+                                    S.get(cfg, "retention.evidence_keep"))
+        if sealed:
+            print(f"  {C['green']}sealed{C['reset']}  {'authority':<14} through row {sealed['retired']}; "
+                  f"{C['dim']}ao commit-check validates across the seal{C['reset']}")
     # Dedupe by inode, not by path string: this filesystem is case-insensitive, so
     # "nudge-Voltrai.log" and "nudge-voltrai.log" are one file that would
     # otherwise be counted — and truncated — twice.
@@ -7578,6 +7591,17 @@ def _doctor_consistency(cfg, repair=False):
     return 1
 
 
+def _store_bound_lines(cfg):
+    """Observation stores past their bound (#50): the watchdog holds them each cycle, so one here means it is not."""
+    from .watchdog import STATE_DIR
+    over = A.stores_over_bound(cfg["root"], cfg, STATE_DIR)
+    if not over:
+        return []
+    return [f"{'stores':<16}{C['yellow']}{len(over)} over their bound{C['reset']}  "
+            f"{C['dim']}{', '.join(f'{os.path.basename(p)} {size // 1024}KB/{limit // 1024}KB' for p, size, limit in over)}"
+            f" — the watchdog trims them each cycle; is it running?{C['reset']}"]
+
+
 def cmd_doctor(cfg, args):
     if getattr(args, "consistency", False):
         return _doctor_consistency(cfg, repair=getattr(args, "repair", False))
@@ -7639,6 +7663,8 @@ def cmd_doctor(cfg, args):
     for line in _architect_absence_lines(cfg):
         print(line)
     for line in _worktree_lines(cfg):
+        print(line)
+    for line in _store_bound_lines(cfg):
         print(line)
     print(f"quota source    {'keyflip' if A.sh('command -v keyflip') else '—'}")
     # Optional capabilities announce themselves; the core never needs them (#82).

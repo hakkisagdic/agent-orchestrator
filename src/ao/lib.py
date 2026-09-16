@@ -1213,6 +1213,8 @@ def record_notice(root, title, msg, sent, key=None, evidence=None):
             if evidence:
                 row["evidence"] = evidence
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        # Observation is held to its bound as it is written (#50).
+        bound_store(os.path.join(d, "notices.jsonl"), settings.get(load_config(root), "retention.observation_kb"))
     except OSError:
         pass
 
@@ -2769,9 +2771,10 @@ def consistency_findings(root, cfg):
         grants = []
         found("authority", f"the authority ledger cannot be read: {exc}")
     try:
-        verifications = {row.get("id") for row in read_chained_jsonl(
-            os.path.join(root, ".ao", "ledger", "verifications.jsonl"), VERIFICATION_CHAIN, legacy_prefix=True)
-            if isinstance(row, dict)}
+        from .storage import sealed_rows
+        ledger = os.path.join(root, ".ao", "ledger", "verifications.jsonl")
+        verifications = {row.get("id") for row in list(read_chained_jsonl(
+            ledger, VERIFICATION_CHAIN, legacy_prefix=True)) + sealed_rows(ledger) if isinstance(row, dict)}
     except Exception as exc:
         verifications = None
         found("verifications", f"the verification ledger cannot be read: {exc}")
@@ -3128,6 +3131,16 @@ def latest_verification(root):
                               VERIFICATION_CHAIN, legacy_prefix=True)
     chained = [row for row in rows if CHAIN_PREVIOUS_FIELD in row]
     return chained[-1] if chained else None
+
+
+def verification_by_id(root, vid):
+    """One verification row by id, from the ledger or the rows a seal retired from it (#50)."""
+    from .storage import read_chained_jsonl, sealed_rows
+    path = os.path.join(root, ".ao", "ledger", "verifications.jsonl")
+    for row in list(read_chained_jsonl(path, VERIFICATION_CHAIN, legacy_prefix=True)) + sealed_rows(path):
+        if isinstance(row, dict) and row.get("id") == vid:
+            return row
+    return None
 
 
 def record_verification(root, record):
@@ -4781,6 +4794,64 @@ def outcome_stats(outcomes):
                                 if isinstance(o.get("size"), dict) else None for o in outcomes),
         "defects_pct": round(100 * sum(o["defect_found"] for o in outcomes) / len(outcomes)) if outcomes else None,
     }
+
+
+# ---- every store is bounded, without being asked (#50) -----------------------------------
+
+OBSERVATION_LOGS = ("nudge-{key}.log", "watchdog-{key}.log", "refill-{key}.log", "escalate-{key}.log",
+                    "cycles-{key}.jsonl")
+
+
+def bound_store(path, kb):
+    """Keep an observation store within its bound as it is written: past it, the oldest records go (#50).
+
+    Measured 2026-09-08: notices 3.2 MB, a nudge log 2.6 MB, and `ao prune`, which
+    existed and defaulted to a dry run, had never been run - the only outcome a
+    manual cleanup has. A store is trimmed once it is a quarter over its bound,
+    back to three quarters of it, at a line boundary, so it is not rewritten on
+    every write. Evidence is never trimmed here; it is sealed.
+    """
+    limit = int(kb) * 1024
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return False
+    if size <= limit * 1.25:
+        return False
+    from .storage import replace_file_durably
+    with open(path, "rb") as fh:
+        fh.seek(size - int(limit * 0.75))
+        tail = fh.read()
+    replace_file_durably(path, tail[tail.find(b"\n") + 1:])
+    return True
+
+
+def observation_stores(root, state_dir=None):
+    """Every observation store of a project: its ledgers' and the watchdog's logs, as paths."""
+    key = project_key(root)
+    state_dir = state_dir or os.path.join(HOME, ".ao")
+    stores = [os.path.join(root, ".ao", "ledger", name) for name in ("notices.jsonl", "progress.jsonl")]
+    return stores + [os.path.join(state_dir, pattern.format(key=key)) for pattern in OBSERVATION_LOGS]
+
+
+def bound_observation_logs(root, state_dir=None):
+    """Hold every observation store to its bound; the watchdog does this each cycle (#50)."""
+    limit = settings.get(load_config(root), "retention.observation_kb")
+    return [path for path in observation_stores(root, state_dir) if bound_store(path, limit)]
+
+
+def stores_over_bound(root, cfg, state_dir=None):
+    """(path, bytes, bound) for each observation store over its bound, for `ao doctor` (#50)."""
+    limit = settings.get(cfg, "retention.observation_kb") * 1024
+    out = []
+    for path in observation_stores(root, state_dir):
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            continue
+        if size > limit * 1.25:
+            out.append((path, size, limit))
+    return out
 
 
 def safe_slug(text, fallback="note", limit=40):
