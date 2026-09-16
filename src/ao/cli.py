@@ -6273,6 +6273,11 @@ def cmd_watchdog(cfg, args):
         if os.path.exists(dplist):
             os.remove(dplist)
             print(f"removed {dlabel}")
+        # A heartbeat left behind reads as a dead watchdog to every other project (audit).
+        try:
+            os.remove(A.heartbeat_path(root))
+        except OSError:
+            pass
         return
 
     os.makedirs(os.path.dirname(plist_path), exist_ok=True)

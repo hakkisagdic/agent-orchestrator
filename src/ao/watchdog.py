@@ -185,11 +185,11 @@ def child_path():
             except OSError:
                 pass
     seen, out = set(), []
-    for chunk in ":".join(parts).split(":"):
+    for chunk in os.pathsep.join(parts).split(os.pathsep):
         if chunk and chunk not in seen:
             seen.add(chunk)
             out.append(chunk)
-    return ":".join(out)
+    return os.pathsep.join(out)
 
 
 # Legacy call sites that do not declare an audience are classified by title.
@@ -205,6 +205,23 @@ def for_human(title):
     # into a human one by its name alone.
     subject = title.split(": ", 1)[1] if ": " in title else title
     return any(k in subject.lower() for k in HUMAN_AUDIENCE)
+
+
+def desktop_notify(title, msg):
+    """A desktop notification where the platform has one; never an exception (audit).
+
+    `osascript` exists only on macOS. Elsewhere its FileNotFoundError ended the cycle
+    before the notice was recorded or the state saved.
+    """
+    if sys.platform != "darwin" or not shutil.which("osascript"):
+        return False
+    title, msg = (str(part).replace('"', "'").replace("\\", "/") for part in (title, msg))
+    try:
+        subprocess.run(["osascript", "-e", f'display notification "{msg}" with title "{title}"'],
+                       capture_output=True, timeout=10)
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def notify(title, msg, root=None, key=None, window=1800, audience=None, level=None,
@@ -299,17 +316,14 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
             if not A.notice_recently_sent(root, "storm", 3600):
                 A.record_notice(root, f"{project}: alert storm", "12+ alerts in an hour; further ones "
                                 "are recorded only — ao notices", sent=True, key="storm")
-                subprocess.run(["osascript", "-e", f'display notification "12+ alerts in an hour; further '
-                                f'ones recorded only (ao notices)" with title "{project}: alert storm"'],
-                               capture_output=True)
+                desktop_notify(f"{project}: alert storm",
+                               "12+ alerts in an hour; further ones recorded only (ao notices)")
         return False
     if dry_run:
         print(f"DRY RUN: would ring {ring} desktop/Telegram channels: {title}")
         return False
     safe = msg.replace('"', "'")[:200]
-    subprocess.run(["osascript", "-e",
-                    f'display notification "{safe}" with title "{title}"'],
-                   capture_output=True)
+    desktop_notify(title, safe)
     try:
         from . import telegram
         telegram.send(f"*{title}*\n{msg}", root)
@@ -418,11 +432,13 @@ def child_alive(st):
     pid = st.get("child_pid")
     if not pid:
         return False
-    try:
-        os.kill(pid, 0)          # signal 0 asks "does this exist?" and changes nothing
-    except OSError:
+    # A bare pid can be reused by an unrelated process, and os.kill(pid, 0) sends
+    # CTRL_C_EVENT on Windows. Liveness comes from the portable probe, identity from
+    # the start recorded when the turn was spawned.
+    if not A._pid_alive(pid):
         return False
-    return True
+    started = st.get("child_start")
+    return started is None or A._process_start(pid) == started
 
 
 def provider_degraded(root, window=900):
@@ -810,6 +826,10 @@ def escalate(root, cfg, adapter, age, args, st):
             print(f"architect at quota until "
                   f"{time.strftime('%H:%M', time.localtime(st['arch_quota_until']))}; not waking")
             resolved = None
+        held = A.hold_state(root)
+        if resolved and held:
+            print(f"held by {held.get('by')} since this cycle began; not waking the architect")
+            resolved = None
         if resolved:
             argv[0] = resolved
             os.makedirs(STATE_DIR, exist_ok=True)
@@ -861,7 +881,9 @@ def open_work(cfg, root):
     if A.board(root)["running"]:
         reasons.append("slice running")
     rs = A.reviewer_state(root)
-    if rs.get("pending_review") and (not rs.get("until") or rs["until"] <= time.time()):
+    # A reviewer that was unavailable with no known window - an expired login, a
+    # missing binary - is not work a nudge can do; nudging for it never ended (audit).
+    if rs.get("pending_review") and rs.get("until") and rs["until"] <= time.time():
         reasons.append("reviewer window reopened — re-run the pending review")
     if A.product_dirty(root, cfg):
         reasons.append("uncommitted changes")
@@ -1015,16 +1037,38 @@ def main():
     return run(args)
 
 
+CYCLE_LOCK = "watchdog-{key}.cycle.lock"
+
+
 def run(args):
-    """One cycle, traced and — unless dry — recorded."""
+    """One cycle, traced and — unless dry — recorded.
+
+    Live cycles take a per-project lock first. The scheduled job and `ao catchup`
+    both ran a cycle, both passed the process scan before either spawned, and both
+    resumed the implementer: the two-writer incident the scan exists to prevent.
+    A cycle that finds the lock held stands down.
+    """
     _TRACE.clear()
     _FACTS.clear()
     root = os.path.abspath(os.path.expanduser(args.root))
     started = time.time()
+    if args.dry_run:
+        try:
+            return _cycle(args, root)
+        finally:
+            record_cycle(root, args, started)
+    from .storage import LedgerLockTimeout, _exclusive_lock
+    key = os.path.basename(root.rstrip("/")) or "root"
     try:
-        return _cycle(args, root)
-    finally:
-        record_cycle(root, args, started)
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with _exclusive_lock(os.path.join(STATE_DIR, CYCLE_LOCK.format(key=key)), timeout=0):
+            try:
+                return _cycle(args, root)
+            finally:
+                record_cycle(root, args, started)
+    except LedgerLockTimeout:
+        print("another watchdog cycle is running for this project; standing down")
+        return 0
 
 
 def _cycle(args, root):
@@ -1140,6 +1184,10 @@ def report_ungranted_commits(root, project, st, limit=20):
 
 
 def _cycle_impl(args, root):
+    # Proof the watchdog ran, before anything that can end the cycle early: a
+    # broken session binding was reported to people as a dead watchdog (audit).
+    if not args.dry_run:
+        A.heartbeat(root)
     cfg = A.load_config(root)
     impl = cfg.get("implementer") or {}
     if not impl:
@@ -1155,7 +1203,6 @@ def _cycle_impl(args, root):
     size = os.path.getsize(msgs)
     st = load_state(root)
     if not args.dry_run:
-        A.heartbeat(root)                 # the only proof this watchdog is alive
         A.reconcile_mail_ledger(root, cfg)  # deleted mail becomes a consumed row
         A.record_progress(root, cfg)      # history of what moved, for the spin check
     project = os.path.basename(root.rstrip("/")) or "root"
@@ -1199,6 +1246,12 @@ def _cycle_impl(args, root):
     if not args.dry_run:
         _FACTS["ungranted_commits"] = report_ungranted_commits(root, project, st)
     _FACTS["decisions_ringing"] = escalate_open_decisions(root, project, dry_run=args.dry_run)
+    parked = A.reviewer_state(root)
+    if parked.get("pending_review") and not parked.get("until") and not args.dry_run:
+        notify(f"{project}: a review is parked",
+               f"the reviewer was unavailable: {A.redact(parked.get('reason') or '?')[:120]} — a person "
+               "restores it, carries the request with ao collect-review, or waives", root,
+               key="review-parked", window=24 * 3600, audience="human")
     for sib, age_s in A.stale_siblings(root).items():
         notify(f"{sib}: watchdog silent", f"no heartbeat for {age_s // 60}m — its watchdog is not "
                f"running; launchctl / ao watchdog status", root, key=f"watchdog-dead:{sib}",
@@ -1293,6 +1346,15 @@ def _cycle_impl(args, root):
             time.sleep(0.5)
         for pid in A.agent_pids(root, adapter, headless_only=True):
             A.kill_turn(pid, signal.SIGKILL)
+        # Only headless turns were reaped. A person's interactive session in this
+        # tree is still here and still a writer; nudging next to it starts a second.
+        # Counted as what the reaper could not have started, from the same scan.
+        headless = set(A.agent_pids(root, adapter, headless_only=True))
+        people = [pid for pid in A.agent_pids(root, adapter) if pid not in headless]
+        if people:
+            print(f"{len(people)} interactive agent process(es) remain in this tree after reaping; "
+                  "not starting another turn")
+            return 0
 
     # 1 — still working
     #
@@ -1414,6 +1476,29 @@ def _cycle_impl(args, root):
             argv[0] = resolved
             key = os.path.basename(root.rstrip("/")) or "root"
             log_path = os.path.join(STATE_DIR, f"refill-{key}.log")
+            if A.hold_state(root):
+                print("held since this cycle began; not waking the architect to refill")
+                return 0
+            # A refill spends the same window a report wake does, and its failures
+            # were never read (audit): check the quota and the last refill's log.
+            if not quota_ok(adapter):
+                print("queue low, but there is no quota headroom to wake the architect")
+                return 0
+            failed = wake_error(log_path)
+            blocked = quota_block_until(failed)
+            if blocked:
+                print(f"the last refill hit the architect's limit; waiting until "
+                      f"{time.strftime('%H:%M', time.localtime(blocked))}")
+                return 0
+            if failed and failed.get("kind") != "quota" and time.time() - (failed.get("at") or 0) < 6 * 3600:
+                notify(f"{project}: refill failed", f"{failed.get('kind')}: "
+                       f"{A.redact(failed.get('text', ''))[:110]}", root,
+                       key="refill-failed", window=6 * 3600, audience="human")
+                # A transport error is retried on the refill spacing; a binary or a
+                # session that failed fails the same way until someone changes it.
+                if failed.get("kind") in ("binary", "session") and failed.get("binary") == f"{resolved} {ver}":
+                    print(f"the last refill with this binary failed ({failed.get('kind')}); not retrying")
+                    return 0
             os.makedirs(STATE_DIR, exist_ok=True)
             with open(log_path, "a", encoding=UTF8) as log:
                 log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} refill {resolved} {ver} ===\n")
@@ -1440,9 +1525,21 @@ def _cycle_impl(args, root):
     intervened = False
     revs_all = A.reviews(root, cfg["reviews"], limit=1)
     if revs_all:
-        rev_mt = os.path.getmtime(os.path.join(root, cfg["reviews"], revs_all[0][0]))
+        # Only the architect re-specifies a slice; any other mail, the watchdog's own
+        # included, is not an intervention (audit). Files can be acknowledged while
+        # this reads them.
+        try:
+            rev_mt = os.path.getmtime(os.path.join(root, cfg["reviews"], revs_all[0][0]))
+        except OSError:
+            rev_mt = time.time()
         for m in A.mailbox(root, cfg["mailbox"]):
-            if os.path.getmtime(os.path.join(root, cfg["mailbox"], m)) > rev_mt:
+            if not A.from_architect(m, cfg):
+                continue
+            try:
+                newer = os.path.getmtime(os.path.join(root, cfg["mailbox"], m)) > rev_mt
+            except OSError:
+                continue
+            if newer:
                 intervened = True
                 break
     if rn > budget and not intervened:
@@ -1580,6 +1677,10 @@ def _cycle_impl(args, root):
                                  "the adapter's resume argv carries no tool scope, so ao appends its trust_all")
         except Exception as exc:
             print(f"could not record the flags added to the implementer: {exc}")
+    held = A.hold_state(root)
+    if held:
+        print(f"held by {held.get('by')} since this cycle began; not nudging")
+        return 0
     with open(log_path, "a", encoding=UTF8) as log:
         log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} nudge"
                   f"{' (added: ' + ' '.join(added) + ')' if added else ''} ===\n")
@@ -1598,8 +1699,13 @@ def _cycle_impl(args, root):
             break
 
     nudged_fp = A.work_fingerprint(root)
+    try:
+        child_start = A._process_start(proc.pid, refresh=True)
+    except Exception:
+        child_start = None
     st.update(attempts=st.get("attempts", 0) + 1, last_nudge=time.time(),
-              last_size=size, child_pid=proc.pid, last_fingerprint=nudged_fp,
+              last_size=size, child_pid=proc.pid, child_start=child_start,
+              last_fingerprint=nudged_fp,
               nudge_size=size, nudge_fingerprint=nudged_fp,
               nudge_inputs=A.nudge_inputs(root, cfg))
     if early not in (None, 0):

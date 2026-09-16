@@ -4272,6 +4272,9 @@ def expire_alarms(project, now=None):
     return done
 
 
+RETIRED_HEARTBEAT_AGE = 7 * 86400
+
+
 def stale_siblings(root, max_age=900):
     """Other projects whose watchdog once had a heartbeat and now has none.
 
@@ -4284,7 +4287,9 @@ def stale_siblings(root, max_age=900):
             if not f.startswith("heartbeat-") or f == f"heartbeat-{me}":
                 continue
             age = int(time.time() - os.path.getmtime(os.path.join(HOME, ".ao", f)))
-            if age > max_age:
+            # A week of silence is a project that was retired, not a watchdog that
+            # just died; ringing a person about it every cycle never ended (audit).
+            if max_age < age <= RETIRED_HEARTBEAT_AGE:
                 out[f[len("heartbeat-"):]] = age
     except OSError:
         pass
