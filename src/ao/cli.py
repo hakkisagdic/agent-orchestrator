@@ -568,6 +568,9 @@ def cmd_verify(cfg, args):
             print(f"  {C['dim']}{tail}{C['reset']}")
         results.append({"name": name, "passed": passed, "detail": detail,
                         "exit": code, "seconds": took, "run": g["run"],
+                        # The runner's own closing line, for reports to quote (#6).
+                        "summary": None if g.get("expect") == "empty"
+                        else A.gate_summary_line(out, g.get("summary")),
                         "counts": None if g.get("expect") == "empty" or not counts
                         else {"pass": counts[0], "fail": counts[1]}})
 

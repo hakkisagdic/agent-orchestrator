@@ -2317,6 +2317,68 @@ def gate_counts(output, summary=None):
     return None
 
 
+def gate_summary_line(output, summary=None):
+    """The closing line gate_counts read its numbers from, or None (#6).
+
+    Kept in the verification beside the exit code, so a report can quote what the
+    runner said rather than a number the reporter typed.
+    """
+    tail = str(output or "").splitlines()[-GATE_SUMMARY_TAIL_LINES:]
+    if summary:
+        try:
+            found = [line for line in tail if re.search(summary, line)]
+        except re.error:
+            return None
+        return found[-1].strip()[:200] if found else None
+    for line in reversed(tail):
+        text = line.strip()
+        if re.match(r"^[#ℹ] (pass|fail) \d+$", text) or \
+                re.match(r"^=*[ \t]*(?:\d+ [a-z]+(?:, )?)+ in [\d.]+s\b", text):
+            return text.strip("= ")[:200]
+    return None
+
+
+def verification_evidence(root):
+    """One line naming the newest verification: its id, each gate's exit and closing line (#6)."""
+    try:
+        record = latest_verification(root)
+    except Exception:
+        return None
+    if not record:
+        return None
+    gates = [f"{g.get('name')} exit {g.get('exit')}" + (f" ({g['summary']})" if g.get("summary") else "")
+             for g in record.get("gates") or [] if isinstance(g, dict)]
+    return (f"{record.get('id')} {'passed' if record.get('passed') else 'FAILED'}: "
+            + ("; ".join(gates) if gates else "no gates"))
+
+
+_GREEN_CLAIM = re.compile(r"\b\d+\s+passed\b|\ball\s+(?:tests|gates|checks)\s+(?:pass|passed|green)\b|"
+                          r"\bgreen\b|\byeşil\b|\bgeçti\b|\bgeçiyor\b", re.I)
+_RED_ADMISSION = re.compile(r"\b[1-9]\d*\s+(?:failed|errors?)\b|\bFAIL(?:ED)?\b|\bkırmızı\b|\bkaldı\b")
+
+
+def report_inconsistency(root, text):
+    """Why a report that claims green contradicts the newest verification, or None (#6).
+
+    A report said "159 passed" while the suite had exited 1. The claim is read from
+    the report's words; the fact from the verification ledger. A report that admits
+    a failure, or a project with no verification, is not inconsistent.
+    """
+    body = str(text or "")
+    if not _GREEN_CLAIM.search(body) or _RED_ADMISSION.search(body):
+        return None
+    try:
+        record = latest_verification(root)
+    except Exception:
+        return None
+    if not record or record.get("passed") is not False:
+        return None
+    failed = [f"{g.get('name')} exit {g.get('exit')}" for g in record.get("gates") or []
+              if isinstance(g, dict) and not g.get("passed")]
+    return (f"the report claims green, but the newest verification {record.get('id')} failed"
+            + (f": {', '.join(failed)}" if failed else ""))
+
+
 def gate_definitions_digest_of(spec, profile):
     """Canonical digest of the gate definitions one profile runs, or None when it has none (#61).
 
@@ -2601,6 +2663,10 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
                     ("none", "no ", "yok", "-", "n/a", "hiç"))
                 break
         kind = "decision-requested" if asking else "report-waiting"
+        contradiction = report_inconsistency(root, body)
+        if contradiction:
+            out.append({"kind": "inconsistent-report", "key": m,
+                        "facts": [f"{m}: {contradiction}"]})
         g = groups.setdefault(kind, {"n": 0, "first": m})
         g["n"] += 1
         g["latest"] = m

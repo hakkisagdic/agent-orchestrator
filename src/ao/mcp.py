@@ -220,10 +220,19 @@ def call(name, args, cfg, allow_verify):
                              f"sees one file with its original time. Do not report it again; end the turn.")}
         name_ = f"{time.strftime('%Y%m%d-%H%M')}-{impl}-to-{arch}-{kind.upper()}-{slug}.md"
         text = f"# {args['summary']}\n\n{header}\n\n"
+        # Counts are quoted from the ledger, not typed; a green claim over a red
+        # verification is said to be what it is (#6).
+        inconsistent = A.report_inconsistency(
+            root, " ".join(str(args.get(field) or "") for field in ("summary", "detail", "needs")))
+        if inconsistent:
+            text += f"## INCONSISTENT\n\n{inconsistent}\n\n"
         if args.get("detail"):
             text += args["detail"] + "\n\n"
         if args.get("needs"):
             text += f"**Needs:** {args['needs']}\n"
+        evidence = A.verification_evidence(root)
+        if evidence:
+            text += f"**Verification:** {evidence}\n"
         A.write_mail(root, cfg, name_, text, {"kind": kind, "from": impl, "to": arch,
                                               "slice": args.get("slice")})
         delivered = 0
@@ -237,7 +246,7 @@ def call(name, args, cfg, allow_verify):
             except Exception:
                 pass
         return {"written": name_, "escalates": kind == "blocked",
-                "delivered_to_phone": delivered,
+                "delivered_to_phone": delivered, "inconsistent": inconsistent,
                 "note": ("the architect is woken on the next watchdog cycle"
                          if kind == "blocked" else "queued for the architect")}
 

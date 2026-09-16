@@ -81,9 +81,14 @@ RAPOR
 - Completed: <what actually happened>
 - Files: <changed files | none>
 - Validation: <exact checks and exact results>
+- Verification: <ao verify id> <passed | FAILED>, each gate's exit code and the runner's closing line, as ao records them
 - Git: <local commit sha | not committed>, <pushed | not pushed>
 - Blockers: <none | what stops the next step>
 ```
+
+`ao_report` adds the Verification line itself, from the ledger. A report whose words claim green -
+"159 passed", "all tests pass" - while the newest verification failed is marked `## INCONSISTENT`,
+and the watchdog raises it as an `inconsistent-report` anomaly: the exit code decides, never the prose.
 
 ## Verdicts
 
