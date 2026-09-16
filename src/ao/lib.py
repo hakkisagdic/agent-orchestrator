@@ -3759,7 +3759,7 @@ def alarm_snoozed(project, key, now=None):
 
 
 def alarm_touch(project, key, level, now=None, red_after=ALARM_RED_AFTER, title=None,
-                persist=True):
+                persist=True, quiet_until=None):
     """Calculate a raise of `key` at `level`; return (level to ring at, episode).
 
     An orange raised repeatedly for `red_after` seconds rings red. `red_due` on
@@ -3779,11 +3779,16 @@ def alarm_touch(project, key, level, now=None, red_after=ALARM_RED_AFTER, title=
     e["count"] = e.get("count", 0) + 1
     if title:
         e["title"] = title
+    if quiet_until:
+        e["quiet_until"] = float(quiet_until)
     ring = level
     e["red_due"] = False
     if level == "red" or (level == "orange" and now - e["first"] >= red_after):
         ring = "red"
         e["red_due"] = e.get("red_sent") is None or now - e["red_sent"] >= ALARM_RED_REPEAT
+        # A standing red with a known end is mailed once, then held until that end (#40).
+        if e.get("red_sent") is not None and now < float(e.get("quiet_until") or 0):
+            e["red_due"] = False
     e["ring"] = ring
     d[k] = e
     if persist:

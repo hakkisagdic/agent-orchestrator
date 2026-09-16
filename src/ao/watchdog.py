@@ -207,7 +207,8 @@ def for_human(title):
     return any(k in subject.lower() for k in HUMAN_AUDIENCE)
 
 
-def notify(title, msg, root=None, key=None, window=1800, audience=None, level=None):
+def notify(title, msg, root=None, key=None, window=1800, audience=None, level=None,
+           quiet_until=None):
     """Raise an alert at most once per window, and always record that we did.
 
     An explicit audience is a routing decision and is never inferred again from
@@ -258,7 +259,7 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
         return False
     ring, episode = A.alarm_touch(
         project, key, level or "orange", red_after=red_after, title=title,
-        persist=not dry_run,
+        persist=not dry_run, quiet_until=quiet_until,
     )
     if ring == "red" and episode.get("red_due"):
         if dry_run:
@@ -274,6 +275,14 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
                         A.record_notice(root, title, msg, sent=True, key="mail:" + key)
             except Exception:
                 pass
+    # Told once, with a known end and nothing new to say before it: record, do not ring.
+    if episode.get("red_sent") is not None and time.time() < float(episode.get("quiet_until") or 0):
+        until = time.strftime("%d %b %H:%M", time.localtime(float(episode["quiet_until"])))
+        if dry_run:
+            print(f"DRY RUN: would hold {title}: told once, quiet until {until}")
+        elif root:
+            A.record_notice(root, title, f"{msg} [told once; quiet until {until}]", sent=False, key=key)
+        return False
     if root and A.notice_recently_sent(root, key, window):
         if dry_run:
             print(f"DRY RUN: would suppress {ring} desktop/Telegram channels "
@@ -335,19 +344,24 @@ def touch_architect_quota(root, st):
 
 
 def _announce_resolved(root, e):
-    """Close the loop on an alarm: the same channels that heard it hear it end."""
-    title = f"{e.get('project', '')}: resolved — {e.get('key', '')}"
+    """Record an alarm that stopped being raised; never louder than the raise (#40).
+
+    An episode ends when nothing has raised it for two hours, which is not proof the
+    condition is gone: a check can stop running, or stop repeating itself. On
+    2026-09-15 two episodes about credits that were still exhausted were announced
+    "resolved" by e-mail. So the end is recorded as what it is, a red episode's end
+    shows once on the desktop, and nothing goes to Telegram or e-mail.
+    """
+    title = f"{e.get('project', '')}: no longer raised — {e.get('key', '')}"
     msg = (f"stood {e.get('age_s', 0) // 60}m, raised {e.get('count', 1)}×"
            + ("; was red" if e.get("red_sent") else ""))
-    A.record_notice(root, title, msg, sent=True, key="resolved:" + e.get("key", ""))
+    was_red = bool(e.get("red_sent")) or e.get("ring") == "red"
+    A.record_notice(root, title, msg, sent=was_red, key="resolved:" + e.get("key", ""))
+    if not was_red:
+        return
     try:
         subprocess.run(["osascript", "-e", f'display notification "{msg}" with title "{title}"'],
                        capture_output=True)
-        from . import telegram
-        telegram.send(f"✅ *{title}*\n{msg}", root)
-        if e.get("red_sent"):
-            from . import email
-            email.send(title, msg, root)
     except Exception:
         pass
 

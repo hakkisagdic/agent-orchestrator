@@ -4190,8 +4190,27 @@ def _credits_problem(br, last):
     return None
 
 
-def _doctor_check(cfg):
-    """Quiet, machine-facing doctor: one line per problem, exit 1 if any, each raised as an alarm."""
+# Findings that mean work has stopped and only a person can restart it. Everything
+# else a doctor finds is an advisory: recorded for the architect, never paged (#40).
+DOCTOR_RED = {"watchdog-dead", "wake-failed", "transcript-blind"}
+
+
+def _doctor_severity(key, text):
+    if key in DOCTOR_RED or (key == "credits-exhaust" and text.startswith("credits exhausted")):
+        return "red"
+    return "yellow"
+
+
+def _doctor_check(cfg, page=False):
+    """Machine-facing doctor: one line per problem, exit 1 if any.
+
+    Run by a person or an agent it pages nobody: it reports to its caller and
+    returns non-zero (#40). Only the scheduled job passes page=True, and then a red
+    finding goes to the human ladder while an advisory is recorded for the
+    architect. On 2026-09-08 two wake turns ran --check by hand and mailed a
+    standing advisory; on 2026-09-15 the scheduled job mailed exhausted credits
+    every six hours although nothing could change before their reset.
+    """
     from .watchdog import notify
     root = cfg["root"]
     project = os.path.basename(root.rstrip("/")) or "root"
@@ -4199,12 +4218,20 @@ def _doctor_check(cfg):
     if not problems:
         print(f"ok {time.strftime('%H:%M')} — no problems")
         return 0
-    ringing = {alarm["key"] for alarm in A.active_alarms(project)}
+    ringing = {alarm["key"] for alarm in A.active_alarms(project)} if page else set()
+    samples = A.credit_samples(root) if page else []
+    reset_at = (samples[-1] if samples else {}).get("reset_at")
     for key, text in problems:
         print(f"PROBLEM {key}: {text}")
-        if DOCTOR_WATCHDOG_ALARMS.get(key) in ringing:
+        if not page or DOCTOR_WATCHDOG_ALARMS.get(key) in ringing:
             continue
-        notify(f"{project}: {key}", text, root, key=f"doctor:{key}", window=3600, audience="human")
+        if _doctor_severity(key, text) == "red":
+            held = {"quiet_until": reset_at} if key == "credits-exhaust" and reset_at else {}
+            notify(f"{project}: {key}", text, root, key=f"doctor:{key}", window=3600,
+                   audience="human", **held)
+        else:
+            notify(f"{project}: {key}", text, root, key=f"doctor:{key}", window=3600,
+                   audience="architect")
     return 1
 
 
@@ -5736,7 +5763,7 @@ def _watchdog_windows(cfg, args):
     root = cfg["root"]
     key = os.path.basename(root.rstrip("/\\")).lower()
     tasks = {f"ao-watchdog-{key}": (2, f'"{shutil.which("ao-watchdog") or "ao-watchdog"}" --root "{root}" --idle-minutes {getattr(args, "idle_minutes", 6)}'),
-             f"ao-doctor-{key}": (15, f'"{shutil.which("ao") or "ao"}" -C "{root}" doctor --check')}
+             f"ao-doctor-{key}": (15, f'"{shutil.which("ao") or "ao"}" -C "{root}" doctor --check --notify')}
     if args.action == "status":
         for name in tasks:
             r = subprocess.run(["schtasks", "/Query", "/TN", name], capture_output=True, text=True, encoding=UTF8, errors="replace")
@@ -5835,19 +5862,19 @@ def cmd_watchdog(cfg, args):
         return 1
     print(f"installed {label}")
     # The second, independent check. A watchdog cannot report its own death;
-    # this job runs `ao doctor --check` every fifteen minutes from its own
+    # this job runs `ao doctor --check --notify` every fifteen minutes from its own
     # launchd entry and raises the alarm the watchdog would have.
     dlabel = f"com.agentorchestrator.doctor.{key}"
     dplist = os.path.expanduser(f"~/Library/LaunchAgents/{dlabel}.plist")
     ao_exe = shutil.which("ao") or os.path.join(A.REPO, "bin", "ao")
     ao_in_repo = os.path.realpath(ao_exe).startswith(os.path.realpath(A.REPO))
-    dargs = ([sys.executable] if ao_in_repo else []) + [ao_exe, "-C", root, "doctor", "--check"]
+    dargs = ([sys.executable] if ao_in_repo else []) + [ao_exe, "-C", root, "doctor", "--check", "--notify"]
     open(dplist, "w", encoding=UTF8).write(PLIST_CMD.format(
         path=_launchd_path(), label=dlabel, args="".join(f"<string>{a}</string>" for a in dargs),
         interval=900, log=os.path.expanduser(f"~/.ao/doctor-{key}.log")))
     A.sh(f"launchctl bootout gui/$(id -u)/{dlabel} 2>/dev/null")
     A.sh(f"launchctl bootstrap gui/$(id -u) {dplist} 2>&1")
-    print(f"installed {dlabel}  (ao doctor --check every 15m — the second, independent check)")
+    print(f"installed {dlabel}  (ao doctor --check --notify every 15m — the second, independent check)")
     print(f"  checks every {args.interval}s · nudges after {args.idle_minutes}m idle")
     print(f"  log: {log}")
     print(f"  remove with: ao -C {root} watchdog uninstall")
@@ -5903,6 +5930,8 @@ def cmd_doctor(cfg, args):
     if getattr(args, "check", False):
         # Scheduled checks return through the existing static helper here;
         # only the manual path below invokes the reviewer nonce probe.
+        if getattr(args, "notify", False):
+            return _doctor_check(cfg, page=True)
         return _doctor_check(cfg)
     root, impl, adapter = _ctx(cfg)
     ok = lambda b: f"{C['green']}ok{C['reset']}" if b else f"{C['red']}missing{C['reset']}"
@@ -6362,7 +6391,10 @@ def main():
     sub.add_parser("projects", help="workspaces with a local agent session").set_defaults(fn=cmd_projects)
     sub.add_parser("adapters", help="adapter registry and verification status").set_defaults(fn=cmd_adapters)
     dr = sub.add_parser("doctor", help="check this workspace's wiring")
-    dr.add_argument("--check", action="store_true", help="quiet: one line per problem, exit 1 if any, alarms raised")
+    dr.add_argument("--check", action="store_true",
+                    help="quiet: one line per problem, exit 1 if any; pages nobody without --notify")
+    dr.add_argument("--notify", action="store_true",
+                    help="with --check, for the scheduled job only: page red findings, record advisories")
     dr.set_defaults(fn=cmd_doctor)
     sk = sub.add_parser("skill", help="the playbook, rendered for the agents this repository uses")
     sk.add_argument("action", choices=["install", "show"], nargs="?", default="install")

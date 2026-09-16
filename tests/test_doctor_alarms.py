@@ -8,7 +8,7 @@ def _capture(monkeypatch, problems):
     raised = []
     monkeypatch.setattr(cli, "doctor_problems", lambda cfg: problems)
     monkeypatch.setattr(W, "notify", lambda title, msg, root=None, key=None, window=1800,
-                        audience=None, level=None: raised.append(key) or True)
+                        audience=None, level=None, **kw: raised.append(key) or True)
     return raised
 
 
@@ -20,7 +20,7 @@ def test_the_doctor_does_not_ring_a_second_alarm_for_what_the_watchdog_rings(pro
     ])
     A.alarm_touch("proj", "credits-exhaust", "red", title="proj: credits exhausted")
 
-    assert cli._doctor_check(project) == 1
+    assert cli._doctor_check(project, page=True) == 1
 
     out = capsys.readouterr().out
     assert "PROBLEM credits-exhaust" in out and "PROBLEM no-channel" in out
@@ -32,7 +32,7 @@ def test_the_doctor_rings_once_the_watchdogs_alarm_has_gone_quiet(project, monke
     A.alarm_touch("proj", "architect-wake-failed", "orange",
                   now=time.time() - A.ALARM_RESET_AFTER - 60)
 
-    assert cli._doctor_check(project) == 1
+    assert cli._doctor_check(project, page=True) == 1
 
     assert raised == ["doctor:wake-failed"]
 
