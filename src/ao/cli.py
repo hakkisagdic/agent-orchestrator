@@ -6988,6 +6988,20 @@ def cmd_adapters(cfg, args):
     print(f"\n{C['dim']}Account detection via keyflip surfaces; it never reads the secret.{C['reset']}")
 
 
+def _optional_features(cfg):
+    """(name, state, what would enable it) for each optional capability, core excluded (#82)."""
+    from . import email, telegram
+    root = cfg["root"]
+    mail = email.config()
+    return [
+        ("keyflip", "installed" if shutil.which("keyflip") else "absent",
+         "install keyflip for account budgets and quota rotation"),
+        ("telegram", "configured" if telegram.config() else "absent", "ao telegram setup"),
+        ("email", f"configured ({mail['provider']})" if mail else "absent", "ao email setup"),
+        ("ping", "configured" if A.ping_url(root) else "absent", "ao ping set <url>"),
+    ]
+
+
 def cmd_doctor(cfg, args):
     if getattr(args, "check", False):
         # Scheduled checks return through the existing static helper here;
@@ -7043,6 +7057,9 @@ def cmd_doctor(cfg, args):
     for line in waiver_lines:
         print(f"                {C['dim']}{line}{C['reset']}")
     print(f"quota source    {'keyflip' if A.sh('command -v keyflip') else '—'}")
+    # Optional capabilities announce themselves; the core never needs them (#82).
+    for name, state, hint in _optional_features(cfg):
+        print(f"optional        {name:<9} {state}" + (f"  {C['dim']}{hint}{C['reset']}" if state == "absent" else ""))
     key = A.project_key(root).lower()
     if os.name == "nt":
         # Windows schedules the watchdog with Task Scheduler, not launchd (#71).

@@ -14,6 +14,11 @@ poverty for everything else.
 | **optional extra** — declared in `[project.optional-dependencies]`, installed on purpose | any package we choose, including our own | the feature reports itself unavailable and names what would enable it; nothing degrades silently and no core path notices |
 | **plugin / provider** — an adapter, a content or question provider, a notification channel | anything at all, including tools in other languages (`ctxman` is Node) | the capability is absent and says so, exactly as a missing reviewer or a missing keyflip does |
 
+This is the project's policy, not a note (#82): `pyproject.toml` points here, `ao doctor` lists
+each optional capability as installed, configured or absent with what would enable it, and
+`tests/test_dependency_tiers.py` fails if importing ao or running a core command loads a module
+from outside the standard library.
+
 So the question for a borrowing is not "may we depend on it" but **which tier it belongs in** —
 and a thing in tier two or three must fail closed and announce itself, never half-work. A design
 or a rule set we write ourselves stays tier one because it costs nothing to; that is an economy,

@@ -20,11 +20,14 @@ classifiers = [
   "Topic :: Software Development :: Quality Assurance",
 ]
 
-# No runtime dependencies, on purpose. This watches agents on machines it does not
-# control — often someone else's laptop, a CI box, a container — and every
-# dependency is a thing that can be missing exactly there. 3.9 is the floor
-# because that is what macOS ships, and `ao status` should work before anyone has
-# installed anything at all.
+# No runtime dependencies for the core, on purpose. This watches agents on machines it
+# does not control — often someone else's laptop, a CI box, a container — and every
+# dependency is a thing that can be missing exactly there. 3.9 is the floor because
+# that is what macOS ships, and `ao status` should work before anyone has installed
+# anything at all. The rule is about the core (#82): docs/upstream.md sets out three
+# tiers - the core on the standard library only, optional extras declared under
+# [project.optional-dependencies] that report themselves unavailable when absent, and
+# plugins or providers outside the package - and a test holds the core to it.
 dependencies = []
 
 [project.urls]
