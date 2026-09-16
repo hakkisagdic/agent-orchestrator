@@ -11,17 +11,17 @@ from tests.scenarios import World
 def test_a_windows_working_directory_names_a_transcript_directory_under_claude_projects(project, monkeypatch):
     base = os.path.join(A.HOME, ".claude", "projects")
     monkeypatch.setattr(A.os, "name", "nt")
-    assert A.claude_project_dir("C:\\Users\\me\\repo.v2") == os.path.join(base, "C--Users-me-repo-v2")
+    assert A.escaped_cwd_dir(A.load_adapter("claude-code")["sessions"], "C:\\Users\\me\\repo.v2") == os.path.join(base, "C--Users-me-repo-v2")
 
     monkeypatch.setattr(A.os, "name", "posix")
-    assert A.claude_project_dir("/srv/me/repo.v2") == os.path.join(base, "-srv-me-repo-v2")
+    assert A.escaped_cwd_dir(A.load_adapter("claude-code")["sessions"], "/srv/me/repo.v2") == os.path.join(base, "-srv-me-repo-v2")
 
 
 def test_a_transcript_directory_that_exists_is_used_as_found(project, monkeypatch):
     base = os.path.join(A.HOME, ".claude", "projects")
     os.makedirs(os.path.join(base, "-srv-my_repo"))
 
-    assert A.claude_project_dir("/srv/my_repo") == os.path.join(base, "-srv-my_repo")
+    assert A.escaped_cwd_dir(A.load_adapter("claude-code")["sessions"], "/srv/my_repo") == os.path.join(base, "-srv-my_repo")
     cfg = dict(project, implementer={"adapter": "claude-code", "session": "abc", "cwd": "/srv/my_repo"})
     assert A.session_paths(cfg)[0] == os.path.join(base, "-srv-my_repo", "abc.jsonl")
 

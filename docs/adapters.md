@@ -55,6 +55,24 @@ A harness with no such fields is simply not set up: ao writes `.ao/PLAYBOOK.md` 
 pointer, and `--agent` refuses a name no adapter answers to. A project can declare a harness ao
 has never shipped in `.ao/adapters/`, and init sets it up the same way.
 
+## Where a harness keeps its sessions is declared, not coded
+
+Session discovery, the implementer's transcript path and the architect's newest session all
+read an adapter's `sessions` store (#76):
+
+| `sessions.kind` | Fields | How ao reads it |
+|---|---|---|
+| `workspace-meta` | `dir`, `meta`, `transcript`, `workspaces`, `title`, `status` | `dir/<workspace>/<session>/meta` names the workspace paths; the newest `transcript` wins |
+| `escaped-cwd` | `dir`, `transcript` (with `{session}`) | the working directory with `/` and `.` made dashes (every other character too on Windows) is a directory under `dir` |
+
+`directives.command_hooks` (`{format: "pre-tool-use", files}`) names the settings whose hooks can
+rewrite an agent's shell commands, which `ao doctor` reports as a measurement filter (#51).
+
+What decides authority reads the **package's** adapters only: which directories are a harness's
+(`detect.dirs`, left out of review scope and product-dirty checks) and which stores are scanned. A
+user's or a project's adapter layer is writable by the agents it describes, so an adapter there
+can add a harness but cannot move a product path out of review by calling it a harness directory.
+
 ## Shipping an adapter without forking
 
 Adapters load from three places, each overriding the one before by `id`: the package, then

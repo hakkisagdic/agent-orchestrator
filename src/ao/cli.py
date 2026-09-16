@@ -3334,14 +3334,16 @@ def _reviewer_probe_text(probe):
 def _implementer_sessions(cfg):
     """The implementer's session ids as ao resolves them (#60).
 
-    `auto` names no session by itself; for a Kiro implementer it is the session
-    discovered for the project, the one the watchdog resumes.
+    `auto` names no session by itself; for an implementer whose adapter keeps a
+    workspace store it is the session discovered for the project, the one the
+    watchdog resumes.
     """
     impl = cfg.get("implementer") or {}
     session = str(impl.get("session") or "")
     if session and session != "auto":
         return {session}
-    if impl and impl.get("adapter", "kiro") == "kiro":
+    store = A.load_adapter(impl.get("adapter") or "").get("sessions") or {} if impl else {}
+    if store.get("kind") == "workspace-meta":
         found = (A.discover_session(impl.get("cwd") or cfg["root"]) or {}).get("session")
         if found:
             return {str(found)}

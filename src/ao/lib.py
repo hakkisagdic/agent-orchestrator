@@ -645,34 +645,94 @@ def sh(cmd, cwd=None, timeout=20):
 
 # ── session discovery ─────────────────────────────────────────────────────────
 
+_PACKAGE_ADAPTERS = {}
+
+
+def package_adapters():
+    """{id: adapter} for the adapters in the package alone (#76).
+
+    Whatever decides authority - which directories are coordination rather than
+    product, which processes are agents - reads only these. A user's or a project's
+    adapter layer is writable by the agents it describes, and must not be able to
+    move a product path out of review by declaring it a harness's directory. Read
+    once per state of the directory: a path check runs this for every changed path.
+    """
+    directory = adapters_dir()
+    try:
+        key = (directory, os.stat(directory).st_mtime_ns)
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return {}
+    if key in _PACKAGE_ADAPTERS:
+        return _PACKAGE_ADAPTERS[key]
+    found = {}
+    for name in names:
+        if not name.endswith(".json") or name == VENDORS_FILE:
+            continue
+        try:
+            with open(os.path.join(directory, name), encoding=UTF8) as fh:
+                adapter = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if isinstance(adapter, dict):
+            found[str(adapter.get("id") or name[:-5])] = adapter
+    _PACKAGE_ADAPTERS.clear()
+    _PACKAGE_ADAPTERS[key] = found
+    return found
+
+
+def _home_path(template):
+    """A declared path with a leading ~ resolved against ao's HOME, so every reader of it agrees."""
+    text = str(template or "")
+    if text == "~":
+        return HOME
+    if text.startswith("~/"):
+        return os.path.join(HOME, *text[2:].split("/"))
+    return text
+
+
+def session_stores(kind):
+    """[(adapter id, store)] for each adapter whose `sessions` store is of this kind (#76)."""
+    return [(ident, adapter["sessions"]) for ident, adapter in sorted(package_adapters().items())
+            if isinstance(adapter.get("sessions"), dict) and adapter["sessions"].get("kind") == kind]
+
+
+def _workspace_sessions(store):
+    """Every session a workspace-meta store holds: its id, workspace directory, workspaces and transcript age."""
+    base = _home_path(store.get("dir"))
+    if not os.path.isdir(base):
+        return
+    for ws in os.listdir(base):
+        wsd = os.path.join(base, ws)
+        if not os.path.isdir(wsd):
+            continue
+        for sess in os.listdir(wsd):
+            meta = os.path.join(wsd, sess, store["meta"])
+            msgs = os.path.join(wsd, sess, store["transcript"])
+            if not (os.path.exists(meta) and os.path.exists(msgs)):
+                continue
+            try:
+                m = json.load(open(meta, encoding=UTF8))
+                mtime = os.path.getmtime(msgs)
+            except Exception:
+                continue
+            yield {"session": sess, "workspace_hash": ws, "paths": m.get(store["workspaces"]) or [], "mtime": mtime,
+                   "title": m.get(store.get("title") or "title", ""), "status": m.get(store.get("status") or "status", "")}
+
+
 def discover_session(cwd):
     """Find the most recently active local agent session whose workspace is cwd.
 
-    Kiro-style stores keep session.json with workspacePaths; that is enough to
-    resolve the opaque per-workspace directory without asking the vendor CLI.
+    A store that keeps each session's metadata with its workspace paths (an adapter's
+    `sessions` of kind workspace-meta) is enough to resolve the opaque per-workspace
+    directory without asking the vendor CLI.
     """
-    base = os.path.join(HOME, ".kiro", "sessions")
     best = None
-    if os.path.isdir(base):
-        for ws in os.listdir(base):
-            wsd = os.path.join(base, ws)
-            if not os.path.isdir(wsd):
-                continue
-            for sess in os.listdir(wsd):
-                meta = os.path.join(wsd, sess, "session.json")
-                msgs = os.path.join(wsd, sess, "messages.jsonl")
-                if not (os.path.exists(meta) and os.path.exists(msgs)):
-                    continue
-                try:
-                    m = json.load(open(meta, encoding=UTF8))
-                except Exception:
-                    continue
-                if cwd not in (m.get("workspacePaths") or []):
-                    continue
-                mt = os.path.getmtime(msgs)
-                if best is None or mt > best["_mtime"]:
-                    best = {"adapter": "kiro", "session": sess, "workspace_hash": ws,
-                            "cwd": cwd, "_mtime": mt}
+    for ident, store in session_stores("workspace-meta"):
+        for row in _workspace_sessions(store):
+            if cwd in row["paths"] and (best is None or row["mtime"] > best["_mtime"]):
+                best = {"adapter": ident, "session": row["session"], "workspace_hash": row["workspace_hash"],
+                        "cwd": cwd, "_mtime": row["mtime"]}
     return best
 
 
@@ -682,53 +742,39 @@ def all_workspaces():
     Lets `ao` answer "which projects can I watch?" without any configuration —
     the vendor stores already record their own workspace paths.
     """
-    base = os.path.join(HOME, ".kiro", "sessions")
     found = {}
-    if not os.path.isdir(base):
-        return []
-    for ws in os.listdir(base):
-        wsd = os.path.join(base, ws)
-        if not os.path.isdir(wsd):
-            continue
-        for sess in os.listdir(wsd):
-            meta = os.path.join(wsd, sess, "session.json")
-            msgs = os.path.join(wsd, sess, "messages.jsonl")
-            if not (os.path.exists(meta) and os.path.exists(msgs)):
-                continue
-            try:
-                m = json.load(open(meta, encoding=UTF8))
-            except Exception:
-                continue
-            for path in (m.get("workspacePaths") or []):
-                mt = os.path.getmtime(msgs)
+    for ident, store in session_stores("workspace-meta"):
+        for row in _workspace_sessions(store):
+            for path in row["paths"]:
                 cur = found.get(path)
-                if cur is None or mt > cur["mtime"]:
-                    found[path] = {"path": path, "mtime": mt, "session": sess,
-                                   "workspace_hash": ws, "adapter": "kiro",
-                                   "title": m.get("title", ""), "status": m.get("status", "")}
+                if cur is None or row["mtime"] > cur["mtime"]:
+                    found[path] = {"path": path, "mtime": row["mtime"], "session": row["session"],
+                                   "workspace_hash": row["workspace_hash"], "adapter": ident,
+                                   "title": row["title"], "status": row["status"]}
     return sorted(found.values(), key=lambda r: r["mtime"], reverse=True)
 
 
 def session_paths(cfg):
     """Transcript and metadata paths for the configured implementer.
 
-    This was hard-wired to Kiro's store, which made the watchdog Kiro-only in
-    practice: a Claude Code implementer resolved to no transcript, the watchdog
-    said "nothing to watch" and quietly never ran. The claude-code adapter
-    already declares its transcript layout; honour it.
+    This was hard-wired to one harness's store, which made the watchdog work for
+    that harness only: an implementer on another resolved to no transcript, the
+    watchdog said "nothing to watch" and quietly never ran. Every adapter declares
+    its store (`sessions`); an implementer whose adapter declares none has no paths.
     """
     impl = cfg.get("implementer") or {}
     sess = impl.get("session")
     if not sess:
         return None, None
-    if impl.get("adapter") == "claude-code":
+    store = load_adapter(impl.get("adapter") or "").get("sessions") or {}
+    if store.get("kind") == "escaped-cwd":
         cwd = impl.get("cwd") or cfg.get("root", "")
-        return os.path.join(claude_project_dir(cwd), sess + ".jsonl"), None
+        return os.path.join(escaped_cwd_dir(store, cwd), store["transcript"].replace("{session}", sess)), None
     ws = impl.get("workspace_hash")
-    if not ws:
+    if store.get("kind") != "workspace-meta" or not ws:
         return None, None
-    d = os.path.join(HOME, ".kiro", "sessions", ws, sess)
-    return os.path.join(d, "messages.jsonl"), os.path.join(d, "session.json")
+    d = os.path.join(_home_path(store["dir"]), ws, sess)
+    return os.path.join(d, store["transcript"]), os.path.join(d, store["meta"])
 
 
 # ── transcript ────────────────────────────────────────────────────────────────
@@ -1938,11 +1984,8 @@ def _coordination_dirs(cfg):
     commit authority so one AO command cannot invalidate another command's
     evidence merely by recording its result.
     """
-    defaults = globals().get(
-        "COORDINATION_DIRS",
-        (".ao/", "agent-mail/", ".kiro/", ".claude/", ".codex/"),
-    )
-    values = list(defaults) + [
+    defaults = globals().get("COORDINATION_DIRS", (".ao/", "agent-mail/"))
+    values = list(defaults) + list(harness_dirs()) + [
         (cfg or {}).get("reviews", "semantic-review"),
         (cfg or {}).get("mailbox", "agent-mail"),
     ]
@@ -2033,6 +2076,20 @@ def measured_by():
     return {"git": git_binary(), "candidate_via_shell": False, "captured_by": "ao"}
 
 
+def command_hook_files(root):
+    """Settings files whose pre-tool-use hooks can rewrite an agent's shell commands, as adapters declare them (#76)."""
+    out = []
+    for adapter in package_adapters().values():
+        hooks = (adapter.get("directives") or {}).get("command_hooks") or {}
+        if hooks.get("format") != "pre-tool-use":
+            continue
+        for rel in hooks.get("files") or []:
+            path = _home_path(rel) if str(rel).startswith("~") else os.path.join(root, *str(rel).split("/"))
+            if path not in out:
+                out.append(path)
+    return out
+
+
 def measurement_filters(root):
     """What could stand between a number and its source, one sentence each (#51).
 
@@ -2052,9 +2109,7 @@ def measurement_filters(root):
         found.append(f"git on PATH is {first}, a script in front of git; " + (
             f"ao measures with {chosen}" if chosen != "git" else
             "no compiled git was found, so ao's own measurements go through it too: set AO_GIT"))
-    for path in (os.path.join(HOME, ".claude", "settings.json"),
-                 os.path.join(root, ".claude", "settings.json"),
-                 os.path.join(root, ".claude", "settings.local.json")):
+    for path in command_hook_files(root):
         try:
             with open(path, encoding=UTF8) as fh:
                 hooks = json.load(fh).get("hooks")
@@ -4102,17 +4157,17 @@ def urgent_messages(root, cfg, role="implementer"):
     return out
 
 
-def claude_project_dir(cwd):
-    """The directory Claude Code keeps a working directory's transcripts in (#71).
+def escaped_cwd_dir(store, cwd):
+    """The directory an escaped-cwd store keeps a working directory's sessions in (#71, #76).
 
     On macOS and Linux the name is the absolute path with "/" and "." made
     dashes. ao built it that way everywhere, and on Windows `C:\\repo` kept its
-    drive: os.path.join took it as an absolute path, dropped ~/.claude/projects,
+    drive: os.path.join took it as an absolute path, dropped the store's directory,
     and the watchdog found no transcript and ended every cycle there. On Windows
     every character outside letters, digits and dashes is made a dash. A
     directory that already exists under either name is used as found.
     """
-    base = os.path.join(HOME, ".claude", "projects")
+    base = _home_path((store or {}).get("dir"))
     cwd = str(cwd or "")
     posix = cwd.replace("/", "-").replace(".", "-")
     portable = re.sub(r"[^A-Za-z0-9-]", "-", cwd)
@@ -4183,28 +4238,29 @@ def git_text(root, *args, timeout=60):
 
 
 def discover_architect(cwd):
-    """The newest Claude Code session for a directory, by transcript mtime.
+    """The newest session an escaped-cwd store keeps for a directory, by transcript mtime.
 
     Pinning a session id in config goes stale the moment the human opens a new
     conversation, and a watchdog that wakes a dead session fails silently — the
     worst shape of failure, because everything still looks configured. Resolve it
     from disk instead, the same way the implementer's session is resolved.
     """
-    # Claude Code flattens the path into a directory name - a worktree under
-    # ".claude" becomes "…Voltrai--claude-worktrees…", with the doubled dash where
-    # "/." was - and on Windows the drive and backslashes go the same way (#71).
-    d = claude_project_dir(cwd)
-    if not os.path.isdir(d):
-        return None
-    best, best_mt = None, 0
-    for f in os.listdir(d):
-        if not f.endswith(".jsonl"):
+    # The store flattens the path into a directory name - a worktree under a
+    # dot-directory gets a doubled dash where "/." was - and on Windows the drive
+    # and backslashes go the same way (#71).
+    best, best_mt, best_path = None, 0, None
+    for _, store in session_stores("escaped-cwd"):
+        d = escaped_cwd_dir(store, cwd)
+        if not os.path.isdir(d):
             continue
-        mt = os.path.getmtime(os.path.join(d, f))
-        if mt > best_mt:
-            best, best_mt = f[:-6], mt
-    return {"session": best, "transcript": os.path.join(d, best + ".jsonl"),
-            "age": int(time.time() - best_mt)} if best else None
+        suffix = store["transcript"].replace("{session}", "")
+        for f in os.listdir(d):
+            if not f.endswith(suffix):
+                continue
+            mt = os.path.getmtime(os.path.join(d, f))
+            if mt > best_mt:
+                best, best_mt, best_path = f[:-len(suffix)], mt, os.path.join(d, f)
+    return {"session": best, "transcript": best_path, "age": int(time.time() - best_mt)} if best else None
 
 
 def _architect_process_roots(root, architect=None, helper_only=False):
@@ -5540,6 +5596,31 @@ _UNSAFE_HOOK = re.compile(r"\b(curl|wget)\b[^|;&]*\|\s*(sudo\s+)?(ba|z)?sh\b|\br
 _UNPINNED_RUNNER = ("npx", "bunx", "uvx", "pipx")
 
 
+def agent_config_files(root):
+    """Project files that configure an agent, as every adapter declares them, and AGENTS.md (#76)."""
+    files = []
+
+    def add(rel):
+        rel = str(rel or "")
+        if rel and not rel.startswith("~") and not os.path.isabs(rel) and rel not in files:
+            files.append(rel)
+
+    for _, entry in sorted(adapter_catalog(root).items()):
+        adapter = entry["adapter"]
+        directives = adapter.get("directives") or {}
+        for rel in (directives.get("rule_files") or []) + (directives.get("steering_files") or []) \
+                + ((directives.get("command_hooks") or {}).get("files") or []):
+            add(rel)
+        add((adapter.get("mcp") or {}).get("file"))
+        steering = directives.get("steering_dir")
+        if steering and os.path.isdir(os.path.join(root, *steering.split("/"))):
+            for name in sorted(os.listdir(os.path.join(root, *steering.split("/")))):
+                if name.endswith(".md"):
+                    add(f"{steering}/{name}")
+    add("AGENTS.md")
+    return files
+
+
 def agent_config_findings(root):
     """AgentShield's check categories over a project's agent configuration, ported natively (#14).
 
@@ -5551,11 +5632,7 @@ def agent_config_findings(root):
     Returns [(category, text)].
     """
     out = []
-    files = ["CLAUDE.md", "AGENTS.md", ".claude/CLAUDE.md", ".claude/settings.json", ".claude/settings.local.json",
-             ".mcp.json"]
-    steering = os.path.join(root, ".kiro", "steering")
-    if os.path.isdir(steering):
-        files += [f".kiro/steering/{name}" for name in sorted(os.listdir(steering)) if name.endswith(".md")]
+    files = agent_config_files(root)
     for rel in files:
         try:
             with open(os.path.join(root, rel), encoding=UTF8, errors="replace") as fh:
@@ -7362,7 +7439,13 @@ def stale_siblings(root, max_age=900):
 
 # ---- review scope ----------------------------------------------------------------
 
-COORDINATION_DIRS = (".ao/", "agent-mail/", ".kiro/", ".claude/", ".codex/")
+COORDINATION_DIRS = (".ao/", "agent-mail/")      # and each shipped harness's own, from harness_dirs()
+
+
+def harness_dirs():
+    """What the shipped harnesses keep in a repository (`detect.dirs`), each ending in a slash (#76)."""
+    return tuple(sorted({str(d).strip("/") + "/" for adapter in package_adapters().values()
+                         for d in (adapter.get("detect") or {}).get("dirs") or [] if str(d).strip("/")}))
 
 
 def review_diff(root, cfg, paths=None, budget=1_500_000):
@@ -7518,7 +7601,10 @@ def helper_pids(root, what=None):
 
 _PRODUCT_PATH = re.compile(r"(^|/)(src|lib|app|apps|test|tests|spec|fixtures|evidence|docs|plugins|site|"
                            r"package\.json|pyproject\.toml|tsconfig)")
-_COORD_PATH = re.compile(r"(^|/)(agent-mail|\.ao|semantic-review|\.kiro|\.claude)(/|$)")
+def _coord_path():
+    """A path under a coordination directory, the shipped harnesses' own included (#76)."""
+    names = ["agent-mail", r"\.ao", "semantic-review"] + [re.escape(d.rstrip("/")) for d in harness_dirs()]
+    return re.compile(r"(^|/)(" + "|".join(names) + r")(/|$)")
 
 
 # ---- what each feature costs, measured rather than estimated (#10) ------------------------
@@ -7638,7 +7724,7 @@ def turn_costs(cfg, since=None):
                 cur["blocked_report"] = True
             if "write" in name.lower() or name in ("fs_write", "Edit", "Write", "MultiEdit"):
                 path = str(args.get("path") or args.get("file_path") or "") if isinstance(args, dict) else ""
-                if _COORD_PATH.search(path):
+                if _coord_path().search(path):
                     cur["coord_writes"] += 1
                 elif _PRODUCT_PATH.search(path) or (path and "/" in path):
                     cur["product_writes"] += 1

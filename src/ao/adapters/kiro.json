@@ -104,6 +104,15 @@
     ],
     "tail_bytes": 900000
   },
+  "sessions": {
+    "kind": "workspace-meta",
+    "dir": "~/.kiro/sessions",
+    "meta": "session.json",
+    "transcript": "messages.jsonl",
+    "workspaces": "workspacePaths",
+    "title": "title",
+    "status": "status"
+  },
   "busy": {
     "meta": "~/.kiro/sessions/{workspace_hash}/{session}/session.json",
     "status_field": "status",
