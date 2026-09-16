@@ -2087,6 +2087,8 @@ def record_review(root, name, data, evidence, verdict, reviewer=None, fallback=F
         "fallback": bool(fallback),
         "reviewer": reviewer,
     }
+    if row["kind"] == "commit-range":
+        row["commits"] = evidence.get("commits")
     return append_chained_jsonl(review_ledger_path(root), row, REVIEW_CHAIN)
 
 
@@ -2147,6 +2149,22 @@ def candidate_review_decision(root, review_dir, candidate_digest):
                                f"the rejection of this candidate in {rejection.get('artefact')}"}
         return {"match": (name, verdict, body, evidence), "problem": None}
     return {"match": None, "problem": None}
+
+
+def range_review_verdict(root, commits, since=0):
+    """The verdict of a retrospective review of exactly this range, recorded after `since` rows, or None."""
+    from .storage import read_chained_jsonl
+    rows = read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN)
+    for row in reversed(rows[since:]):
+        if isinstance(row, dict) and row.get("kind") == "commit-range" \
+                and row.get("commits") == commits:
+            return row.get("verdict")
+    return None
+
+
+def review_row_count(root):
+    from .storage import read_chained_jsonl
+    return len(read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN))
 
 
 def latest_candidate_review(root, review_dir, candidate_digest, limit=40):
@@ -2286,7 +2304,7 @@ def commits_without_grant(root, limit=50):
 def record_authority(root, granted, reasons, tree, verification, token=None,
                      review=None, reviewer=None, candidate=None, scope=None,
                      matrix=None, role_bindings=None, implementer_identity=None,
-                     reviewer_identity=None):
+                     reviewer_identity=None, waiver=None):
     """Persist one hash-chained authority decision, raising on any broken prefix."""
     from .storage import append_chained_jsonl
     record = {"at": int(time.time()), "granted": bool(granted),
@@ -2305,6 +2323,9 @@ def record_authority(root, granted, reasons, tree, verification, token=None,
         })
     elif candidate is not None:
         record.update({"schema": 2, "candidate": candidate, "scope": scope})
+    if waiver is not None:
+        # The waiver a grant stood on; it covers no other candidate after this (#67).
+        record["waiver"] = waiver
     path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
     # Keep the reviewer's identity here, not only in the review file. A grant is
     # not real until the chain prefix validates and the locked append, file
@@ -4364,50 +4385,175 @@ def recently_deferred(root, kind, within=3600):
 
 # ---- waivers: the human's bypass, on the record ---------------------------------
 
-def waive(root, gate, slice_id, why, by="human"):
-    """Record that a person waived a gate for a slice. commit-ok honours it; catchup reconciles it."""
-    d = os.path.join(root, ".ao", "ledger")
-    os.makedirs(d, exist_ok=True)
-    rec = {"event": "waived", "id": f"W-{int(time.time())}", "gate": gate, "slice": slice_id,
-           "why": why, "by": by, "at": int(time.time()),
-           "head": sh("git rev-parse HEAD", cwd=root), "tree": tree_digest(root)}
-    with open(os.path.join(d, "waivers.jsonl"), "a", encoding=UTF8) as fh:
-        fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    return rec
+WAIVER_CHAIN = "ao-waiver-row-v1"
+WAIVER_HOURS_DEFAULT = 24
+WAIVER_HOURS_MAX = 7 * 24
+
+
+def waivers_path(root):
+    return os.path.join(root, ".ao", "ledger", "waivers.jsonl")
+
+
+def waiver_rows(root):
+    """Every waiver row once the chain validates (#67).
+
+    Rows written before the ledger was chained may stand first. An unlinked row
+    after them, or a broken link, makes the ledger unreadable, and every reader
+    fails closed.
+    """
+    from .storage import read_chained_jsonl
+    return read_chained_jsonl(waivers_path(root), WAIVER_CHAIN, legacy_prefix=True)
+
+
+def _login_and_terminal():
+    """The login a command ran under and whether a terminal was attached."""
+    try:
+        import getpass
+        user = getpass.getuser()
+    except Exception:
+        user = None
+    try:
+        interactive = os.isatty(0)
+    except OSError:
+        interactive = False
+    return user, bool(interactive)
+
+
+def waive(root, gate, slice_id, why, by, hours=WAIVER_HOURS_DEFAULT):
+    """Record that a person waived a gate for one slice, for a bounded time (#67).
+
+    A chained append like an authority row. It carries an expiry, the name the
+    person gave, and beside it what ao can check: the login and whether a terminal
+    was attached.
+    """
+    from .storage import append_chained_jsonl
+    now = int(time.time())
+    taken = {row.get("id") for row in waiver_rows(root) if isinstance(row, dict)}
+    wid, n = f"W-{now}", 2
+    while wid in taken:
+        wid, n = f"W-{now}-{n}", n + 1
+    user, interactive = _login_and_terminal()
+    record = {"event": "waived", "id": wid, "gate": gate, "slice": slice_id, "why": why,
+              "by": by, "at": now, "expires": now + int(float(hours) * 3600),
+              "user": user, "interactive": interactive,
+              "head": sh("git rev-parse HEAD", cwd=root), "tree": tree_digest(root)}
+    return append_chained_jsonl(waivers_path(root), record, WAIVER_CHAIN, legacy_prefix=True)
 
 
 def close_waiver(root, wid, outcome):
-    d = os.path.join(root, ".ao", "ledger")
-    try:
-        with open(os.path.join(d, "waivers.jsonl"), "a", encoding=UTF8) as fh:
-            fh.write(json.dumps({"event": "closed", "id": wid, "at": int(time.time()), "outcome": outcome}) + "\n")
-    except OSError:
-        pass
+    """Retire a waiver with a durable chained append; a failure raises rather than leaving it open unseen (#67)."""
+    from .storage import append_chained_jsonl
+    return append_chained_jsonl(
+        waivers_path(root),
+        {"event": "closed", "id": wid, "at": int(time.time()), "outcome": outcome},
+        WAIVER_CHAIN, legacy_prefix=True,
+    )
 
 
 def open_waivers(root, gate=None, slice_id=None):
-    p = os.path.join(root, ".ao", "ledger", "waivers.jsonl")
-    if not os.path.exists(p):
-        return []
     rows, closed = {}, set()
-    for line in open(p, errors="replace", encoding=UTF8):
-        try:
-            r = json.loads(line)
-        except ValueError:
+    for r in waiver_rows(root):
+        if not isinstance(r, dict):
             continue
-        if r.get("event") == "waived":
+        if r.get("event") == "waived" and r.get("id"):
             rows[r["id"]] = r
         elif r.get("event") == "closed":
-            closed.add(r["id"])
+            closed.add(r.get("id"))
     out = [r for i, r in rows.items() if i not in closed]
     if gate:
-        out = [r for r in out if r["gate"] == gate]
+        out = [r for r in out if r.get("gate") == gate]
     if slice_id:
         out = [r for r in out if r.get("slice") in (slice_id, "*")]
     return out
 
 
+def _waiver_candidates(root):
+    """Candidate digests each waiver has already authorised, from the grants that used it."""
+    bound = {}
+    for row in authority_rows(root):
+        if isinstance(row, dict) and row.get("granted") is True and row.get("waiver"):
+            bound.setdefault(row["waiver"], set()).add((row.get("candidate") or {}).get("digest"))
+    return bound
+
+
+def review_waiver_for(root, running, candidate_digest, now=None):
+    """The review waiver that may stand in for a review of this candidate, and why others may not (#67).
+
+    It names a running slice exactly, has not expired, and has authorised no other
+    candidate. A waiver for every slice, one from before waivers expired, and one
+    already spent on other bytes stand in for nothing.
+    """
+    now = time.time() if now is None else now
+    bound = _waiver_candidates(root)
+    notes = []
+    for waiver in reversed(open_waivers(root, gate="review")):
+        wid, slice_id = waiver.get("id"), waiver.get("slice")
+        if slice_id not in running:
+            if slice_id == "*":
+                notes.append(f"waiver {wid} names every slice; a waiver covers one")
+            continue
+        expires = waiver.get("expires")
+        if not isinstance(expires, (int, float)) or isinstance(expires, bool):
+            notes.append(f"waiver {wid} for {slice_id} predates waiver expiry; a person opens a new one")
+            continue
+        if expires <= now:
+            notes.append(f"waiver {wid} for {slice_id} expired "
+                         f"{time.strftime('%d %b %H:%M', time.localtime(expires))}")
+            continue
+        used = bound.get(wid, set())
+        if used and candidate_digest not in used:
+            notes.append(f"waiver {wid} already authorised other bytes; it covers one candidate")
+            continue
+        return waiver, notes
+    return None, notes
+
+
+def open_waiver_report(root, now=None):
+    """One line per open waiver with its age and expiry, for `ao doctor` (#67)."""
+    now = time.time() if now is None else now
+    lines = []
+    for waiver in open_waivers(root):
+        age = max(0, int(now - (waiver.get("at") or now)))
+        expires = waiver.get("expires")
+        state = ("no expiry (legacy)" if not isinstance(expires, (int, float))
+                 else "expired" if expires <= now
+                 else f"expires in {int((expires - now) // 3600)}h")
+        lines.append(f"{waiver.get('id')} {waiver.get('gate')} for {waiver.get('slice')}, "
+                     f"open {age // 86400}d {age % 86400 // 3600}h, {state}, by {waiver.get('by')}")
+    return lines
+
+
 _OBJECT_ID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
+def _bound_waiver_target(root, waiver, trees):
+    """The one landed commit a bounded waiver covers, found by the tree granted under it (#17).
+
+    A waiver that nothing was granted under covers no commit; one whose granted tree
+    never landed is UNRESOLVED rather than reviewed by guess.
+    """
+    item = {"waiver": waiver, "start": "", "end": "", "landed": 0,
+            "newest": False, "problem": None, "unused": not trees,
+            "expired": (waiver.get("expires") or 0) <= time.time()}
+    if not trees:
+        return item
+    try:
+        log = _git_output(root, "log", "--max-count=500", "--format=%H %T", "HEAD", "--").decode("ascii")
+    except (RuntimeError, UnicodeError):
+        item["problem"] = "UNRESOLVED: git cannot list the landed commits"
+        return item
+    sha = next((parts[0] for parts in (line.split() for line in log.splitlines())
+                if len(parts) == 2 and parts[1] in trees), None)
+    if not sha:
+        item["problem"] = "UNRESOLVED: no landed commit carries the tree granted under it"
+        return item
+    try:
+        parent = _git_output(root, "rev-parse", "--verify", f"{sha}^").decode("ascii").strip()
+    except (RuntimeError, UnicodeError):
+        item["problem"] = "UNRESOLVED: its landed commit has no parent to review against"
+        return item
+    item.update(start=parent, end=sha, landed=1)
+    return item
 
 
 def review_waiver_ranges(root):
@@ -4425,19 +4571,20 @@ def review_waiver_ranges(root):
 
     Returns dicts: waiver, start, end, landed (commit count), newest, problem.
     """
-    p = os.path.join(root, ".ao", "ledger", "waivers.jsonl")
-    if not os.path.exists(p):
-        return []
     waived, closed = [], set()
-    for line in open(p, errors="replace", encoding=UTF8):
-        try:
-            r = json.loads(line)
-        except ValueError:
+    for r in waiver_rows(root):
+        if not isinstance(r, dict):
             continue
         if r.get("event") == "waived" and r.get("gate") == "review":
             waived.append(r)
         elif r.get("event") == "closed":
             closed.add(r.get("id"))
+    if not waived:
+        return []
+    granted = {}
+    for row in authority_rows(root):
+        if isinstance(row, dict) and row.get("granted") is True and row.get("waiver"):
+            granted.setdefault(row["waiver"], set()).add((row.get("candidate") or {}).get("index_tree"))
     try:
         current = _git_output(root, "rev-parse", "--verify", "HEAD").decode("ascii").strip()
     except (RuntimeError, UnicodeError):
@@ -4445,6 +4592,9 @@ def review_waiver_ranges(root):
     out = []
     for i, w in enumerate(waived):
         if w.get("id") in closed:
+            continue
+        if "expires" in w:
+            out.append(_bound_waiver_target(root, w, granted.get(w["id"], set())))
             continue
         later = waived[i + 1] if i + 1 < len(waived) else None
         start = str(w.get("head") or "")

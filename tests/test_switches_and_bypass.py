@@ -235,13 +235,26 @@ def test_verdict_without_counts_is_invalid_and_masks_older_approval(project, tmp
     assert A.latest_candidate_review(root, "semantic-review", candidate["digest"]) is None
 
 
+def _legacy_waiver(root, slice_id):
+    """A review waiver as ledgers held it before waivers were bounded (#67): catch-up
+    reviews the range from its head to the next waiver's."""
+    path = os.path.join(root, ".ao", "ledger", "waivers.jsonl")
+    count = len(open(path, encoding="utf-8").read().splitlines()) if os.path.exists(path) else 0
+    row = {"event": "waived", "id": f"W-legacy-{slice_id}-{count}", "gate": "review",
+           "slice": slice_id, "why": "quota", "by": "h", "at": int(time.time()),
+           "head": _head(root), "tree": "t"}
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row) + "\n")
+    return row
+
+
 def test_catchup_reviews_the_landed_range_and_closes_the_waiver(project, tmp_path, monkeypatch):
     root = project["root"]
     os.makedirs(os.path.join(root, "src"), exist_ok=True)
     open(os.path.join(root, "src", "a.py"), "w", encoding="utf-8").write("x = 1\n")
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], cwd=root, check=True)
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "a"], cwd=root, check=True)
-    w = A.waive(root, "review", "B7", "quota", by="h")
+    w = _legacy_waiver(root, "B7")
     open(os.path.join(root, "src", "a.py"), "w", encoding="utf-8").write("x = 2\n")
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-am", "b7"], cwd=root, check=True)
     import sys
@@ -291,9 +304,9 @@ def _bump(root, value, message):
 def test_catchup_gives_each_waiver_only_its_own_slices_commits(project, monkeypatch):
     root = project["root"]
     _seed_tracked_file(root)
-    first = A.waive(root, "review", "B7", "quota", by="h")
+    first = _legacy_waiver(root, "B7")
     _bump(root, 2, "b7")
-    second = A.waive(root, "review", "B8", "quota", by="h")
+    second = _legacy_waiver(root, "B8")
     _bump(root, 3, "b8")
 
     seen = _catchup_with_recorded_ranges(project, monkeypatch)
@@ -305,8 +318,8 @@ def test_catchup_gives_each_waiver_only_its_own_slices_commits(project, monkeypa
 def test_catchup_closes_a_waiver_that_covered_no_commits(project, monkeypatch):
     root = project["root"]
     _seed_tracked_file(root)
-    empty = A.waive(root, "review", "B7", "quota", by="h")
-    kept = A.waive(root, "review", "B8", "quota", by="h")
+    empty = _legacy_waiver(root, "B7")
+    kept = _legacy_waiver(root, "B8")
     _bump(root, 2, "b8")
 
     seen = _catchup_with_recorded_ranges(project, monkeypatch)
@@ -320,7 +333,7 @@ def test_catchup_closes_a_waiver_that_covered_no_commits(project, monkeypatch):
 def test_catchup_keeps_the_newest_waiver_open_until_something_lands(project, monkeypatch):
     root = project["root"]
     _seed_tracked_file(root)
-    waiver = A.waive(root, "review", "B7", "quota", by="h")
+    waiver = _legacy_waiver(root, "B7")
 
     seen = _catchup_with_recorded_ranges(project, monkeypatch)
 

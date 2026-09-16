@@ -576,7 +576,13 @@ def test_strict_catchup_keeps_waiver_open_on_configuration_exit_two(
         project, primary_family="writer-family", fallback_family="writer-family"
     )
     root = cfg["root"]
-    waiver = A.waive(root, "review", "B7", "reviewer unavailable", by="human")
+    # A waiver from before waivers were bounded (#67): catch-up reviews its range.
+    waiver = {"event": "waived", "id": "W-legacy", "gate": "review", "slice": "B7",
+              "why": "reviewer unavailable", "by": "human", "at": 1, "tree": "t",
+              "head": subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                                     capture_output=True, text=True).stdout.strip()}
+    with open(os.path.join(root, ".ao", "ledger", "waivers.jsonl"), "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(waiver) + "\n")
     _stage_change(root)
     subprocess.run(
         ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "landed"],

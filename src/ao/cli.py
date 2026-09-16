@@ -714,8 +714,10 @@ def cmd_commit_ok(cfg, args):
 
     from . import features as F
     running = [it["id"] for it in A.board(root)["running"]]
-    waiver = next((w for w in A.open_waivers(root, gate="review")
-                   if w.get("slice") in running or w.get("slice") == "*"), None)
+    try:
+        waiver, waiver_notes = A.review_waiver_for(root, running, candidate["digest"])
+    except Exception as exc:
+        waiver, waiver_notes = None, [f"waiver ledger is unreadable: {exc}"]
     review_required = F.enabled(cfg, "review")
     try:
         decision = A.candidate_review_decision(root, cfg["reviews"], candidate["digest"])
@@ -735,6 +737,7 @@ def cmd_commit_ok(cfg, args):
     elif not match:
         reasons.append(decision["problem"]
                        or "no APPROVED prospective review is bound to this staged candidate")
+        reasons.extend(waiver_notes)
     else:
         review_name, _, rbody, evidence = match
         reviewed_scope, integrity_reasons = A.candidate_review_integrity(
@@ -796,6 +799,7 @@ def cmd_commit_ok(cfg, args):
         A.record_authority(
             root, True, [], now, ver["id"], token,
             review=review_name, reviewer=rwho, candidate=candidate, scope=scope,
+            waiver=waiver["id"] if review_required and waiver else None,
             **strict_authority,
         )
     except Exception as exc:
@@ -1380,10 +1384,8 @@ def cmd_commit_check(cfg, args):
             if F.enabled(cfg, "review"):
                 try:
                     running = [item["id"] for item in A.board(root)["running"]]
-                    waiver = next(
-                        (item for item in A.open_waivers(root, gate="review")
-                         if item.get("slice") in running or item.get("slice") == "*"),
-                        None,
+                    waiver, notes = A.review_waiver_for(
+                        root, running, (candidate or {}).get("digest")
                     )
                 except Exception as exc:
                     reasons.append(f"cannot validate the live review waiver: {exc}")
@@ -1391,7 +1393,11 @@ def cmd_commit_check(cfg, args):
                     if not waiver:
                         reasons.append(
                             "review is enabled and no matching running-slice waiver is open"
+                            + (f": {'; '.join(notes)}" if notes else "")
                         )
+                    elif grant.get("waiver") and grant["waiver"] != waiver["id"]:
+                        reasons.append(f"the grant stood on waiver {grant['waiver']}, "
+                                       f"not the open {waiver['id']}")
 
     try:
         drift = A.plan_drift(root)
@@ -4537,12 +4543,36 @@ def cmd_features(cfg, args):
     return 0
 
 
+def _agent_names(cfg):
+    """Names that belong to agents or roles, never to the person a waiver must name."""
+    names = {"architect", "implementer", "reviewer", "watchdog", "ao", "agent", "human"}
+    for role in ("implementer", "architect"):
+        block = cfg.get(role) or {}
+        names.update(str(block.get(key) or "") for key in ("name", "adapter", "session"))
+    primary = cfg.get("reviewer") or {}
+    names.update(str(route.get("id") or "") for route in [primary] + list(primary.get("fallbacks") or [])
+                 if isinstance(route, dict))
+    return {name.strip().lower() for name in names if name.strip()}
+
+
 def cmd_waive(cfg, args):
     """A person bypasses a gate for a slice, on the record. Reconciled later by `ao catchup`."""
     root = cfg["root"]
     if not args.why:
         print("--why is required: a waiver without a reason cannot be reconciled"); return 2
-    rec = A.waive(root, args.gate, args.slice or "*", args.why, by=args.by)
+    # A waiver covers one slice for a bounded time and names a person (#67).
+    if not args.slice or args.slice == "*":
+        print("--slice is required: a waiver covers one slice, never every slice"); return 2
+    if not (args.by or "").strip():
+        print("--by is required: name the person who authorises this waiver"); return 2
+    if args.by.strip().lower() in _agent_names(cfg):
+        print(f"--by names an agent or a role ({args.by}); a waiver is a person's act"); return 2
+    if not 0 < args.hours <= A.WAIVER_HOURS_MAX:
+        print(f"--hours must be above 0 and at most {A.WAIVER_HOURS_MAX}"); return 2
+    try:
+        rec = A.waive(root, args.gate, args.slice, args.why, by=args.by.strip(), hours=args.hours)
+    except Exception as exc:
+        print(f"{C['red']}waiver not recorded{C['reset']}: {exc}"); return 1
     print(f"{C['yellow']}{C['b']}waived{C['reset']} {args.gate} for {rec['slice']} ({rec['id']}) by {rec['by']} at HEAD {rec['head'][:8]}")
     print(f"{C['dim']}commit-ok honours it; `ao catchup` runs the missed {args.gate} against the landed range and closes it.{C['reset']}")
     A.record_notice(root, f"waiver {args.gate}", f"{rec['slice']}: {args.why[:120]} ({rec['by']})", sent=False, key="waiver")
@@ -4554,17 +4584,42 @@ def cmd_catchup(cfg, args):
     from types import SimpleNamespace
     root = cfg["root"]
     did = 0
-    for item in A.review_waiver_ranges(root):
+    failed = []
+
+    def close(wid, outcome):
+        # A waiver retires on a durable append or not at all; a failure is reported
+        # and fails the command, never counted as handled (#67).
+        try:
+            A.close_waiver(root, wid, outcome)
+            return True
+        except Exception as exc:
+            print(f"  {C['red']}could not close {wid}{C['reset']}: {exc}")
+            failed.append(wid)
+            return False
+
+    try:
+        targets = A.review_waiver_ranges(root)
+    except Exception as exc:
+        print(f"  {C['red']}waivers cannot be read{C['reset']}: {exc}")
+        targets = []
+        failed.append("ledger")
+    for item in targets:
         w = item["waiver"]
         label = f"{w['id']} ({w['slice']})"
         if item["problem"]:
             print(f"  {label}: {item['problem']}; keeping it open")
             continue
+        if item.get("unused"):
+            if not item.get("expired"):
+                print(f"  {label}: nothing was granted under it yet; keeping it open until it expires")
+            elif close(w["id"], "nothing was granted under it before it expired"):
+                print(f"  {label}: expired unused; closed")
+                did += 1
+            continue
         if not item["landed"]:
             if item["newest"]:
                 print(f"  {label}: nothing landed yet after the waiver; keeping it open")
-            else:
-                A.close_waiver(root, w["id"], "no commits landed before the next waiver was opened")
+            elif close(w["id"], "no commits landed before the next waiver was opened"):
                 print(f"  {label}: no commits landed before the next waiver; closed")
                 did += 1
             continue
@@ -4572,22 +4627,44 @@ def cmd_catchup(cfg, args):
         print(f"  {label}: reviewing its own landed range {rng} ({item['landed']} commit(s))")
         ns = SimpleNamespace(boundary=args.boundary or f"waived review for {w['slice']}: {w['why']}",
                              timeout=900, paths=None, commits=f"{item['start']}..{item['end']}")
+        try:
+            before = A.review_row_count(root)
+        except Exception as exc:
+            print(f"  {C['red']}review ledger cannot be read{C['reset']}: {exc}; {w['id']} stays open")
+            failed.append(w["id"])
+            continue
         code = cmd_review(cfg, ns)
-        if code == 0:
-            A.close_waiver(root, w["id"], "reviewed: APPROVED")
-            did += 1
-        elif code == 3:
+        # The exit code is not a verdict: a review that refused to run exits 1 or 2
+        # too. A waiver closes on the review recorded for exactly this range.
+        try:
+            verdict = A.range_review_verdict(root, ns.commits, since=before)
+        except Exception as exc:
+            print(f"  {C['red']}review ledger cannot be read{C['reset']}: {exc}; {w['id']} stays open")
+            failed.append(w["id"])
+            continue
+        if verdict == "APPROVED":
+            if close(w["id"], "reviewed: APPROVED"):
+                did += 1
+        elif verdict == "NEEDS_CHANGES":
+            if close(w["id"], "reviewed: NEEDS_CHANGES — fix slice needed"):
+                impl, arch = A.mail_names(cfg)
+                A.write_mail(root, cfg, f"{time.strftime('%Y%m%d-%H%M')}-catchup-to-{arch}-REVIEW-{w['slice'].lower()}-needs-changes.md",
+                             f"# Muafiyet kapandı: {w['slice']} retro review NEEDS_CHANGES\n\n## KARAR GEREKLİ\n\n"
+                             f"{w['id']} ({w['by']}: {w['why']}) için inmiş aralık {rng} review edildi; bulgular semantic-review/ altında. "
+                             f"Bir düzeltme dilimi gerekir.\n", {"kind": "review", "from": "catchup", "to": arch, "slice": w["slice"]})
+                did += 1
+        elif verdict is None and code == 0:
+            if close(w["id"], "nothing to review: the landed range has no net change"):
+                print(f"  {label}: the landed range has no net change; closed")
+                did += 1
+        elif code == 3 or verdict == "UNAVAILABLE":
             print(f"  reviewer still unavailable; {w['id']} stays open")
-        elif code == 2 and M.is_strict(cfg):
-            print(f"  reviewer configuration invalid; {w['id']} stays open")
+        elif verdict == "INVALID":
+            print(f"  the reviewer returned no valid verdict; {w['id']} stays open")
+        elif code == 2:
+            print(f"  reviewer configuration invalid, or the range cannot be reviewed; {w['id']} stays open")
         else:
-            A.close_waiver(root, w["id"], "reviewed: NEEDS_CHANGES — fix slice needed")
-            impl, arch = A.mail_names(cfg)
-            A.write_mail(root, cfg, f"{time.strftime('%Y%m%d-%H%M')}-catchup-to-{arch}-REVIEW-{w['slice'].lower()}-needs-changes.md",
-                         f"# Muafiyet kapandı: {w['slice']} retro review NEEDS_CHANGES\n\n## KARAR GEREKLİ\n\n"
-                         f"{w['id']} ({w['by']}: {w['why']}) için inmiş aralık {rng} review edildi; bulgular semantic-review/ altında. "
-                         f"Bir düzeltme dilimi gerekir.\n", {"kind": "review", "from": "catchup", "to": arch, "slice": w["slice"]})
-            did += 1
+            print(f"  no review was recorded (exit {code}); {w['id']} stays open")
     for r in A.deferred_open(root):
         print(f"  deferred {r['kind']} ({r.get('reason', '')}) since {time.strftime('%d %b %H:%M', time.localtime(r['at']))}")
         A.deferred_close(root, r["id"], "replayed by catchup")
@@ -4601,7 +4678,7 @@ def cmd_catchup(cfg, args):
         from . import watchdog as W
         W.run(SimpleNamespace(root=root, idle_minutes=6.0, dry_run=False, prompt=W.NUDGE_PROMPT))
     print(f"{C['green']}catchup{C['reset']} handled {did} item(s)")
-    return 0
+    return 1 if failed else 0
 
 
 def cmd_pings(cfg, args):
@@ -6198,6 +6275,14 @@ def cmd_doctor(cfg, args):
         f"{C['reset']}"
     )
     print(f"review budget   {C['dim']}{_review_budget_text(_review_timeout(cfg))}{C['reset']}")
+    try:
+        waiver_lines = A.open_waiver_report(root)
+    except Exception as exc:
+        waiver_lines = [f"{C['red']}waiver ledger is unreadable: {exc}{C['reset']}"]
+    print(f"waivers         {len(waiver_lines) if waiver_lines else 'none open'}"
+          + (" open" if waiver_lines else ""))
+    for line in waiver_lines:
+        print(f"                {C['dim']}{line}{C['reset']}")
     print(f"quota source    {'keyflip' if A.sh('command -v keyflip') else '—'}")
     key = os.path.basename(root.rstrip("/")).lower()
     wd = A.sh(f"launchctl list | grep com.agentorchestrator.watchdog.{key}")
@@ -6569,7 +6654,9 @@ def main():
     wv.add_argument("gate", choices=["review", "inventory", "gates"])
     wv.add_argument("--slice")
     wv.add_argument("--why")
-    wv.add_argument("--by", default="human")
+    wv.add_argument("--by", help="the person who authorises it; required")
+    wv.add_argument("--hours", type=float, default=24.0,
+                    help="how long it may stand in for the gate (default 24, at most 168)")
     wv.set_defaults(fn=cmd_waive)
     cu = sub.add_parser("catchup", help="replay what could not run: waived reviews, deferred wakes and nudges")
     cu.add_argument("--boundary")
