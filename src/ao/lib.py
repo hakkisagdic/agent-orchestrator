@@ -13,6 +13,7 @@ from datetime import datetime
 UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 HOME = os.path.expanduser("~")
+from . import settings  # noqa: E402  (reads HOME through this module, lazily)
 # Adapters ship with the package, but the documented install is still a git
 # clone plus an alias — both have to resolve. Look beside this module first, then
 # at the repository root, so neither path depends on the other existing.
@@ -2648,7 +2649,7 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
                     "facts": [f"transcript growing for {spin}m",
                               f"HEAD unchanged at {head}", f"{dirty} files dirty, unchanged"]})
     rn = rounds(root, cfg["reviews"])
-    budget = cfg.get("round_budget", 5)
+    budget = settings.get(cfg, "round_budget")
     if rn > budget:
         revs = reviews(root, cfg["reviews"], limit=3)
         out.append({"kind": "over-round-budget",
@@ -3688,13 +3689,10 @@ def git_state(root):
 # the provider window as keyflip reports it, and the project's own record of
 # what fan-outs cost, so the estimate is empirical after the first one.
 
-FANOUT_DEFAULTS = {"max_agents": 12, "per_agent_tokens": 50_000, "window_reserve_pct": 30}
-
-
 def fanout_config(cfg):
-    out = dict(FANOUT_DEFAULTS)
-    out.update(cfg.get("fanout") or {})
-    return out
+    """The fan-out limits in force for this project (#74)."""
+    return {name: settings.get(cfg, f"fanout.{name}")
+            for name in ("max_agents", "per_agent_tokens", "window_reserve_pct")}
 
 
 def provider_window(name="claude"):
@@ -3852,6 +3850,7 @@ def binary_candidates(name, path=None):
     """Every executable called `name` this machine has, PATH first, deduplicated."""
     import glob as _glob
     dirs = [d for d in (path or os.environ.get("PATH", "")).split(os.pathsep) if d]
+    dirs += [os.path.expanduser(d) for d in settings.get(None, "binaries.extra_dirs")]
     dirs += [os.path.expanduser(d) for d in _BIN_DIRS]
     for g in _BIN_GLOBS:
         dirs += sorted(_glob.glob(os.path.expanduser(g)), reverse=True)
@@ -4032,8 +4031,8 @@ def waiting_on_architect(root, cfg):
 
 def mail_names(cfg):
     """(implementer, architect) mail names; defaults keep the historical files valid."""
-    impl = ((cfg.get("implementer") or {}).get("name") or "kiro").strip()
-    arch = ((cfg.get("architect") or {}).get("name") or "fable").strip()
+    impl = settings.get(cfg, "implementer.name").strip()
+    arch = settings.get(cfg, "architect.name").strip()
     return impl, arch
 
 
@@ -4243,9 +4242,14 @@ def mail_search(root, text, limit=50):
 # (e-mail). The ladder is what turns a standing orange into a red: on 2026-09-05
 # every alert went to a notification centre nobody looked at for eleven hours.
 
-ALARM_RED_AFTER = 60 * 60
-ALARM_RED_REPEAT = 6 * 3600
-ALARM_RESET_AFTER = 2 * 3600
+# The defaults, from the settings registry (#74); the functions below read the values in force.
+ALARM_RED_AFTER = settings.default("alarms.red_after_minutes") * 60
+ALARM_RED_REPEAT = settings.default("alarms.red_repeat_hours") * 3600
+ALARM_RESET_AFTER = settings.default("alarms.reset_after_hours") * 3600
+
+
+def _alarm_reset_after():
+    return settings.get(None, "alarms.reset_after_hours") * 3600
 
 
 def alarms_path():
@@ -4328,7 +4332,7 @@ def alarm_touch(project, key, level, now=None, red_after=ALARM_RED_AFTER, title=
     d = load_alarms()
     k = f"{project}:{key}"
     e = d.get(k) or {}
-    if e and now - e.get("last", 0) > ALARM_RESET_AFTER:
+    if e and now - e.get("last", 0) > _alarm_reset_after():
         e = {}
     e.setdefault("first", now)
     e["last"] = now
@@ -4342,7 +4346,7 @@ def alarm_touch(project, key, level, now=None, red_after=ALARM_RED_AFTER, title=
     e["red_due"] = False
     if level == "red" or (level == "orange" and now - e["first"] >= red_after):
         ring = "red"
-        e["red_due"] = e.get("red_sent") is None or now - e["red_sent"] >= ALARM_RED_REPEAT
+        e["red_due"] = e.get("red_sent") is None or now - e["red_sent"] >= settings.get(None, "alarms.red_repeat_hours") * 3600
         # A standing red with a known end is mailed once, then held until that end (#40).
         if e.get("red_sent") is not None and now < float(e.get("quiet_until") or 0):
             e["red_due"] = False
@@ -4369,7 +4373,7 @@ def active_alarms(project=None, now=None):
         proj, _, key = k.partition(":")
         if project and proj != project:
             continue
-        if now - e.get("last", 0) > ALARM_RESET_AFTER:
+        if now - e.get("last", 0) > _alarm_reset_after():
             continue
         out.append(dict(e, project=proj, key=key, age_s=int(now - e.get("first", now))))
     return sorted(out, key=lambda e: -e["age_s"])
@@ -4499,7 +4503,7 @@ def expire_alarms(project, now=None):
     for k in list(d):
         proj, _, key = k.partition(":")
         e = d[k]
-        if proj == project and now - e.get("last", 0) > ALARM_RESET_AFTER:
+        if proj == project and now - e.get("last", 0) > _alarm_reset_after():
             done.append(dict(e, project=proj, key=key, age_s=int(e.get("last", now) - e.get("first", now))))
             del d[k]
     if done:
@@ -4507,7 +4511,7 @@ def expire_alarms(project, now=None):
     return done
 
 
-RETIRED_HEARTBEAT_AGE = 7 * 86400
+RETIRED_HEARTBEAT_AGE = settings.default("heartbeat.retired_days") * 86400
 
 
 def stale_siblings(root, max_age=900):
@@ -4524,7 +4528,7 @@ def stale_siblings(root, max_age=900):
             age = int(time.time() - os.path.getmtime(os.path.join(HOME, ".ao", f)))
             # A week of silence is a project that was retired, not a watchdog that
             # just died; ringing a person about it every cycle never ended (audit).
-            if max_age < age <= RETIRED_HEARTBEAT_AGE:
+            if max_age < age <= settings.get(None, "heartbeat.retired_days") * 86400:
                 out[f[len("heartbeat-"):]] = age
     except OSError:
         pass
@@ -4846,8 +4850,8 @@ def recently_deferred(root, kind, within=3600):
 # ---- waivers: the human's bypass, on the record ---------------------------------
 
 WAIVER_CHAIN = "ao-waiver-row-v1"
-WAIVER_HOURS_DEFAULT = 24
-WAIVER_HOURS_MAX = 7 * 24
+WAIVER_HOURS_DEFAULT = settings.default("waivers.default_hours")
+WAIVER_HOURS_MAX = settings.default("waivers.max_hours")
 
 
 def waivers_path(root):
@@ -5278,10 +5282,7 @@ def foreign_edits(root, cfg, minutes=15):
 # ---- fleet reserve: the machine's shared windows ----------------------------------
 
 def fleet_reserve():
-    try:
-        return int(json.load(open(os.path.join(HOME, ".ao", "fleet.json"), encoding=UTF8)).get("window_reserve_pct", 20))
-    except (OSError, ValueError):
-        return 20
+    return settings.get(None, "fleet.window_reserve_pct")
 
 
 def window_headroom(provider="claude"):

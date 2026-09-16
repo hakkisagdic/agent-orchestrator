@@ -246,7 +246,7 @@ def call(name, args, cfg, allow_verify):
         from . import watchdog as W
         if args.get("action", "explain") == "trace":
             return {"cycles": W.cycles(root, int(args.get("last") or 20))}
-        W.run(SimpleNamespace(root=root, idle_minutes=6.0, dry_run=True, prompt=W.NUDGE_PROMPT))
+        W.run(SimpleNamespace(root=root, idle_minutes=None, dry_run=True, prompt=W.NUDGE_PROMPT))
         return {"facts": dict(W._FACTS), "trace": list(W._TRACE),
                 "verdict": W._TRACE[-1] if W._TRACE else ""}
     if name == "ao_fanout":

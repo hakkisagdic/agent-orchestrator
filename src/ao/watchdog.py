@@ -38,6 +38,7 @@ import sys
 import time
 
 from . import lib as A
+from . import settings as S
 
 STATE_DIR = os.path.join(A.HOME, ".ao")
 _DRY_RUN = ContextVar("ao_watchdog_dry_run", default=False)
@@ -97,7 +98,6 @@ def cycles(root, last=20):
         except ValueError:
             pass
     return rows[-last:]
-MAX_ATTEMPTS = 3
 
 # What an architect turn is for. Deliberately narrow: it refills and admits, it
 # does not implement. Admission is the step that turns "someone filed this" into
@@ -161,8 +161,9 @@ def child_path():
     version-manager shim directory the current interpreter can see.
     """
     parts = [os.environ.get("PATH", "")]
-    for d in ("~/.local/bin", "~/bin", "/usr/local/bin", "/opt/homebrew/bin",
-              "/usr/bin", "/bin", "/usr/sbin", "/sbin"):
+    for d in list(S.get(None, "binaries.extra_dirs")) + [
+            "~/.local/bin", "~/bin", "/usr/local/bin", "/opt/homebrew/bin",
+            "/usr/bin", "/bin", "/usr/sbin", "/sbin"]:
         parts.append(os.path.expanduser(d))
     # Version-manager installs keep node beside the agent binary; a wake that
     # resolves the newest `claude` there must find that node too.
@@ -256,12 +257,10 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
     # The ladder: this is an orange (a person must act). Standing an hour, it
     # rings red and goes to mail — the channel people open when they wake up.
     project = (A.project_key(root) if root else "ao")
-    red_after = A.ALARM_RED_AFTER
-    if root:
-        try:
-            red_after = int((A.load_config(root).get("alarms") or {}).get("red_after_minutes", 60)) * 60
-        except Exception:
-            pass
+    try:
+        red_after = S.get(A.load_config(root) if root else None, "alarms.red_after_minutes") * 60
+    except Exception:
+        red_after = A.ALARM_RED_AFTER
     # Dry-run uses the same alarm state and calculation as a live cycle, but the
     # preview is deliberately not persisted.
     # A snoozed alarm is recorded, not rung: off the channels and off the ladder, so
@@ -915,7 +914,7 @@ WAKE_SIGNATURES = (
 
 # The architect's usage limit comes back within five hours of being hit; a reset
 # a message names further away than that cannot be the one it meant (#40).
-ARCHITECT_QUOTA_WINDOW = 5 * 3600
+ARCHITECT_QUOTA_WINDOW = S.default("architect.quota_window_hours") * 3600
 
 
 def parse_reset(text, now=None, window=None):
@@ -977,7 +976,7 @@ def wake_error(log_path):
         if m:
             text = m.group(1).strip()[:300]
             # A reset is read against when the wake wrote it, not against this cycle.
-            resets_at = (parse_reset(body, now=at, window=ARCHITECT_QUOTA_WINDOW)
+            resets_at = (parse_reset(body, now=at, window=S.get(None, "architect.quota_window_hours") * 3600)
                          if kind == "quota" else None)
             return {"text": text, "binary": binary, "when": when, "at": at, "kind": kind,
                     "resets_at": resets_at}
@@ -994,7 +993,7 @@ def quota_block_until(err, now=None):
     now = now or time.time()
     if not err or err.get("kind") != "quota":
         return None
-    until = err.get("resets_at") or ((err.get("at") or now) + ARCHITECT_QUOTA_WINDOW)
+    until = err.get("resets_at") or ((err.get("at") or now) + S.get(None, "architect.quota_window_hours") * 3600)
     return until if until > now else None
 
 
@@ -1012,11 +1011,12 @@ def quota_ok(adapter):
         if "exceeded" in low or "over budget" in low or "blocked" in low:
             return False
         return True
+    ceiling = S.get(None, "quota.block_percent")
     for line in A.quota(adapter):
         for token in line.replace("%", "% ").split():
             if token.endswith("%"):
                 try:
-                    if float(token[:-1]) >= 97:
+                    if float(token[:-1]) >= ceiling:
                         return False
                 except ValueError:
                     pass
@@ -1026,7 +1026,8 @@ def quota_ok(adapter):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--root", required=True)
-    p.add_argument("--idle-minutes", type=float, default=6)
+    p.add_argument("--idle-minutes", type=float, default=None,
+                   help="default: the project's watchdog.idle_minutes setting")
     p.add_argument("--dry-run", action="store_true")
     # The default prompt encodes two rules learned the expensive way. Park-and-
     # continue: a blocked slice must not stop the run, because the architect can
@@ -1054,6 +1055,8 @@ def run(args):
     _TRACE.clear()
     _FACTS.clear()
     root = os.path.abspath(os.path.expanduser(args.root))
+    if getattr(args, "idle_minutes", None) is None:
+        args.idle_minutes = S.get(A.load_config(root), "watchdog.idle_minutes")
     started = time.time()
     if args.dry_run:
         try:
@@ -1130,13 +1133,14 @@ def _sample_credits(root, st, adapter, project, now=None):
                window=6 * 3600, audience="human", level="red")
 
 
-DECISION_HUMAN_AFTER = 15 * 60
+DECISION_HUMAN_AFTER = S.default("decisions.human_after_minutes") * 60
 
 
 def escalate_open_decisions(root, project, dry_run=False, now=None):
     """A decision nobody has answered reaches a person (#20).
 
-    Fifteen minutes after it was asked it rings orange on the human channel, once
+    Fifteen minutes after it was asked (`decisions.human_after_minutes`) it rings
+    orange on the human channel, once
     an hour, and the alarm ladder turns it red and mails after its hour. The wake
     is not waited for: on 2026-09-07 a decision stood three hours while the only
     notice about it was held for an architect that never came. An answered
@@ -1145,9 +1149,10 @@ def escalate_open_decisions(root, project, dry_run=False, now=None):
     """
     now = time.time() if now is None else now
     ringing = []
+    wait = S.get(A.load_config(root), "decisions.human_after_minutes") * 60
     for decision in A.decisions(root, "open"):
         asked = decision.get("asked_at") or 0
-        if not asked or now - asked < DECISION_HUMAN_AFTER:
+        if not asked or now - asked < wait:
             continue
         ringing.append(decision.get("id"))
         if dry_run:
@@ -1532,7 +1537,7 @@ def _cycle_impl(args, root):
     # than the newest review means the slice was re-specified, and the budget
     # applies to the old specification, not the new one.
     rn = A.rounds(root, cfg["reviews"])
-    budget = cfg.get("round_budget", 5)
+    budget = S.get(cfg, "round_budget")
     intervened = False
     revs_all = A.reviews(root, cfg["reviews"], limit=1)
     if revs_all:
@@ -1616,8 +1621,9 @@ def _cycle_impl(args, root):
         return 0
 
     # 5 — the previous nudge changed nothing
-    if st.get("attempts", 0) >= MAX_ATTEMPTS:
-        notify(f"{project}: agent stuck", f"{MAX_ATTEMPTS} nudges, no progress — needs a human", root)
+    max_attempts = S.get(cfg, "watchdog.max_attempts")
+    if st.get("attempts", 0) >= max_attempts:
+        notify(f"{project}: agent stuck", f"{max_attempts} nudges, no progress — needs a human", root)
         print("backoff exhausted; notified a human")
         return 0
     if st.get("last_nudge") and size == st.get("last_size"):

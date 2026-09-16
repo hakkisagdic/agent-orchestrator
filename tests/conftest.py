@@ -65,6 +65,19 @@ def _ledger_checkpoints(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _machine_settings(tmp_path_factory):
+    """Machine settings live outside the repository; give each test its own file."""
+    path = tmp_path_factory.mktemp("machine-settings") / "settings.json"
+    previous = os.environ.get("AO_SETTINGS")
+    os.environ["AO_SETTINGS"] = str(path)
+    yield
+    if previous is None:
+        os.environ.pop("AO_SETTINGS", None)
+    else:
+        os.environ["AO_SETTINGS"] = previous
+
+
+@pytest.fixture(autouse=True)
 def _project_registry(tmp_path_factory):
     """Project keys are registered outside the repository; give each test its own registry."""
     registry = tmp_path_factory.mktemp("project-registry") / "projects.json"

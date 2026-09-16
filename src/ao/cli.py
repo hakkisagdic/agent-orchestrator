@@ -22,6 +22,7 @@ from datetime import datetime
 
 from . import lib as A
 from . import matrix as M
+from . import settings as S
 UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 C = A.C
@@ -187,7 +188,7 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0):
     revs = A.reviews(root, cfg["reviews"])
     if revs:
         rn = A.rounds(root, cfg["reviews"])
-        budget = cfg.get("round_budget", 5)
+        budget = S.get(cfg, "round_budget")
         a(f"\n{C['b']}{C['mag']}── REVIEWS {'─' * max(0, w - 12)}{C['reset']}")
         if rn > budget:
             a(f"   {C['red']}⚠ round {rn}/{budget} — over budget: re-specify, split, "
@@ -1980,7 +1981,7 @@ REVIEW_DISCOVERY_MAX_FALLBACK_DIRS = 32
 REVIEW_DISCOVERY_MAX_CANDIDATES = 8
 REVIEW_DISCOVERY_MAX_EXTENSIONS = 16
 REVIEW_KILL_DRAIN_SECONDS = 5
-REVIEW_TIMEOUT_DEFAULT = 900
+REVIEW_TIMEOUT_DEFAULT = S.default("review_timeout")
 
 
 def _review_chain_budget(timeout):
@@ -2784,10 +2785,7 @@ def _review_timeout(cfg):
     The implementer runs `ao review`. A deadline it chose could starve the reviewer
     that would reject until a fallback answered.
     """
-    value = cfg.get("review_timeout")
-    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-        return value
-    return REVIEW_TIMEOUT_DEFAULT
+    return S.get(cfg, "review_timeout")
 
 
 def cmd_collect_review(cfg, args):
@@ -3705,7 +3703,7 @@ def cmd_init(cfg, args):
         base_config = document["config"]
         existing_raw = document["raw"]
     else:
-        base_config = {"project": name, "round_budget": 5}
+        base_config = {"project": name, "round_budget": S.default("round_budget")}
 
     planned_config, added = _profile_config(root, args, base_config)
     config_text, config_problem = _planned_project_config_text(planned_config)
@@ -4432,7 +4430,7 @@ def _watchdog_debug(cfg, args):
     from . import watchdog as W
     root = cfg["root"]
     if args.action == "explain":
-        ns = SimpleNamespace(root=root, idle_minutes=6.0, dry_run=True, prompt=W.NUDGE_PROMPT)
+        ns = SimpleNamespace(root=root, idle_minutes=S.get(cfg, "watchdog.idle_minutes"), dry_run=True, prompt=W.NUDGE_PROMPT)
         W.run(ns)
         print(f"\n{C['b']}{C['mag']}── MEASUREMENTS ──{C['reset']}")
         for k, v in W._FACTS.items():
@@ -4572,6 +4570,9 @@ def doctor_problems(cfg):
             out.append(("transcript-blind", "fresh transcript, nothing parsed — the agent CLI's format changed"))
     except Exception:
         pass
+    # A setting that is written but not used says one thing and does another (#74).
+    for name, text in S.problems(cfg):
+        out.append((f"setting:{name}", text))
     if len(A.deferred_open(root)) >= 3:
         out.append(("deferred-pile", f"{len(A.deferred_open(root))} deferred actions waiting — ao catchup"))
     # The playbook exists but nothing the agent reads points at it: the rules are
@@ -4773,6 +4774,70 @@ def cmd_cost(cfg, args):
     return 0
 
 
+def cmd_config(cfg, args):
+    """Read and change what ao lets a person set (#74).
+
+    `list` shows every setting with its value, its default and where the value came
+    from; `get` prints one; `set` and `unset` change the project's config, or with
+    --machine the machine's settings. Both are written whole or not at all.
+    """
+    root = cfg["root"]
+    key = getattr(args, "key", None)
+    if args.action == "list":
+        print(f"  {'setting':<32}{'value':<14}{'default':<12}{'from':<9}what it decides")
+        for name, spec in S.SETTINGS.items():
+            value, source, problem = S.resolve(cfg, name)
+            mark = f" {C['red']}!{C['reset']}" if problem else ""
+            colour = C["dim"] if source == "default" else C["b"]
+            print(f"  {name:<32}{colour}{str(value):<14}{C['reset']}{str(spec.default):<12}{source:<9}"
+                  f"{C['dim']}{spec.text}{C['reset']}{mark}")
+            if problem:
+                print(f"  {'':<32}{C['red']}{problem}{C['reset']}")
+        print(f"\n  {C['dim']}project: .ao/config.json · machine: {S.machine_path()} · "
+              f"ao config set <setting> <value> [--machine]{C['reset']}")
+        return 0
+    if key not in S.SETTINGS:
+        print(f"unknown setting {key!r}; `ao config list` shows the names")
+        return 2
+    if args.action == "get":
+        print(S.get(cfg, key))
+        return 0
+    machine = bool(getattr(args, "machine", False))
+    if S.SETTINGS[key].scope == "machine" and not machine:
+        print(f"{key} governs the whole machine; set it with --machine")
+        return 2
+    if args.action == "set":
+        try:
+            value = S.parse(key, args.value)
+        except (TypeError, ValueError) as exc:
+            print(f"{C['red']}not changed{C['reset']}: {exc}")
+            return 2
+    else:
+        value = S._MISSING
+    if machine:
+        try:
+            S.write_machine(S.assign(S.machine_settings(), key, value))
+        except OSError as exc:
+            print(f"{C['red']}not changed{C['reset']}: {exc}")
+            return 1
+    else:
+        document = A.project_config_document(root)
+        if document["problem"]:
+            # Rebuilding a config ao cannot read would drop what it held (#56).
+            print(f"{C['red']}not changed{C['reset']}: {document['problem']}")
+            return 1
+        try:
+            A.write_project_config(root, json.dumps(S.assign(document["config"], key, value), indent=2,
+                                                    ensure_ascii=False))
+        except OSError as exc:
+            print(f"{C['red']}not changed{C['reset']}: {exc}")
+            return 1
+        cfg = dict(A.load_config(root), root=root)
+    value, source, _ = S.resolve(cfg, key)
+    print(f"{key} = {value!r} ({source})")
+    return 0
+
+
 def cmd_features(cfg, args):
     """The switches and what each costs. All off: deterministic ao, zero model spend."""
     from . import features as F
@@ -4831,10 +4896,12 @@ def cmd_waive(cfg, args):
         print("--by is required: name the person who authorises this waiver"); return 2
     if args.by.strip().lower() in _agent_names(cfg):
         print(f"--by names an agent or a role ({args.by}); a waiver is a person's act"); return 2
-    if not 0 < args.hours <= A.WAIVER_HOURS_MAX:
-        print(f"--hours must be above 0 and at most {A.WAIVER_HOURS_MAX}"); return 2
+    hours = args.hours if args.hours is not None else S.get(cfg, "waivers.default_hours")
+    longest = S.get(cfg, "waivers.max_hours")
+    if not 0 < hours <= longest:
+        print(f"--hours must be above 0 and at most {longest}"); return 2
     try:
-        rec = A.waive(root, args.gate, args.slice, args.why, by=args.by.strip(), hours=args.hours)
+        rec = A.waive(root, args.gate, args.slice, args.why, by=args.by.strip(), hours=hours)
     except Exception as exc:
         print(f"{C['red']}waiver not recorded{C['reset']}: {exc}"); return 1
     print(f"{C['yellow']}{C['b']}waived{C['reset']} {args.gate} for {rec['slice']} ({rec['id']}) by {rec['by']} at HEAD {rec['head'][:8]}")
@@ -4940,7 +5007,7 @@ def cmd_catchup(cfg, args):
     else:
         print(f"{C['dim']}running one watchdog cycle to act on what is now possible{C['reset']}")
         from . import watchdog as W
-        W.run(SimpleNamespace(root=root, idle_minutes=6.0, dry_run=False, prompt=W.NUDGE_PROMPT))
+        W.run(SimpleNamespace(root=root, idle_minutes=S.get(cfg, "watchdog.idle_minutes"), dry_run=False, prompt=W.NUDGE_PROMPT))
     print(f"{C['green']}catchup{C['reset']} handled {did} item(s)")
     return 1 if failed else 0
 
@@ -6347,7 +6414,7 @@ def _watchdog_windows(cfg, args):
     """Task Scheduler is Windows' launchd: one task every two minutes, one every fifteen."""
     root = cfg["root"]
     key = A.project_key(root).lower()
-    tasks = {f"ao-watchdog-{key}": (2, f'"{shutil.which("ao-watchdog") or "ao-watchdog"}" --root "{root}" --idle-minutes {getattr(args, "idle_minutes", 6)}'),
+    tasks = {f"ao-watchdog-{key}": (2, f'"{shutil.which("ao-watchdog") or "ao-watchdog"}" --root "{root}" --idle-minutes {getattr(args, "idle_minutes", None) or S.get(cfg, "watchdog.idle_minutes")}'),
              f"ao-doctor-{key}": (15, f'"{shutil.which("ao") or "ao"}" -C "{root}" doctor --check --notify')}
     if args.action == "status":
         for name in tasks:
@@ -6367,6 +6434,12 @@ def _watchdog_windows(cfg, args):
 
 
 def cmd_watchdog(cfg, args):
+    if getattr(args, "idle_minutes", None) is None:
+        args.idle_minutes = S.get(cfg, "watchdog.idle_minutes")
+    return _cmd_watchdog(cfg, args)
+
+
+def _cmd_watchdog(cfg, args):
     """Install, remove or inspect the launchd job that restarts a stalled agent."""
     if args.action in ("explain", "trace"):
         return _watchdog_debug(cfg, args)
@@ -6803,7 +6876,8 @@ def main():
     wd = sub.add_parser("watchdog", help="launchd job that restarts a stalled agent")
     wd.add_argument("action", choices=["install", "uninstall", "status", "explain", "trace"])
     wd.add_argument("--interval", type=int, default=120)
-    wd.add_argument("--idle-minutes", type=float, default=6)
+    wd.add_argument("--idle-minutes", type=float, default=None,
+                    help="default: the watchdog.idle_minutes setting, read when installed")
     wd.add_argument("--last", type=int, default=20)
     wd.set_defaults(fn=cmd_watchdog)
 
@@ -6951,6 +7025,12 @@ def main():
     co = sub.add_parser("cost", help="what the coordination spends: implementer turns by class (product/analysis/ceremony/coordination)")
     co.add_argument("--since", help="window such as 24h or 7d (default: whole transcript)")
     co.set_defaults(fn=cmd_cost)
+    cf = sub.add_parser("config", help="what a person can set: list, get, set, unset")
+    cf.add_argument("action", choices=["list", "get", "set", "unset"], nargs="?", default="list")
+    cf.add_argument("key", nargs="?")
+    cf.add_argument("value", nargs="?")
+    cf.add_argument("--machine", action="store_true", help="the machine's settings, not the project's")
+    cf.set_defaults(fn=cmd_config)
     ft = sub.add_parser("features", help="the switches and what each costs; all off = deterministic ao")
     ft.add_argument("action", choices=["list", "on", "off"], nargs="?", default="list")
     ft.add_argument("key", nargs="?")
@@ -6960,8 +7040,9 @@ def main():
     wv.add_argument("--slice")
     wv.add_argument("--why")
     wv.add_argument("--by", help="the person who authorises it; required")
-    wv.add_argument("--hours", type=float, default=24.0,
-                    help="how long it may stand in for the gate (default 24, at most 168)")
+    wv.add_argument("--hours", type=float, default=None,
+                    help="how long it may stand in for the gate (settings waivers.default_hours "
+                         "and waivers.max_hours; 24 and 168 unless changed)")
     wv.set_defaults(fn=cmd_waive)
     cu = sub.add_parser("catchup", help="replay what could not run: waived reviews, deferred wakes and nudges")
     cu.add_argument("--boundary")

@@ -38,6 +38,7 @@ FORBIDDEN = (
 # budget with a re-specification it wrote itself (#65).
 IMPLEMENTER_FORBIDDEN = (
     ("re-specifies a slice, restarting its round budget", "ao decide x --scope s"),
+    ("changes the settings that govern its own review", "ao config set review_timeout 1"),
 )
 
 # Flags with which a harness grants every tool at once.
