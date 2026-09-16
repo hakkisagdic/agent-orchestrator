@@ -23,6 +23,8 @@ the same room.
 | **reviewer** | verdict on a boundary: APPROVED / NEEDS_CHANGES with findings | reviewing its own work |
 | **watchdog** | nothing — it measures and acts mechanically (nudge, reap, wake, alarm) | judging; it reports facts to the architect |
 
+Verdicts: `APPROVED`, `NEEDS_CHANGES` (a reviewer's), `UNAVAILABLE`, `INVALID` (ao's: no review took place, or the answer broke the schema). Review status: `pending`, `complete`, `invalid`, `unavailable`. Anything else reads as `INVALID`.
+
 Reviewer ≠ implementer is enforced by `ao commit-ok`. Authority never lives on
 the MCP surface: `ao commit-ok` and `push` are not tools an agent can call for
 itself.

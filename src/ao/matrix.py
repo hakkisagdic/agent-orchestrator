@@ -501,6 +501,10 @@ def _role_bindings(resolution):
 def add_evidence_context(evidence, resolution, attempts, reviewer_identity=None,
                          review_status="pending"):
     """Attach schema-3 declared identity evidence; never attach argv."""
+    from .verdicts import REVIEW_STATUSES
+    if review_status not in REVIEW_STATUSES:
+        # A status outside the closed set would read as neither complete nor failed (#4).
+        raise ValueError(f"unknown review status {review_status!r}; one of {', '.join(REVIEW_STATUSES)}")
     evidence.update({
         "schema": 3,
         "matrix": dict(resolution["matrix"]),

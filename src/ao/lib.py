@@ -3280,7 +3280,8 @@ def recent_errors(recs, limit=3, adapter=None):
 
 def _review_verdict(body):
     """Return one explicit top-level verdict value, otherwise INVALID."""
-    allowed = {"APPROVED", "NEEDS_CHANGES", "UNAVAILABLE", "INVALID"}
+    from .verdicts import VERDICTS
+    allowed = set(VERDICTS)
     values = []
     malformed = False
     for line in str(body or "").splitlines():
