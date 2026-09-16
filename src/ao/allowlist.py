@@ -114,9 +114,9 @@ def reviewer_problems(argv):
 
     On 2026-09-07 a reviewer run as `claude -p … --allowedTools ""` started four MCP
     servers and pulled several hundred tool descriptions into the review: an allow
-    list gates permissions, not which servers start. A Claude Code reviewer needs
-    `--strict-mcp-config` and no `--mcp-config`; any reviewer is refused every tool
-    and any tool that writes.
+    list gates permissions, not which servers start. A reviewer whose adapter declares
+    MCP isolation needs its required flags and none of its forbidden ones; any
+    reviewer is refused every tool and any tool that writes.
     """
     args = [str(arg) for arg in argv or []]
     if not args:
@@ -127,11 +127,20 @@ def reviewer_problems(argv):
     extra = sorted({rule.split("(", 1)[0] for rule in rules(args)} - set(REVIEWER_TOOLS))
     if extra:
         found.append("its allowed tools go beyond reading: " + ", ".join(extra))
-    if os.path.basename(args[0]).lower().split(".")[0] == "claude":
-        if "--strict-mcp-config" not in args:
-            found.append("it starts every configured MCP server (no --strict-mcp-config)")
-        if any(arg == "--mcp-config" or arg.startswith("--mcp-config=") for arg in args):
-            found.append("it loads MCP servers from --mcp-config")
+    # Which harness starts MCP servers unless told not to, and with which flags, is its
+    # adapter's to declare (`options.mcp_isolation`, #76).
+    from . import lib as A
+    program = os.path.basename(args[0]).lower().split(".")[0]
+    for adapter in A.package_adapters().values():
+        if program not in A.adapter_binaries(adapter):
+            continue
+        isolation = (adapter.get("options") or {}).get("mcp_isolation") or {}
+        for flag in isolation.get("required") or []:
+            if flag not in args:
+                found.append(f"it starts every configured MCP server (no {flag})")
+        for flag in isolation.get("forbidden") or []:
+            if any(arg == flag or arg.startswith(flag + "=") for arg in args):
+                found.append(f"it loads MCP servers from {flag}")
     return found
 
 

@@ -31,6 +31,8 @@
   },
   "options": {
     "trust_none": ["--allowedTools", "Read,Grep,Glob", "--strict-mcp-config"],
+    "mcp_isolation": { "required": ["--strict-mcp-config"], "forbidden": ["--mcp-config"],
+                       "why": "an allow list gates permissions, not which MCP servers start (#24)" },
     "model": [
       "--model",
       "{model}"
@@ -76,7 +78,8 @@
   "detect": {
     "dirs": [".claude"],
     "files": [".mcp.json", "CLAUDE.md"],
-    "binaries": ["claude"]
+    "binaries": ["claude"],
+    "processes": ["claude", "claude-code"]
   },
   "directives": {
     "steering_files": [

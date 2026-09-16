@@ -1294,7 +1294,7 @@ def agent_pids(root, adapter, headless_only=False):
         argv = (adapter.get(key) or {}).get("argv") or []
         if argv:
             names.add(os.path.basename(argv[0]))
-    names.update({"kiro-cli", "claude", "claude-code", "codex", "cursor-agent"})
+    names.update(agent_process_names())
     want = os.path.realpath(root)
     me = os.getpid()
     out = []
@@ -1339,6 +1339,16 @@ def agent_pids(root, adapter, headless_only=False):
         # not ask to be stopped.
         out = [p for p in out if _is_headless(p)]
     return out
+
+
+def agent_process_names():
+    """Program names that are agent turns, as the shipped adapters declare them (`detect.processes`) (#76).
+
+    The package's adapters only: whether a process is a writer decides holds and
+    nudges, and a layer an agent can write must not be able to hide one.
+    """
+    return {str(name) for adapter in package_adapters().values()
+            for name in (adapter.get("detect") or {}).get("processes") or [] if name}
 
 
 def _executable(t):
@@ -4195,7 +4205,7 @@ def unplaced_agent_pids(root, adapter):
         argv = (adapter.get(key) or {}).get("argv") or []
         if argv:
             names.add(os.path.basename(argv[0]))
-    names.update({"kiro-cli", "claude", "claude-code", "codex", "cursor-agent"})
+    names.update(agent_process_names())
     want = os.path.realpath(root)
     me = os.getpid()
     helpers = helper_pids(root)
@@ -4281,15 +4291,14 @@ def _architect_process_roots(root, architect=None, helper_only=False):
     names = {command} if command else set()
     # CLI launchers commonly exec a runtime under the package's other public
     # name. These are aliases of the configured command, not a generic list of
-    # agents: a Kiro implementer must not become a Claude architect merely
-    # because both are interactive in the same tree.
-    aliases = {
-        "claude": {"claude", "claude-code"},
-        "claude-code": {"claude", "claude-code"},
-        "kiro": {"kiro", "kiro-cli"},
-        "kiro-cli": {"kiro", "kiro-cli"},
-    }
-    names.update(aliases.get(command, set()))
+    # agents: an implementer on one harness must not become an architect on
+    # another merely because both are interactive in the same tree. The names
+    # that are one agent's are its adapter's id, binaries and processes (#76).
+    for ident, adapter in package_adapters().items():
+        known = {_program_name(name) for name in [ident, *adapter_binaries(adapter),
+                                                  *((adapter.get("detect") or {}).get("processes") or [])] if name}
+        if command in known:
+            names.update(known)
     if not names:
         return []
 

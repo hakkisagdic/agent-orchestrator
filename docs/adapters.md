@@ -73,6 +73,16 @@ What decides authority reads the **package's** adapters only: which directories 
 user's or a project's adapter layer is writable by the agents it describes, so an adapter there
 can add a harness but cannot move a product path out of review by calling it a harness directory.
 
+## Which processes are agents is declared, not coded
+
+`detect.processes` names the program an agent turn runs as. ao counts those processes as writers
+(`ao hold`, the nudge's one-turn rule) and treats an adapter's id, binaries and processes as one
+agent's names when it asks whether the architect is already at the keyboard (#76). Like the
+directories, these are read from the package's adapters only.
+
+`options.mcp_isolation` (`{required, forbidden}`) is the flags a harness needs so a reviewer starts
+no MCP server it was not given (#24); `ao doctor` and the reviewer check read it by binary.
+
 ## Shipping an adapter without forking
 
 Adapters load from three places, each overriding the one before by `id`: the package, then

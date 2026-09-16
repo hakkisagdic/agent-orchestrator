@@ -126,7 +126,8 @@
   },
   "detect": {
     "dirs": [".kiro"],
-    "binaries": ["kiro-cli"]
+    "binaries": ["kiro-cli"],
+    "processes": ["kiro-cli"]
   },
   "mcp": {
     "file": ".kiro/settings/mcp.json",

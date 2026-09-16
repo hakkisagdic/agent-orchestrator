@@ -184,8 +184,10 @@ def child_path():
             "/usr/bin", "/bin", "/usr/sbin", "/sbin"]:
         parts.append(os.path.expanduser(d))
     # Version-manager installs keep node beside the agent binary; a wake that
-    # resolves the newest `claude` there must find that node too.
-    for cand in A.binary_candidates("claude") + A.binary_candidates("node"):
+    # resolves the newest agent there must find that node too.
+    agents = sorted({binary for adapter in A.package_adapters().values()
+                     if (adapter.get("detect") or {}).get("processes") for binary in A.adapter_binaries(adapter)})
+    for cand in [c for binary in agents for c in A.binary_candidates(binary)] + A.binary_candidates("node"):
         parts.append(os.path.dirname(cand))
     # fnm / nvm / asdf style shims: whichever one currently owns `node`
     node = shutil.which("node")
