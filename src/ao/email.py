@@ -7,9 +7,11 @@ the channel people actually check when they wake up, so it is the top of the
 ladder: an orange condition that stands for an hour becomes a red one, and red
 is a mail.
 
-No server. formsubmit.co relays a JSON POST to an address the user has verified
-once; the token in `~/.ao/email.json` is the alias formsubmit hands back after
-that verification. It lives with credentials, never in a repository.
+It goes through a provider (#74). formsubmit.co needs no server: it relays a
+JSON POST to an address the user has verified once, and the token in
+`~/.ao/email.json` is the alias formsubmit hands back after that verification.
+Any SMTP server works too, with the user's own account. Either way the settings
+live with credentials, 0600, never in a repository.
 """
 import json
 import os
@@ -25,27 +27,110 @@ USER_AGENT = "curl/8.7.1"
 
 
 def config():
-    """{"token": ..., "to": ..., "name": ...} or None. 0600, outside any repo."""
+    """The mail channel's settings from `~/.ao/email.json`, or None when it cannot send.
+
+    0600, outside any repository. `provider` names one of PROVIDERS; a file written
+    before there was a choice is formsubmit's.
+    """
     if not os.path.exists(CONF):
         return None
     try:
         c = json.load(open(CONF, encoding=UTF8))
     except (OSError, ValueError):
         return None
-    if not c.get("token"):
+    if not isinstance(c, dict):
         return None
     c.setdefault("name", "ao")
     c.setdefault("provider", "formsubmit")
+    provider = PROVIDERS.get(c["provider"])
+    if provider is None or any(not c.get(field) for field in provider.required):
+        return None
     return c
 
 
-def save(token, to=None, name="ao"):
+def _write(c):
     os.makedirs(os.path.dirname(CONF), exist_ok=True)
-    c = {"provider": "formsubmit", "token": token.strip(), "to": to or "", "name": name}
     with open(CONF, "w", encoding=UTF8) as fh:
         json.dump(c, fh, indent=2)
     os.chmod(CONF, 0o600)
     return c
+
+
+def save(token, to=None, name="ao"):
+    return _write({"provider": "formsubmit", "token": token.strip(), "to": to or "", "name": name})
+
+
+def save_provider(provider, name="ao", **fields):
+    """Save the settings of any provider; refuses one that is unknown or missing a field."""
+    if provider not in PROVIDERS:
+        raise ValueError(f"unknown mail provider {provider!r}; one of {', '.join(PROVIDERS)}")
+    missing = [field for field in PROVIDERS[provider].required if not fields.get(field)]
+    if missing:
+        raise ValueError(f"{provider} needs {', '.join('--' + field for field in missing)}")
+    return _write(dict({key: value for key, value in fields.items() if value not in (None, "")},
+                       provider=provider, name=name))
+
+
+class FormSubmit:
+    """formsubmit.co relays a JSON POST to an address verified once; no server."""
+    name = "formsubmit"
+    required = ("token",)
+
+    def send(self, c, subject, body, project, opener=None):
+        payload = {"name": f"{c['name']} · {project}",
+                   "email": c.get("to") or "noreply@ao.local",
+                   "message": body,
+                   "_subject": f"[ao/{project}] {subject}",
+                   "_template": "box"}
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(ENDPOINT.format(token=c["token"]), data=data, method="POST",
+                                     headers={"Content-Type": "application/json",
+                                              "Accept": "application/json",
+                                              "Referer": "http://localhost:5173/",
+                                              "Origin": "http://localhost:5173/",
+                                              # Cloudflare in front of formsubmit rejects
+                                              # Python's default agent string (error 1010).
+                                              "User-Agent": USER_AGENT})
+        resp = (opener or urllib.request.urlopen)(req, timeout=20)
+        raw = resp.read().decode("utf-8", "replace") if hasattr(resp, "read") else str(resp)
+        try:
+            return str(json.loads(raw).get("success", "")).lower() in ("true", "1")
+        except ValueError:
+            return False
+
+
+class Smtp:
+    """Any mail server that takes SMTP: the user's own provider, with its own credentials.
+
+    `tls` is "starttls" (the default, port 587), "implicit" (port 465) or "none". The
+    password is read from the file, never from a repository.
+    """
+    name = "smtp"
+    required = ("host", "to")
+
+    def send(self, c, subject, body, project, opener=None):
+        import smtplib
+        import ssl
+        from email.message import EmailMessage
+        message = EmailMessage()
+        message["Subject"] = f"[ao/{project}] {subject}"
+        message["From"] = c.get("from") or c["to"]
+        message["To"] = c["to"]
+        message.set_content(body)
+        tls = c.get("tls") or "starttls"
+        port = int(c.get("port") or (465 if tls == "implicit" else 587))
+        factory = opener or (smtplib.SMTP_SSL if tls == "implicit" else smtplib.SMTP)
+        with factory(c["host"], port, timeout=20) as server:
+            if tls == "starttls":
+                server.starttls(context=ssl.create_default_context())
+            if c.get("user"):
+                server.login(c["user"], c.get("password") or "")
+            server.send_message(message)
+        return True
+
+
+# The red channel is one of several providers, not one vendor in an endpoint string (#74).
+PROVIDERS = {provider.name: provider for provider in (FormSubmit(), Smtp())}
 
 
 def send(subject, body, root=None, opener=None):
@@ -54,27 +139,8 @@ def send(subject, body, root=None, opener=None):
     if not c:
         return False
     project = (A.project_key(root) if root else "ao")
-    payload = {"name": f"{c['name']} · {project}",
-               "email": c.get("to") or "noreply@ao.local",
-               "message": body,
-               "_subject": f"[ao/{project}] {subject}",
-               "_template": "box"}
-    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(ENDPOINT.format(token=c["token"]), data=data, method="POST",
-                                 headers={"Content-Type": "application/json",
-                                          "Accept": "application/json",
-                                          "Referer": "http://localhost:5173/",
-                                          "Origin": "http://localhost:5173/",
-                                          # Cloudflare in front of formsubmit rejects
-                                          # Python's default agent string (error 1010).
-                                          "User-Agent": USER_AGENT})
     try:
-        resp = (opener or urllib.request.urlopen)(req, timeout=20)
-        raw = resp.read().decode("utf-8", "replace") if hasattr(resp, "read") else str(resp)
-        try:
-            ok = str(json.loads(raw).get("success", "")).lower() in ("true", "1")
-        except ValueError:
-            ok = False
+        ok = bool(PROVIDERS[c["provider"]].send(c, subject, body, project, opener=opener))
     except Exception:
         ok = False
     if root:
@@ -93,6 +159,11 @@ E-posta kanalı (kırmızı alarm) — sunucu gerekmez, formsubmit.co üzerinden
    (https://formsubmit.co/ajax/<token>). Adresin kendisi de token olarak çalışır.
 3. Kaydet:  ao email setup --token <token> --to SENIN@ADRESIN
 4. Dene:    ao email test        → gelen kutunda "[ao/<proje>] test" görmelisin.
+
+Kendi posta sunucun varsa formsubmit yerine SMTP (parola komut satırına yazılmaz,
+bir ortam değişkeninden bir kez okunur):
+     AO_SMTP_PASSWORD=… ao email setup --provider smtp --host smtp.ornek.com \\
+       --user SEN@ORNEK.COM --password-env AO_SMTP_PASSWORD --to SEN@ORNEK.COM
 
 Token {conf} dosyasında 0600 ile durur; hiçbir depoya yazılmaz. Kırmızı alarmlar
 (bir saatten uzun süren turuncu durumlar, tükenmiş kota, başarısız mimar uyandırma)

@@ -4339,8 +4339,25 @@ def cmd_fanout(cfg, args):
 
 
 def cmd_email(cfg, args):
-    """The red channel: e-mail through formsubmit.co, no server."""
+    """The red channel: e-mail through a provider - formsubmit.co, or any SMTP server (#74)."""
     from . import email
+    provider = getattr(args, "provider", None) or "formsubmit"
+    if args.action == "setup" and provider != "formsubmit":
+        password = None
+        if getattr(args, "password_env", None):
+            # Read once from the environment: a password on the command line stays in history.
+            password = os.environ.get(args.password_env)
+            if password is None:
+                print(f"{C['red']}not saved{C['reset']}: ${args.password_env} is not set"); return 2
+        try:
+            c = email.save_provider(provider, host=args.host, port=args.port, user=args.user,
+                                    password=password, to=args.to, tls=args.tls,
+                                    **{"from": args.sender})
+        except ValueError as exc:
+            print(f"{C['red']}not saved{C['reset']}: {exc}"); return 2
+        print(f"{C['green']}saved{C['reset']} {email.CONF} (0600) provider={provider} → {c.get('to')}")
+        print(f"now: {C['b']}ao email test{C['reset']}")
+        return 0
     if args.action == "setup":
         if args.token:
             c = email.save(args.token, to=args.to)
@@ -7009,10 +7026,17 @@ def main():
     h.add_argument("--note", help="on release: what changed while the agent was stopped")
     h.add_argument("--grace", type=float, default=10, help="seconds before SIGKILL")
     h.set_defaults(fn=cmd_hold)
-    em = sub.add_parser("email", help="the red alarm channel: e-mail via formsubmit.co, no server")
+    em = sub.add_parser("email", help="the red alarm channel: e-mail via formsubmit.co or an SMTP server")
     em.add_argument("action", choices=["setup", "test", "status"], nargs="?", default="status")
-    em.add_argument("--token")
+    em.add_argument("--provider", choices=["formsubmit", "smtp"])
+    em.add_argument("--token", help="formsubmit: the alias it hands back after verification")
     em.add_argument("--to")
+    em.add_argument("--host", help="smtp: the server")
+    em.add_argument("--port", type=int, help="smtp: 587 for starttls, 465 for implicit")
+    em.add_argument("--user", help="smtp: the account")
+    em.add_argument("--password-env", help="smtp: the environment variable holding the password")
+    em.add_argument("--from", dest="sender", help="smtp: the sender, if not --to")
+    em.add_argument("--tls", choices=["starttls", "implicit", "none"])
     em.set_defaults(fn=cmd_email)
     al = sub.add_parser("alarms", help="live alarm episodes (yellow/orange/red); test rings the channels")
     al.add_argument("action", choices=["list", "test", "snooze", "unsnooze"], nargs="?", default="list")
