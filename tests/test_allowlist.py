@@ -62,6 +62,8 @@ def test_ao_commit_checks_authority_first_and_passes_nothing_but_the_message(pro
     calls = []
     monkeypatch.setattr(subprocess, "run", lambda argv, **kw: calls.append(argv) or SimpleNamespace(returncode=0))
     monkeypatch.setattr(cli, "cmd_commit_check", lambda cfg, args: 1)
+    # What landed is compared with the grant after Git commits (#64); tested in test_landed_tree.
+    monkeypatch.setattr(A, "landed_commit_problem", lambda root: None)
 
     assert cli.cmd_commit(project, SimpleNamespace(message="land it", file=None)) == 1
     assert calls == []

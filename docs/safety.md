@@ -88,7 +88,11 @@ non-empty legacy ledger without links is unreadable and is never rewritten impli
 `ao commit-check` is the non-mutating enforcement half: the optional AO pre-commit hook
 runs it against Git's active index and revalidates the latest persisted grant, its exact
 verification and review or live waiver, plus current plan drift, holds, and urgent mail.
-It neither issues nor consumes a grant. A retrospective `ao review --commits` artifact
+It neither issues nor consumes a grant. Its limit: Git writes the commit's tree from the
+index after the hook returns, so a process that stages a path in that window lands it
+inside an authorised commit, and no hook can prevent that. `ao commit` compares the tree
+that landed with the one the grant bound and reports and records a difference, and
+`ao doctor` reports any commit since the first grant whose tree no grant bound. A retrospective `ao review --commits` artifact
 can reconcile landed work but can never authorize a candidate.
 
 Hook ownership is content- and topology-sensitive, not marker-based. Project

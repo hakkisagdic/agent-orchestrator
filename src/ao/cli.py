@@ -1199,7 +1199,23 @@ def cmd_commit(cfg, args):
     env = {name: value for name, value in os.environ.items()
            if not name.startswith(("GIT_CONFIG", "GIT_DIR", "GIT_WORK_TREE"))}
     source = ["-m", message] if message else ["-F", file]
-    return subprocess.run(["git", "commit", *source], cwd=cfg["root"], env=env).returncode
+    code = subprocess.run(["git", "commit", *source], cwd=cfg["root"], env=env).returncode
+    if code:
+        return code
+    # The hook saw the index before Git wrote the tree; what landed is compared
+    # with what was granted, and a difference is reported and recorded (#64).
+    problem = A.landed_commit_problem(cfg["root"])
+    if problem:
+        print(f"{C['red']}{C['b']}LANDED OUTSIDE ITS GRANT{C['reset']}")
+        print(f"  {C['red']}·{C['reset']} {problem}")
+        A.record_notice(cfg["root"], "commit landed outside its grant", problem,
+                        sent=False, key="landed-outside-grant")
+        try:
+            A.record_authority(cfg["root"], False, [problem], A.tree_digest(cfg["root"], cfg), None)
+        except Exception as exc:
+            print(f"  {C['dim']}the mismatch could not be recorded: {exc}{C['reset']}")
+        return 1
+    return 0
 
 
 def cmd_commit_check(cfg, args):
@@ -4329,6 +4345,16 @@ def doctor_problems(cfg):
                 repair = "ensure the hook can resolve this AO executable, then ao hooks status"
             out.append(("commit-hook", "; ".join(reasons) + f" — {repair}"))
     out.extend(_actor_grant_problems(cfg))
+    if _project_enrollment(root)["state"] in ("enrolled", "legacy"):
+        try:
+            stray = A.commits_without_grant(root)
+        except Exception:
+            stray = []
+        if stray:
+            out.append(("landed-without-grant",
+                        f"{len(stray)} commit(s) landed with a tree no grant bound: "
+                        + ", ".join(sha[:12] for sha in stray[:5])
+                        + " — a path staged after commit-check, or a commit made outside ao"))
     return out
 
 

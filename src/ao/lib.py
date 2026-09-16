@@ -2158,6 +2158,60 @@ def record_verification(root, record):
     return append_chained_jsonl(path, record, VERIFICATION_CHAIN, legacy_prefix=True)
 
 
+def _granted_trees(root):
+    """The index trees authority was granted for, and the commit the first grant built on."""
+    rows = [row for row in authority_rows(root)
+            if isinstance(row, dict) and row.get("granted") is True]
+    trees = {(row.get("candidate") or {}).get("index_tree") for row in rows}
+    trees.discard(None)
+    base = next(((row.get("candidate") or {}).get("head") for row in rows
+                 if (row.get("candidate") or {}).get("head")), None)
+    return trees, base, rows
+
+
+def landed_commit_problem(root, commit="HEAD"):
+    """Why a landed commit is not the tree its grant bound, or None when it is (#64).
+
+    commit-check measures the index when the pre-commit hook runs, and Git writes
+    the commit's tree from the index after hooks return, so a process that stages
+    a path in between lands it inside an authorised commit. A hook cannot prevent
+    that; comparing the tree that landed with the tree that was granted detects it.
+    """
+    try:
+        sha = _git_output(root, "rev-parse", "--verify", commit).decode("ascii").strip()
+        tree = _git_output(root, "rev-parse", "--verify", f"{commit}^{{tree}}").decode("ascii").strip()
+    except (RuntimeError, UnicodeError) as exc:
+        return f"cannot read {commit}: {exc}"
+    _, _, rows = _granted_trees(root)
+    grant = rows[-1] if rows else None
+    granted = ((grant or {}).get("candidate") or {}).get("index_tree")
+    if not granted:
+        return f"commit {sha[:12]} landed with no grant on record"
+    if granted != tree:
+        return (f"commit {sha[:12]} landed tree {tree[:12]}, but grant "
+                f"{grant.get('token') or '<unnamed>'} bound tree {granted[:12]}")
+    return None
+
+
+def commits_without_grant(root, limit=50):
+    """Landed commits, newest first, whose tree no grant bound (#64).
+
+    Only commits on top of the one the first grant was built on are measured;
+    history from before the authority ledger has nothing to be compared with.
+    Merges are left out: their trees are Git's, not a candidate's.
+    """
+    trees, base, _ = _granted_trees(root)
+    if base is None:
+        return []
+    try:
+        log = _git_output(root, "log", f"--max-count={int(limit)}", "--no-merges",
+                          "--format=%H %T", f"{base}..HEAD", "--").decode("ascii")
+    except (RuntimeError, UnicodeError):
+        return []
+    return [sha for sha, tree in (line.split() for line in log.splitlines() if line.strip())
+            if tree not in trees]
+
+
 def record_authority(root, granted, reasons, tree, verification, token=None,
                      review=None, reviewer=None, candidate=None, scope=None,
                      matrix=None, role_bindings=None, implementer_identity=None,
