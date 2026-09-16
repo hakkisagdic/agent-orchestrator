@@ -4,6 +4,8 @@
   "send":   { "argv": ["gemini", "--prompt", "{prompt}"] },
   "resume": { "argv": ["gemini", "--prompt", "{prompt}"], "note": "Session resume support varies by version; verify before relying on it." },
   "options": {
+    "trust_none": null,
+    "trust_none_why": "no flag verified to deny every tool",
     "model": ["--model", "{model}"],
     "effort": null,
     "effort_note": "No reasoning-effort flag; model choice carries the tradeoff.",

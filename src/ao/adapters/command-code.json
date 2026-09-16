@@ -9,6 +9,8 @@
   "list_sessions": { "argv": ["cmd", "--resume"], "note": "interactive picker; prefer scanning ~/.commandcode/projects" },
   "list_models": { "argv": ["cmd", "--list-models"] },
   "options": {
+    "trust_none": null,
+    "trust_none_why": "no flag verified to deny every tool",
     "model": ["--model={model}"], "effort": ["--effort={effort}"],
     "effort_values": ["low","medium","high"],
     "output_json": ["--output-format=json"], "max_turns": ["--max-turns={n}"],

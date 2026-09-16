@@ -407,6 +407,53 @@ def load_adapter(adapter_id, root=None):
     return {} if not entry or entry["problem"] else entry["adapter"]
 
 
+# ---- a reviewer invocation is built from its adapter (#88) --------------------------------
+
+def reviewer_eligibility(adapter):
+    """(eligible, why not) for the reviewer role, from what an adapter declares about denying tools (#88).
+
+    A reviewer must not be able to write. An adapter declares `options.trust_none`:
+    the flags that leave the harness only reading, or null with `trust_none_why`,
+    which makes it ineligible rather than silently unsafe.
+    """
+    options = (adapter or {}).get("options") or {}
+    if "trust_none" not in options:
+        return False, "it does not declare how to run without tools (options.trust_none)"
+    if not options["trust_none"]:
+        return False, str(options.get("trust_none_why") or ((adapter.get("roles") or {}).get("reviewer"))
+                          or "it cannot be run without tools")
+    return True, None
+
+
+def compose_reviewer(adapter_id, model=None, effort=None, root=None):
+    """A reviewer route from an adapter's send, model, effort and trust_none; never a hand-written argv (#88)."""
+    adapter = load_adapter(adapter_id, root)
+    if not adapter:
+        raise ValueError(f"no adapter {adapter_id}")
+    eligible, why = reviewer_eligibility(adapter)
+    if not eligible:
+        raise ValueError(f"{adapter_id} is ineligible for the reviewer role: {why}")
+    argv = list((adapter.get("send") or {}).get("argv") or [])
+    if not argv:
+        raise ValueError(f"{adapter_id} declares no send.argv")
+    options = adapter.get("options") or {}
+    if model:
+        if not options.get("model"):
+            raise ValueError(f"{adapter_id} declares no way to choose a model")
+        argv += [part.replace("{model}", model) for part in options["model"]]
+    if effort:
+        values = options.get("effort_values") or []
+        if not options.get("effort") or (values and effort not in values):
+            raise ValueError(f"{adapter_id} does not take effort {effort}" + (f"; it takes {', '.join(values)}" if values else ""))
+        argv += [part.replace("{effort}", effort) for part in options["effort"]]
+    argv += list(options["trust_none"])
+    route = {"id": f"{adapter_id}-reviewer" + (f"-{model}" if model else ""), "adapter": adapter_id, "argv": argv,
+             "composed": True}
+    if model:
+        route["model"] = model
+    return route
+
+
 def validate_adapter(adapter):
     """What an adapter is missing or gets wrong, before anyone relies on it (#77)."""
     problems = []

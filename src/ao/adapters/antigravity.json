@@ -18,6 +18,8 @@
   },
 
   "options": {
+    "trust_none": null,
+    "trust_none_why": "no documented flag denies tools; --dangerously-skip-permissions only widens them",
     "model": ["--model={model}"],
     "effort": ["--effort={effort}"],
     "effort_values": ["low", "medium", "high"],

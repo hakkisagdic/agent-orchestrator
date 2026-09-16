@@ -16,6 +16,26 @@ provider-specific lives here; the orchestrator core knows nothing about any vend
 An adapter with only `send` is still useful — you lose observation and safe injection,
 not the protocol.
 
+## A reviewer is composed from its adapter
+
+A reviewer must not be able to write, so every adapter declares `options.trust_none`: the
+flags that leave the harness only reading, or `null` with `trust_none_why`, which makes it
+**ineligible for the reviewer role** rather than silently unsafe. Today `kiro` and
+`claude-code` declare how to deny tools; every other adapter says why it cannot, or why
+nobody has verified that it can.
+
+```bash
+ao role set reviewer claude-code --model claude-opus-5
+ao role set reviewer kiro --model <model> --effort high
+```
+
+`ao role set reviewer <adapter>` composes the invocation from the adapter - `send.argv`, then
+`options.model`, `options.effort` (refused when the adapter does not take that value), then
+`trust_none` - so a pair of harnesses is chosen by naming two adapters and a model each, not by
+writing argv by hand. A hand-written reviewer argv still works and stays the exception.
+`ao adapters` shows which adapters may review, and `ao doctor` reports a configured reviewer
+whose adapter cannot deny tools.
+
 ## Shipping an adapter without forking
 
 Adapters load from three places, each overriding the one before by `id`: the package, then

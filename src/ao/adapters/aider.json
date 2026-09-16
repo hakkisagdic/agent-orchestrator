@@ -5,6 +5,8 @@
   "send":   { "argv": ["aider", "--message", "{prompt}", "--yes-always"] },
   "resume": { "argv": ["aider", "--message", "{prompt}", "--restore-chat-history", "--yes-always"] },
   "options": {
+    "trust_none": null,
+    "trust_none_why": "aider works by editing files; it has no mode without its edit tools",
     "model": ["--model", "{model}"],
     "effort": ["--reasoning-effort", "{effort}"],
     "effort_values": ["low", "medium", "high"],

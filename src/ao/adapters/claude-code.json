@@ -30,6 +30,7 @@
     "note": "Scoped rather than --dangerously-skip-permissions. The implementer is trusted with the tree — it must write code and run gates — but not with push, gh, or arbitrary shell; authority is withheld by ao, and the allowlist keeps the blast radius to the repo."
   },
   "options": {
+    "trust_none": ["--allowedTools", "Read,Grep,Glob", "--strict-mcp-config"],
     "model": [
       "--model",
       "{model}"

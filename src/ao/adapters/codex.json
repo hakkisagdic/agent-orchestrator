@@ -4,6 +4,8 @@
   "send":   { "argv": ["codex", "exec", "{prompt}"] },
   "resume": { "argv": ["codex", "exec", "resume", "{session}", "{prompt}"], "continue_last": ["codex", "exec", "resume", "--last", "{prompt}"] },
   "options": {
+    "trust_none": null,
+    "trust_none_why": "codex exec keeps its shell tool; --sandbox read-only limits it but does not remove it",
     "model": ["--model", "{model}"],
     "effort": ["-c", "model_reasoning_effort={effort}"],
     "effort_values": ["minimal", "low", "medium", "high"],

@@ -4,6 +4,7 @@
   "kind": "cloud",
   "tier": 3,
   "verified": "partial",
+  "options": { "trust_none": null, "trust_none_why": "a cloud template: the runner it is bound to decides which tools the agent has" },
   "notes": "Provider-agnostic tier-3 adapter: works with any cloud agent that delivers its result as a branch or pull request, with no vendor API and no vendor cooperation. Dispatch is out-of-band (assign an issue, click once in an IDE); everything after that is observed through git. Requires the GitHub CLI.",
 
   "dispatch": {

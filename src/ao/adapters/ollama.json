@@ -2,6 +2,7 @@
   "id": "ollama",
   "name": "Ollama (local models)",
   "verified": "untested",
+  "options": { "trust_none": null, "trust_none_why": "a model backend, not an agent CLI: an agent adapter pointed at it holds the role" },
   "kind": "model-backend",
   "notes": "Not a coding agent. Ollama serves models; an agent adapter points at it. Listed here so a role can be assigned a local model by name, and because the economics differ enough to change which roles are worth running: no quota, no per-token cost, no network — but a smaller model and a shorter context.",
   "serve": { "argv": ["ollama", "serve"], "default_endpoint": "http://127.0.0.1:11434" },

@@ -2035,6 +2035,16 @@ def cmd_role(cfg, args):
             print(f"  {C['yellow']}next{C['reset']}  {pending.get('roles')} once {pending.get('after')} leaves running")
         return 0
     new = dict(roles)
+    if action == "set" and args.role == "reviewer" and args.actor not in actors \
+            and A.load_adapter(args.actor, root):
+        # Name an adapter and a model: the reviewer's invocation is composed from it (#88).
+        try:
+            route = A.compose_reviewer(args.actor, getattr(args, "model", None), getattr(args, "effort", None), root)
+        except ValueError as exc:
+            print(f"{C['red']}refused{C['reset']}: {exc}")
+            return 2
+        actors[route["id"]] = route
+        args.actor = route["id"]
     if action == "set":
         if args.actor not in actors:
             print(f"{C['red']}no actor {args.actor}{C['reset']}; actors: {', '.join(sorted(actors))}")
@@ -5290,6 +5300,13 @@ def doctor_problems(cfg):
         out.append(("unverified-merge", "; ".join(f"{sha[:12]}: {why}" for sha, why in unverified[:3])
                     + (f" and {len(unverified) - 3} more" if len(unverified) > 3 else "")
                     + " — ao merge-check <branch> before merging"))
+    # A reviewer whose adapter cannot deny tools is not a reviewer (#88).
+    reviewer_adapter = (cfg.get("reviewer") or {}).get("adapter")
+    if reviewer_adapter:
+        eligible, why = A.reviewer_eligibility(A.load_adapter(reviewer_adapter, root))
+        if not eligible:
+            out.append((f"reviewer-ineligible:{reviewer_adapter}", f"the reviewer runs {reviewer_adapter}, which may not "
+                        f"review: {why} — ao role set reviewer <adapter> --model <model>"))
     # An implementer with nothing pre-authorised to pick up next stalls the moment
     # the architect is away; two READY items is the floor.
     try:
@@ -7400,8 +7417,10 @@ def cmd_adapters(cfg, args):
                 if have.get("installed") else "account, no CLI" if have.get("account") else "—")
         observation = "call-return" if a.get("observation_mode") == "call-return" \
             else (a.get("transcript", {}) or {}).get("kind", "—")
+        eligible, _ = A.reviewer_eligibility(a)
         print(f"{ident:<16}{entry['source']:<9}{str(a.get('contract', A.ADAPTER_CONTRACT)):<10}{col}{verified:<12}"
-              f"{C['reset']}{here:<22}{observation}")
+              f"{C['reset']}{here:<22}{observation:<14}"
+              f"{'reviewer: eligible' if eligible else C['dim'] + 'reviewer: ineligible' + C['reset']}")
     print(f"\n{C['dim']}Account detection via keyflip surfaces; it never reads the secret. Adapters load from the "
           f"package, then ~/.ao/adapters, then .ao/adapters; a later one overrides by id.{C['reset']}")
 
@@ -8020,6 +8039,8 @@ def main():
     ro.add_argument("action", nargs="?", choices=["show", "set", "swap"], default="show")
     ro.add_argument("role", nargs="?", choices=list(A.ROLE_BLOCKS))
     ro.add_argument("actor", nargs="?", help="set: an actor; swap: the other role")
+    ro.add_argument("--model", help="with set reviewer <adapter>: the model the composed reviewer runs")
+    ro.add_argument("--effort", help="with set reviewer <adapter>: its effort, where the adapter takes one")
     ro.add_argument("--hotfix", action="store_true",
                     help="on a product repository: let the architect implement, named as a hotfix")
     ro.set_defaults(fn=cmd_role)
