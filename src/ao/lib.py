@@ -5872,9 +5872,17 @@ def rounds(root, reviews_dir):
 
 def mailbox(root, mail_dir):
     d = os.path.join(root, mail_dir)
-    if not os.path.isdir(d):
-        return []
-    return [f for f in sorted(os.listdir(d)) if f != "README.md" and f.endswith(".md")]
+    files = [f for f in sorted(os.listdir(d)) if f != "README.md" and f.endswith(".md")] if os.path.isdir(d) else []
+    if mail_store_mode(root) != "append-only":
+        return files
+    # The queue is derived from the store: a view file removed unhandled still counts (#80).
+    try:
+        rows = mail_store_rows(root)
+    except Exception:
+        return files
+    stored = {row.get("id") for row in rows if row.get("event") == "message"}
+    handled = {row.get("id") for row in rows if row.get("event") == "handled"}
+    return sorted((stored - handled) | {name for name in files if name not in stored})
 
 
 REMOTE_PREFIX = "refs/remotes/origin/"
@@ -6600,6 +6608,160 @@ def unseen_messages(root, cfg):
     return sorted(out, key=lambda message: message["at"])
 
 
+# ---- nothing is deleted to prove it was handled (#80) ------------------------------------
+
+MAIL_STORE_CHAIN = "ao-mail-store-row-v1"
+
+
+def mail_store_mode(root):
+    """`append-only` when the project has switched its mailbox to the store, else `deletion` (#80)."""
+    try:
+        return settings.get(load_config(root), "mail.store")
+    except Exception:
+        return "deletion"
+
+
+def mail_store_rows(root):
+    from .storage import read_chained_jsonl
+    return [row for row in read_chained_jsonl(os.path.join(root, ".ao", "ledger", "mail-store.jsonl"), MAIL_STORE_CHAIN)
+            if isinstance(row, dict)]
+
+
+def _mail_store_append(root, row):
+    from .storage import append_chained_jsonl
+    return append_chained_jsonl(os.path.join(root, ".ao", "ledger", "mail-store.jsonl"),
+                                scan_record(dict(row, at=int(time.time()))), MAIL_STORE_CHAIN)
+
+
+def _store_path(root, mid):
+    return os.path.join(root, ".ao", "mail", "store", os.path.basename(mid))
+
+
+def ingest_mail(root, cfg):
+    """Take every message in the mailbox view into the append-only store, once (#80)."""
+    from .storage import replace_file_durably
+    box = os.path.join(root, cfg.get("mailbox", "agent-mail"))
+    known = {row.get("id") for row in mail_store_rows(root) if row.get("event") == "message"}
+    taken = []
+    for name in (sorted(os.listdir(box)) if os.path.isdir(box) else []):
+        if name == "README.md" or not name.endswith(".md") or name in known:
+            continue
+        with open(os.path.join(box, name), "rb") as fh:
+            data = fh.read()
+        replace_file_durably(_store_path(root, name), data)
+        meta = mail_meta(os.path.join(box, name))
+        _mail_store_append(root, {"event": "message", "id": name,
+                                  "digest": "sha256:" + hashlib.sha256(data).hexdigest(),
+                                  "from": meta.get("from"), "to": meta.get("to"), "kind": meta.get("kind")})
+        taken.append(name)
+    return taken
+
+
+def unhandled_messages(root):
+    """The unhandled queue, derived: every stored message with no handling record (#80)."""
+    rows = mail_store_rows(root)
+    handled = {row.get("id") for row in rows if row.get("event") == "handled"}
+    return sorted({row.get("id") for row in rows if row.get("event") == "message"} - handled)
+
+
+def handle_message(root, cfg, mid, by, outcome):
+    """Record that a message was handled, by whom and how; its view file then goes, its record never (#80)."""
+    if mid not in unhandled_messages(root):
+        return False
+    _mail_store_append(root, {"event": "handled", "id": mid, "by": by, "outcome": outcome})
+    view = os.path.join(root, cfg.get("mailbox", "agent-mail"), mid)
+    try:
+        os.remove(view)
+    except FileNotFoundError:
+        pass
+    return True
+
+
+def message_body(root, mid):
+    """A stored message's bytes, read through a compaction stub when it has one (#80)."""
+    import gzip
+    try:
+        with open(_store_path(root, mid), "rb") as fh:
+            data = fh.read()
+    except OSError:
+        data = None
+    if data is not None and data.startswith(b"ao-mail-stub v1\n"):
+        archive = data.decode(UTF8).split("archive: ", 1)[1].strip()
+        with gzip.open(os.path.join(root, archive), "rb") as fh:
+            return fh.read()
+    return data
+
+
+def sync_mail_view(root, cfg):
+    """Make the mailbox view the derived queue: restore what was removed unhandled, drop what was handled (#80).
+
+    An agent may delete a view file; that removes nothing. The message comes back
+    until someone records handling it, because the actor deciding what was handled
+    must not also be able to erase the question.
+    """
+    from .storage import replace_file_durably
+    box = os.path.join(root, cfg.get("mailbox", "agent-mail"))
+    queue = set(unhandled_messages(root))
+    restored, dropped = [], []
+    for mid in sorted(queue):
+        view = os.path.join(box, mid)
+        if not os.path.exists(view):
+            body = message_body(root, mid)
+            if body is not None:
+                replace_file_durably(view, body)
+                restored.append(mid)
+    stored = {row.get("id") for row in mail_store_rows(root) if row.get("event") == "message"}
+    for name in (sorted(os.listdir(box)) if os.path.isdir(box) else []):
+        if name in stored and name not in queue:
+            os.remove(os.path.join(box, name))
+            dropped.append(name)
+    return restored, dropped
+
+
+def compact_messages(root, days, now=None):
+    """Collapse stored bodies older than `days` to a stub with their digest and an archive pointer (#80)."""
+    import gzip
+    from .storage import replace_file_durably
+    cutoff = (time.time() if now is None else now) - days * 86400
+    compacted = []
+    done = {row.get("id") for row in mail_store_rows(root) if row.get("event") == "compacted"}
+    for row in mail_store_rows(root):
+        mid = row.get("id")
+        if row.get("event") != "message" or mid in done or float(row.get("at") or 0) > cutoff:
+            continue
+        path = _store_path(root, mid)
+        try:
+            with open(path, "rb") as fh:
+                data = fh.read()
+        except OSError:
+            continue
+        archive = f".ao/mail/archive/{mid}.gz"
+        os.makedirs(os.path.dirname(os.path.join(root, archive)), exist_ok=True)
+        with gzip.open(os.path.join(root, archive), "wb") as fh:
+            fh.write(data)
+        replace_file_durably(path, f"ao-mail-stub v1\ndigest: {row.get('digest')}\narchive: {archive}\n".encode(UTF8))
+        _mail_store_append(root, {"event": "compacted", "id": mid, "archive": archive, "digest": row.get("digest")})
+        compacted.append(mid)
+    return compacted
+
+
+def room_search(text, root=None, limit=20):
+    """Stored messages in every registered project whose body mentions `text` (#80)."""
+    needle = str(text or "").lower()
+    found = []
+    for project, path in recall_roots(root):
+        try:
+            rows = [row for row in mail_store_rows(path) if row.get("event") == "message"]
+        except Exception:
+            continue
+        for row in rows:
+            body = message_body(path, row["id"])
+            if body is not None and needle in body.decode(UTF8, "replace").lower():
+                found.append(dict(row, project=project))
+    found.sort(key=lambda row: -float(row.get("at") or 0))
+    return found[:limit]
+
+
 def mail_ledger_append(root, row):
     d = os.path.join(root, ".ao", "ledger")
     try:
@@ -6632,6 +6794,11 @@ def reconcile_mail_ledger(root, cfg):
     the watchdog closes the loop each cycle: an open id that is not on disk gets
     a `consumed` row, timed now — a lower bound on when it was read.
     """
+    if mail_store_mode(root) == "append-only":
+        # Nothing is consumed by vanishing: take new mail in, and put the view back in line (#80).
+        ingest_mail(root, cfg)
+        sync_mail_view(root, cfg)
+        return []
     box = os.path.join(root, cfg.get("mailbox", "agent-mail"))
     rows = mail_log(root, 5000)
     open_ids = {}

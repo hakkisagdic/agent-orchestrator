@@ -102,6 +102,9 @@ SETTINGS = {
     "hunter.id": Setting(
         "hunter", str, None, None, "project",
         "the name a hunt's runs and leads are recorded under"),
+    "mail.store": Setting(
+        "deletion", str, None, None, "project",
+        "deletion: handled mail is deleted; append-only: messages are kept and handling is a record"),
     "gates.default_timeout": Setting(
         600, int, 1, None, "project",
         "seconds a gate may run when its own definition names no timeout"),

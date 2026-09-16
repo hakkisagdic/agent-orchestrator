@@ -98,6 +98,17 @@ unseen `needs-decision` message climbs the ladder by age: past `mail.unseen_yell
 the architect is told, past `mail.unseen_orange_minutes` a person's desktop and phone, past
 `mail.unseen_red_minutes` e-mail. `ao status` names the oldest unseen message and its age.
 
+With `mail.store` set to `append-only`, nothing is deleted to prove it was handled. Each message
+is taken into `.ao/mail/store/` and a chained `.ao/ledger/mail-store.jsonl` row the first time the
+watchdog or a mail command sees it; `ao mail ack` and `ao_ack` append a `handled` record naming who
+handled it and how; and the unhandled queue is derived - a stored message with no handling record.
+The mailbox directory becomes a view of that queue: a file removed without a handling record is put
+back, because the actor deciding what was handled must not also be able to erase the question.
+`ao mail compact <days>` collapses older bodies to a stub with their digest and an archive pointer,
+and a stub still answers "unhandled". `ao room search` reads the stored messages of every registered
+project. The default stays `deletion` until an implementer's steering says to acknowledge rather
+than delete; switching a live project first, with the old steering, would hand its handled mail back.
+
 ## Sync: local ref, separate private repository
 
 Two layers, because they answer different questions.

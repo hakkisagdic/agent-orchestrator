@@ -188,7 +188,11 @@ def call(name, args, cfg, allow_verify):
         path = os.path.join(root, box, mid)
         if not mid or mid == "README.md" or not os.path.exists(path):
             return {"error": f"no such message: {args.get('id')}"}
-        os.remove(path)
+        if A.mail_store_mode(root) == "append-only":
+            A.ingest_mail(root, cfg)
+            A.handle_message(root, cfg, mid, "implementer", args.get("outcome", "applied"))   # a record (#80)
+        else:
+            os.remove(path)
         A.record_notice(root, "ack", f"{mid}: {args.get('outcome', 'applied')}",
                         sent=False, key="ack")
         A.mail_ledger_append(root, {"event": "consumed", "id": mid,

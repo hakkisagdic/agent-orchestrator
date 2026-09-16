@@ -450,10 +450,22 @@ def cmd_mail(cfg, args):
         hits = [f for f in A.mailbox(root, cfg["mailbox"]) if f == pattern or fnmatch.fnmatch(f, pattern)]
         if not hits:
             print(f"no message matches {pattern}"); return 1
+        store = A.mail_store_mode(root) == "append-only"
+        if store:
+            A.ingest_mail(root, cfg)
         for f in hits:
-            os.remove(os.path.join(d, f))
+            if store:
+                # Handling is a record; the message stays in the store (#80).
+                A.handle_message(root, cfg, f, A.invoking_role() or "person", args.body or "processed")
+            else:
+                os.remove(os.path.join(d, f))
             A.mail_ledger_append(root, {"event": "consumed", "id": f, "outcome": args.body or "processed"})
             print(f"  {C['green']}acked{C['reset']} {f}")
+    elif args.action == "compact":
+        days = float(args.type) if args.type and args.type != "INFO" else 30.0
+        compacted = A.compact_messages(root, days)
+        print(f"compacted {len(compacted)} stored message(s) older than {days:g} day(s) to stubs; "
+              "their bodies stay in .ao/mail/archive/")
     elif args.action == "log":
         A.reconcile_mail_ledger(root, cfg)
         for r in A.mail_log(root, 40):
@@ -2179,6 +2191,18 @@ def cmd_content(cfg, args):
         for rel in skipped:
             print(f"  {C['dim']}skipped {rel}: only text is borrowed{C['reset']}")
     return 0
+
+
+def cmd_room(cfg, args):
+    """Stored messages in every registered project that mention the words (#80)."""
+    found = A.room_search(" ".join(args.text), cfg["root"])
+    for row in found:
+        when = time.strftime("%Y-%m-%d", time.localtime(float(row.get("at") or 0)))
+        print(f"{C['b']}{row['project']}{C['reset']}  {when}  {row['id']}  "
+              f"{C['dim']}{row.get('from') or '?'} → {row.get('to') or '?'}{C['reset']}")
+    if not found:
+        print(f"{C['dim']}no stored message mentions that{C['reset']}")
+    return 0 if found else 1
 
 
 def cmd_ask(cfg, args):
@@ -8346,7 +8370,7 @@ def main():
     t.set_defaults(fn=cmd_tail)
 
     m = sub.add_parser("mail", help="list, read or send coordination messages")
-    m.add_argument("action", choices=["list", "read", "send", "log", "search", "ack"])
+    m.add_argument("action", choices=["list", "read", "send", "log", "search", "ack", "compact"])
     m.add_argument("type", nargs="?", default="INFO")
     m.add_argument("topic", nargs="?")
     m.add_argument("--body")
@@ -8432,6 +8456,10 @@ def main():
     ct.add_argument("--skills", help="add: the skills to borrow, comma-separated")
     ct.add_argument("--harness", help="add: harness adapters to install into (default: those detected)")
     ct.set_defaults(fn=cmd_content)
+    rm_ = sub.add_parser("room", help="messages across every registered project")
+    rm_.add_argument("action", choices=["search"])
+    rm_.add_argument("text", nargs="+")
+    rm_.set_defaults(fn=cmd_room)
     dg = sub.add_parser("digest", help="what happened, read from the ledgers")
     dg.add_argument("--days", type=float, default=1.0)
     dg.add_argument("-n", type=int, default=6)
