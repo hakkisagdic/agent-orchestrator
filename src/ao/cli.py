@@ -666,6 +666,8 @@ def cmd_verify(cfg, args):
            "review": revs[0][0] if revs else None,
            "review_verdict": revs[0][1] if revs else None,
            "head": A.sh("git rev-parse --short HEAD", cwd=root),
+           # Size by kind, never one number (#34).
+           "candidate_size": _candidate_size_or_none(root, candidate_before),
            # Which git measured the candidate, and that no shell or agent stood between (#51).
            "measured_by": A.measured_by(),
            "dirty": len([l for l in A.sh("git status --short", cwd=root).split("\n") if l.strip()])}
@@ -682,6 +684,13 @@ def cmd_verify(cfg, args):
         col = C["green"] if "APPROVED" in (revs[0][1] or "").upper() else C["yellow"]
         print(f"{C['dim']}newest review:{C['reset']} {col}{revs[0][1]}{C['reset']} ({revs[0][0]})")
     return 0 if ok else 1
+
+
+def _candidate_size_or_none(root, candidate):
+    try:
+        return A.candidate_size(root, candidate)
+    except (RuntimeError, KeyError, TypeError):
+        return None
 
 
 def _latest_verification_or_problem(root):
@@ -3264,6 +3273,16 @@ def cmd_review(cfg, args):
               f"Stage a smaller candidate rather than approving truncated input.{C['reset']}")
         return 2
     diff = diff_bytes.decode(UTF8, "replace")
+    # Size is a tripwire that asks a question, not a gate that reshapes the work (#34).
+    size = trip = None
+    if candidate is not None:
+        size = A.candidate_size(root, candidate)
+        trip = A.size_tripwire(cfg, size)
+        evidence["size"] = size
+        print(f"{C['dim']}size: {A.size_text(size)}{C['reset']}")
+        if trip["state"] == "refuse":
+            print(f"{C['red']}{C['b']}CANDIDATE REFUSED{C['reset']}  {trip['text']}")
+            return 2
 
     running = A.running_slice(root)
     # A boundary file is read at the commit its row names; a later change travels as a diff (#73).
@@ -3281,8 +3300,26 @@ def cmd_review(cfg, args):
 
     # The candidate is what may land; the context is committed source it is judged
     # against and enters neither the diff nor the digest (#97).
+    size_note = ""
+    if trip and trip["state"] == "over":
+        statement = A.one_slice_statement(running, source)
+        verification = A.latest_verification(root) or {}
+        green = verification.get("passed") is True \
+            and (verification.get("candidate") or {}).get("digest") == candidate["digest"]
+        if statement:
+            size_note = (f"\n\nSize: {trip['text']}. The boundary states why this is one slice: {statement}\n"
+                         "Judge that claim; an unconvincing one is a finding.")
+        else:
+            size_note = (f"\n\nSize: {trip['text']}, and the boundary does not say why it is one slice. "
+                         "Say whether it should be split, as a finding.")
+            print(f"{C['yellow']}size{C['reset']}  {trip['text']}: say in the boundary why it is one invariant "
+                  f"(`one slice:` on the row, or a \"Why one slice\" section in its file), or split it")
+        if green and trip["overshoot_pct"] <= S.get(cfg, "size.small_overshoot_pct"):
+            print(f"{C['yellow']}size{C['reset']}  over by {trip['overshoot_pct']}% and "
+                  f"{verification.get('id')} passed on this candidate: do not reshape verified code to "
+                  "meet a size number")
     prompt = REVIEW_PROMPT.format(boundary=(source or {}).get("text") or boundary) \
-        + f"\n\n{REVIEW_CANDIDATE_MARKER}\n" + diff
+        + size_note + f"\n\n{REVIEW_CANDIDATE_MARKER}\n" + diff
     budget = _review_context_budget(prompt)
     if candidate is not None:
         limits = [path.rstrip("/") for path in (scope.get("paths") or [])]

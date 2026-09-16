@@ -1916,6 +1916,94 @@ def candidate_diff(root, candidate, scope=None):
     return _git_output(root, *args, timeout=60)
 
 
+# ---- size is a tripwire that asks a question, not a gate that reshapes work (#34) ------
+
+SIZE_KINDS = ("product", "tests", "fixtures", "generated", "deletion")
+_GENERATED_PATH = re.compile(r"(^|/)(dist|build|generated|__generated__|vendor|node_modules)/|\.min\.(js|css)$|"
+                             r"\.pb\.go$|_pb2\.py$|(^|/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|"
+                             r"poetry\.lock|Cargo\.lock|go\.sum|uv\.lock|Gemfile\.lock)$")
+_FIXTURE_PATH = re.compile(r"(^|/)(fixtures?|testdata|__snapshots__|snapshots)/|\.snap$")
+
+
+def size_kind(path):
+    """What a changed path is, for counting: generated, fixtures, tests or product."""
+    path = str(path).replace("\\", "/")
+    if _GENERATED_PATH.search(path):
+        return "generated"
+    if _FIXTURE_PATH.search(path):
+        return "fixtures"
+    name = path.rsplit("/", 1)[-1]
+    if _is_test_path(path) or "__tests__" in path.split("/") or "spec" in path.split("/")[:-1] \
+            or re.search(r"_test\.go$|\.(test|spec)\.[cm]?[jt]sx?$", name):
+        return "tests"
+    return "product"
+
+
+def candidate_size(root, candidate):
+    """The staged candidate's size by kind and by path, never as one number (#34).
+
+    A single total conflated 400 lines of fixtures with 400 lines of concurrency.
+    Lines are what git counts between HEAD and the pinned index tree; a file
+    whose change only removes lines is a deletion, whatever its path.
+    """
+    listed = _git_output(root, "diff-tree", "-r", "--numstat", "-z", "--no-renames",
+                         candidate["head"], candidate["index_tree"])
+    kinds = {kind: {"paths": 0, "added": 0, "deleted": 0} for kind in SIZE_KINDS}
+    for entry in listed.split(b"\0"):
+        added, _, rest = entry.partition(b"\t")
+        deleted, _, path = rest.partition(b"\t")
+        if not path:
+            continue
+        plus = int(added) if added.isdigit() else 0
+        minus = int(deleted) if deleted.isdigit() else 0
+        kind = "deletion" if plus == 0 and minus > 0 else size_kind(os.fsdecode(path))
+        kinds[kind]["paths"] += 1
+        kinds[kind]["added"] += plus
+        kinds[kind]["deleted"] += minus
+    return {"paths": sum(k["paths"] for k in kinds.values()), "kinds": kinds}
+
+
+def size_text(size):
+    """One line naming each kind that changed: paths and lines, product first."""
+    parts = [f"{kind} {k['paths']} path(s) +{k['added']}/-{k['deleted']}"
+             for kind, k in size["kinds"].items() if k["paths"]]
+    return ", ".join(parts) or "nothing changed"
+
+
+def size_tripwire(cfg, size):
+    """Where a candidate's size stands against the guideline, and what that asks for (#34).
+
+    Within it, nothing. Over it, a question: the boundary must say why the slice
+    is one invariant that cannot be split without leaving a seam unreviewed, and
+    that statement goes to the reviewer. Only far above it, where no review is
+    credible at any length, a refusal. Generated files and pure deletions count
+    toward no limit.
+    """
+    lines = size["kinds"]["product"]["added"] + size["kinds"]["product"]["deleted"]
+    paths = sum(size["kinds"][kind]["paths"] for kind in ("product", "tests", "fixtures"))
+    guide_lines = settings.get(cfg, "size.guideline_product_lines")
+    guide_paths = settings.get(cfg, "size.guideline_paths")
+    refuse_lines = settings.get(cfg, "size.refuse_product_lines")
+    measured = f"{lines} product line(s) across {paths} path(s)"
+    guideline = f"the guideline is {guide_lines} product lines and {guide_paths} paths"
+    if lines > refuse_lines:
+        return {"state": "refuse", "lines": lines, "paths": paths, "overshoot_pct": None,
+                "text": f"{measured} is far above what a review can credibly judge ({refuse_lines} product "
+                        f"lines, size.refuse_product_lines); {guideline}. Split it."}
+    if lines <= guide_lines and paths <= guide_paths:
+        return {"state": "within", "lines": lines, "paths": paths, "overshoot_pct": 0, "text": measured}
+    overshoot = max(100 * (lines - guide_lines) / guide_lines, 100 * (paths - guide_paths) / guide_paths)
+    return {"state": "over", "lines": lines, "paths": paths, "overshoot_pct": round(overshoot),
+            "text": f"{measured} is over the guideline ({guideline})"}
+
+
+def one_slice_statement(item, boundary=None):
+    """Why an oversized slice is one invariant, as its boundary states it (#34): a file section or `one slice:`."""
+    if boundary and (boundary.get("sections") or {}).get("why one slice", "").strip():
+        return boundary["sections"]["why one slice"].strip()
+    return ((((item or {}).get("notes") or {}).get("one slice")) or "").strip()
+
+
 REVIEW_CONTEXT_BUDGET = 100_000
 
 
@@ -4049,7 +4137,7 @@ def slice_boundary(item):
 
 # ---- a slice's boundary: a sentence, or a file the row points at (#73, #35) ------------
 
-BOUNDARY_SECTIONS = ("invariant", "scenarios", "paths", "out of scope")
+BOUNDARY_SECTIONS = ("invariant", "scenarios", "paths", "out of scope", "why one slice")
 _BOUNDARY_COMMIT = re.compile(r"[0-9a-fA-F]{7,40}")
 _NAMED_FILE = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)+[\w.-]+\.\w+|[\w-]+\.(?:py|ts|tsx|js|jsx|mjs|cjs|go|rs|java|kt|"
                          r"rb|cs|swift|c|h|cpp|hpp|sql|sh|ps1|json|ya?ml|toml|md))(?![\w/-])")
@@ -4184,7 +4272,8 @@ def boundary_conflicts(root, item):
     out = [f"{path} is declared but does not exist; write `(new)` after it if the slice creates it"
            for path, new in declared if not new and not os.path.exists(os.path.join(root, path))]
     if source:
-        text = "\n".join(body for name, body in source["sections"].items() if name not in ("paths", "out of scope")) \
+        text = "\n".join(body for name, body in source["sections"].items()
+                         if name not in ("paths", "out of scope", "why one slice")) \
             or source["text"]
     else:
         text = slice_boundary(item)

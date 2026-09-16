@@ -56,6 +56,25 @@ is outside them. It is prose matching, so it names what it found and blocks noth
 point is to find a boundary conflict at registration, when widening or splitting is
 cheap, rather than three hours into the slice.
 
+## Size is a tripwire that asks a question
+
+`ao review` and `ao verify` measure a candidate by kind - product, tests, fixtures,
+generated and pure deletion - and by path, never as one number: 400 lines of fixtures
+are not 400 lines of concurrency. The guideline is `size.guideline_product_lines` (400)
+and `size.guideline_paths` (5). Over it, nothing is refused: the boundary has to say why
+the slice is one invariant that cannot be split without leaving a seam unreviewed -
+`one slice: …` on the row, or a "Why one slice" section in its file - and that statement
+goes to the reviewer to judge. Without one, the reviewer is asked whether it should be
+split. Only far above, at `size.refuse_product_lines` (4000), where no review is
+credible at any length, does `ao review` refuse before spawning.
+
+Code that has passed its gates is never reshaped to satisfy a size number. On
+2026-09-08 a candidate whose fixes were green measured 464 lines, and rewriting it to
+reach 400 would have thrown away the verification it had. When the overshoot is within
+`size.small_overshoot_pct` (25%) and the newest verification passed on this candidate,
+`ao review` says so. The guideline relaxes once sectioned review (#26) lands, since the
+timeout that motivated it is gone.
+
 ## States
 
 ```

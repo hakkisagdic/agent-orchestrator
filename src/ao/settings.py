@@ -39,6 +39,18 @@ SETTINGS = {
     "stall_minutes": Setting(
         60, int, 1, None, "project",
         "minutes a staged candidate may wait to land before throughput calls the slice stalled"),
+    "size.guideline_paths": Setting(
+        5, int, 1, None, "project",
+        "paths a candidate may change before its boundary must say why it is one slice"),
+    "size.guideline_product_lines": Setting(
+        400, int, 1, None, "project",
+        "product lines a candidate may change before its boundary must say why it is one slice"),
+    "size.refuse_product_lines": Setting(
+        4000, int, 1, None, "project",
+        "product lines above which no review is credible and ao review refuses before spawning"),
+    "size.small_overshoot_pct": Setting(
+        25, int, 0, None, "project",
+        "percent over the guideline small enough that verified code is never reshaped to meet it"),
     "boundary.inline_max_chars": Setting(
         400, int, 1, None, "project",
         "characters of acceptance a board row may carry before its boundary belongs in a file"),
