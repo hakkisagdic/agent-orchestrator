@@ -96,6 +96,19 @@ no MCP server it was not given (#24); `ao doctor` and the reviewer check read it
 A driver is chosen by name and reads every path, key, command and endpoint from the adapter, so
 adding a harness whose account answers the same protocol is a data change (#76).
 
+## Profiles and actor names are declared, not coded
+
+`ao init --profile` offers the presets in [`adapters/profiles.json`](../src/ao/adapters/profiles.json):
+which adapter holds each role. The blocks are composed from those adapters (#76) — the implementer's
+name from `actor_name`, the reviewer's argv from `send`, `models.review` and `options.trust_none`
+with its `family`, the architect's from `resume` with `options.allowed_tools` narrowed to what an
+architect runs. An implementer with no `implementer.name` is named by its adapter's `actor_name`,
+and a project with no implementer block by the default profile's, so its mail keeps the names it
+was written under.
+
+`tests/test_harness_guard.py` fails when a harness's id, command, process, directory or rule file
+appears in a core module's code. Docstrings may name one; code reads an adapter instead.
+
 ## Shipping an adapter without forking
 
 Adapters load from three places, each overriding the one before by `id`: the package, then

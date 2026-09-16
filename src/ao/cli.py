@@ -1063,7 +1063,7 @@ PROJECT_ADOPT_HINT = (
     "adopt the marker: printf 'ao-project-v1\\n' > .ao-project && git add .ao-project, "
     "then land that commit through ao commit-ok"
 )
-PROJECT_INIT_COMMAND = "ao init --profile claude-kiro"
+PROJECT_INIT_COMMAND = f"ao init --profile {A.default_profile()}"
 
 
 def _project_refusal(problem):
@@ -3768,11 +3768,14 @@ def cmd_review(cfg, args):
             return 2
     else:
         if not rv.get("argv") and not carried:
-            print(f"{C['yellow']}No reviewer configured.{C['reset']} Add to .ao/config.json:")
-            print(json.dumps({"reviewer": {
-                "id": "claude-reviewer", "family": "anthropic",
-                "argv": ["claude", "-p", "{prompt}", "--model", "claude-opus-5",
-                         "--allowedTools", "Read,Grep,Glob", "--strict-mcp-config"]}}, indent=2))
+            print(f"{C['yellow']}No reviewer configured.{C['reset']} Add to .ao/config.json, or "
+                  f"`ao role set reviewer <adapter> --model <model>`:")
+            reviewer = (A.profiles().get(A.default_profile()) or {}).get("reviewer") or ""
+            try:
+                example = _reviewer_block(reviewer, _models(reviewer).get("review"))
+            except ValueError:
+                example = {"id": "reviewer", "argv": ["<command>", "{prompt}"]}
+            print(json.dumps({"reviewer": example}, indent=2))
             print(f"\n{C['dim']}It must not be the implementer. A model reviewing its own")
             print(f"output shares its own blind spots.{C['reset']}")
             return 1
@@ -4326,7 +4329,7 @@ def cmd_note(cfg, args):
     # for a command an unattended architect calls.
     body = args.body if args.body else (sys.stdin.read() if args.stdin else "")
     if not args.title or not body.strip():
-        print(f"usage: {C['b']}ao note \"title\" --body \"…\" [--to kiro] [--urgent]{C['reset']}")
+        print(f"usage: {C['b']}ao note \"title\" --body \"…\" [--to implementer] [--urgent]{C['reset']}")
         print(f"       {C['dim']}or pipe the body on stdin{C['reset']}")
         return 1
     name = A.note(cfg["root"], cfg, args.to, args.title, body, urgent=args.urgent)
@@ -4514,12 +4517,6 @@ def _models(adapter_id):
         return {}
 
 
-# implementer adapter; models come from the adapters, never from code
-PROFILES = {
-    "claude-kiro":   {"implementer": "kiro"},
-    "claude-claude": {"implementer": "claude-code"},
-}
-
 # The architect's grant names each ao command it runs (#58): `ao:*` would admit
 # `ao push allow` and `ao waive`, which are a person's, and `find` runs anything
 # through -exec.
@@ -4534,18 +4531,46 @@ ARCHITECT_TOOLS = ("Read,Grep,Glob,"
                    "Bash(rm agent-mail/*)")
 
 
+def _reviewer_block(adapter_id, model=None):
+    """A reviewer block composed from its adapter: its actor's name, family, and argv (#88, #76)."""
+    declared = A.load_adapter(adapter_id)
+    route = A.compose_reviewer(adapter_id, model=model)
+    name = declared.get("actor_name") or adapter_id
+    block = {"id": f"{name}-reviewer-{model}" if model else f"{name}-reviewer"}
+    if declared.get("family"):
+        block["family"] = declared["family"]
+    block["argv"] = route["argv"]
+    return block
+
+
+def _architect_argv(adapter_id):
+    """The architect's argv: its adapter's resume, with the allowed tools narrowed to ARCHITECT_TOOLS."""
+    declared = A.load_adapter(adapter_id)
+    argv = list((declared.get("resume") or {}).get("argv") or [])
+    grant = (declared.get("options") or {}).get("allowed_tools") or []
+    if grant:
+        while grant[0] in argv:
+            at = argv.index(grant[0])
+            del argv[at:at + 2]
+        argv += [part.replace("{tools}", ARCHITECT_TOOLS) for part in grant]
+    return argv
+
+
 def _profile_config(root, args, base):
     """Return the profile's intended config and added block names without writing."""
     cfg = dict(base) if isinstance(base, dict) else {}
-    prof = PROFILES.get(getattr(args, "profile", None) or "")
+    presets = A.profiles()
+    prof = presets.get(getattr(args, "profile", None) or "")
     impl_adapter = getattr(args, "implementer", None) or (prof or {}).get("implementer")
     if not impl_adapter and not prof:
         return cfg, []
+    roles = prof or presets.get(A.default_profile()) or {}
     added = []
     if "implementer" not in cfg:
-        block = {"adapter": impl_adapter or "kiro", "session": "auto",
-                 "name": {"kiro": "kiro", "claude-code": "claude"}.get(impl_adapter or "kiro", impl_adapter)}
-        model = getattr(args, "model", None) or _models(impl_adapter or "kiro").get("default")
+        impl_adapter = impl_adapter or roles.get("implementer")
+        block = {"adapter": impl_adapter, "session": "auto",
+                 "name": A.load_adapter(impl_adapter).get("actor_name") or impl_adapter}
+        model = getattr(args, "model", None) or _models(impl_adapter).get("default")
         if model:
             block["model"] = model
         if getattr(args, "effort", None):
@@ -4553,16 +4578,15 @@ def _profile_config(root, args, base):
         cfg["implementer"] = block
         added.append("implementer")
     if "reviewer" not in cfg:
-        rmodel = getattr(args, "reviewer_model", None) or _models("claude-code").get("review") or "claude-opus-5"
-        cfg["reviewer"] = {"id": f"claude-reviewer-{rmodel}", "family": "anthropic",
-                           "argv": ["claude", "-p", "{prompt}", "--model", rmodel, "--allowedTools", "Read,Grep,Glob",
-                                    "--strict-mcp-config"],
-                           "_why": "must not be the implementer; a different model where one is available"}
+        reviewer = roles.get("reviewer")
+        rmodel = getattr(args, "reviewer_model", None) or _models(reviewer).get("review")
+        cfg["reviewer"] = dict(_reviewer_block(reviewer, rmodel),
+                               _why="must not be the implementer; a different model where one is available")
         added.append("reviewer")
     if "architect" not in cfg:
-        cfg["architect"] = {"adapter": "claude-code", "session": "auto", "cwd": root, "name": "fable",
-                            "argv": ["claude", "--resume", "{session}", "-p", "{prompt}",
-                                     "--allowedTools", ARCHITECT_TOOLS],
+        architect = roles.get("architect")
+        cfg["architect"] = {"adapter": architect, "session": "auto", "cwd": root, "name": "fable",
+                            "argv": _architect_argv(architect),
                             "_why": "resumable and woken only into absence; read-only tools plus ao"}
         added.append("architect")
     return cfg, added
@@ -7798,7 +7822,7 @@ def cmd_adapters(cfg, args):
     print(f"{'adapter':<16}{'source':<9}{'contract':<10}{'verified':<12}{'on this machine':<22}observation")
     for ident, entry in sorted(A.adapter_catalog(root).items()):
         a = entry["adapter"]
-        if ident == "cloud-generic":
+        if a.get("kind") == "cloud":
             continue
         if entry["problem"]:
             print(f"{ident:<16}{entry['source']:<9}{C['red']}refused{C['reset']}  {entry['problem']}")
@@ -8534,11 +8558,11 @@ def main():
     ini.add_argument("--mcp", action="store_true", help="(default) register the MCP server for detected agents")
     ini.add_argument("--no-mcp", action="store_true", help="skip the MCP registration")
     ini.add_argument("--rules", action="store_true", help="also write the pointer into the owner's rule files")
-    ini.add_argument("--profile", choices=sorted(PROFILES), help="write the role blocks: who implements, reviews, judges")
-    ini.add_argument("--implementer", help="implementer adapter id (kiro, claude-code, …); overrides the profile")
+    ini.add_argument("--profile", choices=sorted(A.profiles()), help="write the role blocks: who implements, reviews, judges")
+    ini.add_argument("--implementer", help="implementer adapter id (`ao adapters` lists them); overrides the profile")
     ini.add_argument("--model", help="implementer model, passed through the adapter's --model option")
-    ini.add_argument("--effort", help="implementer effort, where the adapter has one (kiro: low…max)")
-    ini.add_argument("--reviewer-model", dest="reviewer_model", help="reviewer model (default claude-opus-5)")
+    ini.add_argument("--effort", help="implementer effort, where its adapter takes one (options.effort_values)")
+    ini.add_argument("--reviewer-model", dest="reviewer_model", help="reviewer model (default: its adapter's models.review)")
     ini.add_argument("--watchdog", action="store_true", help="also install the watchdog")
     ini.add_argument("--allow-uncovered-gates", action="store_true",
                      help="write quick gates that exercise none of the detected toolchains")

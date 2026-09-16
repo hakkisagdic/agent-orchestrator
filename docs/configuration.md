@@ -65,7 +65,7 @@ machine setting written into a project.
 | `fanout.max_agents` | `12` | project | the most agents one fan-out may start |
 | `fanout.per_agent_tokens` | `50000` | project | the token budget each fanned-out agent is given |
 | `fanout.window_reserve_pct` | `30` | project | percent of the provider window a fan-out must leave unused |
-| `implementer.name` | `kiro` | project | the implementer's name in mail file names |
+| `implementer.name` | `none` | project | the implementer's name in mail file names; none: its adapter's actor name |
 | `architect.name` | `fable` | project | the architect's name in mail file names |
 | `keyflip.rotation` | `off` | machine | on: before an actor starts on a spent window, keyflip rotates the machine's account; off: never |
 | `alarms.red_repeat_hours` | `6` | machine | hours before a red alarm that still stands e-mails again |

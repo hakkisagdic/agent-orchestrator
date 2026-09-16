@@ -2,6 +2,8 @@
   "id": "claude-code",
   "name": "Claude Code",
   "verified": "full",
+  "actor_name": "claude",
+  "family": "anthropic",
   "notes": "Works as implementer and as architect. When used as the architect it is the process running the orchestrator, so only send/resume matter.",
   "send": {
     "argv": [

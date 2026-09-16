@@ -1,0 +1,8 @@
+{
+  "about": "Presets for `ao init --profile`: which adapter holds each role (#76). The role blocks are composed from those adapters - an actor's name, a reviewer's argv from its send, model and trust_none, an architect's from its resume and allowed tools - never written here. `init` is the profile a new project is pointed at.",
+  "init": "claude-kiro",
+  "profiles": {
+    "claude-kiro":   { "implementer": "kiro",        "reviewer": "claude-code", "architect": "claude-code" },
+    "claude-claude": { "implementer": "claude-code", "reviewer": "claude-code", "architect": "claude-code" }
+  }
+}

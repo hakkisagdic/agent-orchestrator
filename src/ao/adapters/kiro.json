@@ -2,6 +2,7 @@
   "id": "kiro",
   "name": "Kiro CLI",
   "verified": "full",
+  "actor_name": "kiro",
   "verified_version": "kiro-cli (Kiro CLI), IDE 1.0.411",
   "notes": "Reference adapter. Every capability exercised in a multi-week production run.",
   "send": {

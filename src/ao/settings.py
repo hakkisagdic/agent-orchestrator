@@ -147,8 +147,8 @@ SETTINGS = {
         30, int, 0, 100, "project",
         "percent of the provider window a fan-out must leave unused"),
     "implementer.name": Setting(
-        "kiro", str, None, None, "project",
-        "the implementer's name in mail file names"),
+        None, str, None, None, "project",
+        "the implementer's name in mail file names; none: its adapter's actor name"),
     "architect.name": Setting(
         "fable", str, None, None, "project",
         "the architect's name in mail file names"),

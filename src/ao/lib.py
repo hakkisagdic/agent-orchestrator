@@ -383,7 +383,7 @@ def adapter_catalog(root=None):
         except OSError:
             continue
         for name in names:
-            if not name.endswith(".json") or name == VENDORS_FILE:
+            if not name.endswith(".json") or name in DATA_FILES:
                 continue
             path = os.path.join(directory, name)
             try:
@@ -412,6 +412,54 @@ def load_adapter(adapter_id, root=None):
 VENDORS_FILE = "vendors.json"
 
 
+PROFILES_FILE = "profiles.json"
+DATA_FILES = (VENDORS_FILE, PROFILES_FILE)      # beside the adapters, and not adapters
+
+
+_PROFILE_DOCUMENT = {}
+
+
+def _profile_document():
+    """adapters/profiles.json, read once per state of the file: mail names consult it for every message."""
+    path = os.path.join(adapters_dir(), PROFILES_FILE)
+    try:
+        key = (path, os.stat(path).st_mtime_ns)
+    except OSError:
+        return {}
+    if key not in _PROFILE_DOCUMENT:
+        try:
+            with open(path, encoding=UTF8) as fh:
+                document = json.load(fh)
+        except (OSError, ValueError):
+            document = {}
+        _PROFILE_DOCUMENT.clear()
+        _PROFILE_DOCUMENT[key] = document if isinstance(document, dict) else {}
+    return _PROFILE_DOCUMENT[key]
+
+
+def profiles():
+    """{name: {role: adapter id}}: the presets `ao init --profile` offers, from adapters/profiles.json (#76)."""
+    found = _profile_document().get("profiles")
+    return {name: dict(roles) for name, roles in found.items() if isinstance(roles, dict)} \
+        if isinstance(found, dict) else {}
+
+
+def default_profile():
+    """The profile a new project is pointed at."""
+    return str(_profile_document().get("init") or next(iter(sorted(profiles())), ""))
+
+
+def implementer_actor_name(cfg):
+    """The implementer's name when none is set: its adapter's `actor_name`, else the default profile's (#76).
+
+    A project with no implementer block keeps the name its mail was always written
+    under, because the default profile's implementer declares that name.
+    """
+    ident = ((cfg or {}).get("implementer") or {}).get("adapter") \
+        or (profiles().get(default_profile()) or {}).get("implementer") or ""
+    return str(package_adapters().get(ident, {}).get("actor_name") or ident or "implementer")
+
+
 def vendor_list():
     """Every vendor ao knows, with the adapter that drives it or why none does (#89)."""
     try:
@@ -431,7 +479,7 @@ def shipped_adapter_ids():
     except OSError:
         return ids
     for name in names:
-        if not name.endswith(".json") or name == VENDORS_FILE:
+        if not name.endswith(".json") or name in DATA_FILES:
             continue
         try:
             with open(os.path.join(adapters_dir(), name), encoding=UTF8) as fh:
@@ -667,7 +715,7 @@ def package_adapters():
         return _PACKAGE_ADAPTERS[key]
     found = {}
     for name in names:
-        if not name.endswith(".json") or name == VENDORS_FILE:
+        if not name.endswith(".json") or name in DATA_FILES:
             continue
         try:
             with open(os.path.join(directory, name), encoding=UTF8) as fh:
@@ -6498,7 +6546,7 @@ def waiting_on_architect(root, cfg):
 
 def mail_names(cfg):
     """(implementer, architect) mail names; defaults keep the historical files valid."""
-    impl = settings.get(cfg, "implementer.name").strip()
+    impl = (settings.get(cfg, "implementer.name") or implementer_actor_name(cfg)).strip()
     arch = settings.get(cfg, "architect.name").strip()
     return impl, arch
 
