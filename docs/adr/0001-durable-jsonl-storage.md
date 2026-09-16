@@ -25,8 +25,13 @@ for the migrated authority and verification ledgers.
   makes no progress. A successful return requires file `fsync`.
 - When a ledger is created, also `fsync` its directory on supported POSIX filesystems.
 - Before appending, validate every complete row and repair at most the incomplete
-  tail. Complete a valid unterminated JSON object with LF, or truncate one invalid
-  partial tail to the preceding newline, then `fsync` the repair.
+  tail: truncate it to the preceding newline and `fsync` the repair. A row is
+  committed by its newline, so an unterminated final object - even valid JSON - is
+  never completed or read as a row (amended 2026-09-16, #68).
+- A failure at any step of an append - a short write, `fsync`, the directory `fsync`,
+  or recording a chained ledger's length - takes the append back: the written bytes
+  are cut off and a file the append created is removed. Rows are encoded with ASCII
+  escapes and without NaN, the inputs the chain digest accepts.
 - Treat malformed complete rows as corruption and fail closed. An incomplete final
   row may be ignored by readers; complete corruption may not.
 

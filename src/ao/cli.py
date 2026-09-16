@@ -596,7 +596,14 @@ def cmd_verify(cfg, args):
     # A plan the implementer edited is a plan that no longer measures anything:
     # the work and the standard it is judged by came from the same hand. Treat it
     # as a failed gate, because that is what it is.
-    drift = A.plan_drift(root)
+    try:
+        drift = A.plan_drift(root)
+    except Exception as exc:
+        ok = False
+        drift = []
+        print(f"\n  {C['red']}FAIL{C['reset']}  plan baselines cannot be read: {exc}")
+        results.append({"name": "plan-integrity", "passed": False,
+                        "detail": f"unreadable: {exc}"[:200], "exit": 1, "seconds": 0})
     if drift:
         ok = False
         print(f"\n  {C['red']}FAIL{C['reset']}  plan changed after admission: "
@@ -713,7 +720,11 @@ def cmd_commit_ok(cfg, args):
         if A.gate_definitions_digest(root, ver.get("profile")) != ver.get("gates_digest"):
             reasons.append(f"gate definitions changed since {ver['id']} — re-run `ao verify`")
 
-    drift = A.plan_drift(root)
+    try:
+        drift = A.plan_drift(root)
+    except Exception as exc:
+        drift = []
+        reasons.append(f"plan baselines cannot be read: {exc}")
     if drift:
         reasons.append(f"plan edited after admission: {', '.join(drift)}")
 
@@ -5972,8 +5983,8 @@ def _prune_jsonl(path, cutoff, dry):
             pass                                  # unparseable: keep it, do not silently lose data
         keep.append(line if line.endswith("\n") else line + "\n")
     if dropped and not dry:
-        with open(path, "w", encoding=UTF8) as fh:
-            fh.writelines(keep)
+        from .storage import replace_file_durably
+        replace_file_durably(path, "".join(keep).encode(UTF8))
     freed = before - sum(len(k.encode()) for k in keep) if dropped else 0
     return dropped, len(keep), max(0, freed)
 
@@ -6001,6 +6012,13 @@ def cmd_prune(cfg, args):
 
     total = 0
     for name, kind, rel, desc in STORES:
+        if kind == "evidence" and args.evidence:
+            # Verification rows and plan baselines are what authority was granted
+            # against, and the verification ledger is chained: dropping its oldest
+            # rows would break it. Retention of evidence is sealing, not pruning (#50).
+            print(f"  {C['dim']}keep  {name:<14} evidence is never pruned; "
+                  f"sealing old rows is #50{C['reset']}")
+            continue
         if kind == "evidence" and not args.evidence:
             path = os.path.join(root, rel)
             if os.path.exists(path):

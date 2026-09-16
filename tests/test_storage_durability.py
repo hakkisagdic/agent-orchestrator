@@ -88,10 +88,11 @@ def test_fsync_failure_is_reported_to_the_caller(tmp_path):
         storage.append_jsonl(path, {"id": "uncertain"}, _fsync=fail_fsync)
 
 
-def test_append_uses_portable_utf8_lf_format(tmp_path):
+def test_append_uses_portable_ascii_lf_format(tmp_path):
     path = tmp_path / "events.jsonl"
     storage.append_jsonl(str(path), {"text": "café"})
-    assert path.read_bytes() == b'{"text":"caf\xc3\xa9"}\n'
+    assert path.read_bytes() == b'{"text":"caf\\u00e9"}\n'
+    assert storage.read_jsonl(str(path)) == [{"text": "café"}]
 
 
 def test_new_ledger_syncs_file_and_directory_on_posix(tmp_path):

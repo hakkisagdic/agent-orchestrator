@@ -715,14 +715,12 @@ def plan_digest(root, item_id):
 
 def plan_baseline(root):
     """Plan hashes as they stood when each item was admitted."""
-    p = os.path.join(root, ".ao", "ledger", "plans.jsonl")
+    # A torn or malformed row fails closed instead of silently dropping the
+    # baselines around it, which switched the plan-drift refusal off (#68).
+    from .storage import read_jsonl
     out = {}
-    if not os.path.exists(p):
-        return out
-    for line in open(p, errors="replace", encoding=UTF8):
-        try:
-            rec = json.loads(line)
-        except Exception:
+    for rec in read_jsonl(os.path.join(root, ".ao", "ledger", "plans.jsonl")):
+        if not isinstance(rec, dict):
             continue
         if rec.get("item") and rec.get("digest"):
             out[rec["item"]] = rec["digest"]
@@ -747,11 +745,9 @@ def plan_drift(root):
 
 
 def record_plan(root, item_id, digest):
-    d = os.path.join(root, ".ao", "ledger")
-    os.makedirs(d, exist_ok=True)
-    with open(os.path.join(d, "plans.jsonl"), "a", encoding=UTF8) as fh:
-        fh.write(json.dumps({"item": item_id, "digest": digest,
-                             "at": int(time.time())}) + "\n")
+    from .storage import append_jsonl
+    append_jsonl(os.path.join(root, ".ao", "ledger", "plans.jsonl"),
+                 {"item": item_id, "digest": digest, "at": int(time.time())})
 
 
 def board_append(root, state, line):
@@ -4212,59 +4208,83 @@ def helpers_path(root):
     return os.path.join(HOME, ".ao", f"helpers-{key}.json")
 
 
+def _helpers_update(root, change):
+    """Change the helper registry under its lock and replace it whole (#68).
+
+    It was read, changed and written back unlocked, and the read path wrote too, so
+    a status call overwrote a helper registered a moment before and the watchdog
+    counted a running reviewer as a second writer.
+    """
+    from .storage import _exclusive_lock, replace_file_durably
+    path = helpers_path(root)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with _exclusive_lock(path + ".lock"):
+        try:
+            with open(path, encoding=UTF8) as fh:
+                d = json.load(fh)
+        except (OSError, ValueError):
+            d = {}
+        if not isinstance(d, dict):
+            d = {}
+        change(d)
+        replace_file_durably(path, json.dumps(d).encode(UTF8))
+
+
 def helper_register(root, pid, what):
     """A reviewer, a probe: started by ao inside the repo, never a writer.
 
     Bind the declaration to process start identity. PID existence alone is not
     identity: after reuse it would exclude an unrelated process indefinitely.
     """
+    start = _process_start(pid, refresh=True)
+
+    def change(d):
+        # Dead, reused or unprovable entries go here, under the lock, never on a read.
+        for key in list(d):
+            recorded = d.get(key) if isinstance(d.get(key), dict) else {}
+            try:
+                current = _process_start(int(key))
+            except (TypeError, ValueError):
+                current = None
+            if current is None or current != recorded.get("start"):
+                d.pop(key, None)
+        d[str(pid)] = {"what": what, "at": int(time.time()), "start": start}
+
     try:
-        d = json.load(open(helpers_path(root), encoding=UTF8))
-    except (OSError, ValueError):
-        d = {}
-    d[str(pid)] = {"what": what, "at": int(time.time()),
-                   "start": _process_start(pid, refresh=True)}
-    try:
-        os.makedirs(os.path.dirname(helpers_path(root)), exist_ok=True)
-        json.dump(d, open(helpers_path(root), "w", encoding=UTF8))
+        _helpers_update(root, change)
     except OSError:
         pass
 
 
 def helper_release(root, pid):
     try:
-        d = json.load(open(helpers_path(root), encoding=UTF8))
-        d.pop(str(pid), None)
-        json.dump(d, open(helpers_path(root), "w", encoding=UTF8))
-    except (OSError, ValueError):
+        _helpers_update(root, lambda d: d.pop(str(pid), None))
+    except OSError:
         pass
 
 
 def helper_pids(root, what=None):
+    """Registered helpers still running as the process that registered; reading writes nothing."""
     try:
-        d = json.load(open(helpers_path(root), encoding=UTF8))
+        with open(helpers_path(root), encoding=UTF8) as fh:
+            d = json.load(fh)
     except (OSError, ValueError):
         return set()
+    if not isinstance(d, dict):
+        return set()
     live = set()
-    for key in list(d):
+    for key, recorded in d.items():
         try:
             pid = int(key)
         except (TypeError, ValueError):
-            d.pop(key, None)
             continue
-        recorded = d.get(key) if isinstance(d.get(key), dict) else {}
+        recorded = recorded if isinstance(recorded, dict) else {}
         current_start = _process_start(pid)
+        # Dead, reused, or legacy/unprovable pid: never let declaration alone
+        # exclude a process. Conservative writer checks may count it once.
         if current_start is not None and recorded.get("start") == current_start:
             if what is None or recorded.get("what") == what:
                 live.add(pid)
-        else:
-            # Dead, reused, or legacy/unprovable pid: never let declaration alone
-            # exclude a process. Conservative writer checks may count it once.
-            d.pop(key, None)
-    try:
-        json.dump(d, open(helpers_path(root), "w", encoding=UTF8))
-    except OSError:
-        pass
     return live
 
 

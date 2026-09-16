@@ -72,7 +72,12 @@ def _exclusive_lock(path, timeout=10.0):
 
 
 def _read_jsonl_unlocked(path, allow_partial_tail=True):
-    """Parse a ledger while the caller owns its lock."""
+    """Parse a ledger while the caller owns its lock.
+
+    A row is committed by its newline. A final line without one - even valid
+    JSON - is what an interrupted or failed append leaves, and is never a row:
+    a grant whose append raised must not be read back as authority (#68).
+    """
     try:
         data = open(path, "rb").read()
     except FileNotFoundError:
@@ -84,12 +89,13 @@ def _read_jsonl_unlocked(path, allow_partial_tail=True):
         body = raw.rstrip(b"\r\n")
         if not body:
             continue
+        if not complete:
+            if allow_partial_tail:
+                break
+            raise LedgerCorruption(f"uncommitted final record {index + 1} in {path}")
         try:
             rows.append(json.loads(body.decode(UTF8)))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            is_tail = index == len(lines) - 1
-            if allow_partial_tail and is_tail and not complete:
-                break
             raise LedgerCorruption(
                 f"malformed JSONL record {index + 1} in {path}: {exc}"
             ) from exc
@@ -314,7 +320,10 @@ def replace_file_durably(path, data, *, _checkpoint=None, _fsync=None):
 
 
 def _repair_partial_tail(path, fsync, checkpoint):
-    """Salvage a complete unterminated row or truncate a partial final row."""
+    """Cut off the uncommitted final record an interrupted or failed append left.
+
+    It is never completed: its writer did not return, so it was never committed (#68).
+    """
     if not os.path.exists(path) or os.path.getsize(path) == 0:
         return "clean"
 
@@ -324,41 +333,53 @@ def _repair_partial_tail(path, fsync, checkpoint):
     # an already-corrupt ledger.
     data = open(path, "rb").read()
     _read_jsonl_unlocked(path, allow_partial_tail=True)
-    if data.endswith(b"\n"):
+    if data.endswith((b"\n", b"\r")):
         return "clean"
 
-    boundary = data.rfind(b"\n") + 1
-    tail = data[boundary:]
-    try:
-        json.loads(tail.decode(UTF8))
-        salvage = True
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        salvage = False
-
+    boundary = max(data.rfind(b"\n"), data.rfind(b"\r")) + 1
     with open(path, "r+b", buffering=0) as handle:
-        if salvage:
-            handle.seek(0, os.SEEK_END)
-            handle.write(b"\n")
-            action = "completed-tail"
-        else:
-            handle.truncate(boundary)
-            action = "truncated-tail"
+        handle.truncate(boundary)
         fsync(handle.fileno())
-    _call(checkpoint, action)
-    return action
+    _call(checkpoint, "truncated-tail")
+    return "truncated-tail"
 
 
 def _encode_jsonl(record):
+    # The same inputs the chain digest accepts - ASCII escapes, no NaN - so no row
+    # is written that could never be digested, and a path Git hands over
+    # undecodable is escaped rather than refused (#68).
     return (json.dumps(
-        record, ensure_ascii=False, separators=(",", ":")
-    ) + "\n").encode(UTF8)
+        record, ensure_ascii=True, allow_nan=False, separators=(",", ":")
+    ) + "\n").encode("ascii")
 
 
 def _append_payload_unlocked(path, parent, payload, write, fsync, checkpoint):
-    """Append one encoded row while the caller owns the sidecar lock."""
+    """Append one encoded row while the caller owns the sidecar lock.
+
+    All or nothing (#68): a failure at any step - a short write, the file fsync, the
+    directory fsync - cuts the written bytes off again, and removes a file this
+    append created, before the error goes to the caller. Returns the same undo for
+    a caller whose own next step fails while it still holds the lock.
+    """
     created = not os.path.exists(path)
     flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_BINARY", 0)
     fd = os.open(path, flags, 0o644)
+    size = os.fstat(fd).st_size
+
+    def undo():
+        try:
+            if created:
+                os.remove(path)
+                return
+            os.truncate(path, size)
+            handle = os.open(path, os.O_WRONLY | getattr(os, "O_BINARY", 0))
+            try:
+                os.fsync(handle)
+            finally:
+                os.close(handle)
+        except OSError:
+            pass
+
     try:
         _call(checkpoint, "opened")
         remaining = memoryview(payload)
@@ -373,11 +394,21 @@ def _append_payload_unlocked(path, parent, payload, write, fsync, checkpoint):
         _call(checkpoint, "written")
         fsync(fd)
         _call(checkpoint, "fsynced")
-    finally:
+    except BaseException:
         os.close(fd)
+        undo()
+        raise
+    os.close(fd)
 
-    if created and _sync_directory(parent, fsync):
-        _call(checkpoint, "directory-fsynced")
+    if created:
+        try:
+            synced = _sync_directory(parent, fsync)
+        except BaseException:
+            undo()
+            raise
+        if synced:
+            _call(checkpoint, "directory-fsynced")
+    return undo
 
 
 def append_jsonl(path, record, timeout=10.0, *, _checkpoint=None,
@@ -434,8 +465,15 @@ def append_chained_jsonl(path, record, chain, timeout=10.0, *,
         chained = {previous_field: previous, "ordinal": len(rows) + 1}
         chained.update(record)
         payload = _encode_jsonl(chained)
-        _append_payload_unlocked(
+        digest = chained_row_digest(chained, chain)
+        undo = _append_payload_unlocked(
             path, parent, payload, write, fsync, _checkpoint
         )
-        _record_committed_length(path, len(rows) + 1, chained_row_digest(chained, chain))
+        try:
+            _record_committed_length(path, len(rows) + 1, digest)
+        except BaseException:
+            # A row whose length could not be recorded is taken back, so the
+            # caller's failure and the file agree (#68).
+            undo()
+            raise
     return chained
