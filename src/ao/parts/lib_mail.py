@@ -219,10 +219,37 @@ def fanout_verdict(root, cfg, agents, per_agent_tokens=None, provider=None):
 
 # Where a harness installs itself outside the usual directories is its adapter's to declare
 # (`detect.install_dirs`, #76), placed where such a directory always stood in the search.
-_BIN_DIRS = (("~/.local/bin", "~/bin", "/usr/local/bin", "/opt/homebrew/bin")
-             + tuple(sorted({d for adapter in package_adapters().values()
-                             for d in (adapter.get("detect") or {}).get("install_dirs") or []}))
-             + ("~/.npm-global/bin", "~/.volta/bin", "~/.asdf/shims"))
+class _SearchDirs:
+    """_BIN_DIRS: the directories searched after PATH, the adapter-declared ones in place, read when searched.
+
+    Built as a tuple at import, the list read every package adapter before any `ao`
+    run did anything, though most runs never look for a binary. It iterates, indexes
+    and answers `in` as that tuple did, and a test may still put a tuple in its place.
+    """
+
+    def _dirs(self):
+        return (("~/.local/bin", "~/bin", "/usr/local/bin", "/opt/homebrew/bin")
+                + tuple(sorted({d for adapter in package_adapters().values()
+                                for d in (adapter.get("detect") or {}).get("install_dirs") or []}))
+                + ("~/.npm-global/bin", "~/.volta/bin", "~/.asdf/shims"))
+
+    def __iter__(self):
+        return iter(self._dirs())
+
+    def __getitem__(self, index):
+        return self._dirs()[index]
+
+    def __len__(self):
+        return len(self._dirs())
+
+    def __contains__(self, item):
+        return item in self._dirs()
+
+    def __repr__(self):
+        return repr(self._dirs())
+
+
+_BIN_DIRS = _SearchDirs()
 _BIN_GLOBS = ("~/.local/share/fnm/node-versions/*/installation/bin",
               "~/.fnm/node-versions/*/installation/bin",
               "~/.nvm/versions/node/*/bin", "~/.local/share/mise/installs/node/*/bin")

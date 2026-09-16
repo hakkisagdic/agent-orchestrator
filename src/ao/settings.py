@@ -197,10 +197,28 @@ def machine_path():
     return os.environ.get("AO_SETTINGS") or os.path.join(A.HOME, ".ao", "settings.json")
 
 
+_MACHINE_TEXT = {}
+
+
 def machine_settings():
+    """The machine's settings, as a document the caller owns.
+
+    Every setting lookup read the file, 56 times in one `ao doctor --check`. Its text is
+    kept against the path, size, mtime and inode it was read at, so another AO_SETTINGS
+    or a changed file is read again, and it is parsed on every call: a caller that edits
+    what it is given - `ao config set --machine` does - edits its own copy.
+    """
+    path = machine_path()
     try:
-        with open(machine_path(), encoding=UTF8) as fh:
-            data = json.load(fh)
+        state = os.stat(path)
+        text = _MACHINE_TEXT.get((path, state.st_size, state.st_mtime_ns, state.st_ino))
+        if text is None:
+            with open(path, encoding=UTF8) as fh:
+                opened = os.fstat(fh.fileno())
+                text = fh.read()
+            _MACHINE_TEXT.clear()
+            _MACHINE_TEXT[(path, opened.st_size, opened.st_mtime_ns, opened.st_ino)] = text
+        data = json.loads(text)
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
@@ -316,7 +334,10 @@ def assign(document, key, value):
 
 def write_machine(document):
     from .storage import replace_file_durably
-    replace_file_durably(machine_path(), (json.dumps(document, indent=2, sort_keys=True) + "\n").encode(UTF8))
+    try:
+        replace_file_durably(machine_path(), (json.dumps(document, indent=2, sort_keys=True) + "\n").encode(UTF8))
+    finally:
+        _MACHINE_TEXT.clear()      # the next read takes the file as it now is, whatever its timestamps say
 
 
 def problems(cfg):

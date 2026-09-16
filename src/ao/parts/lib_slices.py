@@ -1418,8 +1418,8 @@ def git_state(root):
         merged = head != "refs/heads/" + ref[len(REMOTE_PREFIX):]
     known = ahead is not None
     return {
-        "log": sh("git log --oneline -4", cwd=root).split("\n"),
-        "dirty": [l for l in sh("git status --short", cwd=root).split("\n") if l.strip()],
+        "log": _git_text(root, "log", "--oneline", "-4").split("\n"),
+        "dirty": [l for l in _git_text(root, "status", "--short").split("\n") if l.strip()],
         "ahead": str(ahead) if known else "?",
         "behind": behind,
         "base": ref[len("refs/remotes/"):] if known else None,

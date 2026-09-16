@@ -500,6 +500,23 @@ def _git_output(root, *args, timeout=60):
     return result.stdout
 
 
+def _git_text(cwd, *args, timeout=20):
+    """What `sh("git …", cwd=cwd)` returned, from the same git without a shell started in front of it.
+
+    A status read asked the shell for two of its git queries, and each paid for a shell
+    before git ran. The answer is unchanged: standard output decoded as UTF-8 with
+    replacement, newlines normalised and stripped, whatever a failing git printed there,
+    and "" when git cannot be started or runs past the timeout.
+    """
+    argv = [git_binary(), *args]
+    try:
+        result = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, encoding=UTF8,
+                                errors="replace", timeout=timeout)
+    except Exception:
+        return ""
+    return result.stdout.strip()
+
+
 def _digest_field(digest, label, value):
     """Length-frame one digest field so path/content boundaries cannot collide."""
     digest.update(len(label).to_bytes(2, "big"))

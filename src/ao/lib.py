@@ -72,7 +72,7 @@ def find_root(start=None):
         if parent == d:
             break
         d = parent
-    top = sh("git rev-parse --show-toplevel", cwd=start or os.getcwd())
+    top = _git_text(start or os.getcwd(), "rev-parse", "--show-toplevel")
     return top or os.path.abspath(start or os.getcwd())
 
 

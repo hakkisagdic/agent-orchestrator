@@ -179,7 +179,8 @@ def main():
     ini = sub.add_parser("init", help="put ao on this project (idempotent)")
     ini.add_argument("--name")
     from . import skillkit as _skillkit
-    ini.add_argument("--agent", choices=_skillkit.agent_choices(), default="auto")
+    agents = _skillkit.agent_choices()      # init and skill offer the same names: one read of the adapter catalog
+    ini.add_argument("--agent", choices=agents, default="auto")
     ini.add_argument("--mcp", action="store_true", help="(default) register the MCP server for detected agents")
     ini.add_argument("--no-mcp", action="store_true", help="skip the MCP registration")
     ini.add_argument("--rules", action="store_true", help="also write the pointer into the owner's rule files")
@@ -421,7 +422,7 @@ def main():
     dr.set_defaults(fn=cmd_doctor)
     sk = sub.add_parser("skill", help="the playbook, rendered for the agents this repository uses")
     sk.add_argument("action", choices=["install", "show"], nargs="?", default="install")
-    sk.add_argument("--agent", choices=_skillkit.agent_choices(), default="auto")
+    sk.add_argument("--agent", choices=agents, default="auto")
     sk.set_defaults(fn=cmd_skill)
 
     args = p.parse_args()
