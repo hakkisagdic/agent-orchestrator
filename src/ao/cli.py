@@ -666,6 +666,8 @@ def cmd_verify(cfg, args):
            "review": revs[0][0] if revs else None,
            "review_verdict": revs[0][1] if revs else None,
            "head": A.sh("git rev-parse --short HEAD", cwd=root),
+           # Which git measured the candidate, and that no shell or agent stood between (#51).
+           "measured_by": A.measured_by(),
            "dirty": len([l for l in A.sh("git status --short", cwd=root).split("\n") if l.strip()])}
     try:
         A.record_verification(root, rec)
@@ -3031,7 +3033,7 @@ def cmd_review_submit(cfg, args):
     rid = f"R-{int(time.time() * 1000)}"
     index = os.path.join(_reviews_dir(root), f"{rid}.index")
     os.makedirs(_reviews_dir(root), exist_ok=True)
-    pinned = subprocess.run(["git", "read-tree", candidate["index_tree"]], cwd=root, capture_output=True,
+    pinned = subprocess.run([A.git_binary(), "read-tree", candidate["index_tree"]], cwd=root, capture_output=True,
                             env=dict(os.environ, GIT_INDEX_FILE=index))
     if pinned.returncode:
         print(f"{C['red']}could not pin the candidate{C['reset']}: {pinned.stderr.decode(UTF8, 'replace').strip()}")
@@ -3271,6 +3273,7 @@ def cmd_review(cfg, args):
     # in every structured artifact so round accounting has an explicit owner.
     evidence["slice"] = (running or {}).get("id")
     evidence["boundary"] = boundary
+    evidence["measured_by"] = A.measured_by()
 
     # The candidate is what may land; the context is committed source it is judged
     # against and enters neither the diff nor the digest (#97).
@@ -5490,7 +5493,7 @@ def _hook_git(cwd, *args, timeout=15, extra_env=None):
         env.update(extra_env)
     try:
         return subprocess.run(
-            ["git", "--literal-pathspecs", "-C", str(cwd), *args],
+            [A.git_binary(), "--literal-pathspecs", "-C", str(cwd), *args],
             env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             timeout=timeout,
         )
@@ -7034,6 +7037,16 @@ def _optional_features(cfg):
     ]
 
 
+def _measurement_lines(cfg):
+    """How ao measures, and what could filter the numbers an agent reads (#51)."""
+    filters = A.measurement_filters(cfg["root"])
+    state = (f"{C['yellow']}{len(filters)} possible filter(s){C['reset']}" if filters
+             else f"{C['green']}unfiltered{C['reset']}")
+    lines = [f"{'measurement':<16}{state}  {C['dim']}ao measures with {A.git_binary()}, "
+             f"the candidate without a shell{C['reset']}"]
+    return lines + [f"{'':<16}{C['dim']}{text}{C['reset']}" for text in filters]
+
+
 def cmd_doctor(cfg, args):
     if getattr(args, "check", False):
         # Scheduled checks return through the existing static helper here;
@@ -7150,6 +7163,8 @@ def cmd_doctor(cfg, args):
     proof_tone = C["green"] if hook_proof["installed"] else C["yellow"]
     print(f"{'commit proof':<16}{proof_tone}{_hook_probe_text(hook_proof)}{C['reset']}")
     print(f"{'checkout':<16}{_checkout_position(A.git_state(root))}")
+    for line in _measurement_lines(cfg):
+        print(line)
     # Can the *agent* run `ao`? A shell alias is invisible to a non-interactive
     # process, so steering that says "run your gates through ao lock" is an
     # instruction the agent cannot follow — and a disciplined agent then parks the

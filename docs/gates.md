@@ -64,6 +64,12 @@ Two properties that are not negotiable:
   digest, so a gate weakened after the run cannot inherit its pass; a row appended
   without a valid link makes the ledger unreadable. Rows written before the ledger was
   chained stay as history and never authorise.
+- **The measurement is not filtered.** ao takes its numbers itself - candidate paths and
+  size, `git status`, `rev-parse`, `write-tree`, gate output - never from an agent's
+  terminal, and runs git as the first compiled `git` on `PATH` or in the system
+  directories (or `AO_GIT`), so a script standing in front of git is passed over. The
+  record says how in `measured_by`. What an agent reads through its own shell can be
+  rewritten by a token-saving proxy; `ao doctor` names such a hook or wrapper.
 
 ## Commit authority is bound to a verification
 

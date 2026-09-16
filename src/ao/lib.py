@@ -280,10 +280,20 @@ def load_adapter(adapter_id):
 
 # ── shell ─────────────────────────────────────────────────────────────────────
 
+def _shell_word(word):
+    if os.name == "nt":
+        return subprocess.list2cmdline([word])
+    import shlex
+    return shlex.quote(word)
+
+
 def sh(cmd, cwd=None, timeout=20):
     # cmd.exe has no /dev/null; it calls it NUL, and the command failed instead (#71).
     if os.name == "nt":
         cmd = cmd.replace("2>/dev/null", "2>NUL")
+    # Through a shell too, git is the compiled one, not a script standing in front of it (#51).
+    if cmd.startswith("git "):
+        cmd = _shell_word(git_binary()) + cmd[3:]
     try:
         r = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True,
                            text=True, encoding=UTF8, errors="replace", timeout=timeout)
@@ -1616,11 +1626,116 @@ def _is_coordination_path(path, cfg):
                for prefix in _coordination_dirs(cfg))
 
 
+# ---- ao's own measurements are not read through a filter (#51) ------------------------
+
+# ELF, Mach-O (fat and thin, either byte order) and PE: a compiled program, not a script.
+_NATIVE_MAGIC = (b"\x7fELF", b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca", b"\xcf\xfa\xed\xfe",
+                 b"\xce\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xfe\xed\xfa\xce", b"MZ")
+# What ao treats as evidence; the doctor names them when something could filter them.
+MEASUREMENTS = ("candidate size and paths", "git status", "rev-parse", "write-tree", "hash-object",
+                "gate output")
+_REWRITING_HOOK = re.compile(r"\brtk\b|\bproxy\b|rewrit|compress|condens", re.I)
+_GIT_BINARIES = {}
+
+
+def _native_executable(path):
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(4)
+    except OSError:
+        return False
+    return any(head.startswith(magic) for magic in _NATIVE_MAGIC)
+
+
+def _find_git_binary():
+    explicit = os.environ.get("AO_GIT")
+    if explicit and os.path.isfile(explicit) and os.access(explicit, os.X_OK):
+        return explicit
+    names = ("git.exe", "git") if os.name == "nt" else ("git",)
+    directories = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d and os.path.isabs(d)]
+    if os.name == "nt":
+        directories.append(os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Git", "cmd"))
+    else:
+        directories += ["/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin"]
+    for directory in directories:
+        for name in names:
+            candidate = os.path.join(directory, name)
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK) \
+                    and _native_executable(os.path.realpath(candidate)):
+                return candidate
+    return "git"
+
+
+def git_binary():
+    """The git ao measures with (#51).
+
+    A token-saving proxy in an agent's shell reported a 5,844-line staged diff as
+    533 lines, and the number nearly sized a decision. ao reads its measurements
+    itself, never from an agent's terminal, and it does not take a wrapper for git
+    either: AO_GIT when that names an executable, otherwise the first git on PATH,
+    then in the system directories, that is a compiled program rather than a
+    script in front of one; plain "git" only when there is none.
+    """
+    key = (os.environ.get("AO_GIT"), os.environ.get("PATH", ""), os.name)
+    found = _GIT_BINARIES.get(key)
+    if found is None or (found != "git" and not os.path.isfile(found)):
+        found = _GIT_BINARIES[key] = _find_git_binary()
+    return found
+
+
+def measured_by():
+    """How the measurements in a record were taken: which git, no shell, read by ao (#51)."""
+    return {"git": git_binary(), "candidate_via_shell": False, "captured_by": "ao"}
+
+
+def measurement_filters(root):
+    """What could stand between a number and its source, one sentence each (#51).
+
+    A script named git ahead of any compiled git on PATH, AO_GIT naming nothing
+    executable, and a Claude Code PreToolUse hook that rewrites the shell commands
+    an agent runs. A hook is recognised by its command, since what it does cannot
+    be read without running it.
+    """
+    import shutil
+    found = []
+    explicit = os.environ.get("AO_GIT")
+    if explicit and not (os.path.isfile(explicit) and os.access(explicit, os.X_OK)):
+        found.append(f"AO_GIT names {explicit}, which is not an executable file; ao measures with {git_binary()}")
+    first = shutil.which("git")
+    if first and not _native_executable(os.path.realpath(first)):
+        chosen = git_binary()
+        found.append(f"git on PATH is {first}, a script in front of git; " + (
+            f"ao measures with {chosen}" if chosen != "git" else
+            "no compiled git was found, so ao's own measurements go through it too: set AO_GIT"))
+    for path in (os.path.join(HOME, ".claude", "settings.json"),
+                 os.path.join(root, ".claude", "settings.json"),
+                 os.path.join(root, ".claude", "settings.local.json")):
+        try:
+            with open(path, encoding=UTF8) as fh:
+                hooks = json.load(fh).get("hooks")
+        except (OSError, ValueError, AttributeError):
+            continue
+        entries = hooks.get("PreToolUse") if isinstance(hooks, dict) else None
+        for entry in entries if isinstance(entries, list) else []:
+            if not isinstance(entry, dict):
+                continue
+            matcher = str(entry.get("matcher") or "*")
+            if matcher != "*" and "bash" not in matcher.lower():
+                continue
+            for hook in entry.get("hooks") or []:
+                command = str(hook.get("command") or "") if isinstance(hook, dict) else ""
+                if _REWRITING_HOOK.search(command):
+                    found.append(f"{path}: the PreToolUse hook `{command}` can rewrite the shell commands an "
+                                 f"agent runs, so what an agent reads of {', '.join(MEASUREMENTS)} may be "
+                                 "compressed; take such numbers from ao's records, which do not pass through it")
+    return found
+
+
 def _git_output(root, *args, timeout=60):
     """Run git without a shell and return bytes, failing closed on an unreadable tree."""
     try:
         result = subprocess.run(
-            ["git", *args], cwd=root, stdout=subprocess.PIPE,
+            [git_binary(), *args], cwd=root, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, timeout=timeout,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -5383,7 +5498,7 @@ def review_waiver_ranges(root):
         else:
             try:
                 ancestor = subprocess.run(
-                    ["git", "merge-base", "--is-ancestor", start, end], cwd=root,
+                    [git_binary(), "merge-base", "--is-ancestor", start, end], cwd=root,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60,
                 ).returncode
             except (OSError, subprocess.TimeoutExpired):
