@@ -53,7 +53,7 @@ def send(subject, body, root=None, opener=None):
     c = config()
     if not c:
         return False
-    project = os.path.basename((root or "").rstrip("/")) or "ao"
+    project = (A.project_key(root) if root else "ao")
     payload = {"name": f"{c['name']} · {project}",
                "email": c.get("to") or "noreply@ao.local",
                "message": body,

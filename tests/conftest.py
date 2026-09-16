@@ -65,6 +65,19 @@ def _ledger_checkpoints(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _project_registry(tmp_path_factory):
+    """Project keys are registered outside the repository; give each test its own registry."""
+    registry = tmp_path_factory.mktemp("project-registry") / "projects.json"
+    previous = os.environ.get("AO_PROJECT_REGISTRY")
+    os.environ["AO_PROJECT_REGISTRY"] = str(registry)
+    yield
+    if previous is None:
+        os.environ.pop("AO_PROJECT_REGISTRY", None)
+    else:
+        os.environ["AO_PROJECT_REGISTRY"] = previous
+
+
+@pytest.fixture(autouse=True)
 def _repo_untouched(request):
     """No test may change the repository it lives in.
 

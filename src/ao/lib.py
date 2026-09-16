@@ -3129,7 +3129,7 @@ def answer(root, did, key_or_text, by="human"):
 
 def last_nudge_error(root):
     """The most recent failed nudge, if the watchdog recorded one."""
-    key = os.path.basename(root.rstrip("/")) or "root"
+    key = project_key(root)
     try:
         st = json.load(open(os.path.join(HOME, ".ao", f"watchdog-{key}.json"), encoding=UTF8))
     except Exception:
@@ -3258,7 +3258,7 @@ REVIEW_UNAVAILABLE_RE = re.compile(
 
 
 def reviewer_state_path(root):
-    key = os.path.basename(root.rstrip("/")) or "root"
+    key = project_key(root)
     return os.path.join(HOME, ".ao", f"reviewer-{key}.json")
 
 
@@ -4233,8 +4233,99 @@ def active_alarms(project=None, now=None):
 
 # ---- heartbeat ------------------------------------------------------------------
 
+# ---- one name for what a project keeps outside its tree (#66) -----------------------
+
+PROJECT_KEY_FILE = "project-key"
+
+
+def project_registry_path():
+    """Which path holds which project name on this machine."""
+    return os.environ.get("AO_PROJECT_REGISTRY") or os.path.join(HOME, ".ao", "projects.json")
+
+
+def project_registry():
+    try:
+        with open(project_registry_path(), encoding=UTF8) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {name: row for name, row in data.items() if isinstance(row, dict) and row.get("root")}
+
+
+def _usable_key(name):
+    return (isinstance(name, str) and 0 < len(name) <= 200 and name not in (".", "..")
+            and not any(ch in name for ch in "/\\\0\n\r"))
+
+
+def project_key(root):
+    """The name a project's files outside its tree are kept under (#66).
+
+    Push windows, watchdog state and logs, heartbeats, locks, the reviewer and
+    helper records and alarms were named by the directory's basename, so two
+    checkouts called `api` shared them: a push allowed in one opened the other,
+    and one project's watchdog state overwrote the other's.
+
+    A project's name belongs to its resolved path in the machine registry. A new
+    project takes its basename - the name its files already had, so an existing
+    install keeps them - unless a path that is still an ao project holds that
+    name, compared without case because launchd labels are lower-cased; then it
+    takes the basename and eight hex digits of its resolved path. The name is
+    also written to `.ao/project-key` with the path, so a lost registry gives
+    each project its own name back and a copied `.ao/` does not claim another's.
+    A directory with no `.ao/` is not an ao project: it gets its basename and
+    nothing is written.
+    """
+    base = os.path.basename(os.path.abspath(root).rstrip("/\\")) or "root"
+    real = os.path.realpath(root)
+    if not os.path.isdir(os.path.join(real, ".ao")):
+        return base
+    mine = next((name for name, row in project_registry().items() if row.get("root") == real), None)
+    if mine:
+        return mine
+    from .storage import _exclusive_lock, replace_file_durably
+    registry = project_registry_path()
+    recorded = os.path.join(real, ".ao", PROJECT_KEY_FILE)
+    try:
+        with _exclusive_lock(registry + ".lock"):
+            known = project_registry()
+            mine = next((name for name, row in known.items() if row.get("root") == real), None)
+            if mine is None:
+                held = {name.lower() for name, row in known.items()
+                        if row.get("root") != real and os.path.isdir(os.path.join(row["root"], ".ao"))}
+                try:
+                    with open(recorded, encoding=UTF8) as fh:
+                        mark = json.load(fh)
+                except (OSError, ValueError):
+                    mark = {}
+                wanted = mark.get("key") if isinstance(mark, dict) and mark.get("root") == real else None
+                if _usable_key(wanted) and wanted.lower() not in held:
+                    mine = wanted
+                elif base.lower() not in held:
+                    mine = base
+                else:
+                    mine = f"{base}-{hashlib.sha256(real.encode('utf-8')).hexdigest()[:8]}"
+                known = {name: row for name, row in known.items() if name.lower() != mine.lower()}
+                known[mine] = {"root": real, "at": int(time.time())}
+                replace_file_durably(registry, json.dumps(known, indent=1, sort_keys=True).encode("utf-8"))
+            replace_file_durably(recorded, json.dumps({"key": mine, "root": real}).encode("utf-8"))
+    except OSError:
+        return mine or base
+    return mine
+
+
+def project_key_collisions():
+    """Registered projects that share a directory name, and the name each is kept under."""
+    groups = {}
+    for name, row in sorted(project_registry().items()):
+        base = os.path.basename(str(row["root"]).rstrip("/\\")).lower()
+        groups.setdefault(base, []).append((name, row["root"]))
+    return {base: rows for base, rows in groups.items() if len(rows) > 1}
+
+
 def heartbeat_path(root):
-    key = os.path.basename(root.rstrip("/")) or "root"
+    key = project_key(root)
     return os.path.join(HOME, ".ao", f"heartbeat-{key}")
 
 
@@ -4280,7 +4371,7 @@ def stale_siblings(root, max_age=900):
 
     A dead watchdog cannot report itself; the ones next to it can. Only projects
     with a heartbeat file count — a project that never ran one is not late."""
-    me = os.path.basename(root.rstrip("/"))
+    me = project_key(root)
     out = {}
     try:
         for f in os.listdir(os.path.join(HOME, ".ao")):
@@ -4361,7 +4452,7 @@ def review_diff(root, cfg, paths=None, budget=1_500_000):
 # ---- helpers: processes ao starts that are not writers -------------------------
 
 def helpers_path(root):
-    key = os.path.basename(root.rstrip("/")) or "root"
+    key = project_key(root)
     return os.path.join(HOME, ".ao", f"helpers-{key}.json")
 
 
@@ -4911,7 +5002,7 @@ def ping_url(root):
         d = json.load(open(pings_path(), encoding=UTF8))
     except (OSError, ValueError):
         return None
-    key = os.path.basename(root.rstrip("/"))
+    key = project_key(root)
     return d.get(key) or d.get("*")
 
 
@@ -4920,7 +5011,7 @@ def set_ping_url(root, url, all_projects=False):
         d = json.load(open(pings_path(), encoding=UTF8))
     except (OSError, ValueError):
         d = {}
-    d["*" if all_projects else os.path.basename(root.rstrip("/"))] = url
+    d["*" if all_projects else project_key(root)] = url
     os.makedirs(os.path.dirname(pings_path()), exist_ok=True)
     json.dump(d, open(pings_path(), "w", encoding=UTF8), indent=2)
     os.chmod(pings_path(), 0o600)
@@ -4945,7 +5036,7 @@ def ping(root, opener=None):
 # ---- architect lock: one judge at a time --------------------------------------------
 
 def architect_lock_path(root):
-    key = os.path.basename(root.rstrip("/")) or "root"
+    key = project_key(root)
     return os.path.join(HOME, ".ao", f"architect-{key}.lock")
 
 

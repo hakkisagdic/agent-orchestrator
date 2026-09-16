@@ -177,7 +177,7 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0):
                   f"exit {nudge_err.get('code')}{C['reset']}")
                 for ln in textwrap.wrap(nudge_err.get("tail", ""), w - 8)[:2]:
                     a(f"     {C['dim']}{ln}{C['reset']}")
-                a(f"     {C['dim']}full log: ~/.ao/nudge-{os.path.basename(root)}.log{C['reset']}")
+                a(f"     {C['dim']}full log: ~/.ao/nudge-{A.project_key(root)}.log{C['reset']}")
             for hh, text in errs:
                 for i, ln in enumerate(textwrap.wrap(text, w - 12)[:2]):
                     a(f"   {C['dim']}{hh}{C['reset']} {C['yellow']}agent error{C['reset']}  {ln}"
@@ -1657,7 +1657,7 @@ def cmd_telegram(cfg, args):
     from . import telegram
     conf = telegram.CONF
     c = telegram.config()
-    label = f"com.agentorchestrator.telegram.{os.path.basename(cfg['root']).lower()}"
+    label = f"com.agentorchestrator.telegram.{A.project_key(cfg['root']).lower()}"
 
     if args.action == "setup":
         print(f"{C['b']}1.{C['reset']} Telegram: {C['b']}@BotFather{C['reset']} → /newbot → token")
@@ -1703,7 +1703,7 @@ def cmd_telegram(cfg, args):
             print(f"{C['red']}No config{C['reset']} — run ao telegram setup first")
             return 1
         exe = shutil.which("ao") or os.path.abspath(sys.argv[0])
-        log = os.path.join(A.HOME, ".ao", f"telegram-{os.path.basename(cfg['root']).lower()}.log")
+        log = os.path.join(A.HOME, ".ao", f"telegram-{A.project_key(cfg['root']).lower()}.log")
         # KeepAlive rather than StartInterval: long polling holds the connection
         # open, so the job wants restarting when it ends, not running on a clock.
         plist = os.path.join(A.HOME, "Library", "LaunchAgents", label + ".plist")
@@ -4236,7 +4236,7 @@ def cmd_email(cfg, args):
 def cmd_alarms(cfg, args):
     """Live alarm episodes and their level; `test` rings every channel."""
     root = cfg["root"]
-    project = os.path.basename(root.rstrip("/"))
+    project = A.project_key(root)
     if args.action in ("snooze", "unsnooze"):
         key = getattr(args, "key", None)
         if not key:
@@ -4375,7 +4375,7 @@ def doctor_problems(cfg):
     """What `ao doctor --check` acts on: conditions a person must fix, as (key, text)."""
     from .watchdog import wake_error, STATE_DIR
     root = cfg["root"]
-    key = os.path.basename(root.rstrip("/")) or "root"
+    key = A.project_key(root)
     out = []
     strict_matrix = M.is_strict(cfg)
     if strict_matrix:
@@ -4567,7 +4567,7 @@ def _doctor_check(cfg, page=False):
     """
     from .watchdog import notify
     root = cfg["root"]
-    project = os.path.basename(root.rstrip("/")) or "root"
+    project = A.project_key(root)
     problems = doctor_problems(cfg)
     if not problems:
         print(f"ok {time.strftime('%H:%M')} — no problems")
@@ -5858,7 +5858,7 @@ def cmd_hooks(cfg, args):
 def cmd_push(cfg, args):
     """`ao push allow [--minutes N]` opens a window for a person's push; `check` is what the hook runs."""
     root = cfg["root"]
-    key = os.path.basename(root.rstrip("/")) or "root"
+    key = A.project_key(root)
     tok = os.path.join(A.HOME, ".ao", f"push-{key}.ok")
     if args.action == "allow":
         os.makedirs(os.path.dirname(tok), exist_ok=True)
@@ -5932,7 +5932,7 @@ def _remove_hook_preflight(inv, allow):
 def cmd_remove(cfg, args):
     """Take ao off only after every reachable hook target passes one preflight."""
     root = cfg["root"]
-    key = os.path.basename(root.rstrip("/")) or "root"
+    key = A.project_key(root)
     plan = [PROJECT_MARKER, ".ao/", "agent-mail/", cfg.get("reviews", "semantic-review") + "/",
             ".claude/skills/ao/", ".kiro/steering/ao-coordination.md", ".kiro/steering/ao-playbook.md",
             ".kiro/steering/ao-single-writer.md", ".kiro/steering/ao-machine.md"]
@@ -6097,7 +6097,7 @@ def cmd_prune(cfg, args):
     root = cfg["root"]
     cutoff = time.time() - args.days * 86400
     dry = not args.yes
-    key = os.path.basename(root.rstrip("/")) or "root"
+    key = A.project_key(root)
     print(f"{C['b']}pruning records older than {args.days} day(s){C['reset']}"
           f"{C['dim']}  {root}{C['reset']}")
     if dry:
@@ -6197,7 +6197,7 @@ def cmd_notices(cfg, args):
 def _watchdog_windows(cfg, args):
     """Task Scheduler is Windows' launchd: one task every two minutes, one every fifteen."""
     root = cfg["root"]
-    key = os.path.basename(root.rstrip("/\\")).lower()
+    key = A.project_key(root).lower()
     tasks = {f"ao-watchdog-{key}": (2, f'"{shutil.which("ao-watchdog") or "ao-watchdog"}" --root "{root}" --idle-minutes {getattr(args, "idle_minutes", 6)}'),
              f"ao-doctor-{key}": (15, f'"{shutil.which("ao") or "ao"}" -C "{root}" doctor --check --notify')}
     if args.action == "status":
@@ -6225,7 +6225,7 @@ def cmd_watchdog(cfg, args):
         return _watchdog_windows(cfg, args)
     import getpass
     root = cfg["root"]
-    key = os.path.basename(root.rstrip("/")).lower()
+    key = A.project_key(root).lower()
     label = f"com.agentorchestrator.watchdog.{key}"
     plist_path = os.path.expanduser(f"~/Library/LaunchAgents/{label}.plist")
     # After a pip/uv install there is no scripts/ directory; there is a console
@@ -6327,13 +6327,19 @@ def cmd_projects(cfg, args):
     ws = A.all_workspaces()
     if not ws:
         print("No local agent sessions found.")
-        return
-    print(f"{'last active':<12}{'status':<14}workspace")
+    else:
+        print(f"{'last active':<12}{'status':<14}workspace")
     for r in ws:
         mins = int((time.time() - r["mtime"]) / 60)
         age = f"{mins}m" if mins < 90 else (f"{mins//60}h" if mins < 2880 else f"{mins//1440}d")
         col = C["green"] if mins < 5 else C["dim"]
         print(f"{col}{age:<12}{C['reset']}{r['status'][:13]:<14}{r['path']}")
+    # Directories with one name used to share every file ao keeps outside them (#66).
+    for base, rows in A.project_key_collisions().items():
+        print(f"\n{C['yellow']}{len(rows)} projects are named {base}{C['reset']}; "
+              "each keeps its own files under its key:")
+        for key, where in rows:
+            print(f"  {key:<28}{where}")
 
 
 def cmd_adapters(cfg, args):
@@ -6422,7 +6428,7 @@ def cmd_doctor(cfg, args):
     for line in waiver_lines:
         print(f"                {C['dim']}{line}{C['reset']}")
     print(f"quota source    {'keyflip' if A.sh('command -v keyflip') else '—'}")
-    key = os.path.basename(root.rstrip("/")).lower()
+    key = A.project_key(root).lower()
     wd = A.sh(f"launchctl list | grep com.agentorchestrator.watchdog.{key}")
     print(f"watchdog        {C['green']}running{C['reset']}" if wd else
           f"watchdog        {C['dim']}not installed — ao watchdog install{C['reset']}")
@@ -6492,7 +6498,7 @@ def cmd_doctor(cfg, args):
             others = [c for c in A.binary_candidates(arch["argv"][0], child_path()) if c != rb]
             print(f"architect bin   {C['green'] if rb else C['red']}{rb or 'not found'}{C['reset']} {C['dim']}{rv}{C['reset']}"
                   + (f"  {C['dim']}({len(others)} older copy: {', '.join(others)}){C['reset']}" if others else ""))
-            key = os.path.basename(root.rstrip("/")) or "root"
+            key = A.project_key(root)
             we = wake_error(os.path.join(STATE_DIR, f"escalate-{key}.log"))
             if we:
                 text, used, when = we["text"], we["binary"], we["when"]
@@ -6526,7 +6532,7 @@ def cmd_doctor(cfg, args):
                       f"{time.strftime('%H:%M', time.localtime(_st['arch_quota_until']))}")
         except Exception:
             pass
-        alive = A.active_alarms(os.path.basename(root.rstrip('/')))
+        alive = A.active_alarms(A.project_key(root))
         if alive:
             worst = max(alive, key=lambda e: {"yellow": 0, "orange": 1, "red": 2}.get(e.get("ring"), 0))
             print(f"alarms          {C['red'] if worst['ring'] == 'red' else C['yellow']}{len(alive)} live, worst {worst['ring']}{C['reset']}  {C['dim']}ao alarms{C['reset']}")

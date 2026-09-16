@@ -60,7 +60,7 @@ def print(*args, **kw):
 
 
 def cycles_path(root):
-    key = os.path.basename(root.rstrip("/")) or "root"
+    key = A.project_key(root)
     return os.path.join(STATE_DIR, f"cycles-{key}.jsonl")
 
 
@@ -255,7 +255,7 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
         return False
     # The ladder: this is an orange (a person must act). Standing an hour, it
     # rings red and goes to mail — the channel people open when they wake up.
-    project = os.path.basename((root or "").rstrip("/")) or "ao"
+    project = (A.project_key(root) if root else "ao")
     red_after = A.ALARM_RED_AFTER
     if root:
         try:
@@ -347,7 +347,7 @@ def touch_architect_quota(root, st):
     text = (st.get("wake_error") or {}).get("text") or "architect quota exhausted"
     reset = time.strftime("%H:%M", time.localtime(until))
     return notify(
-        f"{os.path.basename(root.rstrip('/')) or 'root'}: mimar kotada",
+        f"{A.project_key(root)}: mimar kotada",
         f"{text[:100]} — uyandırma {reset}'e kadar bekletiliyor; Claude Desktop "
         "auto-continue açıksa oturum kendi devam eder",
         root,
@@ -391,7 +391,7 @@ def storm(root, limit=12):
 
 
 def state_path(root):
-    key = os.path.basename(root.rstrip("/")) or "root"
+    key = A.project_key(root)
     return os.path.join(STATE_DIR, f"watchdog-{key}.json")
 
 
@@ -455,7 +455,7 @@ def provider_degraded(root, window=900):
     save. Read only what came after the last `=== <time> nudge ===` marker, and
     only if that marker itself is inside the window.
     """
-    key = os.path.basename(root.rstrip("/")) or "root"
+    key = A.project_key(root)
     p = os.path.join(STATE_DIR, f"nudge-{key}.log")
     if not os.path.exists(p):
         return None
@@ -535,7 +535,7 @@ def architect_hold_reason(root, cfg, adapter, st, found=None, now=None):
     resolved, ver = A.resolve_binary(argv[0], path=child_path())
     if not resolved:
         return no("binary-missing", f"{argv[0]} cannot be found")
-    key = os.path.basename(root.rstrip("/")) or "root"
+    key = A.project_key(root)
     err = wake_error(os.path.join(STATE_DIR, f"escalate-{key}.log"))
     if err and err.get("kind") == "binary" and err.get("binary") == f"{resolved} {ver}" \
             and now - (st.get("wake_error") or {}).get("at", 0) < 6 * 3600:
@@ -590,7 +590,7 @@ def escalate(root, cfg, adapter, age, args, st):
         return False
 
     woke = False
-    project = os.path.basename(root.rstrip("/")) or "root"
+    project = A.project_key(root)
     hold = None
     for a in found:
         key = f"anomaly:{a['kind']}"
@@ -723,7 +723,7 @@ def escalate(root, cfg, adapter, age, args, st):
     from . import features as F
     if woke and not F.enabled(cfg, "architect_wake"):
         print("reports pending; architect_wake feature is off — recorded and alarmed, not woken")
-        notify(f"{os.path.basename(root)}: needs you", f"{len(stale)} report(s) waiting and architect wakes are off",
+        notify(f"{A.project_key(root)}: needs you", f"{len(stale)} report(s) waiting and architect wakes are off",
                root, key="reports-no-wake", window=3600, audience="human")
         woke = False
     if woke:
@@ -768,7 +768,7 @@ def escalate(root, cfg, adapter, age, args, st):
                 for x in arch["argv"]]
         search = child_path()
         resolved, ver = A.resolve_binary(argv[0], path=search)
-        key = os.path.basename(root.rstrip("/")) or "root"
+        key = A.project_key(root)
         log_path = os.path.join(STATE_DIR, f"escalate-{key}.log")
         # Read what the previous wake said before starting another. Same binary,
         # same error, less than six hours old: the human has been told, and a
@@ -1058,7 +1058,7 @@ def run(args):
         finally:
             record_cycle(root, args, started)
     from .storage import LedgerLockTimeout, _exclusive_lock
-    key = os.path.basename(root.rstrip("/")) or "root"
+    key = A.project_key(root)
     try:
         os.makedirs(STATE_DIR, exist_ok=True)
         with _exclusive_lock(os.path.join(STATE_DIR, CYCLE_LOCK.format(key=key)), timeout=0):
@@ -1205,7 +1205,7 @@ def _cycle_impl(args, root):
     if not args.dry_run:
         A.reconcile_mail_ledger(root, cfg)  # deleted mail becomes a consumed row
         A.record_progress(root, cfg)      # history of what moved, for the spin check
-    project = os.path.basename(root.rstrip("/")) or "root"
+    project = A.project_key(root)
     try:
         bd = A.board(root)
         _FACTS.update(idle_s=int(age), transcript_bytes=size,
@@ -1423,7 +1423,7 @@ def _cycle_impl(args, root):
         from . import features as F
         if arch.get("argv") and depth < threshold and not F.enabled(cfg, "refill"):
             print(f"queue low ({depth}); refill feature is off — alarming instead")
-            notify(f"{os.path.basename(root)}: needs you", f"queue has {depth} item(s) and refill wakes are off — add slices to .ao/backlog.md",
+            notify(f"{A.project_key(root)}: needs you", f"queue has {depth} item(s) and refill wakes are off — add slices to .ao/backlog.md",
                    root, key="queue-empty-no-refill", window=3600, audience="human")
             return 0
         if arch.get("argv") and depth < threshold and A.architect_present(root, arch):
@@ -1474,7 +1474,7 @@ def _cycle_impl(args, root):
                 print(f"architect command {argv[0]} not on PATH")
                 return 0
             argv[0] = resolved
-            key = os.path.basename(root.rstrip("/")) or "root"
+            key = A.project_key(root)
             log_path = os.path.join(STATE_DIR, f"refill-{key}.log")
             if A.hold_state(root):
                 print("held since this cycle began; not waking the architect to refill")
@@ -1666,7 +1666,7 @@ def _cycle_impl(args, root):
     # Never discard the child's output. A nudge that dies on an expired login or
     # an exhausted plan looks exactly like an agent that ignored us, and the
     # difference is the only thing worth knowing at that moment.
-    key = os.path.basename(root.rstrip("/")) or "root"
+    key = A.project_key(root)
     log_path = os.path.join(STATE_DIR, f"nudge-{key}.log")
     os.makedirs(STATE_DIR, exist_ok=True)
     env = dict(os.environ, PATH=search)
