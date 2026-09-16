@@ -34,6 +34,12 @@ FORBIDDEN = (
     ("runs arbitrary code", "make x"),
 )
 
+# The architect decides. An implementer granted this could restart its own round
+# budget with a re-specification it wrote itself (#65).
+IMPLEMENTER_FORBIDDEN = (
+    ("re-specifies a slice, restarting its round budget", "ao decide x --scope s"),
+)
+
 # Flags with which a harness grants every tool at once.
 GRANT_ALL = ("--dangerously-skip-permissions", "--trust-all-tools", "--yolo", "--full-auto",
              "--dangerously-bypass-approvals-and-sandbox")
@@ -80,7 +86,7 @@ def grants_everything(argv, options=None):
     return not scoped and "trust_all" in (options or {})
 
 
-def problems(argv, options=None):
+def problems(argv, options=None, role=None):
     """(reason, command, rule) for everything this grant admits that it must not.
 
     A grant of every tool is one finding with command and rule '*'.
@@ -89,7 +95,7 @@ def problems(argv, options=None):
         return [("grants every tool", "*", "*")]
     granted = rules(argv)
     found = []
-    for reason, command in FORBIDDEN:
+    for reason, command in FORBIDDEN + (IMPLEMENTER_FORBIDDEN if role == "implementer" else ()):
         rule = next((r for r in granted if admits(r, command)), None)
         if rule:
             found.append((reason, command, rule))

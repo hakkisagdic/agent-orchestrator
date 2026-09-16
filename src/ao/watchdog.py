@@ -887,8 +887,11 @@ def open_work(cfg, root):
         reasons.append("reviewer window reopened — re-run the pending review")
     if A.product_dirty(root, cfg):
         reasons.append("uncommitted changes")
-    revs = A.reviews(root, cfg["reviews"], limit=1)
-    if revs and "APPROVED" not in revs[0][1].upper():
+    # Findings are the newest review that produced a verdict; an UNAVAILABLE or
+    # INVALID file is not a finding anyone can act on (audit).
+    revs = [(f, v) for f, v in A.reviews(root, cfg["reviews"], limit=8)
+            if v in ("APPROVED", "NEEDS_CHANGES")]
+    if revs and revs[0][1] == "NEEDS_CHANGES":
         try:
             rev_at = os.path.getmtime(os.path.join(root, cfg["reviews"], revs[0][0]))
             head_at = int(A.sh("git log -1 --format=%ct", cwd=root) or 0)

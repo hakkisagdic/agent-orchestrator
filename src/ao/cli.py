@@ -3798,10 +3798,9 @@ def cmd_decide(cfg, args):
               f"recording anyway, check `ao decide --list`")
     rec = {"id": f"AD-{int(time.time())}", "at": int(time.time()), "decision": args.decision,
            "why": args.why, "scope": args.scope, "answers": args.answers, "by": "architect"}
-    d = os.path.join(root, ".ao", "ledger")
-    os.makedirs(d, exist_ok=True)
-    with open(os.path.join(d, "decisions.jsonl"), "a", encoding=UTF8) as fh:
-        fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    # Chained, so a row added by hand cannot pass for a re-specification (#65).
+    from .storage import append_chained_jsonl
+    append_chained_jsonl(A.decisions_path(root), rec, A.DECISION_CHAIN, legacy_prefix=True)
     if args.answers:
         ans = A.answer(root, args.answers, "x " + args.decision if False else args.decision,
                        by="architect")
@@ -4351,7 +4350,7 @@ def _actor_grant_problems(cfg):
             grants.append(("reviewer fallback", fallback.get("id") or "fallback", fallback["argv"], {}))
     out = []
     for role, name, argv, options in grants:
-        text = AL.describe(role, name, AL.problems(argv, options))
+        text = AL.describe(role, name, AL.problems(argv, options, role=role))
         if text:
             out.append((f"actor-grant:{role.replace(' ', '-')}", text))
     return out

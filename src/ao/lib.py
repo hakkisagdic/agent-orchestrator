@@ -1437,9 +1437,11 @@ def digest(root, cfg, since_days=1.0):
                 fresh.append(v)
         except OSError:
             pass
-    out["reviews"] = {"total": len(fresh),
-                      "approved": sum(1 for v in fresh if "APPROVED" in (v or "").upper()),
-                      "changes": sum(1 for v in fresh if "APPROVED" not in (v or "").upper())}
+    # Only a review that produced a verdict is a review (audit); the rest are counted apart.
+    out["reviews"] = {"total": sum(1 for v in fresh if v in ("APPROVED", "NEEDS_CHANGES")),
+                      "approved": sum(1 for v in fresh if v == "APPROVED"),
+                      "changes": sum(1 for v in fresh if v == "NEEDS_CHANGES"),
+                      "not_reviewed": sum(1 for v in fresh if v not in ("APPROVED", "NEEDS_CHANGES"))}
 
     acct = kiro_account_usage()
     if acct and not acct.get("error"):
@@ -1488,13 +1490,22 @@ def work_fingerprint(root, cfg=None):
     cfg = cfg if cfg is not None else load_config(root)
     lines, churn = _product_changes(root, cfg)
     parts = [sh("git rev-parse --short HEAD", cwd=root) or "", "\n".join(lines), str(churn)]
+    # A review that did not take place is a file, not progress: an unavailable
+    # reviewer written every turn reset the nudge backoff every turn (audit).
+    not_reviews = set()
+    try:
+        from .storage import read_chained_jsonl
+        not_reviews = {row.get("artefact") for row in read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN)
+                       if isinstance(row, dict) and row.get("verdict") not in ("APPROVED", "NEEDS_CHANGES")}
+    except Exception:
+        pass
     for sub in (cfg.get("reviews") or "semantic-review", DECISION_DIR):
         d = os.path.join(root, sub)
         if os.path.isdir(d):
             try:
                 parts.append("|".join(sorted(
                     f"{f}:{int(os.path.getmtime(os.path.join(d, f)))}"
-                    for f in os.listdir(d))))
+                    for f in os.listdir(d) if f not in not_reviews)))
             except OSError:
                 pass
     ledger = os.path.join(root, ".ao", "ledger")
@@ -2145,6 +2156,7 @@ def record_review(root, name, data, evidence, verdict, reviewer=None, fallback=F
         "authorizable": evidence.get("authorizable") is True,
         "fallback": bool(fallback),
         "reviewer": reviewer,
+        "slice": evidence.get("slice"),
     }
     if row["kind"] == "commit-range":
         row["commits"] = evidence.get("commits")
@@ -3376,84 +3388,131 @@ def slice_boundary(item):
     return notes.get("acceptance") or notes.get("scope") or item.get("title") or ""
 
 
-def slice_started(root, item=None):
-    """When the current running slice began, from its board `since:` note."""
-    item = item or running_slice(root)
-    raw = (item.get("notes") or {}).get("since") if item else None
-    if not raw:
-        return None
-    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
-        try:
-            return time.mktime(time.strptime(raw.strip()[:len(time.strftime(fmt))], fmt))
-        except ValueError:
-            continue
-    return None
+DECISION_CHAIN = "ao-decision-row-v1"
+
+
+def decisions_path(root):
+    return os.path.join(root, ".ao", "ledger", "decisions.jsonl")
+
+
+def decision_rows(root):
+    """Architect decisions in the order `ao decide` recorded them (#65).
+
+    Rows written before the ledger was chained are read as its legacy prefix. A
+    row added by hand after a chained one breaks the chain and the read raises:
+    a re-specification nobody recorded must not reset a round budget.
+    """
+    from .storage import read_chained_jsonl
+    return [row for row in read_chained_jsonl(decisions_path(root), DECISION_CHAIN, legacy_prefix=True)
+            if isinstance(row, dict)]
 
 
 def respecified_at(root, item=None):
-    """When the architect last re-specified the current slice (`ao decide --scope <id>`)."""
+    """When the architect last re-specified the current slice (`ao decide --scope <id>`).
+
+    None when the decision ledger cannot be trusted: the budget then stands.
+    """
     item = item or running_slice(root)
     item_id = ((item or {}).get("id") or (item or {}).get("key") or "").strip()
-    p = os.path.join(root, ".ao", "ledger", "decisions.jsonl")
-    if not item_id or not os.path.exists(p):
+    if not item_id:
+        return None
+    try:
+        rows = decision_rows(root)
+    except Exception:
         return None
     last = 0
-    for line in open(p, errors="replace", encoding=UTF8):
-        try:
-            r = json.loads(line)
-        except ValueError:
-            continue
+    for r in rows:
         if r.get("by") == "architect" and (r.get("scope") or "").strip() == item_id:
-            last = max(last, int(r.get("at") or 0))
+            try:
+                last = max(last, int(r.get("at") or 0))
+            except (TypeError, ValueError):
+                continue
     return last or None
 
 
-def rounds(root, reviews_dir):
-    """Completed prospective review rounds spent on the current slice.
+def _recorded_review_slice(root, reviews_dir, row):
+    """The slice of a review recorded before ledger rows carried it, from its unchanged file."""
+    try:
+        with open(os.path.join(root, reviews_dir, str(row.get("artefact"))), "rb") as fh:
+            data = fh.read()
+    except OSError:
+        return None
+    if "sha256:" + hashlib.sha256(data).hexdigest() != row.get("sha256"):
+        return None
+    evidence = review_evidence(data.decode(UTF8, "replace"))
+    return (evidence or {}).get("slice") if isinstance(evidence, dict) else None
 
-    HEAD and candidate bytes are not slice identity: two slices may intentionally
-    review the same tree. Only structured index-candidate evidence attributed to
-    the running board item's exact ID may count or reset its budget. Unscoped,
-    retrospective, unavailable, invalid and foreign-slice artifacts are ignored.
+
+def rounds(root, reviews_dir):
+    """Completed prospective review rounds spent on the current slice (#65).
+
+    A round is a review that produced a verdict, read from the chained review
+    ledger in the order ao recorded it. Deleting, emptying or back-dating a review
+    file changes nothing, and neither does editing the board's `since:`, which an
+    implementer can reach. Only index-candidate reviews of the running board
+    item's exact ID count - HEAD and candidate bytes are not slice identity. The
+    count runs back to the newest approval that could authorise, or to the
+    architect's newest recorded re-specification of the item. A fallback's
+    approval after a rejection of the same candidate authorises nothing, so it
+    ends nothing: the rejection still counts. UNAVAILABLE and INVALID are not
+    rounds; nobody completed a review.
+
+    Review files from before the ledger have no row and are read as they always
+    were, so a slice that began before it keeps its count.
     """
     current = running_slice(root)
     slice_id = ((current or {}).get("id") or (current or {}).get("key") or "").strip()
     if not slice_id:
         return 0
+    respec = respecified_at(root, current) or 0
 
-    started = slice_started(root, current)
-    # An architect decision scoped to this exact running item re-specifies it and
-    # starts a fresh budget. Other running entries on a malformed board cannot
-    # reset the item selected above.
-    respec = respecified_at(root, current)
-    if respec and (not started or respec > started):
-        started = respec
-
-    n = 0
-    # Scan the directory rather than the newest N global artifacts: reviews from
-    # other slices must not crowd this slice's evidence out of the accounting
-    # window merely by being newer.
-    for f, v in reviews(root, reviews_dir, limit=None):
-        path = os.path.join(root, reviews_dir, f)
-        if started:
-            try:
-                if os.path.getmtime(path) < started:
-                    break
-            except OSError:
-                continue
-        if v in ("UNAVAILABLE", "INVALID"):
-            continue                          # not a round: nobody completed a review
+    from .storage import read_chained_jsonl
+    try:
+        rows = read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN)
+    except Exception:
+        rows = []                       # an unreadable ledger is reported elsewhere; files still count
+    events, recorded, rejected = [], set(), set()
+    for order, row in enumerate(rows):
+        if not isinstance(row, dict) or row.get("kind") != "index-candidate":
+            continue
+        recorded.add(row.get("artefact"))
+        verdict, candidate = row.get("verdict"), row.get("candidate")
+        if verdict not in ("APPROVED", "NEEDS_CHANGES"):
+            continue
+        row_slice = row["slice"] if "slice" in row else _recorded_review_slice(root, reviews_dir, row)
+        mine = (row_slice or "").strip() == slice_id
         try:
+            at = int(row.get("at") or 0)
+        except (TypeError, ValueError):
+            at = 0
+        if verdict == "NEEDS_CHANGES":
+            if candidate:
+                rejected.add(candidate)
+            if mine:
+                events.append((at, 1, order, "round"))
+        elif mine and row.get("authorizable") is True \
+                and not (row.get("fallback") and candidate in rejected):
+            events.append((at, 1, order, "approved"))
+
+    for order, (f, v) in enumerate(reviews(root, reviews_dir, limit=None)):
+        if f in recorded or v not in ("APPROVED", "NEEDS_CHANGES"):
+            continue
+        path = os.path.join(root, reviews_dir, f)
+        try:
+            at = int(os.path.getmtime(path))
             body = open(path, errors="replace", encoding=UTF8).read(100_000)
         except OSError:
             continue
         evidence = review_evidence(body)
         if not evidence or evidence.get("kind") != "index-candidate" \
-                or (evidence.get("slice") or "").strip() != slice_id:
+                or (evidence.get("slice") or "").strip() != slice_id \
+                or evidence.get("review_status") in ("unavailable", "invalid"):
             continue
-        if evidence.get("review_status") in ("unavailable", "invalid"):
-            continue
-        if "APPROVED" in v.upper():
+        events.append((at, 0, -order, "approved" if v == "APPROVED" else "round"))
+
+    n = 0
+    for at, _, _, what in sorted(events, reverse=True):
+        if at < respec or what == "approved":
             break
         n += 1
     return n
