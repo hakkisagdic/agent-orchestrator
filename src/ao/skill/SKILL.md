@@ -205,6 +205,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao fanout ok|record|history` | budget gate for sub-agent fan-outs; `--roots R --per-root K` for pipelines |
 | `ao credits` | provider credits and windows |
 | `ao features [on|off <key>]` | the switches and what each costs; all off = deterministic ao |
+| `ao collect-review <nonce> --response F --model M --by NAME` | a person records a stand-in session's answer to the review request ao wrote when no reviewer could be reached; never an agent's command |
 | `ao waive <gate> --slice S --why …` / `ao catchup` | a person's bypass on the record; catchup reviews the landed range and replays deferred work |
 | `ao pings setup --url …` / `ao hooks [status|install|uninstall] [--allow-shared-hooks]` / `ao push allow` | dead man's switch; static AO hook intent plus Git-executed, nonce-bound pre-commit proof; explicit authorization for shared/external/global mutation; human push window |
 | `ao cost [--since 24h]` | what the coordination spends: implementer turns by class, wasted turns, review counts |

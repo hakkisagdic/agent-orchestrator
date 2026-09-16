@@ -2689,6 +2689,74 @@ def _review_timeout(cfg):
     return REVIEW_TIMEOUT_DEFAULT
 
 
+def cmd_collect_review(cfg, args):
+    """A person records a stand-in session's answer to ao's review request (#75).
+
+    When no reviewer can be reached, ao writes a request: the exact prompt and a
+    nonce. A person carries it to a session of their choosing and brings the answer
+    back. ao cannot know which model answered or that no agent wrote the answer, so
+    this records the model the person declares, the person, and the transport, and
+    binds the answer to one candidate through the nonce - nothing more. It is a
+    person's command; no agent grant admits it.
+    """
+    from types import SimpleNamespace
+    root = cfg["root"]
+    if M.is_strict(cfg):
+        print(f"{C['red']}refused{C['reset']}: a capability-matrix project records reviews "
+              "only from its declared bindings")
+        return 2
+    by = (args.by or "").strip()
+    if not by:
+        print("--by is required: the person who carried the answer"); return 2
+    if by.lower() in _agent_names(cfg):
+        print(f"--by names an agent or a role ({by}); collecting a review is a person's act"); return 2
+    model = (args.model or "").strip()
+    if not model or not model.isprintable() or len(model) > 80:
+        print("--model is required: the model the stand-in session ran, as you know it"); return 2
+    request = A.review_request(root, args.nonce)
+    if not request:
+        print(f"{C['red']}refused{C['reset']}: there is no review request {args.nonce}"); return 2
+    if request.get("collected"):
+        print(f"{C['red']}refused{C['reset']}: request {args.nonce} was already collected into "
+              f"{request['collected'].get('artefact')}")
+        return 2
+    try:
+        with open(args.response, "rb") as fh:
+            data = fh.read(400_001)
+    except OSError as exc:
+        print(f"{C['red']}refused{C['reset']}: cannot read {args.response}: {exc}"); return 2
+    if len(data) > 400_000:
+        print(f"{C['red']}refused{C['reset']}: the answer is over 400000 bytes"); return 2
+    out = data.decode(UTF8, "replace").strip()
+    first = next((line.strip() for line in out.splitlines() if line.strip()), "")
+    if first != f"NONCE: {request['nonce']}":
+        print(f"{C['red']}refused{C['reset']}: the answer does not begin with this request's nonce")
+        return 1
+    try:
+        candidate = A.index_candidate(root)
+    except RuntimeError as exc:
+        print(f"{C['red']}refused{C['reset']}: {exc}"); return 2
+    if candidate["digest"] != request.get("candidate"):
+        print(f"{C['red']}refused{C['reset']}: the staged candidate changed since the request; "
+              "the answer is about other bytes")
+        return 1
+    route = {"id": f"human-assisted:{model}", "family": "human-assisted"}
+    carried = {"route": route, "out": out, "evidence": {
+        "transport": "human-carried", "collected_by": by, "nonce": request["nonce"],
+        "limits": list(A.STANDIN_LIMITS)}}
+    before = A.review_row_count(root)
+    code = cmd_review(cfg, SimpleNamespace(boundary=request.get("boundary"), timeout=None,
+                                           paths=request.get("paths"), commits=None, carried=carried))
+    from .storage import read_chained_jsonl
+    recorded = [row for row in read_chained_jsonl(A.review_ledger_path(root), A.REVIEW_CHAIN)[before:]
+                if isinstance(row, dict) and row.get("reviewer") == route["id"]]
+    if recorded:
+        A.mark_review_request_collected(root, request["nonce"], recorded[-1].get("artefact"), by)
+        for limit in A.STANDIN_LIMITS:
+            print(f"{C['dim']}limit: {limit}{C['reset']}")
+    return code
+
+
 def cmd_review(cfg, args):
     """Review the working tree with an actor that did not write it.
 
@@ -2707,6 +2775,8 @@ def cmd_review(cfg, args):
     impl = cfg.get("implementer") or {}
     rv = cfg.get("reviewer") or {}
     strict = M.is_strict(cfg)
+    # An answer a person carried from a stand-in session; set only by collect-review (#75).
+    carried = getattr(args, "carried", None)
     matrix_resolution = None
     if strict:
         try:
@@ -2717,7 +2787,7 @@ def cmd_review(cfg, args):
                 print(f"  {C['red']}·{C['reset']} {problem}")
             return 2
     else:
-        if not rv.get("argv"):
+        if not rv.get("argv") and not carried:
             print(f"{C['yellow']}No reviewer configured.{C['reset']} Add to .ao/config.json:")
             print(json.dumps({"reviewer": {
                 "id": "claude-reviewer", "family": "anthropic",
@@ -2726,7 +2796,7 @@ def cmd_review(cfg, args):
             print(f"\n{C['dim']}It must not be the implementer. A model reviewing its own")
             print(f"output shares its own blind spots.{C['reset']}")
             return 1
-        if _reviewer_is_implementer(rv, _implementer_sessions(cfg)):
+        if not carried and _reviewer_is_implementer(rv, _implementer_sessions(cfg)):
             print(f"{C['red']}The reviewer is the implementer.{C['reset']} That is the one "
                   f"configuration this refuses.")
             return 2
@@ -2830,9 +2900,16 @@ def cmd_review(cfg, args):
                       f"implementer — not run{C['reset']}")
                 continue
             chain.append(fallback)
-    invocation = _invoke_reviewer_chain(
-        root, chain, prompt, _review_timeout(cfg), strict, primary=rv if not strict else None
-    )
+    if carried:
+        # A person carried this answer from a session ao could not reach (#75).
+        invocation = {"used": carried["route"], "used_position": 0, "failures": {}, "labels": {},
+                      "chain": [carried["route"]],
+                      "attempt": {"ok": True, "out": carried["out"], "binary": "human-carried"}}
+        evidence.update(carried["evidence"])
+    else:
+        invocation = _invoke_reviewer_chain(
+            root, chain, prompt, _review_timeout(cfg), strict, primary=rv if not strict else None
+        )
     used = invocation["used"]
     if strict:
         strict_attempts = _strict_attempt_snapshot(matrix_resolution, invocation)
@@ -2878,6 +2955,20 @@ def cmd_review(cfg, args):
             unavailable_body + "\nNo review took place. This file is not a round.\n",
             evidence=evidence, verdict="UNAVAILABLE",
         )
+        if candidate is not None:
+            # A person can carry the review to a session ao cannot reach (#75).
+            try:
+                request = A.write_review_request(
+                    root, candidate, scope, evidence.get("diff_digest"), boundary,
+                    evidence.get("slice"), args.paths, prompt)
+            except OSError as exc:
+                request = None
+                print(f"{C['dim']}no stand-in request was written: {exc}{C['reset']}")
+            if request:
+                print(f"{C['dim']}A stand-in review request is in "
+                      f"{os.path.relpath(request['path'], root)}; a person carries it to another "
+                      f"session and runs `ao collect-review {request['nonce']} --response <file> "
+                      f"--model <model> --by <name>` on the answer.{C['reset']}")
         A.set_reviewer_state(
             root, pending_review=True, boundary=boundary[:200],
             until=None, reason=why[:200], at=int(time.time()),
@@ -2892,7 +2983,8 @@ def cmd_review(cfg, args):
     reviewer_executable = invocation["attempt"].get("binary") or "reviewer"
     rv = used
     # A fallback is recorded as one; it cannot supersede a rejection (#63).
-    fallback_used = used["index"] > 0 if strict else used is not (cfg.get("reviewer") or {})
+    fallback_used = False if carried else (
+        used["index"] > 0 if strict else used is not (cfg.get("reviewer") or {}))
     if strict:
         M.add_evidence_context(
             evidence, matrix_resolution, strict_attempts,
@@ -3043,12 +3135,13 @@ def cmd_review(cfg, args):
         evidence["reviewer"] = {
             "id": rv.get("id") or reviewer_executable,
             "family": rv.get("family"),
-            "fallback": rv is not primary,
+            "fallback": fallback_used,
         }
         reviewer_line = (
             f"- reviewer: `{A.review_header_value(rv.get('id') or reviewer_executable)}`  "
             f"family: `{A.review_header_value(rv.get('family', '?'))}`"
-            + ("  (fallback — the primary reviewer was unavailable)" if rv is not primary else "")
+            + ("  (carried by a person from a session ao did not run)" if carried
+               else "  (fallback — the primary reviewer was unavailable)" if rv is not primary else "")
         )
         implementer_line = (
             f"- implementer: "
@@ -6613,6 +6706,13 @@ def main():
     # `review_timeout` in .ao/config.json (#63).
     rw.add_argument("--timeout", type=int, help=argparse.SUPPRESS)
     rw.set_defaults(fn=cmd_review)
+    cr = sub.add_parser("collect-review",
+                        help="a person records a stand-in session's answer to ao's review request")
+    cr.add_argument("nonce")
+    cr.add_argument("--response", required=True, help="file holding the session's whole answer")
+    cr.add_argument("--model", required=True, help="the model the session ran, as you know it")
+    cr.add_argument("--by", required=True, help="the person who carried the answer")
+    cr.set_defaults(fn=cmd_collect_review)
     tg = sub.add_parser("telegram", help="phone channel: alerts out, decisions in")
     tg.add_argument("action", nargs="?", default="status",
                     choices=["status", "setup", "test", "poll", "install", "uninstall"])

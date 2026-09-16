@@ -1,13 +1,21 @@
 # Stand-in sessions
 
-> **A stand-in review cannot authorise a commit, and this page originally implied it could.**
-> Corrected 2026-09-14, after the implementer proved it: `commit-ok` accepts an artefact **ao
-> itself produced**, or an open human waiver — there is no supported path for importing a review
-> ao did not invoke, and hand-writing the evidence block would forge provenance. So a stand-in
-> gives you a real, useful judgement, and the slice still cannot land on it alone: either a human
-> records a waiver (`ao waive review`, which is honest — it says *a person vouched*, not *a review
-> happened*), or the review is re-run through ao (#75, and the reviewer adapter in #86). Use this
-> page to get the judgement; use one of those two to land it.
+> **A stand-in review authorises a commit only through `ao collect-review`, which a person runs.**
+> On 2026-09-14 the implementer proved that `commit-ok` accepted only an artefact ao itself
+> produced, or an open human waiver, and this page had implied more; #86 called that refusal
+> correct, because nothing recorded where a stand-in's answer came from. #75 (decided 2026-09-16)
+> is that record. When no reviewer can be reached for a staged candidate, ao writes a review
+> request — the exact prompt and a nonce — to `.ao/review-requests/`. A person pastes it into a
+> session of their choosing, saves the answer, and runs
+> `ao collect-review <nonce> --response <file> --model <model> --by <name>`. ao checks that the
+> answer leads with the nonce and that the staged bytes are still the ones the request named, then
+> records an ordinary review whose reviewer is `human-assisted:<model>`, with the transport, the
+> person and two limits in its evidence: ao cannot verify which model answered, and a same-user
+> actor could have written the answer — the nonce binds it to one candidate, nothing more. It
+> counts as a round and can authorise. Independence is the person's choice of session, which is
+> why no agent grant admits the command; a capability-matrix project refuses it. Hand-writing an
+> artefact still forges provenance, and a waiver still says *a person vouched*, not *a review
+> happened*.
 
 When the architect or the reviewer cannot be reached — out of quota, asleep, away for a weekend —
 the work does not have to stop. The person opens a second session with **a different model**,

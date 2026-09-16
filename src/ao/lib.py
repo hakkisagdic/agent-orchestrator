@@ -2054,6 +2054,69 @@ def candidate_review_integrity(root, candidate, evidence):
 REVIEW_CHAIN = "ao-review-row-v1"
 
 
+def review_requests_dir(root):
+    return os.path.join(root, ".ao", "review-requests")
+
+
+STANDIN_LIMITS = (
+    "ao cannot verify which model wrote this answer; it records the model the person declared",
+    "a same-user actor could have written the answer; the nonce binds it to one candidate, nothing more",
+)
+
+
+def write_review_request(root, candidate, scope, diff_digest, boundary, slice_id, paths, prompt):
+    """A review request a person can carry to a session ao cannot reach (#75).
+
+    Written when no reviewer could be reached for a staged candidate: the exact
+    prompt the reviewer would have received, and a nonce the answer must lead with.
+    The metadata beside it binds the request to that candidate.
+    """
+    import secrets
+    from .storage import replace_file_durably
+    nonce = secrets.token_hex(16)
+    directory = review_requests_dir(root)
+    meta = {"nonce": nonce, "at": int(time.time()), "candidate": candidate["digest"],
+            "index_tree": candidate["index_tree"], "scope": scope, "diff_digest": diff_digest,
+            "boundary": boundary, "slice": slice_id, "paths": paths, "collected": None}
+    path = os.path.join(directory, f"{nonce}.md")
+    replace_file_durably(os.path.join(directory, f"{nonce}.json"),
+                         json.dumps(meta, indent=1, sort_keys=True).encode(UTF8))
+    text = (f"# ao review request {nonce}\n\n"
+            "No reviewer could be reached for the staged candidate below. Paste everything\n"
+            "under the line into a session running a different model family from the\n"
+            "implementer's, save its whole answer to a file, and then a person runs:\n\n"
+            f"    ao collect-review {nonce} --response <file> --model <the model that answered> --by <your name>\n\n"
+            f"The request binds to candidate `{candidate['digest']}`; if the staged bytes change,\n"
+            "it no longer applies.\n\n---\n\n"
+            f"Cevabının İLK satırı tam olarak şu olsun: NONCE: {nonce}\n\n{prompt}\n")
+    replace_file_durably(path, text.encode(UTF8))
+    return dict(meta, path=path)
+
+
+def review_request(root, nonce):
+    """A request's metadata by its nonce, or None."""
+    if not re.fullmatch(r"[0-9a-f]{32}", str(nonce or "")):
+        return None
+    try:
+        with open(os.path.join(review_requests_dir(root), f"{nonce}.json"), encoding=UTF8) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) and data.get("nonce") == nonce else None
+
+
+def mark_review_request_collected(root, nonce, artefact, by):
+    """A request answers once: record which artefact its answer became and who carried it."""
+    from .storage import replace_file_durably
+    meta = review_request(root, nonce)
+    if meta is None:
+        return None
+    meta["collected"] = {"at": int(time.time()), "artefact": artefact, "by": by}
+    replace_file_durably(os.path.join(review_requests_dir(root), f"{nonce}.json"),
+                         json.dumps(meta, indent=1, sort_keys=True).encode(UTF8))
+    return meta
+
+
 def review_ledger_path(root):
     return os.path.join(root, ".ao", "ledger", "reviews.jsonl")
 
