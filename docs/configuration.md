@@ -31,6 +31,7 @@ machine setting written into a project.
 | `review.prune_after_days` | `30` | project | days after which ao prune moves a review artefact nothing rests on out of the repository |
 | `review_timeout` | `900` | project | seconds one reviewer may take; never taken from the command line |
 | `stall_minutes` | `60` | project | minutes a staged candidate may wait to land before throughput calls the slice stalled |
+| `boundary.inline_max_chars` | `400` | project | characters of acceptance a board row may carry before its boundary belongs in a file |
 | `gates.default_timeout` | `600` | project | seconds a gate may run when its own definition names no timeout |
 | `gates.coverage_min_files` | `5` | project | source files of one toolchain a top-level tree must hold before a gate must exercise it |
 | `watchdog.idle_minutes` | `6.0` | project | minutes of implementer silence before the watchdog acts |

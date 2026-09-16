@@ -39,6 +39,9 @@ SETTINGS = {
     "stall_minutes": Setting(
         60, int, 1, None, "project",
         "minutes a staged candidate may wait to land before throughput calls the slice stalled"),
+    "boundary.inline_max_chars": Setting(
+        400, int, 1, None, "project",
+        "characters of acceptance a board row may carry before its boundary belongs in a file"),
     "gates.default_timeout": Setting(
         600, int, 1, None, "project",
         "seconds a gate may run when its own definition names no timeout"),

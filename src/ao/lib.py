@@ -4047,6 +4047,185 @@ def slice_boundary(item):
     return notes.get("acceptance") or notes.get("scope") or item.get("title") or ""
 
 
+# ---- a slice's boundary: a sentence, or a file the row points at (#73, #35) ------------
+
+BOUNDARY_SECTIONS = ("invariant", "scenarios", "paths", "out of scope")
+_BOUNDARY_COMMIT = re.compile(r"[0-9a-fA-F]{7,40}")
+_NAMED_FILE = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)+[\w.-]+\.\w+|[\w-]+\.(?:py|ts|tsx|js|jsx|mjs|cjs|go|rs|java|kt|"
+                         r"rb|cs|swift|c|h|cpp|hpp|sql|sh|ps1|json|ya?ml|toml|md))(?![\w/-])")
+_NAMED_SYMBOL = re.compile(r"`([A-Za-z_][A-Za-z0-9_]{2,})(?:\(\))?`")
+
+
+def boundary_pointer(item):
+    """(path, commit or None) when a board item's boundary is a file: `boundary: docs/slices/B8a.md@1a2b3c4`."""
+    value = (((item or {}).get("notes") or {}).get("boundary") or "").strip()
+    if not value:
+        return None
+    path, _, commit = value.partition("@")
+    return path.strip(), (commit.strip() or None)
+
+
+def boundary_sections(text):
+    """{section: body} for the headed parts of a boundary file (#73)."""
+    sections, current = {}, None
+    for line in text.splitlines():
+        heading = re.match(r"^#{1,4}\s+(.+?)\s*$", line)
+        if heading:
+            name = heading.group(1).strip().lower()
+            current = next((section for section in BOUNDARY_SECTIONS if section in name), None)
+            if current:
+                sections.setdefault(current, "")
+            continue
+        if current:
+            sections[current] += line + "\n"
+    return sections
+
+
+def read_boundary(root, item):
+    """The boundary file a slice points at, read at the commit the pointer names (#73).
+
+    The boundary lived as prose in a table cell, and twice on 2026-09-07/08 the
+    boundary itself was what was wrong, found mid-slice by an implementer that had
+    started, with no diff to show what changed. A file read at a named commit is
+    one source of truth, and when it has changed since, the change travels to the
+    reviewer as a diff. None when the item's boundary is a sentence.
+
+    Returns {"file", "commit", "changed", "sha256", "label", "text", "sections", "problem"}.
+    """
+    pointer = boundary_pointer(item)
+    if not pointer:
+        return None
+    path, commit = pointer
+    out = {"file": path, "commit": commit, "changed": False, "sha256": None, "sections": {}, "problem": None}
+    real_root = os.path.realpath(root)
+    target = os.path.realpath(os.path.join(root, path))
+    if os.path.isabs(path) or not target.startswith(real_root + os.sep):
+        out["problem"] = "it is not a path inside the repository"
+    elif commit and not _BOUNDARY_COMMIT.fullmatch(commit):
+        out["problem"] = f"{commit!r} is not a commit id"
+    else:
+        try:
+            if commit:
+                data = _git_output(root, "show", f"{commit}:{path}")
+            else:
+                with open(target, "rb") as fh:
+                    data = fh.read()
+        except (OSError, RuntimeError) as exc:
+            out["problem"] = str(exc)
+    if out["problem"]:
+        out.update(label=f"{path} (unreadable)",
+                   text=f"the boundary file {path} cannot be read: {out['problem']} - say so as a finding")
+        return out
+    content = data.decode(UTF8, "replace")
+    diff = ""
+    if commit:
+        try:
+            diff = _git_output(root, "diff", commit, "--", path).decode(UTF8, "replace")
+        except RuntimeError:
+            diff = ""
+    label = f"{path} at {commit[:12]}" if commit else f"{path} as it stands in the worktree"
+    text = f"the boundary file {label}:\n\n{content}"
+    if diff.strip():
+        label += ", changed since"
+        text += (f"\n\nThe file has changed since {commit[:12]}. The change is part of what you judge: "
+                 f"a boundary that moved mid-slice is a finding unless a decision records it.\n{diff}")
+    out.update(changed=bool(diff.strip()), sha256="sha256:" + hashlib.sha256(data).hexdigest(), label=label,
+               text=text, sections=boundary_sections(content))
+    return out
+
+
+def declared_paths(item, boundary=None):
+    """[(path, new)] a slice declares: its boundary file's Paths section, or its row's `paths:` note."""
+    if boundary and boundary.get("sections", {}).get("paths"):
+        raw = [line.strip().lstrip("-*").strip() for line in boundary["sections"]["paths"].splitlines()]
+    else:
+        raw = (((item or {}).get("notes") or {}).get("paths") or "").split(",")
+    out = []
+    for entry in raw:
+        entry = entry.strip().strip("`").strip()
+        new = bool(re.search(r"\((?:new|yeni)\)$", entry, re.I))
+        path = re.sub(r"\s*\((?:new|yeni)\)$", "", entry, flags=re.I).strip().strip("`").strip()
+        if path:
+            out.append((path, new))
+    return out
+
+
+def _symbol_owners(root, symbol):
+    """Tracked files that define a symbol, by a definition keyword in front of its name."""
+    pattern = rf"(def|class|function|interface|type|struct|enum|trait|fn|func|const|let|var)[[:space:]]+{symbol}"
+    try:
+        listed = _git_output(root, "grep", "-l", "-z", "-w", "-E", pattern, timeout=20)
+    except RuntimeError:
+        return []
+    return [os.fsdecode(path) for path in listed.split(b"\0") if path]
+
+
+def boundary_conflicts(root, item):
+    """What a slice's declared paths cannot hold, found when it is registered (#35).
+
+    2026-09-07: B8a named eight paths while its own acceptance could only be met
+    by touching a ninth; the implementer found out mid-slice and lost three hours
+    waiting on a decision. Advisory prose matching, so it names and never blocks:
+    a declared path that neither exists nor is marked `(new)`, a file the
+    acceptance names outside the declared paths, and the file defining a symbol
+    the acceptance names in backticks when that file is outside them. An item
+    that declares no paths has nothing to check.
+    """
+    source = read_boundary(root, item)
+    if source and source["problem"]:
+        return [f"its boundary file {source['file']} cannot be read: {source['problem']}"]
+    declared = declared_paths(item, source)
+    if not declared:
+        return []
+
+    def inside(path):
+        return any(path == d or path.startswith(d.rstrip("/") + "/") for d, _ in declared)
+
+    out = [f"{path} is declared but does not exist; write `(new)` after it if the slice creates it"
+           for path, new in declared if not new and not os.path.exists(os.path.join(root, path))]
+    if source:
+        text = "\n".join(body for name, body in source["sections"].items() if name not in ("paths", "out of scope")) \
+            or source["text"]
+    else:
+        text = slice_boundary(item)
+    tracked = None
+    for named in sorted(set(_NAMED_FILE.findall(text))):
+        if inside(named) or any(d.endswith("/" + named) for d, _ in declared):
+            continue
+        if "/" in named:
+            if os.path.exists(os.path.join(root, named)):
+                out.append(f"the acceptance names {named}, outside the declared paths")
+            continue
+        if tracked is None:
+            try:
+                tracked = [os.fsdecode(p) for p in _git_output(root, "ls-files", "-z").split(b"\0") if p]
+            except RuntimeError:
+                tracked = []
+        owners = [p for p in tracked if os.path.basename(p) == named]
+        if owners and not any(inside(p) for p in owners):
+            out.append(f"the acceptance names {named} ({', '.join(owners[:3])}), outside the declared paths")
+    for symbol in sorted(set(_NAMED_SYMBOL.findall(text)))[:10]:
+        owners = _symbol_owners(root, symbol)
+        if owners and not any(inside(p) for p in owners):
+            out.append(f"the acceptance names `{symbol}`, defined in {', '.join(owners[:3])}, "
+                       "outside the declared paths")
+    return out
+
+
+def boundary_advice(root, cfg, item):
+    """Everything worth saying about one item's boundary before it is worked (#35, #73)."""
+    notes = (item or {}).get("notes") or {}
+    out = boundary_conflicts(root, item)
+    if notes.get("boundary") and notes.get("acceptance"):
+        out.append("it has both a boundary file and an acceptance sentence; one source of truth, so keep the file")
+    limit = settings.get(cfg, "boundary.inline_max_chars")
+    sentence = notes.get("acceptance") or ""
+    if not notes.get("boundary") and len(sentence) > limit:
+        out.append(f"its acceptance is {len(sentence)} characters; above boundary.inline_max_chars ({limit}) it "
+                   "belongs in a file the row points at with `boundary: path@commit`")
+    return out
+
+
 DECISION_CHAIN = "ao-decision-row-v1"
 
 

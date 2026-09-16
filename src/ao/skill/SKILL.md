@@ -44,7 +44,10 @@ Anything not forbidden there and inside the slice's scope is allowed.
 2. `ao writers` once — exit 0 means you are the only writer. Exit 1: stop, report,
    do not kill anything.
 3. Take the first READY item from `.ao/backlog.md`; on `.ao/board.md` move it
-   `queued → running` with `since: YYYY-MM-DD HH:MM`.
+   `queued → running` with `since: YYYY-MM-DD HH:MM`. `ao board` names a boundary
+   conflict under the item - a declared path missing, a named file or symbol outside
+   its paths: raise it before starting, while widening or splitting is cheap. A row
+   with `boundary: file@commit` is reviewed against that file; omit `--boundary`.
 4. If the acceptance boundary is an invariant ("no X can ever produce Y"), write
    the **surface inventory first** (`evidence/…-surface-v1.md`: every path, its
    entry point, its binding, its proof), get it `ao review`ed as APPROVED, then

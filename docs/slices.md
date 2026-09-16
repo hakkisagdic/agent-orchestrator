@@ -24,6 +24,38 @@ The reason is not bureaucracy. A cloud agent cannot ask a cheap follow-up questi
 one will invent an answer, and *you* will not remember in three days what "done" meant. The
 boundary is also what the reviewer reviews against — without it, review drifts into taste.
 
+## A boundary too big for one sentence is a file
+
+A sentence stays in the board row as `acceptance: …`. Above `boundary.inline_max_chars`
+(400 characters) the boundary is a file in the repository and the row carries only a
+pointer to it, `boundary: docs/slices/B8a.md@1a2b3c4` - one source of truth, never two:
+
+```markdown
+# B8a — claim admission journal
+## Invariant
+A claim is journalled before it is admitted, and never after.
+## Scenarios
+1. A duplicate delivery is refused with the first claim's id.
+## Paths
+- src/claims/journal.ts
+- src/claims/sequence.ts (new)
+## Out of scope
+- the public claim API
+```
+
+`ao review` reads the file at the commit the pointer names and hands it to the reviewer.
+If the file has changed since, the change goes with it as a diff, so a boundary that moved
+mid-slice is visible instead of silently becoming a different contract. Such a slice is
+reviewed without `--boundary`.
+
+The declared paths - the file's Paths section, or `paths:` on a row - are checked against
+the repository whenever `ao board` or `ao doctor` reads a running or queued item: a path
+that does not exist and is not marked `(new)`, a file the acceptance names outside the
+declared paths, and the file defining a symbol the acceptance names in backticks when it
+is outside them. It is prose matching, so it names what it found and blocks nothing. The
+point is to find a boundary conflict at registration, when widening or splitting is
+cheap, rather than three hours into the slice.
+
 ## States
 
 ```

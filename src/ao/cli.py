@@ -3266,18 +3266,23 @@ def cmd_review(cfg, args):
     diff = diff_bytes.decode(UTF8, "replace")
 
     running = A.running_slice(root)
-    boundary = args.boundary or A.slice_boundary(running)
+    # A boundary file is read at the commit its row names; a later change travels as a diff (#73).
+    source = None if args.boundary else A.read_boundary(root, running)
+    boundary = args.boundary or (source or {}).get("label") or A.slice_boundary(running)
     boundary = boundary or "not declared — say so as a finding"
     # Candidate/HEAD identity is deliberately insufficient here: two slices can
     # review the same bytes. Persist the board item ID and the reviewed boundary
     # in every structured artifact so round accounting has an explicit owner.
     evidence["slice"] = (running or {}).get("id")
     evidence["boundary"] = boundary
+    if source:
+        evidence["boundary_file"] = {key: source[key] for key in ("file", "commit", "sha256", "changed")}
     evidence["measured_by"] = A.measured_by()
 
     # The candidate is what may land; the context is committed source it is judged
     # against and enters neither the diff nor the digest (#97).
-    prompt = REVIEW_PROMPT.format(boundary=boundary) + f"\n\n{REVIEW_CANDIDATE_MARKER}\n" + diff
+    prompt = REVIEW_PROMPT.format(boundary=(source or {}).get("text") or boundary) \
+        + f"\n\n{REVIEW_CANDIDATE_MARKER}\n" + diff
     budget = _review_context_budget(prompt)
     if candidate is not None:
         limits = [path.rstrip("/") for path in (scope.get("paths") or [])]
@@ -4392,6 +4397,10 @@ def cmd_board(cfg, args):
             notes = "  ".join(f"{C['dim']}{k}:{C['reset']} {v}" if v else f"{C['dim']}{k}{C['reset']}"
                               for k, v in it["notes"].items())
             print(f"   {C['b']}{it['id']}{C['reset']}  {it['title']}" + (f"   {notes}" if notes else ""))
+            if st in ("running", "queued"):
+                # Named when the item is registered, while widening or splitting is cheap (#35).
+                for advice in A.boundary_advice(root, cfg, it):
+                    print(f"      {C['yellow']}boundary: {advice}{C['reset']}")
     if not any(b.values()):
         print(f"{C['dim']}Board is empty.{C['reset']}")
     return 0
@@ -4987,6 +4996,15 @@ def doctor_problems(cfg):
         out.append(("board-graph", "; ".join(graph_problems[:3])
                     + (f" and {len(graph_problems) - 3} more" if len(graph_problems) > 3 else "")
                     + " — ao board"))
+    # A boundary its own acceptance cannot fit is found before the work, not in it (#35).
+    try:
+        conflicts = [f"{item['id']}: {text}" for state in ("running", "queued")
+                     for item in A.board(root)[state] for text in A.boundary_conflicts(root, item)]
+    except Exception:
+        conflicts = []
+    if conflicts:
+        out.append(("boundary-conflict", "; ".join(conflicts[:3])
+                    + (f" and {len(conflicts) - 3} more" if len(conflicts) > 3 else "") + " — ao board"))
     # An implementer with nothing pre-authorised to pick up next stalls the moment
     # the architect is away; two READY items is the floor.
     try:
