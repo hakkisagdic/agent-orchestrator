@@ -1989,6 +1989,8 @@ REVIEW_DISCOVERY_MAX_FALLBACK_DIRS = 32
 REVIEW_DISCOVERY_MAX_CANDIDATES = 8
 REVIEW_DISCOVERY_MAX_EXTENSIONS = 16
 REVIEW_KILL_DRAIN_SECONDS = 5
+# How often a running reviewer says it is still running (#21).
+REVIEW_HEARTBEAT_SECONDS = 60
 REVIEW_TIMEOUT_DEFAULT = S.default("review_timeout")
 
 
@@ -2137,9 +2139,40 @@ def _reviewer_kill_and_drain(proc):
         return "", ""
 
 
-def _run_reviewer(root, argv, timeout, fallback=False):
-    """Run one reviewer outside the repository and classify invocation status."""
+def _elapsed(seconds):
+    seconds = max(0.0, float(seconds))
+    return f"{seconds:.1f}s" if seconds < 60 else f"{int(seconds // 60)}m{int(seconds % 60):02d}s"
+
+
+def _reviewer_communicate(proc, timeout, label, started):
+    """communicate() in heartbeat-sized waits; TimeoutExpired once `timeout` is spent.
+
+    Retrying communicate after a timeout loses no output, so the reviewer's streams
+    are collected whole however many beats it takes.
+    """
+    remaining = float(timeout)
+    while True:
+        wait = min(remaining, REVIEW_HEARTBEAT_SECONDS)
+        try:
+            return proc.communicate(timeout=wait)
+        except subprocess.TimeoutExpired:
+            remaining -= wait
+            if remaining <= 0:
+                raise
+            print(f"{C['dim']}reviewer {label} still working: "
+                  f"{_elapsed(time.monotonic() - started)} elapsed, pid {proc.pid}{C['reset']}", flush=True)
+
+
+def _run_reviewer(root, argv, timeout, fallback=False, label=None):
+    """Run one reviewer outside the repository and classify invocation status.
+
+    It says it is alive (#21). On 2026-09-07 a review printed nothing for four
+    minutes, and nobody could tell a reviewer thinking from one that had died:
+    every REVIEW_HEARTBEAT_SECONDS a line names the reviewer, the time elapsed and
+    the child's pid, and at the end one line gives its exit code and wall time.
+    """
     import tempfile
+    label = label or os.path.basename(argv[0])
     print(f"{C['dim']}reviewer: {os.path.basename(argv[0])}{' (fallback)' if fallback else ''}{C['reset']}")
     with tempfile.TemporaryDirectory(prefix="ao-reviewer-") as fresh:
         fresh = os.path.realpath(fresh)
@@ -2168,9 +2201,10 @@ def _run_reviewer(root, argv, timeout, fallback=False):
             }
 
         A.helper_register(root, proc.pid, "reviewer")
+        started = time.monotonic()
         try:
             try:
-                stdout, stderr = proc.communicate(timeout=timeout)
+                stdout, stderr = _reviewer_communicate(proc, timeout, label, started)
             except KeyboardInterrupt:
                 # Its own group no longer hears the terminal's interrupt; pass it on.
                 _reviewer_kill_and_drain(proc)
@@ -2197,6 +2231,8 @@ def _run_reviewer(root, argv, timeout, fallback=False):
         finally:
             A.helper_release(root, proc.pid)
 
+        print(f"{C['dim']}reviewer {label} exited {proc.returncode} after "
+              f"{_elapsed(time.monotonic() - started)}{C['reset']}")
         out = (stdout if (stdout or "").strip() else stderr or "").strip()
         if proc.returncode != 0:
             temporary = proc.returncode == 75
@@ -2444,7 +2480,7 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary):
             "returncode": None, "kind": "configuration-error", "retryable": False,
         }
     try:
-        attempt = _run_reviewer(root, argv, timeout, fallback)
+        attempt = _run_reviewer(root, argv, timeout, fallback, label=label)
     except Exception as exc:
         attempt = {
             "ok": False, "out": "",
