@@ -717,7 +717,11 @@ def cmd_commit_ok(cfg, args):
     waiver = next((w for w in A.open_waivers(root, gate="review")
                    if w.get("slice") in running or w.get("slice") == "*"), None)
     review_required = F.enabled(cfg, "review")
-    match = A.latest_candidate_review(root, cfg["reviews"], candidate["digest"])
+    try:
+        decision = A.candidate_review_decision(root, cfg["reviews"], candidate["digest"])
+    except Exception as exc:
+        decision = {"match": None, "problem": f"review ledger is unreadable: {exc}"}
+    match = decision["match"]
     review_name, rbody, evidence, rwho = None, "", None, None
     strict_reviewer_identity = None
     scope = A.candidate_scope(candidate)
@@ -729,7 +733,8 @@ def cmd_commit_ok(cfg, args):
     elif strict and not any(route["eligible"] for route in matrix_resolution["reviewers"]):
         reasons.append("capability matrix has no independently eligible reviewer")
     elif not match:
-        reasons.append("no APPROVED prospective review is bound to this staged candidate")
+        reasons.append(decision["problem"]
+                       or "no APPROVED prospective review is bound to this staged candidate")
     else:
         review_name, _, rbody, evidence = match
         reviewed_scope, integrity_reasons = A.candidate_review_integrity(
@@ -1325,10 +1330,15 @@ def cmd_commit_check(cfg, args):
     if grant and grant.get("granted") is True:
         review_name = grant.get("review")
         if review_name:
-            match = A.latest_candidate_review(root, cfg["reviews"], candidate["digest"]) \
-                if candidate is not None else None
+            try:
+                decision = A.candidate_review_decision(root, cfg["reviews"], candidate["digest"]) \
+                    if candidate is not None else {"match": None, "problem": None}
+            except Exception as exc:
+                decision = {"match": None, "problem": f"review ledger is unreadable: {exc}"}
+            match = decision["match"]
             if not match:
-                reasons.append(f"granted review {review_name} is no longer the current approval")
+                reasons.append(f"granted review {review_name} is no longer the current approval"
+                               + (f": {decision['problem']}" if decision["problem"] else ""))
             else:
                 if match[0] != review_name:
                     reasons.append(
@@ -2645,6 +2655,18 @@ def _configured_reviewer(cfg, reviewer_id):
     return {"id": reviewer_id}
 
 
+def _review_timeout(cfg):
+    """Seconds one reviewer may take: `review_timeout` in the config, never the command line (#63).
+
+    The implementer runs `ao review`. A deadline it chose could starve the reviewer
+    that would reject until a fallback answered.
+    """
+    value = cfg.get("review_timeout")
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return REVIEW_TIMEOUT_DEFAULT
+
+
 def cmd_review(cfg, args):
     """Review the working tree with an actor that did not write it.
 
@@ -2787,7 +2809,7 @@ def cmd_review(cfg, args):
                 continue
             chain.append(fallback)
     invocation = _invoke_reviewer_chain(
-        root, chain, prompt, args.timeout, strict, primary=rv if not strict else None
+        root, chain, prompt, _review_timeout(cfg), strict, primary=rv if not strict else None
     )
     used = invocation["used"]
     if strict:
@@ -2809,7 +2831,7 @@ def cmd_review(cfg, args):
         d = os.path.join(root, cfg["reviews"])
         os.makedirs(d, exist_ok=True)
         head = A.sh("git rev-parse --short HEAD", cwd=root)
-        name = f"{datetime.now():%Y-%m-%d-%H%M%S}-{head}.md"
+        name = A.review_artefact_name(root, cfg["reviews"], head)
         if strict:
             evidence["authorizable"] = False
             M.add_evidence_context(
@@ -2829,8 +2851,10 @@ def cmd_review(cfg, args):
                 f"- boundary: {A.review_header_value(boundary)}\n"
                 f"- reviewers tried: {A.review_header_value(why)}\n"
             )
-        open(os.path.join(d, name), "w", encoding=UTF8).write(
-            unavailable_body + "\nNo review took place. This file is not a round.\n"
+        A.write_review_artefact(
+            root, cfg["reviews"], name,
+            unavailable_body + "\nNo review took place. This file is not a round.\n",
+            evidence=evidence, verdict="UNAVAILABLE",
         )
         A.set_reviewer_state(
             root, pending_review=True, boundary=boundary[:200],
@@ -2845,6 +2869,8 @@ def cmd_review(cfg, args):
     out = invocation["attempt"]["out"]
     reviewer_executable = invocation["attempt"].get("binary") or "reviewer"
     rv = used
+    # A fallback is recorded as one; it cannot supersede a rejection (#63).
+    fallback_used = used["index"] > 0 if strict else used is not (cfg.get("reviewer") or {})
     if strict:
         M.add_evidence_context(
             evidence, matrix_resolution, strict_attempts,
@@ -2884,7 +2910,7 @@ def cmd_review(cfg, args):
         d = os.path.join(root, cfg["reviews"])
         os.makedirs(d, exist_ok=True)
         head = A.sh("git rev-parse --short HEAD", cwd=root)
-        name = f"{datetime.now():%Y-%m-%d-%H%M%S}-{head}.md"
+        name = A.review_artefact_name(root, cfg["reviews"], head)
         header = [
             f"# Review {name}",
             "",
@@ -2909,8 +2935,10 @@ def cmd_review(cfg, args):
                 "- paths: " + json.dumps(args.paths, ensure_ascii=True)
             )
         _reviewer_terminal_output(out, "")
-        open(os.path.join(d, name), "w", encoding=UTF8).write(
-            "\n".join(header) + f"\n\n{invalid_reason}.\n"
+        A.write_review_artefact(
+            root, cfg["reviews"], name, "\n".join(header) + f"\n\n{invalid_reason}.\n",
+            evidence=evidence, verdict="INVALID", reviewer=reviewer_label,
+            fallback=fallback_used,
         )
         print(f"{C['yellow']}{C['b']}INVALID REVIEW{C['reset']}  "
               "no valid VERDICT/count schema — not a round; re-run")
@@ -2975,7 +3003,7 @@ def cmd_review(cfg, args):
     d = os.path.join(root, cfg["reviews"])
     os.makedirs(d, exist_ok=True)
     head = A.sh("git rev-parse --short HEAD", cwd=root)
-    name = f"{datetime.now():%Y-%m-%d-%H%M%S}-{head}.md"
+    name = A.review_artefact_name(root, cfg["reviews"], head)
     if strict:
         reviewer_identity = used["identity"]
         reviewer_line = (
@@ -3029,7 +3057,11 @@ def cmd_review(cfg, args):
         )
     if included:
         header.append(f"- new files: {A.review_header_value(', '.join(included))}")
-    open(os.path.join(d, name), "w", encoding=UTF8).write("\n".join(header) + f"\n\n{out}\n")
+    A.write_review_artefact(
+        root, cfg["reviews"], name, "\n".join(header) + f"\n\n{out}\n",
+        evidence=evidence, verdict=verdict, fallback=fallback_used,
+        reviewer=used["identity"]["binding"] if strict else (rv.get("id") or reviewer_executable),
+    )
     A.record_notice(root, "review", f"{verdict} {sev}", sent=False, key="review")
 
     col = C["green"] if verdict == "APPROVED" else C["yellow"]
@@ -6165,7 +6197,7 @@ def cmd_doctor(cfg, args):
         f"reviewer probe  {probe_tone}{_reviewer_probe_text(reviewer_probe)}"
         f"{C['reset']}"
     )
-    print(f"review budget   {C['dim']}{_review_budget_text()}{C['reset']}")
+    print(f"review budget   {C['dim']}{_review_budget_text(_review_timeout(cfg))}{C['reset']}")
     print(f"quota source    {'keyflip' if A.sh('command -v keyflip') else '—'}")
     key = os.path.basename(root.rstrip("/")).lower()
     wd = A.sh(f"launchctl list | grep com.agentorchestrator.watchdog.{key}")
@@ -6452,7 +6484,9 @@ def main():
     rw.add_argument("--boundary", help="acceptance boundary; defaults to the running slice")
     rw.add_argument("--paths", nargs="*", help="narrow a prospective review to these staged paths")
     rw.add_argument("--commits", help="review landed work retrospectively; never authorizes a commit")
-    rw.add_argument("--timeout", type=int, default=REVIEW_TIMEOUT_DEFAULT)
+    # Accepted so existing callers keep working, and ignored: the timeout is
+    # `review_timeout` in .ao/config.json (#63).
+    rw.add_argument("--timeout", type=int, help=argparse.SUPPRESS)
     rw.set_defaults(fn=cmd_review)
     tg = sub.add_parser("telegram", help="phone channel: alerts out, decisions in")
     tg.add_argument("action", nargs="?", default="status",

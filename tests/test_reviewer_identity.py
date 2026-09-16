@@ -105,6 +105,7 @@ def test_an_approval_that_records_no_reviewer_grants_nothing(project, monkeypatc
     del unnamed["reviewer"]
     open(path, "w", encoding="utf-8").write(
         body.replace(A.review_evidence_line(evidence), A.review_evidence_line(unnamed), 1))
+    A.record_review(root, name, open(path, "rb").read(), unnamed, "APPROVED")
 
     code, out = _commit_ok(cfg, monkeypatch, capsys)
     assert code == 1 and f"{name} records no reviewer in its evidence" in out
@@ -120,6 +121,7 @@ def test_a_margin_verdict_edited_away_from_the_evidence_is_invalid(project, monk
     name, path, body = _only_review(root)
     open(path, "w", encoding="utf-8").write(
         body.replace("\nVERDICT: NEEDS_CHANGES\nBLOCKER: 1\n", "\nVERDICT: APPROVED\nBLOCKER: 0\n", 1))
+    A.record_review(root, name, open(path, "rb").read(), A.review_evidence(body), "APPROVED")
 
     assert A.reviews(root, "semantic-review") == [(name, "INVALID")]
     code, out = _commit_ok(cfg, monkeypatch, capsys)

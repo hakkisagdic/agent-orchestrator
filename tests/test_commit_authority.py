@@ -56,9 +56,10 @@ def _review_args():
 def _write_approved_review(project, tree=None, candidate=None):
     root = project["root"]
     lines = ["# Review approved.md", ""]
+    evidence = None
     if candidate is not None:
         scope = A.candidate_scope(candidate)
-        lines.append(A.review_evidence_line({
+        lines.append(A.review_evidence_line(evidence := {
             "schema": 2,
             "kind": "index-candidate",
             "authorizable": True,
@@ -89,6 +90,7 @@ def _write_approved_review(project, tree=None, candidate=None):
     )
     path = os.path.join(root, project["reviews"], "approved.md")
     open(path, "w", encoding="utf-8").write("\n".join(lines))
+    A.record_review(root, "approved.md", open(path, "rb").read(), evidence, "APPROVED")
     return path
 
 
@@ -107,6 +109,10 @@ def _tamper_review(path, field):
     open(path, "w", encoding="utf-8").write(
         body.replace(original, A.review_evidence_line(evidence), 1)
     )
+    # A forger who can edit the file can append its record too; the evidence
+    # checks are what refuse it then.
+    A.record_review(os.path.dirname(os.path.dirname(path)), os.path.basename(path),
+                    open(path, "rb").read(), evidence, A._review_verdict(body))
 
 
 def _allow_commit_prerequisites(monkeypatch, tree, candidate):

@@ -2055,32 +2055,103 @@ def candidate_review_integrity(root, candidate, evidence):
     return scope, reasons
 
 
-def latest_candidate_review(root, review_dir, candidate_digest, limit=40):
-    """Return approval only when the newest matching prospective review approves."""
-    for name, verdict in reviews(root, review_dir, limit=limit):
+REVIEW_CHAIN = "ao-review-row-v1"
+
+
+def review_ledger_path(root):
+    return os.path.join(root, ".ao", "ledger", "reviews.jsonl")
+
+
+def review_artefact_name(root, reviews_dir, head):
+    """A review artefact name no earlier review has, so no record points at a rewritten file."""
+    stem = f"{datetime.now():%Y-%m-%d-%H%M%S}-{head}"
+    name, n = f"{stem}.md", 2
+    while os.path.lexists(os.path.join(root, reviews_dir, name)):
+        name, n = f"{stem}-{n}.md", n + 1
+    return name
+
+
+def record_review(root, name, data, evidence, verdict, reviewer=None, fallback=False):
+    """Append one review to the chained review ledger: which file, which bytes, what it decided (#63)."""
+    from .storage import append_chained_jsonl
+    evidence = evidence if isinstance(evidence, dict) else {}
+    candidate = evidence.get("candidate") if isinstance(evidence.get("candidate"), dict) else {}
+    row = {
+        "at": int(time.time()),
+        "artefact": name,
+        "sha256": "sha256:" + hashlib.sha256(data).hexdigest(),
+        "kind": evidence.get("kind"),
+        "candidate": candidate.get("digest"),
+        "verdict": verdict,
+        "authorizable": evidence.get("authorizable") is True,
+        "fallback": bool(fallback),
+        "reviewer": reviewer,
+    }
+    return append_chained_jsonl(review_ledger_path(root), row, REVIEW_CHAIN)
+
+
+def write_review_artefact(root, reviews_dir, name, text, *, evidence, verdict,
+                          reviewer=None, fallback=False):
+    """Write a review artefact and record exactly the bytes written (#63)."""
+    directory = os.path.join(root, reviews_dir)
+    os.makedirs(directory, exist_ok=True)
+    data = text.encode(UTF8)
+    with open(os.path.join(directory, name), "wb") as fh:
+        fh.write(data)
+    record_review(root, name, data, evidence, verdict, reviewer=reviewer, fallback=fallback)
+
+
+def candidate_review_decision(root, review_dir, candidate_digest):
+    """What the newest recorded review of one candidate decides (#63).
+
+    Returns ``{"match": (name, verdict, body, evidence) or None, "problem": text or None}``.
+    Reviews are taken in the order ao recorded them in the chained review ledger,
+    never by file time, which anyone can touch. A review that did not take place
+    (UNAVAILABLE) masks nothing. Otherwise the newest review of the candidate
+    decides: a missing, unreadable, emptied or rewritten artefact is a refusal and
+    never a step back to an older approval, and a fallback's approval cannot
+    supersede a completed rejection of the same candidate.
+    """
+    from .storage import read_chained_jsonl
+    rows = [row for row in read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN)
+            if isinstance(row, dict) and row.get("kind") == "index-candidate"
+            and row.get("candidate") == candidate_digest]
+    for position in range(len(rows) - 1, -1, -1):
+        row = rows[position]
+        if row.get("verdict") == "UNAVAILABLE":
+            continue
+        name = row.get("artefact")
         try:
-            body = open(
-                os.path.join(root, review_dir, name), errors="replace", encoding=UTF8
-            ).read(100_000)
+            with open(os.path.join(root, review_dir, str(name)), "rb") as fh:
+                data = fh.read()
         except OSError:
-            continue
+            return {"match": None,
+                    "problem": f"the newest review of this candidate, {name}, cannot be read"}
+        if "sha256:" + hashlib.sha256(data).hexdigest() != row.get("sha256"):
+            return {"match": None,
+                    "problem": f"the newest review of this candidate, {name}, is not the file "
+                               "ao recorded: emptied, cut short or rewritten"}
+        body = data.decode(UTF8, "replace")
         evidence = review_evidence(body)
-        if not evidence or evidence.get("kind") != "index-candidate" \
-                or (evidence.get("candidate") or {}).get("digest") != candidate_digest:
-            # Legacy, retrospective, unavailable-without-evidence, and reviews
-            # for other candidates say nothing about this candidate.
-            continue
-        if evidence.get("schema") == 3 and evidence.get("review_status") == "unavailable":
-            # Strict mode records safe route attempts even when no review took
-            # place. Like the legacy unstructured artifact, that is not a round
-            # and must not mask an earlier completed review of the same bytes.
-            continue
-        # The first matching structured artifact is authoritative. A newer
-        # rejection or invalidated review must never expose an older approval.
-        if verdict == "APPROVED" and evidence.get("authorizable") is True:
-            return name, verdict, body, evidence
-        return None
-    return None
+        verdict = _review_verdict(body)
+        if isinstance(evidence, dict) and "verdict" in evidence and evidence["verdict"] != verdict:
+            verdict = "INVALID"
+        if verdict != "APPROVED" or not isinstance(evidence, dict) \
+                or evidence.get("authorizable") is not True:
+            return {"match": None, "problem": None}
+        rejection = next((earlier for earlier in reversed(rows[:position])
+                          if earlier.get("verdict") == "NEEDS_CHANGES"), None)
+        if row.get("fallback") and rejection:
+            return {"match": None,
+                    "problem": f"{name} is a fallback reviewer's approval; it cannot supersede "
+                               f"the rejection of this candidate in {rejection.get('artefact')}"}
+        return {"match": (name, verdict, body, evidence), "problem": None}
+    return {"match": None, "problem": None}
+
+
+def latest_candidate_review(root, review_dir, candidate_digest, limit=40):
+    """Return approval only when the newest recorded review of the candidate approves."""
+    return candidate_review_decision(root, review_dir, candidate_digest)["match"]
 
 
 AUTHORITY_CHAIN = "ao-authority-row-v1"

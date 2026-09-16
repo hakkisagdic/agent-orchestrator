@@ -212,6 +212,8 @@ def test_verdict_without_counts_is_invalid_and_masks_older_approval(project, tmp
         + "\n\nVERDICT: APPROVED\nBLOCKER: 0\nHIGH: 0\nMEDIUM: 0\nLOW: 0\n"
     )
     os.utime(older, (1, 1))
+    A.record_review(root, "older-approved.md", open(older, "rb").read(),
+                    A.review_evidence(open(older, encoding="utf-8").read()), "APPROVED")
     assert A.latest_candidate_review(root, "semantic-review", candidate["digest"])[0] == "older-approved.md"
 
     import sys

@@ -116,6 +116,11 @@ def _write_candidate_review(path, candidate, verdict, *, authorizable=True):
     )
 
 
+def _record(root, path, verdict):
+    A.record_review(root, path.name, path.read_bytes(),
+                    A.review_evidence(path.read_text(encoding="utf-8")), verdict)
+
+
 def test_newest_matching_structured_review_is_authoritative(project):
     root = project["root"]
     _stage_file(root)
@@ -124,16 +129,17 @@ def test_newest_matching_structured_review_is_authoritative(project):
 
     approved = Path(review_dir, "approved.md")
     _write_candidate_review(approved, candidate, "APPROVED")
-    os.utime(approved, (1, 1))
+    _record(root, approved, "APPROVED")
 
     unavailable = Path(review_dir, "unavailable.md")
     unavailable.write_text("VERDICT: UNAVAILABLE\n", encoding="utf-8")
-    os.utime(unavailable, (2, 2))
+    A.record_review(root, "unavailable.md", unavailable.read_bytes(),
+                    {"kind": "index-candidate", "candidate": candidate}, "UNAVAILABLE")
     assert A.latest_candidate_review(root, project["reviews"], candidate["digest"])[0] == "approved.md"
 
     rejected = Path(review_dir, "rejected.md")
     _write_candidate_review(rejected, candidate, "NEEDS_CHANGES")
-    os.utime(rejected, (3, 3))
+    _record(root, rejected, "NEEDS_CHANGES")
     assert A.latest_candidate_review(root, project["reviews"], candidate["digest"]) is None
 
 

@@ -147,6 +147,10 @@ def _tamper_evidence(path, mutate):
     open(path, "w", encoding="utf-8").write(
         body.replace(old, A.review_evidence_line(evidence), 1)
     )
+    # A forger who can edit the file can append its record too; the evidence
+    # checks are what refuse it then.
+    A.record_review(os.path.dirname(os.path.dirname(path)), os.path.basename(path),
+                    open(path, "rb").read(), evidence, A._review_verdict(body))
 
 
 def test_absent_matrix_keeps_legacy_review_schema(project):

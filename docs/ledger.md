@@ -17,6 +17,7 @@ The ledger is the fix: an append-only record that outlives the messages.
 ├── decisions.jsonl      # why we chose things
 ├── verifications.jsonl  # what was actually measured, and by whom (hash-chained)
 ├── authority.jsonl      # hash-chained commit grants and refusals
+├── reviews.jsonl        # hash-chained: each review artefact, its bytes and verdict
 ├── slices.jsonl         # slice lifecycle transitions
 └── INDEX.md             # rendered, human-readable, regenerated on write
 ```
