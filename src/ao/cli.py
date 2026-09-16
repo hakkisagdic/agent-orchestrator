@@ -4248,6 +4248,20 @@ def _actor_grant_problems(cfg):
     return out
 
 
+def _implementer_commit_guard(cfg):
+    """Which guard holds commits for the configured implementer, in one sentence (#109)."""
+    from . import allowlist as AL
+    impl = cfg.get("implementer") or {}
+    if not impl.get("adapter"):
+        return None
+    adapter = A.load_adapter(impl["adapter"])
+    argv = (adapter.get("resume") or {}).get("argv") or []
+    if AL.problems(argv, adapter.get("options") or {}):
+        return (f"{impl['adapter']} can commit around the hook; an ungranted commit is not "
+                "prevented but surfaces within one watchdog cycle (landed-tree check)")
+    return f"{impl['adapter']}'s grant admits no hook bypass; ao commit and the hook hold commits"
+
+
 def doctor_problems(cfg):
     """What `ao doctor --check` acts on: conditions a person must fix, as (key, text)."""
     from .watchdog import wake_error, STATE_DIR
@@ -6275,6 +6289,9 @@ def cmd_doctor(cfg, args):
         f"{C['reset']}"
     )
     print(f"review budget   {C['dim']}{_review_budget_text(_review_timeout(cfg))}{C['reset']}")
+    guard = _implementer_commit_guard(cfg)
+    if guard:
+        print(f"commit guard    {C['dim']}{guard}{C['reset']}")
     try:
         waiver_lines = A.open_waiver_report(root)
     except Exception as exc:

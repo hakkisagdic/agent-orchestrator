@@ -92,7 +92,10 @@ It neither issues nor consumes a grant. Its limit: Git writes the commit's tree 
 index after the hook returns, so a process that stages a path in that window lands it
 inside an authorised commit, and no hook can prevent that. `ao commit` compares the tree
 that landed with the one the grant bound and reports and records a difference, and
-`ao doctor` reports any commit since the first grant whose tree no grant bound. A review
+`ao doctor` reports any commit since the first grant whose tree no grant bound, and the
+watchdog tells the architect about one within a cycle - which is what holds when the
+implementer's harness is granted every tool and could commit with `--no-verify`.
+`tests/test_attacks.py` names ten attacks on commit authority, each of which fails closed. A review
 waiver (`ao waive review`) is a person's
 act and is bounded: it names one slice and a person, expires (24 hours unless `--hours`
 says otherwise, at most a week), stands in for the review of one candidate only, and is

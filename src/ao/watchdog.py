@@ -1038,6 +1038,32 @@ def _sample_credits(root, st, adapter, project, now=None):
                window=6 * 3600, audience="human", level="red")
 
 
+def report_ungranted_commits(root, project, st, limit=20):
+    """Tell the architect once about commits whose tree no grant bound (#109).
+
+    A harness granted every tool can run `git commit --no-verify`, and nothing in
+    its grant keeps that out. The landed-tree check cannot stop such a commit; run
+    every cycle, it makes one visible within a cycle. Commits already told are kept
+    in the watchdog state, so a standing one is not re-reported every two minutes.
+    Returns how many there are.
+    """
+    try:
+        stray = A.commits_without_grant(root, limit=limit)
+    except Exception:
+        return 0
+    told = set(st.get("ungranted_told") or [])
+    new = [sha for sha in stray if sha not in told]
+    if new:
+        notify(f"{project}: {len(new)} commit(s) landed without a grant",
+               ", ".join(sha[:12] for sha in new[:5])
+               + ": no grant bound their trees — a path staged after commit-check, "
+               "or a commit made outside ao", root, key=f"ungranted-commits:{new[0][:12]}",
+               window=30 * 86400, audience="architect")
+        st["ungranted_told"] = sorted(told | set(new))[-200:]
+        save_state(root, st)
+    return len(stray)
+
+
 def _cycle_impl(args, root):
     cfg = A.load_config(root)
     impl = cfg.get("implementer") or {}
@@ -1095,6 +1121,8 @@ def _cycle_impl(args, root):
     # do not appear as the parent's tool calls and would read as a stranger's.
     fe = [] if A.agent_pids(root, adapter) else A.foreign_edits(root, cfg)
     _FACTS["foreign_edits"] = fe
+    if not args.dry_run:
+        _FACTS["ungranted_commits"] = report_ungranted_commits(root, project, st)
     for sib, age_s in A.stale_siblings(root).items():
         notify(f"{sib}: watchdog silent", f"no heartbeat for {age_s // 60}m — its watchdog is not "
                f"running; launchctl / ao watchdog status", root, key=f"watchdog-dead:{sib}",
