@@ -5489,6 +5489,78 @@ def mail_meta(path):
     return out
 
 
+# ---- unread age escalates on the ladder (#30) --------------------------------------------
+
+MAIL_CLASSES = ("fyi", "needs-read", "needs-decision", "urgent")
+_DECISION_KINDS = ("decision", "decision-request", "blocked", "karar", "question", "escalation")
+_FYI_KINDS = ("done", "rapor", "report", "fyi", "info", "status", "note")
+
+
+def mail_class(name, meta=None, body=""):
+    """What a message asks of whoever reads it: fyi, needs-read, needs-decision or urgent (#30).
+
+    Declared in the envelope (`class:`) when the writer said; otherwise read from
+    its kind and its headings, the way the watchdog already reads a request.
+    """
+    meta = meta or {}
+    declared = str(meta.get("class") or "").strip().lower()
+    if declared in MAIL_CLASSES:
+        return declared
+    kind = str(meta.get("kind") or "").strip().lower()
+    if not kind:
+        found = re.match(r"^\d{8}-\d{4}-.+?-to-.+?-([a-z]+)-", name, re.I)
+        kind = found.group(1).lower() if found else ""
+    low = str(body or "").lower()
+    if kind in _DECISION_KINDS or any(mark in low for mark in ("## karar gerekli", "## decision required")):
+        return "needs-decision"
+    return "fyi" if kind in _FYI_KINDS else "needs-read"
+
+
+def addressed_to(name, cfg, role):
+    """Whether a message is for a role: the architect's inbox, or the implementer's; a person reads both."""
+    if role == "architect":
+        return to_architect(name, cfg)
+    if role == "implementer":
+        return not to_architect(name, cfg) and not from_watchdog(name)
+    return True
+
+
+def mail_seen(root, names, by):
+    """Record, once each, that messages were put in front of their reader (#30).
+
+    Seeing is not handling: handling stays deletion, and a message seen and not
+    yet handled is still in the mailbox. What this separates is "nobody has been
+    shown it" from "someone is working on it".
+    """
+    already = {row.get("id") for row in mail_log(root, 5000) if row.get("event") == "seen"}
+    fresh = [name for name in names if name not in already]
+    for name in fresh:
+        mail_ledger_append(root, {"event": "seen", "id": name, "by": by})
+    return fresh
+
+
+def unseen_messages(root, cfg):
+    """Messages in the mailbox nobody has been shown, oldest first, with their class and age (#30)."""
+    box = cfg.get("mailbox", "agent-mail")
+    rows = mail_log(root, 5000)
+    seen = {row.get("id") for row in rows if row.get("event") == "seen"}
+    written = {row.get("id"): row.get("at") for row in rows if row.get("event") == "written"}
+    out = []
+    for name in mailbox(root, box):
+        if name in seen or from_watchdog(name):
+            continue
+        path = os.path.join(root, box, name)
+        try:
+            with open(path, errors="replace", encoding=UTF8) as fh:
+                body = fh.read(4000)
+            at = float(written.get(name) or os.path.getmtime(path))
+        except (OSError, TypeError, ValueError):
+            continue
+        out.append({"id": name, "class": mail_class(name, mail_meta(path), body), "at": at,
+                    "age": max(0.0, time.time() - at)})
+    return sorted(out, key=lambda message: message["at"])
+
+
 def mail_ledger_append(root, row):
     d = os.path.join(root, ".ao", "ledger")
     try:

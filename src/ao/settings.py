@@ -60,6 +60,15 @@ SETTINGS = {
     "merge.check_days": Setting(
         7, int, 1, None, "project",
         "days back ao doctor looks for merges no passing run of their result vouches for"),
+    "mail.unseen_yellow_minutes": Setting(
+        15, int, 1, None, "project",
+        "minutes a needs-decision message may wait unseen before the architect is told"),
+    "mail.unseen_orange_minutes": Setting(
+        60, int, 1, None, "project",
+        "minutes unseen before a person's desktop and phone are told"),
+    "mail.unseen_red_minutes": Setting(
+        240, int, 1, None, "project",
+        "minutes unseen before it rings red and goes to e-mail"),
     "gates.default_timeout": Setting(
         600, int, 1, None, "project",
         "seconds a gate may run when its own definition names no timeout"),

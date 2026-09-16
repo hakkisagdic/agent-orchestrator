@@ -89,6 +89,15 @@ Two rules that come from this project's own scars: a command a person or an agen
 pages anyone (notification belongs to the scheduled watcher), and a resolution is never louder
 than the raise. Escalation by age belongs to `needs-decision` alone.
 
+What exists today, before the store below: a message declares its class in its envelope
+(`ao mail send --class needs-decision`), or it is read from its kind and headings. When a
+reader's own command puts a message in front of it - `ao mail list` or `read`, `ao_inbox`,
+the urgent banner - `.ao/ledger/mail.jsonl` records `seen` once, apart from deletion, so
+"nobody has been shown this" is no longer the same as "someone is working on it". An
+unseen `needs-decision` message climbs the ladder by age: past `mail.unseen_yellow_minutes`
+the architect is told, past `mail.unseen_orange_minutes` a person's desktop and phone, past
+`mail.unseen_red_minutes` e-mail. `ao status` names the oldest unseen message and its age.
+
 ## Sync: local ref, separate private repository
 
 Two layers, because they answer different questions.

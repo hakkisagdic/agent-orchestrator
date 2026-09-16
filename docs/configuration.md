@@ -38,6 +38,9 @@ machine setting written into a project.
 | `boundary.inline_max_chars` | `400` | project | characters of acceptance a board row may carry before its boundary belongs in a file |
 | `merge.link_paths` | `['.venv', 'node_modules']` | project | untracked dependency directories a merge result borrows from the project to run its gates |
 | `merge.check_days` | `7` | project | days back ao doctor looks for merges no passing run of their result vouches for |
+| `mail.unseen_yellow_minutes` | `15` | project | minutes a needs-decision message may wait unseen before the architect is told |
+| `mail.unseen_orange_minutes` | `60` | project | minutes unseen before a person's desktop and phone are told |
+| `mail.unseen_red_minutes` | `240` | project | minutes unseen before it rings red and goes to e-mail |
 | `gates.default_timeout` | `600` | project | seconds a gate may run when its own definition names no timeout |
 | `gates.coverage_min_files` | `5` | project | source files of one toolchain a top-level tree must hold before a gate must exercise it |
 | `watchdog.idle_minutes` | `6.0` | project | minutes of implementer silence before the watchdog acts |

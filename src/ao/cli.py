@@ -237,6 +237,12 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0):
       (", ".join(mail) if mail else f"{C['dim']}empty{C['reset']}"))
     for line in _mailbox_banner(cfg):
         a(f"   {line}")
+    unseen = A.unseen_messages(root, cfg)
+    if unseen:
+        oldest = unseen[0]
+        a(f"   {C['yellow']}oldest unseen{C['reset']} {oldest['id']}  {C['dim']}{oldest['class']}, "
+          f"{int(oldest['age'] // 60)}m" + (f" · {len(unseen) - 1} more unseen" if len(unseen) > 1 else "")
+          + f"{C['reset']}")
 
     # Board — one line, because a parked item is invisible by construction: work
     # moved on past it, so no other signal in this panel looks wrong.
@@ -291,6 +297,8 @@ def _mailbox_banner(cfg):
     try:
         urgent = A.urgent_messages(root, cfg, A.invoking_role())
         waiting = len(A.mailbox(root, cfg.get("mailbox", "agent-mail")))
+        # Named here is shown to its reader (#30).
+        A.mail_seen(root, [m["id"] for m in urgent], A.invoking_role() or "person")
     except OSError:
         return []
     lines = [f"{C['red']}{C['b']}URGENT{C['reset']} for the {m['to']}: {C['b']}{m['title']}{C['reset']}  "
@@ -412,6 +420,11 @@ def cmd_mail(cfg, args):
     if args.action in ("list", "read"):
         for line in _mailbox_banner(cfg):
             print(line)
+    if args.action in ("list", "read"):
+        # What a reader's own command lists is seen by that reader, not yet handled (#30).
+        role = A.invoking_role()
+        shown = [f for f in A.mailbox(root, cfg["mailbox"]) if A.addressed_to(f, cfg, role)]
+        A.mail_seen(root, shown, role or "person")
     if args.action == "list":
         for f in A.mailbox(root, cfg["mailbox"]):
             print(f)
@@ -426,7 +439,8 @@ def cmd_mail(cfg, args):
         name = f"{stamp}-{arch}-to-{impl}-{A.safe_slug(args.type.upper(), 'INFO')}-{topic}.md"
         body = args.body if args.body else sys.stdin.read()
         A.write_mail(root, cfg, name, body.rstrip() + "\n",
-                     {"kind": args.type.lower(), "from": arch, "to": impl})
+                     {"kind": args.type.lower(), "from": arch, "to": impl,
+                      "class": getattr(args, "mail_class", None)})
         print(name)
     elif args.action == "ack":
         import fnmatch
@@ -7665,6 +7679,8 @@ def main():
     m.add_argument("type", nargs="?", default="INFO")
     m.add_argument("topic", nargs="?")
     m.add_argument("--body")
+    m.add_argument("--class", dest="mail_class", choices=A.MAIL_CLASSES,
+                   help="what the message asks of its reader; needs-decision escalates while unseen")
     m.set_defaults(fn=cmd_mail)
 
     v = sub.add_parser("verify", help="run the declared gates and record the result")

@@ -178,6 +178,7 @@ def call(name, args, cfg, allow_verify):
             except OSError:
                 continue
             out.append({"id": m, "body": body})
+        A.mail_seen(root, [message["id"] for message in out], "implementer")   # shown, not handled (#30)
         return {"messages": out, "count": len(out),
                 "note": "acknowledge each with ao_ack after applying or rejecting it"}
 

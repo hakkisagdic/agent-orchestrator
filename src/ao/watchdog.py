@@ -1335,6 +1335,20 @@ def _cycle_impl(args, root):
         notify(f"{project}: needs you", f"{item['id']} waits on a person: "
                f"{item['notes'].get('needs') or item['title']}", root, key=f"waiting-human:{item['id']}",
                window=6 * 3600, audience="human")
+    # A decision request nobody has been shown climbs the ladder by its age: the
+    # architect first, then a person's desktop and phone, then e-mail (#30).
+    for message in A.unseen_messages(root, cfg):
+        if message["class"] != "needs-decision":
+            continue
+        minutes = message["age"] / 60
+        level = ("red" if minutes >= S.get(cfg, "mail.unseen_red_minutes")
+                 else "orange" if minutes >= S.get(cfg, "mail.unseen_orange_minutes")
+                 else "yellow" if minutes >= S.get(cfg, "mail.unseen_yellow_minutes") else None)
+        if level:
+            text = f"{message['id']} has waited {int(minutes)}m and nobody has been shown it"
+            notify(f"{project}: unread decision request", text, root, key=f"unseen:{message['id']}", window=3600,
+                   audience="architect" if level == "yellow" else "human",
+                   level=None if level == "yellow" else level)
     # An agent that is busy and producing nothing never trips the idle guard, so
     # check it before the guard chain rather than inside it. Notify only; a nudge
     # would add a turn to a loop that is already spending them.
