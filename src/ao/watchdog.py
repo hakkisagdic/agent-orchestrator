@@ -583,12 +583,13 @@ def escalate(root, cfg, adapter, age, args, st):
         # Suppression is read-only and therefore part of explain's decision path.
         # A dry-run must not claim it would write a report that a live cycle would
         # suppress; it merely skips the suppressed-notice ledger write.
-        if A.notice_recently_sent(root, key, window):
+        # An architect-audience notice is recorded unsent, so a check on sent rows
+        # never held and the same anomaly wrote a row every cycle (#69). Any row
+        # inside the window stops the repeat; the report and that row are the record.
+        if A.notice_recently_recorded(root, key, window):
             if args.dry_run:
                 print(f"DRY RUN: would suppress anomaly {a['kind']} "
                       f"(reported within {window}s)")
-            else:
-                A.record_notice(root, f"{project}: anomaly", a["kind"], sent=False, key=key)
             continue
         if args.dry_run:
             print(f"DRY RUN: would report anomaly {a['kind']} to the architect")
@@ -621,9 +622,12 @@ def escalate(root, cfg, adapter, age, args, st):
     # Same exclusion as the anomaly scanner: the watchdog's own reports are
     # addressed to the architect but are not themselves reports awaiting the
     # architect, and counting them here re-woke it endlessly on its own output.
+    # Addressed by role, never by an actor's name, and the watchdog's own anomaly
+    # reports count: an anomaly nobody is woken for is not escalated (#69). What
+    # keeps them from re-waking the architect on its own output is the handed set
+    # below, not their names. The architect's notes to itself wake nobody (#18).
     pending = [m for m in A.mailbox(root, cfg["mailbox"])
-               if ("-to-fable-" in m or "-to-architect-" in m)
-               and not (m.startswith("watchdog-to-") or "-watchdog-to-" in m)]
+               if A.to_architect(m, cfg) and not A.from_architect(m, cfg)]
     # Closing the loop out loud: an alert that says a thing was detected, with no
     # later word on whether anything came of it, is what makes someone check by
     # hand — which is the work the alert was supposed to save.
@@ -642,8 +646,26 @@ def escalate(root, cfg, adapter, age, args, st):
     elif pending and not args.dry_run:
         st["arch_pending"] = len(pending)
     last_wake = st.get("last_arch_wake", 0)
-    stale = [m for m in pending
-             if os.path.getmtime(os.path.join(root, cfg["mailbox"], m)) > last_wake]
+    # Wake on the durable state (#69). A report is owed a wake until one that did
+    # not fail has been handed it; comparing its time with the last wake dropped it
+    # for good whenever that wake died at once. A wake whose log shows a transport
+    # failure hands nothing back. A model's own prose saying "Error:" does not count.
+    handed = dict(st.get("handed") or {})
+    if handed:
+        failure = wake_error(os.path.join(STATE_DIR, f"escalate-{project}.log"))
+        if failure and (failure.get("at") or 0) >= int(last_wake) - 2 \
+                and (failure.get("kind") != "other" or "API Error" in failure.get("text", "")):
+            handed = {}
+    mtimes = {}
+    for m in pending:
+        try:
+            mtimes[m] = int(os.path.getmtime(os.path.join(root, cfg["mailbox"], m)))
+        except OSError:
+            continue                  # acknowledged while this cycle ran
+    stale = [m for m in pending if m in mtimes and handed.get(m) != mtimes[m]]
+    if not args.dry_run and handed != (st.get("handed") or {}):
+        st["handed"] = {m: t for m, t in handed.items() if m in mtimes}
+        save_state(root, st)
     woke = bool(stale)
     if woke and time.time() - last_wake < 900:
         print(f"{len(stale)} unhandled report(s), but the architect was woken "
@@ -672,6 +694,14 @@ def escalate(root, cfg, adapter, age, args, st):
     # rather than the triage it was started for.
     if woke and A.architect_present(root, arch):
         print("reports pending, but the architect is already at the keyboard")
+        # Suppressing the wake must not silence the reports (#23): the session acts
+        # when someone prompts it, so tell that someone, once per newest report.
+        if not args.dry_run:
+            newest = max(stale, key=lambda m: mtimes.get(m, 0))
+            notify(f"{project}: reports wait for the architect",
+                   f"{len(stale)} report(s) in {cfg['mailbox']}/, newest {newest}; the "
+                   "architect session is interactive and reads them when prompted",
+                   root, key=f"present-pending:{newest}", window=24 * 3600, audience="human")
         woke = False
     from . import features as F
     if woke and not F.enabled(cfg, "architect_wake"):
@@ -729,6 +759,8 @@ def escalate(root, cfg, adapter, age, args, st):
         err = wake_error(log_path)
         if resolved and err:
             text, used, when, kind = err["text"], err["binary"], err["when"], err["kind"]
+            # The log merges the model's prose with its errors; mask before it is kept or sent.
+            text = A.redact(text)
             prev = st.get("wake_error") or {}
             fresh = prev.get("text") != text or prev.get("binary") != used or prev.get("when") != when
             if fresh:
@@ -743,8 +775,8 @@ def escalate(root, cfg, adapter, age, args, st):
                         st["arch_quota_until"] = until
                         A.deferred_append(root, "wake", reason="architect quota", until=until)
                 save_state(root, st)
-                A.record_notice(root, f"{key}: architect wake failed", f"{kind}: {text} [{used}]",
-                                True, key="architect-wake-failed")
+                # notify records the notice; a row written first under the same key
+                # made notify's own rate limit swallow the ring (#69).
                 if kind == "quota":
                     touch_architect_quota(root, st)
                 else:
@@ -760,9 +792,19 @@ def escalate(root, cfg, adapter, age, args, st):
                       f"{time.strftime('%H:%M', time.localtime(st['arch_quota_until']))}; not waking")
                 resolved = None
             elif kind == "session":
-                # A dead session id: rediscover instead of resuming it again.
-                arch["session"] = "auto"
-                print(f"last wake resumed a dead session ({text[:60]}); rediscovering")
+                # A dead session id: resume a different one or none. Setting the config
+                # back to auto after argv was built resumed the same dead session (#69).
+                dead = st.get("arch_session")
+                if sess and (sess == dead or sess in text):
+                    found = (A.discover_architect(arch.get("cwd") or root) or {}).get("session")
+                    if found and found != sess and found not in text:
+                        sess = found
+                        argv = [x.replace("{prompt}", prompt).replace("{session}", sess)
+                                for x in arch["argv"]]
+                        print(f"last wake resumed a dead session; resuming {sess[:12]} instead")
+                    else:
+                        print("last wake resumed a dead session and no other session was found; not waking")
+                        resolved = None
         if resolved and st.get("arch_quota_until", 0) > time.time():
             print(f"architect at quota until "
                   f"{time.strftime('%H:%M', time.localtime(st['arch_quota_until']))}; not waking")
@@ -785,6 +827,8 @@ def escalate(root, cfg, adapter, age, args, st):
                                         start_new_session=True)
             st["arch_pid"] = proc.pid
             st["last_arch_wake"] = time.time()
+            st["handed"] = {m: mtimes[m] for m in pending if m in mtimes}
+            st["arch_session"] = sess
             A.helper_register(root, proc.pid, "architect")   # a judge, not a writer
             A.acquire_architect(root, proc.pid, "watchdog wake")   # one judge at a time
             save_state(root, st)
@@ -1298,6 +1342,13 @@ def _cycle_impl(args, root):
                 print(f"queue low ({depth}); refill wake sent "
                       f"{int((time.time() - st.get('last_refill', 0)) / 60)}m ago; waiting")
                 return 0
+            # A report wake may have started earlier in this same cycle, now that the
+            # watchdog's own reports wake the architect (#69). The helper scan is the
+            # guard; the wake's own time is the one that cannot miss a young process.
+            if time.time() - st.get("last_arch_wake", 0) < 900:
+                print(f"queue low ({depth}); the architect was woken "
+                      f"{int((time.time() - st.get('last_arch_wake', 0)) / 60)}m ago; waiting")
+                return 0
             if st.get("arch_quota_until", 0) > time.time():
                 print("queue low, but the architect is at quota; waiting")
                 return 0
@@ -1446,8 +1497,10 @@ def _cycle_impl(args, root):
     # its own. Appending --dangerously-skip-permissions on top of --allowedTools
     # would silently override the narrower grant.
     scoped = any(a in ("--allowedTools", "--allowed-tools", "--trust-all-tools") for a in argv)
+    added = []
     if not scoped and "trust_all" in (adapter.get("options") or {}):
-        argv += adapter["options"]["trust_all"]
+        added = list(adapter["options"]["trust_all"])
+        argv += added
     # The project chooses the implementer's model and effort in its config; the
     # adapter says how to spell them. Nothing is appended for an adapter that
     # has no such option.
@@ -1481,8 +1534,16 @@ def _cycle_impl(args, root):
     log_path = os.path.join(STATE_DIR, f"nudge-{key}.log")
     os.makedirs(STATE_DIR, exist_ok=True)
     env = dict(os.environ, PATH=search)
+    if added:
+        # Recorded with its reason whenever it changes, never appended silently (#69).
+        try:
+            A.record_actor_flags(root, "implementer", added,
+                                 "the adapter's resume argv carries no tool scope, so ao appends its trust_all")
+        except Exception as exc:
+            print(f"could not record the flags added to the implementer: {exc}")
     with open(log_path, "a", encoding=UTF8) as log:
-        log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} nudge ===\n")
+        log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} nudge"
+                  f"{' (added: ' + ' '.join(added) + ')' if added else ''} ===\n")
         log.flush()
         proc = subprocess.Popen(argv, cwd=root, env=env, stdin=subprocess.DEVNULL,
                                 stdout=log, stderr=subprocess.STDOUT,
@@ -1506,7 +1567,7 @@ def _cycle_impl(args, root):
         tail = ""
         try:
             with open(log_path, encoding=UTF8) as fh:
-                tail = " ".join(fh.read().strip().split("\n")[-3:])[-300:]
+                tail = A.redact(" ".join(fh.read().strip().split("\n")[-3:])[-300:])
         except OSError:
             pass
         st.pop("child_pid", None)                 # it is gone; do not guard on a dead pid

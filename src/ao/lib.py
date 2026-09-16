@@ -2550,6 +2550,9 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
         # this detector emitted.
         if m.startswith("watchdog-to-") or "-watchdog-to-" in m:
             continue
+        # The architect's notes to itself are not the implementer asking (#18).
+        if from_architect(m, cfg):
+            continue
         try:
             body = open(os.path.join(root, cfg.get("mailbox", "agent-mail"), m),
                         errors="replace", encoding=UTF8).read(4000)
@@ -3850,7 +3853,8 @@ def waiting_on_architect(root, cfg):
     """
     box = cfg.get("mailbox", "agent-mail")
     files = mailbox(root, box)
-    reports = [m for m in files if to_architect(m, cfg) and not from_watchdog(m)]
+    reports = [m for m in files if to_architect(m, cfg) and not from_watchdog(m)
+               and not from_architect(m, cfg)]
     if not reports:
         return None
     latest = reports[-1]
@@ -3884,6 +3888,83 @@ def mail_names(cfg):
 def to_architect(name, cfg):
     _, arch = mail_names(cfg)
     return f"-to-{arch}-" in name or "-to-fable-" in name or "-to-architect-" in name
+
+
+def from_architect(name, cfg):
+    """Whether a mail was written by the architect, read from its sender field (#18)."""
+    _, arch = mail_names(cfg)
+    found = re.match(r"^\d{8}-\d{4}-(.+?)-to-", name)
+    return bool(found) and found.group(1).lower() in {arch.lower(), "fable", "architect"}
+
+
+def notice_recently_recorded(root, key, window):
+    """Was this key recorded inside the window at all, delivered or held (#69)?
+
+    An architect-audience notice is recorded unsent by design, so a check on sent
+    rows never held for one, and the same anomaly wrote a row every cycle.
+    """
+    p = os.path.join(root, ".ao", "ledger", "notices.jsonl")
+    if not os.path.exists(p):
+        return False
+    cutoff = time.time() - window
+    try:
+        with open(p, errors="replace", encoding=UTF8) as fh:
+            fh.seek(max(0, os.path.getsize(p) - 100_000))
+            lines = fh.read().split("\n")
+    except OSError:
+        return False
+    for line in reversed(lines):
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        if rec.get("at", 0) < cutoff:
+            return False
+        if rec.get("key") == key:
+            return True
+    return False
+
+
+SECRET_PATTERNS = (
+    r"sk-[A-Za-z0-9_-]{16,}",
+    r"gh[pousr]_[A-Za-z0-9]{20,}",
+    r"xox[abprs]-[A-Za-z0-9-]{10,}",
+    r"AKIA[0-9A-Z]{16}",
+    r"(?i)bearer\s+[A-Za-z0-9._~+/=-]{16,}",
+    r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}",
+    r"[A-Za-z0-9+_=-]{40,}",
+)
+
+
+def redact(text):
+    """Text from an agent's own output with anything token-shaped masked (#69).
+
+    A wake or nudge log merges a model's prose with its process's errors, and a
+    line of it went to the committed notices ledger, Telegram and e-mail. What
+    leaves the log is masked first.
+    """
+    out = str(text or "")
+    for pattern in SECRET_PATTERNS:
+        out = re.sub(pattern, "[redacted]", out)
+    return out
+
+
+def record_actor_flags(root, actor, flags, reason):
+    """Record a flag ao adds to an actor's argv, with why, each time that changes (#69)."""
+    from .storage import append_jsonl, read_jsonl
+    path = os.path.join(root, ".ao", "ledger", "actor-flags.jsonl")
+    try:
+        rows = read_jsonl(path)
+    except Exception:
+        rows = []
+    last = next((row for row in reversed(rows)
+                 if isinstance(row, dict) and row.get("actor") == actor), None)
+    if last and last.get("flags") == list(flags) and last.get("reason") == reason:
+        return last
+    return append_jsonl(path, {"at": int(time.time()), "actor": actor,
+                               "flags": list(flags), "reason": reason})
 
 
 def from_watchdog(name):

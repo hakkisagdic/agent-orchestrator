@@ -278,6 +278,10 @@ def test_dry_cycle_escalation_has_no_alarm_or_channel_side_effects(
         A, "notice_recently_sent",
         lambda target, key, window: key == "anomaly:decision-requested",
     )
+    monkeypatch.setattr(
+        A, "notice_recently_recorded",
+        lambda target, key, window: key == "anomaly:decision-requested",
+    )
     monkeypatch.setattr(A, "architect_present", lambda target, architect=None: False)
     monkeypatch.setattr(A, "agent_pids", lambda target, adapter, **kw: [])
     monkeypatch.setattr(A, "foreign_edits", lambda target, cfg: [])
@@ -412,6 +416,7 @@ def _escalate_once(project, monkeypatch, present=None, resolve=None):
         {"kind": "decision-requested", "facts": {"decision": "D-1"}, "key": "D-1"}])
     monkeypatch.setattr(A, "write_report", lambda *a, **k: "report.md")
     monkeypatch.setattr(A, "notice_recently_sent", lambda *a, **k: False)
+    monkeypatch.setattr(A, "notice_recently_recorded", lambda *a, **k: False)
     monkeypatch.setattr(A, "mailbox", lambda *a, **k: [])
     monkeypatch.setattr(W, "quota_ok", lambda adapter: True)
     monkeypatch.setattr(W, "arch_alive", lambda root, arch: False)
