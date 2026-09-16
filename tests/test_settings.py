@@ -130,6 +130,16 @@ def test_every_setting_the_docs_name_is_one_ao_reads():
     assert named and named <= set(S.SETTINGS), sorted(named - set(S.SETTINGS))
 
 
+def _reads_a_named_setting(node, numeric):
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get"
+            and node.args and isinstance(node.args[0], ast.Constant) and node.args[0].value in numeric)
+
+
+def _number(node):
+    return isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) \
+        and not isinstance(node.value, bool)
+
+
 def test_no_module_reads_a_threshold_with_a_default_of_its_own():
     numeric = {key.rsplit(".", 1)[-1] for key, spec in S.SETTINGS.items() if spec.kind in (int, float)}
     found = []
@@ -137,10 +147,13 @@ def test_no_module_reads_a_threshold_with_a_default_of_its_own():
         if path.name == "settings.py":
             continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get" \
-                    and len(node.args) == 2 and isinstance(node.args[0], ast.Constant) \
-                    and node.args[0].value in numeric and isinstance(node.args[1], ast.Constant) \
-                    and isinstance(node.args[1].value, (int, float)):
+            # cfg.get("round_budget", 5)
+            if _reads_a_named_setting(node, numeric) and len(node.args) == 2 and _number(node.args[1]):
                 found.append(f"{path.name}:{node.lineno} .get({node.args[0].value!r}, {node.args[1].value!r})")
+            # cfg.get("stall_minutes") or 60
+            if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or) \
+                    and _reads_a_named_setting(node.values[0], numeric) and _number(node.values[-1]):
+                found.append(f"{path.name}:{node.lineno} .get({node.values[0].args[0].value!r}) or "
+                             f"{node.values[-1].value!r}")
 
     assert found == []

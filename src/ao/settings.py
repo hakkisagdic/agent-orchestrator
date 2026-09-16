@@ -27,6 +27,12 @@ SETTINGS = {
     "review_timeout": Setting(
         900, int, 1, None, "project",
         "seconds one reviewer may take; never taken from the command line"),
+    "stall_minutes": Setting(
+        60, int, 1, None, "project",
+        "minutes a staged candidate may wait to land before throughput calls the slice stalled"),
+    "gates.default_timeout": Setting(
+        600, int, 1, None, "project",
+        "seconds a gate may run when its own definition names no timeout"),
     "watchdog.idle_minutes": Setting(
         6.0, float, 1, None, "project",
         "minutes of implementer silence before the watchdog acts"),

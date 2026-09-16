@@ -1277,7 +1277,7 @@ def throughput(root, cfg, hours=24.0, now=None):
 
     A candidate is staged when `ao verify` recorded it ready, and landed when a
     commit's tree is its index tree. The state is read in order: stalled (the
-    newest staged candidate has not landed for `stall_minutes`, default 60),
+    newest staged candidate has not landed for the `stall_minutes` setting),
     landing (a candidate landed in the window), staging (staged, none landed yet),
     busy (the transcript moved, nothing staged) and idle (nothing moved). None of
     it reads the mailbox.
@@ -1314,7 +1314,7 @@ def throughput(root, cfg, hours=24.0, now=None):
     if ready:
         at, newest = max(ready, key=lambda item: item[0])
         minutes = (now - at) / 60
-        if newest["index_tree"] not in trees and minutes >= float(cfg.get("stall_minutes") or 60):
+        if newest["index_tree"] not in trees and minutes >= settings.get(cfg, "stall_minutes"):
             stall = {"minutes": int(minutes), "candidate": newest.get("digest"),
                      "paths": list(newest.get("changed_paths") or []),
                      "reason": _stall_reason(root, cfg, newest, waiting)}

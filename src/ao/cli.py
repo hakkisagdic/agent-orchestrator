@@ -525,7 +525,8 @@ def cmd_verify(cfg, args):
         started = time.time()
         try:
             r = subprocess.run(g["run"], shell=True, cwd=root, capture_output=True,
-                               text=True, encoding=UTF8, errors="replace", timeout=g.get("timeout", 600))
+                               text=True, encoding=UTF8, errors="replace",
+                               timeout=g.get("timeout") or S.get(cfg, "gates.default_timeout"))
             out, code = (r.stdout + r.stderr), r.returncode
         except subprocess.TimeoutExpired:
             out, code = "timed out", 124
