@@ -28,6 +28,8 @@ FEATURES = {
                          "a few implementer tool calls per slice"),
     "hunter":           ("a scheduled, read-only bug hunt that mails leads to the architect", False,
                          "one hunter call per run over a bounded slice of the tree"),
+    "toast":            ("a Windows toast for what reaches a person's desktop", False,
+                         "nothing: a notification on this machine"),
 }
 ORDER = list(FEATURES)
 

@@ -10,10 +10,10 @@ from ao import cli, features as F, lib as A
 
 def test_features_default_on_and_switch(project):
     root = project["root"]
-    assert F.switches(project) == {key: key != "hunter" for key in F.ORDER}   # the bug hunter is opt-in (#45)
+    assert F.switches(project) == {key: key not in ("hunter", "toast") for key in F.ORDER}   # opt-in (#45, #9)
     F.set_switch(root, "review", False)
     cfg = A.load_config(root)
-    assert F.enabled(cfg, "review") is False and sum(F.switches(cfg).values()) == len(F.ORDER) - 2
+    assert F.enabled(cfg, "review") is False and sum(F.switches(cfg).values()) == len(F.ORDER) - 3
     for k in F.ORDER:
         F.set_switch(root, k, False)
     assert not any(F.switches(A.load_config(root)).values())

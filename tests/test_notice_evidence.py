@@ -34,7 +34,7 @@ def test_the_credit_projection_rings_with_the_readings_it_projected_from(project
 
 def test_ao_notices_with_an_id_prints_what_the_notice_was_raised_on(project, monkeypatch, capsys):
     root = project["root"]
-    monkeypatch.setattr(W, "desktop_notify", lambda title, msg: False)
+    monkeypatch.setattr(W, "desktop_notify", lambda title, msg, cfg=None: False)
     from ao import telegram
     monkeypatch.setattr(telegram, "send", lambda *args, **kwargs: 0)
     evidence = A.notice_evidence("burn_rate", [{"value": "1000/10000", "source": "GetUsageLimits", "at": time.time() - 600},

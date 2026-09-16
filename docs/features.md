@@ -43,6 +43,8 @@ What each switch changes when off:
 - `architect_wake` off — anomaly files and alarms only; a person reads them.
 - `refill` off — an empty queue is an orange alarm, not a wake.
 - `reports` off — the implementer's steering asks for reports only at slice end.
+- `toast` on — on Windows, what reaches a person's desktop is also shown as a toast through
+  PowerShell; it spends nothing, and is off until someone on Windows turns it on (#9).
 
 ## Bypass, on the record
 

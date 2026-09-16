@@ -228,12 +228,40 @@ def for_human(title):
     return any(k in subject.lower() for k in HUMAN_AUDIENCE)
 
 
-def desktop_notify(title, msg):
+# The text travels in the environment and is never spliced into the script (#9).
+TOAST_SCRIPT = (
+    "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null; "
+    "$t = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent("
+    "[Windows.UI.Notifications.ToastTemplateType]::ToastText02); "
+    "$x = $t.GetElementsByTagName('text'); "
+    "$x.Item(0).AppendChild($t.CreateTextNode($env:AO_TOAST_TITLE)) > $null; "
+    "$x.Item(1).AppendChild($t.CreateTextNode($env:AO_TOAST_BODY)) > $null; "
+    "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("
+    "'{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe')"
+    ".Show([Windows.UI.Notifications.ToastNotification]::new($t))"
+)
+
+
+def desktop_notify(title, msg, cfg=None):
     """A desktop notification where the platform has one; never an exception (audit).
 
     `osascript` exists only on macOS. Elsewhere its FileNotFoundError ended the cycle
-    before the notice was recorded or the state saved.
+    before the notice was recorded or the state saved. On Windows a toast is shown
+    through PowerShell when the project's `toast` feature is on (#9); unverified on a
+    Windows machine until the Windows lane runs it.
     """
+    if sys.platform == "win32":
+        from . import features as F
+        shell = shutil.which("powershell") or shutil.which("pwsh")
+        if not (cfg and F.enabled(cfg, "toast")) or not shell:
+            return False
+        try:
+            done = subprocess.run([shell, "-NoProfile", "-NonInteractive", "-Command", TOAST_SCRIPT],
+                                  capture_output=True, timeout=20,
+                                  env=dict(os.environ, AO_TOAST_TITLE=str(title), AO_TOAST_BODY=str(msg)))
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return done.returncode == 0
     if sys.platform != "darwin" or not shutil.which("osascript"):
         return False
     title, msg = (str(part).replace('"', "'").replace("\\", "/") for part in (title, msg))
@@ -344,7 +372,11 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
         print(f"DRY RUN: would ring {ring} desktop/Telegram channels: {title}")
         return False
     safe = msg.replace('"', "'")[:200]
-    desktop_notify(title, safe)
+    try:
+        channel_cfg = A.load_config(root) if root else None
+    except Exception:
+        channel_cfg = None
+    desktop_notify(title, safe, channel_cfg)
     try:
         from . import telegram
         telegram.send(f"*{title}*\n{msg}", root)
@@ -396,8 +428,7 @@ def _announce_resolved(root, e):
     if not was_red:
         return
     try:
-        subprocess.run(["osascript", "-e", f'display notification "{msg}" with title "{title}"'],
-                       capture_output=True)
+        desktop_notify(title, msg, A.load_config(root) if root else None)
     except Exception:
         pass
 
