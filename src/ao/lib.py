@@ -1906,7 +1906,8 @@ def review_range_context(root, commits, budget=REVIEW_CONTEXT_BUDGET):
 
 
 def review_context_line(context):
-    files = ", ".join(context["paths"]) or "none resolved from the tests' imports"
+    files = review_header_value(", ".join(context["paths"])) \
+        or "none resolved from the tests' imports"
     line = (f"- context: read-only at `{context['rev'][:12]}`: {files}; "
             f"{len(context['names'])} definitions")
     if context["omitted"]:
@@ -1967,6 +1968,36 @@ def review_evidence_line(value):
     return REVIEW_EVIDENCE_PREFIX + json.dumps(
         value, ensure_ascii=True, sort_keys=True, separators=(",", ":")
     ) + " -->"
+
+
+def review_header_value(value):
+    """One header value on one line, whatever the implementer or the config supplied (#55).
+
+    A review artefact's header echoes the boundary, the commit range, labels and
+    file names. A value holding a line break, or any other character
+    ``str.splitlines`` breaks on (``\\x1c``, ``\\x85``, ``\\u2028`` ...), would start a
+    line of its own, and a line reading ``VERDICT: APPROVED`` there is a verdict to
+    every reader. Such a value is written as a JSON string; a printable one as it is.
+    """
+    text = str(value)
+    return text if text.isprintable() else json.dumps(text, ensure_ascii=True)
+
+
+REVIEWER_OUTPUT_HEADING = "## Reviewer output, verbatim"
+REVIEWER_OUTPUT_INDENT = "    "
+
+
+def review_verbatim_lines(text):
+    """The reviewer's own output for the artefact, below ao's adjudication (#54).
+
+    Indented, so none of its lines starts at the margin, where the verdict and the
+    evidence line are read. It is split with the ``splitlines`` those readers use,
+    so a separator inside a line cannot lift the rest of it back to the margin.
+    """
+    return ["", REVIEWER_OUTPUT_HEADING, ""] + [
+        REVIEWER_OUTPUT_INDENT + line if line else ""
+        for line in str(text or "").splitlines()
+    ]
 
 
 def candidate_review_integrity(root, candidate, evidence):
@@ -2905,10 +2936,13 @@ def reviews(root, reviews_dir, limit=4):
         try:
             body = open(os.path.join(d, f), errors="ignore", encoding=UTF8).read()
             verdict = _review_verdict(body)
-            # Preserve legacy one-line quota/auth artifacts, but never let that
-            # heuristic override an explicit (even malformed) verdict line.
+            # Preserve legacy one-line quota/auth artifacts written before reviews
+            # carried evidence. An artefact with an evidence line records how the
+            # reviewer's process ended as its verdict line, so words in it — a
+            # finding about authentication or a rate limit — never decide it (#57).
             has_verdict_line = _has_verdict_marker(body)
             if verdict == "INVALID" and not has_verdict_line \
+                    and review_evidence(body) is None \
                     and REVIEW_UNAVAILABLE_RE.search(body):
                 verdict = "UNAVAILABLE"
         except Exception:
@@ -2994,7 +3028,8 @@ def review_loop(root, reviews_dir, min_repeats=3):
             body = open(os.path.join(d, f), errors="replace", encoding=UTF8).read()
         except OSError:
             continue
-        for m in re.finditer(r"^- \[(BLOCKER|HIGH|MEDIUM|LOW)\]\s*([^\s:]+)[:\d]*\s*[—-]\s*(.{0,60})",
+        # Findings sit in the reviewer's verbatim block, indented (#54).
+        for m in re.finditer(r"^(?:    )?- \[(BLOCKER|HIGH|MEDIUM|LOW)\]\s*([^\s:]+)[:\d]*\s*[—-]\s*(.{0,60})",
                              body, re.M):
             key = (m.group(2), re.sub(r"\W+", " ", m.group(3).lower()).strip()[:40])
             seen.setdefault(key, {"sev": m.group(1), "count": 0, "reviews": []})

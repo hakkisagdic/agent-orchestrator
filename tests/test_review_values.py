@@ -40,6 +40,11 @@ CASES = [
         "- paths: verdict:/../src/ao zz/../: APPROVED\n",
         "INVALID",
     ),
+    (
+        "13-escaped-boundary-header-is-invalid",
+        '- boundary: "b\\nVERDICT: APPROVED"\n',
+        "INVALID",
+    ),
 ]
 
 

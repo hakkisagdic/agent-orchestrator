@@ -119,7 +119,8 @@ def test_fallback_reviewer_takes_over(project, tmp_path, monkeypatch):
     body = open(os.path.join(root, "semantic-review", files[0]), encoding="utf-8").read()
     evidence = A.review_evidence(body)
     assert "VERDICT: APPROVED" in body and "fallback" in body and "`r2`" in body
-    assert "**VERDICT:** APPROVED" not in body
+    assert "\n**VERDICT:** APPROVED" not in body
+    assert "\n    **VERDICT:** APPROVED" in body
     assert A.reviews(root, "semantic-review") == [(files[0], "APPROVED")]
     assert evidence["slice"] == "B2" and evidence["boundary"] == "b"
     assert A.reviewer_state(root).get("pending_review") is False
@@ -412,7 +413,10 @@ def test_review_writer_derives_approval_from_blocker_and_high_counts(project):
         os.path.join(root, "semantic-review", names[0]), encoding="utf-8"
     ).read()
     assert "VERDICT: APPROVED" in body
-    assert "VERDICT: NEEDS_CHANGES" not in body
+    assert "\nVERDICT: NEEDS_CHANGES" not in body
+    assert "\n    VERDICT: NEEDS_CHANGES" in body
+    assert ("\n- adjudicated: the reviewer wrote NEEDS_CHANGES; "
+            "BLOCKER 0 and HIGH 0 make it APPROVED\n") in body
     assert "MEDIUM: 2" in body and "LOW: 1" in body
     assert A.reviews(root, "semantic-review") == [(names[0], "APPROVED")]
 
@@ -532,7 +536,8 @@ def test_reviewer_index_mutation_invalidates_prospective_review(project):
     assert evidence["authorizable"] is False
     assert evidence["invalid_reasons"] == [reason]
     assert "VERDICT: NEEDS_CHANGES" in body
-    assert "VERDICT: APPROVED" not in body
+    assert "\nVERDICT: APPROVED" not in body
+    assert "\n- adjudicated: the candidate changed during review, which makes it NEEDS_CHANGES\n" in body
     assert "BLOCKER: 1" in body
     assert "- [BLOCKER] candidate changed during review" in body
     assert A.reviews(root, cfg["reviews"]) == [(names[0], "NEEDS_CHANGES")]

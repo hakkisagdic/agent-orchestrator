@@ -2724,12 +2724,14 @@ def cmd_review(cfg, args):
             unavailable_body = (
                 f"# Review {name}\n\nVERDICT: UNAVAILABLE\n\n"
                 + A.review_evidence_line(evidence)
-                + f"\n- boundary: {boundary}\n- reviewers tried: {why}\n"
+                + f"\n- boundary: {A.review_header_value(boundary)}"
+                f"\n- reviewers tried: {A.review_header_value(why)}\n"
             )
         else:
             unavailable_body = (
                 f"# Review {name}\n\nVERDICT: UNAVAILABLE\n\n"
-                f"- boundary: {boundary}\n- reviewers tried: {why}\n"
+                f"- boundary: {A.review_header_value(boundary)}\n"
+                f"- reviewers tried: {A.review_header_value(why)}\n"
             )
         open(os.path.join(d, name), "w", encoding=UTF8).write(
             unavailable_body + "\nNo review took place. This file is not a round.\n"
@@ -2792,8 +2794,8 @@ def cmd_review(cfg, args):
             "VERDICT: INVALID",
             "",
             A.review_evidence_line(evidence),
-            f"- reviewer: `{reviewer_label}`",
-            f"- boundary: {boundary}",
+            f"- reviewer: `{A.review_header_value(reviewer_label)}`",
+            f"- boundary: {A.review_header_value(boundary)}",
         ]
         if context is not None:
             header.append(A.review_context_line(context))
@@ -2804,7 +2806,7 @@ def cmd_review(cfg, args):
                 f"- scope: `{scope['kind']}` `{scope['digest']}`",
             ])
         if args.commits:
-            header.append(f"- commits: {args.commits}")
+            header.append(f"- commits: {A.review_header_value(args.commits)}")
         if args.paths:
             header.append(
                 "- paths: " + json.dumps(args.paths, ensure_ascii=True)
@@ -2825,7 +2827,16 @@ def cmd_review(cfg, args):
     sev = {key: int(values[0]) for key, values in severity_values.items()}
     # Finding counts are the decision input; reviewer prose cannot quietly
     # override the published rule. MEDIUM and LOW remain non-blocking notes.
+    # The artefact carries this adjudicated verdict, a line saying why it
+    # differs from the reviewer's, and the reviewer's own words unchanged (#54).
+    said = verdict
     verdict = "NEEDS_CHANGES" if (sev["BLOCKER"] or sev["HIGH"]) else "APPROVED"
+    adjudication = []
+    if verdict != said:
+        adjudication.append(
+            f"- adjudicated: the reviewer wrote {said}; BLOCKER {sev['BLOCKER']} "
+            f"and HIGH {sev['HIGH']} make it {verdict}"
+        )
 
     if candidate is not None:
         invalid = []
@@ -2844,24 +2855,25 @@ def cmd_review(cfg, args):
         if invalid:
             evidence["authorizable"] = False
             evidence["invalid_reasons"] = invalid
+            if verdict != "NEEDS_CHANGES":
+                adjudication.append(
+                    "- adjudicated: the candidate changed during review, "
+                    "which makes it NEEDS_CHANGES"
+                )
             verdict = "NEEDS_CHANGES"
             sev["BLOCKER"] = max(1, sev["BLOCKER"])
-            out += "\n\n- [BLOCKER] candidate changed during review — " + "; ".join(invalid)
+            adjudication.append(
+                "- [BLOCKER] candidate changed during review — "
+                + A.review_header_value("; ".join(invalid))
+            )
 
-    detail_lines = [
-        line for line in out.splitlines()
-        if A._review_verdict(line) not in ("APPROVED", "NEEDS_CHANGES")
-        and not A.re.fullmatch(
-            r"(?:BLOCKER|HIGH|MEDIUM|LOW):[ \t]*\d+[ \t]*", line
-        )
-    ]
     out = "\n".join([
         f"VERDICT: {verdict}",
         f"BLOCKER: {sev['BLOCKER']}",
         f"HIGH: {sev['HIGH']}",
         f"MEDIUM: {sev['MEDIUM']}",
         f"LOW: {sev['LOW']}",
-    ] + ([""] + detail_lines if detail_lines else []))
+    ] + adjudication + A.review_verbatim_lines(out))
 
     d = os.path.join(root, cfg["reviews"])
     os.makedirs(d, exist_ok=True)
@@ -2870,29 +2882,32 @@ def cmd_review(cfg, args):
     if strict:
         reviewer_identity = used["identity"]
         reviewer_line = (
-            f"- reviewer: `{reviewer_identity['binding']}`  "
-            f"family: `{reviewer_identity['family']}`"
+            f"- reviewer: `{A.review_header_value(reviewer_identity['binding'])}`  "
+            f"family: `{A.review_header_value(reviewer_identity['family'])}`"
             + ("  (fallback — an earlier reviewer was unavailable or ineligible)"
                if used["index"] > 0 else "")
         )
         implementer_line = (
-            f"- implementer: `{matrix_resolution['implementer_identity']['binding']}`"
+            f"- implementer: "
+            f"`{A.review_header_value(matrix_resolution['implementer_identity']['binding'])}`"
         )
     else:
         primary = cfg.get("reviewer") or {}
         reviewer_line = (
-            f"- reviewer: `{rv.get('id') or reviewer_executable}`  family: `{rv.get('family', '?')}`"
+            f"- reviewer: `{A.review_header_value(rv.get('id') or reviewer_executable)}`  "
+            f"family: `{A.review_header_value(rv.get('family', '?'))}`"
             + ("  (fallback — the primary reviewer was unavailable)" if rv is not primary else "")
         )
         implementer_line = (
-            f"- implementer: `{impl.get('adapter')}/{(impl.get('session') or '')[:20]}`"
+            f"- implementer: "
+            f"`{A.review_header_value(str(impl.get('adapter')) + '/' + (impl.get('session') or '')[:20])}`"
         )
     header = [f"# Review {name}", "",
               A.review_evidence_line(evidence),
               reviewer_line,
               implementer_line,
               f"- tree: `{A.tree_digest(root, cfg)}`",
-              f"- boundary: {boundary}"]
+              f"- boundary: {A.review_header_value(boundary)}"]
     if context is not None:
         header.append(A.review_context_line(context))
     if candidate is not None:
@@ -2902,13 +2917,13 @@ def cmd_review(cfg, args):
             f"- scope: `{scope['kind']}` `{scope['digest']}`",
         ])
     if args.commits:
-        header.append(f"- commits: {args.commits}")
+        header.append(f"- commits: {A.review_header_value(args.commits)}")
     if args.paths:
         header.append(
             "- paths: " + json.dumps(args.paths, ensure_ascii=True)
         )
     if included:
-        header.append(f"- new files: {', '.join(included)}")
+        header.append(f"- new files: {A.review_header_value(', '.join(included))}")
     open(os.path.join(d, name), "w", encoding=UTF8).write("\n".join(header) + f"\n\n{out}\n")
     A.record_notice(root, "review", f"{verdict} {sev}", sent=False, key="review")
 
