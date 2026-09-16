@@ -4696,6 +4696,93 @@ def human_waits(root):
             if (item["notes"].get("waiting") or "").strip().lower() in HUMAN_WAITING]
 
 
+# ---- the process is measured by its outcomes (#49) ---------------------------------------
+
+def _since_epoch(text):
+    try:
+        return datetime.strptime(str(text).strip()[:16], "%Y-%m-%d %H:%M").timestamp()
+    except ValueError:
+        return None
+
+
+def slice_outcomes(root, project=None):
+    """What happened to every slice that landed, from what ao already recorded (#49).
+
+    On 2026-09-07 the round budget, the size guideline and the review pipeline
+    were all re-decided in one day on anecdote. Each outcome is read, never
+    typed: the verdicts in the order ao recorded them (a re-specification keeps
+    the history, it does not start a new one), rounds, ready-to-landed time, size
+    by kind, and whether a defect was later found in what landed - a
+    retrospective review that asked for changes, or a board item `fixes:` it.
+    """
+    from .storage import read_chained_jsonl
+    project = project or project_key(root)
+    try:
+        reviews = [row for row in read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN) if isinstance(row, dict)]
+        grants = [row for row in authority_rows(root) if isinstance(row, dict) and row.get("granted") is True]
+    except Exception:
+        return []
+    try:
+        verifications = [row for row in read_chained_jsonl(os.path.join(root, ".ao", "ledger", "verifications.jsonl"),
+                                                           VERIFICATION_CHAIN, legacy_prefix=True)
+                         if isinstance(row, dict)]
+    except Exception:
+        verifications = []
+    try:
+        waivers = {row.get("id"): row for row in waiver_rows(root)
+                   if isinstance(row, dict) and row.get("event") == "waived"}
+    except Exception:
+        waivers = {}
+    by_artefact = {row.get("artefact"): row for row in reviews}
+    items = {item["id"]: item for state_items in board(root).values() for item in state_items}
+    fixed = {item["notes"]["fixes"].strip() for item in items.values() if item["notes"].get("fixes")}
+    out = {}
+    for grant in grants:
+        linked = by_artefact.get(grant.get("review")) or {}
+        slice_id = linked.get("slice") or (waivers.get(grant.get("waiver")) or {}).get("slice")
+        if not slice_id or slice_id in out:
+            continue
+        mine = [row for row in reviews if row.get("slice") == slice_id]
+        prospective = [row for row in mine if row.get("kind") == "index-candidate"
+                       and row.get("verdict") in ("APPROVED", "NEEDS_CHANGES")]
+        candidate = (grant.get("candidate") or {}).get("digest")
+        size = next((row.get("candidate_size") for row in reversed(verifications)
+                     if (row.get("candidate") or {}).get("digest") == candidate and row.get("candidate_size")), None)
+        started = _since_epoch((items.get(slice_id) or {}).get("notes", {}).get("since", "")) \
+            or (min(float(row.get("at") or 0) for row in mine) if mine else None)
+        landed = float(grant.get("at") or 0) or None
+        retro = [row for row in mine if row.get("kind") == "commit-range" and row.get("verdict") == "NEEDS_CHANGES"]
+        out[slice_id] = {
+            "project": project, "slice": slice_id, "verdicts": [row.get("verdict") for row in prospective],
+            "rounds": len(prospective), "first_pass": bool(prospective) and prospective[0].get("verdict") == "APPROVED",
+            "waived": not prospective and bool(grant.get("waiver")),
+            "started_at": started, "landed_at": landed,
+            "hours": round((landed - started) / 3600, 2) if landed and started and landed >= started else None,
+            "size": size, "defect_found": bool(retro) or slice_id in fixed,
+        }
+    return list(out.values())
+
+
+def outcome_stats(outcomes):
+    """The distribution a process change is judged against: rounds, first-pass rate, time, size, defects."""
+    def spread(values):
+        values = sorted(v for v in values if v is not None)
+        if not values:
+            return None
+        return {"median": values[len(values) // 2], "p90": values[min(len(values) - 1, int(len(values) * 0.9))],
+                "n": len(values)}
+    reviewed = [o for o in outcomes if not o["waived"]]
+    return {
+        "slices": len(outcomes), "waived": len(outcomes) - len(reviewed),
+        "rounds": spread(o["rounds"] for o in reviewed),
+        "first_pass_pct": round(100 * sum(o["first_pass"] for o in reviewed) / len(reviewed)) if reviewed else None,
+        "hours": spread(o["hours"] for o in outcomes),
+        "product_lines": spread((o["size"]["kinds"]["product"]["added"] + o["size"]["kinds"]["product"]["deleted"])
+                                if isinstance(o.get("size"), dict) else None for o in outcomes),
+        "defects_pct": round(100 * sum(o["defect_found"] for o in outcomes) / len(outcomes)) if outcomes else None,
+    }
+
+
 def safe_slug(text, fallback="note", limit=40):
     """A file-name part holding only [A-Za-z0-9._-] (#19).
 

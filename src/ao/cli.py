@@ -1980,6 +1980,41 @@ def cmd_recall(cfg, args):
     return 0
 
 
+def cmd_stats(cfg, args):
+    """Slice outcomes across projects, so a process change is judged by what happened (#49)."""
+    roots = A.recall_roots(cfg["root"]) if getattr(args, "all", False) else [(A.project_key(cfg["root"]), cfg["root"])]
+    since = datetime.strptime(args.since, "%Y-%m-%d").timestamp() if getattr(args, "since", None) else None
+    until = datetime.strptime(args.until, "%Y-%m-%d").timestamp() if getattr(args, "until", None) else None
+    outcomes = []
+    for project, path in roots:
+        outcomes += [o for o in A.slice_outcomes(path, project)
+                     if (since is None or (o["landed_at"] or 0) >= since) and (until is None or (o["landed_at"] or 0) < until)]
+    if not outcomes:
+        print(f"{C['dim']}no landed slice with a recorded grant in this window{C['reset']}")
+        return 1
+    stats = A.outcome_stats(outcomes)
+
+    def show(label, spread, unit=""):
+        if spread:
+            print(f"  {label:<22} median {spread['median']}{unit}, p90 {spread['p90']}{unit}  "
+                  f"{C['dim']}({spread['n']} slices){C['reset']}")
+
+    projects = sorted({o["project"] for o in outcomes})
+    print(f"{C['b']}{stats['slices']} slices landed{C['reset']}  {C['dim']}{', '.join(projects)}"
+          f"{' · ' + str(stats['waived']) + ' with review waived' if stats['waived'] else ''}{C['reset']}")
+    show("review rounds", stats["rounds"])
+    if stats["first_pass_pct"] is not None:
+        print(f"  {'approved first time':<22} {stats['first_pass_pct']}%")
+    show("ready to landed", stats["hours"], "h")
+    show("product lines", stats["product_lines"])
+    print(f"  {'defect found later':<22} {stats['defects_pct']}%")
+    if getattr(args, "slices", False):
+        for o in outcomes:
+            print(f"    {o['project']:<14} {o['slice']:<16} {' → '.join(o['verdicts']) or 'waived'}"
+                  f"{'  defect found later' if o['defect_found'] else ''}")
+    return 0
+
+
 def cmd_ask(cfg, args):
     """Pose a decision the implementer cannot make for itself.
 
@@ -7869,6 +7904,12 @@ def main():
     dc = sub.add_parser("decisions", help="open and answered questions")
     dc.add_argument("-n", type=int, default=10)
     dc.set_defaults(fn=cmd_decisions)
+    st_ = sub.add_parser("stats", help="slice outcomes: rounds, first-pass rate, time, size, defects found later")
+    st_.add_argument("--all", action="store_true", help="every project registered on this machine")
+    st_.add_argument("--since", help="landed on or after YYYY-MM-DD")
+    st_.add_argument("--until", help="landed before YYYY-MM-DD")
+    st_.add_argument("--slices", action="store_true", help="one line per slice")
+    st_.set_defaults(fn=cmd_stats)
     rc = sub.add_parser("recall", help="what was decided, found or learned before, across projects")
     rc.add_argument("text", nargs="+")
     rc.add_argument("-n", "--limit", type=int, default=10)

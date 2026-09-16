@@ -183,6 +183,18 @@ That line changes behaviour in a way no per-turn number does. A slice that cost 
 and two thousand credits is telling you something about the specification, not about the
 engine — and you only see it once someone is counting.
 
+## Outcomes, measured
+
+A process change is judged against the slices before and after it, not against anecdote:
+on 2026-09-07 the round budget, the size guideline and the review pipeline were all
+re-decided in one day on the only figures available, an agent's own estimate of where its
+hours went. `ao stats` reads what ao already recorded - nothing is typed by an agent - for
+every slice that landed with a grant: the verdicts in the order they came (a
+re-specification keeps that history), rounds, time from ready to landed, product lines by
+kind, and whether a defect was found later in what it landed, by a retrospective review
+that asked for changes or a board item marked `fixes:` it. `--all` spans every registered
+project; `--since` and `--until` cut the window a change is compared across.
+
 ## Commands
 
 ```bash
