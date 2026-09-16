@@ -189,10 +189,9 @@ class _Windows:
     """Win32_Process through PowerShell, as JSON — structured, not parsed text.
 
     CommandLine is one string on Windows; it is split with the platform's own
-    quoting rules here. The working directory is not exposed by CIM (psutil reads
-    the process environment block for it); agent matching on Windows therefore
-    uses the repository path on the command line (`-C <root>`, or the path as an
-    argument) and reports cwd as None.
+    quoting rules here. The working directory is not exposed by CIM; it is read from
+    the process environment block, as psutil reads it (#9), and where that cannot be
+    read agent matching falls back to the repository path on the command line.
     """
     _cache = None
     _cache_at = 0.0
@@ -244,7 +243,69 @@ class _Windows:
         return av or None
 
     def cwd(self, pid):
-        return None
+        """The working directory from the process's environment block, as psutil reads it (#9).
+
+        CIM does not expose it. OpenProcess with query and read rights, the PEB
+        address from NtQueryInformationProcess, then ProcessParameters and its
+        CurrentDirectory. Only a 64-bit process is read by a 64-bit interpreter:
+        a 32-bit process, one this user may not open, or a read that comes back
+        short is None, which every caller handles on the record (#71).
+        """
+        try:
+            return self._environment_cwd(pid)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _environment_cwd(pid):
+        from ctypes import wintypes
+        if ctypes.sizeof(ctypes.c_void_p) != 8:
+            return None
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        ntdll = ctypes.WinDLL("ntdll")
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.ReadProcessMemory.restype = wintypes.BOOL
+        kernel32.ReadProcessMemory.argtypes = [wintypes.HANDLE, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t,
+                                               ctypes.POINTER(ctypes.c_size_t)]
+        kernel32.IsWow64Process.restype = wintypes.BOOL
+        kernel32.IsWow64Process.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)]
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        ntdll.NtQueryInformationProcess.restype = ctypes.c_long
+        ntdll.NtQueryInformationProcess.argtypes = [wintypes.HANDLE, ctypes.c_ulong, ctypes.c_void_p, ctypes.c_ulong,
+                                                    ctypes.POINTER(ctypes.c_ulong)]
+        PROCESS_QUERY_INFORMATION, PROCESS_VM_READ = 0x0400, 0x0010
+        handle = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid)
+        if not handle:
+            return None
+        try:
+            wow64 = wintypes.BOOL()
+            if not kernel32.IsWow64Process(handle, ctypes.byref(wow64)) or wow64.value:
+                return None
+            basic = (ctypes.c_void_p * 6)()          # PROCESS_BASIC_INFORMATION; PebBaseAddress is the second
+            returned = ctypes.c_ulong(0)
+            if ntdll.NtQueryInformationProcess(handle, 0, basic, ctypes.sizeof(basic), ctypes.byref(returned)) != 0:
+                return None
+
+            def read(address, length):
+                buffer = ctypes.create_string_buffer(length)
+                got = ctypes.c_size_t(0)
+                if not kernel32.ReadProcessMemory(handle, address, buffer, length, ctypes.byref(got)) \
+                        or got.value != length:
+                    raise OSError("short read of another process's memory")
+                return buffer.raw
+
+            peb = basic[1]
+            if not peb:
+                return None
+            parameters, = struct.unpack_from("<Q", read(peb + 0x20, 8))   # PEB.ProcessParameters
+            length, _, text = struct.unpack_from("<HH4xQ", read(parameters + 0x38, 16))   # CurrentDirectory.DosPath
+            if not length or not text:
+                return None
+            path = read(text, length).decode("utf-16-le")
+            return path[:-1] if len(path) > 3 and path.endswith("\\") else path
+        finally:
+            kernel32.CloseHandle(handle)
 
     def info(self, pid):
         r = self._snapshot().get(pid)
@@ -294,8 +355,10 @@ def _backend():
         if cand is not None:
             me = os.getpid()
             info = cand.info(me) or {}
+            here = cand.cwd(me)
             ok = info.get("ppid") == os.getppid() and bool(cand.argv(me)) and \
-                (cand.cwd(me) == os.getcwd() or cand.cwd(me) is None)
+                (here is None or os.path.normcase(os.path.normpath(here))
+                 == os.path.normcase(os.path.normpath(os.getcwd())))
             if not ok:
                 cand = None
     except Exception:

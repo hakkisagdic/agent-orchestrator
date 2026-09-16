@@ -1156,9 +1156,9 @@ def _architect_process_roots(root, architect=None, helper_only=False):
             continue
         cwd = procs.cwd(pid)
         if cwd is None:
-            # Windows' existing process backend cannot read cwd. Keep the same
-            # fail-closed fallback as agent_pids(): an exact absolute repository
-            # argument is required until backlog #9 adds PEB cwd support.
+            # A cwd the platform cannot read (a 32-bit or protected process on
+            # Windows, #9). Keep the same fail-closed fallback as agent_pids():
+            # an exact absolute repository argument is required.
             in_project = any(
                 normal_path(arg.rstrip("/\\")) in targets
                 for arg in argv if absolute_path(arg)
