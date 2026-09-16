@@ -2809,6 +2809,8 @@ def kiro_account_usage(timeout=20):
         "overage_cap": row.get("overageCapWithPrecision", row.get("overageCap")),
         "overage_rate": row.get("overageRate"),
         "overage_now": row.get("currentOveragesWithPrecision", row.get("currentOverages")),
+        # Which account the figures belong to, without keeping the profile ARN itself (#36).
+        "account": credit_account(arn),
     }
 
 
@@ -5093,13 +5095,21 @@ def review_waiver_ranges(root):
 
 # ---- credits: burn rate and the day the work stops -------------------------------
 
-def record_credit_sample(root, used, limit, reset_at=None):
+def credit_account(profile):
+    """A stable name for the account a reading came from; the profile itself is not kept (#36)."""
+    if not profile:
+        return None
+    return "acct-" + hashlib.sha256(str(profile).encode("utf-8")).hexdigest()[:12]
+
+
+def record_credit_sample(root, used, limit, reset_at=None, account=None, at=None):
     d = os.path.join(root, ".ao", "ledger")
     try:
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "credits.jsonl"), "a", encoding=UTF8) as fh:
-            fh.write(json.dumps({"at": int(time.time()), "used": float(used), "limit": float(limit),
-                                 "reset_at": reset_at}) + "\n")
+            fh.write(json.dumps({"at": int(at if at is not None else time.time()), "used": float(used),
+                                 "limit": float(limit), "reset_at": reset_at,
+                                 "account": account}) + "\n")
     except OSError:
         pass
 
@@ -5122,6 +5132,14 @@ def burn_rate(root, window=72 * 3600, now=None):
     before it resets. None when there are not two samples a few hours apart."""
     now = now or time.time()
     rows = [r for r in credit_samples(root) if r["at"] >= now - window]
+    # One account's series only (#36). An owner who switched accounts left the old
+    # account's cumulative `used` in the ledger, and the projection ran across both:
+    # exhaustion declared against an account that was 4% used. A reading that does
+    # not say whose it is projects nothing.
+    account = rows[-1].get("account") if rows else None
+    if not account:
+        return None
+    rows = [r for r in rows if r.get("account") == account]
     if len(rows) < 2:
         return None
     first, last = rows[0], rows[-1]
@@ -5136,7 +5154,7 @@ def burn_rate(root, window=72 * 3600, now=None):
     before_reset = bool(exhausts_at and reset_at and exhausts_at < reset_at)
     return {"per_day": per_day, "remaining": remaining, "days_left": days_left,
             "exhausts_at": exhausts_at, "reset_at": reset_at, "before_reset": before_reset,
-            "used": last["used"], "limit": last["limit"]}
+            "used": last["used"], "limit": last["limit"], "account": account}
 
 
 # ---- external ping: the dead man's switch --------------------------------------------

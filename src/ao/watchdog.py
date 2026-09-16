@@ -917,8 +917,21 @@ WAKE_SIGNATURES = (
 ARCHITECT_QUOTA_WINDOW = S.default("architect.quota_window_hours") * 3600
 
 
+RESET_MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
+
+
+def _reset_clock(hour, minute, meridiem):
+    """(hour, minute) on a 24-hour clock from "9", "20", "pm"."""
+    h, mi, ap = int(hour), int(minute or 0), (meridiem or "").lower()
+    if ap == "pm" and h < 12:
+        h += 12
+    if ap == "am" and h == 12:
+        h = 0
+    return h, mi
+
+
 def parse_reset(text, now=None, window=None):
-    """When does the quota come back? "resets 4:30am" / "resets in 4h 43m" / None.
+    """When does the quota come back? "resets 4:30am" / "resets in 4h 43m" / "resets Sep 14 at 4am" / None.
 
     `now` is when the message was written, not when it is read: a log line read
     again hours later keeps the reset it named. A clock time already past rolls to
@@ -934,14 +947,22 @@ def parse_reset(text, now=None, window=None):
         for n, u in re.findall(r"(\d+)\s*([hms])", m.group(1), re.I):
             secs += int(n) * {"h": 3600, "m": 60, "s": 1}[u.lower()]
         return now + secs
+    # A weekly limit names its day: "resets Sep 14 at 4am". It was read as no reset
+    # at all, so a week-long block was retried every few hours (#41).
+    m = re.search(r"resets?\s+(?:on\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+"
+                  r"(\d{1,2})(?:,?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?)?", text, re.I)
+    if m:
+        month = RESET_MONTHS.index(m.group(1).lower()) + 1
+        h, mi = _reset_clock(m.group(3) or "0", m.group(4), m.group(5))
+        lt = time.localtime(now)
+        cand = time.mktime((lt.tm_year, month, int(m.group(2)), h, mi, 0, 0, 0, -1))
+        if cand < now - 180 * 86400:          # December's message read in January
+            cand = time.mktime((lt.tm_year + 1, month, int(m.group(2)), h, mi, 0, 0, 0, -1))
+        return cand
     m = re.search(r"resets?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", text, re.I)
     if not m:
         return None
-    h, mi, ap = int(m.group(1)), int(m.group(2) or 0), (m.group(3) or "").lower()
-    if ap == "pm" and h < 12:
-        h += 12
-    if ap == "am" and h == 12:
-        h = 0
+    h, mi = _reset_clock(m.group(1), m.group(2), m.group(3))
     lt = time.localtime(now)
     cand = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, h, mi, 0, 0, 0, -1))
     if cand <= now and (window is None or cand + 24 * 3600 - now <= window):
@@ -1115,7 +1136,8 @@ def _sample_credits(root, st, adapter, project, now=None):
         save_state(root, st)
         return
     st.pop("credit_check_problem", None)
-    A.record_credit_sample(root, acct.get("used", 0), acct["limit"], acct.get("reset_at"))
+    A.record_credit_sample(root, acct.get("used", 0), acct["limit"], acct.get("reset_at"),
+                           account=acct.get("account"))
     st["last_credit_sample"] = now
     save_state(root, st)
     used, limit = float(acct.get("used") or 0), float(acct["limit"])

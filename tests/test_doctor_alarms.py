@@ -41,7 +41,7 @@ def test_a_reading_over_the_limit_is_exhausted_not_a_date_ahead():
     projection = {"before_reset": True, "exhausts_at": time.time() + 3600, "per_day": 8547}
 
     assert cli._credits_problem(projection, {"used": 12503.14, "limit": 10000}) == (
-        "credits-exhaust", "credits exhausted at the last reading: 12503/10000")
+        "credits-exhaust", "credits exhausted at the last reading: 12503/10000 (account not named by the reading)")
     code, text = cli._credits_problem(projection, {"used": 9000, "limit": 10000})
     assert code == "credits-exhaust" and text.startswith("credits run out ")
     assert cli._credits_problem({"before_reset": False}, {"used": 10, "limit": 10000}) is None

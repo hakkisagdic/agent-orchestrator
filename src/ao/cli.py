@@ -4694,12 +4694,16 @@ def _credits_problem(br, last):
     reset", because the projection was checked first and a date that had already
     passed read like one still ahead.
     """
+    # Which account, since a switch leaves another account's figures behind (#36).
+    whose = (f"account {last['account']}" if last and last.get("account")
+             else "account not named by the reading")
     if last and last.get("limit") and float(last.get("used") or 0) >= float(last["limit"]):
         return ("credits-exhaust", f"credits exhausted at the last reading: "
-                                   f"{float(last['used']):.0f}/{float(last['limit']):.0f}")
+                                   f"{float(last['used']):.0f}/{float(last['limit']):.0f} ({whose})")
     if br and br.get("before_reset"):
         return ("credits-exhaust", f"credits run out {time.strftime('%d %b', time.localtime(br['exhausts_at']))}, "
-                                   f"before the reset ({br['per_day']:.0f}/day) — new account or fewer features")
+                                   f"before the reset ({br['per_day']:.0f}/day, account {br.get('account')}) "
+                                   "— new account or fewer features")
     return None
 
 
