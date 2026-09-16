@@ -49,6 +49,24 @@ not a prohibition.
 2. Port a change only when it maps to an ao invariant; update the pinned commit here in the same commit.
 3. Never vendor files verbatim; ao stays dependency-free and its tests own the behaviour.
 
+## The content seam, as built
+
+`ao content add <source>@<commit> --skills a,b [--harness claude-code,kiro]` borrows a curated
+subset of a skills repository without installing it wholesale. The pin must be a full commit id -
+a branch or a tag is refused - and ao fetches exactly that commit and only the named `skills/`
+directories. Only text is borrowed: a file with its exec bit, a `#!` script, anything that is not
+Markdown, text, JSON or YAML, and every `hooks/` directory is skipped and named. Each harness gets
+the skill where its adapter says skills are discovered: `directives.skills_dir` keeps the skill's
+files, `directives.steering_dir` turns its SKILL.md into a manually included steering file. The
+digest of every written file is recorded in `.ao/content.json`; `ao content verify` and `ao doctor`
+name a vendored file that drifted from its pin.
+
+`ao doctor` also checks the project's agent configuration by AgentShield's categories, natively and
+with no dependency: a credential in an agent file (CLAUDE.md, AGENTS.md, `.claude/settings*.json`,
+`.mcp.json`, Kiro steering), an allow rule that admits every command, permissions with no deny list,
+a hook that pipes a download into a shell or removes a home directory, and an MCP server run from an
+unpinned package. Findings are problems named `agent-config:<category>`.
+
 ## Known false positives of AgentShield (kept out of the port)
 
 - Reversed-text heuristic flags the phrase "backward compatible".

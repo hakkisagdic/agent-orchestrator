@@ -2152,6 +2152,35 @@ def cmd_hunt(cfg, args):
     return 0
 
 
+def cmd_content(cfg, args):
+    """Borrow third-party skills pinned to a commit, text only, and verify them later (#14)."""
+    from . import skillkit
+    root = cfg["root"]
+    if args.action == "verify":
+        drift = A.verify_content(root)
+        for line in drift:
+            print(f"  {C['red']}·{C['reset']} {line}")
+        print(f"{C['green']}vendored content matches its pins{C['reset']}" if not drift else f"{len(drift)} file(s) drifted")
+        return 1 if drift else 0
+    source, _, pin = (args.spec or "").rpartition("@")
+    skills = [name.strip() for name in (args.skills or "").split(",") if name.strip()]
+    if not source or not skills:
+        print("usage: ao content add <source>@<40-character commit> --skills a,b [--harness claude-code,kiro]")
+        return 2
+    harnesses = [name.strip() for name in (args.harness or "").split(",") if name.strip()] \
+        or sorted(skillkit.detect_agents(root)[1])
+    try:
+        written = A.vendor_skills(root, source, pin, skills, harnesses)
+    except (ValueError, RuntimeError, OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        print(f"{C['red']}not vendored{C['reset']}: {exc}")
+        return 2
+    for name, digests, skipped in written:
+        print(f"{C['green']}vendored{C['reset']} {name}@{pin[:12]} → {', '.join(sorted(digests)) or 'no harness takes skills'}")
+        for rel in skipped:
+            print(f"  {C['dim']}skipped {rel}: only text is borrowed{C['reset']}")
+    return 0
+
+
 def cmd_ask(cfg, args):
     """Pose a decision the implementer cannot make for itself.
 
@@ -5564,6 +5593,14 @@ def doctor_problems(cfg):
         if not eligible:
             out.append((f"reviewer-ineligible:{reviewer_adapter}", f"the reviewer runs {reviewer_adapter}, which may not "
                         f"review: {why} — ao role set reviewer <adapter> --model <model>"))
+    # Agent configuration checked by AgentShield's categories, natively (#14).
+    try:
+        for category, text in A.agent_config_findings(root):
+            out.append((f"agent-config:{category}", text))
+        for text in A.verify_content(root):
+            out.append(("content-drift", text))
+    except Exception:
+        pass
     # An implementer with nothing pre-authorised to pick up next stalls the moment
     # the architect is away; two READY items is the floor.
     try:
@@ -8389,6 +8426,12 @@ def main():
     rsr = sub.add_parser("restore", help="reconstruct the governance from a backup directory")
     rsr.add_argument("source", help="a backup directory with its manifest.json")
     rsr.set_defaults(fn=cmd_restore)
+    ct = sub.add_parser("content", help="borrow third-party skills pinned to a commit, text only; verify them")
+    ct.add_argument("action", choices=["add", "verify"])
+    ct.add_argument("spec", nargs="?", help="add: <source>@<40-character commit>")
+    ct.add_argument("--skills", help="add: the skills to borrow, comma-separated")
+    ct.add_argument("--harness", help="add: harness adapters to install into (default: those detected)")
+    ct.set_defaults(fn=cmd_content)
     dg = sub.add_parser("digest", help="what happened, read from the ledgers")
     dg.add_argument("--days", type=float, default=1.0)
     dg.add_argument("-n", type=int, default=6)

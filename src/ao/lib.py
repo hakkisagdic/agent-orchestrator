@@ -5342,6 +5342,175 @@ def backup_age(root):
     return (time.time() - float(rows[-1]["at"]), rows[-1].get("where")) if rows else None
 
 
+# ---- the harness content seam: borrow, pin, verify (#14) ---------------------------------
+
+CONTENT_TEXT = (".md", ".txt", ".json", ".yaml", ".yml")
+
+
+def content_manifest_path(root):
+    return os.path.join(root, ".ao", "content.json")
+
+
+def content_manifest(root):
+    try:
+        with open(content_manifest_path(root), encoding=UTF8) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {"skills": []}
+    return data if isinstance(data, dict) and isinstance(data.get("skills"), list) else {"skills": []}
+
+
+def fetch_pinned(source, pin, paths, workdir):
+    """Check out exactly `paths` of `source` at commit `pin`; nothing unpinned is ever fetched (#14)."""
+    if not re.fullmatch(r"[0-9a-f]{40}", str(pin or "")):
+        raise ValueError(f"{pin!r} is not a pin: name a full 40-character commit id, never a branch or a tag")
+    git = git_binary()
+    subprocess.run([git, "init", "-q", workdir], check=True, capture_output=True)
+    subprocess.run([git, "-C", workdir, "fetch", "-q", "--depth", "1", source, pin], check=True, capture_output=True,
+                   timeout=300)
+    fetched = subprocess.run([git, "-C", workdir, "rev-parse", "FETCH_HEAD"], check=True, capture_output=True,
+                             text=True).stdout.strip()
+    if fetched != pin:
+        raise RuntimeError(f"{source} answered {fetched[:12]}, not the pinned {pin[:12]}")
+    subprocess.run([git, "-C", workdir, "checkout", "-q", pin, "--", *paths], check=True, capture_output=True)
+
+
+def vendor_skills(root, source, pin, skills, harnesses):
+    """Copy chosen skills, text files only, into each harness's discovery directory at a pinned commit (#14).
+
+    Where a harness's adapter declares `directives.skills_dir` a skill keeps its
+    files; where it declares `directives.steering_dir` the skill's SKILL.md becomes
+    a manually included steering file. Anything executable - a file with its exec
+    bit, a `#!` script, anything but text - and every `hooks/` directory is skipped
+    and named. Each written file's digest is recorded in .ao/content.json.
+    """
+    import tempfile
+    record = content_manifest(root)
+    written = []
+    with tempfile.TemporaryDirectory(prefix="ao-content-") as work:
+        fetch_pinned(source, pin, [f"skills/{name}" for name in skills], work)
+        for name in skills:
+            if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+                raise ValueError(f"{name!r} is not a skill name")
+            base = os.path.join(work, "skills", name)
+            if not os.path.isdir(base):
+                raise ValueError(f"{name} is not a skill at {pin[:12]}")
+            files, skipped = [], []
+            for directory, subdirs, names in os.walk(base):
+                if "hooks" in subdirs:
+                    subdirs.remove("hooks")
+                    skipped.append(os.path.relpath(os.path.join(directory, "hooks"), base) + "/ (hooks are never imported)")
+                for file_name in sorted(names):
+                    full = os.path.join(directory, file_name)
+                    rel = os.path.relpath(full, base).replace(os.sep, "/")
+                    with open(full, "rb") as fh:
+                        data = fh.read()
+                    if not file_name.lower().endswith(CONTENT_TEXT) or os.access(full, os.X_OK) or data[:2] == b"#!":
+                        skipped.append(rel)
+                        continue
+                    files.append((rel, data))
+            digests = {}
+            from .storage import replace_file_durably
+            for harness in harnesses:
+                directives = load_adapter(harness, root).get("directives") or {}
+                if directives.get("skills_dir"):
+                    for rel, data in files:
+                        target = f"{directives['skills_dir']}/{name}/{rel}"
+                        replace_file_durably(os.path.join(root, target), data)
+                        digests[target] = "sha256:" + hashlib.sha256(data).hexdigest()
+                elif directives.get("steering_dir") and dict(files).get("SKILL.md"):
+                    body = dict(files)["SKILL.md"].decode(UTF8, "replace")
+                    body = re.sub(r"\A---\n.*?\n---\n+", "", body, flags=re.S)
+                    data = ("---\ninclusion: manual\n---\n\n" + body).encode(UTF8)
+                    target = f"{directives['steering_dir']}/{name}.md"
+                    replace_file_durably(os.path.join(root, target), data)
+                    digests[target] = "sha256:" + hashlib.sha256(data).hexdigest()
+            record["skills"] = [entry for entry in record["skills"] if entry.get("skill") != name]
+            record["skills"].append({"skill": name, "source": source, "pin": pin, "files": digests, "skipped": skipped})
+            written.append((name, digests, skipped))
+    from .storage import replace_file_durably
+    replace_file_durably(content_manifest_path(root), (json.dumps(record, indent=1, sort_keys=True) + "\n").encode(UTF8))
+    return written
+
+
+def verify_content(root):
+    """Vendored files whose bytes no longer match the digest they were vendored with (#14)."""
+    drift = []
+    for entry in content_manifest(root)["skills"]:
+        for target, digest in sorted((entry.get("files") or {}).items()):
+            try:
+                with open(os.path.join(root, target), "rb") as fh:
+                    actual = "sha256:" + hashlib.sha256(fh.read()).hexdigest()
+            except OSError:
+                drift.append(f"{target} ({entry['skill']}@{entry['pin'][:12]}) is missing")
+                continue
+            if actual != digest:
+                drift.append(f"{target} ({entry['skill']}@{entry['pin'][:12]}) changed since it was vendored")
+    return drift
+
+
+_UNSAFE_HOOK = re.compile(r"\b(curl|wget)\b[^|;&]*\|\s*(sudo\s+)?(ba|z)?sh\b|\brm\s+-rf\s+(/|~|\$HOME)(\s|$)")
+_UNPINNED_RUNNER = ("npx", "bunx", "uvx", "pipx")
+
+
+def agent_config_findings(root):
+    """AgentShield's check categories over a project's agent configuration, ported natively (#14).
+
+    Secrets in agent files, allow rules that admit everything, permissions with no
+    deny list, hooks that pipe a download into a shell or remove the home directory,
+    and MCP servers run from an unpinned package. Only allow rules are scored, so a
+    deny rule naming `--no-verify` is not a finding, and `env -u VAR` is not read as
+    dumping the environment (the known false positives in docs/upstream.md).
+    Returns [(category, text)].
+    """
+    out = []
+    files = ["CLAUDE.md", "AGENTS.md", ".claude/CLAUDE.md", ".claude/settings.json", ".claude/settings.local.json",
+             ".mcp.json"]
+    steering = os.path.join(root, ".kiro", "steering")
+    if os.path.isdir(steering):
+        files += [f".kiro/steering/{name}" for name in sorted(os.listdir(steering)) if name.endswith(".md")]
+    for rel in files:
+        try:
+            with open(os.path.join(root, rel), encoding=UTF8, errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        hits = scan_evidence(text)[1]
+        if hits:
+            out.append(("secrets", f"{rel} holds what looks like a credential: {', '.join(sorted(set(hits)))}"))
+        if not rel.endswith(".json"):
+            continue
+        try:
+            document = json.loads(text)
+        except ValueError:
+            continue
+        permissions = document.get("permissions") if isinstance(document, dict) else None
+        if isinstance(permissions, dict):
+            broad = [rule for rule in permissions.get("allow") or [] if str(rule).strip() in ("*", "Bash", "Bash(*)", "Bash(*:*)")]
+            if broad:
+                out.append(("permissive-allow", f"{rel} allows {', '.join(broad)}: every command, a hook bypass and a push "
+                                                "among them"))
+            if permissions.get("allow") and not permissions.get("deny"):
+                out.append(("missing-deny", f"{rel} allows tools and denies nothing"))
+        hooks = document.get("hooks") if isinstance(document, dict) else None
+        for entries in (hooks.values() if isinstance(hooks, dict) else []):
+            for entry in entries if isinstance(entries, list) else []:
+                for hook in (entry.get("hooks") or []) if isinstance(entry, dict) else []:
+                    command = str((hook or {}).get("command") or "") if isinstance(hook, dict) else ""
+                    if _UNSAFE_HOOK.search(command):
+                        out.append(("hook-safety", f"{rel} runs a hook that pipes a download into a shell or removes "
+                                                   f"a home: {command[:80]}"))
+        servers = document.get("mcpServers") if isinstance(document, dict) else None
+        for name, server in (servers.items() if isinstance(servers, dict) else []):
+            command = os.path.basename(str((server or {}).get("command") or ""))
+            args = [str(arg) for arg in (server or {}).get("args") or []]
+            packages = [arg for arg in args if not arg.startswith("-")]
+            if command in _UNPINNED_RUNNER and packages and not re.search(r".@\d", packages[0]):
+                out.append(("mcp-hygiene", f"{rel} runs MCP server {name} from {command} {packages[0]} with no "
+                                           "version pinned"))
+    return out
+
+
 def safe_slug(text, fallback="note", limit=40):
     """A file-name part holding only [A-Za-z0-9._-] (#19).
 
