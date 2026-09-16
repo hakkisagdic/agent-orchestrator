@@ -100,7 +100,10 @@ candidate; an explicitly empty override is invalid, while relative overrides are
 resolved against the repository root where the Git query runs, so direct
 `commit-check` and the installed hook measure the same index. A marker with
 missing, unreadable, malformed, non-object, or empty `.ao/config.json` state
-refuses rather than falling back to auto-discovery. Both pre-dispatch loading and
+refuses rather than falling back to auto-discovery. Every write of that file replaces
+it whole — a temporary file beside it, fsync, rename — so a crash or kill leaves the old
+document or the new one, never an empty file that has lost its `capability_matrix`;
+a writer refuses a config it cannot read instead of rebuilding it. Both pre-dispatch loading and
 commit enforcement use one bounded reader: it reads at most 1,048,576 bytes and
 rejects container nesting deeper than 64 before recursive JSON decoding. A
 repository with neither HEAD nor index marker is uninitialized, so an incidental

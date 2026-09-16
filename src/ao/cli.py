@@ -3326,16 +3326,17 @@ def _profile_config(root, args, base):
 
 
 def _apply_profile(root, args):
-    """Write missing profile blocks while preserving existing project choices."""
-    p = os.path.join(root, ".ao", "config.json")
-    try:
-        cfg = json.load(open(p, encoding=UTF8))
-    except (OSError, ValueError):
-        cfg = {}
-    planned, added = _profile_config(root, args, cfg)
+    """Write missing profile blocks while preserving existing project choices.
+
+    A config that exists but cannot be read is refused: planning from an empty
+    document and writing the plan over it would erase what it held (#56).
+    """
+    document = A.project_config_document(root)
+    if document["problem"] and os.path.lexists(os.path.join(root, ".ao", "config.json")):
+        raise ValueError(document["problem"])
+    planned, added = _profile_config(root, args, document["config"] or {})
     if added:
-        json.dump(planned, open(p, "w", encoding=UTF8), indent=2,
-                  ensure_ascii=False)
+        A.write_project_config(root, json.dumps(planned, indent=2, ensure_ascii=False))
     return added
 
 
@@ -3468,14 +3469,19 @@ def cmd_init(cfg, args):
             os.chmod(p, mode)
         wrote.append(rel)
 
+    # The config is replaced whole or not at all (#56); a crash never leaves it
+    # empty of the opt-ins it held.
     if config_existed:
         kept.append(".ao/config.json")
         if added:
-            with open(config_path, "w", encoding=UTF8) as fh:
-                fh.write(config_text)
+            A.write_project_config(root, config_text)
             wrote.append(".ao/config.json (+" + ", ".join(added) + ")")
     else:
-        put(".ao/config.json", config_text)
+        if os.path.lexists(config_path):
+            kept.append(".ao/config.json")
+        else:
+            A.write_project_config(root, config_text)
+            wrote.append(".ao/config.json")
         if added:
             wrote.append(".ao/config.json (+" + ", ".join(added) + ")")
 
@@ -4423,7 +4429,11 @@ def cmd_features(cfg, args):
     if args.action in ("on", "off"):
         if args.key not in F.FEATURES:
             print(f"unknown feature {args.key}; one of {', '.join(F.ORDER)}"); return 2
-        F.set_switch(root, args.key, args.action == "on")
+        try:
+            F.set_switch(root, args.key, args.action == "on")
+        except (OSError, ValueError) as exc:
+            print(f"{C['red']}not changed{C['reset']}: {exc}")
+            return 1
         cfg = A.load_config(root)
     on = F.switches(cfg)
     print(f"  {'feature':<18}{'':<4}{'share':>6}  what it spends")

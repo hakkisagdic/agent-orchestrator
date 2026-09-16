@@ -47,8 +47,16 @@ def estimate(cfg):
 
 
 def set_switch(root, key, on):
-    p = os.path.join(root, ".ao", "config.json")
-    cfg = json.load(open(p, encoding=UTF8))
+    """Switch one feature in `.ao/config.json`, written whole or not at all.
+
+    A config ao cannot read is refused rather than rebuilt: rebuilding would drop
+    whatever else it held, `capability_matrix` among it (#56).
+    """
+    from . import lib as A
+    document = A.project_config_document(root)
+    if document["problem"]:
+        raise ValueError(document["problem"])
+    cfg = document["config"]
     cfg.setdefault("features", {})[key] = bool(on)
-    json.dump(cfg, open(p, "w", encoding=UTF8), indent=2, ensure_ascii=False)
+    A.write_project_config(root, json.dumps(cfg, indent=2, ensure_ascii=False))
     return cfg["features"]

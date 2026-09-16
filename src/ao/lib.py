@@ -266,6 +266,12 @@ def load_config(root):
     return cfg
 
 
+def write_project_config(root, text):
+    """Write `.ao/config.json` whole or not at all (#56)."""
+    from .storage import replace_file_durably
+    replace_file_durably(os.path.join(root, ".ao", "config.json"), text.encode(UTF8))
+
+
 def load_adapter(adapter_id):
     p = os.path.join(adapters_dir(), f"{adapter_id}.json")
     return json.load(open(p, encoding=UTF8)) if os.path.exists(p) else {}

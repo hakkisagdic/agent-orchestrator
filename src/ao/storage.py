@@ -250,6 +250,55 @@ def _sync_directory(directory, fsync):
     return True
 
 
+def replace_file_durably(path, data, *, _checkpoint=None, _fsync=None):
+    """Replace a whole file so it is only ever seen with its old bytes or its new ones.
+
+    ``open(path, "w")`` truncates first. A crash, kill or full disk before the new
+    bytes are down leaves a zero-byte file, and a zero-byte ``.ao/config.json`` no
+    longer holds the ``capability_matrix`` that keeps strict authority on (#56).
+    This writes a temporary file beside the target, fsyncs it, renames it over the
+    target and fsyncs the directory. ``_checkpoint`` and ``_fsync`` are the private
+    test seams the ledger appends take.
+    """
+    fsync = _fsync or os.fsync
+    parent = os.path.dirname(path) or "."
+    os.makedirs(parent, exist_ok=True)
+    try:
+        mode = os.stat(path).st_mode & 0o7777
+    except OSError:
+        mode = 0o644
+    temporary = os.path.join(parent, f".{os.path.basename(path)}.{os.getpid()}.tmp")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0)
+    try:
+        fd = os.open(temporary, flags, mode)
+        try:
+            _call(_checkpoint, "temporary-opened")
+            remaining = memoryview(data)
+            while remaining:
+                try:
+                    count = os.write(fd, remaining)
+                except InterruptedError:
+                    continue
+                if count <= 0:
+                    raise OSError(errno.EIO, "write made no forward progress")
+                remaining = remaining[count:]
+            _call(_checkpoint, "temporary-written")
+            fsync(fd)
+            _call(_checkpoint, "temporary-fsynced")
+        finally:
+            os.close(fd)
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
+        raise
+    _call(_checkpoint, "replaced")
+    if _sync_directory(parent, fsync):
+        _call(_checkpoint, "directory-fsynced")
+
+
 def _repair_partial_tail(path, fsync, checkpoint):
     """Salvage a complete unterminated row or truncate a partial final row."""
     if not os.path.exists(path) or os.path.getsize(path) == 0:
