@@ -26,6 +26,8 @@ FEATURES = {
                          "one architect turn per refill"),
     "reports":          ("implementer reports on state changes (start/done/blocked)", True,
                          "a few implementer tool calls per slice"),
+    "hunter":           ("a scheduled, read-only bug hunt that mails leads to the architect", False,
+                         "one hunter call per run over a bounded slice of the tree"),
 }
 ORDER = list(FEATURES)
 

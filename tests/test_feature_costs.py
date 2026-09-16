@@ -45,7 +45,7 @@ def test_each_feature_is_priced_from_what_the_transcript_and_the_watchdog_record
     assert measured["total"] == 20.0 and measured["turns"] == 5
     assert measured["features"] == {"review": {"turns": 1, "usage": 3.0}, "reports": {"turns": 1, "usage": 1.0},
                                     "nudge": {"turns": 1, "usage": 2.0}}
-    assert measured["counted"] == {"architect_wake": 1, "refill": 0}
+    assert measured["counted"] == {"architect_wake": 1, "refill": 0, "hunter": 0}
     assert cli.cmd_cost(project, SimpleNamespace(since=None, features=True)) == 0
     out = capsys.readouterr().out
     assert "review" in out and "15.0%" in out and "the architect's pool" in out

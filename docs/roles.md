@@ -113,6 +113,24 @@ The author is whoever holds the implementer role when the slice runs, resolved f
 table, so after a swap the reviewer that runs the new implementer's engine, or declares its
 family, is refused for every grant - whichever actor that is.
 
+## The bug-hunter lane
+
+The `bug-hunter` finds defects with no slice assigned. It runs as a read lane: no worktree,
+no staging, no write to the repository, and it can never hold or influence a grant. Its
+output is **leads, not verdicts**. `ao hunt` reads the next bounded slice of tracked files
+(`hunter.files_per_run`, `hunter.bytes_per_run`) from a cursor that goes round the tree, and
+mails at most `hunter.max_leads` new leads to the architect, who turns each into a backlog row or
+discards it with `ao hunt discard <id>`. Each lead carries a fingerprint (file, symbol,
+category), so a repeat is not sent again and a discard is remembered. A lead never blocks a
+slice or raises a human alarm.
+
+The hunter is configured as `hunter.argv` and refused unless it cannot write, by the same rule a
+reviewer must meet. With the `hunter` feature switched on (it is off by default) the watchdog
+starts one hunt every `hunter.every_hours`, detached, never continuously. `ao hunt status` and
+`ao cost --features` count the runs, so its value can be judged against what it spends. A
+cheaper model family suits it well: not good enough to hold a verdict, good enough to find
+leads.
+
 ## Presets
 
 ```yaml

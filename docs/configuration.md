@@ -46,6 +46,12 @@ machine setting written into a project.
 | `repository.kind` | `product` | project | product: the architect does not implement beyond a named hotfix; tool: roles may rotate per slice |
 | `review.lenses` | `declared` | project | declared: lenses only where a slice names them; auto: defaults from what the candidate touches; off: none |
 | `review.stall_minutes` | `10` | project | minutes a reviewer may spend no CPU before it is killed as stalled, its partial answer kept |
+| `hunter.every_hours` | `24` | project | hours between bug hunts the watchdog starts, when the hunter feature is on |
+| `hunter.files_per_run` | `8` | project | tracked files one hunt reads, going round the tree run by run |
+| `hunter.bytes_per_run` | `60000` | project | bytes of source one hunt reads |
+| `hunter.max_leads` | `5` | project | new leads one hunt may send |
+| `hunter.argv` | `none` | project | the hunter's command with {prompt}, unable to write; none: no hunt runs |
+| `hunter.id` | `hunter` | project | the name a hunt's runs and leads are recorded under |
 | `gates.default_timeout` | `600` | project | seconds a gate may run when its own definition names no timeout |
 | `gates.coverage_min_files` | `5` | project | source files of one toolchain a top-level tree must hold before a gate must exercise it |
 | `watchdog.idle_minutes` | `6.0` | project | minutes of implementer silence before the watchdog acts |

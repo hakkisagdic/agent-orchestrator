@@ -3607,7 +3607,8 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
         # that filled the mailbox with names hundreds of characters long. What
         # needs a decision is what the implementer or a human sent, never what
         # this detector emitted.
-        if m.startswith("watchdog-to-") or "-watchdog-to-" in m:
+        # The hunter's leads wait for triage; they are not the implementer asking (#45).
+        if m.startswith(("watchdog-to-", "hunter-to-")) or "-watchdog-to-" in m or "-hunter-to-" in m:
             continue
         # The architect's notes to itself are not the implementer asking (#18).
         if from_architect(m, cfg):
@@ -5107,6 +5108,80 @@ def stores_over_bound(root, cfg, state_dir=None):
         if size > limit * 1.25:
             out.append((path, size, limit))
     return out
+
+
+# ---- a standing bug-hunter: read-only, bounded, leads not verdicts (#45) -----------------
+
+HUNT_CATEGORIES = ("correctness", "concurrency", "clock", "durability", "subprocess", "portability", "secrets",
+                   "authority", "tests")
+_LEAD = re.compile(r"^\s*-\s*\[([a-z]+)\]\s*([^\s:]+):(\d+)\s+(\S+)\s+[—-]+\s*(.+?)\s*$")
+
+
+def hunter_ledger_path(root):
+    return os.path.join(root, ".ao", "ledger", "hunter.jsonl")
+
+
+def hunter_record(root, event, **fields):
+    from .storage import append_jsonl
+    append_jsonl(hunter_ledger_path(root), scan_record(dict(fields, at=int(time.time()), event=event)))
+
+
+def hunter_rows(root):
+    from .storage import read_jsonl
+    return [row for row in read_jsonl(hunter_ledger_path(root)) if isinstance(row, dict)]
+
+
+def hunter_known(root):
+    """Fingerprints already sent or discarded: a repeat is suppressed, a discard remembered (#45)."""
+    return {row.get("fingerprint") for row in hunter_rows(root) if row.get("event") in ("sent", "discarded")}
+
+
+def hunt_slice(root, cfg):
+    """The next bounded slice of tracked product files, from a cursor that goes round the tree (#45)."""
+    try:
+        listed = [os.fsdecode(p) for p in _git_output(root, "ls-files", "-z").split(b"\0") if p]
+    except RuntimeError:
+        return [], 0
+    candidates = [p for p in listed if not _is_coordination_path(p, cfg) and os.path.isfile(os.path.join(root, p))]
+    if not candidates:
+        return [], 0
+    state_path = os.path.join(root, ".ao", "hunter.json")
+    try:
+        with open(state_path, encoding=UTF8) as fh:
+            cursor = int(json.load(fh).get("cursor") or 0) % len(candidates)
+    except (OSError, ValueError, TypeError, AttributeError):
+        cursor = 0
+    files, spent, index = [], 0, cursor
+    budget, most = settings.get(cfg, "hunter.bytes_per_run"), settings.get(cfg, "hunter.files_per_run")
+    while len(files) < most and len(files) < len(candidates):
+        path = candidates[index % len(candidates)]
+        index += 1
+        try:
+            with open(os.path.join(root, path), encoding=UTF8) as fh:
+                text = fh.read(budget)
+        except (OSError, UnicodeDecodeError):
+            continue
+        if files and spent + len(text) > budget:
+            break
+        files.append((path, text))
+        spent += len(text)
+    from .storage import replace_file_durably
+    replace_file_durably(state_path, (json.dumps({"cursor": index % len(candidates)}) + "\n").encode(UTF8))
+    return files, cursor
+
+
+def parse_leads(out):
+    """Leads a hunter wrote as `- [category] path:line symbol — what is wrong`, each with a fingerprint (#45)."""
+    leads = []
+    for line in str(out or "").splitlines():
+        found = _LEAD.match(line)
+        if not found or found.group(1) not in HUNT_CATEGORIES:
+            continue
+        category, path, number, symbol, text = found.groups()
+        fingerprint = hashlib.sha256(f"{path}|{symbol}|{category}".encode(UTF8)).hexdigest()[:16]
+        leads.append({"category": category, "path": path, "line": int(number), "symbol": symbol, "finding": text,
+                      "fingerprint": fingerprint})
+    return leads
 
 
 def safe_slug(text, fallback="note", limit=40):
@@ -6782,7 +6857,9 @@ def feature_costs(cfg, since=None):
     return {"unit": costs["unit"], "total": sum(float(turn.get("usage") or 0) for turn in turns),
             "turns": len(turns), "from": min(starts) if starts else None, "to": max(starts) if starts else None,
             "features": features,
-            "counted": {what: len(spawn_times(root, what, since)) for what in ("architect_wake", "refill")}}
+            "counted": dict({what: len(spawn_times(root, what, since)) for what in ("architect_wake", "refill")},
+                            hunter=sum(1 for row in hunter_rows(root) if row.get("event") == "run"
+                                       and (since is None or row.get("at", 0) >= since)))}
 
 
 def turn_costs(cfg, since=None):

@@ -84,6 +84,24 @@ SETTINGS = {
     "review.stall_minutes": Setting(
         10, int, 1, None, "project",
         "minutes a reviewer may spend no CPU before it is killed as stalled, its partial answer kept"),
+    "hunter.every_hours": Setting(
+        24, int, 1, None, "project",
+        "hours between bug hunts the watchdog starts, when the hunter feature is on"),
+    "hunter.files_per_run": Setting(
+        8, int, 1, None, "project",
+        "tracked files one hunt reads, going round the tree run by run"),
+    "hunter.bytes_per_run": Setting(
+        60_000, int, 1000, None, "project",
+        "bytes of source one hunt reads"),
+    "hunter.max_leads": Setting(
+        5, int, 1, None, "project",
+        "new leads one hunt may send"),
+    "hunter.argv": Setting(
+        [], list, None, None, "project",
+        "the hunter's command with {prompt}, unable to write; none: no hunt runs"),
+    "hunter.id": Setting(
+        "hunter", str, None, None, "project",
+        "the name a hunt's runs and leads are recorded under"),
     "gates.default_timeout": Setting(
         600, int, 1, None, "project",
         "seconds a gate may run when its own definition names no timeout"),
@@ -203,7 +221,7 @@ def usable(key, value):
 def expected(key):
     spec = SETTINGS[key]
     if spec.kind is list:
-        return "a list of directory names"
+        return "a list of non-empty strings"
     if spec.kind is str:
         return "a name with no path separator"
     words = {int: "a whole number", float: "a number"}[spec.kind]

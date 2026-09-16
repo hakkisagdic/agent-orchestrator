@@ -908,6 +908,27 @@ def secondary_note(found):
             "Orada devam et; buradaki engeller insanı ya da mimarı bekliyor, bekleme.")
 
 
+def _schedule_hunt(root, cfg, st):
+    """Start one bounded, detached bug hunt when it is switched on and due: a schedule, never a loop (#45)."""
+    from . import features as F
+    if not F.enabled(cfg, "hunter") or not S.get(cfg, "hunter.argv") or A.hold_state(root):
+        return False
+    if time.time() - float(st.get("last_hunt") or 0) < S.get(cfg, "hunter.every_hours") * 3600:
+        return False
+    log = os.path.join(STATE_DIR, f"hunt-{A.project_key(root)}.log")
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(log, "a", encoding=UTF8) as fh:
+        fh.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} hunt ===\n")
+        fh.flush()
+        subprocess.Popen([sys.executable, "-m", "ao", "-C", root, "hunt", "run"], cwd=root,
+                         stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.STDOUT, start_new_session=True,
+                         env=dict(os.environ, AO_ROLE="hunter"))
+    st["last_hunt"] = time.time()
+    save_state(root, st)
+    print("started a bounded bug hunt")
+    return True
+
+
 def open_work(cfg, root):
     """Is there something for the implementer to continue? Cheap signals only.
 
@@ -1325,6 +1346,7 @@ def _cycle_impl(args, root):
         _FACTS["ping"] = "dry-run"
     if not args.dry_run:
         _sample_credits(root, st, adapter, project)
+        _schedule_hunt(root, cfg, st)
     # Only meaningful when no implementer turn is running: a sub-agent's writes
     # do not appear as the parent's tool calls and would read as a stranger's.
     fe = [] if A.agent_pids(root, adapter) else A.foreign_edits(root, cfg)
