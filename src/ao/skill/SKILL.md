@@ -64,6 +64,12 @@ Anything not forbidden there and inside the slice's scope is allowed.
    neither consume nor reset this slice's budget. `ao review --commits <range>`
    is retrospective evidence only, never a round in the prospective budget and
    never authority for a candidate.
+   With submitted reviews (`ao review submit`) the order each time you are free is:
+   a returned review first — land it or fold its findings into its slice; else
+   submit a green, code-complete slice and take the next READY item; else, with
+   `review.max_inflight` reviews running, keep developing. Never wait on a
+   reviewer, and never start new work while a returned review sits uncollected:
+   `ao status` names it and the watchdog raises it. A parked slice holds no slot.
 7. `ao commit-ok --verify` — runs the quick gates itself when verification is
    stale, then persists a grant only for the exact staged index candidate when
    its verification and newest matching prospective review approve, no urgent

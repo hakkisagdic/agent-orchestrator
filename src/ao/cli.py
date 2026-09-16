@@ -185,6 +185,11 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0):
                     a(f"   {C['dim']}{hh}{C['reset']} {C['yellow']}agent error{C['reset']}  {ln}"
                       if i == 0 else f"        {C['dim']}│{C['reset']}  {ln}")
 
+    # A returned review is handled before new work starts (#28, W1).
+    for state in A.returned_reviews(root):
+        a(f"\n   {C['yellow']}{C['b']}REVIEW RETURNED{C['reset']} for {state.get('slice') or 'a slice'}: "
+          f"{state['id']} {state.get('verdict') or state.get('state')} — handle it before new work "
+          f"({C['b']}ao review collect {state['id']}{C['reset']})")
     # reviews + round budget
     revs = A.reviews(root, cfg["reviews"])
     if revs:

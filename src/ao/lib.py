@@ -2809,6 +2809,15 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
         g["n"] += 1
         g["latest"] = m
         g["title"] = first.lstrip("# ").strip()[:200]
+    # A review that came back and nobody took is a slice left unattended (#28, W1).
+    waited = settings.get(cfg, "review.unhandled_minutes") * 60
+    for state in returned_reviews(root):
+        age = time.time() - float(state.get("finished_at") or time.time())
+        if age >= waited:
+            out.append({"kind": "review-returned", "key": state["id"],
+                        "facts": [f"{state['id']} for slice {state.get('slice')} returned "
+                                  f"{state.get('verdict') or state.get('state')} {int(age / 60)}m ago and "
+                                  "has not been collected"]})
     # A question asked with `ao ask` wants the architect as much as a report does,
     # and may have no mail at all (#20). Each open one is its own anomaly.
     for decision in decisions(root, "open"):
@@ -3101,6 +3110,28 @@ def invoking_role():
     """The role this ao process runs for, from AO_ROLE, or None for a person or an unknown caller (#29)."""
     role = (os.environ.get("AO_ROLE") or "").strip().lower()
     return role if role in ROLES else None
+
+
+def returned_reviews(root):
+    """Submitted reviews that have ended and that nobody has collected yet (#28)."""
+    directory = os.path.join(root, ".ao", "reviews")
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return []
+    out = []
+    for name in names:
+        if not (name.startswith("R-") and name.endswith(".json")):
+            continue
+        try:
+            with open(os.path.join(directory, name), encoding=UTF8) as fh:
+                state = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if isinstance(state, dict) and state.get("state") not in (None, "running") \
+                and not state.get("collected_at"):
+            out.append(state)
+    return out
 
 
 def urgent_messages(root, cfg, role="implementer"):

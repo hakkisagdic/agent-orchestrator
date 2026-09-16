@@ -27,6 +27,7 @@ machine setting written into a project.
 |---|---|---|---|
 | `round_budget` | `5` | project | review rounds a slice may spend before the watchdog stops nudging and tells a person |
 | `review.max_inflight` | `2` | project | submitted reviews that may run at once; a submit beyond it names what to collect |
+| `review.unhandled_minutes` | `30` | project | minutes a returned review may wait uncollected before the watchdog raises it |
 | `review_timeout` | `900` | project | seconds one reviewer may take; never taken from the command line |
 | `stall_minutes` | `60` | project | minutes a staged candidate may wait to land before throughput calls the slice stalled |
 | `gates.default_timeout` | `600` | project | seconds a gate may run when its own definition names no timeout |

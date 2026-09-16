@@ -27,6 +27,9 @@ SETTINGS = {
     "review.max_inflight": Setting(
         2, int, 1, None, "project",
         "submitted reviews that may run at once; a submit beyond it names what to collect"),
+    "review.unhandled_minutes": Setting(
+        30, int, 1, None, "project",
+        "minutes a returned review may wait uncollected before the watchdog raises it"),
     "review_timeout": Setting(
         900, int, 1, None, "project",
         "seconds one reviewer may take; never taken from the command line"),
