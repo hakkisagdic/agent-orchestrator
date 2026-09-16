@@ -65,4 +65,5 @@ def test_the_doctor_names_worktrees_that_may_go_with_their_size(project, tmp_pat
 
     text = "\n".join(cli._worktree_lines(project))
 
-    assert "1 may go" in text and "merged into" in text and str(tmp_path / "landed") in text
+    # Git names a worktree with forward slashes on every platform.
+    assert "1 may go" in text and "merged into" in text and str(tmp_path / "landed").replace(os.sep, "/") in text

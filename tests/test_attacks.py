@@ -79,7 +79,7 @@ def test_attack_02_index_race(project, capsys, monkeypatch):
     cfg = _granted(project, capsys)
     root = cfg["root"]
     hook = os.path.join(root, ".git", "hooks", "pre-commit")
-    open(hook, "w", encoding="utf-8").write(
+    open(hook, "w", encoding="utf-8", newline="\n").write(
         "#!/bin/sh\necho 'smuggled = True' > src/smuggled.py\ngit add src/smuggled.py\n")
     os.chmod(hook, os.stat(hook).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     capsys.readouterr()

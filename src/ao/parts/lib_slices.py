@@ -780,7 +780,10 @@ def fetch_pinned(source, pin, paths, workdir):
                              text=True).stdout.strip()
     if fetched != pin:
         raise RuntimeError(f"{source} answered {fetched[:12]}, not the pinned {pin[:12]}")
-    subprocess.run([git, "-C", workdir, "checkout", "-q", pin, "--", *paths], check=True, capture_output=True)
+    # The pinned bytes, whatever this machine converts: Git for Windows checks text out with
+    # CRLF by default, and neither the files nor their digests were the commit's (#71).
+    subprocess.run([git, "-C", workdir, "-c", "core.autocrlf=false", "-c", "core.eol=lf", "checkout", "-q", pin,
+                    "--", *paths], check=True, capture_output=True)
 
 
 def vendor_skills(root, source, pin, skills, harnesses):
@@ -813,7 +816,9 @@ def vendor_skills(root, source, pin, skills, harnesses):
                     rel = os.path.relpath(full, base).replace(os.sep, "/")
                     with open(full, "rb") as fh:
                         data = fh.read()
-                    if not file_name.lower().endswith(CONTENT_TEXT) or os.access(full, os.X_OK) or data[:2] == b"#!":
+                    # Windows keeps no execute bit, and os.access says every file there has one (#71).
+                    executable = os.name != "nt" and os.access(full, os.X_OK)
+                    if not file_name.lower().endswith(CONTENT_TEXT) or executable or data[:2] == b"#!":
                         skipped.append(rel)
                         continue
                     files.append((rel, data))

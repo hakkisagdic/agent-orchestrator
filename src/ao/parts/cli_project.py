@@ -522,7 +522,9 @@ def cmd_init(cfg, args):
             kept.append(rel)
             return
         os.makedirs(os.path.dirname(p), exist_ok=True)
-        with open(p, "w", encoding=UTF8) as fh:
+        # The bytes as given on every platform: Windows text mode wrote the marker with
+        # CRLF, and the marker check below refused the init that had just written it (#71).
+        with open(p, "w", encoding=UTF8, newline="\n") as fh:
             fh.write(content)
         if mode:
             os.chmod(p, mode)

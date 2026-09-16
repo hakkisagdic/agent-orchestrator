@@ -4,6 +4,8 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from ao import cli
 
 
@@ -194,6 +196,8 @@ def test_init_rejects_oversized_planned_profile_before_probe_or_write(
 
 
 
+@pytest.mark.skipif(os.name == "nt", reason="the fixture reviewer runs through its shebang, which Windows "
+                                            "does not honour")
 def test_init_real_failed_probe_contains_version_discovery_side_effects(
     tmp_path, monkeypatch, capsys,
 ):

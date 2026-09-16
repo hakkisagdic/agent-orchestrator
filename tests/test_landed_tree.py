@@ -29,7 +29,7 @@ def _granted_candidate(project, monkeypatch):
 
 def _race(root):
     hook = os.path.join(root, ".git", "hooks", "pre-commit")
-    open(hook, "w", encoding="utf-8").write(RACE_HOOK)
+    open(hook, "w", encoding="utf-8", newline="\n").write(RACE_HOOK)
     os.chmod(hook, os.stat(hook).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 

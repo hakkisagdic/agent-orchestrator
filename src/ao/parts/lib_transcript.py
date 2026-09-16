@@ -1058,7 +1058,9 @@ def _pid_alive(pid):
 def _process_start(pid, refresh=False):
     """Stable process-start identity, optionally forcing a fresh backend scan."""
     from . import procs
-    attempts = 3 if refresh else 1
+    # A fresh Windows snapshot lists every live process, so a pid it lacks has exited, and
+    # each retry there is one more PowerShell query of a second or more (#71).
+    attempts = 3 if refresh and os.name != "nt" else 1
     for attempt in range(attempts):
         try:
             if refresh:

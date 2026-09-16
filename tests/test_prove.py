@@ -22,7 +22,8 @@ def _git(root, *args):
 def _configured(project, tmp_path, monkeypatch, script, installed=True):
     root = project["root"]
     with open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8") as fh:
-        json.dump({"gates": {"check": {"run": shlex.join([sys.executable, "-c", "print('ok')"]), "timeout": 60}},
+        command = (subprocess.list2cmdline if os.name == "nt" else shlex.join)([sys.executable, "-c", "print('ok')"])
+        json.dump({"gates": {"check": {"run": command, "timeout": 60}},
                    "profiles": {"quick": ["check"]}, "default_profile": "quick"}, fh)
     cfg = dict(project, reviewer={"id": "r1", "family": "x", "argv": [sys.executable, "-c", script, "{prompt}"]})
     with open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:

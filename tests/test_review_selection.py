@@ -110,8 +110,12 @@ def test_a_fallback_approval_cannot_supersede_a_rejection_but_the_primary_can(pr
     assert code == 0 and "GRANTED" in out
 
 
-def test_a_timeout_on_the_command_line_cannot_starve_the_primary(project):
+def test_a_timeout_on_the_command_line_cannot_starve_the_primary(project, monkeypatch):
     root = project["root"]
+    # Registering a reviewer reads the process table, on Windows a PowerShell query that can
+    # outlast the one-second timeout this primary is given (#71).
+    monkeypatch.setattr(A, "helper_register", lambda *args, **kwargs: None)
+    monkeypatch.setattr(A, "helper_release", lambda *args, **kwargs: None)
     _repo_with_change(root)
     slow = [sys.executable, "-c",
             "import time; time.sleep(2); " + "; ".join(f"print({line!r})" for line in APPROVED), "{prompt}"]

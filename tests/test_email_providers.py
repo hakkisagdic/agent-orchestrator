@@ -49,6 +49,9 @@ def test_smtp_sends_through_the_users_own_server(conf):
     assert message["Subject"] == "[ao/ao] red" and message["To"] == "me@example.test"
     assert _Server.instance.calls == [("connect", "smtp.example.test", 587), ("starttls",),
                                       ("login", "me@example.test", "pw")]
+    if os.name == "nt":
+        pytest.skip("os.chmod sets only the read-only flag on Windows, so an owner-only mode cannot be "
+                    "checked there (#71)")
     assert stat.S_IMODE(os.stat(conf).st_mode) == 0o600
 
 

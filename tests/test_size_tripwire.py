@@ -73,7 +73,8 @@ def test_a_green_small_overshoot_is_advised_not_refused_and_the_reviewer_is_aske
     root = project["root"]
     _write(root, "src/app.py", 450)
     _stage(root, "src")
-    spec = {"gates": {"test": {"run": shlex.join([sys.executable, "-c", "print('ok')"]), "timeout": 30}},
+    command = (subprocess.list2cmdline if os.name == "nt" else shlex.join)([sys.executable, "-c", "print('ok')"])
+    spec = {"gates": {"test": {"run": command, "timeout": 30}},
             "profiles": {"quick": ["test"]}, "default_profile": "quick"}
     with open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8") as fh:
         json.dump(spec, fh)

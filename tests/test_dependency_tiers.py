@@ -23,6 +23,8 @@ for argv in (["ao", "-C", sys.argv[2], "status"], ["ao", "-C", sys.argv[2], "boa
     except Exception:
         pass
 stdlib = {os.path.realpath(sysconfig.get_paths()[k]) for k in ("stdlib", "platstdlib")}
+if os.name == "nt":                   # Windows keeps the standard library's extension modules in DLLs
+    stdlib.add(os.path.realpath(os.path.join(sys.base_prefix, "DLLs")))
 package = os.path.realpath(os.path.join(sys.argv[1], "src", "ao"))
 outside = []
 for name, module in list(sys.modules.items()):

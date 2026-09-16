@@ -42,7 +42,8 @@ def _verify(project, tmp_path, monkeypatch, script, **gate):
     os.makedirs(os.path.join(root, "src"), exist_ok=True)
     open(os.path.join(root, "src", "a.py"), "w", encoding="utf-8").write("value = 1\n")
     subprocess.run(["git", "add", "src/a.py"], cwd=root, check=True, capture_output=True)
-    command = shlex.join([sys.executable, "-c", script])
+    argv = [sys.executable, "-c", script]
+    command = subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
     spec = {"gates": {"test": {"run": command, "timeout": 30, **gate}},
             "profiles": {"quick": ["test"]}, "default_profile": "quick"}
     open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8").write(json.dumps(spec))

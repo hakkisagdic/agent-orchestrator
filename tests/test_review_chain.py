@@ -952,6 +952,8 @@ def test_communication_error_drain_is_bounded_and_closes_pipes(
     assert attempt["retryable"] is False
 
 
+@pytest.mark.skipif(os.name == "nt", reason="the fixture reviewer runs through its shebang, which Windows "
+                                            "does not honour")
 def test_reviewer_resolver_canonicalizes_relative_path_candidate(
     project, tmp_path, monkeypatch,
 ):

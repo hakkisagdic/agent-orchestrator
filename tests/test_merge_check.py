@@ -30,7 +30,8 @@ def _check(project, branch):
 def test_two_green_branches_whose_merge_is_red_are_caught_and_every_merge_is_accounted_for(project, tmp_path,
                                                                                            monkeypatch):
     root = project["root"]
-    spec = {"gates": {"test": {"run": shlex.join([sys.executable, "-c", GATE]), "timeout": 60}},
+    command = (subprocess.list2cmdline if os.name == "nt" else shlex.join)([sys.executable, "-c", GATE])
+    spec = {"gates": {"test": {"run": command, "timeout": 60}},
             "profiles": {"full": ["test"]}, "default_profile": "full"}
     with open(os.path.join(root, ".ao", "gates.json"), "w", encoding="utf-8") as fh:
         json.dump(spec, fh)

@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shlex
 
 from ao import cli, skillkit
 
@@ -101,7 +102,8 @@ def test_remove_undoes_init_and_only_removes_ao_owned_hooks(project, monkeypatch
     pre_commit = os.path.join(hooks, "pre-commit")
     pre_push = os.path.join(hooks, "pre-push")
     open(pre_commit, "w", encoding="utf-8").write(
-        cli.PRE_COMMIT_HOOK.format(ao="/x/ao", root=root)
+        # Quoted as ao quoted it: a Windows path's backslashes are shell escapes.
+        cli.PRE_COMMIT_HOOK.format(ao="/x/ao", root=shlex.quote(root))
     )
     foreign = "#!/bin/sh\necho foreign\n"
     open(pre_push, "w", encoding="utf-8").write(foreign)
