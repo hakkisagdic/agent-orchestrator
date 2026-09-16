@@ -483,8 +483,11 @@ def test_strict_and_legacy_grants_never_cross_authorize(project, monkeypatch, ca
     assert open(ledger, "rb").read() == strict_bytes
 
     # Replace the decision ledger with an otherwise exact legacy grant, then
-    # prove strict opt-in refuses it rather than silently falling back.
+    # prove strict opt-in refuses it rather than silently falling back. Emptying
+    # a ledger is a cut the recorded length refuses (#62), so the replacement
+    # also forgets that record, as a ledger started on another machine would.
     open(ledger, "w", encoding="utf-8").write("")
+    os.remove(os.environ["AO_LEDGER_CHECKPOINTS"])
     review_name = os.path.basename(_review_body(cfg)[0])
     A.record_authority(
         cfg["root"], True, [], A.tree_digest(cfg["root"], cfg), "V-matrix",

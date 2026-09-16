@@ -80,9 +80,18 @@ without `previous` fields also fails closed; AO never rewrites historical author
 place. Preserve/archive such a ledger explicitly and obtain fresh verification, review
 and authority in a new ledger rather than silently treating old rows as chained.
 
+Every prefix of a valid chain is itself valid, so the chain alone cannot see a removed
+tail. Each row therefore also carries its `ordinal`, and every append records the
+ledger's committed length and the digest of its last row outside the repository, in
+`~/.ao/ledger-checkpoints.json`. A ledger shorter than that record — newest rows cut, or
+the whole file gone — is a broken commitment, not a shorter chain: reading refuses it,
+nothing is appended onto it, and `ao commit-check` refuses. A fresh machine has no record
+to compare with. Retiring a ledger on purpose means archiving the file and removing its
+entry from that record by hand; sealing old rows instead is #50.
+
 This is tamper-evidence, not authentication. Same-user write access can recompute a suffix,
-append a correctly linked forged row, or replace/truncate a valid tail because AO has no
-external trusted head or signing key. See the exact security boundary in
+append a correctly linked forged row, or cut a valid tail and rewrite the length record to
+match, because AO has no external trusted head or signing key. See the exact security boundary in
 [`safety.md`](safety.md).
 
 ## Slices

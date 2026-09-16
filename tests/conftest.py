@@ -47,6 +47,24 @@ def project(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _ledger_checkpoints(tmp_path_factory):
+    """Ledger lengths are recorded outside the repository; give each test its own record.
+
+    Not through monkeypatch: requesting it here would set it up before
+    _repo_untouched and undo a test's GIT_INDEX_FILE only after that guard runs
+    git in the real repository.
+    """
+    store = tmp_path_factory.mktemp("ledger-checkpoints") / "ledger-checkpoints.json"
+    previous = os.environ.get("AO_LEDGER_CHECKPOINTS")
+    os.environ["AO_LEDGER_CHECKPOINTS"] = str(store)
+    yield
+    if previous is None:
+        os.environ.pop("AO_LEDGER_CHECKPOINTS", None)
+    else:
+        os.environ["AO_LEDGER_CHECKPOINTS"] = previous
+
+
+@pytest.fixture(autouse=True)
 def _repo_untouched(request):
     """No test may change the repository it lives in.
 

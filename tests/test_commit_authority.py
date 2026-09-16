@@ -270,6 +270,7 @@ def test_record_authority_persists_the_complete_grant(project):
     row = json.loads(open(path, encoding="utf-8").read().splitlines()[-1])
     assert row == {
         "previous": None,
+        "ordinal": 1,
         "at": row["at"],
         "granted": True,
         "token": "C-1",

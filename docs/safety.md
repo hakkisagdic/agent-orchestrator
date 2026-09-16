@@ -138,7 +138,9 @@ The chain is tamper-evidence, not writer authentication. It detects an edit, del
 reorder, or append whose successor/predecessor links were not recomputed. It cannot
 cryptographically exclude a process with the same user's write access: that process can
 append with the correct predecessor, recompute a replacement suffix, or truncate a valid
-tail. There is no trusted external head anchor, signing key, or authenticated append
+tail and edit the recorded length to match. The length record outside the repository
+makes a cut tail visible to anything that did not also rewrite that record; it is not a
+trusted anchor. There is no trusted external head anchor, signing key, or authenticated append
 service in AO, so the ledger must not be described as proving who wrote a row or as
 detecting every same-user rewrite.
 

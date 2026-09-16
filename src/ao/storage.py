@@ -131,6 +131,59 @@ def chained_row_digest(record, chain):
     return "sha256:" + digest.hexdigest()
 
 
+def checkpoint_path():
+    """Where chained ledgers record their committed length: outside the repository (#62).
+
+    A hash chain detects a changed or inserted row but not a removed tail, because
+    every prefix of a valid chain is itself valid; deleting the newest grants, or
+    the whole file, left a ledger that passed every check. The recorded length is
+    kept apart from the ledger, so removing rows from the file does not remove the
+    record of how many there were.
+    """
+    return (os.environ.get("AO_LEDGER_CHECKPOINTS")
+            or os.path.join(os.path.expanduser("~"), ".ao", "ledger-checkpoints.json"))
+
+
+def _load_committed_lengths():
+    try:
+        with open(checkpoint_path(), encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _record_committed_length(path, count, digest):
+    store = checkpoint_path()
+    os.makedirs(os.path.dirname(store) or ".", exist_ok=True)
+    with _exclusive_lock(store + ".lock"):
+        data = _load_committed_lengths()
+        data[os.path.realpath(path)] = {"count": count, "digest": digest, "at": int(time.time())}
+        temporary = f"{store}.{os.getpid()}.tmp"
+        with open(temporary, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=1, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, store)
+
+
+def _check_committed_length(path, rows, chain):
+    """Refuse a ledger shorter than its recorded length, or diverging from it (#62)."""
+    mark = _load_committed_lengths().get(os.path.realpath(path))
+    if not isinstance(mark, dict) or not isinstance(mark.get("count"), int) or mark["count"] <= 0:
+        return
+    count = mark["count"]
+    if len(rows) < count:
+        raise LedgerCorruption(
+            f"{path} holds {len(rows)} committed rows but recorded {count}: rows were removed from its end"
+            f" (the count is kept in {checkpoint_path()})"
+        )
+    if chained_row_digest(rows[count - 1], chain) != mark.get("digest"):
+        raise LedgerCorruption(
+            f"{path} row {count} does not match the digest recorded for it in {checkpoint_path()}"
+        )
+
+
 def _validate_chained_rows(path, rows, chain, previous_field):
     expected = None
     for index, row in enumerate(rows, 1):
@@ -148,6 +201,10 @@ def _validate_chained_rows(path, rows, chain, previous_field):
                 f"broken hash chain at record {index} in {path}: "
                 f"expected {expected!r}, got {actual!r}"
             )
+        if "ordinal" in row and row.get("ordinal") != index:
+            raise LedgerCorruption(
+                f"chained JSONL record {index} in {path} carries ordinal {row.get('ordinal')!r}"
+            )
         try:
             expected = chained_row_digest(row, chain)
         except (TypeError, ValueError) as exc:
@@ -159,12 +216,19 @@ def _validate_chained_rows(path, rows, chain, previous_field):
 
 def read_chained_jsonl(path, chain, allow_partial_tail=True, timeout=10.0, *,
                        previous_field=CHAIN_PREVIOUS_FIELD):
-    """Read and validate every committed row in one predecessor hash chain."""
+    """Read and validate every committed row in one predecessor hash chain.
+
+    The chain proves no row was changed or inserted; the recorded length proves
+    none was cut off the end, including all of them (#62).
+    """
     if not os.path.exists(path):
+        _check_committed_length(path, [], chain)
         return []
     with _exclusive_lock(path + ".lock", timeout=timeout):
         rows = _read_jsonl_unlocked(path, allow_partial_tail)
-        return _validate_chained_rows(path, rows, chain, previous_field)
+        _validate_chained_rows(path, rows, chain, previous_field)
+        _check_committed_length(path, rows, chain)
+        return rows
 
 
 def _sync_directory(directory, fsync):
@@ -289,8 +353,8 @@ def append_chained_jsonl(path, record, chain, timeout=10.0, *,
         raise TypeError("a chained ledger row must be a JSON object")
     if not isinstance(previous_field, str) or not previous_field:
         raise ValueError("previous_field must be a non-empty string")
-    if previous_field in record:
-        raise ValueError(f"caller must not set the {previous_field!r} chain field")
+    if previous_field in record or "ordinal" in record:
+        raise ValueError(f"caller must not set the {previous_field!r} or 'ordinal' chain fields")
 
     parent = os.path.dirname(path) or "."
     os.makedirs(parent, exist_ok=True)
@@ -302,11 +366,13 @@ def append_chained_jsonl(path, record, chain, timeout=10.0, *,
         _repair_partial_tail(path, fsync, _checkpoint)
         rows = _read_jsonl_unlocked(path, allow_partial_tail=False)
         _validate_chained_rows(path, rows, chain, previous_field)
+        _check_committed_length(path, rows, chain)
         previous = chained_row_digest(rows[-1], chain) if rows else None
-        chained = {previous_field: previous}
+        chained = {previous_field: previous, "ordinal": len(rows) + 1}
         chained.update(record)
         payload = _encode_jsonl(chained)
         _append_payload_unlocked(
             path, parent, payload, write, fsync, _checkpoint
         )
+        _record_committed_length(path, len(rows) + 1, chained_row_digest(chained, chain))
     return chained
