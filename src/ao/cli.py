@@ -945,6 +945,14 @@ def cmd_commit_ok(cfg, args):
     except Exception as exc:
         drift = []
         reasons.append(f"plan baselines cannot be read: {exc}")
+    # A slice the board declares move-only moves text and changes nothing (#44).
+    move_only = [it["id"] for it in A.board(root)["running"] if "move-only" in (it.get("notes") or {})]
+    if move_only:
+        try:
+            problems = A.split_moves(root)["problems"]
+        except RuntimeError as exc:
+            problems = [f"the candidate cannot be read: {exc}"]
+        reasons.extend(f"{move_only[0]} is move-only: {problem}" for problem in problems)
     if drift:
         reasons.append(f"plan edited after admission: {', '.join(drift)}")
 
@@ -2212,6 +2220,22 @@ def cmd_room(cfg, args):
     if not found:
         print(f"{C['dim']}no stored message mentions that{C['reset']}")
     return 0 if found else 1
+
+
+def cmd_split_check(cfg, args):
+    """Is the staged candidate a pure move? Every moved definition byte for byte, nothing else changed (#44)."""
+    try:
+        result = A.split_moves(cfg["root"])
+    except RuntimeError as exc:
+        print(f"{C['red']}cannot read the candidate{C['reset']}: {exc}")
+        return 2
+    for name, source, target in result["moved"]:
+        print(f"  {C['green']}moved{C['reset']}  {name}  {C['dim']}{source} → {target}{C['reset']}")
+    for problem in result["problems"]:
+        print(f"  {C['red']}·{C['reset']} {problem}")
+    print(f"{C['green']}a pure move{C['reset']}: {len(result['moved'])} definition(s), byte for byte"
+          if not result["problems"] else f"{C['red']}not a pure move{C['reset']}")
+    return 1 if result["problems"] else 0
 
 
 def cmd_ask(cfg, args):
@@ -8527,6 +8551,8 @@ def main():
     ro.add_argument("--hotfix", action="store_true",
                     help="on a product repository: let the architect implement, named as a hotfix")
     ro.set_defaults(fn=cmd_role)
+    spl = sub.add_parser("split-check", help="is the staged candidate a pure move between files?")
+    spl.set_defaults(fn=cmd_split_check)
     ht = sub.add_parser("hunt", help="a bounded read-only bug hunt; leads go to the architect")
     ht.add_argument("action", nargs="?", choices=["run", "discard", "status"], default="run")
     ht.add_argument("fingerprint", nargs="?", help="discard: the lead's id")

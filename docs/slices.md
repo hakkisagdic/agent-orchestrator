@@ -204,3 +204,23 @@ ao slice block "waiting on Authenticode certificate"
 ao slice abandon --why "superseded by the metadata authority slice"
 ao slices --open
 ```
+
+## A split is a pure move, proven mechanically
+
+`lib.py` and `cli.py` hold most of the code, so almost every slice touches one of them and two
+lanes meet in the same file (#44). They are split into **parts** in `src/ao/parts/`: a part is a
+contiguous run of a module's own definitions, moved out byte for byte and loaded where it stood
+by `_part("name", globals())`. It runs in the module's namespace, so every name stays where
+callers, tests and monkeypatches look for it — a split moves text and never behaviour, and the
+suite passes without edits.
+
+A split slice is marked `move-only` on its board line. `ao commit-ok` then refuses the candidate
+unless `ao split-check` finds a pure move:
+
+- every definition that leaves a file arrives in another, byte for byte;
+- no definition is edited in place, lost or added, and no other top-level statement changes;
+- every part the candidate adds is loaded by a `_part` call.
+
+What a reviewer reads of a split is its seams — which names a part uses from the rest of its
+module, and which the rest uses from it — not thousands of moved lines.
+

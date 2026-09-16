@@ -143,7 +143,7 @@ def _number(node):
 def test_no_module_reads_a_threshold_with_a_default_of_its_own():
     numeric = {key.rsplit(".", 1)[-1] for key, spec in S.SETTINGS.items() if spec.kind in (int, float)}
     found = []
-    for path in sorted((ROOT / "src" / "ao").glob("*.py")):
+    for path in sorted((ROOT / "src" / "ao").rglob("*.py")):
         if path.name == "settings.py":
             continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):

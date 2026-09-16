@@ -17,6 +17,24 @@ from . import settings  # noqa: E402  (reads HOME through this module, lazily)
 # Adapters ship with the package, but the documented install is still a git
 # clone plus an alias — both have to resolve. Look beside this module first, then
 # at the repository root, so neither path depends on the other existing.
+# A module split into parts keeps one namespace (#44). A part is a contiguous run of a
+# module's own definitions, moved out byte for byte and run here, in the module's
+# globals: every name stays where callers, tests and monkeypatches look for it, so a
+# split moves text and never behaviour. `ao split-check` proves a move is only that.
+_PARTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "parts")
+
+
+def _part(name, namespace):
+    """Run the part `name` in `namespace` - the globals of the module it was moved out of.
+
+    Compiled through the import system's own loader, so a part's bytecode is cached like
+    any module's and an `ao` hook does not recompile thousands of lines on every run.
+    """
+    from importlib.machinery import SourceFileLoader
+    path = os.path.join(_PARTS_DIR, f"{name}.py")
+    exec(SourceFileLoader(f"ao.parts.{name}", path).get_code(f"ao.parts.{name}"), namespace)
+
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(_HERE))
 
@@ -266,6 +284,102 @@ def load_config(root):
         if found:
             cfg["implementer"] = found
     return cfg
+
+
+# ---- a split moves text, never behaviour (#44) ------------------------------------------
+
+_PART_CALL = re.compile(r"""^(?:\w+\.)?_part\(\s*["']([\w-]+)["']\s*,\s*globals\(\)\s*\)\s*$""")
+
+
+def top_level_statements(source, filename="<source>"):
+    """(definitions, others) of one Python source: {name: [text]} for each top-level def, class
+    and simple assignment, decorators included, and [text] for every other top-level statement
+    except a part being loaded and a leading docstring."""
+    import ast
+    tree = ast.parse(source, filename)
+    lines = source.splitlines(keepends=True)
+    definitions, others = {}, []
+    for index, node in enumerate(tree.body):
+        start = min([node.lineno] + [d.lineno for d in getattr(node, "decorator_list", [])])
+        text = "".join(lines[start - 1:node.end_lineno])
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names = [node.name]
+        elif isinstance(node, ast.Assign) and all(isinstance(t, ast.Name) for t in node.targets):
+            names = [t.id for t in node.targets]
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names = [node.target.id]
+        else:
+            names = []
+        if names:
+            for name in names:
+                definitions.setdefault(name, []).append(text)
+        elif _PART_CALL.match(text.strip()):
+            continue
+        elif index == 0 and isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) \
+                and isinstance(node.value.value, str):
+            continue
+        else:
+            others.append(text)
+    return definitions, others
+
+
+def split_moves(root):
+    """What the staged candidate moves between Python files, and everything that is not a pure move (#44).
+
+    A definition moves when it leaves one file and arrives in another; it must arrive
+    byte for byte. In a candidate that moves, nothing else may change: no definition
+    edited in place, lost or added, no other top-level statement changed, and every
+    part the candidate adds is loaded by a `_part(name, globals())` call. Returns
+    {"moved": [(name, from, to)], "problems": [text]}.
+    """
+    raw = _git_output(root, "diff", "--cached", "--name-only", "--no-renames", "-z").decode(UTF8, "replace").split("\0")
+    paths = sorted({path for path in raw if path.endswith(".py")})
+
+    def read(spec):
+        result = subprocess.run([git_binary(), "show", spec], cwd=root, capture_output=True)
+        return result.stdout.decode(UTF8, "replace") if result.returncode == 0 else None
+
+    old, new = {}, {}
+    old_other, new_other, loaded, parts = [], [], set(), []
+    for path in paths:
+        for side, spec, defs, other in (("old", f"HEAD:{path}", old, old_other), ("new", f":{path}", new, new_other)):
+            text = read(spec)
+            if text is None:
+                continue
+            try:
+                definitions, others = top_level_statements(text, path)
+            except SyntaxError as exc:
+                return {"moved": [], "problems": [f"{path} does not parse on the {side} side: {exc.msg}"]}
+            for name, texts in definitions.items():
+                defs.setdefault(name, []).extend((path, t) for t in texts)
+            other.extend(others)
+            if side == "new":
+                loaded |= {m.group(1) for m in re.finditer(r"""_part\(\s*["']([\w-]+)["']""", text)}
+                if "/parts/" in f"/{path}" and read(f"HEAD:{path}") is None:
+                    parts.append(path)
+    moved, problems = [], []
+    for name in sorted(set(old) | set(new)):
+        before, after = old.get(name, []), new.get(name, [])
+        if not after:
+            problems.append(f"{name} left {', '.join(sorted({p for p, _ in before}))} and arrived nowhere")
+            continue
+        if not before:
+            problems.append(f"{name} is new in {', '.join(sorted({p for p, _ in after}))}")
+            continue
+        was, now = sorted({p for p, _ in before}), sorted({p for p, _ in after})
+        if sorted(t for _, t in before) != sorted(t for _, t in after):
+            problems.append(f"{name} changed" + (f" on its way from {', '.join(was)} to {', '.join(now)}"
+                                                 if was != now else f" in {', '.join(now)}"))
+        elif was != now:
+            moved.append((name, ", ".join(was), ", ".join(now)))
+    if sorted(old_other) != sorted(new_other):
+        problems.append("a top-level statement that is not a definition changed")
+    for path in parts:
+        if os.path.splitext(os.path.basename(path))[0] not in loaded:
+            problems.append(f"{path} is not loaded by any _part call")
+    if not moved and not problems:
+        problems.append("nothing moved")
+    return {"moved": moved, "problems": problems}
 
 
 # ---- the role table is real, and messages are addressed to roles (#79, #31) -------------

@@ -42,7 +42,7 @@ def test_a_review_status_outside_the_enum_is_refused_when_written():
 def test_no_module_spells_a_verdict_or_status_the_enum_does_not_hold():
     lookalike = re.compile(r"^(APPROV|NEEDS[ _-]?CHANGE|UNAVAIL|REJECT|LGTM)", re.I)
     found = []
-    for path in sorted((ROOT / "src" / "ao").glob("*.py")):
+    for path in sorted((ROOT / "src" / "ao").rglob("*.py")):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.isupper() \
                     and lookalike.match(node.value) and node.value not in VERDICTS:

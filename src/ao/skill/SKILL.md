@@ -214,6 +214,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao content add <source>@<commit> --skills a,b` / `verify` | borrow skills pinned and text-only; check they have not drifted |
 | `ao backup --to <dir|ref|remote:name>` / `ao restore <dir>` | the governance off this disk, and back, verified |
 | `ao hunt [run|discard <id>|status]` | a bounded read-only bug hunt; leads to the architect, never a verdict |
+| `ao split-check` | is the staged candidate a pure move? a `move-only` slice cannot land otherwise |
 | `ao adapters [list|validate|conform]` | every adapter and its source; check a candidate before relying on it |
 | `ao role [set|swap]` | the role table; a reassignment takes effect on the next slice |
 | `ao stats [--all] [--since D] [--until D]` | slice outcomes from the ledgers: rounds, first-pass rate, time, size, defects found later |

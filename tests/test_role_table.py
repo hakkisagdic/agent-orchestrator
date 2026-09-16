@@ -75,7 +75,7 @@ def test_messages_and_prompts_address_roles_after_both_actors_are_renamed(projec
 def test_no_actor_name_is_used_as_an_address_outside_the_adapters():
     source = pathlib.Path(A.__file__).parent
     addressing = re.compile(r"-to-(fable|kiro)-|(fable|kiro)-to-")
-    found = [f"{path.name}:{number}" for path in sorted(source.glob("*.py"))
+    found = [f"{path.name}:{number}" for path in sorted(source.rglob("*.py"))
              for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
              if addressing.search(line)]
     assert found == []
