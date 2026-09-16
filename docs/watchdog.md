@@ -63,6 +63,23 @@ Order matters: each guard sees only what the ones above left standing.
 Anomalies (`anomalies()`) are computed before the chain and delivered as facts:
 one file per condition, grouped per kind with a count.
 
+## One agent, more than one queue
+
+An implementer can hold work in two projects: a primary one and a secondary one named in
+the primary's config, `"secondary": [{"root": "…", "name": "ao"}]`. Three rules follow
+from the agent being one agent.
+
+- **Presence is the agent's.** When the implementer's transcript in a secondary project
+  moved within the idle window, it is working, whatever this tree's transcript says: the
+  watchdog does not nudge it back, and `ao status` names the project it is in. On
+  2026-09-07 the primary's watchdog nudged an agent that was working elsewhere.
+- **An empty queue here is not an empty queue.** With nothing READY in the primary and no
+  open work, the nudge names the secondary project's first READY item instead of leaving
+  the agent to wait on blockers that belong to people.
+- **A person's blocker reaches a person.** A blocked item marked `waiting: human` is
+  delivered to the human channel directly on the next cycle and never held for an agent
+  whose reachability was only assumed.
+
 ## Fault catalog
 
 Every fault the watchdog has had, in the order it was found. "Test" names the

@@ -95,7 +95,10 @@ Anything not forbidden there and inside the slice's scope is allowed.
    cannot skip it. **No push.**
 8. `ao_report {kind: "done"}`, board `running → done` with the gates named,
    next item. Blocked by a decision? `ao_ask` with options, board `blocked` with
-   `needs:`, and move to the next READY item — park and continue.
+   `needs:`, and move to the next READY item — park and continue. Say who it
+   waits on with `waiting: human|architect|decision|external`: `waiting: human`
+   reaches a person directly. With nothing READY here, a nudge may name a
+   secondary project's READY item: continue there.
 
 **Working while the architect is away.** The architect is a person's quota and
 attention, and both run out. What you settle alone: which READY item comes

@@ -114,6 +114,12 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0):
         a(f"\n{col}{C['b']}{txt}{C['reset']}  {C['dim']}{impl.get('adapter','?')} · {agestr}{C['reset']}")
         for i, ln in enumerate(textwrap.wrap(desc, w - 6)[:2]):
             a(f"  {C['dim']}↳{C['reset']} {ln}" if i == 0 else f"    {ln}")
+        if state in ("stopped", "idle"):
+            # The agent may be writing in a secondary project; say where (#22).
+            elsewhere = A.working_elsewhere(cfg, S.get(cfg, "watchdog.idle_minutes") * 60)
+            if elsewhere:
+                a(f"  {C['green']}↳ working in {elsewhere['name']}{C['reset']}  {C['dim']}"
+                  f"{elsewhere['root']} · last write {int(elsewhere['age'])}s ago there{C['reset']}")
     else:
         a(f"\n{C['yellow']}No implementer session found for this workspace.{C['reset']}")
         a(f"   {C['dim']}{root}{C['reset']}")

@@ -888,6 +888,12 @@ def parked_note(waits, ready_id):
             f"soruyu yeniden sorma, READY {ready_id} ile devam et.")
 
 
+def secondary_note(found):
+    """What a nudge adds when nothing is READY here and a secondary project has work (#8)."""
+    return (f" Bu projede READY iş yok: ikincil proje {found['name']} ({found['root']}) READY {found['item']}. "
+            "Orada devam et; buradaki engeller insanı ya da mimarı bekliyor, bekleme.")
+
+
 def open_work(cfg, root):
     """Is there something for the implementer to continue? Cheap signals only.
 
@@ -1324,6 +1330,11 @@ def _cycle_impl(args, root):
                f"set by {hs.get('by', '?')}: {hs.get('reason', '')} — ao hold release when done",
                root, key="hold-standing", window=6 * 3600, audience="human", level="red")
 
+    # What the implementer declares needs a person reaches a person, never held for an agent (#92).
+    for item in A.human_waits(root):
+        notify(f"{project}: needs you", f"{item['id']} waits on a person: "
+               f"{item['notes'].get('needs') or item['title']}", root, key=f"waiting-human:{item['id']}",
+               window=6 * 3600, audience="human")
     # An agent that is busy and producing nothing never trips the idle guard, so
     # check it before the guard chain rather than inside it. Notify only; a nudge
     # would add a turn to a loop that is already spending them.
@@ -1457,6 +1468,12 @@ def _cycle_impl(args, root):
             save_state(root, st)
         print(f"working ({int(age)}s since last write)")
         return 0
+    # Presence is the agent's, not this tree's: writing in a secondary project is working (#22).
+    elsewhere = A.working_elsewhere(cfg, args.idle_minutes * 60)
+    if elsewhere:
+        print(f"working in {elsewhere['name']} ({int(elsewhere['age'])}s since its last write there); "
+              "not nudging here")
+        return 0
 
     # 2 — nothing to continue. Before standing down, ask why: an empty board can
     # mean "all done" or "the queue ran dry". Only the second one is actionable,
@@ -1487,6 +1504,12 @@ def _cycle_impl(args, root):
     reasons = open_work(cfg, root)
     if not reasons and passing:
         reasons = [f"READY {passing[1]} while {passing[0]} waits"]
+    # Nothing READY here and a secondary project has work: the nudge names it (#8).
+    elsewhere_ready = None
+    if not reasons and not A.ready(root):
+        elsewhere_ready = A.secondary_ready(cfg)
+        if elsewhere_ready:
+            reasons = [f"READY {elsewhere_ready['item']} in {elsewhere_ready['name']}"]
     if not reasons:
         sc = A.sources(root)
         arch = cfg.get("architect") or {}
@@ -1692,7 +1715,8 @@ def _cycle_impl(args, root):
             print(f"backing off ({st['attempts']} attempts, waiting {int(wait)}s)")
             return 0
 
-    prompt = args.prompt + (parked_note(*passing) if passing else "")
+    prompt = args.prompt + (parked_note(*passing) if passing else "") \
+        + (secondary_note(elsewhere_ready) if elsewhere_ready else "")
     argv = [x.replace("{session}", impl["session"]).replace("{prompt}", prompt)
             for x in (adapter.get("resume", {}).get("argv") or [])]
     if not argv:

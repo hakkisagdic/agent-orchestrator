@@ -4466,6 +4466,64 @@ def prune_worktree(root, fact, apply=False, now=None):
     return steps
 
 
+# ---- the secondary project: the same agent, another queue (#8, #22, #92) ----------------
+
+HUMAN_WAITING = ("human", "insan", "person", "owner")
+
+
+def secondary_projects(cfg):
+    """The projects this one names as secondary (`"secondary": [{"root", "name"}]`), each with its config (#8)."""
+    out = []
+    for entry in (cfg or {}).get("secondary") or []:
+        other_root = entry.get("root") if isinstance(entry, dict) else entry
+        if not isinstance(other_root, str) or not os.path.isdir(os.path.join(other_root, ".ao")):
+            continue
+        try:
+            other = load_config(other_root)
+        except Exception:
+            continue
+        name = (entry.get("name") if isinstance(entry, dict) else None) or project_key(other_root)
+        out.append({"name": name, "root": other_root, "cfg": other})
+    return out
+
+
+def working_elsewhere(cfg, idle_seconds):
+    """The secondary project the implementer is writing in now, if it is (#22).
+
+    2026-09-07: while the implementer worked in an ao worktree, the Voltrai
+    watchdog read the same agent as idle with a slice running and nudged it
+    back. Presence belongs to the agent: a transcript moving in a secondary
+    project is the agent working.
+    """
+    for other in secondary_projects(cfg):
+        try:
+            transcript, _ = session_paths(other["cfg"])
+            age = time.time() - os.path.getmtime(transcript)
+        except (OSError, TypeError, ValueError):
+            continue
+        if age < idle_seconds:
+            return {"name": other["name"], "root": other["root"], "age": age}
+    return None
+
+
+def secondary_ready(cfg):
+    """The first READY item of a secondary project, for an implementer with nothing READY here (#8)."""
+    for other in secondary_projects(cfg):
+        try:
+            items = ready(other["root"])
+        except Exception:
+            continue
+        if items:
+            return {"name": other["name"], "root": other["root"], "item": items[0]["id"]}
+    return None
+
+
+def human_waits(root):
+    """Blocked board items the implementer declared as waiting on a person: `waiting: human` (#92)."""
+    return [item for item in board(root)["blocked"]
+            if (item["notes"].get("waiting") or "").strip().lower() in HUMAN_WAITING]
+
+
 def safe_slug(text, fallback="note", limit=40):
     """A file-name part holding only [A-Za-z0-9._-] (#19).
 
