@@ -96,7 +96,7 @@ ADAPTER_CONTRACT = 1
 ADAPTER_VERIFIED = ("full", "partial", "documented", "untested", "planned")
 ADAPTER_PLACEHOLDERS = ("prompt", "session", "model", "effort", "mode", "cwd", "escaped_cwd", "workspace_hash",
                         "timeout", "tools", "schema", "max_steps", "provider", "name", "n", "tokens", "dir", "path",
-                        "agent", "agent_login", "branch", "issue", "lane", "pr", "url")
+                        "agent", "agent_login", "branch", "issue", "lane", "pr", "url", "diff_file", "output")
 
 
 def adapter_layers(root=None):
@@ -277,7 +277,16 @@ def adapter_binaries(adapter):
 
 
 def absent_adapter_binaries(cfg):
-    """(actor, adapter, binaries) for each configured actor whose adapter's command this machine lacks (#89)."""
+    """(actor, adapter, binaries) for each configured actor whose adapter's command this machine lacks (#89).
+
+    A command an optional extra installed beside the interpreter ao runs on is there too (#86).
+    """
+    import sys
+
+    def present(name):
+        beside = os.path.join(os.path.dirname(sys.executable), name) if sys.executable else ""
+        return bool(binary_candidates(name)) or (os.path.isfile(beside) and os.access(beside, os.X_OK))
+
     actors, _, _ = role_table(cfg)
     out = []
     for actor, block in sorted(actors.items()):
@@ -285,7 +294,7 @@ def absent_adapter_binaries(cfg):
         if not ident:
             continue
         names = adapter_binaries(load_adapter(ident, cfg.get("root")))
-        if names and not any(binary_candidates(name) for name in names):
+        if names and not any(present(name) for name in names):
             out.append((actor, ident, names))
     return out
 
@@ -297,19 +306,29 @@ def reviewer_eligibility(adapter):
 
     A reviewer must not be able to write. An adapter declares `options.trust_none`:
     the flags that leave the harness only reading, or null with `trust_none_why`,
-    which makes it ineligible rather than silently unsafe.
+    which makes it ineligible rather than silently unsafe. An empty list is an answer
+    only from a tool reviewer with a sound review contract (#86): ao runs it over a
+    file it wrote, outside any repository, and there is nothing left to deny.
     """
     options = (adapter or {}).get("options") or {}
     if "trust_none" not in options:
         return False, "it does not declare how to run without tools (options.trust_none)"
+    if options["trust_none"] == [] and (adapter or {}).get("review") is not None:
+        problems = tool_review_problems(adapter)
+        return (False, "its review contract is not sound: " + "; ".join(problems)) if problems else (True, None)
     if not options["trust_none"]:
         return False, str(options.get("trust_none_why") or ((adapter.get("roles") or {}).get("reviewer"))
                           or "it cannot be run without tools")
     return True, None
 
 
-def compose_reviewer(adapter_id, model=None, effort=None, root=None):
-    """A reviewer route from an adapter's send, model, effort and trust_none; never a hand-written argv (#88)."""
+def compose_reviewer(adapter_id, model=None, effort=None, root=None, family=None):
+    """A reviewer route from an adapter's send, model, effort and trust_none; never a hand-written argv (#88).
+
+    A tool reviewer (#86) reaches many models through its own provider. Its route
+    carries the model, which the adapter's review contract pins when ao runs it, and
+    the family only a person can name: ao never infers one from a model name.
+    """
     adapter = load_adapter(adapter_id, root)
     if not adapter:
         raise ValueError(f"no adapter {adapter_id}")
@@ -319,6 +338,19 @@ def compose_reviewer(adapter_id, model=None, effort=None, root=None):
     argv = list((adapter.get("send") or {}).get("argv") or [])
     if not argv:
         raise ValueError(f"{adapter_id} declares no send.argv")
+    declared = str(adapter.get("family") or "").strip()
+    if family and declared and family.strip().lower() != declared.lower():
+        raise ValueError(f"{adapter_id} declares the {declared} family")
+    if tool_review_contract(adapter) is not None:
+        if not model:
+            raise ValueError(f"{adapter_id} reaches many models; name the one it runs with --model")
+        if effort:
+            raise ValueError(f"{adapter_id} takes no effort")
+        route = {"id": f"{adapter_id}-reviewer-{model}", "adapter": adapter_id, "kind": "tool", "argv": argv,
+                 "composed": True, "model": model}
+        if family:
+            route["family"] = family.strip()
+        return route
     options = adapter.get("options") or {}
     if model:
         if not options.get("model"):
@@ -334,7 +366,88 @@ def compose_reviewer(adapter_id, model=None, effort=None, root=None):
              "composed": True}
     if model:
         route["model"] = model
+    if family:
+        route["family"] = family.strip()
     return route
+
+
+# ---- a reviewer can be a tool ao runs over the candidate, on its own provider (#86) -------
+
+TOOL_REVIEW_PLACEHOLDERS = ("prompt", "diff_file", "output", "model", "timeout")
+TOOL_REVIEW_ENV_PLACEHOLDERS = ("model", "timeout")
+
+
+def tool_review_problems(adapter, argv=None):
+    """What a tool reviewer's review contract is missing or gets wrong; empty when there is none (#86).
+
+    The contract says how ao hands the tool the candidate (a diff file ao writes), where
+    the answer comes back, and which of the inherited environment the tool must not read:
+    for a tool configured through its environment, whoever runs `ao review` could otherwise
+    choose the reviewer's model or its instructions. `argv` is the template a configured
+    route runs, `send.argv` when none is given. A model the contract does not pin is one ao
+    could not honestly record, so a contract that never names {model} is refused.
+    """
+    review = (adapter or {}).get("review")
+    if review is None:
+        return []
+    if not isinstance(review, dict):
+        return ["`review` must be an object"]
+    problems = []
+    if review.get("candidate") != "diff-file":
+        problems.append("`review.candidate` must be diff-file: ao hands a tool reviewer the candidate as a file")
+    if "encoding" in review:
+        try:
+            "".encode(review["encoding"])
+        except (LookupError, TypeError):
+            problems.append(f"`review.encoding` is {review['encoding']!r}, which is not an encoding")
+    answer = review.get("answer")
+    if not isinstance(answer, dict) or answer.get("from") != "output":
+        problems.append("`review.answer.from` must be output: the file ao names in {output}")
+    elif "after_prompt" in answer and not (isinstance(answer["after_prompt"], str) and answer["after_prompt"].strip()
+                                           and "\n" not in answer["after_prompt"]):
+        problems.append("`review.answer.after_prompt` must be one line of text")
+    if argv is None:
+        send = adapter.get("send")
+        argv = send.get("argv") if isinstance(send, dict) else None
+    if not isinstance(argv, list) or not argv or not all(isinstance(part, str) for part in argv):
+        return problems + ["a tool reviewer's argv must be a list of strings"]
+    used = [name for part in argv for name in re.findall(r"\{([a-z_]+)\}", part)]
+    unknown = sorted(set(used) - set(TOOL_REVIEW_PLACEHOLDERS))
+    if unknown:
+        problems.append(f"a tool reviewer's argv uses placeholders ao does not fill: {', '.join(unknown)}")
+    for name in ("prompt", "diff_file", "output"):
+        if used.count(name) != 1:
+            problems.append(f"a tool reviewer's argv must carry {{{name}}} exactly once")
+    environment = review.get("environment") or {}
+    if not isinstance(environment, dict):
+        return problems + ["`review.environment` must be an object"]
+    for key in ("remove", "keep"):
+        patterns = environment.get(key) or []
+        if not isinstance(patterns, list) or not all(isinstance(pattern, str) for pattern in patterns):
+            problems.append(f"`review.environment.{key}` must be a list of regular expressions")
+            continue
+        for pattern in patterns:
+            try:
+                re.compile(pattern)
+            except re.error as exc:
+                problems.append(f"`review.environment.{key}` holds {pattern!r}, which does not compile: {exc}")
+    pinned = environment.get("set") or {}
+    if not isinstance(pinned, dict) or not all(isinstance(name, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name)
+                                               and isinstance(value, str) for name, value in pinned.items()):
+        return problems + ["`review.environment.set` must map variable names to strings"]
+    values = [name for value in pinned.values() for name in re.findall(r"\{([a-z_]+)\}", value)]
+    unknown = sorted(set(values) - set(TOOL_REVIEW_ENV_PLACEHOLDERS))
+    if unknown:
+        problems.append(f"`review.environment.set` uses placeholders ao does not fill: {', '.join(unknown)}")
+    if "model" not in used and "model" not in values:
+        problems.append("the review contract never pins {model}, so ao could not record which model answered")
+    return problems
+
+
+def tool_review_contract(adapter):
+    """An adapter's review contract when it is a sound tool reviewer's, else None (#86)."""
+    review = (adapter or {}).get("review")
+    return review if isinstance(review, dict) and not tool_review_problems(adapter) else None
 
 
 def validate_adapter(adapter):
@@ -368,7 +481,7 @@ def validate_adapter(adapter):
         unknown = sorted({p for a in argv for p in re.findall(r"\{([a-z_]+)\}", a)} - set(ADAPTER_PLACEHOLDERS))
         if unknown:
             problems.append(f"`{capability}.argv` uses placeholders ao does not fill: {', '.join(unknown)}")
-    return problems
+    return problems + tool_review_problems(adapter)
 
 
 def conform_adapter(adapter, harness, workdir):

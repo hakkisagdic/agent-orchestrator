@@ -33,8 +33,10 @@ the code:
 - **#71**: the code landed (WINDOWS-FAIL-CLOSED). The Windows lane has not run it; that
   is the owner's call.
 - **#72**: the implementer's own slice in its project.
-- **#86**: pr-agent has to be installed and given a provider account before it can be
-  proven on a local candidate. Both are the owner's.
+- **#86**: the tool-reviewer route landed (REVIEWER-TOOL): `ao review` hands a tool the exact
+  staged candidate and records the adapter, the model and the digest it handed, and the pr-agent
+  adapter declares how pr-agent is run. pr-agent has to be installed and given a provider
+  account before it can be proven on a local candidate. Both are the owner's.
 
 **The 2026-09-08 adversarial audit** ([`docs/audit/2026-09-08-adversarial.md`](audit/2026-09-08-adversarial.md)) ran to completion: 502 agents, three rounds, 155 findings reported, **119 confirmed — 16 BLOCKER, 77 HIGH, 26 MEDIUM**, plus three more BLOCKERs raised by the completeness critic. #53–#64 are the ones that break a stated guarantee outright; #65–#71 carry the remaining 103 findings as seven themes, each named by the guarantee it protects — a slice is done when every finding the audit filed in its area is closed or explicitly declined in the report, so nothing is quietly dropped. The implementer's own attack suite (#7) independently reached five of the same defects — index race, forged review provenance, waiver replay, hook removal, ledger tail truncation — and its red tests in `kiro/authority-attacks` are the acceptance evidence for the slices that fix them.
 

@@ -217,7 +217,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao hunt [run|discard <id>|status]` | a bounded read-only bug hunt; leads to the architect, never a verdict |
 | `ao split-check` | is the staged candidate a pure move? a `move-only` slice cannot land otherwise |
 | `ao adapters [list|validate|conform]` | every adapter and its source; check a candidate before relying on it |
-| `ao role [set|swap]` | the role table; a reassignment takes effect on the next slice |
+| `ao role [set|swap]` | the role table; a reassignment takes effect on the next slice. `set reviewer <adapter> --model M` composes the reviewer from its adapter; a tool reviewer, which ao runs over the staged candidate on its own provider, also needs `--family F` |
 | `ao stats [--all] [--since D] [--until D]` | slice outcomes from the ledgers: rounds, first-pass rate, time, size, defects found later |
 | `ao doctor --consistency [--repair]` | board, ledgers, review artefacts and git checked against each other |
 | `ao prove [--no-review]` | run the guarantees: the hook refuses, the reviewer answers, a throwaway slice lands |

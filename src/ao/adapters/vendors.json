@@ -1,5 +1,5 @@
 {
-  "about": "The canonical vendor list (#89). Every surface that names a harness derives from it: each shipped adapter is named by exactly one vendor, and a vendor with no adapter says why. `traycer` marks the vendors in Traycer's canonical enum (protocol/src/host/agent/shared.ts, read 2026-09-14), the coverage this list is measured against. `surfaces` are the names keyflip's surface list gives a vendor.",
+  "about": "The canonical vendor list (#89). Every surface that names a harness derives from it: each shipped adapter is named by exactly one vendor, and a vendor with no adapter says why. `traycer` marks the vendors in Traycer's canonical enum (protocol/src/host/agent/shared.ts, read 2026-09-14), the coverage this list is measured against. `surfaces` are the names keyflip's surface list gives a vendor. `pr-agent` is not an agent but a reviewer ao runs as a tool (#86).",
   "vendors": [
     { "id": "claude",       "adapter": "claude-code",   "traycer": true },
     { "id": "codex",        "adapter": "codex",         "traycer": true, "surfaces": ["codex cli"] },
@@ -34,6 +34,7 @@
     { "id": "ollama",       "adapter": "ollama" },
     { "id": "qoder",        "adapter": "qoder" },
     { "id": "trae",         "adapter": "trae" },
-    { "id": "cloud",        "adapter": "cloud-generic" }
+    { "id": "cloud",        "adapter": "cloud-generic" },
+    { "id": "pr-agent",     "adapter": "pr-agent" }
   ]
 }

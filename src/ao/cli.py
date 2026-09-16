@@ -146,6 +146,7 @@ def main():
     ro.add_argument("actor", nargs="?", help="set: an actor; swap: the other role")
     ro.add_argument("--model", help="with set reviewer <adapter>: the model the composed reviewer runs")
     ro.add_argument("--effort", help="with set reviewer <adapter>: its effort, where the adapter takes one")
+    ro.add_argument("--family", help="with set reviewer <adapter>: the model's family; a tool reviewer needs one")
     ro.add_argument("--hotfix", action="store_true",
                     help="on a product repository: let the architect implement, named as a hotfix")
     ro.set_defaults(fn=cmd_role)

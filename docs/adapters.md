@@ -36,6 +36,40 @@ writing argv by hand. A hand-written reviewer argv still works and stays the exc
 `ao adapters` shows which adapters may review, and `ao doctor` reports a configured reviewer
 whose adapter cannot deny tools.
 
+## A reviewer can be a tool ao runs
+
+A reviewer that runs the architect's binary on the architect's quota window stops when that window
+closes, and a stand-in session's answer is not evidence ao produced (#86). A **tool reviewer** is a
+program ao runs itself over the staged candidate, on a provider account of its own. Its adapter
+declares `"kind": "tool-reviewer"`, `options.trust_none: []` - nothing is left to deny where ao runs
+it - and a `review` contract, which ao reads from the package's adapters only:
+
+| Field | What it declares |
+|---|---|
+| `review` → `candidate` | `diff-file`: ao writes the exact candidate diff, the bytes `diff_digest` names, into the reviewer's own directory outside any repository and fills `{diff_file}` with its path |
+| `review` → `answer` | `{from: output, after_prompt}`: the answer is read from the file ao names in `{output}`; with `after_prompt`, only what follows the tool's echo of this exact prompt and that marker line |
+| `review` → `environment` | `remove` and `keep`: patterns, matched without regard to case, for inherited variables the tool would read as settings and the ones it keeps; `set`: the variables that pin it, with `{model}` and `{timeout}` |
+| `review` → `encoding` | the encoding the tool reads the diff in; a candidate in another is refused before the tool starts |
+| `review` → `install`, `limits` | what would install it, named when it is absent; what ao cannot know about its answer, written into the evidence |
+
+```bash
+ao role set reviewer pr-agent --model <provider/model> --family <family>
+```
+
+A tool reaches many models and families, so its route names both: the model, which the contract
+pins, and the family, which a person names because ao never infers one from a model name. A tool
+route with no family may not review. The question is ao's own review prompt, candidate included,
+so the verdict rule and the count schema are every other reviewer's. The evidence adds `adapter`
+and `model` to `reviewer`, and a `tool` block with the tool's version, the digest and size of the
+bytes handed and the adapter's limits; a review whose handed bytes are not the candidate diff is
+INVALID. A tool that is not installed makes the review UNAVAILABLE, naming what would install it,
+and `ao doctor` lists it among the optional capabilities. A tool route spends no actor's window:
+ao asks keyflip about no provider for it, and never runs the architect's route.
+
+`pr-agent` is the first, and untested until the owner proves it on a local candidate: plain-diff
+mode (`--diff-file`) reads the candidate with no pull request and no platform token and publishes
+nowhere, and `ask` carries ao's prompt. A capability-matrix project cannot bind a tool reviewer yet.
+
 ## Setting ao up for a harness is declared, not coded
 
 `ao init`, `ao skill` and `ao remove` name no harness (#76). What a harness leaves in a
@@ -179,9 +213,10 @@ the adapter says so in its `disclaimer`. **Reviewer** is whether the adapter can
 | `qoder` | `qoder` | untested | ineligible | Qoder CLI |
 | `trae` | `trae` | untested | ineligible | Trae Agent (ByteDance) |
 | `cloud` | `cloud-generic` | partial | ineligible | Generic cloud agent (pull-request delivered) |
+| `pr-agent` | `pr-agent` | untested | eligible | PR-Agent, a tool reviewer ao runs over the candidate (#86) |
 
 The first twenty-one rows are Traycer's canonical enum, the coverage this list is measured
-against; the rest are harnesses ao shipped before it. Moving a row to `full` is the most valuable
+against; then the harnesses ao shipped before it, and last a tool reviewer. Moving a row to `full` is the most valuable
 contribution this project can take. See [`adapters/README.md`](../src/ao/adapters/README.md).
 
 ## Two observation modes

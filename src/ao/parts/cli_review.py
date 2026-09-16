@@ -267,13 +267,206 @@ def _reviewer_communicate(proc, timeout, label, started, stall=None):
                   f"{_elapsed(time.monotonic() - started)} elapsed, pid {proc.pid}{C['reset']}", flush=True)
 
 
-def _run_reviewer(root, argv, timeout, fallback=False, label=None):
+# ---- a reviewer ao runs as a tool over the candidate, on its own provider (#86) ------------
+
+# The file ao hands a tool reviewer and the one it reads the answer from, both in the
+# reviewer's own directory outside the repository.
+REVIEW_TOOL_CANDIDATE = "candidate.diff"
+REVIEW_TOOL_ANSWER = "answer.md"
+# An answer file can echo the whole prompt, and the candidate with it.
+REVIEW_TOOL_ANSWER_BYTES = 4_000_000
+
+
+def _tool_route(route):
+    """Whether a configured reviewer route is a tool ao runs over the candidate (#86)."""
+    return isinstance(route, dict) and route.get("kind") == "tool"
+
+
+def _tool_invocation(route, prompt, candidate):
+    """(what a tool reviewer is run with, None), or (None, why it cannot run) (#86).
+
+    The review contract is read from the package's adapters only, like everything that
+    decides authority (#76): what the tool is told, what of the environment it may not
+    read and where ao reads its verdict are not for a layer the implementer can write.
+    """
+    ident = str(route.get("adapter") or "")
+    adapter = A.package_adapters().get(ident)
+    contract = A.tool_review_contract(adapter)
+    if contract is None:
+        problems = A.tool_review_problems(adapter) if adapter else []
+        return None, (f"{ident or 'this route'} has no sound review contract among this ao's adapters"
+                      + (f": {'; '.join(problems)}" if problems else ""))
+    problems = A.tool_review_problems(adapter, route.get("argv"))
+    if problems:
+        return None, "; ".join(problems)
+    model = route.get("model")
+    if not isinstance(model, str) or not model.strip() or not model.isprintable() or len(model) > 200:
+        return None, "a tool reviewer records the model it runs, and this route names none (model)"
+    if not isinstance(candidate, (bytes, bytearray)):
+        return None, "a tool reviewer is handed the candidate as a file, and no candidate was given"
+    return {"adapter": ident, "contract": contract, "prompt": prompt, "candidate": bytes(candidate),
+            "model": model.strip(), "install": contract.get("install")}, None
+
+
+def _tool_render(text, values):
+    """Placeholders filled in one pass, so a filled value - a prompt holding `{output}` - is never read again."""
+    return A.re.sub(r"\{([a-z_]+)\}", lambda match: values.get(match.group(1), match.group(0)), text)
+
+
+def _normal_newlines(text):
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _tool_repository_above(directory):
+    """Whether a directory, or one above it, holds a repository (#86).
+
+    A tool that finds its repository from its working directory reads settings and
+    context from the first one there; none of those files is the candidate.
+    """
+    current = os.path.realpath(directory)
+    while True:
+        if os.path.lexists(os.path.join(current, ".git")):
+            return True
+        parent = os.path.dirname(current)
+        if parent == current:
+            return False
+        current = parent
+
+
+def _tool_beside_interpreter(name):
+    """The command an optional extra installed beside the interpreter ao runs on, or None (#86).
+
+    An extra lands in ao's own environment, whose scripts directory need not be on PATH.
+    """
+    name = str(name)
+    here = os.path.dirname(sys.executable or "")
+    if not here or not name or os.path.basename(name) != name:
+        return None
+    for extension in ((".exe", "") if os.name == "nt" else ("",)):
+        candidate = os.path.join(here, name + extension)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def _tool_prepare(fresh, argv, env, timeout, tool):
+    """Hand a tool reviewer the candidate in its own directory (#86).
+
+    Returns {"ok": True, "argv", "env", "handoff"} or a failed attempt. The file holds
+    exactly the bytes the review names, read back and digested before the tool starts.
+    The environment loses what the contract says could configure the tool - its model,
+    its instructions, a settings file - and gains what pins it to this route's model.
+    """
+    def refused(kind, reason):
+        return {"ok": False, "out": "", "reason": reason, "returncode": None, "kind": kind, "retryable": False}
+
+    if _tool_repository_above(fresh):
+        return refused("isolation-error", "the reviewer's directory lies inside a repository, whose files the "
+                                          "tool would read as if they were the candidate")
+    contract = tool["contract"]
+    if contract.get("encoding"):
+        try:
+            tool["candidate"].decode(str(contract["encoding"]))
+        except (LookupError, UnicodeDecodeError):
+            return refused("tool-input", f"the candidate diff is not {contract['encoding']} text, which the tool "
+                                         "cannot read")
+    paths = {"diff_file": os.path.join(fresh, REVIEW_TOOL_CANDIDATE),
+             "output": os.path.join(fresh, REVIEW_TOOL_ANSWER)}
+    try:
+        with open(paths["diff_file"], "xb") as fh:
+            fh.write(tool["candidate"])
+        with open(paths["diff_file"], "rb") as fh:
+            handed = fh.read()
+    except OSError as exc:
+        return refused("handoff-error", f"could not write the candidate for the tool ({type(exc).__name__})")
+    if handed != tool["candidate"]:
+        return refused("handoff-error", "the candidate file does not hold the bytes ao wrote")
+    environment = contract.get("environment") or {}
+    remove = [A.re.compile(pattern, A.re.I) for pattern in environment.get("remove") or []]
+    keep = [A.re.compile(pattern, A.re.I) for pattern in environment.get("keep") or []]
+    env = {name: value for name, value in env.items()
+           if not any(pattern.search(name) for pattern in remove) or any(pattern.search(name) for pattern in keep)}
+    values = {"model": tool["model"], "timeout": str(max(1, int(timeout)))}
+    for name, value in (environment.get("set") or {}).items():
+        env[name] = _tool_render(value, values)
+    values.update(paths, prompt=tool["prompt"])
+    return {"ok": True, "argv": [argv[0]] + [_tool_render(part, values) for part in argv[1:]], "env": env,
+            "handoff": {"handed": "sha256:" + A.hashlib.sha256(handed).hexdigest(), "bytes": len(handed)}}
+
+
+def _tool_answer(fresh, tool, handoff, stdout, stderr):
+    """The answer a tool reviewer wrote where its contract says, as an attempt (#86).
+
+    A tool can exit 0 on a failure it only logged, so a missing or empty answer file
+    is silence, not a verdict. Where the tool echoes the prompt before its answer, the
+    answer is what follows the echo of this exact prompt and the contract's marker line:
+    the prompt carries the candidate, and a candidate can hold text shaped like a marker.
+    """
+    def failed(kind, reason):
+        _reviewer_terminal_output(stdout, stderr)
+        return {"ok": False, "out": "", "reason": reason, "returncode": 0, "kind": kind, "retryable": False}
+
+    path = os.path.join(fresh, REVIEW_TOOL_ANSWER)
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read(REVIEW_TOOL_ANSWER_BYTES + 1)
+    except OSError:
+        return failed("silence", "wrote no answer file (exit 0)")
+    if len(data) > REVIEW_TOOL_ANSWER_BYTES:
+        return failed("unreadable-answer", f"its answer file is over {REVIEW_TOOL_ANSWER_BYTES} bytes")
+    text = _normal_newlines(data.decode(UTF8, "replace"))
+    marker = (tool["contract"].get("answer") or {}).get("after_prompt")
+    if marker:
+        echo = _normal_newlines(tool["prompt"]).strip() + "\n\n" + marker + "\n"
+        at = text.find(echo)
+        if at < 0:
+            return failed("unreadable-answer", "its answer file does not hold an answer after this prompt, where "
+                                               "its adapter says")
+        text = text[at + len(echo):]
+    if not text.strip():
+        return failed("silence", "wrote an empty answer (exit 0)")
+    return {"ok": True, "out": text.strip(), "reason": "", "returncode": 0, "kind": "success", "retryable": False,
+            "tool": dict(handoff)}
+
+
+def _tool_review_evidence(evidence, route, attempt):
+    """Record which tool answered, with which model, over which bytes; why that is no review of them, or None (#86).
+
+    What ao cannot know about the answer - which model a provider really ran - is
+    the adapter's to state, and it is written into the evidence rather than hidden.
+    """
+    if not _tool_route(route):
+        return None
+    handoff = (attempt or {}).get("tool") or {}
+    contract = A.tool_review_contract(A.package_adapters().get(str(route.get("adapter") or ""))) or {}
+    limits = contract.get("limits")
+    evidence["tool"] = {"adapter": route.get("adapter"), "model": route.get("model"),
+                        "version": (attempt or {}).get("version") or None,
+                        "handed": handoff.get("handed"), "bytes": handoff.get("bytes"),
+                        "limits": [str(limit) for limit in limits] if isinstance(limits, list) else []}
+    if not handoff.get("handed") or handoff.get("handed") != evidence.get("diff_digest"):
+        return "the bytes handed to the tool reviewer are not the candidate diff this review names"
+    return None
+
+
+def _tool_review_lines(evidence):
+    tool = evidence.get("tool")
+    if not isinstance(tool, dict):
+        return []
+    return [f"- tool: `{A.review_header_value(tool.get('adapter'))}`  model: "
+            f"`{A.review_header_value(tool.get('model'))}`  handed: `{A.review_header_value(tool.get('handed'))}`"]
+
+
+def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None):
     """Run one reviewer outside the repository and classify invocation status.
 
     It says it is alive (#21). On 2026-09-07 a review printed nothing for four
     minutes, and nobody could tell a reviewer thinking from one that had died:
     every REVIEW_HEARTBEAT_SECONDS a line names the reviewer, the time elapsed and
     the child's pid, and at the end one line gives its exit code and wall time.
+
+    A tool reviewer (#86) is handed the candidate as a file in that directory and
+    answers into another file there; `tool` is what `_tool_invocation` made of its route.
     """
     import tempfile
     label = label or os.path.basename(argv[0])
@@ -287,9 +480,15 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None):
                 "returncode": None, "kind": "isolation-error",
                 "retryable": False,
             }
+        env, handoff = _reviewer_environment(fresh), None
+        if tool is not None:
+            prepared = _tool_prepare(fresh, argv, env, timeout, tool)
+            if not prepared["ok"]:
+                return prepared
+            argv, env, handoff = prepared["argv"], prepared["env"], prepared["handoff"]
         try:
             proc = subprocess.Popen(
-                argv, cwd=fresh, env=_reviewer_environment(fresh),
+                argv, cwd=fresh, env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, encoding=UTF8, errors="replace",
                 **_reviewer_group(),
@@ -357,6 +556,8 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None):
                 "kind": "temporary-exit" if temporary else "nonzero-exit",
                 "retryable": temporary,
             }
+        if tool is not None:
+            return _tool_answer(fresh, tool, handoff, stdout, stderr)
         if not out:
             return {
                 "ok": False, "out": "",
@@ -513,8 +714,12 @@ def _reviewer_resolve_binary(root, name):
     return best
 
 
-def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary):
-    """Resolve and invoke one declared route without a shell."""
+def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, candidate=None):
+    """Resolve and invoke one declared route without a shell.
+
+    A tool route (#86) is handed `candidate`, the exact bytes the review names.
+    """
+    tool = None
     if strict:
         label = "reviewer"
         fallback = False
@@ -548,6 +753,19 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary):
                 "retryable": False,
             }
             return label, None, None, attempt
+    elif _tool_route(cand):
+        raw = cand.get("argv") or []
+        label = cand.get("id") or (str(raw[0]) if raw else "reviewer")
+        fallback = cand is not primary
+        tool, problem = _tool_invocation(cand, prompt, candidate)
+        if problem:
+            return label, None, None, {
+                "ok": False, "out": "", "reason": problem,
+                "returncode": None, "kind": "configuration-error",
+                "retryable": False,
+            }
+        # The prompt and the candidate's paths are filled in the reviewer's own directory.
+        argv = list(raw)
     else:
         raw = cand.get("argv") or []
         label = cand.get("id") or (str(raw[0]) if raw else "reviewer")
@@ -571,6 +789,9 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary):
     declared_binary = str(argv[0])
     try:
         exe, version = _reviewer_resolve_binary(root, argv[0])
+        beside = _tool_beside_interpreter(argv[0]) if not exe and tool is not None else None
+        if beside:
+            exe, version = _reviewer_resolve_binary(root, beside)
     except Exception as exc:
         return label, declared_binary, None, {
             "ok": False, "out": "", "binary": declared_binary,
@@ -579,9 +800,10 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary):
             "retryable": False,
         }
     if not exe:
+        # An optional tool names what would install it (#86).
         return label, declared_binary, version, {
             "ok": False, "out": "", "binary": declared_binary,
-            "reason": "not installed",
+            "reason": "not installed" + (f"; {tool['install']}" if tool is not None and tool.get("install") else ""),
             "returncode": None, "kind": "missing-binary",
             "retryable": False,
         }
@@ -594,7 +816,8 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary):
             "returncode": None, "kind": "configuration-error", "retryable": False,
         }
     try:
-        attempt = _run_reviewer(root, argv, timeout, fallback, label=label)
+        attempt = _run_reviewer(root, argv, timeout, fallback, label=label,
+                                **({"tool": tool} if tool is not None else {}))
     except Exception as exc:
         attempt = {
             "ok": False, "out": "",
@@ -677,13 +900,15 @@ def _section_journal(root, evidence, boundary, sections, chain):
     return os.path.join(root, ".ao", "reviews", "sections", f"{key}.jsonl")
 
 
-def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, strict, primary=None):
+def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, strict, primary=None,
+                              candidate=None):
     """Ask each section as its own call, each answer durable before the next (#26, P1-P4).
 
     A section answered before, for the same candidate, boundary, sections and
     reviewers, is not asked again: a review cut off resumes where it stopped. The
     verdict is computed from the sections' counts; a section with no answer leaves
-    the review with no verdict, which is not a round.
+    the review with no verdict, which is not a round. A tool reviewer's handoff is
+    kept with each answer, and stands for the review when every section agrees (#86).
     """
     from .storage import append_jsonl, read_jsonl
     answered = {row["section"]: row for row in read_jsonl(journal)
@@ -694,7 +919,7 @@ def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, s
         if row is None:
             print(f"{C['dim']}section {index}/{len(sections)} {section['name']}: asking{C['reset']}")
             invocation = _invoke_reviewer_chain(root, chain, f"{prompt}\n\n{REVIEW_SECTION_MARKER}\n{section['question']}",
-                                                timeout, strict, primary=primary)
+                                                timeout, strict, primary=primary, candidate=candidate)
             if invocation["used"] is None:
                 partial = [f.get("partial") for f in invocation["failures"].values() if f.get("kind") == "stalled"]
                 if partial:
@@ -712,6 +937,8 @@ def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, s
                    "route": invocation["labels"].get(invocation["used_position"], "reviewer"),
                    "counts": {key: int(values[0]) for key, values in counts.items()}, "out": A.scan_evidence(out)[0]}
             row["verdict"] = "NEEDS_CHANGES" if row["counts"]["BLOCKER"] or row["counts"]["HIGH"] else "APPROVED"
+            if invocation["attempt"].get("tool"):
+                row["tool"] = invocation["attempt"]["tool"]
             append_jsonl(journal, row)
             last = invocation
             print(f"{C['dim']}section {index}/{len(sections)} {section['name']}: {row['verdict']} "
@@ -729,6 +956,10 @@ def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, s
         body += ["    " + line for line in row["out"].splitlines()]
     position = max(row["position"] for row in rows)
     attempt = dict((last or {}).get("attempt") or {"ok": True, "binary": "section journal"}, out="\n".join(body))
+    handoffs = [row.get("tool") for row in rows]
+    attempt.pop("tool", None)
+    if handoffs and all(handoffs) and all(handoff == handoffs[0] for handoff in handoffs):
+        attempt["tool"] = handoffs[0]
     return {"used": chain[position], "used_position": position, "attempt": attempt, "failures": {},
             "labels": (last or {}).get("labels") or {}, "chain": chain,
             "sections": [_section_summary(row) for row in rows]}
@@ -739,14 +970,15 @@ def _section_summary(row):
 
 
 def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
-                           validate=None):
+                           validate=None, candidate=None):
     """Walk fallbacks now; retry only structurally transient route positions.
 
     The whole walk shares one deadline (#100). A route starts only while the
     deadline leaves room for reviewer discovery and the kill drain, and it gets
     no more time than remains; a route the budget never reached, and a transient
     one it cannot retry, is recorded as such, so an exhausted budget closes as
-    UNAVAILABLE naming the budget rather than running on.
+    UNAVAILABLE naming the budget rather than running on. `candidate` is the diff
+    a tool route is handed (#86); every other route reads it in the prompt.
     """
     failures, transient, labels = {}, [], {}
     budget = _review_chain_budget(timeout)
@@ -781,7 +1013,8 @@ def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
             print(f"{C['dim']}{labels[position]} unavailable: {headroom['text']}{C['reset']}")
             return None
         label, binary, version, attempt = _reviewer_route_invocation(
-            root, cand, prompt, route_timeout, strict, primary
+            root, cand, prompt, route_timeout, strict, primary,
+            **({"candidate": candidate} if not strict and _tool_route(cand) else {})
         )
         labels[position] = label
         if attempt["ok"] and validate is not None:
@@ -868,6 +1101,14 @@ def _reviewer_probe_nonce():
     return "AO-REVIEWER-PROBE-" + secrets.token_hex(16)
 
 
+def _reviewer_probe_diff():
+    """A one-line candidate for the probe, since a tool reviewer is handed a diff beside its prompt (#86)."""
+    body = b"probe\n"
+    blob = A.hashlib.sha1(b"blob %d\0" % len(body) + body).hexdigest().encode("ascii")
+    return (b"diff --git a/ao-probe.txt b/ao-probe.txt\nnew file mode 100644\nindex 0000000.." + blob[:7] + b"\n"
+            b"--- /dev/null\n+++ b/ao-probe.txt\n@@ -0,0 +1 @@\n+probe\n")
+
+
 def _reviewer_probe(cfg, timeout=REVIEW_PROBE_TIMEOUT):
     """Actually invoke the configured chain and require one exact nonce line."""
     root = cfg["root"]
@@ -919,6 +1160,7 @@ def _reviewer_probe(cfg, timeout=REVIEW_PROBE_TIMEOUT):
         validate=lambda attempt: (
             "unexpected probe response" if attempt["out"] != expected else None
         ),
+        candidate=_reviewer_probe_diff(),
     )
     if invocation["used"] is not None:
         position = invocation["used_position"]
@@ -1029,6 +1271,10 @@ def _reviewer_ineligible(cfg, route, sessions=None):
     sessions = _implementer_sessions(cfg) if sessions is None else sessions
     if _reviewer_is_implementer(route, sessions):
         return "it runs as the implementer"
+    if _tool_route(route) and not str(route.get("family") or "").strip():
+        # A tool reaches many families through its provider, and a model name is not a family (#86).
+        return ("it is a tool reviewer that names no model family: ao role set reviewer <adapter> "
+                "--model <model> --family <family>")
     impl = cfg.get("implementer") or {}
     family = str(route.get("family") or "").strip().lower()
     implementer_family = str(impl.get("family") or "").strip().lower()
@@ -1569,11 +1815,12 @@ def cmd_review(cfg, args):
             # A review of eight questions is eight bounded calls, resumable one by one (#26).
             invocation = _invoke_reviewer_sections(
                 root, chain, prompt, sections, _section_journal(root, evidence, boundary, sections, chain),
-                _review_timeout(cfg), strict, primary=rv if not strict else None)
+                _review_timeout(cfg), strict, primary=rv if not strict else None, candidate=diff_bytes)
             evidence["sections"] = invocation.get("sections")
         else:
             invocation = _invoke_reviewer_chain(
-                root, chain, prompt, _review_timeout(cfg), strict, primary=rv if not strict else None
+                root, chain, prompt, _review_timeout(cfg), strict, primary=rv if not strict else None,
+                candidate=diff_bytes,
             )
     used = invocation["used"]
     if strict:
@@ -1669,12 +1916,14 @@ def cmd_review(cfg, args):
     valid_schema = verdict in ("APPROVED", "NEEDS_CHANGES") and all(
         len(values) == 1 for values in severity_values.values()
     )
-    if not valid_schema:
+    # A tool reviewer answers about the bytes ao handed it, and about no others (#86).
+    handoff_problem = None if strict else _tool_review_evidence(evidence, used, invocation["attempt"])
+    if not valid_schema or handoff_problem:
         # No valid verdict/count schema is not NEEDS_CHANGES. It is a reviewer
         # that did not do the job. Persist the measured evidence so a newer
         # matching INVALID candidate cannot expose an older approval; an
         # UNAVAILABLE attempt above remains deliberately unstructured.
-        invalid_reason = "reviewer returned no valid verdict/count schema"
+        invalid_reason = handoff_problem or "reviewer returned no valid verdict/count schema"
         evidence["authorizable"] = False
         evidence["invalid_reasons"] = [invalid_reason]
         if strict:
@@ -1698,6 +1947,7 @@ def cmd_review(cfg, args):
             "",
             A.review_evidence_line(evidence),
             f"- reviewer: `{A.review_header_value(reviewer_label)}`",
+        ] + _tool_review_lines(evidence) + [
             f"- boundary: {A.review_header_value(boundary)}",
         ]
         if context is not None:
@@ -1721,7 +1971,7 @@ def cmd_review(cfg, args):
             fallback=fallback_used,
         )
         print(f"{C['yellow']}{C['b']}INVALID REVIEW{C['reset']}  "
-              "no valid VERDICT/count schema — not a round; re-run")
+              f"{handoff_problem or 'no valid VERDICT/count schema'} — not a round; re-run")
         return 3
     if strict:
         M.set_attempt(strict_attempts, used, "reviewed")
@@ -1804,6 +2054,9 @@ def cmd_review(cfg, args):
             "family": rv.get("family"),
             "fallback": fallback_used,
         }
+        if _tool_route(rv):
+            # A tool reviewer is named by its adapter and the model it ran (#86).
+            evidence["reviewer"].update(adapter=rv.get("adapter"), model=rv.get("model"))
         reviewer_line = (
             f"- reviewer: `{A.review_header_value(rv.get('id') or reviewer_executable)}`  "
             f"family: `{A.review_header_value(rv.get('family', '?'))}`"
@@ -1819,7 +2072,7 @@ def cmd_review(cfg, args):
     evidence["counts"] = dict(sev)
     header = [f"# Review {name}", "",
               A.review_evidence_line(evidence),
-              reviewer_line,
+              reviewer_line] + _tool_review_lines(evidence) + [
               implementer_line,
               f"- tree: `{A.tree_digest(root, cfg)}`",
               f"- boundary: {A.review_header_value(boundary)}"]

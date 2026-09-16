@@ -1,0 +1,53 @@
+{
+  "id": "pr-agent", "name": "PR-Agent", "contract": 1, "kind": "tool-reviewer", "verified": "untested",
+  "disclaimer": "Written from pr-agent's documentation and its source at v0.45.0 and main, read 2026-09-17, and never run here. It is proven on a local candidate before it is adopted, and that run - an install and a provider account - is the owner's (#86).",
+  "notes": "Not a harness ao drives: a reviewer ao runs itself over the staged candidate, on a provider account of its own, so a review spends no actor's window. Plain-diff mode (--diff-file) reads a unified diff with no pull request and no platform token, and publishes nowhere: it prints its result and writes it to --output. The command is ask, with ao's whole review prompt as the question, so the verdict rule and the count schema stay ao's; review answers with neither a verdict nor severities, and publishes nothing when it finds no major issue. The question carries the whole candidate, so the copy of the diff pr-agent trims to its token budget is context rather than the model's only view of the code, and where both fit the diff is paid for twice. The answer file holds the Ask heading, the question as given, a line `### **Answer:**` and then the answer. pr-agent's settings are read from files and then from the environment as <TABLE>__<KEY>, the highest layer. v0.45.0 exits 0 when the command fails, so no answer file is silence; later versions exit 1 under config.propagate_tool_errors.",
+  "sources": ["https://github.com/The-PR-Agent/pr-agent",
+              "https://pypi.org/project/pr-agent/",
+              "https://github.com/The-PR-Agent/pr-agent/blob/main/docs/docs/usage-guide/plain_diff_mode.md",
+              "https://github.com/The-PR-Agent/pr-agent/blob/main/docs/docs/usage-guide/local_git_provider.md",
+              "https://github.com/The-PR-Agent/pr-agent/blob/main/docs/docs/usage-guide/changing_a_model.md",
+              "https://github.com/The-PR-Agent/pr-agent/blob/main/docs/docs/installation/locally.md",
+              "https://github.com/The-PR-Agent/pr-agent/blob/v0.45.0/pr_agent/cli.py",
+              "https://github.com/The-PR-Agent/pr-agent/blob/v0.45.0/pr_agent/git_providers/plain_diff_provider.py",
+              "https://github.com/The-PR-Agent/pr-agent/blob/v0.45.0/pr_agent/tools/pr_questions.py",
+              "https://github.com/The-PR-Agent/pr-agent/blob/main/pr_agent/agent/pr_agent.py",
+              "https://github.com/The-PR-Agent/pr-agent/blob/main/pr_agent/algo/cli_args.py",
+              "https://github.com/The-PR-Agent/pr-agent/blob/main/pr_agent/algo/artifacts.py",
+              "https://github.com/The-PR-Agent/pr-agent/blob/main/pr_agent/config_loader.py",
+              "https://github.com/The-PR-Agent/pr-agent/blob/main/pr_agent/git_providers/utils.py",
+              "https://github.com/The-PR-Agent/pr-agent/blob/main/pr_agent/settings/configuration.toml",
+              "https://github.com/The-PR-Agent/pr-agent/blob/main/pr_agent/settings/.secrets_template.toml"],
+  "roles": { "reviewer": "eligible: one completion over a diff file ao wrote, outside any repository, publishing nowhere",
+             "implementer": "ineligible: it writes no code",
+             "architect": "ineligible: it answers one question and keeps no session" },
+  "send": { "argv": ["pr-agent", "--diff-file", "{diff_file}", "--output", "{output}", "ask", "{prompt}"],
+            "note": "--diff-file and --output come before the command; the question is the one argument after it" },
+  "options": {
+    "trust_none": [],
+    "trust_none_note": "nothing to deny: plain-diff mode has no platform to publish to and no tools, and ao runs it in a directory of its own outside any repository, where the only file it is given is the candidate",
+    "model": null,
+    "model_note": "chosen through the review contract's environment: config.model, model_weak, model_reasoning and fallback_models all name the route's model, so no other model can answer",
+    "effort": null,
+    "effort_note": "config.reasoning_effort exists and is left at pr-agent's default; ao composes no effort for a tool"
+  },
+  "review": {
+    "candidate": "diff-file",
+    "encoding": "utf-8",
+    "answer": { "from": "output", "after_prompt": "### **Answer:**" },
+    "environment": {
+      "remove": ["^[A-Za-z][A-Za-z0-9_]*__[A-Za-z0-9_]", "_FOR_DYNACONF$", "^DYNACONF_", "^PR_AGENT_",
+                 "^ARTIFACT_(PATH|INSTRUCTIONS)$", "^GITHUB_WORKSPACE$"],
+      "keep": ["^(OPENAI|ANTHROPIC|COHERE|REPLICATE|GROQ|SAMBANOVA|XAI|HUGGINGFACE|OLLAMA|VERTEXAI|GOOGLE_AI_STUDIO|DEEPSEEK|ZAI|MOONSHOT|DASHSCOPE|XIAOMI_MIMO|DEEPINFRA|DATABRICKS|AZURE_AD|OPENROUTER|AWS)__"],
+      "set": { "CONFIG__MODEL": "{model}", "CONFIG__MODEL_WEAK": "{model}", "CONFIG__MODEL_REASONING": "{model}",
+               "CONFIG__FALLBACK_MODELS": "{model}", "CONFIG__AI_TIMEOUT": "{timeout}",
+               "CONFIG__MAX_MODEL_TOKENS": "1000000", "CONFIG__PROPAGATE_TOOL_ERRORS": "true",
+               "CONFIG__USE_REPO_SETTINGS_FILE": "false", "CONFIG__USE_GLOBAL_SETTINGS_FILE": "false" },
+      "note": "Whoever runs `ao review` owns its environment, and pr-agent reads every <TABLE>__<KEY> variable as a setting: the model, its fallbacks, extra instructions, artifacts injected into prompts, callbacks that ship prompts elsewhere. Every such variable is removed except the provider sections, which carry credentials and endpoints; so are Dynaconf's own controls (a settings file to load), the PR_AGENT_ variables (an extra config URL, a config branch) and the ARTIFACT_ variables. fallback_models is a plain string on purpose: at v0.45.0 settings merge, so a list given in the environment is appended to the default fallback list, while a string replaces it and pr-agent splits it on commas. max_model_tokens is raised so the budget pr-agent trims its own copy of the diff to is the model's context rather than its default of 32000, which a prompt carrying the candidate and its context can exhaust before any of the diff fits; pr-agent then skips the model call and answers nothing."
+    },
+    "install": "pipx install pr-agent (Python 3.12 or later), or pip install 'ao-orchestrator[pr-agent]'",
+    "limits": ["pr-agent does not report which model answered; ao records the model it pinned in every model setting pr-agent reads",
+               "pr-agent's own settings files on this machine are read below the environment, and ao does not read or check them"]
+  },
+  "detect": { "binaries": ["pr-agent"] }
+}

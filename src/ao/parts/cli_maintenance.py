@@ -591,13 +591,25 @@ def _optional_features(cfg):
     from . import email, telegram
     root = cfg["root"]
     mail = email.config()
-    return [
+    features = [
         ("keyflip", "installed" if shutil.which("keyflip") else "absent",
          "install keyflip for account budgets and quota rotation"),
         ("telegram", "configured" if telegram.config() else "absent", "ao telegram setup"),
         ("email", f"configured ({mail['provider']})" if mail else "absent", "ao email setup"),
         ("ping", "configured" if A.ping_url(root) else "absent", "ao ping set <url>"),
     ]
+    # A tool reviewer is an optional extra with its own provider account (#86).
+    primary = cfg.get("reviewer") or {}
+    routes = [primary] + list(primary.get("fallbacks") or []) if isinstance(primary, dict) else []
+    configured = {route.get("adapter") for route in routes if _tool_route(route)}
+    for ident, adapter in sorted(A.package_adapters().items()):
+        contract = A.tool_review_contract(adapter)
+        if contract is None:
+            continue
+        found = any(shutil.which(binary) or _tool_beside_interpreter(binary) for binary in A.adapter_binaries(adapter))
+        features.append((ident, "absent" if not found else "configured" if ident in configured else "installed",
+                         str(contract.get("install") or f"install {ident}")))
+    return features
 
 
 def _measurement_lines(cfg):

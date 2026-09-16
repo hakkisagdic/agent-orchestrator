@@ -391,8 +391,16 @@ def cmd_role(cfg, args):
     if action == "set" and args.role == "reviewer" and args.actor not in actors \
             and A.load_adapter(args.actor, root):
         # Name an adapter and a model: the reviewer's invocation is composed from it (#88).
+        family = getattr(args, "family", None)
+        if A.tool_review_contract(A.load_adapter(args.actor, root)) is not None and getattr(args, "model", None) \
+                and not family:
+            # A tool reviewer reaches many model families, and a model name is not a family (#86).
+            print(f"{C['red']}refused{C['reset']}: {args.actor} runs whichever model it is given; name that "
+                  "model's family with --family, so independence from the implementer can be checked")
+            return 2
         try:
-            route = A.compose_reviewer(args.actor, getattr(args, "model", None), getattr(args, "effort", None), root)
+            route = A.compose_reviewer(args.actor, getattr(args, "model", None), getattr(args, "effort", None), root,
+                                       family=family)
         except ValueError as exc:
             print(f"{C['red']}refused{C['reset']}: {exc}")
             return 2

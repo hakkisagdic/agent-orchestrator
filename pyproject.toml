@@ -49,3 +49,7 @@ include = ["src/ao", "docs", "README.md", "README.tr.md", "LICENSE", "pyproject.
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+# A reviewer ao runs as a tool over the staged candidate, on its own provider (#86). Tier two:
+# absent, the reviewer reports itself unavailable and names this extra. pr-agent needs Python
+# 3.12, above ao's floor, so on an older interpreter the extra installs nothing rather than fail.
+pr-agent = ["pr-agent>=0.45.0; python_version >= '3.12'"]
