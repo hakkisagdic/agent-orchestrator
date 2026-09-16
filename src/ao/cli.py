@@ -1156,6 +1156,29 @@ def _commit_hook_probe_response(root):
     return 1
 
 
+def cmd_commit(cfg, args):
+    """Commit the staged candidate in the one form a tool grant can safely allow (#58).
+
+    A grant of `git commit:*` is a grant of `git commit --no-verify`, the flag that
+    skips the only commit-time enforcement. This takes a message and nothing else,
+    runs the same authority check the pre-commit hook runs before Git is asked to
+    commit - so a deleted or redirected hook does not skip it - drops inherited
+    configuration that could redirect the hooks, and lets them run as usual.
+    """
+    import subprocess
+    message, file = getattr(args, "message", None), getattr(args, "file", None)
+    if bool(message) == bool(file):
+        print("ao commit takes exactly one of -m MESSAGE or -F FILE")
+        return 2
+    code = cmd_commit_check(cfg, args)
+    if code:
+        return code
+    env = {name: value for name, value in os.environ.items()
+           if not name.startswith(("GIT_CONFIG", "GIT_DIR", "GIT_WORK_TREE"))}
+    source = ["-m", message] if message else ["-F", file]
+    return subprocess.run(["git", "commit", *source], cwd=cfg["root"], env=env).returncode
+
+
 def cmd_commit_check(cfg, args):
     """Revalidate the latest persisted grant against Git's exact active index."""
     root = cfg["root"]
@@ -3025,10 +3048,10 @@ dilimin kapsamında olan bir şey serbesttir.
 
 ## Serbest — sormadan yap
 
-- **`git commit`** — istediğin kadar. Yeşil gate + bağımsız review beklemek iyi
-  pratiktir, ama commit atmak için izin gerekmez.
+- **Commit** — `ao commit-ok` yetkiyi verdikten sonra `ao commit -m "…"` ile. Doğrudan
+  `git commit` değil: o `--no-verify` taşıyabilir, `ao commit` ise önce yetkiyi denetler.
 - Kod, test, fixture, doküman yazmak ve değiştirmek
-- Gate koşturmak (`ao lock -- <komut>`, `ao verify`)
+- Gate koşturmak (`ao verify`)
 - `.ao/board.md` durumunu güncellemek; `agent-mail/`'e mesaj bırakmak
 
 ## Yasak — asla yapma
@@ -3174,9 +3197,18 @@ PROFILES = {
     "claude-claude": {"implementer": "claude-code"},
 }
 
-ARCHITECT_TOOLS = ("Read,Grep,Glob,Bash(ao:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),"
-                   "Bash(git show:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(grep:*),"
-                   "Bash(find:*),Bash(ps:*),Bash(lsof:*),Bash(rm agent-mail/*)")
+# The architect's grant names each ao command it runs (#58): `ao:*` would admit
+# `ao push allow` and `ao waive`, which are a person's, and `find` runs anything
+# through -exec.
+ARCHITECT_TOOLS = ("Read,Grep,Glob,"
+                   "Bash(ao status:*),Bash(ao board:*),Bash(ao mail:*),Bash(ao decide:*),Bash(ao note:*),"
+                   "Bash(ao answer:*),Bash(ao review:*),Bash(ao catchup:*),Bash(ao doctor),"
+                   "Bash(ao doctor --check),Bash(ao digest:*),Bash(ao notices:*),Bash(ao alarms),"
+                   "Bash(ao alarms list:*),Bash(ao cost:*),Bash(ao credits:*),Bash(ao tail:*),"
+                   "Bash(ao watchdog status:*),Bash(ao watchdog explain:*),Bash(ao watchdog trace:*),"
+                   "Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(ls:*),"
+                   "Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(grep:*),Bash(ps:*),Bash(lsof:*),"
+                   "Bash(rm agent-mail/*)")
 
 
 def _profile_config(root, args, base):
@@ -4028,6 +4060,30 @@ def cmd_skill(cfg, args):
     return 0
 
 
+def _actor_grant_problems(cfg):
+    """Doctor findings for each configured actor whose tool grant admits a bypass (#58)."""
+    from . import allowlist as AL
+    grants = []
+    impl = cfg.get("implementer") or {}
+    if impl.get("adapter"):
+        adapter = A.load_adapter(impl["adapter"])
+        grants.append(("implementer", impl["adapter"],
+                       (adapter.get("resume") or {}).get("argv") or [], adapter.get("options") or {}))
+    for role in ("architect", "reviewer"):
+        actor = cfg.get(role) or {}
+        if actor.get("argv"):
+            grants.append((role, actor.get("id") or actor.get("name") or role, actor["argv"], {}))
+    for fallback in (cfg.get("reviewer") or {}).get("fallbacks") or []:
+        if fallback.get("argv"):
+            grants.append(("reviewer fallback", fallback.get("id") or "fallback", fallback["argv"], {}))
+    out = []
+    for role, name, argv, options in grants:
+        text = AL.describe(role, name, AL.problems(argv, options))
+        if text:
+            out.append((f"actor-grant:{role.replace(' ', '-')}", text))
+    return out
+
+
 def doctor_problems(cfg):
     """What `ao doctor --check` acts on: conditions a person must fix, as (key, text)."""
     from .watchdog import wake_error, STATE_DIR
@@ -4162,6 +4218,7 @@ def doctor_problems(cfg):
             else:
                 repair = "ensure the hook can resolve this AO executable, then ao hooks status"
             out.append(("commit-hook", "; ".join(reasons) + f" — {repair}"))
+    out.extend(_actor_grant_problems(cfg))
     return out
 
 
@@ -6267,6 +6324,11 @@ def main():
     cr.add_argument("--local", action="store_true", help="also show this machine's share")
     cr.add_argument("--reset-day", type=int, help="fallback: override the renewal day")
     cr.set_defaults(fn=cmd_credits)
+    cm = sub.add_parser("commit", help="commit the staged candidate after ao commit-ok; never skips hooks")
+    source = cm.add_mutually_exclusive_group(required=True)
+    source.add_argument("-m", "--message")
+    source.add_argument("-F", "--file")
+    cm.set_defaults(fn=cmd_commit)
     ck = sub.add_parser("commit-ok", help="grant authority for the exact staged index candidate")
     ck.add_argument("--verify", action="store_true", help="run the quick gates first when the verification is stale")
     ck.add_argument("-p", "--profile", help="gate profile for --verify (default quick)")

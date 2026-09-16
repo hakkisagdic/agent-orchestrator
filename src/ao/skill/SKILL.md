@@ -79,8 +79,9 @@ Anything not forbidden there and inside the slice's scope is allowed.
    `ao hooks` resolves Git's effective path, never
    overwrites foreign/protected content, and requires explicit
    `--allow-shared-hooks` for the whole mutation set when any eligible target is
-   shared, external, or selected by global/system config. Then one local commit.
-   **No push.**
+   shared, external, or selected by global/system config. Then one local commit
+   with `ao commit -m "…"`, which runs the same authority check as the hook and
+   cannot skip it. **No push.**
 8. `ao_report {kind: "done"}`, board `running → done` with the gates named,
    next item. Blocked by a decision? `ao_ask` with options, board `blocked` with
    `needs:`, and move to the next READY item — park and continue.

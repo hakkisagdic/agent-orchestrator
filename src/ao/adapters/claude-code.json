@@ -19,7 +19,7 @@
       "-p",
       "{prompt}",
       "--allowedTools",
-      "Read,Grep,Glob,Write,Edit,Bash(ao:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(python3:*),Bash(pytest:*),Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
+      "Read,Grep,Glob,Write,Edit,Bash(ao status:*),Bash(ao board:*),Bash(ao verify:*),Bash(ao review:*),Bash(ao commit-ok:*),Bash(ao commit -m:*),Bash(ao commit -F:*),Bash(ao mail:*),Bash(ao ask:*),Bash(ao tail:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(ls:*),Bash(cat:*),Bash(grep:*)"
     ],
     "continue_last": [
       "claude",
@@ -45,7 +45,7 @@
     "trust_all": [
       "--dangerously-skip-permissions"
     ],
-    "implementer_tools": "Read,Grep,Glob,Write,Edit,Bash(ao:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(git commit:*),Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(python3:*),Bash(pytest:*),Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(find:*)"
+    "implementer_tools": "Read,Grep,Glob,Write,Edit,Bash(ao status:*),Bash(ao board:*),Bash(ao verify:*),Bash(ao review:*),Bash(ao commit-ok:*),Bash(ao commit -m:*),Bash(ao commit -F:*),Bash(ao mail:*),Bash(ao ask:*),Bash(ao tail:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(ls:*),Bash(cat:*),Bash(grep:*)"
   },
   "transcript": {
     "kind": "jsonl",

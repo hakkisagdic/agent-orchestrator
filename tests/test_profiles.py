@@ -19,7 +19,8 @@ def test_profile_writes_role_blocks_and_keeps_existing(project):
     cfg = json.load(open(os.path.join(root, ".ao", "config.json"), encoding="utf-8"))
     assert cfg["implementer"]["adapter"] == "claude-code" and cfg["implementer"]["model"] == "claude-sonnet-5"
     assert "--model" in cfg["reviewer"]["argv"] and "claude-opus-5" in cfg["reviewer"]["argv"]
-    assert cfg["architect"]["session"] == "auto" and "Bash(ao:*)" in cfg["architect"]["argv"][-1]
+    grant = cfg["architect"]["argv"][-1]
+    assert cfg["architect"]["session"] == "auto" and "Bash(ao status:*)" in grant and "Bash(ao:*)" not in grant
     # second run: nothing overwritten
     cfg["implementer"]["model"] = "custom"
     json.dump(cfg, open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8"))
