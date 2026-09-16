@@ -4245,8 +4245,8 @@ def cmd_decide(cfg, args):
         print(f"{C['yellow']}another architect turn holds the lock{C['reset']} ({holder.get('who')}, pid {holder.get('pid')}, "
               f"since {time.strftime('%H:%M', time.localtime(holder.get('at', 0)))}) — two judges at once contradict each other; "
               f"recording anyway, check `ao decide --list`")
-    rec = {"id": f"AD-{int(time.time())}", "at": int(time.time()), "decision": args.decision,
-           "why": args.why, "scope": args.scope, "answers": args.answers, "by": "architect"}
+    rec = A.scan_record({"id": f"AD-{int(time.time())}", "at": int(time.time()), "decision": args.decision,
+                         "why": args.why, "scope": args.scope, "answers": args.answers, "by": "architect"})
     # Chained, so a row added by hand cannot pass for a re-specification (#65).
     from .storage import append_chained_jsonl
     append_chained_jsonl(A.decisions_path(root), rec, A.DECISION_CHAIN, legacy_prefix=True)

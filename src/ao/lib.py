@@ -2313,7 +2313,7 @@ def write_review_artefact(root, reviews_dir, name, text, *, evidence, verdict,
     from .storage import replace_file_durably
     directory = os.path.join(root, reviews_dir)
     os.makedirs(directory, exist_ok=True)
-    data = text.encode(UTF8)
+    data = scan_evidence(text)[0].encode(UTF8)          # scanned before it is recorded or written (#48)
     record_review(root, name, data, evidence, verdict, reviewer=reviewer, fallback=fallback)
     replace_file_durably(os.path.join(directory, name), data)
 
@@ -2561,7 +2561,7 @@ def record_verification(root, record):
     """Durably append one chained verification before reporting its result."""
     from .storage import append_chained_jsonl
     path = os.path.join(root, ".ao", "ledger", "verifications.jsonl")
-    return append_chained_jsonl(path, record, VERIFICATION_CHAIN, legacy_prefix=True)
+    return append_chained_jsonl(path, scan_record(record), VERIFICATION_CHAIN, legacy_prefix=True)
 
 
 def _granted_trees(root):
@@ -3451,9 +3451,9 @@ def ask(root, question, options, context=None, slice_id=None):
     did = f"D-{int(time.time())}"
     opts = [{"key": chr(ord('a') + i), "label": o} for i, o in enumerate(options[:8])]
     opts.append({"key": "x", "label": "Başka (serbest metin)", "free_text": True})
-    rec = {"asked_at": int(time.time()), "question": question, "context": context,
-           "slice": slice_id, "options": opts, "state": "open",
-           "answer": None, "answered_at": None, "answered_by": None}
+    rec = scan_record({"asked_at": int(time.time()), "question": question, "context": context,
+                       "slice": slice_id, "options": opts, "state": "open",
+                       "answer": None, "answered_at": None, "answered_by": None})
     json.dump(rec, open(os.path.join(d, did + ".json"), "w", encoding=UTF8),
               ensure_ascii=False, indent=2)
     rec["id"] = did
@@ -3473,6 +3473,7 @@ def answer(root, did, key_or_text, by="human"):
     rec["state"] = "answered"
     rec["answered_at"] = int(time.time())
     rec["answered_by"] = by
+    rec = scan_record(rec)
     json.dump(rec, open(p, "w", encoding=UTF8), ensure_ascii=False, indent=2)
     rec["id"] = did
     return rec
@@ -4355,6 +4356,45 @@ SECRET_PATTERNS = (
 )
 
 
+# What ao writes into a repository is scanned for credentials first (#48). Named rules,
+# so a redaction says what it removed; hex digests (commit ids, sha256 values) match
+# none of them, which is why the generic long-token rule `redact` uses is not here.
+EVIDENCE_RULES = (
+    ("private-key", r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"),
+    ("anthropic-key", r"sk-ant-[A-Za-z0-9_-]{16,}"),
+    ("openai-key", r"sk-(?:proj-)?[A-Za-z0-9_-]{20,}"),
+    ("github-token", r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})"),
+    ("slack-token", r"xox[abprs]-[A-Za-z0-9-]{10,}"),
+    ("aws-access-key", r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
+    ("jwt", r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),
+    ("bearer-token", r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{16,}"),
+    ("assigned-secret", r"(?i)\b(?:api[_-]?key|secret|password|passwd|access[_-]?token)\b[\"']?\s*[:=]\s*[\"']?"
+                        r"[A-Za-z0-9+/_.=-]{12,}"),
+)
+
+
+def scan_evidence(text):
+    """(text with every credential-shaped string replaced by `[redacted:<rule>]`, the rules that hit)."""
+    out = str(text if text is not None else "")
+    hits = []
+    for rule, pattern in EVIDENCE_RULES:
+        out, count = re.subn(pattern, f"[redacted:{rule}]", out)
+        if count:
+            hits.append(rule)
+    return out, hits
+
+
+def scan_record(value):
+    """A JSON-shaped value with every string in it scanned (#48)."""
+    if isinstance(value, str):
+        return scan_evidence(value)[0]
+    if isinstance(value, dict):
+        return {key: scan_record(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [scan_record(item) for item in value]
+    return value
+
+
 def redact(text):
     """Text from an agent's own output with anything token-shaped masked (#69).
 
@@ -4406,6 +4446,8 @@ def write_mail(root, cfg, name, body, meta=None):
     meta.setdefault("at", time.strftime("%Y-%m-%dT%H:%M:%S%z"))
     order = ["ao", "id", "kind", "from", "to", "slice", "at"]
     keys = [k for k in order if k in meta] + [k for k in meta if k not in order]
+    meta = scan_record(meta)
+    body = scan_evidence(body)[0]                     # scanned before it is written (#48)
     head = "---\n" + "".join(f"{k}: {meta[k]}\n" for k in keys if meta[k] not in (None, "")) + "---\n"
     with open(os.path.join(box, name), "w", encoding=UTF8) as fh:
         fh.write(head + body.lstrip("\n"))

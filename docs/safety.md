@@ -216,6 +216,33 @@ report. Adapters record *where* credentials live, never their values. If a trans
 contains one, that is the vendor's bug and the orchestrator does not propagate it — the
 dashboard renders opaque handles and commitments only.
 
+### 7b. What ao writes is scanned before it is written
+
+On 2026-09-08 a boundary asked for a reviewer's raw output to be kept as evidence, and the
+decision had to reverse it: review artefacts are committed, and a model's stdout can carry a
+credential. The class is covered now (#48). Review artefacts, mail, decision records (`ao ask`,
+an answer, `ao decide`) and verification records pass `lib.scan_evidence` before a byte is
+written, and a hit becomes `[redacted:<rule>]`, naming what was removed. A review artefact's
+recorded digest is of the scanned bytes.
+
+| rule | matches |
+|---|---|
+| `private-key` | a PEM private key block |
+| `anthropic-key` | `sk-ant-` and 16 or more key characters |
+| `openai-key` | `sk-` or `sk-proj-` and 20 or more |
+| `github-token` | GitHub's personal, OAuth, user, server and refresh token prefixes with 20 or more characters, and fine-grained personal tokens |
+| `slack-token` | Slack's app, bot, user, refresh and session tokens |
+| `aws-access-key` | `AKIA` or `ASIA` and 16 upper-case letters or digits |
+| `jwt` | three dot-separated base64url parts starting `eyJ` |
+| `bearer-token` | `Bearer` and a 16-character or longer token |
+| `assigned-secret` | `api_key`, `secret`, `password`, `passwd` or `access_token` assigned a 12-character or longer value |
+
+False positives, and why the rules are shaped as they are: a commit id or a `sha256:` digest is
+hexadecimal and matches no rule - the generic long-token rule the watchdog's log masking uses
+would erase every digest commit authority reads, so it is not one of these. A word like
+`password` in prose is untouched unless a long value is assigned to it. A test fixture that must
+hold a token-shaped string builds it at run time.
+
 ## 8. Blast radius of the machine itself
 
 Parallel lanes are cheap to start and expensive to run. Five simultaneous test suites will
