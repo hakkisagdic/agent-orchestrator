@@ -14,6 +14,28 @@ Nothing here is authorised until it is queued on a project board.
 | 72 | **The architect actor is named for its role, not for a model** | mail, steering and the watchdog's own wake prompt address the architect by a model's name because `mail_names()` falls back to a hardcoded default when `architect.name` is unset — which it is. Renaming is safe today: both `to_architect()` and `urgent_messages()` already accept the role-shaped form | The implementer performs the rename as its own recorded slice, **after AO25a lands and before it starts the next one**: set `architect.name` to the role name in `.ao/config.json`, rename the steering file that carries the old name, update the references inside it and in `board.md`/`backlog.md`, and confirm with `ao mail send` that delivery still resolves; the code-level fix stays #31, and the wake prompt's literal glob is corrected there |
 | 86 | **The reviewer is a tool ao invokes, not a session that shares the architect's quota** | two failures that look different are the same one. `shared-pool`: the reviewer and the architect run the same binary on one quota window, so when the architect's week ends the reviewer ends with it — which is exactly what happened between 2026-09-10 and 09-14, with every wake failing on `hit your weekly limit` and fourteen of them piling into `deferred.jsonl`. And provenance: a stand-in session produced a clean APPROVED for AO53 that ao **cannot legitimately record**, because `commit-ok` accepts an artefact ao produced or a human waiver, and nothing else. The second is not a gap in the stand-in idea — it is the correct refusal. What is missing is a reviewer ao can *invoke* that does not spend the architect's window | A reviewer adapter that ao runs itself, over a **local staged candidate** rather than a hosted pull request, with its provider chosen independently of the architect's — so the evidence is ao-generated (provenance intact) and the quota is someone else's (`shared-pool` gone). [pr-agent](https://github.com/The-PR-Agent/pr-agent) (MIT, pip, reaches OpenAI, Anthropic, Gemini, DeepSeek, Mistral and anything behind LiteLLM) is the first candidate and belongs in tier two: an optional extra that reports itself unavailable when absent. It must be proven on a local diff before it is adopted — its documented entry point is a PR URL, and a reviewer that needs a PR is no use to a staged candidate. Acceptance: `ao review` runs it against the exact staged candidate, the artefact carries the adapter and the resolved model, the architect's window is untouched, and a test proves the candidate digest in the evidence matches what was staged |
 
+**What the open rows wait on (2026-09-16).** Between 2026-09-15 and 09-16 the architect
+implemented the rest of the queue under the owner's decision to defer reviews while the
+implementer is out of credits. Every slice closed in that window carries a deferred-review
+waiver, and `ao catchup` reconciles them when the implementer returns, with a reviewer of a
+different model family from the architect. Each row still open needs a step taken outside
+the code:
+
+- **#9**: the toast channel landed (WINDOWS-TOAST), and `procs.cwd` answering None on
+  Windows is handled by every caller on the record (#71). What remains is the Windows lane
+  run and `ao hold` proven there, which spend the owner's hosted-CI minutes.
+- **#12**: a release is published: the tag, PyPI and Homebrew are the owner's to push.
+- **#15**: the work happens in the owner's ECC fork, and the owner reviews before any
+  upstream PR.
+- **#52**: installing the filter changes the implementer's own environment in both
+  projects, and it is measured for a week either side. It waits for the implementer's
+  return.
+- **#71**: the code landed (WINDOWS-FAIL-CLOSED). The Windows lane has not run it; that
+  is the owner's call.
+- **#72**: the implementer's own slice in its project.
+- **#86**: pr-agent has to be installed and given a provider account before it can be
+  proven on a local candidate. Both are the owner's.
+
 **The 2026-09-08 adversarial audit** ([`docs/audit/2026-09-08-adversarial.md`](audit/2026-09-08-adversarial.md)) ran to completion: 502 agents, three rounds, 155 findings reported, **119 confirmed — 16 BLOCKER, 77 HIGH, 26 MEDIUM**, plus three more BLOCKERs raised by the completeness critic. #53–#64 are the ones that break a stated guarantee outright; #65–#71 carry the remaining 103 findings as seven themes, each named by the guarantee it protects — a slice is done when every finding the audit filed in its area is closed or explicitly declined in the report, so nothing is quietly dropped. The implementer's own attack suite (#7) independently reached five of the same defects — index race, forged review provenance, waiver replay, hook removal, ledger tail truncation — and its red tests in `kiro/authority-attacks` are the acceptance evidence for the slices that fix them.
 
 **Queue order is not row order.** Rows are numbered as they were written; what runs next is
