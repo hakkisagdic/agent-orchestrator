@@ -843,7 +843,7 @@ def escalate(root, cfg, adapter, age, args, st):
                 # shape of the first architect wake — over a minute, no output —
                 # and very likely of the fifteen agent processes this project
                 # found accumulated in one repository.
-                proc = subprocess.Popen(argv, cwd=root, env=dict(os.environ, PATH=search),
+                proc = subprocess.Popen(argv, cwd=root, env=dict(os.environ, PATH=search, AO_ROLE="architect"),
                                         stdin=subprocess.DEVNULL,
                                         stdout=log, stderr=subprocess.STDOUT,
                                         start_new_session=True)
@@ -1549,7 +1549,7 @@ def _cycle_impl(args, root):
             with open(log_path, "a", encoding=UTF8) as log:
                 log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} refill {resolved} {ver} ===\n")
                 log.flush()
-                proc = subprocess.Popen(argv, cwd=root, env=dict(os.environ, PATH=search),
+                proc = subprocess.Popen(argv, cwd=root, env=dict(os.environ, PATH=search, AO_ROLE="architect"),
                                         stdin=subprocess.DEVNULL,   # see escalate()
                                         stdout=log, stderr=subprocess.STDOUT,
                                         start_new_session=True)
@@ -1716,7 +1716,7 @@ def _cycle_impl(args, root):
     key = A.project_key(root)
     log_path = os.path.join(STATE_DIR, f"nudge-{key}.log")
     os.makedirs(STATE_DIR, exist_ok=True)
-    env = dict(os.environ, PATH=search)
+    env = dict(os.environ, PATH=search, AO_ROLE="implementer")
     if added:
         # Recorded with its reason whenever it changes, never appended silently (#69).
         try:

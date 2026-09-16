@@ -223,6 +223,8 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0):
     mail = A.mailbox(root, cfg["mailbox"])
     a(f"\n   {C['b']}Mailbox:{C['reset']} " +
       (", ".join(mail) if mail else f"{C['dim']}empty{C['reset']}"))
+    for line in _mailbox_banner(cfg):
+        a(f"   {line}")
 
     # Board — one line, because a parked item is invisible by construction: work
     # moved on past it, so no other signal in this panel looks wrong.
@@ -266,6 +268,25 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0):
         if msg_lines:
             msg_lines.append(f"   {C['dim']}… older messages hidden (window too short){C['reset']}")
     return "\n".join(fixed + msg_lines)
+
+
+def _mailbox_banner(cfg):
+    """Lines naming the marked messages for the role running this command, and how many others wait (#29).
+
+    A person, or a caller with no AO_ROLE, sees what is marked for either role.
+    """
+    root = cfg["root"]
+    try:
+        urgent = A.urgent_messages(root, cfg, A.invoking_role())
+        waiting = len(A.mailbox(root, cfg.get("mailbox", "agent-mail")))
+    except OSError:
+        return []
+    lines = [f"{C['red']}{C['b']}URGENT{C['reset']} for the {m['to']}: {C['b']}{m['title']}{C['reset']}  "
+             f"{C['dim']}{m['id']}{C['reset']}" for m in urgent]
+    others = waiting - len(urgent)
+    if others > 0:
+        lines.append(f"{C['dim']}{others} other message(s) waiting in {cfg.get('mailbox', 'agent-mail')}/{C['reset']}")
+    return lines
 
 
 def cmd_status(cfg, args):
@@ -361,6 +382,8 @@ def cmd_fleet(cfg, args):
 
 
 def cmd_tail(cfg, args):
+    for line in _mailbox_banner(cfg):
+        print(line)
     msgs_path, _ = A.session_paths(cfg)
     if not msgs_path:
         print("No implementer session found.", file=sys.stderr)
@@ -374,6 +397,9 @@ def cmd_tail(cfg, args):
 def cmd_mail(cfg, args):
     root = cfg["root"]
     d = os.path.join(root, cfg["mailbox"])
+    if args.action in ("list", "read"):
+        for line in _mailbox_banner(cfg):
+            print(line)
     if args.action == "list":
         for f in A.mailbox(root, cfg["mailbox"]):
             print(f)
@@ -4091,6 +4117,8 @@ def cmd_board(cfg, args):
     it, so nothing else in the panel looks wrong.
     """
     root = cfg["root"]
+    for line in _mailbox_banner(cfg):
+        print(line)
     b = A.board(root)
     path = os.path.join(root, ".ao", "board.md")
     if not os.path.exists(path):

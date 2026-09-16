@@ -3094,7 +3094,16 @@ def credit_usage(monthly_budget=None):
 URGENT_MARKERS = ("## ACİL", "## URGENT", "## DUR", "## STOP")
 
 
-def urgent_messages(root, cfg):
+ROLES = ("implementer", "architect")
+
+
+def invoking_role():
+    """The role this ao process runs for, from AO_ROLE, or None for a person or an unknown caller (#29)."""
+    role = (os.environ.get("AO_ROLE") or "").strip().lower()
+    return role if role in ROLES else None
+
+
+def urgent_messages(root, cfg, role="implementer"):
     """Unacknowledged messages the implementer must see before it does anything big.
 
     MCP cannot interrupt. Its tools fire only when the agent chooses to call them,
@@ -3109,12 +3118,18 @@ def urgent_messages(root, cfg):
 
     Marked messages only. Everything routine waits for `ao_inbox`, or the channel
     becomes noise and gets skimmed — which is how it fails.
+
+    Urgency is resolved for a role, not hardcoded to the implementer (#29): mail
+    addressed to the architect's role is the architect's, the rest the
+    implementer's, and role None takes both. An implementer report marked urgent
+    sat unread for four hours because this skipped everything bound for the architect.
     """
     box = cfg.get("mailbox", "agent-mail")
     out = []
     for m in mailbox(root, box):
-        if "-to-fable-" in m or "-to-architect-" in m:
-            continue                       # outbound; not for the implementer
+        addressed = "architect" if to_architect(m, cfg) else "implementer"
+        if role and addressed != role:
+            continue
         try:
             body = open(os.path.join(root, box, m), errors="replace", encoding=UTF8).read(8000)
         except OSError:
@@ -3122,7 +3137,8 @@ def urgent_messages(root, cfg):
         upper = body.upper()
         if any(k.upper() in upper for k in URGENT_MARKERS):
             title = next((l for l in body.split("\n") if l.strip().startswith("# ")), m)
-            out.append({"id": m, "title": title.lstrip("# ").strip()[:120], "body": body})
+            out.append({"id": m, "title": title.lstrip("# ").strip()[:120], "body": body,
+                        "to": addressed})
     return out
 
 
