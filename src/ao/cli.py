@@ -7322,6 +7322,62 @@ def _architect_absence_lines(cfg):
             f"{away['waiting'][0]} for {oldest}{C['reset']}  {C['dim']}answered in one pass: ao decisions{C['reset']}"]
 
 
+def _human_bytes(count):
+    for unit in ("B", "KB", "MB", "GB"):
+        if count < 1024 or unit == "GB":
+            return f"{count:.0f} {unit}" if unit == "B" else f"{count:.1f} {unit}"
+        count /= 1024
+
+
+def cmd_worktrees(cfg, args):
+    """Every worktree, what keeps it and whether it may go; `prune` retires those that may (#42).
+
+    Seven worktrees stood on this machine, one per slice, none removed when its
+    branch landed, each a full checkout with its own state and stale reviews.
+    Prune is a dry run until --yes.
+    """
+    root = cfg["root"]
+    try:
+        facts = A.worktree_facts(root, cfg, sizes=True)
+    except RuntimeError as exc:
+        print(f"{C['red']}{exc}{C['reset']}")
+        return 2
+    pruning = getattr(args, "action", None) == "prune"
+    apply = pruning and getattr(args, "yes", False)
+    if pruning and not apply:
+        print(f"{C['yellow']}dry run — add --yes to apply{C['reset']}")
+    for fact in facts:
+        size = _human_bytes(fact["bytes"]) if fact["bytes"] is not None \
+            else "gone" if not os.path.isdir(fact["path"]) else "—"
+        state = (f"{C['green']}may go{C['reset']} ({fact['why']})" if fact["may_go"]
+                 else f"{C['dim']}keep{C['reset']} ({'; '.join(fact['keep']) or 'not merged, slice not rejected'})")
+        print(f"  {fact['path']}  {C['dim']}{fact['branch'] or 'detached'} · {size}{C['reset']}  {state}")
+        if pruning and fact["may_go"]:
+            try:
+                for step in A.prune_worktree(root, fact, apply=apply):
+                    print(f"      {'done' if apply else 'would'}: {step}")
+            except (OSError, RuntimeError) as exc:
+                print(f"      {C['red']}stopped{C['reset']}: {exc}")
+                return 1
+    return 0
+
+
+def _worktree_lines(cfg):
+    """Worktrees whose branch is merged or gone, with their size on disk (#42)."""
+    try:
+        going = [fact for fact in A.worktree_facts(cfg["root"], cfg, sizes=True) if fact["may_go"]]
+    except Exception as exc:
+        return [f"{'worktrees':<16}{C['yellow']}cannot tell: {exc}{C['reset']}"]
+    if not going:
+        return []
+    total = sum(fact["bytes"] or 0 for fact in going)
+    lines = [f"{'worktrees':<16}{C['yellow']}{len(going)} may go ({_human_bytes(total)}){C['reset']}  "
+             f"{C['dim']}ao worktrees prune{C['reset']}"]
+    lines += [f"{'':<16}{C['dim']}{fact['path']}  {fact['why']}  "
+              f"{_human_bytes(fact['bytes']) if fact['bytes'] is not None else 'gone'}{C['reset']}" for fact in going[:5]]
+    return lines
+
+
 def cmd_doctor(cfg, args):
     if getattr(args, "check", False):
         # Scheduled checks return through the existing static helper here;
@@ -7379,6 +7435,8 @@ def cmd_doctor(cfg, args):
     for line in _review_evidence_lines(cfg):
         print(line)
     for line in _architect_absence_lines(cfg):
+        print(line)
+    for line in _worktree_lines(cfg):
         print(line)
     print(f"quota source    {'keyflip' if A.sh('command -v keyflip') else '—'}")
     # Optional capabilities announce themselves; the core never needs them (#82).
@@ -7646,6 +7704,10 @@ def main():
     rc.add_argument("text", nargs="+")
     rc.add_argument("-n", "--limit", type=int, default=10)
     rc.set_defaults(fn=cmd_recall)
+    wt = sub.add_parser("worktrees", help="every worktree and whether it may go; prune retires those that may")
+    wt.add_argument("action", nargs="?", choices=["list", "prune"], default="list")
+    wt.add_argument("--yes", action="store_true", help="apply the prune (default is a dry run)")
+    wt.set_defaults(fn=cmd_worktrees)
     dg = sub.add_parser("digest", help="what happened, read from the ledgers")
     dg.add_argument("--days", type=float, default=1.0)
     dg.add_argument("-n", type=int, default=6)

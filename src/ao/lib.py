@@ -4317,6 +4317,155 @@ def architect_absence(root, cfg):
             "oldest_at": waiting[0].get("asked_at") if waiting else None}
 
 
+# ---- a worktree lives exactly as long as its slice (#42) --------------------------------
+
+def default_branch(root):
+    """The branch work lands on: origin's HEAD, else main, else master, else the main checkout's."""
+    remote = git_text(root, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD")
+    if remote.startswith("refs/remotes/origin/"):
+        return remote[len("refs/remotes/origin/"):]
+    for name in ("main", "master"):
+        if git_text(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{name}"):
+            return name
+    trees = worktree_list(root)
+    return trees[0]["branch"] if trees else None
+
+
+def worktree_list(root):
+    """Every worktree of the repository: {"path", "head", "branch", "prunable"}, the main one first."""
+    listed = _git_output(root, "worktree", "list", "--porcelain", "-z")
+    out = []
+    for record in listed.split(b"\0\0"):
+        fields = {}
+        for attribute in record.split(b"\0"):
+            key, _, value = os.fsdecode(attribute).partition(" ")
+            if key:
+                fields[key] = value
+        if "worktree" in fields:
+            branch = fields.get("branch", "")
+            out.append({"path": fields["worktree"], "head": fields.get("HEAD"),
+                        "branch": branch[len("refs/heads/"):] if branch.startswith("refs/heads/") else None,
+                        "prunable": "prunable" in fields})
+    return out
+
+
+def reviews_in_flight(root):
+    """Submitted reviews in one checkout whose runner is alive or has only just started."""
+    directory = os.path.join(root, ".ao", "reviews")
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return []
+    flying = []
+    for name in names:
+        if not (name.startswith("R-") and name.endswith(".json")):
+            continue
+        try:
+            with open(os.path.join(directory, name), encoding=UTF8) as fh:
+                state = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if isinstance(state, dict) and state.get("state") == "running" and (
+                _pid_alive(state.get("pid")) if state.get("pid")
+                else time.time() - float(state.get("submitted_at") or 0) < 60):
+            flying.append(state.get("id") or name[:-5])
+    return flying
+
+
+def _tree_bytes(path):
+    total = 0
+    for directory, subdirs, files in os.walk(path):
+        subdirs[:] = [d for d in subdirs if not os.path.islink(os.path.join(directory, d))]
+        for name in files:
+            try:
+                total += os.lstat(os.path.join(directory, name)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def worktree_facts(root, cfg, sizes=False):
+    """What decides whether each worktree may go (#42).
+
+    A worktree may go when its branch is merged into the default branch, when the
+    board rejected the slice that owns it (`worktree:` or `branch:` on the item),
+    or when its directory is already gone - and never while it holds product
+    changes nobody committed, a review in flight, or the command that is asking.
+    """
+    target = default_branch(root)
+    board_items = board(root)
+    owners = []
+    for state, items in board_items.items():
+        for item in items:
+            owners.append((state, item))
+    here = os.path.realpath(root)
+    out = []
+    for index, tree in enumerate(worktree_list(root)):
+        path, branch = tree["path"], tree["branch"]
+        real = os.path.realpath(path)
+        slice_state = next((state for state, item in owners
+                            if (item["notes"].get("worktree") and os.path.realpath(item["notes"]["worktree"]) == real)
+                            or (branch and item["notes"].get("branch") == branch)), None)
+        merged = bool(branch and target and branch != target and subprocess.run(
+            [git_binary(), "merge-base", "--is-ancestor", tree["head"], target], cwd=root,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0)
+        exists = os.path.isdir(path)
+        dirty = product_dirty(path, cfg) if exists else []
+        flying = reviews_in_flight(path) if exists else []
+        keep = []
+        if index == 0:
+            keep.append("the main checkout")
+        if real == here:
+            keep.append("the checkout asking")
+        if dirty:
+            keep.append(f"{len(dirty)} uncommitted product change(s)")
+        if flying:
+            keep.append(f"review in flight: {', '.join(flying)}")
+        why = "merged into " + target if merged else "its slice was rejected" if slice_state == "rejected" \
+            else "its directory is gone" if not exists or tree["prunable"] else None
+        may_go = bool(why) and not keep
+        # Sizes are for what may go: walking every dependency tree on disk is not free.
+        out.append(dict(tree, merged=merged, slice_state=slice_state, dirty=len(dirty), in_flight=flying,
+                        keep=keep, why=why, may_go=may_go,
+                        bytes=_tree_bytes(path) if sizes and may_go and exists else None))
+    return out
+
+
+def prune_worktree(root, fact, apply=False, now=None):
+    """Retire one worktree that may go: archive its coordination state and branch tip, then remove both (#42).
+
+    The `.ao/` state and review artefacts go to ~/.ao/archive/<project>/, and the
+    branch tip stays reachable as refs/ao/archive/<branch>-<stamp>, so what the
+    worktree held can still be read after it is gone.
+    """
+    import shutil
+    stamp = datetime.fromtimestamp(time.time() if now is None else now).strftime("%Y%m%d-%H%M%S")
+    name = os.path.basename(os.path.normpath(fact["path"]))
+    archive = os.path.join(HOME, ".ao", "archive", project_key(root), f"worktree-{name}-{stamp}")
+    steps = []
+    for part in (".ao", "semantic-review"):
+        source = os.path.join(fact["path"], part)
+        if os.path.isdir(source):
+            steps.append(f"archive {part}/ to {archive}")
+            if apply:
+                shutil.copytree(source, os.path.join(archive, part), symlinks=True)
+    if fact["branch"]:
+        steps.append(f"keep {fact['branch']} at refs/ao/archive/{fact['branch']}-{stamp}")
+        if apply:
+            _git_output(root, "update-ref", f"refs/ao/archive/{fact['branch']}-{stamp}", fact["head"])
+    steps.append(f"remove the worktree {fact['path']}")
+    if apply and os.path.isdir(fact["path"]):
+        _git_output(root, "worktree", "remove", "--force", fact["path"])
+    if fact["branch"]:
+        steps.append(f"delete the branch {fact['branch']}")
+        if apply:
+            _git_output(root, "branch", "-D", fact["branch"])
+    steps.append("git worktree prune")
+    if apply:
+        _git_output(root, "worktree", "prune")
+    return steps
+
+
 def safe_slug(text, fallback="note", limit=40):
     """A file-name part holding only [A-Za-z0-9._-] (#19).
 

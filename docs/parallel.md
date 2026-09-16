@@ -94,6 +94,23 @@ With parallel lanes, messages carry a lane:
 An actor reads only messages addressed to a role it currently holds in a lane it owns.
 Everything else in the directory it leaves alone.
 
+## A worktree lives as long as its slice
+
+A worktree per lane is cheap to create and easy to forget: seven stood on one machine,
+one per slice, none removed when its branch landed, each a full checkout with its own
+state and stale reviews, and a merged one still listed as if it were live. `ao
+worktrees` lists every worktree with what keeps it; `ao worktrees prune` retires the
+ones that may go, as a dry run until `--yes`.
+
+A worktree may go when its branch is merged into the default branch, when the board
+rejected the slice that owns it (`worktree: <path>` or `branch: <name>` on the item), or
+when its directory is already gone. It is never removed while it holds product changes
+nobody committed, a review in flight, or the command that is asking. Retiring one copies
+its `.ao/` state and review artefacts to `~/.ao/archive/<project>/`, keeps its branch tip
+reachable as `refs/ao/archive/<branch>-<stamp>`, removes the worktree and the branch, and
+runs `git worktree prune` so no administrative file is left behind. `ao doctor` names the
+worktrees that may go, with their size on disk.
+
 ## What not to parallelise
 
 - **Contract decisions.** One architect. Two agents deciding boundaries independently
