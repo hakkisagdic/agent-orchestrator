@@ -383,9 +383,9 @@ def cmd_mail(cfg, args):
     elif args.action == "send":
         os.makedirs(d, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d-%H%M")
-        topic = (args.topic or "note").replace(" ", "-").lower()
+        topic = A.safe_slug((args.topic or "note").lower())
         impl, arch = A.mail_names(cfg)
-        name = f"{stamp}-{arch}-to-{impl}-{args.type.upper()}-{topic}.md"
+        name = f"{stamp}-{arch}-to-{impl}-{A.safe_slug(args.type.upper(), 'INFO')}-{topic}.md"
         body = args.body if args.body else sys.stdin.read()
         A.write_mail(root, cfg, name, body.rstrip() + "\n",
                      {"kind": args.type.lower(), "from": arch, "to": impl})

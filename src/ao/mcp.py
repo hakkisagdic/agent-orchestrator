@@ -200,7 +200,7 @@ def call(name, args, cfg, allow_verify):
         # The agent saying so directly beats a detector inferring it twenty
         # minutes later, which is what used to happen.
         header = "## KARAR GEREKLİ" if kind == "blocked" else f"## {kind.upper()}"
-        slug = "".join(c if c.isalnum() else "-" for c in args["summary"].lower())[:40]
+        slug = A.safe_slug(args["summary"].lower(), "report")
         # The same request twice is one request. An implementer nudged into a
         # turn with nothing to do reports the same blocker again; eighty copies
         # of "queue empty" stood in one mailbox after eleven hours, each a fresh

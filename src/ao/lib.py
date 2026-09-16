@@ -3439,6 +3439,17 @@ def review_loop(root, reviews_dir, min_repeats=3):
             for k, v in seen.items() if v["count"] >= min_repeats]
 
 
+def safe_slug(text, fallback="note", limit=40):
+    """A file-name part holding only [A-Za-z0-9._-] (#19).
+
+    `ao mail send note "ao: kiro/* dal …"` kept the "/" and wrote into a directory
+    that did not exist. Separators, wildcards, quotes, whitespace and letters
+    outside ASCII all become a dash; what is left is cut to `limit`.
+    """
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", str(text or "")).strip("-.")[:limit].strip("-.")
+    return slug or fallback
+
+
 def note(root, cfg, to, title, body, urgent=False):
     """Write an architect message into the mailbox through the tool.
 
@@ -3449,9 +3460,10 @@ def note(root, cfg, to, title, body, urgent=False):
     """
     box = os.path.join(root, cfg.get("mailbox", "agent-mail"))
     os.makedirs(box, exist_ok=True)
-    slug = re.sub(r"[^a-z0-9]+", "-", title.lower())[:40].strip("-") or "not"
+    slug = safe_slug(title.lower(), "not")
     kind = "ACIL" if urgent else "DECISION"
-    _, arch = mail_names(cfg)
+    impl, arch = mail_names(cfg)
+    to = safe_slug(to, impl)
     name = f"{time.strftime('%Y%m%d-%H%M')}-{arch}-to-{to}-{kind}-{slug}.md"
     text = f"# {title}\n\n" + ("## ACİL\n\n" if urgent else "") + body.rstrip() + "\n"
     return write_mail(root, cfg, name, text, {"kind": kind.lower(), "from": arch, "to": to})
