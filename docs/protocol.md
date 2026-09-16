@@ -203,6 +203,16 @@ forever. The fix is a standing directive, not a tool:
 Keep the stopping conditions — they are where verification and human judgement enter. An
 agent that never stops is not a feature.
 
+Stopping for a question is not stopping the queue. The playbook writes down what the
+implementer settles alone while the architect is away (the next READY item, how to split
+a slice, whether a finding is in scope, when to park), what it never settles however
+long nobody answers (landing without review, its own authority), and what it does when
+blocked: ask, park the slice with `needs:` and take the next READY item. The watchdog
+keeps to it: an open decision stands the implementer down only when nothing is READY;
+otherwise the nudge names the question that waits and the item to take instead. The
+questions accumulate for the architect to answer in one pass, and `ao doctor` says how
+long it has been away and how many wait.
+
 ## Channel choice: mail carries scope, steering carries rules
 
 A mailbox is the wrong place for anything the agent must know *before* it decides

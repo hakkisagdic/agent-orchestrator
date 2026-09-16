@@ -7307,6 +7307,21 @@ def _review_evidence_lines(cfg):
     return lines
 
 
+def _architect_absence_lines(cfg):
+    """How long the architect has been away and how many questions wait for it (#84)."""
+    try:
+        away = A.architect_absence(cfg["root"], cfg)
+    except Exception as exc:
+        return [f"{'architect away':<16}{C['yellow']}cannot tell: {exc}{C['reset']}"]
+    seen = (f"last seen {_elapsed(time.time() - away['seen_at'])} ago" if away["seen_at"]
+            else "not seen in this project's records")
+    if not away["waiting"]:
+        return [f"{'architect away':<16}{C['dim']}{seen} · no question waiting{C['reset']}"]
+    oldest = _elapsed(time.time() - float(away["oldest_at"] or time.time()))
+    return [f"{'architect away':<16}{C['yellow']}{seen} · {len(away['waiting'])} question(s) waiting, the oldest "
+            f"{away['waiting'][0]} for {oldest}{C['reset']}  {C['dim']}answered in one pass: ao decisions{C['reset']}"]
+
+
 def cmd_doctor(cfg, args):
     if getattr(args, "check", False):
         # Scheduled checks return through the existing static helper here;
@@ -7362,6 +7377,8 @@ def cmd_doctor(cfg, args):
     for line in waiver_lines:
         print(f"                {C['dim']}{line}{C['reset']}")
     for line in _review_evidence_lines(cfg):
+        print(line)
+    for line in _architect_absence_lines(cfg):
         print(line)
     print(f"quota source    {'keyflip' if A.sh('command -v keyflip') else '—'}")
     # Optional capabilities announce themselves; the core never needs them (#82).

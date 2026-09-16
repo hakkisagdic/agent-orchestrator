@@ -864,6 +864,30 @@ def escalate(root, cfg, adapter, age, args, st):
     return woke
 
 
+def queue_past_a_question(root):
+    """(what waits, the READY item to take) when a question waits and READY work stands (#84).
+
+    The architect is a person's quota and attention, and both run out. An open
+    decision cannot be answered by a nudged turn (#20), but it must not stop the
+    queue either: the slice it blocks is parked and the next READY item is taken.
+    None when nothing waits, or when nothing is READY and waiting is all there is.
+    """
+    ready = A.ready(root)
+    if not ready:
+        return None
+    asked = [d for d in A.decisions(root, "open") if d.get("asked_at")]
+    if asked:
+        return min(asked, key=lambda d: d["asked_at"])["id"], ready[0]["id"]
+    blocked = A.board(root)["blocked"]
+    return (blocked[0]["id"], ready[0]["id"]) if blocked else None
+
+
+def parked_note(waits, ready_id):
+    """What a nudge adds when a question waits and READY work stands (#84)."""
+    return (f" {waits} cevap bekliyor ve kuyruğu durdurmaz: bekleyen dilimi blocked bırak (needs: {waits}), "
+            f"soruyu yeniden sorma, READY {ready_id} ile devam et.")
+
+
 def open_work(cfg, root):
     """Is there something for the implementer to continue? Cheap signals only.
 
@@ -1449,14 +1473,20 @@ def _cycle_impl(args, root):
         print(f"implementer is waiting on the architect since "
               f"{time.strftime('%H:%M', time.localtime(at))} ({name}); not nudging")
         return 0
-    # An open decision cannot be answered by a nudged turn (#20).
+    # An open decision cannot be answered by a nudged turn (#20), and it does not
+    # stop the queue while READY work stands: its slice parks and the next starts (#84).
     asked = [d for d in A.decisions(root, "open") if d.get("asked_at")]
-    if asked:
+    passing = queue_past_a_question(root)
+    if asked and not passing:
         oldest = min(asked, key=lambda d: d["asked_at"])
         print(f"decision {oldest['id']} is open since "
               f"{time.strftime('%H:%M', time.localtime(oldest['asked_at']))}; not nudging")
         return 0
+    if passing:
+        print(f"{passing[0]} waits, and {passing[1]} is READY: an open question does not stop the queue")
     reasons = open_work(cfg, root)
+    if not reasons and passing:
+        reasons = [f"READY {passing[1]} while {passing[0]} waits"]
     if not reasons:
         sc = A.sources(root)
         arch = cfg.get("architect") or {}
@@ -1662,7 +1692,8 @@ def _cycle_impl(args, root):
             print(f"backing off ({st['attempts']} attempts, waiting {int(wait)}s)")
             return 0
 
-    argv = [x.replace("{session}", impl["session"]).replace("{prompt}", args.prompt)
+    prompt = args.prompt + (parked_note(*passing) if passing else "")
+    argv = [x.replace("{session}", impl["session"]).replace("{prompt}", prompt)
             for x in (adapter.get("resume", {}).get("argv") or [])]
     if not argv:
         print("adapter has no resume command")
@@ -1703,8 +1734,8 @@ def _cycle_impl(args, root):
     if fe:
         # A person is in these files right now. Say so in the prompt; the
         # implementer keeps away from them for this turn.
-        argv = [a.replace(args.prompt, args.prompt + " İnsan şu dosyaları düzenliyor, bu turda dokunma: "
-                          + ", ".join(fe[:8])) if a == args.prompt else a for a in argv]
+        argv = [a.replace(prompt, prompt + " İnsan şu dosyaları düzenliyor, bu turda dokunma: "
+                          + ", ".join(fe[:8])) if a == prompt else a for a in argv]
     print(f"idle {int(age)}s · {', '.join(reasons)} · nudging")
     if args.dry_run:
         print("DRY RUN:", " ".join(argv[:4]), "…")

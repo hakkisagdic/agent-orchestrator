@@ -4286,6 +4286,37 @@ def recall(text, root=None, limit=10, exclude=(), share=0.5):
     return found[:limit]
 
 
+def architect_absence(root, cfg):
+    """When the architect was last seen, and the questions waiting for its return (#84).
+
+    Seen means its session wrote, it recorded a decision, or it left mail still in
+    the mailbox, whichever is newest.
+    """
+    seen = []
+    try:
+        found = discover_architect((cfg.get("architect") or {}).get("cwd") or root)
+        if found and found.get("age") is not None:
+            seen.append(time.time() - float(found["age"]))
+    except Exception:
+        pass
+    try:
+        rows = decision_rows(root)
+        if rows and _epoch(rows[-1].get("at")):
+            seen.append(_epoch(rows[-1].get("at")))
+    except Exception:
+        pass
+    mailbox_dir = cfg.get("mailbox", "agent-mail")
+    for name in mailbox(root, mailbox_dir):
+        if from_architect(name, cfg):
+            try:
+                seen.append(os.path.getmtime(os.path.join(root, mailbox_dir, name)))
+            except OSError:
+                pass
+    waiting = sorted(decisions(root, "open"), key=lambda d: d.get("asked_at") or 0)
+    return {"seen_at": max(seen) if seen else None, "waiting": [d["id"] for d in waiting],
+            "oldest_at": waiting[0].get("asked_at") if waiting else None}
+
+
 def safe_slug(text, fallback="note", limit=40):
     """A file-name part holding only [A-Za-z0-9._-] (#19).
 

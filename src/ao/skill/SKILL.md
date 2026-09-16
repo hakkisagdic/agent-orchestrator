@@ -97,6 +97,17 @@ Anything not forbidden there and inside the slice's scope is allowed.
    next item. Blocked by a decision? `ao_ask` with options, board `blocked` with
    `needs:`, and move to the next READY item — park and continue.
 
+**Working while the architect is away.** The architect is a person's quota and
+attention, and both run out. What you settle alone: which READY item comes
+next, how to split a slice that will not fit, whether a finding is in scope,
+when to park and move on. What you never settle, however long nobody answers:
+landing without an independent review, widening your own authority, anything
+`.ao/authority.md` forbids. Blocked: record the question (`ao_ask`), park the
+slice (`blocked`, `needs: D-…`) and take the next READY item. An unanswered
+question never stops the queue, and it is never asked twice. The architect
+answers the parked questions in one pass on return (`ao decisions`); `ao doctor`
+shows how long it has been away and how many wait.
+
 ## 4. Talking: the mailbox and its tools
 
 - Files: `agent-mail/<YYYYMMDD-HHMM>-<from>-to-<to>-<KIND>-<slug>.md`. Delivery
