@@ -738,8 +738,10 @@ def escalate(root, cfg, adapter, age, args, st):
                     # The architect is paused, not broken. Wait for the window, tell
                     # the human once (orange), and remember that the desktop app may
                     # resume the session itself when its auto-continue is on.
-                    st["arch_quota_until"] = err.get("resets_at") or time.time() + 3600
-                    A.deferred_append(root, "wake", reason="architect quota", until=st["arch_quota_until"])
+                    until = quota_block_until(err)
+                    if until:
+                        st["arch_quota_until"] = until
+                        A.deferred_append(root, "wake", reason="architect quota", until=until)
                 save_state(root, st)
                 A.record_notice(root, f"{key}: architect wake failed", f"{kind}: {text} [{used}]",
                                 True, key="architect-wake-failed")
@@ -841,8 +843,21 @@ WAKE_SIGNATURES = (
 )
 
 
-def parse_reset(text, now=None):
-    """When does the quota come back? "resets 4:30am" / "resets in 4h 43m" / None."""
+# The architect's usage limit comes back within five hours of being hit; a reset
+# a message names further away than that cannot be the one it meant (#40).
+ARCHITECT_QUOTA_WINDOW = 5 * 3600
+
+
+def parse_reset(text, now=None, window=None):
+    """When does the quota come back? "resets 4:30am" / "resets in 4h 43m" / None.
+
+    `now` is when the message was written, not when it is read: a log line read
+    again hours later keeps the reset it named. A clock time already past rolls to
+    the next day only while that stays inside `window`, the limit's own length;
+    otherwise the message meant the time that has gone. On 2026-09-07 a 17:48
+    "resets 9:20pm" was re-read after 21:20 on every cycle and pushed a day ahead
+    each time, so the block it raised never ended (#40).
+    """
     now = now or time.time()
     m = re.search(r"resets?\s+in\s+((?:\d+\s*[hms]\s*)+)", text, re.I)
     if m:
@@ -860,7 +875,7 @@ def parse_reset(text, now=None):
         h = 0
     lt = time.localtime(now)
     cand = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, h, mi, 0, 0, 0, -1))
-    if cand <= now:
+    if cand <= now and (window is None or cand + 24 * 3600 - now <= window):
         cand += 24 * 3600
     return cand
 
@@ -883,13 +898,34 @@ def wake_error(log_path):
     if len(segs) < 5:
         return None
     when, _, binary, body = segs[-4], segs[-3], segs[-2] or "", segs[-1]
+    try:
+        at = time.mktime(time.strptime(when, "%Y-%m-%d %H:%M:%S"))
+    except ValueError:
+        at = None
     for kind, pat in WAKE_SIGNATURES:
         m = re.search(pat, body)
         if m:
             text = m.group(1).strip()[:300]
-            return {"text": text, "binary": binary, "when": when, "kind": kind,
-                    "resets_at": parse_reset(body) if kind == "quota" else None}
+            # A reset is read against when the wake wrote it, not against this cycle.
+            resets_at = (parse_reset(body, now=at, window=ARCHITECT_QUOTA_WINDOW)
+                         if kind == "quota" else None)
+            return {"text": text, "binary": binary, "when": when, "at": at, "kind": kind,
+                    "resets_at": resets_at}
     return None
+
+
+def quota_block_until(err, now=None):
+    """Until when a quota error read from the wake log blocks a wake; None once it no longer does.
+
+    The block ends at the reset the message named or, when it named none, one
+    limit window after the message was written. An older error describes a
+    window that is over, however many times the log is read again (#40).
+    """
+    now = now or time.time()
+    if not err or err.get("kind") != "quota":
+        return None
+    until = err.get("resets_at") or ((err.get("at") or now) + ARCHITECT_QUOTA_WINDOW)
+    return until if until > now else None
 
 
 def quota_ok(adapter):
@@ -1038,6 +1074,13 @@ def _cycle_impl(args, root):
     # episodes that went quiet, then say so once.  A quota window lives in state,
     # so unlike a transient notice it must keep aging toward red while it stands.
     # In dry-run, notify previews that same touch without persisting it.
+    # A present, working architect is not at quota, whatever the cache says (#40).
+    architect = cfg.get("architect") or {}
+    if st.get("arch_quota_until", 0) > time.time() and architect.get("argv") \
+            and A.architect_present(root, architect):
+        st.pop("arch_quota_until", None)
+        save_state(root, st)
+        print("the architect is present and working; its cached quota block is cleared")
     touch_architect_quota(root, st)
     if not args.dry_run:
         for e in A.expire_alarms(project):

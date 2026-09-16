@@ -23,7 +23,8 @@ def test_quota_failure_carries_reset_time(tmp_path):
     e = W.wake_error(p)
     assert e["kind"] == "quota"
     assert time.strftime("%H:%M", time.localtime(e["resets_at"])) == "04:30"
-    assert e["resets_at"] > time.time() - 24 * 3600
+    assert e["resets_at"] == time.mktime(time.strptime("2026-09-05 04:30", "%Y-%m-%d %H:%M"))
+    assert W.quota_block_until(e) is None      # read days after it was written, that window is over
 
 
 def test_relative_reset_is_parsed():
