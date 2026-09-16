@@ -67,18 +67,64 @@ def measured_by():
     return {"git": git_binary(), "candidate_via_shell": False, "captured_by": "ao"}
 
 
-def command_hook_files(root):
-    """Settings files whose pre-tool-use hooks can rewrite an agent's shell commands, as adapters declare them (#76)."""
-    out = []
+def command_hook_sources(root):
+    """(settings file, the adapter's declaration, whether the file is user-level) for each hook file (#76, #52).
+
+    A user-level file is one an adapter names under `~`, outside every repository. The
+    project's own files are writable by the agents ao governs, so the filter probe runs
+    no command they name.
+    """
+    out, seen = [], set()
     for adapter in package_adapters().values():
         hooks = (adapter.get("directives") or {}).get("command_hooks") or {}
         if hooks.get("format") != "pre-tool-use":
             continue
         for rel in hooks.get("files") or []:
-            path = _home_path(rel) if str(rel).startswith("~") else os.path.join(root, *str(rel).split("/"))
-            if path not in out:
-                out.append(path)
+            user = str(rel).startswith("~")
+            path = _home_path(rel) if user else os.path.join(root, *str(rel).split("/"))
+            if path not in seen:
+                seen.add(path)
+                out.append((path, hooks, user))
     return out
+
+
+def command_hook_files(root):
+    """Settings files whose pre-tool-use hooks can rewrite an agent's shell commands, as adapters declare them (#76)."""
+    return [path for path, _, _ in command_hook_sources(root)]
+
+
+def _matcher_matches(matcher, tool):
+    """A hook matcher read as the harness reads it: empty or `*` is every tool, plain words exact names, else a regex."""
+    text = "" if matcher is None else str(matcher)
+    if text in ("", "*"):
+        return True
+    if re.fullmatch(r"[A-Za-z0-9_\- ,|]+", text):
+        return tool in {name.strip() for name in re.split(r"[|,]", text)}
+    try:
+        return re.search(text, tool) is not None
+    except re.error:
+        return True             # a matcher ao cannot read is counted, not passed over
+
+
+def _shell_hooks(path, declaration):
+    """The command hooks a settings file runs before the harness's shell tool, in the order it declares them."""
+    try:
+        with open(path, encoding=UTF8) as fh:
+            hooks = json.load(fh).get("hooks")
+    except (OSError, ValueError, AttributeError):
+        return []
+    tool = str(declaration.get("shell_tool") or "Bash")
+    entries = hooks.get("PreToolUse") if isinstance(hooks, dict) else None
+    return [hook for entry in (entries if isinstance(entries, list) else [])
+            if isinstance(entry, dict) and _matcher_matches(entry.get("matcher"), tool)
+            for hook in (entry.get("hooks") if isinstance(entry.get("hooks"), list) else [])
+            if isinstance(hook, dict) and hook.get("type", "command") == "command"]
+
+
+def _hook_text(hook):
+    """A command hook as one line: its command, and its arguments when it declares them apart."""
+    args = hook.get("args") if isinstance(hook.get("args"), list) else []
+    return " ".join(word for word in [str(hook.get("command") or ""), *map(str, args)] if word)
 
 
 def measurement_filters(root):
@@ -86,8 +132,8 @@ def measurement_filters(root):
 
     A script named git ahead of any compiled git on PATH, AO_GIT naming nothing
     executable, and a Claude Code PreToolUse hook that rewrites the shell commands
-    an agent runs. A hook is recognised by its command, since what it does cannot
-    be read without running it.
+    an agent runs. A hook is recognised here by its command; `probe_filters` asks
+    it what it does (#52).
     """
     import shutil
     found = []
@@ -100,26 +146,343 @@ def measurement_filters(root):
         found.append(f"git on PATH is {first}, a script in front of git; " + (
             f"ao measures with {chosen}" if chosen != "git" else
             "no compiled git was found, so ao's own measurements go through it too: set AO_GIT"))
-    for path in command_hook_files(root):
-        try:
-            with open(path, encoding=UTF8) as fh:
-                hooks = json.load(fh).get("hooks")
-        except (OSError, ValueError, AttributeError):
-            continue
-        entries = hooks.get("PreToolUse") if isinstance(hooks, dict) else None
-        for entry in entries if isinstance(entries, list) else []:
-            if not isinstance(entry, dict):
-                continue
-            matcher = str(entry.get("matcher") or "*")
-            if matcher != "*" and "bash" not in matcher.lower():
-                continue
-            for hook in entry.get("hooks") or []:
-                command = str(hook.get("command") or "") if isinstance(hook, dict) else ""
-                if _REWRITING_HOOK.search(command):
-                    found.append(f"{path}: the PreToolUse hook `{command}` can rewrite the shell commands an "
-                                 f"agent runs, so what an agent reads of {', '.join(MEASUREMENTS)} may be "
-                                 "compressed; take such numbers from ao's records, which do not pass through it")
+    for path, declaration, _ in command_hook_sources(root):
+        for hook in _shell_hooks(path, declaration):
+            command = _hook_text(hook)
+            if _REWRITING_HOOK.search(command):
+                found.append(f"{path}: the PreToolUse hook `{command}` can rewrite the shell commands an "
+                             f"agent runs, so what an agent reads of {', '.join(MEASUREMENTS)} may be "
+                             "compressed; take such numbers from ao's records, which do not pass through it")
     return found
+
+
+# ---- a filter's exclusions are proved by asking it, not read from its configuration (#52) --
+
+# The shell commands through which an agent reads a measurement - candidate size and paths, git
+# status, history, rev-parse, write-tree, hash-object and ao's own records - that a filter's
+# exclusion list must leave alone. `measurement_commands` adds the project's gate commands.
+MEASUREMENT_COMMANDS = ("git diff", "git diff --cached", "git diff --stat", "git diff --numstat",
+                        "git diff --cached --numstat", "git diff --name-only", "git status",
+                        "git status --porcelain", "git log", "git log --oneline", "git show --stat",
+                        "git rev-parse HEAD", "git write-tree", "git hash-object --stdin",
+                        "ao status", "ao verify", "ao review", "ao board")
+# All a probed hook sees of ao's environment: where programs, its home and its own configuration
+# are. No credential, no GIT_* binding, no loader or interpreter start-up variable.
+_PROBE_ENVIRONMENT = ("PATH", "HOME", "USER", "LOGNAME", "USERNAME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+                      "XDG_CONFIG_HOME", "XDG_DATA_HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL",
+                      "SYSTEMROOT", "WINDIR", "PATHEXT")
+_PROBE_OUTPUT_BYTES = 65_536
+_PROBE_GATE_COMMANDS = 12
+# What makes a command more than words to split: expansion, substitution, redirection, globs,
+# chaining and escapes. Such a command needs a shell, and the probe runs none.
+_SHELL_SYNTAX = re.compile(r"[$`|&;<>(){}\[\]*?!#\\\r\n]")
+
+
+def measurement_commands(root):
+    """The commands the filter probe asks a hook about: MEASUREMENT_COMMANDS, then the project's gates (#52).
+
+    The gate commands are what an agent runs to read a count. They come from a file the
+    agents can write, so they are taken as data only - the payload a hook reads - and
+    at most _PROBE_GATE_COMMANDS of them.
+    """
+    commands = list(MEASUREMENT_COMMANDS)
+    try:
+        with open(os.path.join(root, ".ao", "gates.json"), encoding=UTF8) as fh:
+            gates = json.load(fh).get("gates")
+    except (OSError, ValueError, AttributeError):
+        gates = None
+    for gate in (gates.values() if isinstance(gates, dict) else []):
+        run = gate.get("run").strip() if isinstance(gate, dict) and isinstance(gate.get("run"), str) else ""
+        if run and len(run) <= 1000 and run not in commands:
+            commands.append(run)
+        if len(commands) >= len(MEASUREMENT_COMMANDS) + _PROBE_GATE_COMMANDS:
+            break
+    return commands
+
+
+def _within(path, root):
+    """Whether a path, followed through its links, lies inside root."""
+    real, top = (os.path.normcase(os.path.realpath(p)) for p in (path, root))
+    try:
+        return os.path.commonpath([real, top]) == top
+    except ValueError:
+        return False            # another drive
+
+
+def _hook_argv(hook):
+    """The argument vector a command hook runs as without a shell, or (None, why only a shell could run it)."""
+    import shlex
+    command = hook.get("command")
+    if not isinstance(command, str) or not command.strip():
+        return None, "it names no command"
+    if "args" in hook:
+        # Exec form: the harness runs `command` with `args`, no shell, placeholders filled in.
+        args = hook["args"]
+        if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
+            return None, "its args are not a list of strings"
+        if any("${" in word for word in [command, *args]):
+            return None, "it names a placeholder only the harness fills in"
+        return [command, *args], None
+    if str(hook.get("shell") or "bash").lower() not in ("bash", "sh"):
+        return None, f"it runs under {hook['shell']}, which ao does not imitate"
+    words = None
+    if not _SHELL_SYNTAX.search(command):
+        try:
+            words = shlex.split(command)
+        except ValueError:
+            words = None
+    if not words or "=" in words[0] or any("~" in word and word != "~" and not word.startswith("~/")
+                                           for word in words):
+        return None, "it needs a shell to run, and ao runs none; declare it as command and args"
+    return [_home_path(word) for word in words], None
+
+
+def _probe_program(argv, root, programs, search_path):
+    """The argv ao may run for a user-level hook, its program resolved, or (None, the rule it fails) (#52).
+
+    A filter is itself a program that runs commands, so the rule is about who chose the
+    words as much as which program they name: the program must be one the machine
+    allows, found where the agents' PATH finds it, outside the project, and no argument
+    may name a path the agents can write.
+    """
+    import shutil
+    name = _program_name(argv[0])
+    if name not in programs:
+        return None, f"{name} is not in filters.probe_programs, the programs ao may run to ask"
+    if os.path.isabs(argv[0]):
+        found = argv[0] if os.path.isfile(argv[0]) and os.access(argv[0], os.X_OK) else None
+    elif "/" in argv[0] or os.sep in argv[0]:
+        return None, f"its program {argv[0]} is named relative to the directory it runs in, the project"
+    else:
+        found = shutil.which(argv[0], path=search_path)
+    if not found:
+        return None, f"{argv[0]} is not an executable on the agents' PATH"
+    if os.path.splitext(found)[1].lower() in (".bat", ".cmd"):
+        return None, f"{found} is a batch file, which only a shell runs"
+    for word in [found, *argv[1:]]:
+        for piece in {word, word.split("=", 1)[-1]}:
+            candidate = piece if os.path.isabs(piece) else os.path.join(root, piece)
+            if piece and (os.path.isabs(piece) or os.path.lexists(candidate)) and _within(candidate, root):
+                return None, f"{piece} lies inside the project, where the agents ao governs can write"
+    return [found, *argv[1:]], None
+
+
+def _probe_environment(root, declaration, search_path):
+    """What a probed hook is given: _PROBE_ENVIRONMENT, the agents' PATH and the project directory variable."""
+    env = {name: os.environ[name] for name in _PROBE_ENVIRONMENT if os.environ.get(name)}
+    env["PATH"] = search_path
+    variable = declaration.get("project_dir_env")
+    if isinstance(variable, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", variable):
+        env[variable] = root
+    return env
+
+
+def _run_hook(argv, payload, cwd, env, timeout):
+    """Run one hook with one payload as the harness would, inside a time and an output bound (#52).
+
+    Returns (exit code, stdout, stderr, None), or (None, b"", b"", what cut it off). The hook
+    leads its own process group, so a timeout ends whatever it started; a child still
+    holding its output open is still answering.
+    """
+    import signal
+    import threading
+    group = ({"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)} if os.name == "nt"
+             else {"start_new_session": True})
+    try:
+        proc = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, **group)
+    except OSError as exc:
+        return None, b"", b"", f"it could not be started ({exc.strerror or exc})"
+    output, flooded = {"out": bytearray(), "err": bytearray()}, threading.Event()
+
+    def feed():
+        try:
+            proc.stdin.write(payload)
+        except OSError:
+            pass                # a hook may exit without reading what it was given
+        try:
+            proc.stdin.close()
+        except OSError:
+            pass
+
+    def drain(stream, into):
+        try:
+            for block in iter(lambda: stream.read1(65536), b""):
+                into.extend(block)
+                if len(into) > _PROBE_OUTPUT_BYTES:
+                    flooded.set()
+                    return
+        except (OSError, ValueError):
+            pass
+
+    readers = [threading.Thread(target=drain, args=(proc.stdout, output["out"]), daemon=True),
+               threading.Thread(target=drain, args=(proc.stderr, output["err"]), daemon=True)]
+    for thread in [threading.Thread(target=feed, daemon=True), *readers]:
+        thread.start()
+    deadline, cut = time.monotonic() + timeout, None
+    while cut is None and (proc.poll() is None or any(reader.is_alive() for reader in readers)):
+        if flooded.is_set():
+            cut = f"it wrote more than {_PROBE_OUTPUT_BYTES} bytes"
+        elif time.monotonic() >= deadline:
+            cut = f"it did not answer within {timeout}s"
+        else:
+            time.sleep(0.01)
+    if cut is None and flooded.is_set():
+        cut = f"it wrote more than {_PROBE_OUTPUT_BYTES} bytes"
+    if cut and (proc.poll() is None or any(reader.is_alive() for reader in readers)):
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True)
+        else:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except OSError:
+                pass
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        for reader in readers:
+            reader.join(1)
+    if not any(reader.is_alive() for reader in readers):
+        for stream in (proc.stdout, proc.stderr):
+            stream.close()
+    if cut:
+        return None, b"", b"", cut
+    return proc.returncode, bytes(output["out"]), bytes(output["err"]), None
+
+
+def _hook_answer(command, code, out, err):
+    """What a pre-tool-use hook's answer does to one command, read as the harness reads it (#52).
+
+    (None, None) passes it through unchanged. ("rewrites", the new command or None) and
+    ("blocks", how) change what an agent reads; ("unreadable", why) is an answer ao can
+    vouch for neither way. A rewrite counts whether or not the answer also allows the
+    command: harness versions have differed on applying a rewrite that carries no decision,
+    and keeping measurements out of the filter is its exclusion list's job, not theirs.
+    """
+    if code == 2:
+        lines = err.decode(UTF8, "replace").strip().splitlines()
+        return "blocks", "is blocked" + (f" ({lines[0][:160]})" if lines else "")
+    text = out.decode(UTF8, "replace").strip()
+    answer = None
+    if text.startswith("{") and text.endswith("}"):
+        try:
+            answer = json.loads(text)
+        except ValueError:
+            return "unreadable", "its answer is not JSON"
+    if isinstance(answer, dict):
+        specific = answer.get("hookSpecificOutput") if isinstance(answer.get("hookSpecificOutput"), dict) else {}
+        decision = specific.get("permissionDecision")
+        reason = str(specific.get("permissionDecisionReason") or answer.get("reason")
+                     or answer.get("stopReason") or "")[:160]
+        why = f" ({reason})" if reason else ""
+        if answer.get("continue") is False:
+            return "blocks", "stops the agent before it runs" + why
+        if decision == "deny" or answer.get("decision") == "block":
+            return "blocks", "is blocked" + why
+        if "updatedInput" in specific:
+            updated = specific["updatedInput"]
+            rewritten = updated.get("command") if isinstance(updated, dict) else None
+            if rewritten != command:
+                return "rewrites", rewritten if isinstance(rewritten, str) else None
+        if decision == "ask":
+            return "blocks", "is held for a person's approval" + why
+    if code != 0:
+        return "unreadable", f"it exited {code}"
+    return None, None
+
+
+def probe_filters(root):
+    """Ask each hook that could filter an agent's shell what it does to every measurement command (#52).
+
+    #51 names such a hook by its command. #52 installs one on purpose, with an exclusion
+    list covering every measurement path, and asks the doctor to prove the list is in
+    force rather than trust it: a release of one such filter kept rewriting what its
+    exclusion list named, the list being read on only one of its two rewrite paths. So
+    each hook is run as the harness runs it, once per command in `measurement_commands`,
+    with the payload the harness sends, and its answer is read as the harness reads it.
+    The command it answers with is never run.
+
+    `ao doctor --check` runs unattended, and a settings file the agents can write would
+    make this a way to run anything. A hook is run only when it is declared in a
+    user-level file outside the project and `_probe_program` allows its program; then
+    without a shell, in the project directory as the harness runs it, with
+    `_probe_environment`, `filters.probe_timeout_seconds` for each answer and bounded
+    output. Any other hook that could filter is reported unverified, with the rule it
+    fails. Returns a dict per hook: file, user, command, program, verdict (in-force,
+    filters, unverified), changed [(command, "rewrites" or "blocks", detail)], why, asked.
+    """
+    root = os.path.abspath(root)
+    programs = {_program_name(name) for name in settings.get(None, "filters.probe_programs")}
+    timeout = settings.get(None, "filters.probe_timeout_seconds")
+    results, search_path, commands = [], None, None
+    for path, declaration, user in command_hook_sources(root):
+        for hook in _shell_hooks(path, declaration):
+            shown = _hook_text(hook)
+            argv, why = _hook_argv(hook)
+            program = _program_name(argv[0] if argv else (shown.split() or ["hook"])[0])
+            if not (_REWRITING_HOOK.search(shown) or program in programs):
+                continue
+            result = {"file": path, "user": user, "command": shown, "program": program, "verdict": "unverified",
+                      "changed": [], "why": None, "asked": 0}
+            results.append(result)
+            if not user or _within(path, root):
+                result["why"] = ("it is declared in the project's own settings, which the agents ao governs can "
+                                 "write, and ao runs no command such a file names")
+                continue
+            if argv:
+                if search_path is None:
+                    from .watchdog import child_path
+                    search_path = os.pathsep.join(d for d in child_path().split(os.pathsep)
+                                                  if d and os.path.isabs(d) and not _within(d, root))
+                argv, why = _probe_program(argv, root, programs, search_path)
+            if why:
+                result["why"] = why
+                continue
+            env = _probe_environment(root, declaration, search_path)
+            tool = str(declaration.get("shell_tool") or "Bash")
+            commands = measurement_commands(root) if commands is None else commands
+            for index, command in enumerate(commands):
+                payload = json.dumps({
+                    "session_id": "ao-filter-probe", "transcript_path": "", "cwd": root,
+                    "permission_mode": "default", "hook_event_name": "PreToolUse", "tool_name": tool,
+                    "tool_input": {"command": command, "description": "ao doctor: does a filter change this?"},
+                    "tool_use_id": f"ao-filter-probe-{index}"}).encode(UTF8)
+                code, out, err, cut = _run_hook(argv, payload, root, env, timeout)
+                result["asked"] += 1
+                kind, detail = (None, cut) if cut else _hook_answer(command, code, out, err)
+                if cut or kind == "unreadable":
+                    result["why"] = f"{detail} when asked about `{_clip(command)}`"
+                    break
+                if kind:
+                    result["changed"].append((command, kind, detail))
+            result["verdict"] = "filters" if result["changed"] else "unverified" if result["why"] else "in-force"
+    return results
+
+
+def _clip(text, limit=200):
+    """Text a settings file or a hook supplied, on one line and no longer than limit, for a doctor line."""
+    line = " ".join(str(text).split())
+    return line if len(line) <= limit else line[:limit - 3] + "..."
+
+
+def filter_probe_text(result):
+    """One sentence for one probed hook: in force, every measurement command it changes, or why it is unverified."""
+    where = f"`{_clip(result['command'])}` ({result['file']})"
+    if result["verdict"] == "in-force":
+        return f"{where} passes all {result['asked']} measurement commands through unchanged: its exclusions are in force"
+    changes = [(f"`{_clip(command)}` becomes `{_clip(detail)}`" if detail is not None
+                else f"`{_clip(command)}` loses its command")
+               if kind == "rewrites" else f"`{_clip(command)}` {detail}" for command, kind, detail in result["changed"]]
+    parts = [f"changes {len(changes)} of the {result['asked']} measurement commands it was asked about: "
+             + "; ".join(changes)] if changes else []
+    if result["why"]:
+        parts.append(f"is not verified: {result['why']}")
+    return f"{where} " + ", and ".join(parts)
 
 
 def _git_output(root, *args, timeout=60):

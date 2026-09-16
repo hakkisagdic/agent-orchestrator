@@ -176,6 +176,12 @@ SETTINGS = {
     "binaries.extra_dirs": Setting(
         [], list, None, None, "machine",
         "directories searched for agent binaries after PATH, before the usual install locations"),
+    "filters.probe_programs": Setting(
+        ["rtk"], list, None, None, "machine",
+        "programs ao doctor may run as a user-level shell-command filter hook, to prove it leaves measurements alone"),
+    "filters.probe_timeout_seconds": Setting(
+        5, int, 1, 60, "machine",
+        "seconds a probed filter hook may take to answer for one measurement command before ao stops asking it"),
 }
 
 _MISSING = object()

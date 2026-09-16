@@ -65,8 +65,13 @@ read an adapter's `sessions` store (#76):
 | `workspace-meta` | `dir`, `meta`, `transcript`, `workspaces`, `title`, `status` | `dir/<workspace>/<session>/meta` names the workspace paths; the newest `transcript` wins |
 | `escaped-cwd` | `dir`, `transcript` (with `{session}`) | the working directory with `/` and `.` made dashes (every other character too on Windows) is a directory under `dir` |
 
-`directives.command_hooks` (`{format: "pre-tool-use", files}`) names the settings whose hooks can
-rewrite an agent's shell commands, which `ao doctor` reports as a measurement filter (#51).
+`directives.command_hooks` (`{format: "pre-tool-use", shell_tool, project_dir_env, files}`) names
+the settings whose hooks can rewrite an agent's shell commands, which `ao doctor` reports as a
+measurement filter (#51) and asks what each does to the commands an agent measures with (#52,
+[gates.md](gates.md#a-filters-exclusions-are-proved-not-trusted)). `shell_tool` is the tool name a
+hook's matcher is tested against, and `project_dir_env` the variable the harness sets to the
+project directory for a hook. A file under `~` is user-level; ao runs no hook that a file inside
+the project names.
 
 What decides authority reads the **package's** adapters only: which directories are a harness's
 (`detect.dirs`, left out of review scope and product-dirty checks) and which stores are scanned. A

@@ -69,7 +69,63 @@ Two properties that are not negotiable:
   terminal, and runs git as the first compiled `git` on `PATH` or in the system
   directories (or `AO_GIT`), so a script standing in front of git is passed over. The
   record says how in `measured_by`. What an agent reads through its own shell can be
-  rewritten by a token-saving proxy; `ao doctor` names such a hook or wrapper.
+  rewritten by a token-saving proxy; `ao doctor` names such a hook or wrapper, and asks
+  each filter hook it may run what it does to the commands an agent measures with (below).
+
+## A filter's exclusions are proved, not trusted
+
+A token-saving filter installed as a harness hook rewrites the shell commands an agent
+runs; one reported a 5,844-line diff as 533 lines. It can stay for everything else only if
+its exclusion list leaves every measurement alone, and a configuration that says so proves
+nothing: one release of such a filter kept rewriting the commands its exclusion list named,
+because the list was read on only one of its two rewrite paths. So `ao doctor`, and
+`ao doctor --check` every fifteen minutes, ask the filter.
+
+Each hook that runs before the shell tool in a settings file an adapter declares in
+`directives.command_hooks` ([adapters.md](adapters.md)), and whose command the doctor
+recognises as a filter or whose program is in `filters.probe_programs`, is run once for each
+measurement command: `git diff` (plain, `--cached`, `--stat`, `--numstat`,
+`--cached --numstat`, `--name-only`), `git status` and `git status --porcelain`, `git log`
+and `git log --oneline`, `git show --stat`, `git rev-parse HEAD`, `git write-tree`,
+`git hash-object --stdin`, `ao status`, `ao verify`, `ao review`, `ao board`, and the `run`
+of each gate in `.ao/gates.json`. It is given the JSON the harness sends (`hook_event_name`,
+`tool_name`, `tool_input.command`, `cwd`), and its answer is read as the harness reads it:
+an `updatedInput` with another command is a rewrite, whether or not the answer also allows
+it; a `deny` or `ask` decision, `continue: false` or exit code 2 blocks the command; no
+answer, or the same command, passes it through. The command a hook answers with is never
+run.
+
+| `ao doctor` reports | when |
+|---|---|
+| exclusions in force | the hook passed every measurement command through unchanged |
+| `measurement-filter:<program>` naming each command and what it became | it rewrote or blocked any of them: add those to the filter's exclusions |
+| `measurement-filter:<program>`, not verified | the rule below does not let ao run it, or it did not answer within `filters.probe_timeout_seconds`, wrote more than 64 KiB, exited with another error or answered with something that is not JSON |
+
+Both are advisories under `ao doctor --check`: recorded for the architect, never paged.
+
+**Which hooks ao runs.** `ao doctor --check` runs on a timer with nobody watching, and a
+project's own settings file is writable by the agents ao governs: a doctor that ran what
+such a file names would run whatever an agent wrote there. ao runs a hook only when all of
+these hold, and reports any other filter as not verified, naming the rule it fails:
+
+- it is declared in a user-level settings file - one an adapter names under `~` - that does
+  not lie inside the project. No list of programs could make a project's hook safe to run:
+  a filter is itself a program that runs commands, so the words after its name matter as
+  much as the name;
+- its program is named in the machine setting `filters.probe_programs` (default `rtk`),
+  which no project can widen, and resolves - through the agents' `PATH`, leaving out any
+  directory inside the project - to an executable outside the project; no argument names a
+  path inside the project, and a batch file, which only a shell runs, is refused;
+- it needs no shell: `command` with `args`, or a command that is only words, with no `$`,
+  backquote, pipe, redirection, glob, `;`, `&` or backslash. Declare anything else as
+  `command` and `args`.
+
+It then runs without a shell, in the project directory as the harness runs it, in a process
+group of its own, given only `PATH`, the home, user, configuration, temporary and locale
+variables and the project directory variable its adapter names - no credentials, no `GIT_*` -
+and it is killed with everything it started when it does not answer in time. Name filter
+programs in `filters.probe_programs`, not interpreters or shells: `python3 -m` and `node`
+load modules from the directory they run in, which here is the project.
 
 ## A merge is gated on its result
 

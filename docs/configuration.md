@@ -75,9 +75,15 @@ machine setting written into a project.
 | `heartbeat.retired_days` | `7` | machine | days of watchdog silence after which a project counts as retired, not dead |
 | `fleet.window_reserve_pct` | `20` | machine | percent of the machine's provider window kept free before a report wake |
 | `binaries.extra_dirs` | `none` | machine | directories searched for agent binaries after PATH, before the usual install locations |
+| `filters.probe_programs` | `['rtk']` | machine | programs ao doctor may run as a user-level shell-command filter hook, to prove it leaves measurements alone |
+| `filters.probe_timeout_seconds` | `5` | machine | seconds a probed filter hook may take to answer for one measurement command before ao stops asking it |
 
 The scheduled watchdog reads `watchdog.idle_minutes` when it is installed; run
 `ao watchdog install` again after changing it. Everything else is read when it is used.
+
+The two filter settings are machine settings on purpose: they decide which programs
+`ao doctor` may run, unattended, and a project's own files are writable by the agents it
+governs ([gates.md](gates.md#a-filters-exclusions-are-proved-not-trusted)).
 
 An implementer whose tool grant admits `ao config set` could lengthen or shorten what
 governs its own review, and `ao doctor` names such a grant. Credentials - the e-mail relay

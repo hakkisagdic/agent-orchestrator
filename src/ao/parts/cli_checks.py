@@ -196,6 +196,23 @@ def doctor_problems(cfg):
             out.append(("content-drift", text))
     except Exception:
         pass
+    # A filter in front of an agent's shell is asked what it does to each measurement,
+    # not trusted to leave them alone because its configuration says so (#52).
+    try:
+        probed = A.probe_filters(root)
+    except Exception as exc:
+        probed = []
+        out.append(("measurement-filter", f"the filter probe failed ({exc}); what a filter does to a "
+                                          "measurement is not verified"))
+    filtering = {}
+    for result in probed:
+        if result["verdict"] == "in-force":
+            continue
+        hint = ("add them to the filter's exclusions" if result["changed"]
+                else "docs/gates.md says which filters ao may ask")
+        key, text = f"measurement-filter:{result['program']}", f"{A.filter_probe_text(result)} — {hint}"
+        filtering[key] = f"{filtering[key]}; {text}" if key in filtering else text
+    out.extend(filtering.items())
     # Mail is governance; a store ahead of its private copy is on one disk (#83).
     try:
         sync = A.mail_sync_state(root, cfg)

@@ -103,7 +103,7 @@
     ],
     "steering_format": "markdown, always included",
     "hooks": ".claude/settings.json (hooks key)",
-    "command_hooks": { "format": "pre-tool-use",
+    "command_hooks": { "format": "pre-tool-use", "shell_tool": "Bash", "project_dir_env": "CLAUDE_PROJECT_DIR",
                        "files": ["~/.claude/settings.json", ".claude/settings.json", ".claude/settings.local.json"] },
     "skills_dir": ".claude/skills",
     "playbook": { "path": ".claude/skills/ao/SKILL.md", "header": "frontmatter" },

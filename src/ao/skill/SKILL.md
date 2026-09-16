@@ -135,7 +135,8 @@ working, quota, problems), `ao board` (READY / running / blocked with `needs:`),
 (why the watchdog did or did not act, every measurement and verdict),
 `ao since last` (what happened while you were away), `ao digest`.
 Your shell's output may pass through a proxy that compresses it (`ao doctor` names
-one): take a size, a path list or a count from ao's records, not from the terminal.
+one, and its `measurement-filter` problem lists the measurement commands the proxy
+rewrites): take a size, a path list or a count from ao's records, not from the terminal.
 
 ## 6. Alarms: who acts
 

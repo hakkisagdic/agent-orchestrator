@@ -601,13 +601,19 @@ def _optional_features(cfg):
 
 
 def _measurement_lines(cfg):
-    """How ao measures, and what could filter the numbers an agent reads (#51)."""
+    """How ao measures, what could filter the numbers an agent reads (#51), and what each filter does to them (#52)."""
     filters = A.measurement_filters(cfg["root"])
     state = (f"{C['yellow']}{len(filters)} possible filter(s){C['reset']}" if filters
              else f"{C['green']}unfiltered{C['reset']}")
     lines = [f"{'measurement':<16}{state}  {C['dim']}ao measures with {A.git_binary()}, "
              f"the candidate without a shell{C['reset']}"]
-    return lines + [f"{'':<16}{C['dim']}{text}{C['reset']}" for text in filters]
+    lines += [f"{'':<16}{C['dim']}{text}{C['reset']}" for text in filters]
+    try:
+        probed = A.probe_filters(cfg["root"])
+    except Exception as exc:
+        return lines + [f"{'filter probe':<16}{C['yellow']}cannot tell: {exc}{C['reset']}"]
+    return lines + [f"{'filter probe':<16}{C['green'] if result['verdict'] == 'in-force' else C['yellow']}"
+                    f"{A.filter_probe_text(result)}{C['reset']}" for result in probed]
 
 
 def _review_evidence_lines(cfg):
