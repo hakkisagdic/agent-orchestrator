@@ -117,6 +117,9 @@ SETTINGS = {
     "architect.name": Setting(
         "fable", str, None, None, "project",
         "the architect's name in mail file names"),
+    "keyflip.rotation": Setting(
+        "off", str, None, None, "machine",
+        "on: before an actor starts on a spent window, keyflip rotates the machine's account; off: never"),
     "alarms.red_repeat_hours": Setting(
         6, int, 1, None, "machine",
         "hours before a red alarm that still stands e-mails again"),

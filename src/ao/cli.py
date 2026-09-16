@@ -2833,6 +2833,15 @@ def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
 
     def invoke(position, route_timeout):
         cand = chain[position]
+        headroom = A.rotate_if_exhausted(None, cand.get("argv") or [], "reviewer") \
+            if isinstance(cand, dict) else {"ok": True}
+        if not headroom["ok"]:
+            # Not spent on an exhausted window: the next route is tried (#32).
+            labels[position] = str(cand.get("id") or "reviewer")
+            failures[position] = {"ok": False, "out": "", "returncode": None, "kind": "quota",
+                                  "retryable": False, "reason": headroom["text"]}
+            print(f"{C['dim']}{labels[position]} unavailable: {headroom['text']}{C['reset']}")
+            return None
         label, binary, version, attempt = _reviewer_route_invocation(
             root, cand, prompt, route_timeout, strict, primary
         )
@@ -5272,7 +5281,9 @@ def doctor_problems(cfg):
     rv_bin = os.path.basename((rv.get("argv") or [""])[0])
     if not strict_matrix and arch_bin and arch_bin == rv_bin and not rv.get("fallbacks"):
         out.append(("shared-pool", f"architect and reviewer both run `{arch_bin}` on one quota pool and the reviewer has no "
-                                   f"fallback — add reviewer.fallbacks or use another model family"))
+                                   f"fallback — let keyflip rotate accounts before a spawn (`ao config set "
+                                   f"keyflip.rotation on --machine`), use another model family, or, on a "
+                                   f"machine without keyflip, add reviewer.fallbacks"))
     # A dependency the board cannot resolve makes READY wrong without a word (#33).
     try:
         graph_problems = A.board_graph(root)["problems"]

@@ -57,6 +57,17 @@ keyflip next --strategy best     # rotate to the account with the most headroom
 Policy: if the implementer's account is exhausted → rotate → then nudge. If no account
 has headroom → do not nudge; surface it to the human instead of burning turns.
 
+What ao does, with `keyflip.rotation` set to `on` on the machine: before it starts any actor on a
+provider keyflip manages - a reviewer route, an architect wake or refill, an implementer nudge -
+it reads that provider's window, and when it is at `quota.block_percent` it runs `keyflip next
+--strategy best` and reads again. A rotation is machine-wide and in place, so rotations run
+one at a time under a machine lock, and a window another actor already rotated is not rotated
+twice. If no account has headroom afterwards, the actor is not started: a reviewer route
+records a quota failure and the next route is tried, a wake tells a person. With rotation
+`off`, the default, ao never switches an account; `reviewer.fallbacks` stays the manual escape
+hatch for a machine without keyflip. Kiro's credits are not a keyflip account and are not
+rotated.
+
 ## Integration point 3 — which tools are actually usable here
 
 `keyflip surfaces` reports, per tool, whether an authenticated account exists —

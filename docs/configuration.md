@@ -57,6 +57,7 @@ machine setting written into a project.
 | `fanout.window_reserve_pct` | `30` | project | percent of the provider window a fan-out must leave unused |
 | `implementer.name` | `kiro` | project | the implementer's name in mail file names |
 | `architect.name` | `fable` | project | the architect's name in mail file names |
+| `keyflip.rotation` | `off` | machine | on: before an actor starts on a spent window, keyflip rotates the machine's account; off: never |
 | `alarms.red_repeat_hours` | `6` | machine | hours before a red alarm that still stands e-mails again |
 | `alarms.reset_after_hours` | `2` | machine | hours of quiet after which an alarm episode is over |
 | `quota.block_percent` | `97` | machine | a provider window used at or above this percent stops a wake or a nudge |

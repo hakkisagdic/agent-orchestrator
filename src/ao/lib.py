@@ -5597,6 +5597,55 @@ def provider_window(name="claude"):
     return None
 
 
+# ---- quota rotation is asked of keyflip, never written into config (#32) -----------------
+
+ENGINE_PROVIDERS = {"claude": "claude", "codex": "codex", "gemini": "gemini", "agent": "cursor", "copilot": "copilot"}
+
+
+def provider_of(argv):
+    """The keyflip provider an actor's argv spends, or None when keyflip does not manage it."""
+    return ENGINE_PROVIDERS.get(_program_name(argv[0])) if argv and isinstance(argv[0], str) else None
+
+
+def rotate_if_exhausted(cfg, argv, who):
+    """Before an actor starts: rotate its provider's account through keyflip when the window is spent (#32).
+
+    2026-09-07: kiro-cli hit its overage limit and every nudge failed silently for
+    an hour, and the reviewer shared one Claude window with the architect. Account
+    routing is keyflip's; ao only asks. keyflip.rotation is off unless a person
+    turns it on, because a rotation is machine-wide and in place: it moves every
+    session on that provider, so rotations are serialised under one machine lock
+    and a window another actor already rotated is not rotated again. Returns
+    {"ok", "provider", "rotated", "text"}; not ok means no account has headroom,
+    and the caller surfaces that instead of spending the attempt.
+    """
+    provider = provider_of(argv)
+    if settings.get(cfg, "keyflip.rotation") != "on" or not provider:
+        return {"ok": True, "provider": provider, "rotated": False, "text": "rotation off"}
+    ceiling = settings.get(None, "quota.block_percent")
+    window = provider_window(provider)
+    if not window or window["pct"] < ceiling:
+        return {"ok": True, "provider": provider, "rotated": False, "text": "headroom"}
+    from .storage import _exclusive_lock
+    os.makedirs(os.path.join(HOME, ".ao"), exist_ok=True)
+    with _exclusive_lock(os.path.join(HOME, ".ao", "keyflip-rotation.lock"), timeout=180):
+        window = provider_window(provider)
+        if window and window["pct"] < ceiling:
+            return {"ok": True, "provider": provider, "rotated": False, "text": "another actor rotated first"}
+        try:
+            subprocess.run(["keyflip", "next", "--strategy", "best"], stdin=subprocess.DEVNULL,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
+        except Exception as exc:                      # a rotation that cannot run is not a headroom
+            return {"ok": False, "provider": provider, "rotated": False,
+                    "text": f"{provider} window {window['pct']}% used and keyflip could not rotate: {exc}"}
+        after = provider_window(provider)
+    if after and after["pct"] < ceiling:
+        return {"ok": True, "provider": provider, "rotated": True,
+                "text": f"rotated through keyflip for the {who}: {provider} now {after['pct']}% used"}
+    return {"ok": False, "provider": provider, "rotated": True,
+            "text": f"no {provider} account has headroom after rotating for the {who}"}
+
+
 def fanout_history(root, limit=20):
     p = os.path.join(root, ".ao", "ledger", "fanouts.jsonl")
     if not os.path.exists(p):

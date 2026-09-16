@@ -835,6 +835,14 @@ def escalate(root, cfg, adapter, age, args, st):
         if resolved and held:
             print(f"held by {held.get('by')} since this cycle began; not waking the architect")
             resolved = None
+        if resolved and not args.dry_run:
+            # An exhausted window is rotated through keyflip first, when it may be (#32).
+            headroom = A.rotate_if_exhausted(cfg, argv, "architect")
+            if not headroom["ok"]:
+                print(f"{headroom['text']}; not waking the architect")
+                notify(f"{key}: no headroom", headroom["text"] + " — a person decides", root,
+                       key=f"no-headroom:{headroom['provider']}", window=6 * 3600, audience="human")
+                resolved = None
         if resolved:
             argv[0] = resolved
             os.makedirs(STATE_DIR, exist_ok=True)
@@ -1595,6 +1603,10 @@ def _cycle_impl(args, root):
                 print(f"architect command {argv[0]} not on PATH")
                 return 0
             argv[0] = resolved
+            headroom = A.rotate_if_exhausted(cfg, argv, "architect")
+            if not headroom["ok"]:
+                print(f"queue low, but {headroom['text']}")
+                return 0
             key = A.project_key(root)
             log_path = os.path.join(STATE_DIR, f"refill-{key}.log")
             if A.hold_state(root):
@@ -1782,6 +1794,10 @@ def _cycle_impl(args, root):
         # implementer keeps away from them for this turn.
         argv = [a.replace(prompt, prompt + " İnsan şu dosyaları düzenliyor, bu turda dokunma: "
                           + ", ".join(fe[:8])) if a == prompt else a for a in argv]
+    headroom = A.rotate_if_exhausted(cfg, argv, "implementer") if not args.dry_run else {"ok": True}
+    if not headroom["ok"]:
+        print(f"idle {int(age)}s · {', '.join(reasons)} · {headroom['text']}; not nudging")
+        return 0
     print(f"idle {int(age)}s · {', '.join(reasons)} · nudging")
     if args.dry_run:
         print("DRY RUN:", " ".join(argv[:4]), "…")
