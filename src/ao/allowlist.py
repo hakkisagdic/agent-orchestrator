@@ -6,6 +6,7 @@ flag that skips the only commit-time enforcement; one that grants `ao:*` grants
 command can be written as a script. So each rule is asked what it would admit,
 command by command, instead of being read for its intent.
 """
+import os
 
 # (why no actor ao runs may be granted it, the command)
 FORBIDDEN = (
@@ -100,6 +101,37 @@ def problems(argv, options=None, role=None):
         rule = next((r for r in granted if admits(r, command)), None)
         if rule:
             found.append((reason, command, rule))
+    return found
+
+
+# A reviewer reads. Tools a reviewer may use, and the Claude Code flags that keep
+# every configured MCP server from starting (#24).
+REVIEWER_TOOLS = ("Read", "Grep", "Glob")
+
+
+def reviewer_problems(argv):
+    """What a reviewer's argv can reach beyond reading, as short phrases (#24).
+
+    On 2026-09-07 a reviewer run as `claude -p … --allowedTools ""` started four MCP
+    servers and pulled several hundred tool descriptions into the review: an allow
+    list gates permissions, not which servers start. A Claude Code reviewer needs
+    `--strict-mcp-config` and no `--mcp-config`; any reviewer is refused every tool
+    and any tool that writes.
+    """
+    args = [str(arg) for arg in argv or []]
+    if not args:
+        return []
+    found = []
+    if any(arg in GRANT_ALL for arg in args):
+        found.append("it is granted every tool")
+    extra = sorted({rule.split("(", 1)[0] for rule in rules(args)} - set(REVIEWER_TOOLS))
+    if extra:
+        found.append("its allowed tools go beyond reading: " + ", ".join(extra))
+    if os.path.basename(args[0]).lower().split(".")[0] == "claude":
+        if "--strict-mcp-config" not in args:
+            found.append("it starts every configured MCP server (no --strict-mcp-config)")
+        if any(arg == "--mcp-config" or arg.startswith("--mcp-config=") for arg in args):
+            found.append("it loads MCP servers from --mcp-config")
     return found
 
 

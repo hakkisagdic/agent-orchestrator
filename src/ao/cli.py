@@ -2892,7 +2892,7 @@ def cmd_review(cfg, args):
             print(json.dumps({"reviewer": {
                 "id": "claude-reviewer", "family": "anthropic",
                 "argv": ["claude", "-p", "{prompt}", "--model", "claude-opus-5",
-                         "--allowedTools", "Read,Grep,Glob"]}}, indent=2))
+                         "--allowedTools", "Read,Grep,Glob", "--strict-mcp-config"]}}, indent=2))
             print(f"\n{C['dim']}It must not be the implementer. A model reviewing its own")
             print(f"output shares its own blind spots.{C['reset']}")
             return 1
@@ -3609,7 +3609,8 @@ def _profile_config(root, args, base):
     if "reviewer" not in cfg:
         rmodel = getattr(args, "reviewer_model", None) or _models("claude-code").get("review") or "claude-opus-5"
         cfg["reviewer"] = {"id": f"claude-reviewer-{rmodel}", "family": "anthropic",
-                           "argv": ["claude", "-p", "{prompt}", "--model", rmodel, "--allowedTools", "Read,Grep,Glob"],
+                           "argv": ["claude", "-p", "{prompt}", "--model", rmodel, "--allowedTools", "Read,Grep,Glob",
+                                    "--strict-mcp-config"],
                            "_why": "must not be the implementer; a different model where one is available"}
         added.append("reviewer")
     if "architect" not in cfg:
@@ -4505,6 +4506,11 @@ def _actor_grant_problems(cfg):
         text = AL.describe(role, name, AL.problems(argv, options, role=role))
         if text:
             out.append((f"actor-grant:{role.replace(' ', '-')}", text))
+        # A reviewer reads, and starts no MCP server it was not given (#24).
+        if role.startswith("reviewer"):
+            reach = AL.reviewer_problems(argv)
+            if reach:
+                out.append((f"reviewer-tools:{name}", f"{role} ({name}): " + "; ".join(reach)))
     return out
 
 
