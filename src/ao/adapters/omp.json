@@ -1,0 +1,25 @@
+{
+  "id": "omp", "name": "oh-my-pi", "contract": 1, "verified": "untested",
+  "disclaimer": "Written from the documented interface, not verified against an install. Flags drift; correct and open a PR.",
+  "notes": "A pi fork (can1357/oh-my-pi, npm @oh-my-pi/pi-coding-agent). Its default approval mode is already yolo. --plan <id> chooses the model of the plan role; it is not a plan mode.",
+  "sources": ["https://github.com/can1357/oh-my-pi/blob/main/docs/cli-reference.md",
+              "https://github.com/can1357/oh-my-pi/blob/main/docs/approval-mode.md",
+              "https://github.com/can1357/oh-my-pi/blob/main/docs/session.md",
+              "https://github.com/can1357/oh-my-pi/blob/main/docs/context-files.md"],
+  "send":   { "argv": ["omp", "-p", "{prompt}"], "cwd_matters": true },
+  "resume": { "argv": ["omp", "--resume", "{session}", "-p", "{prompt}"], "continue_last": ["omp", "--continue", "-p", "{prompt}"],
+              "note": "--resume takes an id prefix or a path" },
+  "options": {
+    "trust_none": ["--no-tools"],
+    "trust_none_note": "every built-in tool off",
+    "model": ["--model", "{model}"],
+    "effort": ["--thinking", "{effort}"],
+    "effort_values": ["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto"],
+    "output_json": ["--mode", "json"],
+    "trust_all": ["--approval-mode", "yolo"]
+  },
+  "transcript": { "kind": "jsonl", "path": "~/.omp/agent/sessions/{encoded_cwd}/*_{session}.jsonl", "todo": "confirm the cwd encoding and the record shape against an install" },
+  "busy": { "mtime_glob": "~/.omp/agent/sessions/*/*.jsonl", "idle_seconds": 240 },
+  "directives": { "steering_files": [".omp/AGENTS.md", ".omp/RULES.md", "AGENTS.md", "CLAUDE.md", "~/.omp/agent/AGENTS.md"],
+                  "note": "also reads other harnesses' rule files; --no-rules loads none" }
+}

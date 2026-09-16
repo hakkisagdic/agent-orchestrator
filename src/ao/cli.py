@@ -5636,6 +5636,14 @@ def doctor_problems(cfg):
         if not eligible:
             out.append((f"reviewer-ineligible:{reviewer_adapter}", f"the reviewer runs {reviewer_adapter}, which may not "
                         f"review: {why} — ao role set reviewer <adapter> --model <model>"))
+    # A configured adapter whose command this machine lacks would fail at its first spawn (#89).
+    try:
+        absent = A.absent_adapter_binaries(cfg)
+    except Exception:
+        absent = []
+    for actor, ident, binaries in absent:
+        out.append((f"adapter-binary:{actor}", f"{actor} runs the {ident} adapter, but {' or '.join(binaries)} "
+                    "is not on this machine (PATH, binaries.extra_dirs, the usual install directories)"))
     # Agent configuration checked by AgentShield's categories, natively (#14).
     try:
         for category, text in A.agent_config_findings(root):
@@ -7796,6 +7804,12 @@ def cmd_adapters(cfg, args):
         print(f"{ident:<16}{entry['source']:<9}{str(a.get('contract', A.ADAPTER_CONTRACT)):<10}{col}{verified:<12}"
               f"{C['reset']}{here:<22}{observation:<14}"
               f"{'reviewer: eligible' if eligible else C['dim'] + 'reviewer: ineligible' + C['reset']}")
+    for vendor in A.vendor_list():
+        if not vendor.get("adapter"):
+            print(f"{vendor['id']:<16}{C['dim']}{'vendor':<9}{'—':<10}{'no adapter':<12}{vendor.get('why', '')}"
+                  f"{C['reset']}")
+    for problem in A.vendor_problems():
+        print(f"{C['red']}vendor list{C['reset']}: {problem}")
     print(f"\n{C['dim']}Account detection via keyflip surfaces; it never reads the secret. Adapters load from the "
           f"package, then ~/.ao/adapters, then .ao/adapters; a later one overrides by id.{C['reset']}")
 

@@ -1,0 +1,21 @@
+{
+  "id": "droid", "name": "Factory Droid", "contract": 1, "verified": "untested",
+  "disclaimer": "Written from the documented interface, not verified against an install. Flags drift; correct and open a PR.",
+  "sources": ["https://docs.factory.ai/reference/cli-reference", "https://docs.factory.ai/droid-exec/overview",
+              "https://docs.factory.ai/harness/agents-md", "https://docs.factory.ai/harness/hooks"],
+  "send":   { "argv": ["droid", "exec", "{prompt}"], "cwd_matters": true },
+  "resume": { "argv": ["droid", "exec", "-s", "{session}", "{prompt}"], "note": "exec resumes by --session-id and still takes a prompt; --fork <id> branches instead" },
+  "options": {
+    "trust_none": null,
+    "trust_none_why": "droid exec without --auto is documented as read-only by default, but no flag states it, so a reviewer's argv cannot prove it; --restrict-tools takes the tool ids an install lists with --list-tools. Ineligible for the reviewer role until that is verified against an install.",
+    "model": ["-m", "{model}"],
+    "effort": ["-r", "{effort}"],
+    "effort_note": "under exec -r is --reasoning-effort; interactively -r is resume",
+    "output_json": ["-o", "stream-json"],
+    "trust_some": ["--auto", "{mode}"], "mode_values": ["low", "medium", "high"],
+    "trust_all": ["--skip-permissions-unsafe"]
+  },
+  "transcript": { "kind": "jsonl", "path": "~/.factory/projects/**/session.jsonl", "todo": "the path is the hooks documentation's example; confirm it against an install" },
+  "busy": { "mtime_glob": "~/.factory/projects/**/*.jsonl", "idle_seconds": 240 },
+  "directives": { "steering_files": ["AGENTS.md", "CLAUDE.md", ".factory/AGENTS.md", "~/.factory/AGENTS.md"], "note": "searched from the working directory up to the git root" }
+}

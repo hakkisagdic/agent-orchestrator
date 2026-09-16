@@ -72,3 +72,6 @@ pull request. Include the CLI version you tested against.
   agents, open read-only — a second writer corrupts the agent's own state.
 - **Record where credentials live, never their values.**
 - **`verified` is a claim about you, not the tool.** Set it to what you actually ran.
+- **Name it in `vendors.json`.** Every shipped adapter is named by one vendor there, and a vendor
+  with no adapter says why; a test fails when the list and the files disagree (#89). If the
+  command it runs is not `send.argv[0]`, declare it in `detect.binaries`.

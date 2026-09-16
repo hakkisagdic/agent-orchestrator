@@ -1,0 +1,21 @@
+{
+  "id": "reasonix", "name": "Reasonix", "contract": 1, "verified": "untested",
+  "disclaimer": "Written from the documented interface and, for -p, the source; not verified against an install. Flags drift; correct and open a PR.",
+  "notes": "esengine/DeepSeek-Reasonix, default branch main-v2, npm reasonix. -p as a switch with a positional prompt is read from internal/cli/cli_flags.go. --auto and -y are not full approval: they equal the default, workspace-write.",
+  "sources": ["https://github.com/esengine/DeepSeek-Reasonix/blob/main-v2/docs/CLI.md",
+              "https://github.com/esengine/DeepSeek-Reasonix/blob/main-v2/docs/CONFIG_PATHS.md",
+              "https://github.com/esengine/DeepSeek-Reasonix/blob/main-v2/docs/GUIDE.md"],
+  "send":   { "argv": ["reasonix", "-p", "{prompt}"], "cwd_matters": true },
+  "resume": { "argv": ["reasonix", "run", "--resume", "{session}", "{prompt}"], "note": "--resume takes an id, a path or a unique title" },
+  "options": {
+    "trust_none": ["--permission-mode=read-only"],
+    "trust_none_note": "a non-interactive read-only run refuses writes and side effects",
+    "model": ["--model", "{model}"],
+    "effort": ["--effort", "{effort}"],
+    "output_json": ["--output-format", "stream-json"],
+    "trust_all": ["--permission-mode=danger-full-access"]
+  },
+  "transcript": { "kind": "unknown", "path": "~/.reasonix/sessions/", "todo": "find the record format against an install" },
+  "busy": { "mtime_glob": "~/.reasonix/sessions/**", "idle_seconds": 240 },
+  "directives": { "steering_files": ["REASONIX.md", "AGENTS.md", "CLAUDE.md"], "note": "hierarchical; a .local.md beside one wins" }
+}

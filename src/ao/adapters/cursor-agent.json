@@ -1,6 +1,7 @@
 {
   "id": "cursor-agent", "name": "Cursor Agent CLI", "verified": "documented",
   "verified_source": "cursor.com/docs/cli (headless + using), Aug 2026 changelog",
+  "detect": { "binaries": ["agent", "cursor-agent"] },
   "important": "The invoked command is `agent`, not `cursor-agent`. The npm/binary is installed as cursor-agent but the CLI you run is `agent`. `-f`/`--force` (auto-approve) is REQUIRED for it to modify files in a headless run; without it the agent plans but changes nothing — a silent no-op that looks like failure.",
   "send":   { "argv": ["agent", "-p", "{prompt}", "--output-format", "json", "-f"] },
   "resume": { "argv": ["agent", "--resume", "{session}", "-p", "{prompt}", "--output-format", "json", "-f"] },

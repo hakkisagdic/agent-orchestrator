@@ -1,0 +1,26 @@
+{
+  "id": "hermes", "name": "Hermes Agent (Nous Research)", "contract": 1, "verified": "untested",
+  "disclaimer": "Written from the documented interface, not verified against an install. Flags drift; correct and open a PR.",
+  "notes": "-z prints only the final answer. -p is --profile, not a prompt, and -q alone on a terminal opens an interactive session. A single-query session refuses dangerous commands by default (approvals.single_query_mode: deny).",
+  "sources": ["https://hermes-agent.nousresearch.com/docs/reference/cli-commands",
+              "https://hermes-agent.nousresearch.com/docs/user-guide/sessions",
+              "https://hermes-agent.nousresearch.com/docs/user-guide/features/context-files",
+              "https://hermes-agent.nousresearch.com/docs/user-guide/security",
+              "https://hermes-agent.nousresearch.com/docs/reference/toolsets-reference"],
+  "send":   { "argv": ["hermes", "-z", "{prompt}"], "cwd_matters": true },
+  "resume": { "argv": ["hermes", "chat", "--resume", "{session}", "-Q", "-q", "{prompt}"],
+              "note": "resuming under -z is not documented; chat --resume takes an id, a title or latest" },
+  "options": {
+    "trust_none": ["--toolsets", "safe"],
+    "trust_none_note": "the safe toolset has web search, vision and image generation, and no file writing, terminal or code execution",
+    "model": ["-m", "{model}"],
+    "provider": ["--provider", "{provider}"],
+    "effort": null, "effort_why": "chat has no flag; agent.reasoning_effort in the configuration",
+    "output_json": ["--format", "stream-json"],
+    "trust_all": ["--yolo"]
+  },
+  "transcript": { "kind": "sqlite", "path": "~/.hermes/state.db", "access": "READ-ONLY. A second writer corrupts the agent's own state.", "todo": "map the schema against an install" },
+  "busy": { "mtime_file": "~/.hermes/state.db-wal", "idle_seconds": 240 },
+  "directives": { "steering_files": [".hermes.md", "HERMES.md", "AGENTS.override.md", "AGENTS.md", "CLAUDE.md", ".cursorrules"],
+                  "note": "only the first match loads, plus a global SOUL.md; --ignore-rules loads none" }
+}

@@ -383,7 +383,7 @@ def adapter_catalog(root=None):
         except OSError:
             continue
         for name in names:
-            if not name.endswith(".json"):
+            if not name.endswith(".json") or name == VENDORS_FILE:
                 continue
             path = os.path.join(directory, name)
             try:
@@ -405,6 +405,92 @@ def adapter_catalog(root=None):
 def load_adapter(adapter_id, root=None):
     entry = adapter_catalog(root).get(adapter_id)
     return {} if not entry or entry["problem"] else entry["adapter"]
+
+
+# ---- the adapter set derives from one canonical vendor list (#89) ------------------------
+
+VENDORS_FILE = "vendors.json"
+
+
+def vendor_list():
+    """Every vendor ao knows, with the adapter that drives it or why none does (#89)."""
+    try:
+        with open(os.path.join(adapters_dir(), VENDORS_FILE), encoding=UTF8) as fh:
+            vendors = json.load(fh).get("vendors")
+    except (OSError, ValueError, AttributeError):
+        return []
+    return [vendor for vendor in vendors if isinstance(vendor, dict) and vendor.get("id")] \
+        if isinstance(vendors, list) else []
+
+
+def shipped_adapter_ids():
+    """The ids of the adapters in the package itself, whatever a user or a project layers over them."""
+    ids = set()
+    try:
+        names = os.listdir(adapters_dir())
+    except OSError:
+        return ids
+    for name in names:
+        if not name.endswith(".json") or name == VENDORS_FILE:
+            continue
+        try:
+            with open(os.path.join(adapters_dir(), name), encoding=UTF8) as fh:
+                ids.add(str(json.load(fh).get("id") or name[:-5]))
+        except (OSError, ValueError, AttributeError):
+            ids.add(name[:-5])
+    return ids
+
+
+def vendor_problems():
+    """Where the shipped adapters and the vendor list disagree; empty when they agree (#89).
+
+    An adapter no vendor names, a vendor naming an adapter that is not shipped, and a
+    vendor with neither an adapter nor a reason are each an error here rather than a
+    silent gap on whichever surface met it first.
+    """
+    vendors = vendor_list()
+    if not vendors:
+        return [f"adapters/{VENDORS_FILE} is missing or unreadable"]
+    shipped = shipped_adapter_ids()
+    problems, named = [], {}
+    for vendor in vendors:
+        adapter = vendor.get("adapter")
+        if adapter:
+            if adapter in named:
+                problems.append(f"adapter {adapter} is named by both {named[adapter]} and {vendor['id']}")
+            named[adapter] = vendor["id"]
+            if adapter not in shipped:
+                problems.append(f"vendor {vendor['id']} names adapter {adapter}, which is not shipped")
+        elif not str(vendor.get("why") or "").strip():
+            problems.append(f"vendor {vendor['id']} has no adapter and no reason for having none")
+    for ident in sorted(shipped - set(named)):
+        problems.append(f"adapter {ident} is shipped, but no vendor in adapters/{VENDORS_FILE} names it")
+    return problems
+
+
+def adapter_binaries(adapter):
+    """The command names an adapter runs as: `detect.binaries` where it declares them, else what `send` runs."""
+    adapter = adapter or {}
+    declared = (adapter.get("detect") or {}).get("binaries") if isinstance(adapter.get("detect"), dict) else None
+    if isinstance(declared, list) and declared:
+        return [str(name) for name in declared if name]
+    send = adapter.get("send")
+    argv = send.get("argv") if isinstance(send, dict) else None
+    return [os.path.basename(str(argv[0]))] if isinstance(argv, list) and argv else []
+
+
+def absent_adapter_binaries(cfg):
+    """(actor, adapter, binaries) for each configured actor whose adapter's command this machine lacks (#89)."""
+    actors, _, _ = role_table(cfg)
+    out = []
+    for actor, block in sorted(actors.items()):
+        ident = block.get("adapter")
+        if not ident:
+            continue
+        names = adapter_binaries(load_adapter(ident, cfg.get("root")))
+        if names and not any(binary_candidates(name) for name in names):
+            out.append((actor, ident, names))
+    return out
 
 
 # ---- a reviewer invocation is built from its adapter (#88) --------------------------------
@@ -826,7 +912,8 @@ def tool_availability(ttl=600):
     there an authenticated account for it. keyflip already answers the second for
     a range of tools and never reads the secret itself, so ask it rather than
     reinventing credential detection — align, do not depend: if keyflip is absent
-    the CLI check still works on its own.
+    the CLI check still works on its own. Which tools and which binaries come from
+    the vendor list and the adapters, never from a table here (#89).
     """
     import shutil as _sh
     if time.time() - _SURFACES["at"] < ttl and _SURFACES["rows"]:
@@ -840,20 +927,20 @@ def tool_availability(ttl=600):
         body = line[1:].strip()
         name = re.split(r"\s{2,}", body)[0].strip().lower()
         rows[name] = {"account": line.startswith("●")}
-    alias = {"gemini cli": "gemini", "codex cli": "codex", "github copilot": "copilot",
-             "cursor": "cursor-agent", "aider": "aider", "opencode": "opencode"}
+    vendors = [vendor for vendor in vendor_list() if vendor.get("adapter")]
+    alias = {str(surface).lower(): vendor["adapter"] for vendor in vendors for surface in vendor.get("surfaces") or []}
     named = {}
     for k, v in rows.items():
         named[alias.get(k, k)] = v
-    for adapter_id, binary in (("kiro", "kiro-cli"), ("claude-code", "claude"),
-                               ("antigravity", "agy"), ("opencode", "opencode"),
-                               ("codex", "codex"), ("gemini", "gemini"),
-                               ("cursor-agent", "cursor-agent"), ("aider", "aider"),
-                               ("amp", "amp"), ("copilot", "copilot"),
-                               ("amazon-q", "q"), ("command-code", "cmd")):
-        entry = named.setdefault(adapter_id, {})
-        entry["installed"] = bool(_sh.which(binary))
-        entry["binary"] = binary
+    catalog = adapter_catalog()
+    for vendor in vendors:
+        binaries = adapter_binaries((catalog.get(vendor["adapter"]) or {}).get("adapter"))
+        if not binaries:
+            continue
+        found = next((binary for binary in binaries if _sh.which(binary)), None)
+        entry = named.setdefault(vendor["adapter"], {})
+        entry["installed"] = bool(found)
+        entry["binary"] = found or binaries[0]
     _SURFACES.update(at=time.time(), rows=named)
     return named
 

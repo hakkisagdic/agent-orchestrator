@@ -1,0 +1,21 @@
+{
+  "id": "grok", "name": "Grok CLI (superagent-ai)", "contract": 1, "verified": "untested",
+  "disclaimer": "Written from the documented interface and, where the README is silent, the source; not verified against an install. Flags drift; correct and open a PR.",
+  "notes": "A community project; its README says it is not affiliated with xAI (npm grok-dev). --model is defined in src/index.ts and absent from the README, which names GROK_MODEL instead; the session store is read from src/storage/db.ts.",
+  "sources": ["https://github.com/superagent-ai/grok-cli",
+              "https://github.com/superagent-ai/grok-cli/blob/main/src/index.ts",
+              "https://github.com/superagent-ai/grok-cli/blob/main/src/storage/db.ts"],
+  "send":   { "argv": ["grok", "-p", "{prompt}"], "cwd_matters": true },
+  "resume": { "argv": ["grok", "-s", "{session}", "-p", "{prompt}"], "continue_last": ["grok", "--session", "latest", "-p", "{prompt}"] },
+  "options": {
+    "trust_none": null,
+    "trust_none_why": "No documented read-only or tool-less mode; --sandbox isolates a run in a microVM but does not stop it writing. Ineligible for the reviewer role until one exists.",
+    "model": ["-m", "{model}"],
+    "output_json": ["--format", "json"],
+    "max_steps": ["--max-tool-rounds", "{max_steps}"],
+    "trust_all": null, "trust_all_why": "no documented approval flag"
+  },
+  "transcript": { "kind": "sqlite", "path": "~/.grok/grok.db", "access": "READ-ONLY. A second writer corrupts the agent's own state.", "todo": "map the schema against an install" },
+  "busy": { "mtime_file": "~/.grok/grok.db-wal", "idle_seconds": 240 },
+  "directives": { "steering_files": ["AGENTS.md", "AGENTS.override.md", "~/.grok/AGENTS.md"], "note": "AGENTS.md files merge from the git root down to the working directory" }
+}

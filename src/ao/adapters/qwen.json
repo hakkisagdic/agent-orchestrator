@@ -1,0 +1,21 @@
+{
+  "id": "qwen", "name": "Qwen Code", "contract": 1, "verified": "untested",
+  "disclaimer": "Written from the documented interface, not verified against an install. Flags drift; correct and open a PR.",
+  "sources": ["https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/",
+              "https://qwenlm.github.io/qwen-code-docs/en/users/configuration/settings/",
+              "https://qwenlm.github.io/qwen-code-docs/en/users/features/memory/"],
+  "send":   { "argv": ["qwen", "-p", "{prompt}"], "cwd_matters": true },
+  "resume": { "argv": ["qwen", "--resume", "{session}", "-p", "{prompt}"], "continue_last": ["qwen", "--continue", "-p", "{prompt}"],
+              "note": "--resume without an id opens an interactive picker; always pass one." },
+  "options": {
+    "trust_none": ["--approval-mode", "plan"],
+    "trust_none_note": "plan mode analyses only: it neither edits files nor runs commands",
+    "model": ["--model", "{model}"],
+    "effort": null, "effort_why": "no documented flag; reasoning effort is the model.reasoningEffort setting",
+    "output_json": ["--output-format", "stream-json"],
+    "trust_all": ["--yolo"]
+  },
+  "transcript": { "kind": "jsonl", "path": "~/.qwen/projects/{sanitized_cwd}/chats", "todo": "confirm how the cwd is sanitised and the record shape against an install" },
+  "busy": { "mtime_glob": "~/.qwen/projects/*/chats/*", "idle_seconds": 240 },
+  "directives": { "steering_files": ["QWEN.md", "AGENTS.md", ".qwen/QWEN.local.md", "~/.qwen/QWEN.md"], "note": "the file name follows context.fileName" }
+}

@@ -1,0 +1,22 @@
+{
+  "id": "pi", "name": "pi coding agent", "contract": 1, "verified": "untested",
+  "disclaimer": "Written from the documented interface, not verified against an install. Flags drift; correct and open a PR.",
+  "notes": "badlogic/pi-mono now redirects to earendil-works/pi (npm @earendil-works/pi-coding-agent). pi has no permission prompts by design. -p is a switch and the prompt is positional.",
+  "sources": ["https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md"],
+  "send":   { "argv": ["pi", "-p", "{prompt}"], "cwd_matters": true },
+  "resume": { "argv": ["pi", "--session", "{session}", "-p", "{prompt}"], "continue_last": ["pi", "--continue", "-p", "{prompt}"],
+              "note": "--session takes a path or a partial id" },
+  "options": {
+    "trust_none": ["--tools", "read,grep,find,ls"],
+    "trust_none_note": "the README's read-only example; --no-tools removes every tool",
+    "model": ["--model", "{model}"],
+    "provider": ["--provider", "{provider}"],
+    "effort": ["--thinking", "{effort}"],
+    "effort_values": ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+    "output_json": ["--mode", "json"],
+    "trust_all": null, "trust_all_why": "there are no permission prompts to skip"
+  },
+  "transcript": { "kind": "jsonl", "path": "~/.pi/agent/sessions/", "note": "kept per working directory; --session-dir moves it", "todo": "confirm the layout and the record shape against an install" },
+  "busy": { "mtime_glob": "~/.pi/agent/sessions/**/*.jsonl", "idle_seconds": 240 },
+  "directives": { "steering_files": ["AGENTS.override.md", "AGENTS.md", "CLAUDE.md", "~/.pi/agent/AGENTS.md"], "note": "--no-context-files loads none" }
+}

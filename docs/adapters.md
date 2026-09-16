@@ -61,31 +61,50 @@ would break a third party's adapter breaks ours first.
 
 ## Support matrix
 
-`full` = every capability verified against a running install.
-`partial` = command surface verified, transcript store not yet mapped.
-`planned` = interface known, not yet written.
+One row per vendor in [`adapters/vendors.json`](../src/ao/adapters/vendors.json), the canonical list every
+surface derives from (#89); a test fails when this table, the list and the shipped adapters disagree.
 
-| CLI | Send | Resume | Transcript | Busy | Directives | Status |
-|---|---|---|---|---|---|---|
-| Kiro CLI | ✓ | ✓ | ✓ JSONL | ✓ | steering + hooks | **full** |
-| Claude Code | ✓ | ✓ | ✓ JSONL | ✓ | CLAUDE.md + hooks | **full** |
-| Antigravity (`agy`) | ✓ | ✓ | ✓ call-return | ✓ | — | **full** |
-| opencode | ✓ | ? | SQLite | ? | — | partial |
-| Codex CLI | | | | | | planned |
-| Gemini CLI | | | | | | planned |
-| Cursor Agent (`agent`) | ✓ | ✓ | ✓ call-return | ✓ | .cursor/rules | documented |
-| Command Code (`cmd`) | ✓ | ✓ | ✓ JSONL | ✓ | AGENTS.md | partial |
-| Codex CLI | | | | | | planned |
-| Gemini CLI | | | | | | planned |
-| DeepSeek | | | | | | planned |
-| Qoder | | | | | | planned |
-| Aider | | | | | | planned |
-| Amp | | | | | | planned |
-| GitHub Copilot CLI | | | | | | planned |
-| Amazon Q CLI | | | | | | planned |
+`full` = every capability verified against a running install. `partial` = the command surface or the store
+verified, not both. `documented` and `untested` = written from the tool's own documentation and not run here;
+the adapter says so in its `disclaimer`. **Reviewer** is whether the adapter can run without write tools
+(`options.trust_none`, #88); an ineligible one says why.
 
-Contributions that move a row from `planned` to `full` are the most valuable thing you
-can send this project. See [`adapters/README.md`](../src/ao/adapters/README.md).
+| Vendor | Adapter | Verified | Reviewer | Note |
+|---|---|---|---|---|
+| `claude` | `claude-code` | full | eligible | Claude Code |
+| `codex` | `codex` | untested | ineligible | OpenAI Codex CLI |
+| `opencode` | `opencode` | partial | ineligible | opencode |
+| `traycer` | — | — | — | no adapter: an orchestrator of agents, as ao is, not an agent ao drives |
+| `cursor` | `cursor-agent` | documented | ineligible | Cursor Agent CLI |
+| `grok` | `grok` | untested | ineligible | Grok CLI (superagent-ai) |
+| `qwen` | `qwen` | untested | eligible | Qwen Code |
+| `kiro` | `kiro` | full | eligible | Kiro CLI |
+| `droid` | `droid` | untested | ineligible | Factory Droid |
+| `kimi` | `kimi` | untested | ineligible | Kimi Code CLI |
+| `copilot` | `copilot` | untested | ineligible | GitHub Copilot CLI |
+| `kilocode` | `kilocode` | untested | eligible | Kilo Code CLI |
+| `openrouter` | — | — | — | no adapter: a model router reached through a harness that takes provider/model, such as opencode or kilocode; not a harness itself |
+| `amp` | `amp` | untested | ineligible | Amp (Sourcegraph) |
+| `devin` | — | — | — | no adapter: a hosted agent with no local command line; the pull requests it opens are observed through cloud-generic |
+| `pi` | `pi` | untested | eligible | pi coding agent |
+| `hermes` | `hermes` | untested | eligible | Hermes Agent (Nous Research) |
+| `omp` | `omp` | untested | eligible | oh-my-pi |
+| `huggingface` | — | — | — | no adapter: a model hub and inference provider reached through a harness, not a harness |
+| `reasonix` | `reasonix` | untested | eligible | Reasonix |
+| `antigravity` | `antigravity` | full | ineligible | Antigravity CLI (agy) |
+| `aider` | `aider` | untested | ineligible | Aider |
+| `amazon-q` | `amazon-q` | untested | ineligible | Amazon Q Developer CLI |
+| `command-code` | `command-code` | partial | ineligible | Command Code (cmd) |
+| `deepseek` | `deepseek` | untested | ineligible | DeepSeek harness / CLI |
+| `gemini` | `gemini` | untested | ineligible | Google Gemini CLI |
+| `ollama` | `ollama` | untested | ineligible | Ollama (local models) |
+| `qoder` | `qoder` | untested | ineligible | Qoder CLI |
+| `trae` | `trae` | untested | ineligible | Trae Agent (ByteDance) |
+| `cloud` | `cloud-generic` | partial | ineligible | Generic cloud agent (pull-request delivered) |
+
+The first twenty-one rows are Traycer's canonical enum, the coverage this list is measured
+against; the rest are harnesses ao shipped before it. Moving a row to `full` is the most valuable
+contribution this project can take. See [`adapters/README.md`](../src/ao/adapters/README.md).
 
 ## Two observation modes
 

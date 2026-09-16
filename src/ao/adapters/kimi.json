@@ -1,0 +1,21 @@
+{
+  "id": "kimi", "name": "Kimi Code CLI", "contract": 1, "verified": "untested",
+  "disclaimer": "Written from the documented interface, not verified against an install. Flags drift; correct and open a PR.",
+  "notes": "The kimi binary belongs to Kimi Code CLI (MoonshotAI/kimi-code); the older kimi-cli's README says it is being wound down in its favour. The older CLI's flags differ: there -c is --command, not continue, and --print approves every tool.",
+  "sources": ["https://moonshotai.github.io/kimi-code/en/reference/kimi-command",
+              "https://moonshotai.github.io/kimi-code/en/configuration/data-locations",
+              "https://moonshotai.github.io/kimi-code/en/customization/agents"],
+  "send":   { "argv": ["kimi", "-p", "{prompt}"], "cwd_matters": true },
+  "resume": { "argv": ["kimi", "--session", "{session}", "-p", "{prompt}"], "continue_last": ["kimi", "--continue", "-p", "{prompt}"] },
+  "options": {
+    "trust_none": null,
+    "trust_none_why": "--prompt runs under the auto permission policy, and --plan, the read-only mode, is refused together with --prompt; no headless read-only mode is documented. Ineligible for the reviewer role.",
+    "model": ["--model", "{model}"],
+    "effort": null, "effort_why": "no flag; [thinking] effort in the configuration",
+    "output_json": ["--output-format", "stream-json"],
+    "trust_all": null, "trust_all_why": "--yolo and --auto are refused together with --prompt, which already runs under auto"
+  },
+  "transcript": { "kind": "jsonl", "path": "~/.kimi-code/sessions/{workdir_key}/{session}/agents/main/wire.jsonl", "todo": "confirm the work-directory key, the session index and the record shape against an install" },
+  "busy": { "mtime_file": "wire.jsonl", "idle_seconds": 240 },
+  "directives": { "steering_files": ["AGENTS.md", ".kimi-code/AGENTS.md", "~/.kimi-code/AGENTS.md", "~/.agents/AGENTS.md"] }
+}

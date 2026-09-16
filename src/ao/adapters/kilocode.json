@@ -1,0 +1,25 @@
+{
+  "id": "kilocode", "name": "Kilo Code CLI", "contract": 1, "verified": "untested",
+  "disclaimer": "Written from the documented interface, not verified against an install. Flags drift; correct and open a PR.",
+  "notes": "An opencode fork (Kilo-Org/kilocode, npm @kilocode/cli). The command is kilo, with kilocode as an alias.",
+  "sources": ["https://kilo.ai/docs/code-with-ai/platforms/cli", "https://kilo.ai/docs/code-with-ai/platforms/cli-reference",
+              "https://kilo.ai/docs/code-with-ai/agents/using-agents", "https://kilo.ai/docs/code-with-ai/agents/session-history",
+              "https://kilo.ai/docs/customize/agents-md"],
+  "detect": { "binaries": ["kilo", "kilocode"] },
+  "send":   { "argv": ["kilo", "run", "{prompt}"], "cwd_matters": true },
+  "resume": { "argv": ["kilo", "run", "-s", "{session}", "{prompt}"],
+              "note": "the CLI page says --continue takes neither a prompt nor --auto while the generated reference lists both under kilo run; resume by id instead" },
+  "options": {
+    "trust_none": ["--agent", "ask"],
+    "trust_none_note": "the ask agent blocks every write",
+    "model": ["-m", "{model}"], "model_format": "provider/model",
+    "effort": ["--variant", "{effort}"], "effort_note": "a provider-specific reasoning effort",
+    "output_json": ["--format", "json"],
+    "trust_all": ["--auto"],
+    "trust_all_note": "without --auto a non-interactive run refuses every permission request"
+  },
+  "transcript": { "kind": "sqlite", "path": "~/.local/share/kilo/kilo.db", "locate": ["kilo", "db", "path"],
+                  "access": "READ-ONLY. A second writer corrupts the agent's own state.", "todo": "map the schema against an install" },
+  "busy": { "mtime_file": "~/.local/share/kilo/kilo.db-wal", "idle_seconds": 240 },
+  "directives": { "steering_files": ["AGENTS.md", "AGENT.md"], "note": "AGENTS.md files in subdirectories load as they are reached" }
+}
