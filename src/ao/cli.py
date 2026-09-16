@@ -702,6 +702,10 @@ def cmd_commit_ok(cfg, args):
     if not candidate["changed_paths"]:
         reasons.append("no staged candidate — stage exactly what you intend to commit")
     reasons.extend(A.candidate_issue_messages(issues))
+    if issues.get("worktree_noise"):
+        # Listed, never fatal: no declared gate reads these paths (#16).
+        print(f"{C['dim']}worktree noise, outside the candidate and every gate's inputs: "
+              f"{', '.join(issues['worktree_noise'])}{C['reset']}")
     if ver_problem:
         reasons.append(f"verification ledger is unreadable: {ver_problem}")
     elif not ver:

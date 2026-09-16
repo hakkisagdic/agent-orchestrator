@@ -1929,9 +1929,42 @@ def review_context_line(context):
     return line
 
 
-def candidate_worktree_issues(root, cfg, candidate=None):
-    """State that would make gates execute bytes other than the staged candidate."""
+def gate_inputs(root):
+    """The paths the declared gates read, as globs, or None for the whole tree (#16).
+
+    A gate may name its `inputs`. Only when every gate in `.ao/gates.json` does can
+    a dirty path outside all of them be known not to reach a gate; one gate without
+    inputs reads the whole tree, and so does a file that cannot be read.
+    """
+    try:
+        with open(os.path.join(root, ".ao", "gates.json"), encoding=UTF8) as fh:
+            spec = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    gates = spec.get("gates") if isinstance(spec, dict) else None
+    if not isinstance(gates, dict) or not gates:
+        return None
+    globs = set()
+    for gate in gates.values():
+        declared = gate.get("inputs") if isinstance(gate, dict) else None
+        if not isinstance(declared, list) or not declared \
+                or not all(isinstance(item, str) and item.strip() for item in declared):
+            return None
+        globs.update(item.strip() for item in declared)
+    return sorted(globs)
+
+
+def candidate_worktree_issues(root, cfg, candidate=None, inputs="declared"):
+    """State that would make gates execute bytes other than the staged candidate.
+
+    Only a dirty path that is part of the candidate or that a gate reads refuses (#16).
+    On 2026-09-06 seven untracked files outside the slice withheld commit authority
+    until a person moved them. A path no gate reads is listed as `worktree_noise`,
+    never fatal; while any gate declares no inputs, every dirty path counts.
+    """
     candidate = candidate or index_candidate(root)
+    if inputs == "declared":
+        inputs = gate_inputs(root)
     unstaged = {
         os.fsdecode(raw)
         for raw in _git_output(
@@ -1949,10 +1982,18 @@ def candidate_worktree_issues(root, cfg, candidate=None):
     coordination = {
         path for path in candidate["changed_paths"] if _is_coordination_path(path, cfg)
     }
+    if inputs is None:
+        noise = set()
+    else:
+        import fnmatch
+        mine = set(candidate["changed_paths"])
+        noise = {path for path in unstaged | untracked
+                 if path not in mine and not any(fnmatch.fnmatchcase(path, glob) for glob in inputs)}
     return {
-        "unstaged": sorted(unstaged, key=os.fsencode),
-        "untracked": sorted(untracked, key=os.fsencode),
+        "unstaged": sorted(unstaged - noise, key=os.fsencode),
+        "untracked": sorted(untracked - noise, key=os.fsencode),
         "staged_coordination": sorted(coordination, key=os.fsencode),
+        "worktree_noise": sorted(noise, key=os.fsencode),
     }
 
 

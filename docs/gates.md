@@ -22,6 +22,13 @@ profiles:
 Declared once, in the repository, so a gate is not something the orchestrator improvises
 differently each time it asks.
 
+A gate may declare the paths it reads as `inputs`, a list of globs (`"inputs": ["src/**", "tests/**"]`).
+An unstaged or untracked path refuses verification and commit authority only when it is part of
+the staged candidate or a gate reads it; when **every** gate declares inputs, a dirty path outside
+all of them is listed as `worktree_noise` instead. One gate without inputs reads the whole tree,
+and then every dirty path counts, as before. Inputs are part of the gate definitions a
+verification is bound to, so narrowing them after `ao verify` withdraws its authority.
+
 ## The artifact sweep earns its place
 
 That fifth gate looks like housekeeping and is not. In the source run, fault-injection
