@@ -153,7 +153,7 @@ def test_cycle_previews_and_persists_quota_ladder_until_reset(
         email, "send", lambda title, body, target: mailed.append((title, target)) or True,
     )
     monkeypatch.setattr(A, "session_paths", lambda cfg: (str(transcript), None))
-    monkeypatch.setattr(A, "load_adapter", lambda name: {})
+    monkeypatch.setattr(A, "load_adapter", lambda name, root=None: {})
     monkeypatch.setattr(A, "architect_present", lambda target, architect=None: False)
     monkeypatch.setattr(A, "agent_pids", lambda target, adapter: [])
     monkeypatch.setattr(A, "foreign_edits", lambda target, cfg: [])
@@ -267,7 +267,7 @@ def test_dry_cycle_escalation_has_no_alarm_or_channel_side_effects(
         email, "send", lambda title, body, target: mailed.append((title, target)) or True,
     )
     monkeypatch.setattr(A, "session_paths", lambda cfg: (str(transcript), None))
-    monkeypatch.setattr(A, "load_adapter", lambda name: {})
+    monkeypatch.setattr(A, "load_adapter", lambda name, root=None: {})
     monkeypatch.setattr(A, "heartbeat", unexpected)
     monkeypatch.setattr(A, "reconcile_mail_ledger", unexpected)
     monkeypatch.setattr(A, "record_progress", unexpected)

@@ -1269,7 +1269,7 @@ def _cycle_impl(args, root):
     if not impl:
         print("no implementer session; nothing to watch")
         return 0
-    adapter = A.load_adapter(impl.get("adapter", ""))
+    adapter = A.load_adapter(impl.get("adapter", ""), root)
     msgs, _ = A.session_paths(cfg)
     if not msgs or not os.path.exists(msgs):
         print("no transcript; nothing to watch")

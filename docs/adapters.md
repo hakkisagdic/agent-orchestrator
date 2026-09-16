@@ -16,6 +16,29 @@ provider-specific lives here; the orchestrator core knows nothing about any vend
 An adapter with only `send` is still useful — you lose observation and safe injection,
 not the protocol.
 
+## Shipping an adapter without forking
+
+Adapters load from three places, each overriding the one before by `id`: the package, then
+`~/.ao/adapters/`, then the project's `.ao/adapters/`. Supporting a new harness is a JSON file,
+not a change to ao and a wait for a release.
+
+```bash
+ao adapters                          # each adapter, its source, contract and verification
+ao adapters validate my-harness.json # what a candidate is missing, before anyone relies on it
+ao adapters conform my-harness       # run send and resume through a fixture harness
+```
+
+An adapter declares `"contract": 1`, the adapter contract this ao implements. One declaring
+another contract is listed as refused, with both versions named, and never loaded half-way.
+`validate` checks the fields every adapter needs - `id`, `name`, `verified`, `contract`, and a
+`send.argv` carrying `{prompt}` in exactly one argument - and that `resume.argv` carries
+`{session}` and uses only placeholders ao fills. `conform` runs `send` and `resume` with the
+harness binary replaced by a fixture that records what it was given, and passes only when the
+prompt, with spaces, quotes, `=` signs and a line break, arrives whole in one argument and,
+where `resume` takes a session id, the session arrives too; `transcript`, `busy` and `directives` are reported as declared or absent.
+ao's own tests run every shipped adapter through the same conformance, so a change in ao that
+would break a third party's adapter breaks ours first.
+
 ## Support matrix
 
 `full` = every capability verified against a running install.

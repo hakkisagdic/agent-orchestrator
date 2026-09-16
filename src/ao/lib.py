@@ -344,9 +344,138 @@ def write_project_config(root, text):
     replace_file_durably(os.path.join(root, ".ao", "config.json"), text.encode(UTF8))
 
 
-def load_adapter(adapter_id):
-    p = os.path.join(adapters_dir(), f"{adapter_id}.json")
-    return json.load(open(p, encoding=UTF8)) if os.path.exists(p) else {}
+# ---- adapters load from outside the package too (#77) ------------------------------------
+
+ADAPTER_CONTRACT = 1
+ADAPTER_VERIFIED = ("full", "partial", "documented", "untested", "planned")
+ADAPTER_PLACEHOLDERS = ("prompt", "session", "model", "effort", "mode", "cwd", "escaped_cwd", "workspace_hash",
+                        "timeout", "tools", "schema", "max_steps", "provider", "name", "n", "tokens", "dir", "path",
+                        "agent", "agent_login", "branch", "issue", "lane", "pr", "url")
+
+
+def adapter_layers(root=None):
+    """[(source, directory)] searched for adapters, lowest first: the package, the user's, the project's (#77)."""
+    layers = [("package", adapters_dir()),
+              ("user", os.environ.get("AO_USER_ADAPTERS") or os.path.join(HOME, ".ao", "adapters"))]
+    if root:
+        layers.append(("project", os.path.join(root, ".ao", "adapters")))
+    return layers
+
+
+def adapter_catalog(root=None):
+    """{id: {"source", "path", "adapter", "problem"}} for every adapter found, a later layer overriding by id.
+
+    An adapter that declares a contract this ao does not implement is listed with
+    the problem and never loaded half-way.
+    """
+    found = {}
+    for source, directory in adapter_layers(root):
+        try:
+            names = sorted(os.listdir(directory))
+        except OSError:
+            continue
+        for name in names:
+            if not name.endswith(".json"):
+                continue
+            path = os.path.join(directory, name)
+            try:
+                with open(path, encoding=UTF8) as fh:
+                    adapter = json.load(fh)
+            except (OSError, ValueError) as exc:
+                found[name[:-5]] = {"source": source, "path": path, "adapter": {}, "problem": f"unreadable: {exc}"}
+                continue
+            if not isinstance(adapter, dict):
+                continue
+            ident = str(adapter.get("id") or name[:-5])
+            contract = adapter.get("contract", ADAPTER_CONTRACT)
+            problem = None if contract == ADAPTER_CONTRACT else (
+                f"declares adapter contract {contract!r}; this ao implements contract {ADAPTER_CONTRACT}")
+            found[ident] = {"source": source, "path": path, "adapter": adapter, "problem": problem}
+    return found
+
+
+def load_adapter(adapter_id, root=None):
+    entry = adapter_catalog(root).get(adapter_id)
+    return {} if not entry or entry["problem"] else entry["adapter"]
+
+
+def validate_adapter(adapter):
+    """What an adapter is missing or gets wrong, before anyone relies on it (#77)."""
+    problems = []
+    if not isinstance(adapter, dict):
+        return ["an adapter is a JSON object"]
+    for field in ("id", "name", "verified"):
+        if not isinstance(adapter.get(field), str) or not adapter[field].strip():
+            problems.append(f"`{field}` is missing")
+    if adapter.get("verified") and adapter["verified"] not in ADAPTER_VERIFIED:
+        problems.append(f"`verified` is {adapter['verified']!r}; one of {', '.join(ADAPTER_VERIFIED)}")
+    if "contract" not in adapter:
+        problems.append(f"`contract` is missing; this ao implements contract {ADAPTER_CONTRACT}")
+    elif adapter["contract"] != ADAPTER_CONTRACT:
+        problems.append(f"declares contract {adapter['contract']!r}; this ao implements contract {ADAPTER_CONTRACT}")
+    for capability in ("send", "resume"):
+        block = adapter.get(capability)
+        if block is None:
+            if capability == "send":
+                problems.append("`send` is missing: an adapter must say how to run one prompt")
+            continue
+        argv = (block or {}).get("argv") if isinstance(block, dict) else None
+        if not isinstance(argv, list) or not argv or not all(isinstance(a, str) for a in argv):
+            problems.append(f"`{capability}.argv` must be a list of strings")
+            continue
+        if sum("{prompt}" in a for a in argv) != 1:
+            problems.append(f"`{capability}.argv` must carry {{prompt}} in exactly one argument")
+        if capability == "resume" and not any("{session}" in a for a in argv):
+            problems.append("`resume.argv` must carry {session}")
+        unknown = sorted({p for a in argv for p in re.findall(r"\{([a-z_]+)\}", a)} - set(ADAPTER_PLACEHOLDERS))
+        if unknown:
+            problems.append(f"`{capability}.argv` uses placeholders ao does not fill: {', '.join(unknown)}")
+    return problems
+
+
+def conform_adapter(adapter, harness, workdir):
+    """Run an adapter's send and resume through a fixture harness: does each prompt and session arrive whole? (#77)
+
+    Returns [(capability, "pass" | "fail" | "absent", detail)] for the five capabilities.
+    """
+    results = []
+    prompt = "conformance prompt: spaces, 'quotes', \"double\", = signs and a\nsecond line"
+    for capability in ("send", "resume"):
+        argv = ((adapter.get(capability) or {}).get("argv") if isinstance(adapter.get(capability), dict) else None)
+        if not argv:
+            results.append((capability, "absent", "not declared"))
+            continue
+        rendered = [harness] + [a.replace("{prompt}", prompt).replace("{session}", "sess-conformance")
+                                for a in argv[1:]]
+        record = os.path.join(workdir, f"{capability}.json")
+        try:
+            subprocess.run(rendered, cwd=workdir, env=dict(os.environ, AO_HARNESS_RECORD=record), timeout=30,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            with open(record, encoding=UTF8) as fh:
+                received = json.load(fh)["argv"]
+        except (OSError, ValueError, KeyError, subprocess.TimeoutExpired) as exc:
+            results.append((capability, "fail", f"the harness did not run: {exc}"))
+            continue
+        whole = [a for a in received if a == prompt or a.endswith("=" + prompt)]
+        if len(whole) != 1:
+            results.append((capability, "fail", "the prompt did not arrive whole in exactly one argument"))
+        elif capability == "resume" and any("{session}" in a for a in argv) \
+                and not any("sess-conformance" in a for a in received):
+            results.append((capability, "fail", "the session did not arrive"))
+        elif capability == "resume" and not any("{session}" in a for a in argv):
+            results.append((capability, "pass", "prompt whole; it resumes the most recent session, no id"))
+        else:
+            results.append((capability, "pass", f"{len(received)} argument(s), prompt whole"))
+    for capability in ("transcript", "busy", "directives"):
+        block = adapter.get(capability)
+        if not block:
+            results.append((capability, "absent", "not declared"))
+        elif capability == "transcript" and block.get("kind") not in ("jsonl", "sqlite", "json", "markdown",
+                                                                        "call-return", "unknown", None):
+            results.append((capability, "fail", f"unknown transcript kind {block.get('kind')!r}"))
+        else:
+            results.append((capability, "pass", "declared"))
+    return results
 
 
 # ── shell ─────────────────────────────────────────────────────────────────────

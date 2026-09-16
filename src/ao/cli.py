@@ -32,7 +32,7 @@ C = A.C
 def _ctx(cfg):
     root = cfg["root"]
     impl = cfg.get("implementer") or {}
-    adapter = A.load_adapter(impl.get("adapter", "")) if impl else {}
+    adapter = A.load_adapter(impl.get("adapter", ""), root) if impl else {}
     return root, impl, adapter
 
 
@@ -7351,34 +7351,59 @@ def cmd_projects(cfg, args):
 
 
 def cmd_adapters(cfg, args):
-    d = A.adapters_dir()
-    rows = []
-    for f in sorted(os.listdir(d)):
-        if not f.endswith(".json") or f == "cloud-generic.json":
-            continue
-        try:
-            a = __import__("json").load(open(os.path.join(d, f), encoding=UTF8))
-        except Exception:
-            continue
-        rows.append((a.get("id", f), a.get("verified", "?"),
-                     "call-return" if a.get("observation_mode") == "call-return"
-                     else (a.get("transcript", {}) or {}).get("kind", "—")))
-    avail = A.tool_availability()
-    print(f"{'adapter':<16}{'verified':<12}{'on this machine':<22}observation")
-    for r in rows:
-        col = C["green"] if r[1] == "full" else C["yellow"] if r[1] == "partial" else C["dim"]
-        a = avail.get(r[0], {})
-        if a.get("installed") and a.get("account"):
-            here = f"{C['green']}installed + account{C['reset']}"
-        elif a.get("installed"):
-            here = f"{C['green']}installed{C['reset']}"
-        elif a.get("account"):
-            here = f"{C['yellow']}account, no CLI{C['reset']}"
+    """Every adapter ao can load, where it came from, and whether a candidate is sound (#77)."""
+    root = cfg["root"]
+    action = getattr(args, "action", None) or "list"
+    if action in ("validate", "conform"):
+        target = getattr(args, "target", None)
+        catalog = A.adapter_catalog(root)
+        if target in catalog:
+            adapter = catalog[target]["adapter"]
         else:
-            here = f"{C['dim']}—{C['reset']}"
-        pad = 22 - len(A.re.sub(r"\033\[[0-9;]*m", "", here))
-        print(f"{r[0]:<16}{col}{r[1]:<12}{C['reset']}{here}{' ' * max(1, pad)}{r[2]}")
-    print(f"\n{C['dim']}Account detection via keyflip surfaces; it never reads the secret.{C['reset']}")
+            try:
+                with open(target or "", encoding=UTF8) as fh:
+                    adapter = json.load(fh)
+            except (OSError, ValueError) as exc:
+                print(f"{C['red']}no adapter {target}{C['reset']}: {exc}")
+                return 2
+        if action == "validate":
+            problems = A.validate_adapter(adapter)
+            for problem in problems:
+                print(f"  {C['red']}·{C['reset']} {problem}")
+            print(f"{C['green']}sound{C['reset']}" if not problems else f"{len(problems)} problem(s)")
+            return 1 if problems else 0
+        import tempfile
+        harness = os.path.join(os.path.dirname(A.__file__), "conformance_harness.py")
+        with tempfile.TemporaryDirectory(prefix="ao-conform-") as workdir:
+            shim = os.path.join(workdir, "harness")
+            with open(shim, "w", encoding=UTF8) as fh:
+                fh.write(f"#!{sys.executable}\n" + open(harness, encoding=UTF8).read())
+            os.chmod(shim, 0o755)
+            results = A.conform_adapter(adapter, shim, workdir)
+        for capability, state, detail in results:
+            tone = C["green"] if state == "pass" else C["red"] if state == "fail" else C["dim"]
+            print(f"  {capability:<11} {tone}{state}{C['reset']}  {C['dim']}{detail}{C['reset']}")
+        return 1 if any(state == "fail" for _, state, _ in results) else 0
+    avail = A.tool_availability()
+    print(f"{'adapter':<16}{'source':<9}{'contract':<10}{'verified':<12}{'on this machine':<22}observation")
+    for ident, entry in sorted(A.adapter_catalog(root).items()):
+        a = entry["adapter"]
+        if ident == "cloud-generic":
+            continue
+        if entry["problem"]:
+            print(f"{ident:<16}{entry['source']:<9}{C['red']}refused{C['reset']}  {entry['problem']}")
+            continue
+        verified = a.get("verified", "?")
+        col = C["green"] if verified == "full" else C["yellow"] if verified == "partial" else C["dim"]
+        have = avail.get(ident, {})
+        here = ("installed + account" if have.get("installed") and have.get("account") else "installed"
+                if have.get("installed") else "account, no CLI" if have.get("account") else "—")
+        observation = "call-return" if a.get("observation_mode") == "call-return" \
+            else (a.get("transcript", {}) or {}).get("kind", "—")
+        print(f"{ident:<16}{entry['source']:<9}{str(a.get('contract', A.ADAPTER_CONTRACT)):<10}{col}{verified:<12}"
+              f"{C['reset']}{here:<22}{observation}")
+    print(f"\n{C['dim']}Account detection via keyflip surfaces; it never reads the secret. Adapters load from the "
+          f"package, then ~/.ao/adapters, then .ao/adapters; a later one overrides by id.{C['reset']}")
 
 
 def _optional_features(cfg):
@@ -8227,7 +8252,10 @@ def main():
     sr.add_argument("action", choices=["list", "status", "import"], nargs="?", default="status")
     sr.set_defaults(fn=cmd_source)
     sub.add_parser("projects", help="workspaces with a local agent session").set_defaults(fn=cmd_projects)
-    sub.add_parser("adapters", help="adapter registry and verification status").set_defaults(fn=cmd_adapters)
+    adp = sub.add_parser("adapters", help="adapter registry: list, validate a candidate, run conformance")
+    adp.add_argument("action", nargs="?", choices=["list", "validate", "conform"], default="list")
+    adp.add_argument("target", nargs="?", help="an adapter id or a JSON file")
+    adp.set_defaults(fn=cmd_adapters)
     dr = sub.add_parser("doctor", help="check this workspace's wiring")
     dr.add_argument("--check", action="store_true",
                     help="quiet: one line per problem, exit 1 if any; pages nobody without --notify")
