@@ -153,6 +153,14 @@ in different hands, which is the only reason the decision is worth anything.
 reviewing its own output shares its own blind spots. Where only one engine is available,
 the reviewer must at least run a different model family.
 
+Who reviewed, the verdict and the counts are read from the evidence line ao writes into
+the artefact, never from its text, where the implementer's boundary also appears. Without
+a capability matrix a reviewer is the implementer when its id is the implementer's
+session id (`auto` resolved the way the watchdog resumes it) or its command carries that
+id as an argument. Such a route is never run, and `ao commit-ok` refuses a review that
+records one. A label is not an identity: a reviewer called `s10` is not the implementer
+`s1`, and one called `independent-auditor` that resumes `s1` is.
+
 The same applies to `verifier ≠ implementer`.
 
 ## 5. Trust flags are a decision, not a default

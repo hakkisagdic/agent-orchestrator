@@ -67,6 +67,7 @@ def _write_approved_review(project, tree=None, candidate=None):
             "diff_digest": "sha256:" + hashlib.sha256(
                 A.candidate_diff(root, candidate, scope)
             ).hexdigest(),
+            "reviewer": {"id": "independent-reviewer", "family": "independent", "fallback": False},
         }))
     lines.extend([
         "- reviewer: `independent-reviewer`",

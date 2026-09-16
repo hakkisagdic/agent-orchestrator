@@ -2936,13 +2936,19 @@ def reviews(root, reviews_dir, limit=4):
         try:
             body = open(os.path.join(d, f), errors="ignore", encoding=UTF8).read()
             verdict = _review_verdict(body)
+            evidence = review_evidence(body)
+            # ao records the verdict it adjudicated in the evidence line too; a
+            # margin verdict that disagrees was changed after ao wrote it (#60).
+            if isinstance(evidence, dict) and "verdict" in evidence \
+                    and evidence["verdict"] != verdict:
+                verdict = "INVALID"
             # Preserve legacy one-line quota/auth artifacts written before reviews
             # carried evidence. An artefact with an evidence line records how the
             # reviewer's process ended as its verdict line, so words in it — a
             # finding about authentication or a rate limit — never decide it (#57).
             has_verdict_line = _has_verdict_marker(body)
             if verdict == "INVALID" and not has_verdict_line \
-                    and review_evidence(body) is None \
+                    and evidence is None \
                     and REVIEW_UNAVAILABLE_RE.search(body):
                 verdict = "UNAVAILABLE"
         except Exception:

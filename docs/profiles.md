@@ -25,7 +25,8 @@ ao init --implementer codex --reviewer-model claude-opus-5
   and `--effort low…max` where the adapter has one; Claude Code has no effort
   flag, so only the model applies).
 - **reviewer** — its own `argv`; `ao commit-ok` refuses a review whose author is
-  the implementer. Different family or different model, never the same session.
+  the implementer — its id is the implementer's session, or its command resumes that
+  session. Different family or different model, never the same session.
 - **architect** — resumable, `session: auto`, read-only tools plus `ao`; the
   watchdog wakes it only when nobody is at the keyboard.
 

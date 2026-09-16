@@ -729,12 +729,16 @@ def cmd_commit_ok(cfg, args):
             rwho = (strict_reviewer_identity or {}).get("binding") \
                 if isinstance(strict_reviewer_identity, dict) else None
         else:
-            m = A.re.search(r"reviewer:\s*`([^`]+)`", rbody)
-            rwho = m.group(1) if m else None
-            impl_id = (cfg.get("implementer") or {}).get("session") or ""
-            if not rwho:
-                reasons.append(f"{review_name} names no reviewer — cannot tell who wrote it")
-            elif impl_id and (rwho in impl_id or impl_id in rwho):
+            # Who reviewed is read from the evidence ao wrote, never from the
+            # artefact's text, where the implementer's boundary appears too (#60).
+            recorded = evidence.get("reviewer") if isinstance(evidence, dict) else None
+            rwho = recorded.get("id") if isinstance(recorded, dict) else None
+            if not isinstance(rwho, str) or not rwho:
+                rwho = None
+                reasons.append(f"{review_name} records no reviewer in its evidence — "
+                               "run `ao review` again")
+            elif _reviewer_is_implementer(_configured_reviewer(cfg, rwho),
+                                          _implementer_sessions(cfg)):
                 reasons.append(f"the review was written by the implementer ({rwho})")
 
     held = A.hold_state(root)
@@ -2560,6 +2564,48 @@ def _reviewer_probe_text(probe):
     return f"failed — {route} via {binary} ({version}); {probe['reason']}"
 
 
+def _implementer_sessions(cfg):
+    """The implementer's session ids as ao resolves them (#60).
+
+    `auto` names no session by itself; for a Kiro implementer it is the session
+    discovered for the project, the one the watchdog resumes.
+    """
+    impl = cfg.get("implementer") or {}
+    session = str(impl.get("session") or "")
+    if session and session != "auto":
+        return {session}
+    if impl and impl.get("adapter", "kiro") == "kiro":
+        found = (A.discover_session(impl.get("cwd") or cfg["root"]) or {}).get("session")
+        if found:
+            return {str(found)}
+    return set()
+
+
+def _reviewer_is_implementer(route, sessions):
+    """Whether a reviewer route without a capability matrix runs as the implementer (#60).
+
+    Identities, not labels: the route is the implementer when its id is the
+    implementer's session id, or when its command carries that id as an argument,
+    alone or after `=`. A label that contains the id, or an id the label contains,
+    says nothing about who runs.
+    """
+    if not sessions or not isinstance(route, dict):
+        return False
+    if str(route.get("id") or "") in sessions:
+        return True
+    return any(isinstance(arg, str) and (arg in sessions or arg.partition("=")[2] in sessions)
+               for arg in route.get("argv") or [])
+
+
+def _configured_reviewer(cfg, reviewer_id):
+    """The configured route a recorded reviewer id names, or that bare identity."""
+    primary = cfg.get("reviewer") or {}
+    for route in [primary] + list(primary.get("fallbacks") or []):
+        if isinstance(route, dict) and route.get("id") == reviewer_id:
+            return route
+    return {"id": reviewer_id}
+
+
 def cmd_review(cfg, args):
     """Review the working tree with an actor that did not write it.
 
@@ -2597,7 +2643,7 @@ def cmd_review(cfg, args):
             print(f"\n{C['dim']}It must not be the implementer. A model reviewing its own")
             print(f"output shares its own blind spots.{C['reset']}")
             return 1
-        if rv.get("id") and rv["id"] == impl.get("session"):
+        if _reviewer_is_implementer(rv, _implementer_sessions(cfg)):
             print(f"{C['red']}The reviewer is the implementer.{C['reset']} That is the one "
                   f"configuration this refuses.")
             return 2
@@ -2689,8 +2735,18 @@ def cmd_review(cfg, args):
     if strict:
         chain = [route for route in matrix_resolution["reviewers"] if route["eligible"]]
     else:
-        # Legacy selection remains byte-for-byte compatible when no matrix exists.
-        chain = [rv] + [f for f in (rv.get("fallbacks") or []) if f.get("argv")]
+        # Legacy selection remains byte-for-byte compatible when no matrix exists,
+        # except that a fallback running as the implementer is never spawned (#60).
+        sessions = _implementer_sessions(cfg)
+        chain = [rv]
+        for fallback in rv.get("fallbacks") or []:
+            if not fallback.get("argv"):
+                continue
+            if _reviewer_is_implementer(fallback, sessions):
+                print(f"{C['dim']}fallback {fallback.get('id') or 'reviewer'} runs as the "
+                      f"implementer — not run{C['reset']}")
+                continue
+            chain.append(fallback)
     invocation = _invoke_reviewer_chain(
         root, chain, prompt, args.timeout, strict, primary=rv if not strict else None
     )
@@ -2721,6 +2777,7 @@ def cmd_review(cfg, args):
                 evidence, matrix_resolution, strict_attempts,
                 reviewer_identity=None, review_status="unavailable",
             )
+            evidence["verdict"] = "UNAVAILABLE"
             unavailable_body = (
                 f"# Review {name}\n\nVERDICT: UNAVAILABLE\n\n"
                 + A.review_evidence_line(evidence)
@@ -2784,6 +2841,7 @@ def cmd_review(cfg, args):
             reviewer_label = used["identity"]["binding"]
         else:
             reviewer_label = rv.get("id") or reviewer_executable
+        evidence["verdict"] = "INVALID"
         d = os.path.join(root, cfg["reviews"])
         os.makedirs(d, exist_ok=True)
         head = A.sh("git rev-parse --short HEAD", cwd=root)
@@ -2893,6 +2951,11 @@ def cmd_review(cfg, args):
         )
     else:
         primary = cfg.get("reviewer") or {}
+        evidence["reviewer"] = {
+            "id": rv.get("id") or reviewer_executable,
+            "family": rv.get("family"),
+            "fallback": rv is not primary,
+        }
         reviewer_line = (
             f"- reviewer: `{A.review_header_value(rv.get('id') or reviewer_executable)}`  "
             f"family: `{A.review_header_value(rv.get('family', '?'))}`"
@@ -2902,6 +2965,9 @@ def cmd_review(cfg, args):
             f"- implementer: "
             f"`{A.review_header_value(str(impl.get('adapter')) + '/' + (impl.get('session') or '')[:20])}`"
         )
+    # The adjudicated verdict and counts, and who reviewed, are read from here (#60).
+    evidence["verdict"] = verdict
+    evidence["counts"] = dict(sev)
     header = [f"# Review {name}", "",
               A.review_evidence_line(evidence),
               reviewer_line,
