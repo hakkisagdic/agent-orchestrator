@@ -8,15 +8,15 @@ from types import SimpleNamespace
 from ao import cli, features as F, lib as A
 
 
-def test_features_default_estimate_and_switch(project):
+def test_features_default_on_and_switch(project):
     root = project["root"]
-    assert F.estimate(project) == sum(v[2] for v in F.FEATURES.values())
+    assert all(F.switches(project).values())
     F.set_switch(root, "review", False)
     cfg = A.load_config(root)
-    assert F.enabled(cfg, "review") is False and F.estimate(cfg) == F.estimate(project) - 8
+    assert F.enabled(cfg, "review") is False and sum(F.switches(cfg).values()) == len(F.ORDER) - 1
     for k in F.ORDER:
         F.set_switch(root, k, False)
-    assert F.estimate(A.load_config(root)) == 0
+    assert not any(F.switches(A.load_config(root)).values())
 
 
 def test_deferred_queue_roundtrip(project):

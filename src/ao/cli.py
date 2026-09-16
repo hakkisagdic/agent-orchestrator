@@ -5490,6 +5490,24 @@ def _account_beside_share(cfg, since=None):
     return lines
 
 
+def _cost_by_feature(cfg, since, window):
+    """`ao cost --features`: the implementer's spend each switch caused, over the window it was measured (#10)."""
+    measured = A.feature_costs(cfg, since=since)
+    if not measured["turns"]:
+        print("no transcript turns in this window")
+        return 0
+    span = " to ".join(time.strftime("%d %b %H:%M", time.localtime(at)) for at in (measured["from"], measured["to"]))
+    print(f"{C['b']}implementer spend by feature{C['reset']}  {C['dim']}({measured['unit']}; {measured['turns']} turns, "
+          f"{span}{' — last ' + window if window else ''}){C['reset']}")
+    for name, spent in measured["features"].items():
+        share = 100 * spent["usage"] / measured["total"] if measured["total"] else 0
+        print(f"  {name:<18}{spent['turns']:>5} turns {spent['usage']:>9.1f}  {share:>5.1f}%")
+    for name, count in measured["counted"].items():
+        print(f"  {name:<18}{count:>5} started  {C['dim']}the architect's pool, not this transcript{C['reset']}")
+    print(f"  {'inventory_review':<18}  {C['dim']}counted with review: a transcript cannot tell them apart{C['reset']}")
+    return 0
+
+
 def cmd_cost(cfg, args):
     """What the coordination spends: the implementer's turns by what they did.
 
@@ -5503,6 +5521,8 @@ def cmd_cost(cfg, args):
     if args.since:
         n, unit = A.re.match(r"(\d+)([hd])", args.since).groups()
         since = time.time() - int(n) * (3600 if unit == "h" else 86400)
+    if getattr(args, "features", False):
+        return _cost_by_feature(cfg, since, args.since)
     c = A.turn_costs(cfg, since=since)
     if not c["turns"]:
         print("no transcript"); return 0
@@ -5599,6 +5619,17 @@ def cmd_config(cfg, args):
     return 0
 
 
+def _feature_cell(measured, key):
+    """One feature's measured cost as a short cell: a share of the implementer's spend, or a count (#10)."""
+    if not measured:
+        return "—"
+    if key in measured["counted"]:
+        return f"{measured['counted'][key]} started"
+    if key not in measured["features"] or not measured["total"]:
+        return "with review" if key == "inventory_review" else "—"
+    return f"{100 * measured['features'][key]['usage'] / measured['total']:.1f}%"
+
+
 def cmd_features(cfg, args):
     """The switches and what each costs. All off: deterministic ao, zero model spend."""
     from . import features as F
@@ -5613,22 +5644,18 @@ def cmd_features(cfg, args):
             return 1
         cfg = A.load_config(root)
     on = F.switches(cfg)
-    print(f"  {'feature':<18}{'':<4}{'share':>6}  what it spends")
-    for k in F.ORDER:
-        label, _, share, what = F.FEATURES[k]
-        state = f"{C['green']}on {C['reset']}" if on[k] else f"{C['dim']}off{C['reset']}"
-        print(f"  {k:<18}{state:<4}{share:>5}%  {C['dim']}{what}{C['reset']}")
-    est = F.estimate(cfg)
-    print(f"\n  estimated share of implementer spend with these switches: {C['b']}~{est}%{C['reset']}  "
-          f"{C['dim']}(all on ≈ {sum(v[2] for v in F.FEATURES.values())}%, all off = 0%: board, mail, gates, commit-ok, alarms, pings, hooks only){C['reset']}")
     try:
-        c = A.turn_costs(cfg, since=time.time() - 7 * 86400)
-        if c["total"]:
-            ov = sum(c["by_class"].get(k, {}).get("usage", 0) for k in ("ceremony", "coordination"))
-            print(f"  measured last 7 days: {C['b']}{100 * ov / c['total']:.0f}%{C['reset']} ceremony + coordination "
-                  f"({ov:.0f} of {c['total']:.0f} {c['unit']}) — `ao cost` for the breakdown")
+        measured = A.feature_costs(cfg, since=time.time() - 7 * 86400)
     except Exception:
-        pass
+        measured = None
+    print(f"  {'feature':<18}{'':<4}{'last 7 days':>13}  what it spends")
+    for k in F.ORDER:
+        label, _, what = F.FEATURES[k]
+        state = f"{C['green']}on {C['reset']}" if on[k] else f"{C['dim']}off{C['reset']}"
+        print(f"  {k:<18}{state:<4}{_feature_cell(measured, k):>13}  {C['dim']}{what}{C['reset']}")
+    print(f"\n  {C['dim']}measured from the implementer's transcript and the watchdog's logs, never estimated; "
+          f"all off = board, mail, gates, commit-ok, alarms, pings and hooks only; `ao cost --features` "
+          f"for the window{C['reset']}")
     print(f"  {C['dim']}ao features on|off <feature>{C['reset']}")
     return 0
 
@@ -7924,7 +7951,8 @@ def cmd_doctor(cfg, args):
                   f"{C['dim']}the exhaustion alarm is blind until it reads again{C['reset']}")
         print(f"ping            {C['green'] + 'configured' + C['reset'] if A.ping_url(root) else C['yellow'] + 'off' + C['reset'] + '  ao pings setup'}")
         from . import features as _F
-        print(f"features        {sum(_F.switches(cfg).values())}/{len(_F.ORDER)} on · est. ~{_F.estimate(cfg)}% of implementer spend  {C['dim']}ao features{C['reset']}")
+        print(f"features        {sum(_F.switches(cfg).values())}/{len(_F.ORDER)} on  {C['dim']}ao cost --features for what "
+              f"each spent{C['reset']}")
         print(f"ao for agents   {C['green']}{reachable}{C['reset']}")
     else:
         print(f"ao for agents   {C['red']}not on a spawned agent's PATH{C['reset']}")
@@ -8212,6 +8240,7 @@ def main():
     al.set_defaults(fn=cmd_alarms)
     co = sub.add_parser("cost", help="what the coordination spends: implementer turns by class (product/analysis/ceremony/coordination)")
     co.add_argument("--since", help="window such as 24h or 7d (default: whole transcript)")
+    co.add_argument("--features", action="store_true", help="what each feature switch spent, measured")
     co.set_defaults(fn=cmd_cost)
     cf = sub.add_parser("config", help="what a person can set: list, get, set, unset")
     cf.add_argument("action", choices=["list", "get", "set", "unset"], nargs="?", default="list")

@@ -1,28 +1,32 @@
 # Features and what each costs
 
 ao's cost is a menu. Everything that spends a model's quota is a switch in
-`.ao/config.json` (`"features": {…}`), and `ao features` prints the estimate
-for the current switches. All off, ao is a deterministic monitor — board,
-mailbox, gates under the lock, commit authority bound to an immutable index
-candidate, alarms, pings, hooks — and spends nothing. All on, about a quarter of the implementer's spend.
+`.ao/config.json` (`"features": {…}`). All off, ao is a deterministic monitor — board,
+mailbox, gates under the lock, commit authority bound to an immutable index candidate,
+alarms, pings, hooks — and spends nothing.
 
-| switch | on by default | share | what it spends |
+What each switch costs is **measured, not estimated**: an earlier version of this page
+carried percentages from one pilot, and nothing kept them true. `ao cost --features` reads
+the implementer's transcript and the watchdog's own logs and prints, for the window it
+covers, what each switch spent:
+
+| switch | on by default | measured as | what it spends |
 |---|---|---|---|
-| `review` | yes | ~8% | the reviewer model reads the slice diff, once or twice per slice |
-| `inventory_review` | yes | ~4% | one or two more reviews on slices that open a new surface; none on fix slices |
-| `nudge` | yes | ~4% | implementer turns; only the empty ones are overhead |
-| `architect_wake` | yes | ~3% | one architect turn per batch of anomalies or decisions |
-| `refill` | yes | ~2% | one architect turn when the queue is empty |
-| `reports` | yes | ~2% | a few implementer tool calls per slice (start / done / blocked) |
+| `review` | yes | implementer turns that ran `ao review` | the reviewer model reads the slice diff, once or twice per slice |
+| `inventory_review` | yes | counted with `review`; a transcript cannot tell them apart | one or two more reviews on slices that open a new surface |
+| `nudge` | yes | turns a nudge started, within five minutes, that wrote no product | implementer turns; only the empty ones are overhead |
+| `architect_wake` | yes | wakes started, from the watchdog's log; the architect's pool, not priced here | one architect turn per batch of anomalies or decisions |
+| `refill` | yes | refills started, likewise | one architect turn when the queue is empty |
+| `reports` | yes | turns that only coordinated: inbox, report, board, writers | a few implementer tool calls per slice |
 
-The shares were measured on the first pilot with `ao cost` and are refined by
-it: `ao features` shows the measured share of the last seven days beside the
-estimate. If the measured number is well above the estimate, something is
-looping — `ao cost --since 24h` names the class, `ao watchdog explain` the
-guard.
+The reviewer's own spend is the reviewer's pool and is not in the implementer's
+transcript either. `ao features` shows the last seven days beside each switch; if one
+is well above what you expect, something is looping — `ao cost --since 24h` names the
+turn class, `ao watchdog explain` the guard.
 
 ```bash
-ao features                      # the table and the estimate
+ao features                      # the switches, and what each spent in the last 7 days
+ao cost --features --since 30d   # the same, over a window you choose
 ao features off review           # candidate-bound gates still decide; review is skipped
 ao features off architect_wake   # anomalies are written and alarmed, nobody is woken
 ```

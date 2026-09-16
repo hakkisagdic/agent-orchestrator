@@ -6,25 +6,25 @@ all of them off, ao is a deterministic monitor — board, mailbox, gates, commit
 authority by digest, alarms, pings, hooks — and costs nothing. With all of them
 on it costs about a quarter of the implementer's spend on a normal day. The
 shares below were measured on the first pilot (`ao cost`) and are refined by
-it; `ao features` prints the estimate for the current switches.
+it. What each costs is measured, never estimated: `ao cost --features` (#10).
 """
 import json
 import os
 UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
-# key: (label, default, share of implementer spend in %, what it spends)
+# key: (label, default, what it spends). What each costs is measured by `ao cost --features` (#10).
 FEATURES = {
-    "review":           ("independent review of every slice", True, 8,
+    "review":           ("independent review of every slice", True,
                          "reviewer model reads the slice diff, 1–2 times per slice"),
-    "inventory_review": ("inventory-first review on slices that open a new surface", True, 4,
+    "inventory_review": ("inventory-first review on slices that open a new surface", True,
                          "reviewer model, +1–2 reviews on such slices; none on fix slices"),
-    "nudge":            ("watchdog restarts the idle implementer", True, 4,
+    "nudge":            ("watchdog restarts the idle implementer", True,
                          "implementer turns; only the empty ones are overhead"),
-    "architect_wake":   ("anomalies and decisions wake the architect", True, 3,
+    "architect_wake":   ("anomalies and decisions wake the architect", True,
                          "one architect turn per anomaly batch"),
-    "refill":           ("an empty queue wakes the architect to refill it", True, 2,
+    "refill":           ("an empty queue wakes the architect to refill it", True,
                          "one architect turn per refill"),
-    "reports":          ("implementer reports on state changes (start/done/blocked)", True, 2,
+    "reports":          ("implementer reports on state changes (start/done/blocked)", True,
                          "a few implementer tool calls per slice"),
 }
 ORDER = list(FEATURES)
@@ -38,12 +38,6 @@ def switches(cfg):
 
 def enabled(cfg, key):
     return switches(cfg).get(key, FEATURES.get(key, ("", True))[1])
-
-
-def estimate(cfg):
-    """Estimated share of implementer spend for the current switches, in %."""
-    on = switches(cfg)
-    return sum(FEATURES[k][2] for k in ORDER if on[k])
 
 
 def set_switch(root, key, on):

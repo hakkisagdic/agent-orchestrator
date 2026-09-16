@@ -6727,6 +6727,64 @@ _PRODUCT_PATH = re.compile(r"(^|/)(src|lib|app|apps|test|tests|spec|fixtures|evi
 _COORD_PATH = re.compile(r"(^|/)(agent-mail|\.ao|semantic-review|\.kiro|\.claude)(/|$)")
 
 
+# ---- what each feature costs, measured rather than estimated (#10) ------------------------
+
+SPAWN_LOGS = {"nudge": "nudge-{key}.log", "architect_wake": "escalate-{key}.log", "refill": "refill-{key}.log"}
+
+
+def spawn_times(root, what, since=None):
+    """When the watchdog started a nudge, an architect wake or a refill, read from its own logs (#10)."""
+    from .watchdog import STATE_DIR
+    path = os.path.join(STATE_DIR, SPAWN_LOGS[what].format(key=project_key(root)))
+    times = []
+    try:
+        with open(path, encoding=UTF8, errors="replace") as fh:
+            for line in fh:
+                found = re.match(r"^=== (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) ", line)
+                if found:
+                    at = time.mktime(time.strptime(found.group(1), "%Y-%m-%d %H:%M:%S"))
+                    if since is None or at >= since:
+                        times.append(at)
+    except OSError:
+        pass
+    return times
+
+
+def feature_costs(cfg, since=None):
+    """The implementer's spend attributed to each feature switch, and the window it was measured over (#10).
+
+    `review`: turns that ran `ao review`. `reports`: turns that only coordinated -
+    inbox, report, board, writers. `nudge`: turns a nudge started, within five
+    minutes of it, that wrote no product; a nudge that started real work is the
+    work, not overhead. The architect's wakes and refills spend the architect's
+    pool, not this transcript, so they are counted and not priced, and an
+    inventory review cannot be told from a review in a transcript, so it is
+    counted with review.
+    """
+    root = cfg["root"]
+    costs = turn_costs(cfg, since)
+    turns = [turn for turn in costs["turns"] if turn.get("cls")]
+    nudges = spawn_times(root, "nudge", since)
+    features = {name: {"turns": 0, "usage": 0.0} for name in ("review", "reports", "nudge")}
+    for turn in turns:
+        start = turn.get("start") or 0
+        if turn.get("reviews"):
+            key = "review"
+        elif turn["cls"] == "coordination":
+            key = "reports"
+        elif turn["cls"] != "product" and any(0 <= start - at <= 300 for at in nudges):
+            key = "nudge"
+        else:
+            continue
+        features[key]["turns"] += 1
+        features[key]["usage"] += float(turn.get("usage") or 0)
+    starts = [turn["start"] for turn in turns if turn.get("start")]
+    return {"unit": costs["unit"], "total": sum(float(turn.get("usage") or 0) for turn in turns),
+            "turns": len(turns), "from": min(starts) if starts else None, "to": max(starts) if starts else None,
+            "features": features,
+            "counted": {what: len(spawn_times(root, what, since)) for what in ("architect_wake", "refill")}}
+
+
 def turn_costs(cfg, since=None):
     """Per-turn cost and class from the implementer's transcript.
 
