@@ -849,31 +849,42 @@ def credit_usage(monthly_budget=None):
     and taking only the final record counts one turn per session (40x low). The
     peaks reading was confirmed against a known 10,000/month allowance — the
     month of heaviest use came to 10,148, where the others gave 13,168 and 258.
+
+    Which transcripts are read, which records carry usage and where its values are
+    come from each shipped adapter (`billing.fallback.transcripts`, `telemetry.cost`,
+    `transcript.record`); the reading is its `billing.fallback.reading`, and only the
+    peak-per-turn reading is implemented, so a fallback declaring another is not read
+    rather than misread (#76).
     """
     import glob
     from collections import defaultdict
     months, days, sessions = defaultdict(float), defaultdict(float), []
-    patterns = [_home_path(((adapter.get("billing") or {}).get("fallback") or {}).get("transcripts"))
-                for _, adapter in sorted(package_adapters().items())
-                if ((adapter.get("billing") or {}).get("fallback") or {}).get("transcripts")]
-    for f in [path for pattern in patterns for path in glob.glob(pattern)]:
+    sources = []
+    for _, adapter in sorted(package_adapters().items()):
+        fallback = (adapter.get("billing") or {}).get("fallback") or {}
+        shape = transcript_shape(adapter)
+        if fallback.get("transcripts") and fallback.get("reading") == "peak-per-turn" and shape["usage"]:
+            # A line that does not name the usage field holds no usage, and is never parsed.
+            marks = sorted({'"' + field.split(".")[0].split("[")[0] + '"' for field in shape["usage"]["fields"]})
+            sources += [(path, shape, marks) for path in glob.glob(_home_path(fallback["transcripts"]))]
+    for f, shape, marks in sources:
         peaks, cur, month, turns = 0.0, 0.0, "", 0
         cur_day = ""
         try:
             with open(f, errors="replace", encoding=UTF8) as fh:
                 for line in fh:
-                    if '"promptTurnSummaries"' not in line:
+                    if not any(mark in line for mark in marks):
                         continue
                     try:
                         rec = json.loads(line)
                     except Exception:
                         continue
-                    pl = rec.get("payload", rec)
-                    if pl.get("type") != "usage_summary":
+                    pl = record_body(rec, shape)
+                    if pl is None or record_kind(rec, shape) != shape["usage"]["type"]:
                         continue
-                    v = sum(x.get("usage", 0) for x in (pl.get("promptTurnSummaries") or [])
-                            if isinstance(x.get("usage"), (int, float)))
-                    ts = (rec.get("timestamp") or "")
+                    v = sum(value for values, _ in usage_entries(pl, shape["usage"]) for value in values
+                            if isinstance(value, (int, float)))
+                    ts = record_time(rec, shape)
                     if v < cur:                  # dropped: the previous turn ended at cur
                         peaks += cur
                         turns += 1
@@ -1311,18 +1322,25 @@ def recent_errors(recs, limit=3, adapter=None):
     words like "failed" surfaces the agent's own search patterns and passing test
     names, which is worse than showing nothing: a panel that cries wolf gets
     ignored exactly when it is right.
+
+    The record, the verdict field, the value that means failed and where the output
+    is are the adapter's `telemetry.failure`; asked without an adapter, the
+    implementer's adapter declares them.
     """
-    field = ((adapter or {}).get("telemetry", {}).get("failure") or {}).get("field", "success")
+    shape = transcript_shape(implementer_adapter() if adapter is None else adapter)
+    failure = shape["failure"]
+    if not failure:
+        return []
     out = []
     for r in reversed(recs):
-        pl = r.get("payload", r)
-        if not isinstance(pl, dict) or pl.get("type") != "tool_result":
+        pl = record_body(r, shape)
+        if pl is None or record_kind(r, shape) != failure["type"]:
             continue
-        if pl.get(field) is not False:
+        if not _declared_value(_path_value(pl, failure["field"]), failure["failed_when"]):
             continue
         # Failed tool output is usually a wall of passing lines with the real
         # cause buried in it. Lead with the line that actually failed.
-        raw = str(pl.get("content", ""))
+        raw = str(_path_value(pl, failure["text"]) or "") if failure["text"] else ""
         lines = [ln.strip() for ln in raw.split("\n") if ln.strip()]
         def is_signal(ln):
             low = ln.lower()
@@ -1336,7 +1354,7 @@ def recent_errors(recs, limit=3, adapter=None):
             signal = next((ln for ln in lines if not ln.lower().startswith("output:")
                            and not ln.startswith("✔")), lines[0] if lines else raw)
         text = " ".join(str(signal)[:260].split())
-        out.append((local_hhmm(r.get("timestamp", "")) or "--:--", text))
+        out.append((local_hhmm(record_time(r, shape)) or "--:--", text))
         if len(out) >= limit:
             break
     return list(reversed(out))

@@ -98,11 +98,18 @@
       "tool_call",
       "tool_result",
       "session_metadata",
+      "usage_summary",
+      "session_event",
       "turn_start",
       "turn_end",
       "sub_agent_start",
       "sub_agent_complete"
     ],
+    "messages": { "prompt": ["user"], "reply": ["assistant"] },
+    "turn": { "start": ["turn_start"], "end": ["turn_end"],
+              "bookkeeping": ["session_metadata", "usage_summary", "session_event"] },
+    "tool_call": { "type": "tool_call", "name": "toolName", "args": "args", "path_keys": ["path"],
+                   "write_tools": ["fs_write"], "write_words": ["write"] },
     "tail_bytes": 900000
   },
   "sessions": {
@@ -174,7 +181,7 @@
       "type": "usage_summary",
       "field": "promptTurnSummaries[].usage",
       "unit": "credit",
-      "also": "promptTurnSummaries[].usedTools",
+      "tools": "promptTurnSummaries[].usedTools",
       "verified": true
     },
     "quota": {
@@ -195,6 +202,7 @@
       "type": "tool_result",
       "field": "success",
       "failed_when": false,
+      "text": "content",
       "verified": true,
       "note": "Structural verdict on every tool result. Never text-match for 'error' or 'failed' — the agent's own search patterns and passing test names contain both."
     }

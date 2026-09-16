@@ -547,54 +547,57 @@ def turn_costs(cfg, since=None):
     committed), ceremony (review / verify / lock / commit-ok, nothing written),
     coordination (only inbox/report/writers/board, few calls), analysis (read and
     reasoned, wrote nothing).
+
+    Which records open and close a turn, carry usage or call a tool is the
+    implementer's adapter's to declare (`transcript.turn`, `transcript.messages`,
+    `transcript.tool_call`, `telemetry.cost`): a turn opens at a start record, or at
+    a prompt when none is open or the open one ended.
     """
     import collections
     msgs, _ = session_paths(cfg)
-    out = {"unit": "credit", "turns": [], "by_class": {}, "ao_commands": collections.Counter(), "total": 0.0}
+    shape = transcript_shape(implementer_adapter(cfg))
+    usage, tool = shape["usage"], shape["tool"]
+    out = {"unit": shape["unit"], "turns": [], "by_class": {}, "ao_commands": collections.Counter(), "total": 0.0}
     if not msgs or not os.path.exists(msgs):
         return out
     recs = read_tail(msgs, 400_000_000)
     cur = None
 
     def ts(d):
-        raw = d.get("timestamp", "")
+        raw = record_time(d, shape)
         try:
             import datetime as _dt
             return _dt.datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
         except Exception:
             return None
     for d in recs:
-        pl = d.get("payload") or d.get("message") or {}
-        t = pl.get("type") or d.get("type")
-        if t == "turn_start" or (t == "user" and cur is None) or (t == "user" and cur and cur.get("closed")):
+        pl = record_body(d, shape) or {}
+        t = record_kind(d, shape)
+        if t in shape["start"] or (t in shape["prompt"] and (cur is None or cur.get("closed"))):
             cur = {"start": ts(d), "usage": 0.0, "product_writes": 0, "coord_writes": 0, "tool_calls": 0,
                    "reviews": 0, "commits": 0, "blocked_report": False, "ao": collections.Counter()}
             out["turns"].append(cur)
             continue
         if cur is None:
             continue
-        if t == "usage_summary":
-            for ps in pl.get("promptTurnSummaries") or []:
-                try:
-                    cur["usage"] += float(ps.get("usage") or 0)
-                    out["unit"] = ps.get("unit") or out["unit"]
-                except (TypeError, ValueError):
-                    pass
-        elif t == "assistant" and isinstance(pl.get("usage"), dict):      # claude-code transcripts
-            u = pl["usage"]
-            cur["usage"] += (u.get("input_tokens", 0) + u.get("output_tokens", 0)) / 1000.0
-            out["unit"] = "ktok"
-        elif t == "turn_end":
+        if usage and t == usage["type"]:
+            for values, _ in usage_entries(pl, usage):
+                for value in values:
+                    try:
+                        cur["usage"] += float(value or 0)
+                    except (TypeError, ValueError):
+                        pass
+        elif t in shape["end"]:
             cur["closed"] = True
-        elif t == "tool_call":
+        elif tool and t == tool["type"]:
             cur["tool_calls"] += 1
-            name = str(pl.get("toolName") or pl.get("name") or "")
-            args = pl.get("args") or pl.get("input") or {}
+            name = str(_path_value(pl, tool["name"]) or "")
+            args = _path_value(pl, tool["args"]) or {}
             text = json.dumps(args, ensure_ascii=False) if not isinstance(args, str) else args
             if name.endswith("ao_report") and "blocked" in text:      # MCP clients prefix tool names
                 cur["blocked_report"] = True
-            if "write" in name.lower() or name in ("fs_write", "Edit", "Write", "MultiEdit"):
-                path = str(args.get("path") or args.get("file_path") or "") if isinstance(args, dict) else ""
+            if tool_writes_file(name, tool):
+                path = str(tool_path(args, tool) or "")
                 if _coord_path().search(path):
                     cur["coord_writes"] += 1
                 elif _PRODUCT_PATH.search(path) or (path and "/" in path):
@@ -1086,25 +1089,32 @@ def release_architect(root, pid=None):
 # ---- foreign edits: a person in the same files -------------------------------------
 
 def implementer_recent_writes(cfg, minutes=15):
-    """Paths the implementer's tools wrote in the last N minutes, from its transcript."""
+    """Paths the implementer's tools wrote in the last N minutes, from its transcript.
+
+    A tool call and the argument naming its file are what the implementer's adapter
+    declares in `transcript.tool_call`; one that declares none has written nothing
+    ao can see.
+    """
     msgs, _ = session_paths(cfg)
     if not msgs or not os.path.exists(msgs):
+        return set()
+    shape = transcript_shape(implementer_adapter(cfg))
+    tool = shape["tool"]
+    if not tool:
         return set()
     cut = time.time() - minutes * 60
     out = set()
     for d in read_tail(msgs, 3_000_000):
-        pl = d.get("payload") or {}
-        if pl.get("type") != "tool_call":
+        if record_kind(d, shape) != tool["type"]:
             continue
         try:
             import datetime as _dt
-            at = _dt.datetime.fromisoformat(d.get("timestamp", "").replace("Z", "+00:00")).timestamp()
+            at = _dt.datetime.fromisoformat(record_time(d, shape).replace("Z", "+00:00")).timestamp()
         except Exception:
             continue
         if at < cut:
             continue
-        args = pl.get("args") or {}
-        path = args.get("path") or args.get("file_path") if isinstance(args, dict) else None
+        path = tool_path(_path_value(record_body(d, shape), tool["args"]), tool)
         if path:
             out.add(os.path.realpath(str(path)))
     return out
@@ -1156,14 +1166,18 @@ def turn_ended(cfg):
     A process that is alive after its transcript wrote `turn_end` is not
     working; it is a runtime that forgot to exit. Waiting the full silence
     threshold for it (three times the idle window) cost twenty minutes per
-    occurrence. The transcript's own word is enough to reap at the idle window."""
+    occurrence. The transcript's own word is enough to reap at the idle window.
+
+    Which kinds close a turn and which are bookkeeping that may follow it is the
+    implementer's adapter's to declare (`transcript.turn`)."""
     msgs, _ = session_paths(cfg)
     if not msgs or not os.path.exists(msgs):
         return False
+    shape = transcript_shape(implementer_adapter(cfg))
     tail = read_tail(msgs, 200_000)
     for d in reversed(tail):
-        t = (d.get("payload") or {}).get("type") or d.get("type")
-        if t in ("session_metadata", "usage_summary", "session_event"):
+        t = record_kind(d, shape)
+        if t in shape["bookkeeping"]:
             continue                                        # bookkeeping after the turn
-        return t in ("turn_end", "result")
+        return t in shape["end"]
     return False

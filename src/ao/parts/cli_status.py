@@ -236,7 +236,7 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0):
     # rather than the state you actually steer by.
     msgs_block = []
     try:
-        ms = A.messages(msg_records, msg_count)
+        ms = A.messages(msg_records, msg_count, adapter)
     except NameError:
         ms = []
     if ms:
@@ -385,7 +385,7 @@ def cmd_tail(cfg, args):
         print("No implementer session found.", file=sys.stderr)
         return 1
     _, _, adapter = _ctx(cfg)
-    for hh, kind, text in A.messages(A.read_tail(msgs_path), args.n):
+    for hh, kind, text in A.messages(A.read_tail(msgs_path), args.n, adapter):
         who = "YOU  " if kind == "user" else "AGENT"
         print(f"--- {hh} [{who}] ---\n{text}\n")
 

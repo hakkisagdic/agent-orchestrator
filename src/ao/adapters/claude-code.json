@@ -62,10 +62,20 @@
       "text_keys": [
         "message.content",
         "content",
-        "text"
+        "text",
+        "message"
       ]
     },
+    "messages": { "prompt": ["user"], "reply": ["assistant"] },
+    "turn": { "end": ["result"] },
+    "note": "No record starts a turn, so a prompt opens one. `result` closes a turn in --output-format stream-json output; the session store writes no closing record. A tool call is a tool_use block inside an assistant record's message.content (name, input, a written file at input.file_path), not a record of its own, so no tool_call is declared and ao reads none from this store.",
     "tail_bytes": 900000
+  },
+  "telemetry": {
+    "cost": {
+      "from": "none",
+      "note": "Assistant records carry message.usage (input_tokens, output_tokens), repeated on every record of one response. Not read yet: adding the records up counts a response once per record."
+    }
   },
   "sessions": {
     "kind": "escaped-cwd",

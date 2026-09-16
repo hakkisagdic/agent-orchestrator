@@ -220,6 +220,33 @@ Three shapes cover everything seen so far:
 - **Opaque / none** — observation unavailable. `send` and `resume` still work; the
   dashboard degrades to repo and mailbox signals only.
 
+### What a record looks like is declared, not coded
+
+A JSONL transcript's records are read through what the implementer's adapter declares about
+them (#76): the status panel's context, cost, messages and failed tool calls, `ao cost`, the
+watchdog's "has the turn ended" and foreign-edit checks, and the offline credit estimate. A
+reader asked without an adapter reads what the implementer's adapter declares, and a part an
+adapter does not declare is read as nothing, never as another harness's field.
+
+| Field | What it declares | Used by |
+|---|---|---|
+| `transcript.record.kind` | the path to a record's kind (`payload.type`, `type`); every field below except `time` is read from the object holding the kind | every reader |
+| `transcript.record.time` | the path to a record's ISO timestamp, from the record itself | every reader |
+| `transcript.record.text_keys` | the keys whose string values are a message's text, at any depth; a dotted path is read by its last key | the panel's messages, `ao tail` |
+| `transcript.messages` | `{prompt, reply}`: the kinds of the owner's prompt and of the agent's reply | the panel's messages, `ao tail`, `ao cost` |
+| `transcript.turn` | `{start, end, bookkeeping}`: the kinds that open and close a turn, and those that may follow its end without meaning a turn is running | `ao cost`, the watchdog's reap and idle answer |
+| `transcript.tool_call` | `{type, name, args, path_keys, write_tools, write_words}`: a tool call's kind, the paths to its name and arguments, the arguments naming a file, and the tools that write one - by name, or by a word their name holds in any case | `ao cost`, foreign edits |
+| `telemetry.context` | `{from: "transcript", type, match, field}`: the record and the path of the context percentage | the panel, `ao_status` |
+| `telemetry.cost` | `{from: "transcript", type, field, tools, unit}`: the usage record, the path to its value - or `fields`, several paths that add up - and the path to the tools each entry used | the panel, `ao cost`, the credit estimate |
+| `telemetry.failure` | `{from: "transcript", type, field, failed_when, text}`: the verdict on a tool result, the value that means it failed, and the path to its output | the panel's problems |
+| `billing.fallback.reading` | how usage records add up to spend; ao implements `peak-per-turn`, and does not read a fallback that declares another | `ao credits --offline`, `ao digest` |
+
+A path steps into objects with dots (`value.usagePercentage`), and `[]` steps into each element
+of a list (`promptTurnSummaries[].usage`), one entry per element. A turn opens at a `start` kind,
+or at a `prompt` when no turn is open or the open one ended. `tests/test_transcript_shape.py`
+reads a harness ao never shipped, declared only in a project's adapter layer, and fails when a
+core module names a kind, a field or a tool of a shipped adapter's shape.
+
 ## Busy detection
 
 Two signals, both cheap, used together:
@@ -273,7 +300,9 @@ that test by declaring itself ineligible, which is a pass.
   "transcript": {
     "kind": "jsonl",
     "path": "~/.mytool/sessions/{session}/messages.jsonl",
-    "record": { "time": "timestamp", "role": "payload.type", "text": "payload.content" }
+    "record": { "time": "timestamp", "kind": "payload.type", "text_keys": ["content"] },
+    "messages": { "prompt": ["user"], "reply": ["assistant"] },
+    "turn": { "start": ["turn_start"], "end": ["turn_end"] }
   },
   "busy": { "meta": "~/.mytool/sessions/{session}/meta.json", "status_field": "state",
             "running_values": ["running"], "idle_seconds": 240 }

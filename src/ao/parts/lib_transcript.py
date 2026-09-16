@@ -165,7 +165,144 @@ def read_tail(path, nbytes=900_000):
     return recs
 
 
-def _strings(o, out, depth=0):
+# What a record looks like is its adapter's to declare (#76): where the kind and the time
+# are, which kinds open, close and follow a turn, where a tool call keeps its name and
+# arguments and which tools write a file, and where usage, context and failures are.
+# The readers below ask these helpers and name no harness's field.
+
+def _path_values(obj, path):
+    """Every value a declared path reaches: `a.b` descends, `a[].b` reads `b` in each element of the list `a`.
+
+    A `[]` step yields one value per element, None where an element lacks the rest of
+    the path, so two paths through one list stay aligned element by element.
+    """
+    values = [obj]
+    for step in str(path or "").split("."):
+        many = step.endswith("[]")
+        key = step[:-2] if many else step
+        found = []
+        for value in values:
+            value = value.get(key) if isinstance(value, dict) and key else None
+            if many:
+                found.extend(value if isinstance(value, list) else [])
+            else:
+                found.append(value)
+        values = found
+    return values
+
+
+def _path_value(obj, path):
+    """The first value a declared path reaches, or None."""
+    values = _path_values(obj, path)
+    return values[0] if values else None
+
+
+def _name(value):
+    """A declared name, kind or path: the string itself, or "" for anything else."""
+    return value if isinstance(value, str) else ""
+
+
+def _names(value):
+    """A declared list of names, kinds or paths, as the strings in it; one may be written bare."""
+    return [item for item in (value if isinstance(value, list) else [value]) if _name(item)]
+
+
+def _block(document, key):
+    """The object a declaration keeps under `key`, or {} when it keeps none there."""
+    value = document.get(key) if isinstance(document, dict) else None
+    return value if isinstance(value, dict) else {}
+
+
+def transcript_shape(adapter):
+    """How an adapter's transcript records are read, from what it declares (#76).
+
+    `transcript.record.kind` is the path to a record's kind, and every other field is
+    read from the object holding it: the payload when the kind is `payload.type`, the
+    record itself when it is `type`. `record.time` is read from the record. A part the
+    adapter does not declare comes back empty or None, and a reader then reads nothing
+    for it rather than another harness's field.
+    """
+    transcript, signals = _block(adapter, "transcript"), _block(adapter, "telemetry")
+    record, message_kinds, turn = (_block(transcript, key) for key in ("record", "messages", "turn"))
+    body, _, kind = _name(record.get("kind")).rpartition(".")
+    shape = {"time": _name(record.get("time")), "body": body, "kind": kind,
+             "text_keys": [key.rpartition(".")[2] for key in _names(record.get("text_keys"))],
+             "prompt": _names(message_kinds.get("prompt")), "reply": _names(message_kinds.get("reply")),
+             "start": _names(turn.get("start")), "end": _names(turn.get("end")),
+             "bookkeeping": _names(turn.get("bookkeeping")),
+             "tool": None, "usage": None, "context": None, "failure": None}
+    tool = _block(transcript, "tool_call")
+    if _name(tool.get("type")):
+        shape["tool"] = {"type": tool["type"], "name": _name(tool.get("name")), "args": _name(tool.get("args")),
+                         "path_keys": _names(tool.get("path_keys")), "write_tools": _names(tool.get("write_tools")),
+                         "write_words": [word.lower() for word in _names(tool.get("write_words"))]}
+    cost = _block(signals, "cost")
+    shape["unit"] = _name(cost.get("unit")) or "unit"
+    fields = _names(cost.get("fields")) or _names(cost.get("field"))
+    if cost.get("from") == "transcript" and _name(cost.get("type")) and fields:
+        shape["usage"] = {"type": cost["type"], "fields": fields, "tools": _name(cost.get("tools"))}
+    context = _block(signals, "context")
+    if context.get("from") == "transcript" and _name(context.get("type")) and _name(context.get("field")):
+        shape["context"] = {"type": context["type"], "match": _block(context, "match"), "field": context["field"]}
+    failure = _block(signals, "failure")
+    if failure.get("from") == "transcript" and _name(failure.get("type")) and _name(failure.get("field")) \
+            and "failed_when" in failure:
+        shape["failure"] = {"type": failure["type"], "field": failure["field"],
+                            "failed_when": failure["failed_when"], "text": _name(failure.get("text"))}
+    return shape
+
+
+def record_body(rec, shape):
+    """The object a record's kind and fields are read from, or None when the record has none."""
+    if not shape["kind"] or not isinstance(rec, dict):
+        return None
+    body = _path_value(rec, shape["body"]) if shape["body"] else rec
+    return body if isinstance(body, dict) else None
+
+
+def record_kind(rec, shape):
+    """A record's kind where its adapter says it is, or None."""
+    body = record_body(rec, shape)
+    kind = body.get(shape["kind"]) if body is not None else None
+    return kind if isinstance(kind, str) else None
+
+
+def record_time(rec, shape):
+    """A record's ISO timestamp where its adapter says it is, or ""."""
+    value = _path_value(rec, shape["time"]) if shape["time"] and isinstance(rec, dict) else None
+    return value if isinstance(value, str) else ""
+
+
+def usage_entries(body, usage):
+    """[(values, tools)]: one entry per element a `[]` usage field reaches, else one for the record.
+
+    `values` holds the entry's value at each declared field, in order, and `tools` the
+    value of `tools` beside it; each reader adds the values up as it always has.
+    """
+    columns = [_path_values(body, field) for field in usage["fields"]]
+    tools = _path_values(body, usage["tools"]) if usage["tools"] else []
+    return [([column[i] if i < len(column) else None for column in columns], tools[i] if i < len(tools) else None)
+            for i in range(max(len(column) for column in columns))]
+
+
+def tool_writes_file(name, tool):
+    """Does a tool of this name write a file: named in `write_tools`, or holding one of `write_words` in any case?"""
+    return name in tool["write_tools"] or any(word in name.lower() for word in tool["write_words"])
+
+
+def tool_path(args, tool):
+    """The file a tool call's arguments name, under the first of the adapter's `path_keys` that is set, or None."""
+    if not isinstance(args, dict):
+        return None
+    return next((args[key] for key in tool["path_keys"] if args.get(key)), None)
+
+
+def _declared_value(value, expected):
+    """A field holds the declared value: by identity for true, false and null, by equality otherwise."""
+    return value is expected if expected is None or isinstance(expected, bool) else value == expected
+
+
+def _strings(o, out, keys, depth=0):
     if depth > 7:
         return
     if isinstance(o, str):
@@ -173,13 +310,13 @@ def _strings(o, out, depth=0):
             out.append(o)
     elif isinstance(o, dict):
         for k, v in o.items():
-            if k in ("text", "content", "message"):
-                _strings(v, out, depth + 1)
+            if k in keys:
+                _strings(v, out, keys, depth + 1)
             elif isinstance(v, (dict, list)):
-                _strings(v, out, depth + 1)
+                _strings(v, out, keys, depth + 1)
     elif isinstance(o, list):
         for x in o:
-            _strings(x, out, depth + 1)
+            _strings(x, out, keys, depth + 1)
 
 
 def local_hhmm(ts):
@@ -203,23 +340,26 @@ def local_hhmm(ts):
         return ts[11:16]
 
 
-def messages(recs, limit=8, kinds=("assistant", "user")):
-    """[(HH:MM, kind, text)] oldest→newest."""
+def messages(recs, limit=8, adapter=None):
+    """[(HH:MM, "user" | "assistant", text)] oldest→newest.
+
+    A prompt and a reply are the kinds the adapter declares in `transcript.messages`;
+    asked without an adapter, the implementer's adapter says which they are.
+    """
+    shape = transcript_shape(implementer_adapter() if adapter is None else adapter)
+    roles = dict.fromkeys(shape["reply"], "assistant")
+    roles.update(dict.fromkeys(shape["prompt"], "user"))
     out = []
     for r in reversed(recs):
-        pl = r.get("payload", r)
-        if not isinstance(pl, dict):
-            continue
-        kind = pl.get("type") or pl.get("role")
-        if kind not in kinds:
+        kind = record_kind(r, shape)
+        if kind not in roles:
             continue
         buf = []
-        _strings(pl, buf)
+        _strings(record_body(r, shape), buf, shape["text_keys"])
         text = " ".join(" ".join(buf).split())
         if len(text) < 40:
             continue
-        ts = r.get("timestamp", "")
-        out.append((local_hhmm(ts), kind, text))
+        out.append((local_hhmm(record_time(r, shape)), roles[kind], text))
         if len(out) >= limit:
             break
     return list(reversed(out))
@@ -227,31 +367,27 @@ def messages(recs, limit=8, kinds=("assistant", "user")):
 
 def telemetry(recs, adapter):
     """Context %, per-turn and session cost, driven by the adapter's block."""
-    tel = adapter.get("telemetry", {})
-    ctx_spec = tel.get("context") or {}
-    cost_spec = tel.get("cost") or {}
-    out = {"ctx": None, "total": 0.0, "turns": 0, "last": None,
-           "unit": cost_spec.get("unit", "unit")}
+    shape = transcript_shape(implementer_adapter() if adapter is None else adapter)
+    ctx_spec, cost_spec = shape["context"], shape["usage"]
+    out = {"ctx": None, "total": 0.0, "turns": 0, "last": None, "unit": shape["unit"]}
     for r in recs:
-        pl = r.get("payload", r)
-        if not isinstance(pl, dict):
+        pl = record_body(r, shape)
+        if pl is None:
             continue
-        t = pl.get("type")
-        if ctx_spec.get("from") == "transcript" and t == ctx_spec.get("type"):
-            match = ctx_spec.get("match") or {}
-            if all(pl.get(k) == v for k, v in match.items()):
-                val = pl.get("value")
-                if isinstance(val, dict):
-                    key = ctx_spec.get("field", "").split(".")[-1]
-                    if isinstance(val.get(key), (int, float)):
-                        out["ctx"] = val[key]
-        if cost_spec.get("from") == "transcript" and t == cost_spec.get("type"):
-            for s in pl.get("promptTurnSummaries", []) or []:
-                u = s.get("usage") or 0
-                if isinstance(u, (int, float)):
+        t = record_kind(r, shape)
+        if ctx_spec and t == ctx_spec["type"]:
+            if all(pl.get(k) == v for k, v in ctx_spec["match"].items()):
+                val = _path_value(pl, ctx_spec["field"])
+                if isinstance(val, (int, float)):
+                    out["ctx"] = val
+        if cost_spec and t == cost_spec["type"]:
+            for values, tools in usage_entries(pl, cost_spec):
+                values = [value or 0 for value in values]
+                if all(isinstance(value, (int, float)) for value in values):
+                    u = sum(values)
                     out["total"] += u
                     out["turns"] += 1
-                    out["last"] = (u, len(s.get("usedTools") or []))
+                    out["last"] = (u, len(tools or []))
     return out
 
 
@@ -290,7 +426,7 @@ def busy(cfg, adapter):
         except Exception:
             pass
     idle_s = (adapter.get("busy") or {}).get("idle_seconds", 240)
-    running = status in ((adapter.get("busy") or {}).get("running_values") or ["in_progress"])
+    running = status in ((adapter.get("busy") or {}).get("running_values") or [])
 
     # A freshly-written transcript does not mean a live turn. The file keeps its
     # mtime after the process exits, so a killed agent reads as WORKING for the
