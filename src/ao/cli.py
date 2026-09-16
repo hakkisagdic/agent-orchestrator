@@ -23,6 +23,7 @@ from datetime import datetime
 from . import lib as A
 from . import matrix as M
 from . import settings as S
+from .verdicts import REVIEWER_VERDICTS
 UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 C = A.C
@@ -705,6 +706,18 @@ def cmd_commit_ok(cfg, args):
     except RuntimeError as exc:
         print(f"{C['red']}{C['b']}REFUSED{C['reset']}\n  {C['red']}·{C['reset']} {exc}")
         return 1
+    wanted = getattr(args, "review", None)
+    if wanted:
+        # A submitted review grants only the tree it pinned (S1).
+        state = _review_state(root, wanted)
+        refusal = (f"no submitted review {wanted}" if not state
+                   else f"{wanted} is {state.get('state')}, not finished" if state.get("state") != "finished"
+                   else f"the staged tree is not the tree {wanted} reviewed: staged {candidate['index_tree']}, "
+                        f"reviewed {state.get('tree')}" if state.get("tree") != candidate["index_tree"]
+                   else None)
+        if refusal:
+            print(f"{C['red']}{C['b']}REFUSED{C['reset']}\n  {C['red']}·{C['reset']} {refusal}")
+            return 1
     now = A.tree_digest(root, cfg)       # legacy/audit surface, not commit identity
     ver, ver_problem = _latest_verification_or_problem(root)
 
@@ -2926,6 +2939,207 @@ def cmd_collect_review(cfg, args):
     return code
 
 
+# ---- the review pipeline: submitted and collected, never waited on (#27) ----------------
+
+def _reviews_dir(root):
+    return os.path.join(root, ".ao", "reviews")
+
+
+def _review_state_path(root, rid):
+    return os.path.join(_reviews_dir(root), f"{rid}.json")
+
+
+def _review_state(root, rid):
+    if not A.re.fullmatch(r"R-\d+", str(rid or "")):
+        return None
+    try:
+        with open(_review_state_path(root, rid), encoding=UTF8) as fh:
+            state = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return state if isinstance(state, dict) else None
+
+
+def _review_states(root):
+    try:
+        names = sorted(os.listdir(_reviews_dir(root)))
+    except OSError:
+        return []
+    states = [_review_state(root, name[:-5]) for name in names if name.startswith("R-") and name.endswith(".json")]
+    return [state for state in states if state]
+
+
+def _write_review_state(root, state):
+    from .storage import replace_file_durably
+    os.makedirs(_reviews_dir(root), exist_ok=True)
+    replace_file_durably(_review_state_path(root, state["id"]),
+                         (json.dumps(state, indent=2, ensure_ascii=False) + "\n").encode(UTF8))
+
+
+def _review_in_flight(state, now=None):
+    """A submitted review still running: its runner is alive, or it has just been started."""
+    if state.get("state") != "running":
+        return False
+    if state.get("pid"):
+        return A._pid_alive(state["pid"])
+    return (now or time.time()) - float(state.get("submitted_at") or 0) < 60
+
+
+def _spawn_review_run(root, rid):
+    """Start the detached run of one submitted review, its output in .ao/reviews/<id>.log."""
+    log = os.path.join(_reviews_dir(root), f"{rid}.log")
+    with open(log, "a", encoding=UTF8) as fh:
+        subprocess.Popen([sys.executable, "-m", "ao", "-C", root, "review", "--run", rid], cwd=root,
+                         stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.STDOUT, **_reviewer_group())
+
+
+def cmd_review_submit(cfg, args):
+    """Pin the staged candidate as a tree, start its review detached, and return its id at once (S1-S3)."""
+    root = cfg["root"]
+    try:
+        candidate = A.index_candidate(root)
+    except RuntimeError as exc:
+        print(f"{C['red']}{exc}{C['reset']}")
+        return 2
+    if not candidate["changed_paths"]:
+        print(f"{C['dim']}Nothing staged to review — stage the exact candidate first.{C['reset']}")
+        return 2
+    flying = [state for state in _review_states(root) if _review_in_flight(state)]
+    limit = S.get(cfg, "review.max_inflight")
+    if len(flying) >= limit:
+        # The reviewer shares a person's model window; fan-out spends someone else's quota (S3).
+        print(f"{C['red']}refused{C['reset']}: {len(flying)} review(s) in flight and review.max_inflight is "
+              f"{limit}; collect first: {', '.join(state['id'] for state in flying)}")
+        return 2
+    running = A.running_slice(root)
+    slice_id = (running or {}).get("id")
+    elsewhere = [state for state in flying if state.get("slice") != slice_id]
+    if elsewhere:
+        # One slice, one worktree, one index: a pinned tree is never another slice's (S2).
+        print(f"{C['red']}refused{C['reset']}: {elsewhere[0]['id']} is in flight in this worktree for slice "
+              f"{elsewhere[0].get('slice')}; one slice per worktree")
+        return 2
+    rid = f"R-{int(time.time() * 1000)}"
+    index = os.path.join(_reviews_dir(root), f"{rid}.index")
+    os.makedirs(_reviews_dir(root), exist_ok=True)
+    pinned = subprocess.run(["git", "read-tree", candidate["index_tree"]], cwd=root, capture_output=True,
+                            env=dict(os.environ, GIT_INDEX_FILE=index))
+    if pinned.returncode:
+        print(f"{C['red']}could not pin the candidate{C['reset']}: {pinned.stderr.decode(UTF8, 'replace').strip()}")
+        return 2
+    state = {"id": rid, "state": "running", "tree": candidate["index_tree"], "head": candidate["head"],
+             "candidate": candidate["digest"], "changed_paths": candidate["changed_paths"],
+             "boundary": getattr(args, "boundary", None), "paths": getattr(args, "paths", None),
+             "slice": slice_id, "worktree": root, "index": index, "submitted_at": int(time.time())}
+    _write_review_state(root, state)
+    try:
+        _spawn_review_run(root, rid)
+    except OSError as exc:
+        state.update(state="failed", reason=f"could not start the review: {exc}", finished_at=int(time.time()))
+        _write_review_state(root, state)
+        print(f"{C['red']}{rid} failed to start{C['reset']}: {exc}")
+        return 1
+    print(rid)
+    print(f"{C['dim']}tree {candidate['index_tree']} pinned; `ao reviews` shows it, "
+          f"`ao review collect {rid}` takes the verdict{C['reset']}")
+    return 0
+
+
+def cmd_review_run(cfg, rid):
+    """The detached half of a submit: review the pinned tree, whatever the live index holds now."""
+    from types import SimpleNamespace
+    from .storage import read_chained_jsonl
+    root = cfg["root"]
+    state = _review_state(root, rid)
+    if not state or state.get("state") != "running":
+        print(f"no running review {rid}")
+        return 2
+    state["pid"] = os.getpid()
+    _write_review_state(root, state)
+    previous = os.environ.get("GIT_INDEX_FILE")
+    os.environ["GIT_INDEX_FILE"] = state["index"]
+    try:
+        candidate = A.index_candidate(root)
+        if candidate["digest"] != state["candidate"]:
+            state.update(state="stale", finished_at=int(time.time()),
+                         reason=f"HEAD moved from {state['head'][:12]} to {candidate['head'][:12]} after submit; "
+                                "the pinned tree is no longer this candidate")
+            _write_review_state(root, state)
+            return 2
+        before = A.review_row_count(root)
+        code = cmd_review(cfg, SimpleNamespace(boundary=state.get("boundary"), paths=state.get("paths"),
+                                               commits=None, pinned=True))
+        rows = [row for row in read_chained_jsonl(A.review_ledger_path(root), A.REVIEW_CHAIN)[before:]
+                if isinstance(row, dict) and row.get("candidate") == state["candidate"]]
+        newest = rows[-1] if rows else None
+        verdict = (newest or {}).get("verdict")
+        state.update(state="finished" if verdict in REVIEWER_VERDICTS else "unavailable" if code == 3 else "failed",
+                     exit=code, verdict=verdict, artefact=(newest or {}).get("artefact"),
+                     finished_at=int(time.time()))
+        _write_review_state(root, state)
+        return code
+    finally:
+        if previous is None:
+            os.environ.pop("GIT_INDEX_FILE", None)
+        else:
+            os.environ["GIT_INDEX_FILE"] = previous
+        try:
+            os.remove(state["index"])
+        except OSError:
+            pass
+
+
+def cmd_review_collect(cfg, args):
+    """Take a finished review's result - one named, or with --any the oldest finished - never waiting."""
+    root = cfg["root"]
+    states = _review_states(root)
+    rid = getattr(args, "rid", None)
+    if rid:
+        state = _review_state(root, rid)
+        if not state:
+            print(f"no review {rid}")
+            return 2
+        if state.get("state") == "running":
+            print(f"{rid} is still running: {_elapsed(time.time() - state.get('submitted_at', time.time()))}")
+            return 1
+    else:
+        done = [s for s in states if s.get("state") != "running" and not s.get("collected_at")]
+        if not done or not getattr(args, "any", False):
+            flying = [s["id"] for s in states if _review_in_flight(s)]
+            print("nothing finished to collect" + (f"; in flight: {', '.join(flying)}" if flying else ""))
+            return 1
+        state = done[0]
+    print(f"{C['b']}{state['id']}{C['reset']}  {state.get('state')}  slice {state.get('slice')}  "
+          f"verdict {state.get('verdict') or '—'}")
+    if state.get("artefact"):
+        print(f"  review: {cfg.get('reviews', 'semantic-review')}/{state['artefact']}")
+    if state.get("reason"):
+        print(f"  {state['reason']}")
+    print(f"  tree {state.get('tree')}; `ao commit-ok --review {state['id']}` grants only on this tree")
+    state["collected_at"] = int(time.time())
+    _write_review_state(root, state)
+    return 0
+
+
+def cmd_reviews(cfg, args):
+    """Every submitted review: its state, its slice, how long it has run, and its verdict."""
+    root = cfg["root"]
+    states = _review_states(root)
+    if not states:
+        print(f"{C['dim']}No reviews submitted. `ao review submit` starts one.{C['reset']}")
+        return 0
+    now = time.time()
+    for state in reversed(states):
+        ended = state.get("finished_at") or now
+        shown = state.get("state")
+        if shown == "running" and not _review_in_flight(state, now):
+            shown = "lost"                     # its runner is gone and wrote no result
+        print(f"  {state['id']}  {shown:<11} {str(state.get('slice') or '—'):<18} "
+              f"{_elapsed(ended - state.get('submitted_at', ended)):>8}  {state.get('verdict') or ''}"
+              f"{'  collected' if state.get('collected_at') else ''}")
+    return 0
+
+
 def cmd_review(cfg, args):
     """Review the working tree with an actor that did not write it.
 
@@ -2940,6 +3154,15 @@ def cmd_review(cfg, args):
     refuses a review whose author is the implementer.
     """
     import subprocess
+    action = getattr(args, "action", None)
+    if action == "submit":
+        return cmd_review_submit(cfg, args)
+    if action == "collect":
+        return cmd_review_collect(cfg, args)
+    if getattr(args, "run", None):
+        return cmd_review_run(cfg, args.run)
+    # A submitted review judges a pinned tree; the worktree beside it is the next slice's (#27).
+    pinned = bool(getattr(args, "pinned", False))
     root = cfg["root"]
     impl = cfg.get("implementer") or {}
     rv = cfg.get("reviewer") or {}
@@ -3003,7 +3226,7 @@ def cmd_review(cfg, args):
         if not candidate["changed_paths"]:
             print(f"{C['dim']}Nothing staged to review — stage the exact candidate first.{C['reset']}")
             return 0
-        issue_messages = A.candidate_issue_messages(issues)
+        issue_messages = [] if pinned else A.candidate_issue_messages(issues)
         if scope["outside_paths"]:
             issue_messages.append(
                 "review scope excludes staged paths: " + ", ".join(scope["outside_paths"])
@@ -3265,9 +3488,10 @@ def cmd_review(cfg, args):
                     "index changed during review: expected "
                     f"{candidate['index_tree']}, got {current_candidate['index_tree']}"
                 )
-            invalid.extend(A.candidate_issue_messages(
-                A.candidate_worktree_issues(root, cfg, current_candidate)
-            ))
+            if not pinned:
+                invalid.extend(A.candidate_issue_messages(
+                    A.candidate_worktree_issues(root, cfg, current_candidate)
+                ))
         except RuntimeError as exc:
             invalid.append(str(exc))
         if invalid:
@@ -7104,6 +7328,12 @@ def main():
     hf.add_argument("--no-send", action="store_true")
     hf.set_defaults(fn=cmd_handoff)
     rw = sub.add_parser("review", help="review an exact staged candidate with an independent actor")
+    rw.add_argument("action", nargs="?", choices=["submit", "collect"],
+                    help="submit: pin the staged candidate and review it in the background; "
+                         "collect: take a finished review")
+    rw.add_argument("rid", nargs="?", help="collect: the review id")
+    rw.add_argument("--any", action="store_true", help="collect: the oldest finished review")
+    rw.add_argument("--run", help=argparse.SUPPRESS)
     rw.add_argument("--boundary", help="acceptance boundary; defaults to the running slice")
     rw.add_argument("--paths", nargs="*", help="narrow a prospective review to these staged paths")
     rw.add_argument("--commits", help="review landed work retrospectively; never authorizes a commit")
@@ -7111,6 +7341,8 @@ def main():
     # `review_timeout` in .ao/config.json (#63).
     rw.add_argument("--timeout", type=int, help=argparse.SUPPRESS)
     rw.set_defaults(fn=cmd_review)
+    rs = sub.add_parser("reviews", help="submitted reviews: state, slice, elapsed and verdict")
+    rs.set_defaults(fn=cmd_reviews)
     cr = sub.add_parser("collect-review",
                         help="a person records a stand-in session's answer to ao's review request")
     cr.add_argument("nonce")
@@ -7136,6 +7368,7 @@ def main():
     ck = sub.add_parser("commit-ok", help="grant authority for the exact staged index candidate")
     ck.add_argument("--verify", action="store_true", help="run the quick gates first when the verification is stale")
     ck.add_argument("-p", "--profile", help="gate profile for --verify (default quick)")
+    ck.add_argument("--review", help="grant only if the staged tree is the tree this submitted review pinned")
     ck.set_defaults(fn=cmd_commit_ok)
     cc = sub.add_parser(
         "commit-check",

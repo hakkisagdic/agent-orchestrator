@@ -32,6 +32,10 @@ git object at submit time and to keep one slice per worktree.
 
 ## 1 — Submit and collect
 
+*In ao since slice PIPELINE-SUBMIT (#27): `ao review submit`, `ao reviews`, `ao review collect`,
+`ao commit-ok --review`, and `review.max_inflight`. The pinned tree is kept as a private index
+file under `.ao/reviews/`, so the running review reads that tree whatever the live index holds.*
+
 ```bash
 ao review submit --boundary '…'      # returns R-1788… immediately
 ao reviews                            # what is in flight, with elapsed and progress
@@ -97,7 +101,8 @@ is working; a section that has produced nothing for a long time is stuck, and ki
 is the only way to find out.
 
 **Invariant Z1.** A section is killed only when it **stalls** — no output and no
-heartbeat for `review.stall_minutes` (default 10) — never for having taken a long time.
+heartbeat for a stall window (ten minutes proposed; not a setting until this lands) — never for
+having taken a long time.
 A stalled section is recorded as unanswered with its partial output kept as evidence; the
 rest of the review is untouched and `ao review resume` retries just that one.
 
