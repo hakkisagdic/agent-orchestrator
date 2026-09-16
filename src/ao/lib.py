@@ -2704,7 +2704,179 @@ def prune_review_artefacts(root, cfg, days, apply=False, now=None):
         os.makedirs(archive, exist_ok=True)
         for name in moving:
             shutil.move(os.path.join(directory, name), os.path.join(archive, name))
+            record_archived(root, name, archive)     # where it went stays on the record (#47)
     return {"kept": kept, "recent": recent, "moved": moving, "bytes": size, "archive": archive}
+
+
+# ---- the stores agree with each other, and a repair is on the record (#47) --------------
+
+REPAIR_CHAIN = "ao-repair-row-v1"
+
+
+def archived_path(root):
+    return os.path.join(root, ".ao", "ledger", "archived.jsonl")
+
+
+def archived_artefacts(root):
+    """{artefact: archive directory} for review artefacts ao moved out of the repository (#38, #47)."""
+    from .storage import read_jsonl
+    if not os.path.exists(archived_path(root)):
+        return {}
+    try:
+        return {row["artefact"]: row.get("archive") for row in read_jsonl(archived_path(root))
+                if isinstance(row, dict) and row.get("artefact")}
+    except Exception:
+        return {}
+
+
+def record_archived(root, name, archive):
+    from .storage import append_jsonl
+    append_jsonl(archived_path(root), {"at": int(time.time()), "artefact": name, "archive": archive})
+
+
+def _in_archive(root, reviews_dir, name):
+    folder = os.path.join(HOME, ".ao", "archive", project_key(root))
+    try:
+        for entry in sorted(os.listdir(folder)):
+            if entry.startswith(os.path.basename(os.path.normpath(reviews_dir)) + "-") \
+                    and os.path.exists(os.path.join(folder, entry, name)):
+                return os.path.join(folder, entry)
+    except OSError:
+        pass
+    return None
+
+
+def consistency_findings(root, cfg):
+    """Every disagreement between the board, the ledgers, the review artefacts and git (#47).
+
+    On 2026-09-07 the architect hand-edited three state files with no way for the
+    tool to confirm the result was coherent. Each finding names both sides. A
+    finding carries a repair only when the state is mechanical - a checkpoint for a
+    ledger whose checkout is gone, a lock whose holder is dead, an archived review
+    with no pointer to where it went; what was authorised, reviewed or verified is
+    reported and never changed.
+    """
+    from .storage import _load_committed_lengths, read_chained_jsonl
+    out = []
+
+    def found(kind, text, repair=None):
+        out.append({"kind": kind, "text": text, "repair": repair})
+
+    reviews_dir = cfg.get("reviews", "semantic-review")
+    try:
+        grants = [row for row in authority_rows(root) if isinstance(row, dict) and row.get("granted") is True]
+    except Exception as exc:
+        grants = []
+        found("authority", f"the authority ledger cannot be read: {exc}")
+    try:
+        verifications = {row.get("id") for row in read_chained_jsonl(
+            os.path.join(root, ".ao", "ledger", "verifications.jsonl"), VERIFICATION_CHAIN, legacy_prefix=True)
+            if isinstance(row, dict)}
+    except Exception as exc:
+        verifications = None
+        found("verifications", f"the verification ledger cannot be read: {exc}")
+    try:
+        waivers = {row.get("id") for row in waiver_rows(root) if isinstance(row, dict)}
+    except Exception as exc:
+        waivers = None
+        found("waivers", f"the waiver ledger cannot be read: {exc}")
+    archived = archived_artefacts(root)
+    for row in grants:
+        token = row.get("token") or "a grant"
+        review = row.get("review")
+        if review and not os.path.exists(os.path.join(root, reviews_dir, review)) and review not in archived:
+            found("grant-review", f"grant {token} rests on review {review}, which is neither in {reviews_dir}/ "
+                                  "nor recorded as archived")
+        if verifications is not None and row.get("verification") and row["verification"] not in verifications:
+            found("grant-verification", f"grant {token} names verification {row['verification']}, which the "
+                                        "verification ledger does not hold")
+        if waivers is not None and row.get("waiver") and row["waiver"] not in waivers:
+            found("grant-waiver", f"grant {token} stood on waiver {row['waiver']}, which the waiver ledger does not hold")
+    try:
+        review_rows = read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN)
+    except Exception as exc:
+        review_rows = []
+        found("reviews", f"the review ledger cannot be read: {exc}")
+    for row in review_rows:
+        name = row.get("artefact") if isinstance(row, dict) else None
+        if not name:
+            continue
+        path = os.path.join(root, reviews_dir, name)
+        if os.path.exists(path):
+            with open(path, "rb") as fh:
+                if "sha256:" + hashlib.sha256(fh.read()).hexdigest() != row.get("sha256"):
+                    found("review-bytes", f"{reviews_dir}/{name} is not the bytes its review row recorded")
+        elif name not in archived:
+            where = _in_archive(root, reviews_dir, name)
+            if where:
+                found("archive-pointer", f"{name} was moved to {where} and nothing records where",
+                      repair=("archive-pointer", name, where))
+            else:
+                found("review-missing", f"{reviews_dir}/{name} has a review row and no file, here or archived")
+    for state, items in board(root).items():
+        for item in items:
+            for key in ("landed", "commit"):
+                sha = (item["notes"].get(key) or "").split(" ")[0].strip()
+                if re.fullmatch(r"[0-9a-f]{7,40}", sha) and \
+                        not git_text(root, "rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}"):
+                    found("board-commit", f"the board says {item['id']} {key} {sha}, which is not a commit here")
+    for ledger in sorted(_load_committed_lengths()):
+        checkout = os.path.dirname(os.path.dirname(os.path.dirname(ledger)))
+        if os.path.basename(os.path.dirname(ledger)) == "ledger" and not os.path.isdir(checkout):
+            found("checkpoint", f"a committed length is recorded for {ledger}, whose checkout is gone",
+                  repair=("checkpoint", ledger))
+    lock = architect_lock_path(root)
+    try:
+        with open(lock, encoding=UTF8) as fh:
+            holder = json.load(fh)
+    except (OSError, ValueError):
+        holder = None
+    if isinstance(holder, dict) and holder.get("pid") and not _pid_alive(holder["pid"]):
+        found("architect-lock", f"the architect lock names pid {holder['pid']}, which is not running",
+              repair=("architect-lock", lock))
+    return out
+
+
+def repair_consistency(root, findings):
+    """Apply only the mechanical repairs, and record each in .ao/ledger/repairs.jsonl (#47).
+
+    A repair is itself evidence. It never touches the authority, verification,
+    review or waiver ledgers.
+    """
+    from .storage import _exclusive_lock, _load_committed_lengths, append_chained_jsonl, checkpoint_path
+    done = []
+    for finding in findings:
+        repair = finding.get("repair")
+        if not repair:
+            continue
+        kind = repair[0]
+        if kind == "checkpoint":
+            store = checkpoint_path()
+            with _exclusive_lock(store + ".lock"):
+                data = _load_committed_lengths()
+                if repair[1] not in data:
+                    continue
+                del data[repair[1]]
+                temporary = f"{store}.{os.getpid()}.tmp"
+                with open(temporary, "w", encoding=UTF8) as fh:
+                    json.dump(data, fh, indent=1, sort_keys=True)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                os.replace(temporary, store)
+        elif kind == "architect-lock":
+            try:
+                os.remove(repair[1])
+            except FileNotFoundError:
+                continue
+        elif kind == "archive-pointer":
+            record_archived(root, repair[1], repair[2])
+        else:
+            continue
+        append_chained_jsonl(os.path.join(root, ".ao", "ledger", "repairs.jsonl"),
+                             {"at": int(time.time()), "kind": kind, "target": list(repair[1:]),
+                              "finding": finding["text"]}, REPAIR_CHAIN)
+        done.append(finding)
+    return done
 
 
 def grant_artefacts_at_risk(root, cfg):

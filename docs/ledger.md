@@ -111,6 +111,21 @@ ao ledger render                                       # regenerate INDEX.md
 
 `ao verify` writes its own record; you never hand-author a verification.
 
+## The stores are checked against each other
+
+The board, the ledgers, the review artefacts and git refs are four stores that must agree.
+`ao doctor --consistency` cross-checks them and names every disagreement with both sides: a
+grant resting on a review that is neither on disk nor recorded as archived, a grant naming a
+verification or a waiver its ledger does not hold, a review file that is not the bytes its row
+recorded, a review row with no file anywhere, a board item citing a commit that is not in the
+repository, a committed-length checkpoint for a checkout that is gone, an architect lock whose
+holder is dead, and a review ao archived with nothing recording where.
+
+`--repair` fixes only the last three kinds - mechanical state - and appends what it did to
+`.ao/ledger/repairs.jsonl`, chained, so a repair is itself evidence. Anything that says what
+was authorised, reviewed or verified is reported and never changed; no repair rewrites an
+authority row.
+
 ## Rules
 
 - **Append-only.** Corrections are new entries. A ledger you can rewrite is a ledger you

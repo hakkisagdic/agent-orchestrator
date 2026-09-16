@@ -7523,7 +7523,29 @@ def _init_then_prove(cfg, args):
     return cmd_prove(A.load_config(cfg["root"]), args)
 
 
+def _doctor_consistency(cfg, repair=False):
+    """`ao doctor --consistency [--repair]`: the four stores checked against each other (#47)."""
+    root = cfg["root"]
+    findings = A.consistency_findings(root, cfg)
+    if repair:
+        for finding in A.repair_consistency(root, findings):
+            print(f"{C['green']}repaired{C['reset']}  {finding['text']}  {C['dim']}recorded in "
+                  f".ao/ledger/repairs.jsonl{C['reset']}")
+        findings = A.consistency_findings(root, cfg)
+    if not findings:
+        print(f"{C['green']}consistent{C['reset']}  board, ledgers, review artefacts and git agree")
+        return 0
+    for finding in findings:
+        mark = f"{C['yellow']}repairable{C['reset']}" if finding["repair"] else f"{C['red']}disagrees{C['reset']}"
+        print(f"{mark}  {finding['kind']}: {finding['text']}")
+    if any(finding["repair"] for finding in findings):
+        print(f"{C['dim']}ao doctor --consistency --repair fixes the repairable ones and records what it did{C['reset']}")
+    return 1
+
+
 def cmd_doctor(cfg, args):
+    if getattr(args, "consistency", False):
+        return _doctor_consistency(cfg, repair=getattr(args, "repair", False))
     if getattr(args, "check", False):
         # Scheduled checks return through the existing static helper here;
         # only the manual path below invokes the reviewer nonce probe.
@@ -8092,6 +8114,10 @@ def main():
                     help="quiet: one line per problem, exit 1 if any; pages nobody without --notify")
     dr.add_argument("--notify", action="store_true",
                     help="with --check, for the scheduled job only: page red findings, record advisories")
+    dr.add_argument("--consistency", action="store_true",
+                    help="check the board, the ledgers, the review artefacts and git against each other")
+    dr.add_argument("--repair", action="store_true",
+                    help="with --consistency: fix only mechanical disagreements, on the record")
     dr.set_defaults(fn=cmd_doctor)
     sk = sub.add_parser("skill", help="the playbook, rendered for the agents this repository uses")
     sk.add_argument("action", choices=["install", "show"], nargs="?", default="install")
