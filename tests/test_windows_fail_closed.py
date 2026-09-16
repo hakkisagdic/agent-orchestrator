@@ -14,7 +14,7 @@ def test_a_windows_working_directory_names_a_transcript_directory_under_claude_p
     assert A.claude_project_dir("C:\\Users\\me\\repo.v2") == os.path.join(base, "C--Users-me-repo-v2")
 
     monkeypatch.setattr(A.os, "name", "posix")
-    assert A.claude_project_dir("/Users/me/repo.v2") == os.path.join(base, "-Users-me-repo-v2")
+    assert A.claude_project_dir("/srv/me/repo.v2") == os.path.join(base, "-srv-me-repo-v2")
 
 
 def test_a_transcript_directory_that_exists_is_used_as_found(project, monkeypatch):
