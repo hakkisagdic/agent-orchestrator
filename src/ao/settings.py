@@ -78,6 +78,9 @@ SETTINGS = {
     "repository.kind": Setting(
         "product", str, None, None, "project",
         "product: the architect does not implement beyond a named hotfix; tool: roles may rotate per slice"),
+    "review.lenses": Setting(
+        "declared", str, None, None, "project",
+        "declared: lenses only where a slice names them; auto: defaults from what the candidate touches; off: none"),
     "gates.default_timeout": Setting(
         600, int, 1, None, "project",
         "seconds a gate may run when its own definition names no timeout"),

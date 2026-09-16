@@ -2800,6 +2800,131 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary):
     return label, exe, version, attempt
 
 
+REVIEW_SECTION_MARKER = "--- BU BÖLÜMÜN SORUSU ---"
+# A lens is a failure mode with the question it asks, never a job title (#78).
+REVIEW_LENSES = {
+    "correctness": "Does the candidate do what the boundary says in every case, the edges included?",
+    "concurrency": "Can two processes, threads or turns interleave here and leave a wrong or half-written state?",
+    "clock": "Is every time comparison, window, timezone and reset right, including skew and DST?",
+    "durability": "If the process dies at any line, is what was written whole, and is what was promised persisted?",
+    "subprocess": "Does every spawned process get exact argv, a bounded time, reaped children and no shell to inject into?",
+    "portability": "Does it behave the same on macOS, Linux and Windows: paths, encodings, signals, line endings?",
+    "secrets": "Can a token, a key, a private path or a personal detail leak into a file, a log, a prompt or a message?",
+    "authority": "Can anything here widen what an agent may do, or grant without the evidence the rule requires?",
+    "tests": "Do the tests prove the claim, fail without the change, and test the code rather than a mock?",
+}
+# What a candidate touches decides which lenses it needs by default (#78).
+LENS_SIGNALS = {
+    "clock": r"time\.time\(|datetime|strftime|strptime|mktime|timedelta",
+    "durability": r"fsync|os\.replace|replace_file_durably|append_jsonl",
+    "subprocess": r"subprocess\.|Popen|os\.kill|killpg",
+    "concurrency": r"_exclusive_lock|flock|threading|concurrent\.futures",
+    "secrets": r"token|secret|password|api[_-]?key|credential",
+    "authority": r"commit_ok|commit-ok|record_authority|waive|grant",
+    "portability": r"os\.name|sys\.platform|os\.sep|pathsep|encoding=",
+}
+
+
+def review_sections(cfg, item, boundary_text, diff):
+    """The questions one review asks, each its own bounded call; [] asks it all at once (#26, #78).
+
+    Lenses first: the slice's `lenses:` note names them (`+x` adds one to the
+    defaults, `-x` waives one on the record), and with review.lenses `auto` the
+    defaults come from what the candidate touches. Otherwise the boundary's
+    numbered scenarios, each its own question. A review of eight scenarios is
+    eight questions, not one, and a cut-off then costs one of them.
+    """
+    notes = (item or {}).get("notes") or {}
+    tokens = [token.strip().lower() for token in A.re.split(r"[,\s]+", notes.get("lenses", "")) if token.strip()]
+    added = [token[1:] for token in tokens if token.startswith("+")]
+    waived = [token[1:] for token in tokens if token.startswith("-")]
+    named = [token for token in tokens if token[0] not in "+-"]
+    mode = S.get(cfg, "review.lenses")
+    lenses = []
+    if mode != "off":
+        if named:
+            lenses = named
+        elif mode == "auto" or added:
+            lenses = ["correctness"] + [lens for lens, pattern in LENS_SIGNALS.items() if A.re.search(pattern, diff)]
+            if A.re.search(r"^\+\+\+ b/(?:.*/)?tests?/", diff, A.re.M):
+                lenses.append("tests")
+        lenses = [lens for lens in dict.fromkeys(lenses + added) if lens in REVIEW_LENSES and lens not in waived]
+    if len(lenses) >= 2:
+        record = {"asked": lenses, "waived": [lens for lens in waived if lens in REVIEW_LENSES],
+                  "added": [lens for lens in added if lens in REVIEW_LENSES]}
+        return [{"name": f"lens:{lens}",
+                 "question": f"Lens `{lens}`: {REVIEW_LENSES[lens]} Judge the candidate only through this lens, "
+                             "and count only the findings it reveals."} for lens in lenses], record
+    scenarios = A.re.findall(r"^\s*S?(\d{1,2})[.)]\s+(\S.{6,})$", boundary_text or "", A.re.M)
+    if len(scenarios) >= 2:
+        return [{"name": f"scenario:{number}",
+                 "question": f"Scenario {number}: {text.strip()} Judge only whether the candidate satisfies this "
+                             "scenario, and count only the findings about it."} for number, text in scenarios[:12]], None
+    return [], None
+
+
+def _section_journal(root, evidence, boundary, sections, chain):
+    key = A.hashlib.sha256(json.dumps([evidence.get("diff_digest"), boundary, [s["name"] for s in sections],
+                                     [str((route or {}).get("id") or (route or {}).get("argv")) for route in chain]],
+                                    sort_keys=True).encode(UTF8)).hexdigest()[:24]
+    return os.path.join(root, ".ao", "reviews", "sections", f"{key}.jsonl")
+
+
+def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, strict, primary=None):
+    """Ask each section as its own call, each answer durable before the next (#26, P1-P4).
+
+    A section answered before, for the same candidate, boundary, sections and
+    reviewers, is not asked again: a review cut off resumes where it stopped. The
+    verdict is computed from the sections' counts; a section with no answer leaves
+    the review with no verdict, which is not a round.
+    """
+    from .storage import append_jsonl, read_jsonl
+    answered = {row["section"]: row for row in read_jsonl(journal) if isinstance(row, dict) and row.get("section")}
+    rows, last, started = [], None, time.time()
+    for index, section in enumerate(sections, 1):
+        row = answered.get(section["name"])
+        if row is None:
+            print(f"{C['dim']}section {index}/{len(sections)} {section['name']}: asking{C['reset']}")
+            invocation = _invoke_reviewer_chain(root, chain, f"{prompt}\n\n{REVIEW_SECTION_MARKER}\n{section['question']}",
+                                                timeout, strict, primary=primary)
+            if invocation["used"] is None:
+                return dict(invocation, sections=[_section_summary(r) for r in rows])
+            out = invocation["attempt"]["out"]
+            counts = {key: A.re.findall(rf"^{key}:[ \t]*([0-9]{{1,9}})[ \t]*\r?$", out, A.re.M)
+                      for key in ("BLOCKER", "HIGH", "MEDIUM", "LOW")}
+            verdict = A._review_verdict(out)
+            if verdict not in ("APPROVED", "NEEDS_CHANGES") or any(len(v) != 1 for v in counts.values()):
+                return dict(invocation, sections=[_section_summary(r) for r in rows])
+            row = {"at": int(time.time()), "section": section["name"], "position": invocation["used_position"],
+                   "route": invocation["labels"].get(invocation["used_position"], "reviewer"),
+                   "counts": {key: int(values[0]) for key, values in counts.items()}, "out": A.scan_evidence(out)[0]}
+            row["verdict"] = "NEEDS_CHANGES" if row["counts"]["BLOCKER"] or row["counts"]["HIGH"] else "APPROVED"
+            append_jsonl(journal, row)
+            last = invocation
+            print(f"{C['dim']}section {index}/{len(sections)} {section['name']}: {row['verdict']} "
+                  f"(BLOCKER {row['counts']['BLOCKER']}, HIGH {row['counts']['HIGH']}) · "
+                  f"{_elapsed(time.time() - started)} · {row['route']}{C['reset']}")
+        else:
+            print(f"{C['dim']}section {index}/{len(sections)} {section['name']}: answered before, "
+                  f"{row['verdict']}{C['reset']}")
+        rows.append(row)
+    totals = {key: sum(row["counts"][key] for row in rows) for key in ("BLOCKER", "HIGH", "MEDIUM", "LOW")}
+    verdict = "NEEDS_CHANGES" if totals["BLOCKER"] or totals["HIGH"] else "APPROVED"
+    body = [f"VERDICT: {verdict}"] + [f"{key}: {value}" for key, value in totals.items()]
+    for index, row in enumerate(rows, 1):
+        body += ["", f"## Section {index}/{len(rows)}: {row['section']} — {row['verdict']}"]
+        body += ["    " + line for line in row["out"].splitlines()]
+    position = max(row["position"] for row in rows)
+    attempt = dict((last or {}).get("attempt") or {"ok": True, "binary": "section journal"}, out="\n".join(body))
+    return {"used": chain[position], "used_position": position, "attempt": attempt, "failures": {},
+            "labels": (last or {}).get("labels") or {}, "chain": chain,
+            "sections": [_section_summary(row) for row in rows]}
+
+
+def _section_summary(row):
+    return {"section": row["section"], "verdict": row["verdict"], "counts": row["counts"], "route": row["route"]}
+
+
 def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
                            validate=None):
     """Walk fallbacks now; retry only structurally transient route positions.
@@ -3619,9 +3744,19 @@ def cmd_review(cfg, args):
                       "attempt": {"ok": True, "out": carried["out"], "binary": "human-carried"}}
         evidence.update(carried["evidence"])
     else:
-        invocation = _invoke_reviewer_chain(
-            root, chain, prompt, _review_timeout(cfg), strict, primary=rv if not strict else None
-        )
+        sections, lenses = review_sections(cfg, running, (source or {}).get("text") or boundary, diff)
+        if lenses:
+            evidence["lenses"] = lenses
+        if sections:
+            # A review of eight questions is eight bounded calls, resumable one by one (#26).
+            invocation = _invoke_reviewer_sections(
+                root, chain, prompt, sections, _section_journal(root, evidence, boundary, sections, chain),
+                _review_timeout(cfg), strict, primary=rv if not strict else None)
+            evidence["sections"] = invocation.get("sections")
+        else:
+            invocation = _invoke_reviewer_chain(
+                root, chain, prompt, _review_timeout(cfg), strict, primary=rv if not strict else None
+            )
     used = invocation["used"]
     if strict:
         strict_attempts = _strict_attempt_snapshot(matrix_resolution, invocation)

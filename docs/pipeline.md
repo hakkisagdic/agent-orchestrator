@@ -68,6 +68,11 @@ model quota with the architect; unbounded fan-out spends someone else's window.
 
 ## 2 — Sectioned reviews, so a cut-off costs one section
 
+*In ao since slice REVIEW-SECTIONS (#26, #78): sections come from the slice's lenses or the
+boundary's numbered scenarios; each answer is appended to `.ao/reviews/sections/<key>.jsonl`
+before the next is asked, a re-run of `ao review` on the same candidate asks only what is
+unanswered, and the verdict is computed from the sections' counts.*
+
 A review of eight scenarios is eight questions, not one. ao splits the prompt into
 **sections** — from the numbered scenarios in the boundary, or failing that from the
 candidate's file groups — and runs them as separate bounded calls, appending each result
@@ -86,6 +91,23 @@ review with unanswered sections has no verdict at all and is not a round.
 **Invariant P4.** Each section completion writes a heartbeat line: elapsed, sections done
 of total, reviewer id, child pid. `ao reviews` shows it. Silence is a symptom, and today
 there is no way to tell a working reviewer from a dead one.
+
+## 2b — Lenses: a review is a set of declared questions
+
+Twelve finder lenses over this repository found 110 distinct defect sites on 2026-09-08,
+and 91% of them were found by exactly one lens. A single general review is one lens, and
+the other findings are simply missed. A lens is a failure mode with the question it asks:
+`correctness`, `concurrency`, `clock`, `durability`, `subprocess`, `portability`, `secrets`,
+`authority` and `tests`.
+
+A slice names its lenses on its board row, `lenses: correctness, clock, durability`; `+x` adds
+one to the defaults and `-x` waives one, and both are recorded in the review's evidence with
+the lenses actually asked. With `review.lenses` set to `auto`, the defaults come from what the
+candidate touches - a timestamp brings `clock`, a file write `durability`, a spawned process
+`subprocess`. The default is `declared`: every lens is a separate reviewer call, and a
+reviewer's quota is someone's window. Each lens is a section, so a lens pass is bounded and
+resumable like any other, and the verdict is per lens in the artefact: a clean correctness
+pass no longer implies a clean concurrency pass.
 
 ## 3 — No deadline on thinking; a deadline on silence
 
