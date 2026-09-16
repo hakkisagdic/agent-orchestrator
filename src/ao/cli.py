@@ -499,6 +499,9 @@ def cmd_verify(cfg, args):
         print(f"unknown profile {profile}; have: {', '.join(spec.get('profiles', {}))}")
         A.release_gate_lock()
         return 1
+    # The record names what ran, so a later edit to gates.json cannot inherit
+    # this result (#61).
+    gates_digest = A.gate_definitions_digest_of(spec, profile)
 
     try:
         candidate_before = A.index_candidate(root)
@@ -559,7 +562,7 @@ def cmd_verify(cfg, args):
             tail = " ".join(out.strip().split("\n")[-4:])[:400]
             print(f"  {C['dim']}{tail}{C['reset']}")
         results.append({"name": name, "passed": passed, "detail": detail,
-                        "exit": code, "seconds": took})
+                        "exit": code, "seconds": took, "run": g["run"]})
 
     try:
         candidate_after = A.index_candidate(root)
@@ -599,7 +602,8 @@ def cmd_verify(cfg, args):
 
     revs = A.reviews(root, cfg["reviews"], limit=1)
     rec = {"id": f"V-{int(time.time())}", "at": datetime.now().isoformat(timespec="seconds"),
-           "schema": 2, "profile": profile, "by": "ao verify", "passed": ok,
+           "schema": 2, "profile": profile, "gates_digest": gates_digest,
+           "by": "ao verify", "passed": ok,
            "gates": results, "plan_drift": drift,
            "candidate": candidate_before,
            "candidate_after": candidate_after,
@@ -616,6 +620,9 @@ def cmd_verify(cfg, args):
            "dirty": len([l for l in A.sh("git status --short", cwd=root).split("\n") if l.strip()])}
     try:
         A.record_verification(root, rec)
+    except Exception as exc:
+        print(f"{C['red']}{C['b']}NOT RECORDED{C['reset']}  verification ledger: {exc}")
+        return 2
     finally:
         A.release_gate_lock()
 
@@ -624,6 +631,14 @@ def cmd_verify(cfg, args):
         col = C["green"] if "APPROVED" in (revs[0][1] or "").upper() else C["yellow"]
         print(f"{C['dim']}newest review:{C['reset']} {col}{revs[0][1]}{C['reset']} ({revs[0][0]})")
     return 0 if ok else 1
+
+
+def _latest_verification_or_problem(root):
+    """The newest verification, or why the chained ledger cannot be read (#61)."""
+    try:
+        return A.latest_verification(root), None
+    except Exception as exc:
+        return None, str(exc)
 
 
 def cmd_commit_ok(cfg, args):
@@ -648,7 +663,7 @@ def cmd_commit_ok(cfg, args):
         print(f"{C['red']}{C['b']}REFUSED{C['reset']}\n  {C['red']}·{C['reset']} {exc}")
         return 1
     now = A.tree_digest(root, cfg)       # legacy/audit surface, not commit identity
-    ver = A.latest_verification(root)
+    ver, ver_problem = _latest_verification_or_problem(root)
 
     def verification_matches(record):
         measured = (record or {}).get("candidate") or {}
@@ -664,13 +679,15 @@ def cmd_commit_ok(cfg, args):
         candidate = A.index_candidate(root)
         issues = A.candidate_worktree_issues(root, cfg, candidate)
         now = A.tree_digest(root, cfg)
-        ver = A.latest_verification(root)
+        ver, ver_problem = _latest_verification_or_problem(root)
 
     reasons = []
     if not candidate["changed_paths"]:
         reasons.append("no staged candidate — stage exactly what you intend to commit")
     reasons.extend(A.candidate_issue_messages(issues))
-    if not ver:
+    if ver_problem:
+        reasons.append(f"verification ledger is unreadable: {ver_problem}")
+    elif not ver:
         reasons.append("no verification record — run `ao verify`")
     else:
         if not ver.get("passed"):
@@ -688,6 +705,8 @@ def cmd_commit_ok(cfg, args):
             detail = "; ".join(ver.get("candidate_issues") or [])
             reasons.append(f"{ver['id']} did not verify an isolated staged candidate"
                            + (f": {detail}" if detail else ""))
+        if A.gate_definitions_digest(root, ver.get("profile")) != ver.get("gates_digest"):
+            reasons.append(f"gate definitions changed since {ver['id']} — re-run `ao verify`")
 
     drift = A.plan_drift(root)
     if drift:
@@ -1282,6 +1301,10 @@ def cmd_commit_check(cfg, args):
             reasons.append("the grant's verification did not prove an isolated candidate")
         if candidate is not None and verification.get("candidate") != candidate:
             reasons.append("the grant's verification does not match the current index candidate")
+        if A.gate_definitions_digest(root, verification.get("profile")) \
+                != verification.get("gates_digest"):
+            reasons.append("gate definitions changed since the grant's verification — "
+                           "re-run `ao verify`")
 
     if grant and grant.get("granted") is True:
         review_name = grant.get("review")

@@ -15,7 +15,7 @@ The ledger is the fix: an append-only record that outlives the messages.
 ```
 .ao/ledger/
 ├── decisions.jsonl      # why we chose things
-├── verifications.jsonl  # what was actually measured, and by whom
+├── verifications.jsonl  # what was actually measured, and by whom (hash-chained)
 ├── authority.jsonl      # hash-chained commit grants and refusals
 ├── slices.jsonl         # slice lifecycle transitions
 └── INDEX.md             # rendered, human-readable, regenerated on write

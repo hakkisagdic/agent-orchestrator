@@ -45,6 +45,12 @@ Two properties that are not negotiable:
   are usually accurate; a system whose correctness depends on that has no check at all.
 - **The result is recorded** in `.ao/ledger/verifications.jsonl` with the exact numbers and
   the actor who measured them ([`ledger.md`](ledger.md)).
+- **The result names what ran.** The record carries each gate's command and the digest of
+  the profile's definitions, and the ledger is hash-chained like the authority ledger.
+  `ao commit-ok` and `ao commit-check` refuse when `.ao/gates.json` no longer matches that
+  digest, so a gate weakened after the run cannot inherit its pass; a row appended
+  without a valid link makes the ledger unreadable. Rows written before the ledger was
+  chained stay as history and never authorise.
 
 ## Commit authority is bound to a verification
 

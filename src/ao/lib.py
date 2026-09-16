@@ -2108,22 +2108,54 @@ def latest_authority_decision(root):
     )
 
 
-def latest_verification(root):
-    """The newest complete `ao verify` record, or None.
+VERIFICATION_CHAIN = "ao-verification-row-v1"
 
-    An interrupted append may leave one partial tail. The storage layer ignores
-    only that recoverable suffix and fails closed on corruption anywhere else.
+
+def gate_definitions_digest_of(spec, profile):
+    """Canonical digest of the gate definitions one profile runs, or None when it has none (#61).
+
+    `.ao/gates.json` is a file the implementer can write. A verification that does
+    not name the definitions it ran lets a gate weakened after the run inherit the
+    pass measured under the stronger one.
     """
-    from .storage import read_jsonl
-    rows = read_jsonl(os.path.join(root, ".ao", "ledger", "verifications.jsonl"))
-    return rows[-1] if rows else None
+    try:
+        ran = [[name, spec["gates"][name]] for name in spec["profiles"][profile]]
+        canonical = json.dumps({"profile": profile, "gates": ran}, ensure_ascii=True,
+                               sort_keys=True, separators=(",", ":"))
+    except (KeyError, TypeError, ValueError):
+        return None
+    return "sha256:" + hashlib.sha256(canonical.encode("ascii")).hexdigest()
+
+
+def gate_definitions_digest(root, profile):
+    """The digest of the definitions in force now, read from `.ao/gates.json`."""
+    try:
+        with open(os.path.join(root, ".ao", "gates.json"), encoding=UTF8) as fh:
+            spec = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return gate_definitions_digest_of(spec, profile)
+
+
+def latest_verification(root):
+    """The newest complete, chained `ao verify` record, or None.
+
+    The ledger is chained like the authority ledger (#61), so a row appended
+    without a valid link makes it unreadable. Rows written before it was chained
+    carry no link; they stay readable as history and never count.
+    """
+    from .storage import CHAIN_PREVIOUS_FIELD, read_chained_jsonl
+    rows = read_chained_jsonl(os.path.join(root, ".ao", "ledger", "verifications.jsonl"),
+                              VERIFICATION_CHAIN, legacy_prefix=True)
+    chained = [row for row in rows if CHAIN_PREVIOUS_FIELD in row]
+    return chained[-1] if chained else None
 
 
 def record_verification(root, record):
-    """Durably append one verification before reporting its result."""
-    from .storage import append_jsonl
+    """Durably append one chained verification before reporting its result."""
+    from .storage import append_chained_jsonl
     path = os.path.join(root, ".ao", "ledger", "verifications.jsonl")
-    return append_jsonl(path, record)
+    return append_chained_jsonl(path, record, VERIFICATION_CHAIN, legacy_prefix=True)
 
 
 def record_authority(root, granted, reasons, tree, verification, token=None,

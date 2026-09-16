@@ -184,9 +184,23 @@ def _check_committed_length(path, rows, chain):
         )
 
 
-def _validate_chained_rows(path, rows, chain, previous_field):
+def _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix=False):
     expected = None
-    for index, row in enumerate(rows, 1):
+    start = 0
+    if legacy_prefix:
+        # Rows written before a ledger was chained carry no link. They may only
+        # come first, and the first linked row names the digest of the last one.
+        while start < len(rows) and isinstance(rows[start], dict) \
+                and previous_field not in rows[start]:
+            start += 1
+        if start:
+            try:
+                expected = chained_row_digest(rows[start - 1], chain)
+            except (TypeError, ValueError) as exc:
+                raise LedgerCorruption(
+                    f"cannot digest chained JSONL record {start} in {path}: {exc}"
+                ) from exc
+    for index, row in enumerate(rows[start:], start + 1):
         if not isinstance(row, dict):
             raise LedgerCorruption(
                 f"chained JSONL record {index} in {path} is not an object"
@@ -215,7 +229,7 @@ def _validate_chained_rows(path, rows, chain, previous_field):
 
 
 def read_chained_jsonl(path, chain, allow_partial_tail=True, timeout=10.0, *,
-                       previous_field=CHAIN_PREVIOUS_FIELD):
+                       previous_field=CHAIN_PREVIOUS_FIELD, legacy_prefix=False):
     """Read and validate every committed row in one predecessor hash chain.
 
     The chain proves no row was changed or inserted; the recorded length proves
@@ -226,7 +240,7 @@ def read_chained_jsonl(path, chain, allow_partial_tail=True, timeout=10.0, *,
         return []
     with _exclusive_lock(path + ".lock", timeout=timeout):
         rows = _read_jsonl_unlocked(path, allow_partial_tail)
-        _validate_chained_rows(path, rows, chain, previous_field)
+        _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix)
         _check_committed_length(path, rows, chain)
         return rows
 
@@ -390,7 +404,7 @@ def append_jsonl(path, record, timeout=10.0, *, _checkpoint=None,
 
 
 def append_chained_jsonl(path, record, chain, timeout=10.0, *,
-                         previous_field=CHAIN_PREVIOUS_FIELD,
+                         previous_field=CHAIN_PREVIOUS_FIELD, legacy_prefix=False,
                          _checkpoint=None, _write=None, _fsync=None):
     """Atomically select a predecessor, append, and persist one chained row.
 
@@ -414,7 +428,7 @@ def append_chained_jsonl(path, record, chain, timeout=10.0, *,
         _call(_checkpoint, "locked")
         _repair_partial_tail(path, fsync, _checkpoint)
         rows = _read_jsonl_unlocked(path, allow_partial_tail=False)
-        _validate_chained_rows(path, rows, chain, previous_field)
+        _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix)
         _check_committed_length(path, rows, chain)
         previous = chained_row_digest(rows[-1], chain) if rows else None
         chained = {previous_field: previous, "ordinal": len(rows) + 1}
