@@ -45,6 +45,12 @@ Two properties that are not negotiable:
   are usually accurate; a system whose correctness depends on that has no check at all.
 - **The result is recorded** in `.ao/ledger/verifications.jsonl` with the exact numbers and
   the actor who measured them ([`ledger.md`](ledger.md)).
+- **The result is read structurally.** The exit code decides pass or fail. Counts come
+  only from the summary a runner ends with - node's `# pass`/`# fail` lines, pytest's
+  closing line, or the regex a gate names in `summary` with `pass` and `fail` groups -
+  read from the last lines of output, so a test name printing `# pass 900` earlier
+  counts for nothing. A summary that cannot be found is recorded as `counts: null`, and
+  a gate with `min_tests` then fails.
 - **The result names what ran.** The record carries each gate's command and the digest of
   the profile's definitions, and the ledger is hash-chained like the authority ledger.
   `ao commit-ok` and `ao commit-check` refuse when `.ao/gates.json` no longer matches that

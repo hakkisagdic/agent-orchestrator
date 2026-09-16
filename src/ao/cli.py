@@ -529,16 +529,18 @@ def cmd_verify(cfg, args):
         except subprocess.TimeoutExpired:
             out, code = "timed out", 124
         took = int(time.time() - started)
+        counts = None
 
         if g.get("expect") == "empty":
             passed = not out.strip()
             detail = "clean" if passed else " ".join(out.split())[:120]
         else:
+            # The exit code decides; counts come only from the runner's closing
+            # summary, never from the first match in output the implementer controls (#70).
             passed = code == 0
-            m = A.re.search(r"#\s*pass\s+(\d+)[\s\S]*?#\s*fail\s+(\d+)", out) or \
-                A.re.search(r"(?:ℹ\s*)?pass\s+(\d+)[\s\S]*?(?:ℹ\s*)?fail\s+(\d+)", out)
-            if m:
-                p_, f_ = int(m.group(1)), int(m.group(2))
+            counts = A.gate_counts(out, g.get("summary"))
+            if counts:
+                p_, f_ = counts
                 detail = f"{p_}/{p_ + f_}"
                 passed = passed and f_ == 0
                 # Exit zero is not proof that anything ran. A test runner whose
@@ -552,7 +554,8 @@ def cmd_verify(cfg, args):
                     detail += f" — only {p_ + f_} ran, {need} required"
             elif g.get("min_tests"):
                 passed = False
-                detail = f"exit {code}, but no test count found and min_tests={g['min_tests']}"
+                detail = (f"exit {code}, but the runner's closing summary was not found "
+                          f"and min_tests={g['min_tests']}")
             else:
                 detail = f"exit {code}"
         ok = ok and passed
@@ -562,7 +565,9 @@ def cmd_verify(cfg, args):
             tail = " ".join(out.strip().split("\n")[-4:])[:400]
             print(f"  {C['dim']}{tail}{C['reset']}")
         results.append({"name": name, "passed": passed, "detail": detail,
-                        "exit": code, "seconds": took, "run": g["run"]})
+                        "exit": code, "seconds": took, "run": g["run"],
+                        "counts": None if g.get("expect") == "empty" or not counts
+                        else {"pass": counts[0], "fail": counts[1]}})
 
     try:
         candidate_after = A.index_candidate(root)

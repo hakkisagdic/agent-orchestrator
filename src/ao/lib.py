@@ -2200,6 +2200,46 @@ def latest_authority_decision(root):
 VERIFICATION_CHAIN = "ao-verification-row-v1"
 
 
+GATE_SUMMARY_TAIL_LINES = 30
+
+
+def gate_counts(output, summary=None):
+    """Pass and fail counts from the summary a test runner ends with, or None (#70).
+
+    Only the last lines are read, and the last summary in them counts: a test name,
+    a log line or a fixture the implementer wrote can print "# pass 900" anywhere
+    earlier. A gate can name its runner's summary with `summary`, a regex with `pass`
+    and `fail` groups. Nothing found is None - unparsed, never a number.
+    """
+    tail = "\n".join(str(output or "").splitlines()[-GATE_SUMMARY_TAIL_LINES:])
+    if summary:
+        try:
+            found = list(re.finditer(summary, tail, re.M))
+        except re.error:
+            return None
+        if not found:
+            return None
+        groups = found[-1].groupdict()
+        try:
+            return int(groups.get("pass") or 0), int(groups.get("fail") or 0)
+        except ValueError:
+            return None
+    # node --test closes with "# pass N" / "# fail N" (TAP) or "ℹ pass N" / "ℹ fail N".
+    for mark in ("#", "ℹ"):
+        passes = re.findall(rf"^{mark} pass (\d+)[ \t]*$", tail, re.M)
+        fails = re.findall(rf"^{mark} fail (\d+)[ \t]*$", tail, re.M)
+        if passes and fails:
+            return int(passes[-1]), int(fails[-1])
+    # pytest closes with "3 failed, 461 passed, 2 skipped in 12.30s".
+    closing = re.findall(r"^=*[ \t]*((?:\d+ [a-z]+(?:, )?)+) in [\d.]+s\b", tail, re.M)
+    if closing:
+        counts = {word: int(n) for n, word in re.findall(r"(\d+) ([a-z]+)", closing[-1])}
+        if "passed" in counts or "failed" in counts:
+            return (counts.get("passed", 0),
+                    counts.get("failed", 0) + counts.get("error", 0) + counts.get("errors", 0))
+    return None
+
+
 def gate_definitions_digest_of(spec, profile):
     """Canonical digest of the gate definitions one profile runs, or None when it has none (#61).
 
