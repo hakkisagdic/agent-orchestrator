@@ -211,6 +211,13 @@
       "request": {
         "profileArn": "from `kiro-cli whoami`"
       },
+      "driver": "usage-limits",
+      "token": { "sqlite": "~/Library/Application Support/kiro-cli/data.sqlite3", "table": "auth_kv",
+                 "key": "kirocli:odic:token", "field": "access_token", "expires": "expires_at" },
+      "profile": { "argv": ["kiro-cli", "whoami"], "prefix": "arn:aws:codewhisperer" },
+      "body": { "profileArn": "{profile}" },
+      "resource": "CREDIT",
+      "login": ["kiro-cli", "login"],
       "response": "usageBreakdownList[resourceType=CREDIT].currentUsageWithPrecision and .usageLimitWithPrecision; plus subscriptionInfo, overageConfiguration, nextDateReset, daysUntilReset",
       "verified": true
     },
@@ -218,6 +225,7 @@
     "fallback": {
       "source": "transcript",
       "reading": "peak-per-turn",
+      "transcripts": "~/.kiro/sessions/*/*/messages.jsonl",
       "note": "usage_summary reports the running total of the turn in progress; a turn costs the peak it reached before the next turn resets it. Summing every record over-counts ~3x, taking only the last under-counts ~18x.",
       "accuracy": "a floor — measured at 69% of the account figure, since sessions on other machines are invisible"
     }

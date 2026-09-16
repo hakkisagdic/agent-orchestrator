@@ -79,7 +79,9 @@
     "dirs": [".claude"],
     "files": [".mcp.json", "CLAUDE.md"],
     "binaries": ["claude"],
-    "processes": ["claude", "claude-code"]
+    "processes": ["claude", "claude-code"],
+    "install_dirs": ["~/.claude/local"],
+    "update": ["claude", "update"]
   },
   "directives": {
     "steering_files": [
@@ -97,6 +99,7 @@
     "ao_files": [".claude/skills/ao/"]
   },
   "mcp": { "file": ".mcp.json", "remove_when_empty": true },
+  "quota": { "provider": "claude" },
   "models": {
     "default": "claude-sonnet-5",
     "review": "claude-opus-5",

@@ -3,6 +3,7 @@
   "disclaimer": "Written from documented interface, not verified against an install.",
   "send":   { "argv": ["gemini", "--prompt", "{prompt}"] },
   "resume": { "argv": ["gemini", "--prompt", "{prompt}"], "note": "Session resume support varies by version; verify before relying on it." },
+  "quota": { "provider": "gemini" },
   "options": {
     "trust_none": null,
     "trust_none_why": "no flag verified to deny every tool",

@@ -83,6 +83,19 @@ directories, these are read from the package's adapters only.
 `options.mcp_isolation` (`{required, forbidden}`) is the flags a harness needs so a reviewer starts
 no MCP server it was not given (#24); `ao doctor` and the reviewer check read it by binary.
 
+## Accounts, windows and installs are declared, not coded
+
+| Field | What it declares | Used by |
+|---|---|---|
+| `billing.api.driver` | a protocol in `src/ao/drivers.py` (`usage-limits`) with its `token`, `profile`, `body`, `resource` and `login` | `ao credits`, the credit sampler, `ao digest`, handoff |
+| `billing.fallback.transcripts` | a glob of transcripts whose usage records are read when the account cannot be | `ao credits --offline` |
+| `quota` → `provider` | the keyflip provider an actor running this harness spends | window reserve, rotation (#32), `ao fanout` |
+| `detect.install_dirs` | where the harness installs itself outside the usual directories | the newest-binary search |
+| `detect.update` | the command that updates the harness | `ao doctor` on a stale binary |
+
+A driver is chosen by name and reads every path, key, command and endpoint from the adapter, so
+adding a harness whose account answers the same protocol is a data change (#76).
+
 ## Shipping an adapter without forking
 
 Adapters load from three places, each overriding the one before by `id`: the package, then

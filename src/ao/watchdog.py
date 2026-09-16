@@ -369,7 +369,7 @@ def touch_architect_quota(root, st):
     reset = time.strftime("%H:%M", time.localtime(until))
     return notify(
         f"{A.project_key(root)}: mimar kotada",
-        f"{text[:100]} — uyandırma {reset}'e kadar bekletiliyor; Claude Desktop "
+        f"{text[:100]} — uyandırma {reset}'e kadar bekletiliyor; mimarın uygulamasında "
         "auto-continue açıksa oturum kendi devam eder",
         root,
         key="architect-quota",
@@ -546,10 +546,11 @@ def architect_hold_reason(root, cfg, adapter, st, found=None, now=None):
                   + time.strftime("%H:%M", time.localtime(st["arch_quota_until"])))
     if arch_alive(root, arch):
         return {"holdable": True, "code": "wake-running", "reason": "an architect wake is already running"}
-    left, reserve = A.window_headroom("claude")
+    provider = A.provider_of(argv)
+    left, reserve = A.window_headroom(provider)
     urgent = any(item.get("kind") == "decision-requested" for item in (found or []))
     if left is not None and left < reserve and not urgent:
-        return no("window-reserve", f"the machine's Claude window has {left}% left, below the {reserve}% reserve")
+        return no("window-reserve", f"the machine's {provider} window has {left}% left, below the {reserve}% reserve")
     if "{session}" in " ".join(argv) and arch.get("session") in (None, "auto") \
             and not (A.discover_architect(arch.get("cwd") or root) or {}).get("session"):
         return no("session-unresolved", "the architect session cannot be resolved")
@@ -750,10 +751,11 @@ def escalate(root, cfg, adapter, age, args, st):
                root, key="reports-no-wake", window=3600, audience="human")
         woke = False
     if woke:
-        left, reserve = A.window_headroom("claude")
+        provider = A.provider_of(arch.get("argv"))
+        left, reserve = A.window_headroom(provider)
         urgent = any(a.get("kind") == "decision-requested" for a in (found or []))
         if left is not None and left < reserve and not urgent:
-            print(f"reports pending, but the machine's Claude window has {left}% left (< reserve {reserve}%); not waking")
+            print(f"reports pending, but the machine's {provider} window has {left}% left (< reserve {reserve}%); not waking")
             woke = False
     if woke and arch_alive(root, arch):
         print("reports pending, but an architect wake is already running")
@@ -1196,7 +1198,7 @@ def _sample_credits(root, st, adapter, project, now=None):
     if not (adapter.get("billing") or {}).get("api"):
         return
     try:
-        acct = A.kiro_account_usage()
+        acct = A.account_usage()
     except Exception as exc:
         acct = {"error": f"the usage check raised {type(exc).__name__}"}
     if acct is None:

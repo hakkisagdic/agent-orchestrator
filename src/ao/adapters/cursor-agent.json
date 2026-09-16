@@ -6,6 +6,7 @@
   "send":   { "argv": ["agent", "-p", "{prompt}", "--output-format", "json", "-f"] },
   "resume": { "argv": ["agent", "--resume", "{session}", "-p", "{prompt}", "--output-format", "json", "-f"] },
   "list_sessions": { "argv": ["agent", "ls"] },
+  "quota": { "provider": "cursor" },
   "options": {
     "trust_none": null,
     "trust_none_why": "no documented flag denies tools in print mode",

@@ -3,6 +3,7 @@
   "disclaimer": "Written from documented interface, not verified against an install. Flags drift; correct and open a PR.",
   "send":   { "argv": ["codex", "exec", "{prompt}"] },
   "resume": { "argv": ["codex", "exec", "resume", "{session}", "{prompt}"], "continue_last": ["codex", "exec", "resume", "--last", "{prompt}"] },
+  "quota": { "provider": "codex" },
   "options": {
     "trust_none": null,
     "trust_none_why": "codex exec keeps its shell tool; --sandbox read-only limits it but does not remove it",

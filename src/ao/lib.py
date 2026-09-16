@@ -1887,7 +1887,7 @@ def digest(root, cfg, since_days=1.0):
                       "changes": sum(1 for v in fresh if v == "NEEDS_CHANGES"),
                       "not_reviewed": sum(1 for v in fresh if v not in ("APPROVED", "NEEDS_CHANGES"))}
 
-    acct = kiro_account_usage()
+    acct = account_usage()
     if acct and not acct.get("error"):
         out["credits"] = {"used": acct["used"], "limit": acct["limit"],
                           "remaining": acct["limit"] - acct["used"]}
@@ -3922,103 +3922,25 @@ def write_report(root, cfg, kind, facts, key=None):
         return None
 
 
-def kiro_account_usage(timeout=20):
-    """Real credit usage from the provider, not an estimate.
+def usage_api():
+    """The first shipped adapter's account lookup that ao has a driver for, or {} (#76)."""
+    from . import drivers
+    for _, adapter in sorted(package_adapters().items()):
+        api = (adapter.get("billing") or {}).get("api") or {}
+        if api.get("driver") in drivers.USAGE:
+            return api
+    return {}
 
-    `GetUsageLimits` on the CodeWhisperer runtime returns exactly what the app's
-    dashboard shows: credits used, the plan limit, the reset date, overage
-    settings. It authenticates with the OIDC access token the CLI already holds
-    after login, read from its local store — the same credential, on the same
-    machine, for the same account.
 
-    Two things this is not. It is not the `ksk_` API key: that key is rejected as
-    a bearer token here, so it authenticates something else. And it is not
-    guesswork from transcripts — that reading exists as an offline fallback and
-    undercounts by whatever ran on another machine, which measured about a third.
+def account_usage(timeout=20):
+    """Real usage from the provider, through the driver an adapter's billing names; None when none can.
 
-    Returns None when there is no usable token; the caller falls back rather than
-    presenting an error as a balance. The token is used and never stored, logged
-    or returned.
-    When the CLI cannot be found or run it returns {"error": ...} naming the step,
-    so a caller can report a broken check instead of a silent one.
+    The protocol lives in drivers.py and every path, key, command and endpoint in
+    the adapter, so this core function names no harness (#76).
     """
-    db = os.path.join(HOME, "Library", "Application Support", "kiro-cli", "data.sqlite3")
-    if not os.path.exists(db):
-        return None
-    raw = sh(f"sqlite3 {json.dumps(db)} "
-             "\"SELECT value FROM auth_kv WHERE key='kirocli:odic:token';\"")
-    if not raw:
-        return None
-    try:
-        tok = json.loads(raw)
-    except Exception:
-        return None
-    access = tok.get("access_token")
-    if not access:
-        return None
-    if tok.get("expires_at"):
-        try:
-            exp = tok["expires_at"]
-            exp = float(exp) if not isinstance(exp, str) else \
-                __import__("datetime").datetime.fromisoformat(
-                    exp.replace("Z", "+00:00")).timestamp()
-            if exp < time.time():
-                return {"expired": True}
-        except Exception:
-            pass
-
-    # Resolve the CLI through the harness binary search, not the ambient PATH: under
-    # launchd that PATH is /usr/bin:/bin:/usr/sbin:/sbin, kiro-cli was never found,
-    # and a `2>/dev/null` turned the miss into None, so the watchdog never recorded
-    # a sample and the exhaustion alarm could not fire. Say which step failed.
-    found = binary_candidates("kiro-cli")
-    if not found:
-        return {"error": "kiro-cli is not on PATH or in the usual install directories"}
-    try:
-        prof = subprocess.run([found[0], "whoami"], capture_output=True, text=True, encoding=UTF8,
-                              errors="replace", timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return {"error": f"{found[0]} whoami could not run ({type(exc).__name__})"}
-    arn = next((line.strip() for line in (prof.stdout or "").splitlines()
-                if line.strip().startswith("arn:aws:codewhisperer")), "")
-    if not arn:
-        return {"error": f"{found[0]} whoami returned no profile ARN (exit {prof.returncode})"}
-
-    import urllib.error
-    import urllib.request
-    req = urllib.request.Request(
-        "https://codewhisperer.us-east-1.amazonaws.com/",
-        data=json.dumps({"profileArn": arn}).encode(),
-        headers={"Content-Type": "application/x-amz-json-1.0",
-                 "x-amz-target": "AmazonCodeWhispererService.GetUsageLimits",
-                 "Authorization": "Bearer " + access})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            d = json.loads(r.read().decode())
-    except urllib.error.HTTPError as e:
-        return {"error": f"HTTP {e.code}"}
-    except Exception:
-        return None
-
-    row = next((b for b in d.get("usageBreakdownList") or []
-                if b.get("resourceType") == "CREDIT"), None)
-    if not row:
-        return {"error": "no CREDIT row in response"}
-    sub = d.get("subscriptionInfo") or {}
-    over = d.get("overageConfiguration") or {}
-    return {
-        "used": row.get("currentUsageWithPrecision", row.get("currentUsage")),
-        "limit": row.get("usageLimitWithPrecision", row.get("usageLimit")),
-        "reset_at": row.get("nextDateReset") or d.get("nextDateReset"),
-        "days_until_reset": d.get("daysUntilReset"),
-        "plan": sub.get("subscriptionTitle"),
-        "overage_status": over.get("overageStatus"),
-        "overage_cap": row.get("overageCapWithPrecision", row.get("overageCap")),
-        "overage_rate": row.get("overageRate"),
-        "overage_now": row.get("currentOveragesWithPrecision", row.get("currentOverages")),
-        # Which account the figures belong to, without keeping the profile ARN itself (#36).
-        "account": credit_account(arn),
-    }
+    from . import drivers
+    api = usage_api()
+    return drivers.USAGE[api["driver"]](api, timeout=timeout) if api else None
 
 
 def credit_usage(monthly_budget=None):
@@ -4043,7 +3965,10 @@ def credit_usage(monthly_budget=None):
     import glob
     from collections import defaultdict
     months, days, sessions = defaultdict(float), defaultdict(float), []
-    for f in glob.glob(os.path.join(HOME, ".kiro", "sessions", "*", "*", "messages.jsonl")):
+    patterns = [_home_path(((adapter.get("billing") or {}).get("fallback") or {}).get("transcripts"))
+                for _, adapter in sorted(package_adapters().items())
+                if ((adapter.get("billing") or {}).get("fallback") or {}).get("transcripts")]
+    for f in [path for pattern in patterns for path in glob.glob(pattern)]:
         peaks, cur, month, turns = 0.0, 0.0, "", 0
         cur_day = ""
         try:
@@ -6182,7 +6107,7 @@ def fanout_config(cfg):
             for name in ("max_agents", "per_agent_tokens", "window_reserve_pct")}
 
 
-def provider_window(name="claude"):
+def provider_window(name):
     """The machine-wide usage window keyflip reports for a provider, parsed.
 
     Read through the same adapter command the status panel uses, so the panel and
@@ -6191,11 +6116,8 @@ def provider_window(name="claude"):
     as headroom.
     """
     argv = None
-    for aid in ("kiro", "claude-code"):
-        try:
-            spec = (load_adapter(aid).get("telemetry") or {}).get("quota") or {}
-        except Exception:
-            spec = {}
+    for _, adapter in sorted(package_adapters().items()):
+        spec = (adapter.get("telemetry") or {}).get("quota") or {}
         if spec.get("argv"):
             argv = spec["argv"]
             break
@@ -6222,12 +6144,16 @@ def provider_window(name="claude"):
 
 # ---- quota rotation is asked of keyflip, never written into config (#32) -----------------
 
-ENGINE_PROVIDERS = {"claude": "claude", "codex": "codex", "gemini": "gemini", "agent": "cursor", "copilot": "copilot"}
-
-
 def provider_of(argv):
-    """The keyflip provider an actor's argv spends, or None when keyflip does not manage it."""
-    return ENGINE_PROVIDERS.get(_program_name(argv[0])) if argv and isinstance(argv[0], str) else None
+    """The keyflip provider an actor's argv spends, as its adapter declares it (`quota.provider`), or None."""
+    if not argv or not isinstance(argv[0], str):
+        return None
+    program = _program_name(argv[0])
+    for ident, adapter in sorted(package_adapters().items()):
+        provider = (adapter.get("quota") or {}).get("provider")
+        if provider and program in {_program_name(name) for name in [ident, *adapter_binaries(adapter)]}:
+            return provider
+    return None
 
 
 def rotate_if_exhausted(cfg, argv, who):
@@ -6312,7 +6238,7 @@ def observed_per_agent_tokens(root):
     return int(tok / n) if n else None
 
 
-def fanout_verdict(root, cfg, agents, per_agent_tokens=None, provider="claude"):
+def fanout_verdict(root, cfg, agents, per_agent_tokens=None, provider=None):
     """May a fan-out of this size start now?
 
     Three checks, each a fact the caller can see: the project's hard cap, whether
@@ -6324,7 +6250,8 @@ def fanout_verdict(root, cfg, agents, per_agent_tokens=None, provider="claude"):
     fc = fanout_config(cfg)
     observed = observed_per_agent_tokens(root)
     per = per_agent_tokens or observed or fc["per_agent_tokens"]
-    win = provider_window(provider)
+    provider = provider or provider_of((cfg.get("architect") or {}).get("argv"))
+    win = provider_window(provider) if provider else None
     reasons, verdict = [], "ok"
     if agents > fc["max_agents"]:
         verdict = "too-many"
@@ -6375,8 +6302,12 @@ def fanout_verdict(root, cfg, agents, per_agent_tokens=None, provider="claude"):
 # copy sat unused. `which` answers "the first one", and the first one is the
 # wrong question. Ask "the newest one" and remember what it said.
 
-_BIN_DIRS = ("~/.local/bin", "~/bin", "/usr/local/bin", "/opt/homebrew/bin",
-             "~/.claude/local", "~/.npm-global/bin", "~/.volta/bin", "~/.asdf/shims")
+# Where a harness installs itself outside the usual directories is its adapter's to declare
+# (`detect.install_dirs`, #76), placed where such a directory always stood in the search.
+_BIN_DIRS = (("~/.local/bin", "~/bin", "/usr/local/bin", "/opt/homebrew/bin")
+             + tuple(sorted({d for adapter in package_adapters().values()
+                             for d in (adapter.get("detect") or {}).get("install_dirs") or []}))
+             + ("~/.npm-global/bin", "~/.volta/bin", "~/.asdf/shims"))
 _BIN_GLOBS = ("~/.local/share/fnm/node-versions/*/installation/bin",
               "~/.fnm/node-versions/*/installation/bin",
               "~/.nvm/versions/node/*/bin", "~/.local/share/mise/installs/node/*/bin")
@@ -8282,9 +8213,9 @@ def fleet_reserve():
     return settings.get(None, "fleet.window_reserve_pct")
 
 
-def window_headroom(provider="claude"):
-    """(left_pct, reserve_pct) or (None, reserve) when the window is unreadable."""
-    w = provider_window(provider)
+def window_headroom(provider):
+    """(left_pct, reserve_pct) or (None, reserve) when the window is unreadable or no provider is known."""
+    w = provider_window(provider) if provider else None
     return (100 - w["pct"]) if w else None, fleet_reserve()
 
 

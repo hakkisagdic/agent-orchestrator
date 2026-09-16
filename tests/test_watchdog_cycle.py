@@ -336,7 +336,7 @@ def test_kiro_usage_names_a_missing_cli_instead_of_returning_nothing(tmp_path, m
     monkeypatch.setattr(A, "HOME", str(tmp_path / "home"))
     monkeypatch.setattr(A, "binary_candidates", lambda name, path=None: [])
 
-    result = A.kiro_account_usage()
+    result = A.account_usage()
 
     assert result and "kiro-cli" in result.get("error", "")
 
@@ -347,7 +347,7 @@ def test_credit_sampler_records_a_broken_check_and_waits_before_retrying(project
     def usage(timeout=20):
         calls.append(1)
         return {"error": "kiro-cli is not on PATH or in the usual install directories"}
-    monkeypatch.setattr(A, "kiro_account_usage", usage)
+    monkeypatch.setattr(A, "account_usage", usage)
     monkeypatch.setattr(W, "notify", lambda *a, **k: alerts.append(k))
     st = {}
 
@@ -363,7 +363,7 @@ def test_credit_sampler_records_a_broken_check_and_waits_before_retrying(project
 def test_credit_sampler_raises_exhaustion_on_the_first_reading(project, monkeypatch):
     root = project["root"]
     alerts = []
-    monkeypatch.setattr(A, "kiro_account_usage",
+    monkeypatch.setattr(A, "account_usage",
                         lambda timeout=20: {"used": 10200.0, "limit": 10000.0, "reset_at": None})
     monkeypatch.setattr(W, "notify", lambda title, msg, root=None, **k: alerts.append((title, k)))
     st = {"credit_check_problem": {"at": 1, "reason": "an earlier failure"}}

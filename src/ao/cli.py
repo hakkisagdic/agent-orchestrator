@@ -1807,7 +1807,7 @@ def cmd_credits(cfg, args):
     """
     from datetime import date, datetime
 
-    acct = None if args.offline else A.kiro_account_usage()
+    acct = None if args.offline else A.account_usage()
     if acct and not acct.get("error") and not acct.get("expired"):
         used, limit = acct["used"], acct["limit"]
         pct = used / limit * 100 if limit else 0
@@ -1840,8 +1840,9 @@ def cmd_credits(cfg, args):
         return 0
 
     if acct and acct.get("expired"):
+        login = " ".join(A.usage_api().get("login") or []) or "the CLI's login"
         print(f"{C['yellow']}The CLI's token has expired.{C['reset']} "
-              f"Run {C['b']}kiro-cli login{C['reset']} and try again.")
+              f"Run {C['b']}{login}{C['reset']} and try again.")
     elif acct and acct.get("error"):
         print(f"{C['yellow']}Account lookup failed:{C['reset']} {acct['error']}")
     elif not args.offline:
@@ -2308,7 +2309,7 @@ def cmd_handoff(cfg, args):
     g = A.git_state(root)
     opens = A.decisions(root, "open")
     revs = A.reviews(root, cfg["reviews"], limit=1)
-    acct = A.kiro_account_usage() if impl.get("adapter") == "kiro" else None
+    acct = A.account_usage() if ((adapter.get("billing") or {}).get("api") or {}).get("driver") else None
     state, age, doing = A.busy(cfg, adapter) if impl else ("unknown", None, "")
 
     lines = [f"# Devir — {cfg.get('project') or os.path.basename(root)}",
@@ -5821,13 +5822,13 @@ def _doctor_check(cfg, page=False):
 
 # A credit pool is shared: what ao reads is ao's share, what the account says is everyone's (#95).
 SHARED_POOL_NOTE = ("the account's figure counts every session on it - another project's CLI, an IDE, "
-                    "a tool like Traycer - and ao's transcript holds only ao's own turns")
+                    "another orchestrator - and ao's transcript holds only ao's own turns")
 
 
 def _account_beside_share(cfg, since=None):
     """Lines setting the account's figure beside ao's own transcript share, labelled as such."""
     try:
-        acct = A.kiro_account_usage()
+        acct = A.account_usage()
     except Exception:
         acct = None
     if not acct or acct.get("error") or acct.get("expired") or not acct.get("limit"):
@@ -8296,7 +8297,11 @@ def cmd_doctor(cfg, args):
                 elif used != f"{rb} {rv}":
                     print(f"                {C['dim']}a different binary resolves now; the next wake will use it{C['reset']}")
                 else:
-                    print(f"                {C['yellow']}same binary — update it (claude update) or remove the stale copy{C['reset']}")
+                    update = next((adapter["detect"]["update"] for adapter in A.package_adapters().values()
+                                   if (adapter.get("detect") or {}).get("update")
+                                   and os.path.basename(arch["argv"][0]) in A.adapter_binaries(adapter)), None)
+                    how = f" ({' '.join(update)})" if update else ""
+                    print(f"                {C['yellow']}same binary — update it{how} or remove the stale copy{C['reset']}")
         # Liveness and channels. A watchdog nobody can prove is alive, and an orange
         # alarm with no channel beyond the desktop, are both silent failures.
         hb = A.heartbeat_age(root)
@@ -8735,7 +8740,7 @@ def main():
     fo.add_argument("--roots", type=int, help="pipeline: number of first-stage agents")
     fo.add_argument("--per-root", type=int, dest="per_root", help="pipeline: at most this many second-stage agents per root")
     fo.add_argument("--per-agent-tokens", type=int, dest="per_agent_tokens")
-    fo.add_argument("--provider", default="claude")
+    fo.add_argument("--provider", help="keyflip provider; default: the architect's")
     fo.add_argument("--done", type=int)
     fo.add_argument("--errors", type=int)
     fo.add_argument("--tokens", type=int)

@@ -120,7 +120,7 @@ def test_a_review_that_did_not_take_place_is_neither_findings_nor_progress(proje
 
 def test_the_digest_counts_only_reviews_that_took_place(project, monkeypatch):
     root = project["root"]
-    monkeypatch.setattr(A, "kiro_account_usage", lambda timeout=20: None)
+    monkeypatch.setattr(A, "account_usage", lambda timeout=20: None)
     _review(root, "NEEDS_CHANGES")
     _review(root, "UNAVAILABLE")
     _review(root, "APPROVED")

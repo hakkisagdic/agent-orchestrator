@@ -89,7 +89,7 @@ def test_the_shell_helper_speaks_cmd_on_windows(monkeypatch):
 
 def test_the_digest_reads_commits_without_a_shell(project, monkeypatch):
     root = project["root"]
-    monkeypatch.setattr(A, "kiro_account_usage", lambda timeout=20: None)
+    monkeypatch.setattr(A, "account_usage", lambda timeout=20: None)
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty",
                     "-m", "a | subject with a pipe"], cwd=root, check=True)
 

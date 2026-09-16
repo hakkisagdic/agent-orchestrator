@@ -677,7 +677,7 @@ def test_digest_surfaces_broken_authority_chain_without_trusting_counts(
         lambda root: {state: [] for state in A.BOARD_STATES},
     )
     monkeypatch.setattr(A, "reviews", lambda *args, **kwargs: [])
-    monkeypatch.setattr(A, "kiro_account_usage", lambda: None)
+    monkeypatch.setattr(A, "account_usage", lambda: None)
     monkeypatch.setattr(A, "credit_usage", lambda: {"days": {}})
 
     result = A.digest(root, project)

@@ -18,7 +18,7 @@ def test_the_credit_projection_rings_with_the_readings_it_projected_from(project
     root = project["root"]
     now = time.time()
     A.record_credit_sample(root, 1000, 10_000, reset_at=now + 30 * 86400, account="acct-a", at=now - 5 * 3600)
-    monkeypatch.setattr(A, "kiro_account_usage", lambda timeout=20: {
+    monkeypatch.setattr(A, "account_usage", lambda timeout=20: {
         "used": 5000, "limit": 10_000, "reset_at": now + 30 * 86400, "account": "acct-a"})
     rung = []
     monkeypatch.setattr(W, "notify", lambda title, msg, root=None, **kw: rung.append((title, kw)))
