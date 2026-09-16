@@ -340,6 +340,7 @@ def touch_architect_quota(root, st):
         key="architect-quota",
         window=6 * 3600,
         audience="human",
+        quiet_until=until,
     )
 
 
@@ -1082,6 +1083,36 @@ def _sample_credits(root, st, adapter, project, now=None):
                window=6 * 3600, audience="human", level="red")
 
 
+DECISION_HUMAN_AFTER = 15 * 60
+
+
+def escalate_open_decisions(root, project, dry_run=False, now=None):
+    """A decision nobody has answered reaches a person (#20).
+
+    Fifteen minutes after it was asked it rings orange on the human channel, once
+    an hour, and the alarm ladder turns it red and mails after its hour. The wake
+    is not waited for: on 2026-09-07 a decision stood three hours while the only
+    notice about it was held for an architect that never came. An answered
+    decision stops being raised and its alarm ends on its own. Returns the ids
+    that are ringing.
+    """
+    now = time.time() if now is None else now
+    ringing = []
+    for decision in A.decisions(root, "open"):
+        asked = decision.get("asked_at") or 0
+        if not asked or now - asked < DECISION_HUMAN_AFTER:
+            continue
+        ringing.append(decision.get("id"))
+        if dry_run:
+            print(f"DRY RUN: would ring a person about decision {decision.get('id')}")
+            continue
+        notify(f"{project}: decision waiting",
+               f"{decision.get('id')}: {str(decision.get('question') or '')[:120]} — open "
+               f"{int((now - asked) / 60)}m; ao answer {decision.get('id')} <key>",
+               root, key=f"decision-open:{decision.get('id')}", window=3600, audience="human")
+    return ringing
+
+
 def report_ungranted_commits(root, project, st, limit=20):
     """Tell the architect once about commits whose tree no grant bound (#109).
 
@@ -1167,6 +1198,7 @@ def _cycle_impl(args, root):
     _FACTS["foreign_edits"] = fe
     if not args.dry_run:
         _FACTS["ungranted_commits"] = report_ungranted_commits(root, project, st)
+    _FACTS["decisions_ringing"] = escalate_open_decisions(root, project, dry_run=args.dry_run)
     for sib, age_s in A.stale_siblings(root).items():
         notify(f"{sib}: watchdog silent", f"no heartbeat for {age_s // 60}m — its watchdog is not "
                f"running; launchctl / ao watchdog status", root, key=f"watchdog-dead:{sib}",
@@ -1308,6 +1340,13 @@ def _cycle_impl(args, root):
         name, at = waiting
         print(f"implementer is waiting on the architect since "
               f"{time.strftime('%H:%M', time.localtime(at))} ({name}); not nudging")
+        return 0
+    # An open decision cannot be answered by a nudged turn (#20).
+    asked = [d for d in A.decisions(root, "open") if d.get("asked_at")]
+    if asked:
+        oldest = min(asked, key=lambda d: d["asked_at"])
+        print(f"decision {oldest['id']} is open since "
+              f"{time.strftime('%H:%M', time.localtime(oldest['asked_at']))}; not nudging")
         return 0
     reasons = open_work(cfg, root)
     if not reasons:

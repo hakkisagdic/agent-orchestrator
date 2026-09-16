@@ -2587,6 +2587,14 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
         g["n"] += 1
         g["latest"] = m
         g["title"] = first.lstrip("# ").strip()[:200]
+    # A question asked with `ao ask` wants the architect as much as a report does,
+    # and may have no mail at all (#20). Each open one is its own anomaly.
+    for decision in decisions(root, "open"):
+        asked = decision.get("asked_at") or 0
+        out.append({"kind": "decision-requested", "key": decision.get("id"),
+                    "facts": [f"{decision.get('id')} is open since "
+                              f"{time.strftime('%d %b %H:%M', time.localtime(asked)) if asked else '?'}",
+                              str(decision.get("question") or "")[:200]]})
     # One anomaly per kind, however many reports carry it. Eighty "queue empty"
     # reports in eleven hours became eighty anomaly files and forty wake attempts;
     # the architect needed one line saying "eighty, since 06:31".
@@ -4544,6 +4552,14 @@ def turn_costs(cfg, since=None):
 # later" the human asked for: the run degrades, it never forgets.
 
 def deferred_append(root, kind, **fields):
+    """Defer one kind of work; an open deferral of that kind is the one that stands (#87).
+
+    A wake is state, not a queue of attempts: fourteen deferred wakes piled up over
+    one outage and replayed in a burst when it ended.
+    """
+    standing = next((row for row in deferred_open(root) if row.get("kind") == kind), None)
+    if standing:
+        return standing
     d = os.path.join(root, ".ao", "ledger")
     rec = {"event": "deferred", "id": f"DF-{int(time.time())}-{kind}", "kind": kind, "at": int(time.time())}
     rec.update(fields)
