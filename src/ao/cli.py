@@ -2185,7 +2185,7 @@ def cmd_content(cfg, args):
     source, _, pin = (args.spec or "").rpartition("@")
     skills = [name.strip() for name in (args.skills or "").split(",") if name.strip()]
     if not source or not skills:
-        print("usage: ao content add <source>@<40-character commit> --skills a,b [--harness claude-code,kiro]")
+        print("usage: ao content add <source>@<40-character commit> --skills a,b [--harness <adapter>,<adapter>]")
         return 2
     harnesses = [name.strip() for name in (args.harness or "").split(",") if name.strip()] \
         or sorted(skillkit.detect_agents(root)[1])
@@ -4774,8 +4774,14 @@ def cmd_init(cfg, args):
     # AGENTS.md) are never appended to unless they ask with --rules: a tool that
     # writes instructions there has, from the reading agent's side, issued rules
     # nobody authorised — the second pilot's coordinator refused exactly that.
-    if os.path.isdir(os.path.join(root, ".kiro")) or args.agent == "kiro":
-        put(".kiro/steering/ao-coordination.md", STEERING_COORD.format())
+    from . import skillkit
+    requested = skillkit.detect_agents(root, args.agent)[0]
+    for ident, adapter in skillkit.setup_adapters(root):
+        coordination = (adapter.get("directives") or {}).get("coordination")
+        present = any(os.path.isdir(os.path.join(root, *path.split("/")))
+                      for path in (adapter.get("detect") or {}).get("dirs") or [])
+        if coordination and (ident == requested or present):
+            put(coordination, STEERING_COORD.format())
 
     for rel in wrote:
         print(f"  {C['green']}wrote{C['reset']}  {rel}")
@@ -4793,7 +4799,8 @@ def cmd_init(cfg, args):
     for rel, what in playbook_files.items():
         print(f"  {C['green'] if what != 'kept' else C['dim']}{what:<8}{C['reset']} {rel}")
     if not getattr(args, "rules", False):
-        print(f"  {C['dim']}rule files untouched — paste this into CLAUDE.md / AGENTS.md yourself, or re-run with --rules:{C['reset']}")
+        print(f"  {C['dim']}rule files untouched — paste this into {' / '.join(skillkit.rule_file_names(root))} "
+              f"yourself, or re-run with --rules:{C['reset']}")
         for line in skillkit.RULE_POINTER.split("\n"):
             print(f"      {line}")
     registered = {} if args.no_mcp else skillkit.register_mcp(root, agents, exe)
@@ -5590,7 +5597,8 @@ def doctor_problems(cfg):
     # written and not in force. init prints the pointer; this is the reminder.
     from . import skillkit
     if skillkit.rules_wired(root) is False:
-        out.append(("rules-not-wired", "no rule file (CLAUDE.md, AGENTS.md, .kiro/steering) points at the ao playbook — "
+        named = ", ".join(skillkit.rule_file_names(root) + skillkit.steering_dirs(root))
+        out.append(("rules-not-wired", f"no rule file ({named}) points at the ao playbook — "
                                        "paste the pointer or run `ao init --rules`"))
     # Two critical roles on one rate-limited pool fail together: the day the
     # architect ran dry, so did the reviewer, and the run locked.
@@ -7285,15 +7293,14 @@ def cmd_remove(cfg, args):
     """Take ao off only after every reachable hook target passes one preflight."""
     root = cfg["root"]
     key = A.project_key(root)
-    plan = [PROJECT_MARKER, ".ao/", "agent-mail/", cfg.get("reviews", "semantic-review") + "/",
-            ".claude/skills/ao/", ".kiro/steering/ao-coordination.md", ".kiro/steering/ao-playbook.md",
-            ".kiro/steering/ao-single-writer.md", ".kiro/steering/ao-machine.md"]
-    mcp_files = [(".mcp.json", "ao"), (os.path.join(".kiro", "settings", "mcp.json"), "ao")]
+    from . import skillkit
+    harness_files, mcp_files = skillkit.ao_files(root)
+    plan = [PROJECT_MARKER, ".ao/", "agent-mail/", cfg.get("reviews", "semantic-review") + "/"] + harness_files
     print(f"{C['b']}ao remove{C['reset']} would delete from {root}:")
     for rel in plan:
         if os.path.exists(os.path.join(root, rel)):
             print(f"   {rel}")
-    for f, name in mcp_files:
+    for f, name, _ in mcp_files:
         p = os.path.join(root, f)
         if os.path.exists(p):
             print(f"   {f}: the `{name}` server entry (other entries stay)")
@@ -7301,7 +7308,7 @@ def cmd_remove(cfg, args):
     print(f"   {C['dim']}hook files only when statically AO-owned, untracked, and fully authorized; "
           f"protected dead-misplaced files are preserved{C['reset']}")
     print(f"   {C['dim']}not touched: product files, reviews you moved elsewhere, "
-          f"CLAUDE.md / AGENTS.md text (paste-in was yours){C['reset']}")
+          f"{' / '.join(skillkit.rule_file_names(root))} text (paste-in was yours){C['reset']}")
     if not args.yes:
         print(f"\nre-run with {C['b']}--yes{C['reset']} to do it")
         return 0
@@ -7360,7 +7367,7 @@ def cmd_remove(cfg, args):
             _sh.rmtree(p, ignore_errors=True)
         elif os.path.exists(p):
             os.remove(p)
-    for f, name in mcp_files:
+    for f, name, remove_when_empty in mcp_files:
         p = os.path.join(root, f)
         if os.path.exists(p):
             try:
@@ -7368,7 +7375,7 @@ def cmd_remove(cfg, args):
                 if name in (d.get("mcpServers") or {}):
                     del d["mcpServers"][name]
                     json.dump(d, open(p, "w", encoding=UTF8), indent=2)
-                if not d.get("mcpServers") and f == ".mcp.json":
+                if not d.get("mcpServers") and remove_when_empty:
                     os.remove(p)
             except (OSError, ValueError):
                 pass
@@ -8360,8 +8367,11 @@ def cmd_doctor(cfg, args):
         print(f"                {C['dim']}a shell alias does not count — "
               f"uv tool install ao-orchestrator{C['reset']}")
 
-    steer = os.path.join(root, ".kiro", "steering")
-    if os.path.isdir(steer) and not reachable:
+    from . import skillkit as _skillkit
+    for steering in _skillkit.steering_dirs(root):
+        steer = os.path.join(root, *steering.split("/"))
+        if not os.path.isdir(steer) or reachable:
+            continue
         refs = [f for f in os.listdir(steer)
                 if f.endswith(".md") and "ao " in open(os.path.join(steer, f),
                                                        errors="replace", encoding=UTF8).read()]
@@ -8512,10 +8522,11 @@ def main():
     dg.set_defaults(fn=cmd_digest)
     ini = sub.add_parser("init", help="put ao on this project (idempotent)")
     ini.add_argument("--name")
-    ini.add_argument("--agent", choices=["kiro", "claude", "claude-code", "codex", "auto", "all"], default="auto")
+    from . import skillkit as _skillkit
+    ini.add_argument("--agent", choices=_skillkit.agent_choices(), default="auto")
     ini.add_argument("--mcp", action="store_true", help="(default) register the MCP server for detected agents")
     ini.add_argument("--no-mcp", action="store_true", help="skip the MCP registration")
-    ini.add_argument("--rules", action="store_true", help="also write the pointer into CLAUDE.md / AGENTS.md (the owner's rule files)")
+    ini.add_argument("--rules", action="store_true", help="also write the pointer into the owner's rule files")
     ini.add_argument("--profile", choices=sorted(PROFILES), help="write the role blocks: who implements, reviews, judges")
     ini.add_argument("--implementer", help="implementer adapter id (kiro, claude-code, …); overrides the profile")
     ini.add_argument("--model", help="implementer model, passed through the adapter's --model option")
@@ -8754,7 +8765,7 @@ def main():
     dr.set_defaults(fn=cmd_doctor)
     sk = sub.add_parser("skill", help="the playbook, rendered for the agents this repository uses")
     sk.add_argument("action", choices=["install", "show"], nargs="?", default="install")
-    sk.add_argument("--agent", choices=["kiro", "claude", "claude-code", "codex", "auto", "all"], default="auto")
+    sk.add_argument("--agent", choices=_skillkit.agent_choices(), default="auto")
     sk.set_defaults(fn=cmd_skill)
 
     args = p.parse_args()

@@ -36,6 +36,25 @@ writing argv by hand. A hand-written reviewer argv still works and stays the exc
 `ao adapters` shows which adapters may review, and `ao doctor` reports a configured reviewer
 whose adapter cannot deny tools.
 
+## Setting ao up for a harness is declared, not coded
+
+`ao init`, `ao skill` and `ao remove` name no harness (#76). What a harness leaves in a
+repository and where ao's files for it go are fields of its adapter, and core reads them:
+
+| Field | What it declares | Used by |
+|---|---|---|
+| `detect.dirs`, `detect.files`, `detect.binaries` | the signs that a repository uses this harness | `ao init`, `ao skill`, `ao content add` |
+| `directives.playbook` | `{path, header}`: where the playbook is rendered; `header` is text or `frontmatter` | `ao init`, `ao skill` |
+| `directives.coordination` | a steering file ao writes the coordination rules into | `ao init` |
+| `directives.rule_files` | the owner's rule files this harness reads (AGENTS.md is shared and needs no entry) | `--rules`, `ao doctor` |
+| `directives.steering_dir`, `directives.skills_dir` | directories the harness reads by itself | `ao doctor`, `ao content add` |
+| `directives.ao_files` | every path ao may have written for this harness | `ao remove` |
+| `mcp` | `{file, key, extra, register, remove_when_empty}` or `{manual, snippet}` | `ao init`, `ao remove` |
+
+A harness with no such fields is simply not set up: ao writes `.ao/PLAYBOOK.md` and prints the
+pointer, and `--agent` refuses a name no adapter answers to. A project can declare a harness ao
+has never shipped in `.ao/adapters/`, and init sets it up the same way.
+
 ## Shipping an adapter without forking
 
 Adapters load from three places, each overriding the one before by `id`: the package, then

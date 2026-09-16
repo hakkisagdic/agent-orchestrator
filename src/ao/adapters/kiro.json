@@ -115,8 +115,22 @@
     "idle_seconds": 240,
     "note": "status can remain in_progress across an idle gap; the mtime check is the reliable half."
   },
+  "detect": {
+    "dirs": [".kiro"],
+    "binaries": ["kiro-cli"]
+  },
+  "mcp": {
+    "file": ".kiro/settings/mcp.json",
+    "extra": { "env": {} },
+    "register": ["kiro-cli", "mcp", "add", "--name", "ao", "--scope", "workspace", "--command", "{exe}", "--args", "{args}"],
+    "register_note": "run only when the CLI is installed and the file does not exist yet; otherwise the entry is merged"
+  },
   "directives": {
     "steering_dir": ".kiro/steering",
+    "playbook": { "path": ".kiro/steering/ao-playbook.md", "header": "---\ninclusion: always\n---\n\n" },
+    "coordination": ".kiro/steering/ao-coordination.md",
+    "ao_files": [".kiro/steering/ao-coordination.md", ".kiro/steering/ao-playbook.md",
+                 ".kiro/steering/ao-single-writer.md", ".kiro/steering/ao-machine.md"],
     "steering_format": "markdown with `inclusion: always` frontmatter",
     "hooks_dir": ".kiro/hooks",
     "hooks_format": "{\"version\":\"v1\",\"hooks\":[{name,trigger,action:{type:\"agent\"|\"command\",prompt|command}}]}",

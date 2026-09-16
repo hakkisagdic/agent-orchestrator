@@ -68,6 +68,11 @@
     "idle_seconds": 240,
     "note": "No status file; rely on write age alone."
   },
+  "detect": {
+    "dirs": [".claude"],
+    "files": [".mcp.json", "CLAUDE.md"],
+    "binaries": ["claude"]
+  },
   "directives": {
     "steering_files": [
       "CLAUDE.md",
@@ -76,8 +81,12 @@
     ],
     "steering_format": "markdown, always included",
     "hooks": ".claude/settings.json (hooks key)",
-    "skills_dir": ".claude/skills"
+    "skills_dir": ".claude/skills",
+    "playbook": { "path": ".claude/skills/ao/SKILL.md", "header": "frontmatter" },
+    "rule_files": ["CLAUDE.md"],
+    "ao_files": [".claude/skills/ao/"]
   },
+  "mcp": { "file": ".mcp.json", "remove_when_empty": true },
   "models": {
     "default": "claude-sonnet-5",
     "review": "claude-opus-5",
