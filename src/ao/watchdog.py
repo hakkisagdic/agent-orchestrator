@@ -226,7 +226,7 @@ def desktop_notify(title, msg):
 
 
 def notify(title, msg, root=None, key=None, window=1800, audience=None, level=None,
-           quiet_until=None):
+           quiet_until=None, evidence=None):
     """Raise an alert at most once per window, and always record that we did.
 
     An explicit audience is a routing decision and is never inferred again from
@@ -252,7 +252,7 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
         if dry_run:
             print(f"DRY RUN: would record architect notice: {title}")
         elif root:
-            A.record_notice(root, title, msg, sent=False, key=key)
+            A.record_notice(root, title, msg, sent=False, key=key, evidence=evidence)
         return False
     # The ladder: this is an orange (a person must act). Standing an hour, it
     # rings red and goes to mail — the channel people open when they wake up.
@@ -271,11 +271,11 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
         if dry_run:
             print(f"DRY RUN: would hold {title}: snoozed until {until} by {snoozed.get('by')}")
         elif root:
-            A.record_notice(root, title, f"{msg} [snoozed until {until}]", sent=False, key=key)
+            A.record_notice(root, title, f"{msg} [snoozed until {until}]", sent=False, key=key, evidence=evidence)
         return False
     ring, episode = A.alarm_touch(
         project, key, level or "orange", red_after=red_after, title=title,
-        persist=not dry_run, quiet_until=quiet_until,
+        persist=not dry_run, quiet_until=quiet_until, evidence=evidence,
     )
     if ring == "red" and episode.get("red_due"):
         if dry_run:
@@ -285,7 +285,9 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
                 from . import email
                 since = time.strftime("%d %b %H:%M", time.localtime(episode.get("first", time.time())))
                 if email.send(f"{title}", f"{msg}\n\nDuruyor: {since}'den beri ({episode.get('count', 1)} kez). "
-                              f"Proje: {root or '?'}\n`ao alarms` merdiveni, `ao status` durumu gösterir.", root):
+                              f"Proje: {root or '?'}\n`ao alarms` merdiveni, `ao status` durumu gösterir."
+                              + ("\n\nKanıt:\n" + "\n".join(A.evidence_lines(evidence))
+                                 if evidence else ""), root):
                     A.alarm_mailed(project, key)
                     if root:
                         A.record_notice(root, title, msg, sent=True, key="mail:" + key)
@@ -297,21 +299,21 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
         if dry_run:
             print(f"DRY RUN: would hold {title}: told once, quiet until {until}")
         elif root:
-            A.record_notice(root, title, f"{msg} [told once; quiet until {until}]", sent=False, key=key)
+            A.record_notice(root, title, f"{msg} [told once; quiet until {until}]", sent=False, key=key, evidence=evidence)
         return False
     if root and A.notice_recently_sent(root, key, window):
         if dry_run:
             print(f"DRY RUN: would suppress {ring} desktop/Telegram channels "
                   f"(recent notice): {title}")
         else:
-            A.record_notice(root, title, msg, sent=False, key=key)
+            A.record_notice(root, title, msg, sent=False, key=key, evidence=evidence)
         return False
     if root and storm(root):
         if dry_run:
             print(f"DRY RUN: would suppress {ring} desktop/Telegram channels "
                   f"(alert storm): {title}")
         else:
-            A.record_notice(root, title, msg, sent=False, key=key)
+            A.record_notice(root, title, msg, sent=False, key=key, evidence=evidence)
             if not A.notice_recently_sent(root, "storm", 3600):
                 A.record_notice(root, f"{project}: alert storm", "12+ alerts in an hour; further ones "
                                 "are recorded only — ao notices", sent=True, key="storm")
@@ -329,7 +331,7 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
     except Exception:
         pass                                # a phone being unreachable is not a failure
     if root:
-        A.record_notice(root, title, msg, sent=True, key=key)
+        A.record_notice(root, title, msg, sent=True, key=key, evidence=evidence)
     return True
 
 
@@ -1142,17 +1144,23 @@ def _sample_credits(root, st, adapter, project, now=None):
     save_state(root, st)
     used, limit = float(acct.get("used") or 0), float(acct["limit"])
     if used >= limit:
+        reading = A.notice_evidence("credit_reading", [
+            {"value": f"{used:.0f}/{limit:.0f}", "at": int(now),
+             "source": f"GetUsageLimits, account {acct.get('account')}"}])
         notify(f"{project}: credits exhausted",
                f"{used:.0f}/{limit:.0f} used; the plan is spent and only overage, if enabled, runs "
                f"until the reset. New account (keyflip) or `ao features off …`", root,
-               key="credits-exhaust", window=6 * 3600, audience="human", level="red")
+               key="credits-exhaust", window=6 * 3600, audience="human", level="red", evidence=reading)
         return
     br = A.burn_rate(root)
     if br and br["before_reset"]:
+        evidence = A.notice_evidence("burn_rate", [
+            {"value": f"{sample['used']:.0f}/{sample['limit']:.0f}", "at": sample.get("at"),
+             "source": f"GetUsageLimits, account {sample.get('account')}"} for sample in br["samples"]])
         notify(f"{project}: credits run out {time.strftime('%d %b', time.localtime(br['exhausts_at']))}",
                f"{br['used']:.0f}/{br['limit']:.0f} at {br['per_day']:.0f}/day; the reset is later. "
                f"New account (keyflip) or `ao features off …`", root, key="credits-exhaust",
-               window=6 * 3600, audience="human", level="red")
+               window=6 * 3600, audience="human", level="red", evidence=evidence)
 
 
 DECISION_HUMAN_AFTER = S.default("decisions.human_after_minutes") * 60

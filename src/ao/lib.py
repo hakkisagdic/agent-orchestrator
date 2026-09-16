@@ -1164,7 +1164,24 @@ def _process_start(pid, refresh=False):
     return None
 
 
-def record_notice(root, title, msg, sent, key=None):
+PROJECTION_CHECKS = ("burn_rate",)
+
+
+def notice_evidence(check, samples, source=None):
+    """What a notice was raised on: the check, and each sample's value, source and time (#37).
+
+    The owner received a quota-looking alert for a limit that did not exist and had no
+    way to ask why. A projection is only as good as the readings it projected from, so
+    one cannot be recorded without them.
+    """
+    rows = [{"value": sample.get("value"), "source": sample.get("source") or source,
+             "at": sample.get("at")} for sample in samples or []]
+    if check in PROJECTION_CHECKS and not rows:
+        raise ValueError(f"a {check} notice needs the samples it projected from")
+    return {"check": check, "samples": rows}
+
+
+def record_notice(root, title, msg, sent, key=None, evidence=None):
     """Every notification we raise, kept where the architect can read it.
 
     A desktop notification is fire-and-forget: it reaches the human and vanishes,
@@ -1180,11 +1197,26 @@ def record_notice(root, title, msg, sent, key=None):
     try:
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "notices.jsonl"), "a", encoding=UTF8) as fh:
-            fh.write(json.dumps({"at": int(time.time()), "title": title,
-                                 "msg": msg, "sent": bool(sent),
-                                 "key": key or title}, ensure_ascii=False) + "\n")
+            row = {"id": f"N-{int(time.time() * 1000)}", "at": int(time.time()), "title": title,
+                   "msg": msg, "sent": bool(sent), "key": key or title}
+            if evidence:
+                row["evidence"] = evidence
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
     except OSError:
         pass
+
+
+def evidence_lines(evidence, now=None):
+    """A notice's evidence as lines a person reads: the check, then each sample and its age."""
+    if not evidence:
+        return ["no evidence recorded (raised before notices kept it, or by a check that has none)"]
+    now = now or time.time()
+    lines = [f"check: {evidence.get('check')}"]
+    for sample in evidence.get("samples") or []:
+        at = sample.get("at")
+        age = f"{int((now - at) / 60)}m ago" if isinstance(at, (int, float)) else "time unknown"
+        lines.append(f"  {sample.get('value')}  from {sample.get('source') or '?'}, {age}")
+    return lines
 
 
 def notices(root, limit=10, include_suppressed=False):
@@ -4507,7 +4539,7 @@ def alarm_snoozed(project, key, now=None):
 
 
 def alarm_touch(project, key, level, now=None, red_after=ALARM_RED_AFTER, title=None,
-                persist=True, quiet_until=None):
+                persist=True, quiet_until=None, evidence=None):
     """Calculate a raise of `key` at `level`; return (level to ring at, episode).
 
     An orange raised repeatedly for `red_after` seconds rings red. `red_due` on
@@ -4529,6 +4561,8 @@ def alarm_touch(project, key, level, now=None, red_after=ALARM_RED_AFTER, title=
         e["title"] = title
     if quiet_until:
         e["quiet_until"] = float(quiet_until)
+    if evidence:
+        e["evidence"] = evidence      # the ladder shows what the notice was raised on (#37)
     ring = level
     e["red_due"] = False
     if level == "red" or (level == "orange" and now - e["first"] >= red_after):
@@ -5339,7 +5373,8 @@ def burn_rate(root, window=72 * 3600, now=None):
     before_reset = bool(exhausts_at and reset_at and exhausts_at < reset_at)
     return {"per_day": per_day, "remaining": remaining, "days_left": days_left,
             "exhausts_at": exhausts_at, "reset_at": reset_at, "before_reset": before_reset,
-            "used": last["used"], "limit": last["limit"], "account": account}
+            "used": last["used"], "limit": last["limit"], "account": account,
+            "samples": [first, last]}
 
 
 # ---- external ping: the dead man's switch --------------------------------------------

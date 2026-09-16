@@ -4517,6 +4517,9 @@ def cmd_alarms(cfg, args):
         print(f"  {tone}{e.get('ring', '?'):<7}{C['reset']} {e['key']:<32} since {since}  "
               f"×{e.get('count', 1)}  {C['dim']}{e.get('title', '')[:50]}{C['reset']}"
               + (f"  mailed {datetime.fromtimestamp(e['red_sent']).strftime('%H:%M')}" if e.get('red_sent') else ""))
+        if e.get("evidence"):
+            for line in A.evidence_lines(e["evidence"]):
+                print(f"          {C['dim']}{line}{C['reset']}")
     return 0
 
 
@@ -6513,6 +6516,20 @@ def cmd_notices(cfg, args):
     panel is the one participant who never sees what the human was told.
     """
     root = cfg["root"]
+    wanted = getattr(args, "ident", None)
+    if wanted:
+        # "Why did I get this?" is one command (#37).
+        row = next((r for r in A.notices(root, 10**9, include_suppressed=True) if r.get("id") == wanted), None)
+        if not row:
+            print(f"no notice {wanted}; `ao notices --all` lists them with their ids")
+            return 1
+        when = datetime.fromtimestamp(row["at"]).strftime("%d %b %H:%M")
+        print(f"{C['b']}{row['title']}{C['reset']}  {C['dim']}{wanted} · {when} · "
+              f"{'sent' if row.get('sent') else 'held'} · key {row.get('key')}{C['reset']}")
+        print(f"  {row.get('msg')}")
+        for line in A.evidence_lines(row.get("evidence")):
+            print(f"  {line}")
+        return 0
     rows = A.notices(root, args.n, include_suppressed=args.all)
     if not rows:
         print(f"{C['dim']}No notices recorded.{C['reset']}")
@@ -6521,7 +6538,9 @@ def cmd_notices(cfg, args):
         when = datetime.fromtimestamp(r["at"]).strftime("%d %b %H:%M")
         tag = (f"{C['green']}sent{C['reset']}" if r.get("sent")
                else f"{C['dim']}held{C['reset']}")
-        print(f"  {C['dim']}{when}{C['reset']}  {tag}  {C['b']}{r['title']}{C['reset']}  {r['msg']}")
+        print(f"  {C['dim']}{when}{C['reset']}  {tag}  {C['b']}{r['title']}{C['reset']}  {r['msg']}"
+              + (f"  {C['dim']}{r['id']}{' · evidence' if r.get('evidence') else ''}{C['reset']}"
+                 if r.get("id") else ""))
     if not args.all:
         print(f"{C['dim']}  (--all also shows alerts the rate limit suppressed){C['reset']}")
     return 0
@@ -7111,7 +7130,8 @@ def main():
     a2.add_argument("action", choices=["serve", "info"], nargs="?", default="info")
     a2.add_argument("--port", type=int, default=8731)
     a2.set_defaults(fn=cmd_a2a)
-    n = sub.add_parser("notices", help="alerts this project raised")
+    n = sub.add_parser("notices", help="alerts this project raised; with an id, what it was raised on")
+    n.add_argument("ident", nargs="?", help="a notice id: print its evidence")
     n.add_argument("-n", type=int, default=12)
     n.add_argument("--all", action="store_true", help="include rate-limited ones")
     n.set_defaults(fn=cmd_notices)
