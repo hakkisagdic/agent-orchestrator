@@ -2165,13 +2165,18 @@ def record_review(root, name, data, evidence, verdict, reviewer=None, fallback=F
 
 def write_review_artefact(root, reviews_dir, name, text, *, evidence, verdict,
                           reviewer=None, fallback=False):
-    """Write a review artefact and record exactly the bytes written (#63)."""
+    """Record a review, then write exactly the recorded bytes, whole (#63, #65).
+
+    The row comes first. A write that dies after it leaves a newest review that
+    cannot be read, and that refuses; written first, a file whose row was never
+    appended left the older recorded approval of the candidate deciding (audit).
+    """
+    from .storage import replace_file_durably
     directory = os.path.join(root, reviews_dir)
     os.makedirs(directory, exist_ok=True)
     data = text.encode(UTF8)
-    with open(os.path.join(directory, name), "wb") as fh:
-        fh.write(data)
     record_review(root, name, data, evidence, verdict, reviewer=reviewer, fallback=fallback)
+    replace_file_durably(os.path.join(directory, name), data)
 
 
 def candidate_review_decision(root, review_dir, candidate_digest):

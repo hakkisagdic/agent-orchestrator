@@ -65,7 +65,7 @@ def test_a_collected_rejection_is_a_round_recorded_with_its_transport_and_limits
     assert code == 1
     assert A.rounds(root, "semantic-review") == 1
     (row,) = _carried_rows(root)
-    assert row["reviewer"] == "human-assisted:gpt-5.5" and row["fallback"] is False
+    assert row["reviewer"] == "human-assisted:gpt-5.5" and row["fallback"] is True
     evidence = A.review_evidence(open(os.path.join(root, "semantic-review", row["artefact"]), encoding="utf-8").read())
     assert evidence["transport"] == "human-carried" and evidence["collected_by"] == "Hakkı (owner)"
     assert evidence["limits"] == list(A.STANDIN_LIMITS) and evidence["nonce"] == request["nonce"]

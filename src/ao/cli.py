@@ -780,9 +780,11 @@ def cmd_commit_ok(cfg, args):
                 rwho = None
                 reasons.append(f"{review_name} records no reviewer in its evidence — "
                                "run `ao review` again")
-            elif _reviewer_is_implementer(_configured_reviewer(cfg, rwho),
-                                          _implementer_sessions(cfg)):
+            elif _reviewer_ineligible(cfg, _configured_reviewer(cfg, rwho)) == "it runs as the implementer":
                 reasons.append(f"the review was written by the implementer ({rwho})")
+            elif _reviewer_ineligible(cfg, _configured_reviewer(cfg, rwho)):
+                reasons.append(f"the review's reviewer {rwho} may not review this implementer: "
+                               f"{_reviewer_ineligible(cfg, _configured_reviewer(cfg, rwho))}")
 
     held = A.hold_state(root)
     if held:
@@ -2096,7 +2098,11 @@ def _reviewer_temp_is_inside(root, temp_cwd):
 
 
 def _reviewer_kill_and_drain(proc):
-    """Kill one reviewer process and bound pipe draining after termination."""
+    """Kill a reviewer with everything it started, and bound pipe draining after (#65)."""
+    try:
+        A.kill_turn(proc.pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+    except (OSError, subprocess.SubprocessError):
+        pass
     try:
         proc.kill()
     except OSError:
@@ -2134,6 +2140,7 @@ def _run_reviewer(root, argv, timeout, fallback=False):
                 argv, cwd=fresh, env=_reviewer_environment(fresh),
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, encoding=UTF8, errors="replace",
+                **_reviewer_group(),
             )
         except OSError as exc:
             return _reviewer_os_failure(exc, "could not start")
@@ -2149,6 +2156,10 @@ def _run_reviewer(root, argv, timeout, fallback=False):
         try:
             try:
                 stdout, stderr = proc.communicate(timeout=timeout)
+            except KeyboardInterrupt:
+                # Its own group no longer hears the terminal's interrupt; pass it on.
+                _reviewer_kill_and_drain(proc)
+                raise
             except subprocess.TimeoutExpired:
                 stdout, stderr = _reviewer_kill_and_drain(proc)
                 _reviewer_terminal_output(stdout, stderr)
@@ -2570,16 +2581,19 @@ def _reviewer_probe(cfg, timeout=REVIEW_PROBE_TIMEOUT):
                 "binary": None, "version": None, "reason": "not configured",
                 "kind": "not-configured",
             }
-        impl = cfg.get("implementer") or {}
-        if rv.get("id") and rv["id"] == impl.get("session"):
+        # The probe applies the rule `ao review` applies (#65).
+        sessions = _implementer_sessions(cfg)
+        refused = _reviewer_ineligible(cfg, rv, sessions)
+        if refused:
             return {
                 "configured": True, "ok": False, "route": rv.get("id"),
                 "binary": None, "version": None,
-                "reason": "reviewer is the implementer",
+                "reason": f"the reviewer may not review this implementer: {refused}",
                 "kind": "configuration-error",
             }
         chain = [rv] + [
-            item for item in (rv.get("fallbacks") or []) if item.get("argv")
+            item for item in (rv.get("fallbacks") or [])
+            if item.get("argv") and not _reviewer_ineligible(cfg, item, sessions)
         ]
         primary = rv
 
@@ -2666,6 +2680,80 @@ def _reviewer_is_implementer(route, sessions):
         return True
     return any(isinstance(arg, str) and (arg in sessions or arg.partition("=")[2] in sessions)
                for arg in route.get("argv") or [])
+
+
+def _implementer_engines(cfg):
+    """The programs the implementer's adapter runs, by name (#65)."""
+    impl = cfg.get("implementer") or {}
+    if not impl.get("adapter"):
+        return set()
+    try:
+        adapter = A.load_adapter(impl["adapter"])
+    except Exception:
+        return set()
+    names = set()
+    for key in ("send", "resume"):
+        argv = (adapter.get(key) or {}).get("argv") or []
+        if argv and isinstance(argv[0], str):
+            names.add(A._program_name(argv[0]))
+    return names
+
+
+def _reviewer_ineligible(cfg, route, sessions=None):
+    """Why a reviewer route may not review this implementer where no matrix decides, or None (#65).
+
+    Strict mode refuses the implementer's own binding and model family. This is
+    the same rule from what an unmatrixed config says: a route is refused when it
+    runs as the implementer's session (#60); when it and the implementer declare
+    one model family; and, unless both declare families and they differ, when it
+    runs the implementer's own engine. A model reviewing its own output shares its
+    blind spots, and a fallback naming the implementer's binary with no id ran
+    unrefused (audit).
+    """
+    if not isinstance(route, dict):
+        return "it is not a reviewer route"
+    sessions = _implementer_sessions(cfg) if sessions is None else sessions
+    if _reviewer_is_implementer(route, sessions):
+        return "it runs as the implementer"
+    impl = cfg.get("implementer") or {}
+    family = str(route.get("family") or "").strip().lower()
+    implementer_family = str(impl.get("family") or "").strip().lower()
+    if family and implementer_family:
+        return (f"it declares the implementer's model family ({family})"
+                if family == implementer_family else None)
+    argv = route.get("argv") or []
+    engine = A._program_name(argv[0]) if argv and isinstance(argv[0], str) else ""
+    if engine and engine in _implementer_engines(cfg):
+        return f"it runs the implementer's own engine ({engine})"
+    return None
+
+
+def _reviewer_group():
+    """Start a reviewer as the leader of its own process group (#65).
+
+    A timeout killed the wrapper alone; the runtime and engine it had started ran on.
+    """
+    if os.name == "nt":
+        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+    return {"start_new_session": True}
+
+
+def _reviewer_argv_limit():
+    """Bytes one reviewer prompt argument can carry on this platform, or None when unknown (#65).
+
+    Linux refuses a single argument over 128 KiB and Windows a command line over
+    32,767 characters; macOS limits all arguments and the environment together.
+    """
+    if os.name == "nt":
+        return 32_000
+    if sys.platform.startswith("linux"):
+        return 131_071
+    try:
+        arg_max = os.sysconf("SC_ARG_MAX")
+    except (ValueError, OSError, AttributeError):
+        return None
+    environment = sum(len(key) + len(value) + 2 for key, value in os.environ.items())
+    return max(0, arg_max - environment - 64_000)
 
 
 def _configured_reviewer(cfg, reviewer_id):
@@ -2796,9 +2884,10 @@ def cmd_review(cfg, args):
             print(f"\n{C['dim']}It must not be the implementer. A model reviewing its own")
             print(f"output shares its own blind spots.{C['reset']}")
             return 1
-        if not carried and _reviewer_is_implementer(rv, _implementer_sessions(cfg)):
-            print(f"{C['red']}The reviewer is the implementer.{C['reset']} That is the one "
-                  f"configuration this refuses.")
+        refused = None if carried else _reviewer_ineligible(cfg, rv)
+        if refused:
+            print(f"{C['red']}The reviewer may not review this implementer:{C['reset']} {refused}. "
+                  "A model reviewing its own output shares its own blind spots.")
             return 2
 
     candidate, scope, included = None, None, []
@@ -2883,6 +2972,14 @@ def cmd_review(cfg, args):
         context = A.review_range_context(root, str(args.commits), budget)
     if context is not None:
         prompt += f"\n\n{REVIEW_CONTEXT_MARKER}\n" + context["text"]
+    # The prompt travels as one argument. Past what one argument can carry here the
+    # reviewer cannot start, and that was filed as an unreachable reviewer (#65).
+    argv_limit = _reviewer_argv_limit()
+    prompt_bytes = len(prompt.encode(UTF8))
+    if not carried and argv_limit is not None and prompt_bytes > argv_limit:
+        print(f"{C['red']}The review prompt is {prompt_bytes} bytes; one argument on {sys.platform} "
+              f"carries at most {argv_limit}.{C['reset']} Stage a smaller candidate.")
+        return 2
     # Strict mode resolves and validates the complete declared chain before this
     # point. Ineligible routes are evidence, never subprocess candidates.
     if strict:
@@ -2895,9 +2992,9 @@ def cmd_review(cfg, args):
         for fallback in rv.get("fallbacks") or []:
             if not fallback.get("argv"):
                 continue
-            if _reviewer_is_implementer(fallback, sessions):
-                print(f"{C['dim']}fallback {fallback.get('id') or 'reviewer'} runs as the "
-                      f"implementer — not run{C['reset']}")
+            refused = _reviewer_ineligible(cfg, fallback, sessions)
+            if refused:
+                print(f"{C['dim']}fallback {fallback.get('id') or 'reviewer'} not run: {refused}{C['reset']}")
                 continue
             chain.append(fallback)
     if carried:
@@ -2982,8 +3079,9 @@ def cmd_review(cfg, args):
     out = invocation["attempt"]["out"]
     reviewer_executable = invocation["attempt"].get("binary") or "reviewer"
     rv = used
-    # A fallback is recorded as one; it cannot supersede a rejection (#63).
-    fallback_used = False if carried else (
+    # A fallback is recorded as one; it cannot supersede a rejection (#63). An answer
+    # a person carried from a stand-in session is not the configured reviewer either (#65).
+    fallback_used = True if carried else (
         used["index"] > 0 if strict else used is not (cfg.get("reviewer") or {}))
     if strict:
         M.add_evidence_context(
