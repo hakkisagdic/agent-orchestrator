@@ -5511,6 +5511,46 @@ def agent_config_findings(root):
     return out
 
 
+# ---- asking the codebase a question is a capability, not a copy (#81) --------------------
+
+def ask_codebase(root, cfg, question, timeout=300):
+    """Answer a question about the code through a configured provider, never without citations (#81).
+
+    ao cannot embed a code-intelligence engine without breaking `dependencies = []`,
+    and should not reimplement one. A provider is a command in `codebase.provider`
+    (argv with {question} and {root}) that prints JSON: {"answer": text, "citations":
+    [{"file": path, "lines": "a-b"}]}. With none configured, or an answer that cites
+    nothing, the question is refused and what would satisfy it is named.
+    Returns {"answer", "citations"} or raises ValueError.
+    """
+    provider = (cfg.get("codebase") or {}).get("provider") or {}
+    argv = provider.get("argv") if isinstance(provider, dict) else None
+    if not argv:
+        raise ValueError("no codebase provider is configured: set codebase.provider.argv to a command that takes "
+                         "{question} and {root} and prints {\"answer\", \"citations\"} as JSON (ctxman is the first "
+                         "provider documented in docs/upstream.md)")
+    rendered = [str(part).replace("{question}", question).replace("{root}", root) for part in argv]
+    try:
+        result = subprocess.run(rendered, cwd=root, capture_output=True, text=True, encoding=UTF8, errors="replace",
+                                timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ValueError(f"the codebase provider did not run: {exc}") from exc
+    try:
+        document = json.loads(result.stdout)
+    except ValueError as exc:
+        raise ValueError(f"the codebase provider did not answer in JSON (exit {result.returncode})") from exc
+    answer = str((document or {}).get("answer") or "").strip() if isinstance(document, dict) else ""
+    citations = [item for item in (document.get("citations") or []) if isinstance(item, dict) and item.get("file")] \
+        if isinstance(document, dict) else []
+    if not answer or not citations:
+        raise ValueError("the provider's answer cites no file and line range; an answer without citations is not "
+                         "an answer ao passes on")
+    missing = [item["file"] for item in citations if not os.path.exists(os.path.join(root, item["file"]))]
+    if missing:
+        raise ValueError(f"the answer cites files that are not in this repository: {', '.join(missing[:3])}")
+    return {"answer": scan_evidence(answer)[0], "citations": citations}
+
+
 def safe_slug(text, fallback="note", limit=40):
     """A file-name part holding only [A-Za-z0-9._-] (#19).
 

@@ -2221,6 +2221,17 @@ def cmd_ask(cfg, args):
     whether a run survives the hours when nobody is at a desk.
     """
     root = cfg["root"]
+    if getattr(args, "codebase", False):
+        # A question to the code goes to a provider and comes back cited, or not at all (#81).
+        try:
+            found = A.ask_codebase(root, cfg, args.question or "")
+        except ValueError as exc:
+            print(f"{C['yellow']}not answered{C['reset']}: {exc}")
+            return 2
+        print(found["answer"])
+        for item in found["citations"]:
+            print(f"  {C['dim']}{item['file']}{':' + str(item['lines']) if item.get('lines') else ''}{C['reset']}")
+        return 0
     if not args.question:
         print(f"usage: {C['b']}ao ask \"question\" \"option a\" \"option b\" …{C['reset']}")
         return 0
@@ -8428,6 +8439,8 @@ def main():
     ak.add_argument("options", nargs="*")
     ak.add_argument("--context")
     ak.add_argument("--slice")
+    ak.add_argument("--codebase", action="store_true",
+                    help="ask the code, through codebase.provider; the answer must cite files and lines")
     ak.set_defaults(fn=cmd_ask)
     an = sub.add_parser("answer", help="answer a pending decision")
     an.add_argument("id")

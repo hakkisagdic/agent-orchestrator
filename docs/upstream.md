@@ -67,6 +67,17 @@ with no dependency: a credential in an agent file (CLAUDE.md, AGENTS.md, `.claud
 a hook that pipes a download into a shell or removes a home directory, and an MCP server run from an
 unpinned package. Findings are problems named `agent-config:<category>`.
 
+## Asking the codebase, as built
+
+`ao ask --codebase "<question>"` sends a question about the code to a provider named in
+`.ao/config.json` as `codebase.provider.argv` - a command taking `{question}` and `{root}` that
+prints `{"answer": …, "citations": [{"file": …, "lines": "a-b"}]}` - and prints the answer with the
+files and line ranges it rested on. ao embeds no code-intelligence engine and keeps
+`dependencies = []`: with no provider configured the command says so and names what would satisfy
+it, and an answer that cites nothing, or cites a file that is not in the repository, is refused
+rather than passed on. The owner's ctxman is the first provider meant for this seam; installing it
+is the owner's step.
+
 ## Known false positives of AgentShield (kept out of the port)
 
 - Reversed-text heuristic flags the phrase "backward compatible".
