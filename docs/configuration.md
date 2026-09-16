@@ -43,6 +43,7 @@ machine setting written into a project.
 | `mail.unseen_red_minutes` | `240` | project | minutes unseen before it rings red and goes to e-mail |
 | `retention.observation_kb` | `2048` | project | kilobytes an observation store (notices, progress, cycles, logs) keeps before its oldest records go |
 | `retention.evidence_keep` | `500` | project | newest rows a chained evidence ledger keeps live when ao prune --evidence seals the rest |
+| `repository.kind` | `product` | project | product: the architect does not implement beyond a named hotfix; tool: roles may rotate per slice |
 | `gates.default_timeout` | `600` | project | seconds a gate may run when its own definition names no timeout |
 | `gates.coverage_min_files` | `5` | project | source files of one toolchain a top-level tree must hold before a gate must exercise it |
 | `watchdog.idle_minutes` | `6.0` | project | minutes of implementer silence before the watchdog acts |

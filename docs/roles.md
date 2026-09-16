@@ -99,6 +99,20 @@ Adapters are named on purpose: launching `kiro-cli` requires knowing it is `kiro
 That is a statement about a *tool*, not about who holds a *role*, and swapping the
 implementer must never require touching it.
 
+## Tandem: roles rotate on a tool repository
+
+On a repository that builds tooling for the agents themselves, roles may rotate per slice:
+the architect implements one slice while the implementer reviews it, and the next slice
+swaps back. Set `repository.kind` to `tool` and reassign with `ao role set` or `ao role
+swap`; a reassignment still waits for the running slice to end. On a product repository,
+the default, the architect does not implement: `ao role set implementer <architect>` is
+refused unless a person names it a hotfix with `--hotfix`.
+
+What never rotates is the invariant: **the reviewer is not the author of the candidate**.
+The author is whoever holds the implementer role when the slice runs, resolved from the
+table, so after a swap the reviewer that runs the new implementer's engine, or declares its
+family, is refused for every grant - whichever actor that is.
+
 ## Presets
 
 ```yaml

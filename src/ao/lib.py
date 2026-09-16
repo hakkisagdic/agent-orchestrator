@@ -314,9 +314,17 @@ def role_table(cfg):
     return actors, roles, cfg.get("roles_next")
 
 
-def assignment_problem(actors, roles):
-    """Why an assignment would break separation of duties, or None (#79)."""
+def assignment_problem(actors, roles, repository="tool", hotfix=False):
+    """Why an assignment would break separation of duties, or None (#79, #13).
+
+    Roles may rotate per slice on a tool repository. On a product repository the
+    architect does not implement, except a hotfix a person names as one. Wherever
+    roles stand, the reviewer is never the implementer's actor or family.
+    """
     implementer, reviewer = roles.get("implementer"), roles.get("reviewer")
+    if repository != "tool" and not hotfix and implementer and implementer == roles.get("architect"):
+        return (f"on a product repository the architect does not implement ({implementer} holds both); roles rotate "
+                "on a tool repository (repository.kind tool), or name a hotfix with --hotfix")
     if implementer and reviewer and implementer == reviewer:
         return f"the reviewer and the implementer would both be {implementer}; no actor reviews its own work"
     families = [str((actors.get(actor) or {}).get("family") or "").lower() for actor in (implementer, reviewer)]

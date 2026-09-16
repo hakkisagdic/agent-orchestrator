@@ -2042,7 +2042,7 @@ def cmd_role(cfg, args):
         new[args.role] = args.actor
     else:
         new[args.role], new[args.actor] = roles.get(args.actor), roles.get(args.role)
-    problem = A.assignment_problem(actors, new)
+    problem = A.assignment_problem(actors, new, S.get(cfg, "repository.kind"), getattr(args, "hotfix", False))
     if problem:
         print(f"{C['red']}refused{C['reset']}: {problem}")
         return 2
@@ -8020,6 +8020,8 @@ def main():
     ro.add_argument("action", nargs="?", choices=["show", "set", "swap"], default="show")
     ro.add_argument("role", nargs="?", choices=list(A.ROLE_BLOCKS))
     ro.add_argument("actor", nargs="?", help="set: an actor; swap: the other role")
+    ro.add_argument("--hotfix", action="store_true",
+                    help="on a product repository: let the architect implement, named as a hotfix")
     ro.set_defaults(fn=cmd_role)
     dg = sub.add_parser("digest", help="what happened, read from the ledgers")
     dg.add_argument("--days", type=float, default=1.0)
