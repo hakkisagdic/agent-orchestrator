@@ -205,6 +205,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao ask` / `ao answer` / `ao decisions` | questions with options; the answers unpark slices |
 | `ao lock -- <cmd>` | hold the writer lock, run a gate, record it |
 | `ao verify -p quick|full` | run the declared gates and record the measured result |
+| `ao merge-check <branch>` | gate the result of a merge before merging; the record names both parents |
 | `ao review --boundary "…" [--paths …]` | independent prospective review of the exact staged candidate; `--paths` narrows its staged scope |
 | `ao review --commits <range>` | retrospective review of landed work; never authorizes a candidate |
 | `ao review submit [--boundary …]` / `ao review collect <R-id>\|--any` / `ao reviews` | submit pins the staged tree and reviews it in the background, returning an id at once; collect takes a finished one; `ao reviews` lists them; `ao commit-ok --review <R-id>` grants only on the pinned tree |

@@ -498,6 +498,150 @@ PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
+def _judge_gate(g, out, code):
+    """(passed, detail, counts) for one gate's output and exit code, as `ao verify` judges it."""
+    counts = None
+
+    if g.get("expect") == "empty":
+        passed = not out.strip()
+        detail = "clean" if passed else " ".join(out.split())[:120]
+    else:
+        # The exit code decides; counts come only from the runner's closing
+        # summary, never from the first match in output the implementer controls (#70).
+        passed = code == 0
+        counts = A.gate_counts(out, g.get("summary"))
+        if counts:
+            p_, f_ = counts
+            detail = f"{p_}/{p_ + f_}"
+            passed = passed and f_ == 0
+            # Exit zero is not proof that anything ran. A test runner whose
+            # worker pool fails can collect zero tests and exit 0, and the
+            # gate stays green having measured nothing — the second pilot's
+            # agent found vitest doing exactly that. A gate that declares
+            # `min_tests` must see at least that many actually execute.
+            need = int(g.get("min_tests", 0) or 0)
+            if need and (p_ + f_) < need:
+                passed = False
+                detail += f" — only {p_ + f_} ran, {need} required"
+        elif g.get("min_tests"):
+            passed = False
+            detail = (f"exit {code}, but the runner's closing summary was not found "
+                      f"and min_tests={g['min_tests']}")
+        else:
+            detail = f"exit {code}"
+    return passed, detail, counts
+
+
+def cmd_merge_check(cfg, args):
+    """Run a profile's gates on the result of a merge before it is made, and record the run (#39).
+
+    2026-09-07: four branches, each green on its own, were merged and main went
+    red - one changed a signature another still called. Hosted CI runs only when
+    dispatched by hand, so nothing caught it but a suite run afterwards. The merge
+    result is computed by git, checked out into a temporary worktree and gated
+    there; the record names both parents and the merged tree, so it vouches for
+    exactly that merge and no later one.
+    """
+    import shutil
+    import tempfile
+    root = cfg["root"]
+    try:
+        with open(os.path.join(root, ".ao", "gates.json"), encoding=UTF8) as fh:
+            spec = json.load(fh)
+    except (OSError, ValueError) as exc:
+        print(f"{C['red']}no usable .ao/gates.json{C['reset']}: {exc}")
+        return 2
+    profiles = spec.get("profiles") or {}
+    profile = args.profile or ("full" if "full" in profiles else spec.get("default_profile", "quick"))
+    names = profiles.get(profile)
+    if not names:
+        print(f"unknown profile {profile}; have: {', '.join(profiles)}")
+        return 2
+    into = A.git_text(root, "rev-parse", "--verify", "--quiet", f"{args.into}^{{commit}}")
+    branch = A.git_text(root, "rev-parse", "--verify", "--quiet", f"{args.branch}^{{commit}}")
+    if not into or not branch:
+        print(f"{C['red']}cannot resolve {args.branch if into else args.into} to a commit{C['reset']}")
+        return 2
+    try:
+        tree, conflict = A.merge_result_tree(root, into, branch)
+    except RuntimeError as exc:
+        print(f"{C['red']}{exc}{C['reset']}")
+        return 2
+    row = {"id": f"MC-{int(time.time() * 1000)}", "at": int(time.time()), "into": into, "branch": branch,
+           "tree": tree, "profile": profile, "gates_digest": A.gate_definitions_digest_of(spec, profile),
+           "measured_by": A.measured_by()}
+    if conflict:
+        row.update(passed=False, gates=[], conflict=conflict)
+        A.record_merge_check(root, row)
+        print(f"{C['red']}{C['b']}CONFLICT{C['reset']}  {conflict}  {C['dim']}recorded as {row['id']}{C['reset']}")
+        return 1
+    holder = A.gate_lock_holder()
+    if holder and holder.get("root") != root:
+        if not A.acquire_gate_lock(root, args.wait):
+            print(f"{C['red']}{os.path.basename(holder['root'])} is running its gates; not starting a second "
+                  f"suite{C['reset']}")
+            return 2
+    else:
+        A.acquire_gate_lock(root, 0)
+    scratch = tempfile.mkdtemp(prefix="ao-merge-check-")
+    result_dir = os.path.join(scratch, "result")
+    links, results, ok = [], [], True
+    try:
+        added = subprocess.run([A.git_binary(), "worktree", "add", "--detach", "--quiet", result_dir, into],
+                               cwd=root, capture_output=True)
+        checked_out = added.returncode == 0 and subprocess.run(
+            [A.git_binary(), "read-tree", "-u", "--reset", tree], cwd=result_dir, capture_output=True).returncode == 0
+        if not checked_out:
+            print(f"{C['red']}could not check out the merge result{C['reset']}: "
+                  f"{added.stderr.decode(UTF8, 'replace').strip()}")
+            return 2
+        # Dependencies are installed per checkout, not tracked; the result borrows the project's.
+        for name in S.get(cfg, "merge.link_paths"):
+            source, target = os.path.join(root, name), os.path.join(result_dir, name)
+            if os.path.exists(source) and not os.path.lexists(target):
+                try:
+                    os.symlink(source, target)
+                    links.append(target)
+                except OSError:
+                    pass
+        print(f"{C['b']}merge {args.branch} ({branch[:12]}) into {args.into} ({into[:12]}){C['reset']}  "
+              f"{C['dim']}result tree {tree[:12]}, profile {profile}{C['reset']}")
+        for name in names:
+            g = spec["gates"][name]
+            print(f"{C['dim']}▶ {name}{C['reset']}  {g['run']}")
+            started = time.time()
+            try:
+                r = subprocess.run(g["run"], shell=True, cwd=result_dir, capture_output=True, text=True,
+                                   encoding=UTF8, errors="replace",
+                                   timeout=g.get("timeout") or S.get(cfg, "gates.default_timeout"))
+                out, code = (r.stdout + r.stderr), r.returncode
+            except subprocess.TimeoutExpired:
+                out, code = "timed out", 124
+            passed, detail, counts = _judge_gate(g, out, code)
+            ok = ok and passed
+            print(f"  {C['green'] + 'pass' if passed else C['red'] + 'FAIL'}{C['reset']}  {detail}")
+            results.append({"name": name, "passed": passed, "detail": detail, "exit": code,
+                            "seconds": int(time.time() - started), "run": g["run"],
+                            "summary": None if g.get("expect") == "empty"
+                            else A.gate_summary_line(out, g.get("summary")),
+                            "counts": {"pass": counts[0], "fail": counts[1]} if counts else None})
+    finally:
+        for link in links:
+            try:
+                os.unlink(link)
+            except OSError:
+                pass
+        subprocess.run([A.git_binary(), "worktree", "remove", "--force", result_dir], cwd=root, capture_output=True)
+        shutil.rmtree(scratch, ignore_errors=True)
+        subprocess.run([A.git_binary(), "worktree", "prune"], cwd=root, capture_output=True)
+        A.release_gate_lock()
+    row.update(passed=ok, gates=results, conflict=None)
+    A.record_merge_check(root, row)
+    print(f"\n{C['b']}{'PASS' if ok else 'FAIL'}{C['reset']}  recorded as {row['id']}; it vouches for a merge of "
+          f"these two parents whose tree is {tree[:12]}")
+    return 0 if ok else 1
+
+
 def cmd_verify(cfg, args):
     """Run the project's declared gates ourselves and record what we measured.
 
@@ -563,35 +707,7 @@ def cmd_verify(cfg, args):
         except subprocess.TimeoutExpired:
             out, code = "timed out", 124
         took = int(time.time() - started)
-        counts = None
-
-        if g.get("expect") == "empty":
-            passed = not out.strip()
-            detail = "clean" if passed else " ".join(out.split())[:120]
-        else:
-            # The exit code decides; counts come only from the runner's closing
-            # summary, never from the first match in output the implementer controls (#70).
-            passed = code == 0
-            counts = A.gate_counts(out, g.get("summary"))
-            if counts:
-                p_, f_ = counts
-                detail = f"{p_}/{p_ + f_}"
-                passed = passed and f_ == 0
-                # Exit zero is not proof that anything ran. A test runner whose
-                # worker pool fails can collect zero tests and exit 0, and the
-                # gate stays green having measured nothing — the second pilot's
-                # agent found vitest doing exactly that. A gate that declares
-                # `min_tests` must see at least that many actually execute.
-                need = int(g.get("min_tests", 0) or 0)
-                if need and (p_ + f_) < need:
-                    passed = False
-                    detail += f" — only {p_ + f_} ran, {need} required"
-            elif g.get("min_tests"):
-                passed = False
-                detail = (f"exit {code}, but the runner's closing summary was not found "
-                          f"and min_tests={g['min_tests']}")
-            else:
-                detail = f"exit {code}"
+        passed, detail, counts = _judge_gate(g, out, code)
         ok = ok and passed
         mark = f"{C['green']}pass{C['reset']}" if passed else f"{C['red']}FAIL{C['reset']}"
         print(f"  {mark}  {detail}  {C['dim']}{took}s{C['reset']}")
@@ -5042,6 +5158,15 @@ def doctor_problems(cfg):
     if conflicts:
         out.append(("boundary-conflict", "; ".join(conflicts[:3])
                     + (f" and {len(conflicts) - 3} more" if len(conflicts) > 3 else "") + " — ao board"))
+    # Green branches make a red main when nobody ran their merge (#39).
+    try:
+        unverified = A.unverified_merges(root, cfg)
+    except Exception:
+        unverified = []
+    if unverified:
+        out.append(("unverified-merge", "; ".join(f"{sha[:12]}: {why}" for sha, why in unverified[:3])
+                    + (f" and {len(unverified) - 3} more" if len(unverified) > 3 else "")
+                    + " — ao merge-check <branch> before merging"))
     # An implementer with nothing pre-authorised to pick up next stalls the moment
     # the architect is away; two READY items is the floor.
     try:
@@ -7445,6 +7570,14 @@ def main():
     v.add_argument("--wait", type=int, default=900,
                    help="seconds to wait if another project holds the machine gate lock")
     v.set_defaults(fn=cmd_verify)
+
+    mc = sub.add_parser("merge-check", help="run the gates on a merge's result before merging, and record it")
+    mc.add_argument("branch", help="the branch or commit to be merged")
+    mc.add_argument("--into", default="HEAD", help="what it is merged into (default HEAD)")
+    mc.add_argument("-p", "--profile", help="gate profile (default full, when declared)")
+    mc.add_argument("--wait", type=int, default=900,
+                    help="seconds to wait if another project holds the machine gate lock")
+    mc.set_defaults(fn=cmd_merge_check)
 
     wd = sub.add_parser("watchdog", help="launchd job that restarts a stalled agent")
     wd.add_argument("action", choices=["install", "uninstall", "status", "explain", "trace"])

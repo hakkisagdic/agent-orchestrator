@@ -2534,6 +2534,70 @@ REVIEW_REFERENCE_FILES = (
 )
 
 
+# ---- a merge is verified on its result, before it is made (#39) ------------------------
+
+MERGE_CHAIN = "ao-merge-check-row-v1"
+
+
+def merge_checks_path(root):
+    return os.path.join(root, ".ao", "ledger", "merges.jsonl")
+
+
+def merge_checks(root):
+    """Recorded runs of merge results, oldest first; raises on a broken chain."""
+    from .storage import read_chained_jsonl
+    return [row for row in read_chained_jsonl(merge_checks_path(root), MERGE_CHAIN) if isinstance(row, dict)]
+
+
+def record_merge_check(root, row):
+    from .storage import append_chained_jsonl
+    return append_chained_jsonl(merge_checks_path(root), scan_record(row), MERGE_CHAIN)
+
+
+def merge_result_tree(root, into, branch):
+    """(tree, conflict): the tree `git merge` would make of two commits, computed without touching a worktree.
+
+    RuntimeError when git cannot compute it at all (merge-tree --write-tree needs git 2.38).
+    """
+    try:
+        result = subprocess.run([git_binary(), "merge-tree", "--write-tree", "--name-only", "--no-messages",
+                                 into, branch], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                timeout=120)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError(f"cannot compute the merge: {exc}") from exc
+    lines = result.stdout.decode(UTF8, "replace").splitlines()
+    if result.returncode == 0 and lines:
+        return lines[0].strip(), None
+    if result.returncode == 1 and lines:
+        return None, "conflicts in " + ", ".join(line.strip() for line in lines[1:] if line.strip())
+    detail = result.stderr.decode(UTF8, "replace").strip()
+    raise RuntimeError(f"cannot compute the merge: {detail or f'git merge-tree exit {result.returncode}'}")
+
+
+def unverified_merges(root, cfg):
+    """(merge commit, why) for each recent merge on HEAD's first-parent line no passing run vouches for (#39).
+
+    A run vouches for a merge only when it names both parents and the tree the
+    merge made, so a run of an older pair, or of a result that was changed while
+    merging, vouches for nothing.
+    """
+    days = settings.get(cfg, "merge.check_days")
+    log = git_text(root, "log", "--merges", "--first-parent", f"--since={days}.days", "--format=%H %T %P", "HEAD")
+    runs = {(row.get("into"), row.get("branch"), row.get("tree")): row for row in merge_checks(root)}
+    out = []
+    for line in log.splitlines():
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        sha, tree, first, second = parts[:4]
+        run = runs.get((first, second, tree))
+        if run is None:
+            out.append((sha, "no run of its merge result was recorded"))
+        elif run.get("passed") is not True:
+            out.append((sha, f"the recorded run of its merge result, {run.get('id')}, failed"))
+    return out
+
+
 def review_artefact_names(root, reviews_dir):
     """The review artefacts on disk: the files in the reviews directory, dotfiles aside."""
     directory = os.path.join(root, reviews_dir)

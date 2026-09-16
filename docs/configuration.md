@@ -36,6 +36,8 @@ machine setting written into a project.
 | `size.refuse_product_lines` | `4000` | project | product lines above which no review is credible and ao review refuses before spawning |
 | `size.small_overshoot_pct` | `25` | project | percent over the guideline small enough that verified code is never reshaped to meet it |
 | `boundary.inline_max_chars` | `400` | project | characters of acceptance a board row may carry before its boundary belongs in a file |
+| `merge.link_paths` | `['.venv', 'node_modules']` | project | untracked dependency directories a merge result borrows from the project to run its gates |
+| `merge.check_days` | `7` | project | days back ao doctor looks for merges no passing run of their result vouches for |
 | `gates.default_timeout` | `600` | project | seconds a gate may run when its own definition names no timeout |
 | `gates.coverage_min_files` | `5` | project | source files of one toolchain a top-level tree must hold before a gate must exercise it |
 | `watchdog.idle_minutes` | `6.0` | project | minutes of implementer silence before the watchdog acts |

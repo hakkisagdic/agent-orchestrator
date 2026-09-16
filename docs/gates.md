@@ -71,6 +71,25 @@ Two properties that are not negotiable:
   record says how in `measured_by`. What an agent reads through its own shell can be
   rewritten by a token-saving proxy; `ao doctor` names such a hook or wrapper.
 
+## A merge is gated on its result
+
+Two branches can each be green and their merge red: on 2026-09-07 one changed a
+signature another still called, and main went red after four merges. Hosted CI runs
+only when dispatched by hand, so the gate is local and costs no Actions minutes:
+
+```bash
+ao merge-check feature/x                 # the full profile on HEAD merged with feature/x
+ao merge-check feature/x --into main -p quick
+```
+
+git computes the merge result without touching your checkout; ao checks it out in a
+temporary worktree, borrows the untracked dependency directories named in
+`merge.link_paths`, runs the profile there and records the run in
+`.ao/ledger/merges.jsonl`, chained. The record names both parents and the tree the merge
+makes, so it vouches for exactly that merge: after either side moves, it vouches for
+nothing. `ao doctor` reports a merge on the current branch within `merge.check_days` that
+no passing run vouches for, and one whose recorded run failed.
+
 ## Commit authority is bound to a verification
 
 ```bash

@@ -54,6 +54,12 @@ SETTINGS = {
     "boundary.inline_max_chars": Setting(
         400, int, 1, None, "project",
         "characters of acceptance a board row may carry before its boundary belongs in a file"),
+    "merge.link_paths": Setting(
+        [".venv", "node_modules"], list, None, None, "project",
+        "untracked dependency directories a merge result borrows from the project to run its gates"),
+    "merge.check_days": Setting(
+        7, int, 1, None, "project",
+        "days back ao doctor looks for merges no passing run of their result vouches for"),
     "gates.default_timeout": Setting(
         600, int, 1, None, "project",
         "seconds a gate may run when its own definition names no timeout"),
