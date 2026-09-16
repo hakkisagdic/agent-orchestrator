@@ -30,6 +30,9 @@ SETTINGS = {
     "review.unhandled_minutes": Setting(
         30, int, 1, None, "project",
         "minutes a returned review may wait uncollected before the watchdog raises it"),
+    "review.prune_after_days": Setting(
+        30, int, 1, None, "project",
+        "days after which ao prune moves a review artefact nothing rests on out of the repository"),
     "review_timeout": Setting(
         900, int, 1, None, "project",
         "seconds one reviewer may take; never taken from the command line"),

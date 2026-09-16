@@ -138,3 +138,11 @@ and plan hashes are what commit authority was granted against — deleting them 
 housekeeping would quietly remove the ability to answer "on what basis did this
 land". Log trimming keeps the tail rather than the head, because the last turn's
 output is the part anyone actually reads when diagnosing a failed nudge.
+
+Review artefacts are evidence too, and they are kept by reference. One that a grant, a
+verification, the board, a waiver or a decision names, one of a slice still open or of
+the candidate staged now, and one git tracks never moves. The rest leave once older than
+`review.prune_after_days` (30), to `~/.ao/archive/<project>/` rather than away, and
+`ao prune` says how many it kept and why; if any of those references cannot be read,
+nothing moves. `ao doctor` names a review a grant rests on that git does not hold -
+evidence on one disk is one disk failure from gone - so commit those.

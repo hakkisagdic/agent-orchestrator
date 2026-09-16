@@ -6768,6 +6768,30 @@ def cmd_prune(cfg, args):
             print(f"  {C['green']}{'would drop' if dry else 'dropped'}{C['reset']}  "
                   f"{name:<14} {dropped} of {dropped + kept}  {C['dim']}{desc}{C['reset']}")
 
+    # Review artefacts stay while anything rests on them; the rest leave by age (#38).
+    review_days = getattr(args, "review_days", None)
+    if review_days is None:
+        review_days = S.get(cfg, "review.prune_after_days")
+    try:
+        outcome = A.prune_review_artefacts(root, cfg, review_days, apply=not dry)
+    except Exception as exc:
+        print(f"  {C['yellow']}keep  {'reviews':<14} every artefact: what rests on them cannot be read "
+              f"({exc}){C['reset']}")
+    else:
+        why = {}
+        for reasons in outcome["kept"].values():
+            for reason in reasons:
+                why[reason] = why.get(reason, 0) + 1
+        if outcome["moved"]:
+            total += outcome["bytes"]
+            print(f"  {C['green']}{'would move' if dry else 'moved'}{C['reset']}  {'reviews':<14} "
+                  f"{len(outcome['moved'])} older than {review_days:g} day(s) that nothing rests on  "
+                  f"{C['dim']}→ {outcome['archive']}{C['reset']}")
+        if outcome["kept"] or outcome["recent"]:
+            detail = ", ".join(f"{count} {reason}" for reason, count in sorted(why.items()))
+            print(f"  {C['dim']}keep  {'reviews':<14} {len(outcome['kept'])} referenced"
+                  + (f" ({detail})" if detail else "") + f", {outcome['recent']} recent{C['reset']}")
+
     # Dedupe by inode, not by path string: this filesystem is case-insensitive, so
     # "nudge-Voltrai.log" and "nudge-voltrai.log" are one file that would
     # otherwise be counted — and truncated — twice.
@@ -7047,6 +7071,23 @@ def _measurement_lines(cfg):
     return lines + [f"{'':<16}{C['dim']}{text}{C['reset']}" for text in filters]
 
 
+def _review_evidence_lines(cfg):
+    """The reviews a grant rests on that git does not hold: one disk from gone (#38)."""
+    try:
+        risky = A.grant_artefacts_at_risk(cfg["root"], cfg)
+    except Exception as exc:
+        return [f"{'review evidence':<16}{C['yellow']}cannot tell: {exc}{C['reset']}"]
+    if not risky:
+        return [f"{'review evidence':<16}{C['green']}every review a grant rests on is in git{C['reset']}"]
+    untracked = sum(1 for _, state in risky if state == "untracked")
+    lines = [f"{'review evidence':<16}{C['yellow']}{untracked} untracked, {len(risky) - untracked} missing of "
+             f"the reviews grants rest on{C['reset']}  {C['dim']}commit them; ao prune never moves them{C['reset']}"]
+    lines += [f"{'':<16}{C['dim']}{state:<9} {name}{C['reset']}" for name, state in risky[:5]]
+    if len(risky) > 5:
+        lines.append(f"{'':<16}{C['dim']}and {len(risky) - 5} more{C['reset']}")
+    return lines
+
+
 def cmd_doctor(cfg, args):
     if getattr(args, "check", False):
         # Scheduled checks return through the existing static helper here;
@@ -7101,6 +7142,8 @@ def cmd_doctor(cfg, args):
           + (" open" if waiver_lines else ""))
     for line in waiver_lines:
         print(f"                {C['dim']}{line}{C['reset']}")
+    for line in _review_evidence_lines(cfg):
+        print(line)
     print(f"quota source    {'keyflip' if A.sh('command -v keyflip') else '—'}")
     # Optional capabilities announce themselves; the core never needs them (#82).
     for name, state, hint in _optional_features(cfg):
@@ -7469,6 +7512,9 @@ def main():
     pr.add_argument("--days", type=float, default=7)
     pr.add_argument("--keep-kb", type=int, default=64, help="log tail to keep")
     pr.add_argument("--evidence", action="store_true", help="also prune verifications and plans")
+    pr.add_argument("--review-days", type=float, default=None,
+                    help="age at which review artefacts nothing rests on move to the archive "
+                         "(default: review.prune_after_days)")
     pr.add_argument("--yes", action="store_true", help="apply (default is a dry run)")
     pr.set_defaults(fn=cmd_prune)
     h = sub.add_parser("hold", help="stop this project's agents and keep them stopped")

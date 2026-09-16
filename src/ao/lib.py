@@ -2433,6 +2433,139 @@ def write_review_artefact(root, reviews_dir, name, text, *, evidence, verdict,
     replace_file_durably(os.path.join(directory, name), data)
 
 
+# ---- review artefacts: kept while anything rests on them, pruned by age (#38) ----------
+
+# Files whose text names the review artefacts they rest on, and what each one is.
+REVIEW_REFERENCE_FILES = (
+    ("grant", (".ao", "ledger", "authority.jsonl")),
+    ("verification", (".ao", "ledger", "verifications.jsonl")),
+    ("board", (".ao", "board.md")),
+    ("waiver", (".ao", "ledger", "waivers.jsonl")),
+    ("decision", (".ao", "ledger", "decisions.jsonl")),
+)
+
+
+def review_artefact_names(root, reviews_dir):
+    """The review artefacts on disk: the files in the reviews directory, dotfiles aside."""
+    directory = os.path.join(root, reviews_dir)
+    try:
+        return sorted(name for name in os.listdir(directory)
+                      if not name.startswith(".") and os.path.isfile(os.path.join(directory, name)))
+    except FileNotFoundError:
+        return []
+
+
+def tracked_review_names(root, reviews_dir):
+    """The review artefacts git tracks, by name; RuntimeError when git cannot say."""
+    listed = _git_output(root, "ls-files", "-z", "--", reviews_dir)
+    return {os.path.basename(os.fsdecode(path)) for path in listed.split(b"\0") if path}
+
+
+def review_artefact_references(root, cfg):
+    """{artefact: [what rests on it]} for every review artefact ao must keep (#38).
+
+    A grant, a verification, the board, a waiver or a decision that names the
+    file; a submitted review's state; a review of a slice that is neither done nor
+    rejected, or of the candidate staged now; and a file git tracks, which moving
+    would turn into a deletion in the tree. The review ledger is the catalogue of
+    every review, not a reason to keep one. Whatever cannot be read raises, so
+    nothing is pruned on a guess.
+    """
+    from .storage import read_chained_jsonl
+    names = review_artefact_names(root, cfg["reviews"])
+    kept = {}
+
+    def keep(name, why):
+        reasons = kept.setdefault(name, [])
+        if why not in reasons:
+            reasons.append(why)
+
+    texts = []
+    for why, parts in REVIEW_REFERENCE_FILES:
+        try:
+            with open(os.path.join(root, *parts), encoding=UTF8, errors="replace") as fh:
+                texts.append((why, fh.read()))
+        except FileNotFoundError:
+            continue
+    states = os.path.join(root, ".ao", "reviews")
+    for entry in sorted(os.listdir(states)) if os.path.isdir(states) else []:
+        if entry.startswith("R-") and entry.endswith(".json"):
+            with open(os.path.join(states, entry), encoding=UTF8, errors="replace") as fh:
+                texts.append(("submitted review", fh.read()))
+    for why, text in texts:
+        for name in names:
+            if name in text:
+                keep(name, why)
+    open_slices = {item["id"] for state, items in board(root).items() if state not in ("done", "rejected")
+                   for item in items}
+    try:
+        staged = index_candidate(root)["digest"]
+    except RuntimeError:
+        staged = None
+    for row in read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN):
+        name = row.get("artefact") if isinstance(row, dict) else None
+        if name not in names:
+            continue
+        if row.get("slice") in open_slices:
+            keep(name, "open slice")
+        if staged and row.get("candidate") == staged:
+            keep(name, "staged candidate")
+    tracked = tracked_review_names(root, cfg["reviews"])
+    for name in names:
+        if name in tracked:
+            keep(name, "tracked in git")
+    return kept
+
+
+def prune_review_artefacts(root, cfg, days, apply=False, now=None):
+    """Move the review artefacts nothing rests on, older than `days`, out of the repository (#38).
+
+    Age is the later of the file's time and its ledger row's, so neither alone
+    makes a review old. They move to ~/.ao/archive/<project>/, not away: a review
+    is evidence someone may still ask for. Returns what was kept and why, how many
+    were recent, what was moved (or would be), its bytes and where it went.
+    """
+    import shutil
+    from .storage import read_chained_jsonl
+    now = time.time() if now is None else now
+    kept = review_artefact_references(root, cfg)
+    written = {}
+    for row in read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN):
+        if isinstance(row, dict) and row.get("artefact"):
+            written[row["artefact"]] = max(written.get(row["artefact"], 0), int(row.get("at") or 0))
+    directory = os.path.join(root, cfg["reviews"])
+    cutoff = now - days * 86400
+    recent, moving, size = 0, [], 0
+    for name in review_artefact_names(root, cfg["reviews"]):
+        if name in kept:
+            continue
+        path = os.path.join(directory, name)
+        if max(os.path.getmtime(path), written.get(name, 0)) >= cutoff:
+            recent += 1
+        else:
+            moving.append(name)
+            size += os.path.getsize(path)
+    folder = f"{os.path.basename(os.path.normpath(cfg['reviews']))}-{datetime.fromtimestamp(now):%Y%m%d-%H%M%S}"
+    archive = os.path.join(HOME, ".ao", "archive", project_key(root), folder)
+    if apply and moving:
+        os.makedirs(archive, exist_ok=True)
+        for name in moving:
+            shutil.move(os.path.join(directory, name), os.path.join(archive, name))
+    return {"kept": kept, "recent": recent, "moved": moving, "bytes": size, "archive": archive}
+
+
+def grant_artefacts_at_risk(root, cfg):
+    """(name, "untracked" or "missing") for each review a grant rests on that git does not hold (#38)."""
+    granted = sorted({row["review"] for row in authority_rows(root)
+                      if isinstance(row, dict) and row.get("granted") is True and row.get("review")})
+    if not granted:
+        return []
+    tracked = tracked_review_names(root, cfg["reviews"])
+    directory = os.path.join(root, cfg["reviews"])
+    return [(name, "untracked" if os.path.exists(os.path.join(directory, name)) else "missing")
+            for name in granted if name not in tracked]
+
+
 def candidate_review_decision(root, review_dir, candidate_digest):
     """What the newest recorded review of one candidate decides (#63).
 
