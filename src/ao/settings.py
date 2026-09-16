@@ -18,6 +18,11 @@ UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise 
 
 Setting = namedtuple("Setting", "default kind minimum maximum scope text")
 
+
+class Location(str):
+    """The kind of a setting that names a repository by URL or path, so separators are allowed."""
+
+
 # scope: "project" settings are read from the project first; "machine" settings
 # govern state shared by every project on the machine and are read from there only.
 SETTINGS = {
@@ -105,6 +110,9 @@ SETTINGS = {
     "mail.store": Setting(
         "deletion", str, None, None, "project",
         "deletion: handled mail is deleted; append-only: messages are kept and handling is a record"),
+    "mail.sync_repo": Setting(
+        None, Location, None, None, "project",
+        "the one private repository the message store is pushed to as refs/mail/<project>; none: not synced"),
     "gates.default_timeout": Setting(
         600, int, 1, None, "project",
         "seconds a gate may run when its own definition names no timeout"),
@@ -212,6 +220,8 @@ def usable(key, value):
             return False
     elif spec.kind is str:
         return isinstance(value, str) and bool(value.strip()) and "/" not in value and "\\" not in value
+    elif spec.kind is Location:
+        return isinstance(value, str) and bool(value.strip())
     elif spec.kind is list:
         return isinstance(value, list) and all(isinstance(item, str) and item.strip() for item in value)
     if spec.minimum is not None and value < spec.minimum:
@@ -225,6 +235,8 @@ def expected(key):
     spec = SETTINGS[key]
     if spec.kind is list:
         return "a list of non-empty strings"
+    if spec.kind is Location:
+        return "a repository URL or path"
     if spec.kind is str:
         return "a name with no path separator"
     words = {int: "a whole number", float: "a number"}[spec.kind]

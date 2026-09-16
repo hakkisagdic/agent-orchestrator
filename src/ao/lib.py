@@ -6762,6 +6762,104 @@ def room_search(text, root=None, limit=20):
     return found[:limit]
 
 
+# ---- the message store syncs to one private repository, never the product's remote (#83) --
+
+def _url_is_private(root, url):
+    """True for a local path, or when the host says the repository is private; None when it cannot say (#83)."""
+    import shutil
+    if url and not re.match(r"^[a-z][a-z0-9+.-]*://|^[^/]+@[^:]+:", url):
+        return True                              # a directory on this machine publishes nothing
+    found = re.search(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?$", url or "")
+    if not found or not shutil.which("gh"):
+        return None
+    try:
+        answer = subprocess.run(["gh", "api", f"repos/{found.group(1)}/{found.group(2)}", "--jq", ".private"],
+                                capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return {"true": True, "false": False}.get(answer.stdout.strip())
+
+
+def mail_ref_commit(root):
+    """Commit the message store under refs/ao/mail, scanned, parented on the last one; returns the commit (#83)."""
+    store = os.path.join(root, ".ao", "mail")
+    ledger = os.path.join(root, ".ao", "ledger", "mail-store.jsonl")
+    entries = {}
+    for directory, _, files in os.walk(store):
+        for name in files:
+            rel = os.path.relpath(os.path.join(directory, name), root).replace(os.sep, "/")
+            with open(os.path.join(root, rel), "rb") as fh:
+                data = fh.read()
+            if not name.endswith(".gz"):
+                data = scan_evidence(data.decode(UTF8, "replace"))[0].encode(UTF8)
+            entries[rel] = data
+    if os.path.exists(ledger):
+        with open(ledger, encoding=UTF8) as fh:
+            entries[".ao/ledger/mail-store.jsonl"] = scan_evidence(fh.read())[0].encode(UTF8)
+    tree = {}
+    for rel, data in sorted(entries.items()):
+        blob = subprocess.run([git_binary(), "hash-object", "-w", "--stdin"], cwd=root, input=data,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout.decode().strip()
+        node = tree
+        parts = rel.split("/")
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node[parts[-1]] = blob
+
+    def write(node):
+        lines = [f"040000 tree {write(node[name])}\t{name}" if isinstance(node[name], dict)
+                 else f"100644 blob {node[name]}\t{name}" for name in sorted(node)]
+        return subprocess.run([git_binary(), "mktree"], cwd=root, input=("\n".join(lines) + "\n").encode(UTF8),
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout.decode().strip()
+
+    parent = git_text(root, "rev-parse", "--verify", "--quiet", "refs/ao/mail")
+    tree_id = write(tree)
+    if parent and git_text(root, "rev-parse", f"{parent}^{{tree}}") == tree_id:
+        return parent
+    argv = [git_binary(), "-c", "user.name=ao", "-c", "user.email=ao@localhost", "commit-tree", tree_id,
+            "-m", f"ao mail store of {project_key(root)}"]
+    if parent:
+        argv += ["-p", parent]
+    commit = subprocess.run(argv, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            check=True).stdout.decode().strip()
+    _git_output(root, "update-ref", "refs/ao/mail", commit)
+    return commit
+
+
+def sync_mail(root, cfg):
+    """Push the store's ref to the one private repository named in mail.sync_repo, as refs/mail/<project> (#83).
+
+    The product's own remote is never a target, and a repository the host does not
+    confirm private is refused, named and logged. Every record is scanned before it
+    leaves. Returns (commit, where).
+    """
+    target = (settings.get(cfg, "mail.sync_repo") or "").strip()
+    if not target:
+        raise RuntimeError("no mail.sync_repo is named; syncing is opt-in per project")
+    origin = git_text(root, "remote", "get-url", "origin")
+    if origin and target.rstrip("/").removesuffix(".git") == origin.rstrip("/").removesuffix(".git"):
+        raise RuntimeError("mail.sync_repo is this product's own remote; mail never goes there")
+    private = _url_is_private(root, target)
+    if private is not True:
+        record_notice(root, "mail sync refused", f"{target} was not confirmed private", sent=False, key="mail-sync-refused")
+        raise RuntimeError(f"not syncing mail to {target}: the host did not confirm it is private")
+    commit = mail_ref_commit(root)
+    ref = f"refs/mail/{project_key(root)}"
+    _git_output(root, "push", target, f"refs/ao/mail:{ref}", timeout=300)
+    return commit, f"{target} {ref}"
+
+
+def mail_sync_state(root, cfg):
+    """(local commit, remote commit or None, problem or None) for `ao doctor` (#83)."""
+    target = (settings.get(cfg, "mail.sync_repo") or "").strip()
+    if not target:
+        return None
+    local = git_text(root, "rev-parse", "--verify", "--quiet", "refs/ao/mail") or None
+    remote = (git_text(root, "ls-remote", target, f"refs/mail/{project_key(root)}").split() or [None])[0]
+    problem = None if _url_is_private(root, target) is True else f"{target} could not be verified private"
+    return local, remote, problem
+
+
 def mail_ledger_append(root, row):
     d = os.path.join(root, ".ao", "ledger")
     try:

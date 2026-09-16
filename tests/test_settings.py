@@ -116,7 +116,7 @@ def test_the_documentation_lists_every_setting_with_its_default():
     assert set(rows) == set(S.SETTINGS)
     for key, shown in rows.items():
         default = S.SETTINGS[key].default
-        assert shown == ("none" if default == [] else str(default)), key
+        assert shown == ("none" if default in ([], None) else str(default)), key
 
 
 def test_every_setting_the_docs_name_is_one_ao_reads():

@@ -461,6 +461,14 @@ def cmd_mail(cfg, args):
                 os.remove(os.path.join(d, f))
             A.mail_ledger_append(root, {"event": "consumed", "id": f, "outcome": args.body or "processed"})
             print(f"  {C['green']}acked{C['reset']} {f}")
+    elif args.action == "sync":
+        A.ingest_mail(root, cfg)
+        try:
+            commit, where = A.sync_mail(root, cfg)
+        except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
+            print(f"{C['red']}not synced{C['reset']}: {exc}")
+            return 1
+        print(f"{C['green']}synced{C['reset']} the message store {commit[:12]} → {where}")
     elif args.action == "compact":
         days = float(args.type) if args.type and args.type != "INFO" else 30.0
         compacted = A.compact_messages(root, days)
@@ -5625,6 +5633,17 @@ def doctor_problems(cfg):
             out.append(("content-drift", text))
     except Exception:
         pass
+    # Mail is governance; a store ahead of its private copy is on one disk (#83).
+    try:
+        sync = A.mail_sync_state(root, cfg)
+    except Exception:
+        sync = None
+    if sync:
+        local, remote, problem = sync
+        if problem:
+            out.append(("mail-sync", problem + " — ao mail sync refuses it"))
+        elif local and local != remote:
+            out.append(("mail-sync", "the message store is ahead of its private copy — ao mail sync"))
     # An implementer with nothing pre-authorised to pick up next stalls the moment
     # the architect is away; two READY items is the floor.
     try:
@@ -8370,7 +8389,7 @@ def main():
     t.set_defaults(fn=cmd_tail)
 
     m = sub.add_parser("mail", help="list, read or send coordination messages")
-    m.add_argument("action", choices=["list", "read", "send", "log", "search", "ack", "compact"])
+    m.add_argument("action", choices=["list", "read", "send", "log", "search", "ack", "compact", "sync"])
     m.add_argument("type", nargs="?", default="INFO")
     m.add_argument("topic", nargs="?")
     m.add_argument("--body")
