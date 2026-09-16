@@ -76,19 +76,27 @@ function Get-Board([string]$Root) {
 
 function Get-Session([string]$Root) {
   # Kiro keeps one directory per workspace, named by an opaque hash, so the
-  # workspace cannot be derived from the path - find the session whose recorded
-  # cwd matches instead, and fall back to the most recently written one.
+  # workspace cannot be derived from the path. Each session.json records the
+  # workspace paths it belongs to; take the newest session whose paths include
+  # this repository. There is no fallback: the newest session of another
+  # workspace reported an unrelated project's agent (#71).
   $base = Join-Path $env:USERPROFILE '.kiro\sessions'
   if (-not (Test-Path $base)) { return $null }
+  $want = (Resolve-Path $Root -ErrorAction SilentlyContinue).Path
+  if (-not $want) { return $null }
   $best = $null
   foreach ($f in Get-ChildItem $base -Recurse -Filter 'messages.jsonl' -ErrorAction SilentlyContinue) {
     $meta = Join-Path $f.Directory 'session.json'
-    $cwd = $null
-    if (Test-Path $meta) {
-      try { $cwd = (Get-Content $meta -Raw | ConvertFrom-Json).cwd } catch {}
+    if (-not (Test-Path $meta)) { continue }
+    $paths = @()
+    try { $paths = @((Get-Content $meta -Raw | ConvertFrom-Json).workspacePaths) } catch { continue }
+    $match = $false
+    foreach ($p in $paths) {
+      if (-not $p) { continue }
+      $resolved = (Resolve-Path $p -ErrorAction SilentlyContinue).Path
+      if ($resolved -and $resolved.TrimEnd('\') -ieq $want.TrimEnd('\')) { $match = $true; break }
     }
-    if ($cwd -and ((Resolve-Path $cwd -ErrorAction SilentlyContinue).Path -eq $Root)) { return $f }
-    if (-not $best -or $f.LastWriteTime -gt $best.LastWriteTime) { $best = $f }
+    if ($match -and (-not $best -or $f.LastWriteTime -gt $best.LastWriteTime)) { $best = $f }
   }
   return $best
 }
@@ -109,14 +117,21 @@ function Show-Status([string]$Root) {
 
   # A fresh transcript is not a live turn: the file keeps its timestamp after the
   # process exits, so ask the process table before calling anything WORKING.
-  # Weaker than the Python check, and deliberately so: matching a process to a
-  # repository needs its cwd, which Windows does not expose without extra work.
-  # This asks only whether an agent runtime is up at all, so it can say STOPPED
-  # with confidence and WORKING only as a strong hint.
-  $procs = @(Get-Process -Name 'kiro-cli', 'claude', 'node' -ErrorAction SilentlyContinue)
-  if ($age -lt 120 -and $procs.Count -gt 0) { $state = 'WORKING'; $col = 'Green' }
-  elseif ($age -lt 240 -and $procs.Count -gt 0) { $state = 'slowing'; $col = 'Yellow' }
-  elseif ($procs.Count -eq 0 -and $age -lt 240) { $state = 'STOPPED'; $col = 'Red' }
+  # Windows exposes no process working directory, so a process cannot be placed
+  # in this repository: an agent anywhere on the machine counts. Only command
+  # lines that name an agent count - a bare `node` is any Node program, and with
+  # it STOPPED could never be reported (#71). When the table cannot be read the
+  # state is UNKNOWN, not a guess.
+  $agents = $null
+  try {
+    $agents = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
+      $_.CommandLine -and ($_.CommandLine -match 'kiro-cli|claude-code|claude\.exe|[\\/]claude(\s|"|$)')
+    })
+  } catch { $agents = $null }
+  if ($null -eq $agents) { $state = 'UNKNOWN'; $col = 'Yellow' }
+  elseif ($age -lt 120 -and $agents.Count -gt 0) { $state = 'WORKING'; $col = 'Green' }
+  elseif ($age -lt 240 -and $agents.Count -gt 0) { $state = 'slowing'; $col = 'Yellow' }
+  elseif ($agents.Count -eq 0 -and $age -lt 240) { $state = 'STOPPED'; $col = 'Red' }
   else { $state = 'IDLE'; $col = 'Red' }
   Write-Host "`n$state" -ForegroundColor $col -NoNewline
   Write-Host "  last write $([int]($age / 60))m $($age % 60)s ago" -ForegroundColor DarkGray

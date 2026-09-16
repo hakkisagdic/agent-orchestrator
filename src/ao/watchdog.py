@@ -1308,6 +1308,14 @@ def _cycle_impl(args, root):
             A.sweep_orphans(dead)
     running = [p for p in A.agent_pids(root, adapter) if p not in set(dead)]
     _FACTS.update(writers=len(A.process_trees(running)) if running else 0, orphans=len(dead))
+    # Windows cannot say which tree an agent works in (#71). One that cannot be
+    # placed may be this tree's writer; starting another beside it is the two-writer
+    # incident, so stand down and say why.
+    unplaced = A.unplaced_agent_pids(root, adapter)
+    if unplaced:
+        print(f"{len(unplaced)} agent process(es) cannot be placed in a tree - Windows exposes no "
+              f"process working directory ({unplaced}); not starting another turn")
+        return 0
     if running:
         # A process being alive is not a turn being in flight. An agent can finish
         # its turn and never exit, and the first version of this guard treated that
@@ -1348,7 +1356,7 @@ def _cycle_impl(args, root):
                 break
             time.sleep(0.5)
         for pid in A.agent_pids(root, adapter, headless_only=True):
-            A.kill_turn(pid, signal.SIGKILL)
+            A.kill_turn(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
         # Only headless turns were reaped. A person's interactive session in this
         # tree is still here and still a writer; nudging next to it starts a second.
         # Counted as what the reaper could not have started, from the same scan.

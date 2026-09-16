@@ -1692,6 +1692,12 @@ def cmd_telegram(cfg, args):
     if args.action == "poll":
         return _serve("telegram", cfg, ["--once"] if args.once else [])
 
+    if os.name == "nt" and args.action in ("install", "uninstall", "status"):
+        # The poller is a launchd job; on Windows these printed success and did nothing (#71).
+        print(f"{C['yellow']}refused{C['reset']}: the telegram poller is scheduled with launchd, which "
+              "Windows does not have; schedule `ao telegram poll` with Task Scheduler instead")
+        return 1
+
     if args.action == "uninstall":
         A.sh(f"launchctl bootout gui/$(id -u)/{label} 2>/dev/null")
         p = os.path.join(A.HOME, "Library", "LaunchAgents", label + ".plist")
@@ -2421,6 +2427,13 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary):
             "retryable": False,
         }
     argv[0] = exe
+    if os.name == "nt" and exe.lower().endswith((".cmd", ".bat")):
+        return label, declared_binary, version, {
+            "ok": False, "out": "", "binary": exe,
+            "reason": "a .cmd or .bat reviewer runs through cmd.exe, which cuts a command line at "
+                      "8191 characters and reads the diff as shell syntax (#71)",
+            "returncode": None, "kind": "configuration-error", "retryable": False,
+        }
     try:
         attempt = _run_reviewer(root, argv, timeout, fallback)
     except Exception as exc:
@@ -3945,7 +3958,7 @@ def cmd_since(cfg, args):
     mins = int((now - cut) / 60)
     print(f"{C['b']}since{C['reset']} {C['dim']}{mins // 60}h {mins % 60}m ago{C['reset']}")
 
-    log = A.sh(f"git log --since=@{int(cut)} --pretty='%h|%s'", cwd=root) or ""
+    log = A.git_text(root, "log", f"--since=@{int(cut)}", "--pretty=%h|%s")
     commits = [l.split("|", 1) for l in log.split("\n") if "|" in l]
     print(f"\n  {C['b']}{len(commits)}{C['reset']} commit")
     for sha, subj in commits[:8]:
@@ -4180,6 +4193,9 @@ def cmd_hold(cfg, args):
         if dead:
             print(f"clearing {len(dead)} orphaned process(es) left by ended turns: {dead}")
             A.sweep_orphans(dead)
+        if A.unplaced_agent_pids(root, adapter):
+            print(f"{C['yellow']}hold set{C['reset']} — no agent turn could be placed in this tree")
+            return _hold_unplaced(root, adapter)
         print(f"{C['yellow']}hold set{C['reset']} — no agent turn was running")
         return 0
     dead = A.orphans(root, adapter)
@@ -4197,10 +4213,26 @@ def cmd_hold(cfg, args):
         time.sleep(0.5)
     alive = [p for p in pids if _alive(p)]
     for pid in alive:
-        A.kill_turn(pid, signal.SIGKILL)
-    print(f"{C['red']}HELD{C['reset']} — {len(pids) - len(alive)} exited on request, "
-          f"{len(alive)} killed. The watchdog will not restart while .ao/hold exists.")
-    return 0
+        A.kill_turn(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+    if os.name == "nt":
+        # taskkill /T /F ends a tree at once; nothing exited on request (#71).
+        print(f"{C['red']}HELD{C['reset']} — {len(pids)} process tree(s) stopped by force "
+              "(Windows). The watchdog will not restart while .ao/hold exists.")
+    else:
+        print(f"{C['red']}HELD{C['reset']} — {len(pids) - len(alive)} exited on request, "
+              f"{len(alive)} killed. The watchdog will not restart while .ao/hold exists.")
+    return _hold_unplaced(root, adapter)
+
+
+def _hold_unplaced(root, adapter):
+    """Say which agent processes a hold could not stop because they cannot be placed (#71)."""
+    unplaced = A.unplaced_agent_pids(root, adapter)
+    if not unplaced:
+        return 0
+    print(f"{C['red']}{len(unplaced)} agent process(es) were not stopped{C['reset']}: Windows exposes no "
+          f"process working directory, so they cannot be placed in this tree: {unplaced}. Stop them "
+          "by hand if they work here; the hold keeps the watchdog from starting another.")
+    return 1
 
 
 def cmd_writers(cfg, args):
@@ -4218,6 +4250,12 @@ def cmd_writers(cfg, args):
     impl = cfg.get("implementer") or {}
     adapter = A.load_adapter(impl.get("adapter", "")) if impl else {}
     roots, dead = A.writers(root, adapter)
+    unplaced = A.unplaced_agent_pids(root, adapter)
+    if unplaced:
+        # A count that cannot see a writer must not report none (#71).
+        print(f"{C['red']}writers unknown{C['reset']} — {len(unplaced)} agent process(es) cannot be placed "
+              f"in a tree: Windows exposes no process working directory ({unplaced})")
+        return 1
     table = A._proc_table()
     rows = []
     for pid in roots:
@@ -4523,6 +4561,12 @@ def doctor_problems(cfg):
                                      f"the exhaustion alarm is blind until it reads again"))
     try:
         msgs_p, _ = A.session_paths(cfg)
+        # The watchdog's heartbeat now comes before its transcript check, so a
+        # transcript it cannot find no longer looks like a dead watchdog (#71).
+        if (cfg.get("implementer") or {}).get("session") and _features.enabled(cfg, "nudge") \
+                and (not msgs_p or not os.path.exists(msgs_p)):
+            out.append(("transcript-missing", "the implementer's transcript cannot be found — the "
+                        "watchdog has nothing to watch and restarts nobody; check implementer.session"))
         if msgs_p and os.path.exists(msgs_p) and time.time() - os.path.getmtime(msgs_p) < 3600 \
                 and not A.read_tail(msgs_p, 2_000_000):
             out.append(("transcript-blind", "fresh transcript, nothing parsed — the agent CLI's format changed"))
@@ -4643,7 +4687,7 @@ def _credits_problem(br, last):
 
 # Findings that mean work has stopped and only a person can restart it. Everything
 # else a doctor finds is an advisory: recorded for the architect, never paged (#40).
-DOCTOR_RED = {"watchdog-dead", "wake-failed", "transcript-blind"}
+DOCTOR_RED = {"watchdog-dead", "wake-failed", "transcript-blind", "transcript-missing"}
 
 
 def _doctor_severity(key, text):
@@ -5765,6 +5809,13 @@ def _hook_probe_text(probe):
 
 def _authorization_refusal(targets, allow):
     needed = [target for target in targets if target.get("needs_authorization")]
+    if needed and os.name == "nt":
+        # The shared hook compares Git's shell path, /c/..., with C:\..., never
+        # matches, and lets every commit through (#71).
+        print(f"{C['red']}refused{C['reset']} — a shared or external hook cannot recognise this "
+              "repository on Windows, where Git's shell names it /c/... and ao names it C:\\...; "
+              "install the hooks inside the repository")
+        return True
     if needed and not allow:
         places = ", ".join(sorted({
             f"{target['directory_class']}:{target['directory']}"
@@ -5786,7 +5837,11 @@ def _atomic_hook_write(path, data):
             fh.write(data)
             fh.flush()
             os.fsync(fh.fileno())
-            os.fchmod(fh.fileno(), 0o755)
+            # os.fchmod exists on Windows only from Python 3.13 (#71).
+            if hasattr(os, "fchmod"):
+                os.fchmod(fh.fileno(), 0o755)
+        if not hasattr(os, "fchmod"):
+            os.chmod(temporary, 0o755)
         os.replace(temporary, path)
     except Exception:
         try:
@@ -6135,11 +6190,8 @@ def cmd_remove(cfg, args):
 
 
 def _alive(pid):
-    try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
-        return False
+    # os.kill(pid, 0) is CTRL_C_EVENT on Windows, not a question (#71).
+    return A._pid_alive(pid)
 
 
 # What each store is for. The split matters: pruning operational noise is
@@ -6526,7 +6578,12 @@ def cmd_doctor(cfg, args):
         print(f"                {C['dim']}{line}{C['reset']}")
     print(f"quota source    {'keyflip' if A.sh('command -v keyflip') else '—'}")
     key = A.project_key(root).lower()
-    wd = A.sh(f"launchctl list | grep com.agentorchestrator.watchdog.{key}")
+    if os.name == "nt":
+        # Windows schedules the watchdog with Task Scheduler, not launchd (#71).
+        wd = subprocess.run(["schtasks", "/Query", "/TN", f"ao-watchdog-{key}"], capture_output=True,
+                            text=True, encoding=UTF8, errors="replace").returncode == 0
+    else:
+        wd = A.sh(f"launchctl list | grep com.agentorchestrator.watchdog.{key}")
     print(f"watchdog        {C['green']}running{C['reset']}" if wd else
           f"watchdog        {C['dim']}not installed — ao watchdog install{C['reset']}")
     err = A.last_nudge_error(root)

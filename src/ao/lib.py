@@ -280,6 +280,9 @@ def load_adapter(adapter_id):
 # ── shell ─────────────────────────────────────────────────────────────────────
 
 def sh(cmd, cwd=None, timeout=20):
+    # cmd.exe has no /dev/null; it calls it NUL, and the command failed instead (#71).
+    if os.name == "nt":
+        cmd = cmd.replace("2>/dev/null", "2>NUL")
     try:
         r = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True,
                            text=True, encoding=UTF8, errors="replace", timeout=timeout)
@@ -368,9 +371,7 @@ def session_paths(cfg):
         return None, None
     if impl.get("adapter") == "claude-code":
         cwd = impl.get("cwd") or cfg.get("root", "")
-        escaped = cwd.replace("/", "-").replace(".", "-")
-        d = os.path.join(HOME, ".claude", "projects", escaped)
-        return os.path.join(d, sess + ".jsonl"), None
+        return os.path.join(claude_project_dir(cwd), sess + ".jsonl"), None
     ws = impl.get("workspace_hash")
     if not ws:
         return None, None
@@ -1343,10 +1344,9 @@ def digest(root, cfg, since_days=1.0):
 
     # git's approxidate wants "N hours ago"; a bare "24.hours" parses to nothing
     # and silently reports zero commits on a day that landed two.
-    # Quote the format: sh() runs through a shell, where a bare "|" in
-    # --pretty=%h|%ct|%s is a pipe, and the commit list quietly came back empty.
-    log = sh(f"git log --since='{int(since_days * 24)} hours ago' --pretty='%h|%ct|%s'",
-             cwd=root) or ""
+    # No shell: through one, a bare "|" in --pretty=%h|%ct|%s is a pipe, and on
+    # Windows a quoted one is too, so the commit list quietly came back empty (#71).
+    log = git_text(root, "log", f"--since={int(since_days * 24)} hours ago", "--pretty=%h|%ct|%s")
     out["commits"] = [dict(zip(("sha", "at", "subject"), l.split("|", 2)))
                       for l in log.split("\n") if l.count("|") >= 2]
     out["unpushed"] = int(sh("git rev-list --count @{u}..HEAD 2>/dev/null", cwd=root) or 0) \
@@ -2767,7 +2767,8 @@ def kiro_account_usage(timeout=20):
     if not found:
         return {"error": "kiro-cli is not on PATH or in the usual install directories"}
     try:
-        prof = subprocess.run([found[0], "whoami"], capture_output=True, text=True, timeout=timeout)
+        prof = subprocess.run([found[0], "whoami"], capture_output=True, text=True, encoding=UTF8,
+                              errors="replace", timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"error": f"{found[0]} whoami could not run ({type(exc).__name__})"}
     arn = next((line.strip() for line in (prof.stdout or "").splitlines()
@@ -2918,6 +2919,86 @@ def urgent_messages(root, cfg):
     return out
 
 
+def claude_project_dir(cwd):
+    """The directory Claude Code keeps a working directory's transcripts in (#71).
+
+    On macOS and Linux the name is the absolute path with "/" and "." made
+    dashes. ao built it that way everywhere, and on Windows `C:\\repo` kept its
+    drive: os.path.join took it as an absolute path, dropped ~/.claude/projects,
+    and the watchdog found no transcript and ended every cycle there. On Windows
+    every character outside letters, digits and dashes is made a dash. A
+    directory that already exists under either name is used as found.
+    """
+    base = os.path.join(HOME, ".claude", "projects")
+    cwd = str(cwd or "")
+    posix = cwd.replace("/", "-").replace(".", "-")
+    portable = re.sub(r"[^A-Za-z0-9-]", "-", cwd)
+    for name in (posix, portable):
+        if name and "/" not in name and "\\" not in name and ":" not in name \
+                and os.path.isdir(os.path.join(base, name)):
+            return os.path.join(base, name)
+    return os.path.join(base, portable if os.name == "nt" else posix)
+
+
+def unplaced_agent_pids(root, adapter):
+    """Agent processes that may be working in this tree but cannot be placed (#71).
+
+    Windows exposes no process working directory, and no shipped adapter's command
+    line names the repository, so there a turn in this tree was no writer at all:
+    `ao hold` stopped nothing and the watchdog started a second turn. The guards
+    that must not miss a writer count these and say why. Where a process's
+    directory can be read this is empty.
+    """
+    if os.name != "nt":
+        return []
+    from . import procs
+    names = set()
+    for key in ("send", "resume"):
+        argv = (adapter.get(key) or {}).get("argv") or []
+        if argv:
+            names.add(os.path.basename(argv[0]))
+    names.update({"kiro-cli", "claude", "claude-code", "codex", "cursor-agent"})
+    want = os.path.realpath(root)
+    me = os.getpid()
+    helpers = helper_pids(root)
+    table = _proc_table() if helpers else {}
+
+    def under_helper(pid):
+        seen, current = set(), pid
+        while current > 1 and current not in seen:
+            if current in helpers:
+                return True
+            seen.add(current)
+            current = table.get(current, (0, 0, ""))[0]
+        return False
+
+    out = []
+    for pid in procs.all_pids():
+        if pid == me:
+            continue
+        av = procs.argv(pid)
+        if not av or not _is_agent_process(pid, names, av) or procs.cwd(pid) is not None:
+            continue
+        if any(os.path.isabs(a) and os.path.realpath(a.rstrip("/\\")) == want for a in av):
+            continue                      # it names this tree: agent_pids placed it
+        if helpers and under_helper(pid):
+            continue
+        out.append(pid)
+    return sorted(out)
+
+
+def git_text(root, *args, timeout=60):
+    """git's output as text without a shell, or "" when git fails (#71).
+
+    cmd.exe treats neither single quotes nor `2>/dev/null` as a POSIX shell does:
+    the quoted `--pretty` format was split at its "|" and the log came back empty.
+    """
+    try:
+        return _git_output(root, *args, timeout=timeout).decode(UTF8, "replace").strip()
+    except RuntimeError:
+        return ""
+
+
 def discover_architect(cwd):
     """The newest Claude Code session for a directory, by transcript mtime.
 
@@ -2926,11 +3007,10 @@ def discover_architect(cwd):
     worst shape of failure, because everything still looks configured. Resolve it
     from disk instead, the same way the implementer's session is resolved.
     """
-    # Claude Code flattens the path into a directory name by replacing both "/"
-    # and "." — a worktree under ".claude" becomes "…Voltrai--claude-worktrees…",
-    # with the doubled dash where "/." was.
-    escaped = cwd.replace("/", "-").replace(".", "-")
-    d = os.path.join(HOME, ".claude", "projects", escaped)
+    # Claude Code flattens the path into a directory name - a worktree under
+    # ".claude" becomes "…Voltrai--claude-worktrees…", with the doubled dash where
+    # "/." was - and on Windows the drive and backslashes go the same way (#71).
+    d = claude_project_dir(cwd)
     if not os.path.isdir(d):
         return None
     best, best_mt = None, 0
