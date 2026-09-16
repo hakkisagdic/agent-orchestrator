@@ -111,6 +111,15 @@ pass no longer implies a clean concurrency pass.
 
 ## 3 — No deadline on thinking; a deadline on silence
 
+*In ao since slice SILENCE-DEADLINE (#25): a reviewer whose process group spends no CPU for
+`review.stall_minutes` (10) is killed as stalled - a streaming answer spends CPU, a hung call
+spends none - and a stalled section is journaled unanswered with its partial output, so a
+re-run asks it again. One ruling against the text below: `review_timeout` stays each call's
+ceiling. It is the bound where CPU cannot be read, and the chain budget (#100) that a later
+decision set rests on it; a project that wants long thinking raises it. The whole review
+still has no deadline: it is as many bounded calls as it has sections, and the size guideline
+that Z3 describes became a question rather than a refusal (#34).*
+
 Once nobody is waiting, a wall-clock cap on the whole review has no purpose left. It was
 never a quality control — it was a way to stop a blocked implementer waiting forever, and
 §1 removes the waiting. So:

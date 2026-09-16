@@ -81,6 +81,9 @@ SETTINGS = {
     "review.lenses": Setting(
         "declared", str, None, None, "project",
         "declared: lenses only where a slice names them; auto: defaults from what the candidate touches; off: none"),
+    "review.stall_minutes": Setting(
+        10, int, 1, None, "project",
+        "minutes a reviewer may spend no CPU before it is killed as stalled, its partial answer kept"),
     "gates.default_timeout": Setting(
         600, int, 1, None, "project",
         "seconds a gate may run when its own definition names no timeout"),

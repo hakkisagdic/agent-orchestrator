@@ -45,6 +45,7 @@ machine setting written into a project.
 | `retention.evidence_keep` | `500` | project | newest rows a chained evidence ledger keeps live when ao prune --evidence seals the rest |
 | `repository.kind` | `product` | project | product: the architect does not implement beyond a named hotfix; tool: roles may rotate per slice |
 | `review.lenses` | `declared` | project | declared: lenses only where a slice names them; auto: defaults from what the candidate touches; off: none |
+| `review.stall_minutes` | `10` | project | minutes a reviewer may spend no CPU before it is killed as stalled, its partial answer kept |
 | `gates.default_timeout` | `600` | project | seconds a gate may run when its own definition names no timeout |
 | `gates.coverage_min_files` | `5` | project | source files of one toolchain a top-level tree must hold before a gate must exercise it |
 | `watchdog.idle_minutes` | `6.0` | project | minutes of implementer silence before the watchdog acts |

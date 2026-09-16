@@ -32,6 +32,44 @@ def _sh(cmd):
         return ""
 
 
+def group_cpu_seconds(pgid):
+    """CPU seconds spent so far by every process in one process group, or None when unreadable (#25).
+
+    A reviewer thinking spends CPU as its answer streams in; one that has hung
+    spends none. Windows exposes no process group here, so it answers None.
+    """
+    if os.name == "nt":
+        return None
+    total, found = 0.0, False
+    if sys.platform.startswith("linux"):
+        tick = os.sysconf("SC_CLK_TCK")
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            try:
+                with open(f"/proc/{entry}/stat", "rb") as fh:
+                    fields = fh.read().rsplit(b")", 1)[1].split()
+            except (OSError, IndexError):
+                continue
+            if len(fields) > 12 and int(fields[2]) == pgid:
+                total += (int(fields[11]) + int(fields[12])) / tick
+                found = True
+        return total if found else None
+    for line in _sh("ps -A -o pgid=,time=").splitlines():
+        parts = line.split()
+        if len(parts) != 2 or not parts[0].isdigit() or int(parts[0]) != pgid:
+            continue
+        seconds = 0.0
+        try:
+            for piece in parts[1].split(":"):
+                seconds = seconds * 60 + float(piece)
+        except ValueError:
+            continue
+        total += seconds
+        found = True
+    return total if found else None
+
+
 # ---------------------------------------------------------------- macOS (libproc)
 class _Darwin:
     CTL_KERN, KERN_ARGMAX, KERN_PROCARGS2 = 1, 8, 49

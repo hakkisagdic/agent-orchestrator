@@ -2451,13 +2451,18 @@ def _elapsed(seconds):
     return f"{seconds:.1f}s" if seconds < 60 else f"{int(seconds // 60)}m{int(seconds % 60):02d}s"
 
 
-def _reviewer_communicate(proc, timeout, label, started):
-    """communicate() in heartbeat-sized waits; TimeoutExpired once `timeout` is spent.
+def _reviewer_communicate(proc, timeout, label, started, stall=None):
+    """communicate() in heartbeat-sized waits; TimeoutExpired once `timeout` is spent, or on a stall.
 
     Retrying communicate after a timeout loses no output, so the reviewer's streams
-    are collected whole however many beats it takes.
+    are collected whole however many beats it takes. With `stall` seconds given, a
+    reviewer whose process group has spent no CPU for that long is stalled, not
+    thinking, and the TimeoutExpired carries `stalled` (#25). Where CPU cannot be
+    read, only `timeout` ends it.
     """
+    from . import procs
     remaining = float(timeout)
+    last_cpu, quiet_since = None, time.monotonic()
     while True:
         wait = min(remaining, REVIEW_HEARTBEAT_SECONDS)
         try:
@@ -2466,6 +2471,15 @@ def _reviewer_communicate(proc, timeout, label, started):
             remaining -= wait
             if remaining <= 0:
                 raise
+            if stall:
+                cpu, now = procs.group_cpu_seconds(proc.pid), time.monotonic()
+                if cpu is None or last_cpu is None or cpu > last_cpu + 0.01:
+                    quiet_since = now
+                last_cpu = cpu if cpu is not None else last_cpu
+                if cpu is not None and now - quiet_since >= stall:
+                    stalled = subprocess.TimeoutExpired(proc.args, timeout)
+                    stalled.stalled = now - quiet_since
+                    raise stalled
             print(f"{C['dim']}reviewer {label} still working: "
                   f"{_elapsed(time.monotonic() - started)} elapsed, pid {proc.pid}{C['reset']}", flush=True)
 
@@ -2511,14 +2525,24 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None):
         started = time.monotonic()
         try:
             try:
-                stdout, stderr = _reviewer_communicate(proc, timeout, label, started)
+                stdout, stderr = _reviewer_communicate(proc, timeout, label, started,
+                                                       stall=S.get(A.load_config(root), "review.stall_minutes") * 60)
             except KeyboardInterrupt:
                 # Its own group no longer hears the terminal's interrupt; pass it on.
                 _reviewer_kill_and_drain(proc)
                 raise
-            except subprocess.TimeoutExpired:
+            except subprocess.TimeoutExpired as expired:
                 stdout, stderr = _reviewer_kill_and_drain(proc)
                 _reviewer_terminal_output(stdout, stderr)
+                stalled = getattr(expired, "stalled", None)
+                if stalled:
+                    # Killed for silence, not for thinking long; what it said so far is kept (#25).
+                    return {
+                        "ok": False, "out": "",
+                        "reason": f"stalled: no CPU progress for {_elapsed(stalled)}",
+                        "returncode": proc.returncode, "kind": "stalled", "retryable": True,
+                        "partial": A.scan_evidence(((stdout or "") + (stderr or ""))[-4000:])[0],
+                    }
                 return {
                     "ok": False, "out": "",
                     "reason": f"timeout after {timeout}s",
@@ -2879,7 +2903,8 @@ def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, s
     the review with no verdict, which is not a round.
     """
     from .storage import append_jsonl, read_jsonl
-    answered = {row["section"]: row for row in read_jsonl(journal) if isinstance(row, dict) and row.get("section")}
+    answered = {row["section"]: row for row in read_jsonl(journal)
+                if isinstance(row, dict) and row.get("section") and row.get("verdict")}
     rows, last, started = [], None, time.time()
     for index, section in enumerate(sections, 1):
         row = answered.get(section["name"])
@@ -2888,6 +2913,11 @@ def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, s
             invocation = _invoke_reviewer_chain(root, chain, f"{prompt}\n\n{REVIEW_SECTION_MARKER}\n{section['question']}",
                                                 timeout, strict, primary=primary)
             if invocation["used"] is None:
+                partial = [f.get("partial") for f in invocation["failures"].values() if f.get("kind") == "stalled"]
+                if partial:
+                    # The stalled section stays unanswered; what it said is kept as evidence (#25).
+                    append_jsonl(journal, {"at": int(time.time()), "section": section["name"], "stalled": True,
+                                           "partial": partial[-1] or ""})
                 return dict(invocation, sections=[_section_summary(r) for r in rows])
             out = invocation["attempt"]["out"]
             counts = {key: A.re.findall(rf"^{key}:[ \t]*([0-9]{{1,9}})[ \t]*\r?$", out, A.re.M)
