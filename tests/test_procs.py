@@ -17,6 +17,23 @@ def test_self_consistency_on_this_platform():
     assert t[me][0] == os.getppid()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows keeps no zombie processes")
+def test_a_process_that_exited_and_was_not_reaped_is_not_alive():
+    import subprocess
+    import time
+    from ao import lib as A
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    try:
+        deadline = time.time() + 20
+        while time.time() < deadline and not procs.zombie(child.pid):
+            time.sleep(0.05)
+        assert procs.zombie(child.pid)
+        assert not A._pid_alive(child.pid)
+        assert A._pid_alive(os.getpid()) and not procs.zombie(os.getpid())
+    finally:
+        child.wait()
+
+
 def test_supported_host_uses_native_backend():
     supported = sys.platform in ("darwin", "win32") or (
         sys.platform.startswith("linux") and os.path.isdir("/proc")

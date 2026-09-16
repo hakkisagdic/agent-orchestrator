@@ -63,7 +63,7 @@ def test_turn_ended_reads_the_transcripts_own_word(project, tmp_path, monkeypatc
 def test_explicit_audience_is_not_overridden_by_title(project, monkeypatch):
     root = project["root"]
     desktop, phone = [], []
-    monkeypatch.setattr(W.subprocess, "run", lambda argv, **kw: desktop.append(argv))
+    monkeypatch.setattr(W, "desktop_notify", lambda title, msg, cfg=None: desktop.append((title, msg)) or True)
     monkeypatch.setattr(telegram, "send", lambda body, target: phone.append((body, target)) or True)
 
     assert W.notify(
@@ -145,7 +145,7 @@ def test_cycle_previews_and_persists_quota_ladder_until_reset(
     desktop, phone, mailed = [], [], []
 
     monkeypatch.setattr(W.time, "time", lambda: clock[0])
-    monkeypatch.setattr(W.subprocess, "run", lambda argv, **kw: desktop.append(argv))
+    monkeypatch.setattr(W, "desktop_notify", lambda title, msg, cfg=None: desktop.append((title, msg)) or True)
     monkeypatch.setattr(
         telegram, "send", lambda body, target: phone.append((body, target)) or True,
     )
@@ -218,7 +218,7 @@ def test_cycle_previews_and_persists_quota_ladder_until_reset(
 def test_omitted_audience_retains_legacy_title_inference(project, monkeypatch):
     root = project["root"]
     desktop, phone = [], []
-    monkeypatch.setattr(W.subprocess, "run", lambda argv, **kw: desktop.append(argv))
+    monkeypatch.setattr(W, "desktop_notify", lambda title, msg, cfg=None: desktop.append((title, msg)) or True)
     monkeypatch.setattr(
         telegram, "send", lambda body, target: phone.append((body, target)) or True,
     )
@@ -259,7 +259,7 @@ def test_dry_cycle_escalation_has_no_alarm_or_channel_side_effects(
     def unexpected(*args, **kwargs):
         raise AssertionError("dry-run attempted a persistent side effect")
 
-    monkeypatch.setattr(W.subprocess, "run", lambda argv, **kw: desktop.append(argv))
+    monkeypatch.setattr(W, "desktop_notify", lambda title, msg, cfg=None: desktop.append((title, msg)) or True)
     monkeypatch.setattr(
         telegram, "send", lambda body, target: phone.append((body, target)) or True,
     )

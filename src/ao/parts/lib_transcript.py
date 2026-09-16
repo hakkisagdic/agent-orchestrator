@@ -912,9 +912,11 @@ def _pid_alive(pid):
             return False
     try:
         os.kill(pid, 0)
-        return True
     except OSError:
         return False
+    # A zombie answers the probe and does nothing: it has exited, only its pid is left.
+    from . import procs
+    return not procs.zombie(pid)
 
 
 def _process_start(pid, refresh=False):

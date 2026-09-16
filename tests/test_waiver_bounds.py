@@ -173,11 +173,16 @@ def test_a_close_that_cannot_be_written_fails_catchup(project, monkeypatch, caps
     time.sleep(1)
     from ao import watchdog as W
     monkeypatch.setattr(W, "run", lambda ns: 0)
-    path = A.waivers_path(root)
-    os.chmod(path, stat.S_IRUSR)
-    try:
-        assert cli.cmd_catchup(project, SimpleNamespace(boundary=None)) == 1
-    finally:
-        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+    path = os.path.abspath(A.waivers_path(root))
+    append = storage.append_chained_jsonl
+
+    def refused(target, *args, **kwargs):
+        # A file mode does not stop root, so the refusal is the write's own (the Linux lane runs as root).
+        if os.path.abspath(target) == path:
+            raise PermissionError(13, "Permission denied", target)
+        return append(target, *args, **kwargs)
+
+    monkeypatch.setattr(storage, "append_chained_jsonl", refused)
+    assert cli.cmd_catchup(project, SimpleNamespace(boundary=None)) == 1
     assert "could not close" in capsys.readouterr().out
     assert [w["id"] for w in A.open_waivers(root)] == [empty["id"]]

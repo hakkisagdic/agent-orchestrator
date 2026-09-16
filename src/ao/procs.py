@@ -135,6 +135,16 @@ class _Darwin:
         return {"ppid": ppid, "pgid": pgid, "tty": None if tdev == self.NODEV else tdev,
                 "start": start, "comm": comm}
 
+    SZOMB = 5
+
+    def zombie(self, pid):
+        buf = ctypes.create_string_buffer(self.BSDINFO_SIZE * 2)
+        n = self.libproc.proc_pidinfo(pid, self.PROC_PIDTBSDINFO, ctypes.c_uint64(0), buf, ctypes.sizeof(buf))
+        if n < self.BSDINFO_SIZE:
+            return None
+        status, = struct.unpack_from("I", buf.raw, 4)
+        return status == self.SZOMB
+
 
 # ---------------------------------------------------------------- Linux (/proc)
 class _Linux:
@@ -153,6 +163,13 @@ class _Linux:
             return os.readlink(f"/proc/{pid}/cwd")
         except OSError:
             return None
+
+    def zombie(self, pid):
+        try:
+            stat = open(f"/proc/{pid}/stat", encoding=UTF8).read()
+        except OSError:
+            return None
+        return stat[stat.rindex(")") + 2:stat.rindex(")") + 3] == "Z"
 
     def info(self, pid):
         try:
@@ -309,6 +326,24 @@ def argv(pid):
 
 def cwd(pid):
     return _backend().cwd(pid)
+
+
+def zombie(pid):
+    """Has this process exited and only waits to be reaped? It holds a pid and no work.
+
+    A container whose first process never reaps, or a parent that has not yet waited,
+    leaves one behind, and `kill(pid, 0)` still succeeds on it. Windows has none.
+    """
+    if os.name == "nt":
+        return False
+    probe = getattr(_backend(), "zombie", None)
+    try:
+        answer = probe(pid) if probe else None
+    except Exception:
+        answer = None
+    if answer is None:
+        answer = _sh(f"ps -o stat= -p {int(pid)}").strip().startswith("Z")
+    return answer
 
 
 def info(pid):

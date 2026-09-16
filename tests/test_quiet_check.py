@@ -21,7 +21,7 @@ def _record_notify(monkeypatch):
 
 def _channels(monkeypatch):
     desktop, phone, mailed = [], [], []
-    monkeypatch.setattr(W.subprocess, "run", lambda argv, **kw: desktop.append(argv))
+    monkeypatch.setattr(W, "desktop_notify", lambda title, msg, cfg=None: desktop.append((title, msg)) or True)
     monkeypatch.setattr(telegram, "send", lambda body, target: phone.append(body) or True)
     monkeypatch.setattr(email, "send", lambda title, body, target: mailed.append(title) or True)
     return desktop, phone, mailed

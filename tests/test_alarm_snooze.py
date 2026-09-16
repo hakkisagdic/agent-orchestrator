@@ -7,7 +7,7 @@ from ao import watchdog as W
 
 def _channels(monkeypatch):
     desktop, phone = [], []
-    monkeypatch.setattr(W.subprocess, "run", lambda argv, **kw: desktop.append(argv))
+    monkeypatch.setattr(W, "desktop_notify", lambda title, msg, cfg=None: desktop.append((title, msg)) or True)
     monkeypatch.setattr(telegram, "send", lambda body, target: phone.append((body, target)) or True)
     return desktop, phone
 
