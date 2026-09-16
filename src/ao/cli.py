@@ -7977,6 +7977,54 @@ def _store_bound_lines(cfg):
             f" — the watchdog trims them each cycle; is it running?{C['reset']}"]
 
 
+def cmd_backup(cfg, args):
+    """Write the project's governance to the destination it names: a directory, `ref`, or `remote:<name>` (#46)."""
+    destination = getattr(args, "to", None) or (cfg.get("backup") or {}).get("to")
+    if not destination:
+        print(f"{C['yellow']}no destination{C['reset']}: `ao backup --to <directory|ref|remote:name>`, or name one as "
+              "backup.to in .ao/config.json")
+        return 2
+    try:
+        manifest = A.write_backup(cfg["root"], cfg, destination)
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as exc:
+        print(f"{C['red']}not backed up{C['reset']}: {exc}")
+        return 1
+    print(f"{C['green']}backed up{C['reset']} {len(manifest['files'])} governance file(s) → {manifest['where']}")
+    return 0
+
+
+def cmd_restore(cfg, args):
+    """Reconstruct the control plane from a backup directory; say what could not be verified (#46)."""
+    root = cfg["root"]
+    try:
+        restored, unverified = A.restore_backup(root, args.source)
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"{C['red']}not restored{C['reset']}: {exc}")
+        return 2
+    print(f"restored {len(restored)} file(s)")
+    for line in unverified:
+        print(f"  {C['red']}not verified{C['reset']}  {line}")
+    try:
+        A.authority_rows(root)
+        A.board(root)
+        print(f"{C['green']}the authority chain and the board validate{C['reset']}")
+    except Exception as exc:
+        print(f"{C['red']}restored state does not validate{C['reset']}: {exc}")
+        return 1
+    return 1 if unverified else 0
+
+
+def _backup_lines(cfg):
+    """How old the newest backup is, and whether governance exists with none (#46)."""
+    age = A.backup_age(cfg["root"])
+    if age is None:
+        return [f"{'backup':<16}{C['yellow']}none{C['reset']}  {C['dim']}the control plane is on this disk only — "
+                f"ao backup --to <directory|ref|remote:name>{C['reset']}"]
+    seconds, where = age
+    tone = C["green"] if seconds < 7 * 86400 else C["yellow"]
+    return [f"{'backup':<16}{tone}{_elapsed(seconds)} ago{C['reset']}  {C['dim']}{where}{C['reset']}"]
+
+
 def cmd_doctor(cfg, args):
     if getattr(args, "consistency", False):
         return _doctor_consistency(cfg, repair=getattr(args, "repair", False))
@@ -8040,6 +8088,8 @@ def cmd_doctor(cfg, args):
     for line in _worktree_lines(cfg):
         print(line)
     for line in _store_bound_lines(cfg):
+        print(line)
+    for line in _backup_lines(cfg):
         print(line)
     print(f"quota source    {'keyflip' if A.sh('command -v keyflip') else '—'}")
     # Optional capabilities announce themselves; the core never needs them (#82).
@@ -8333,6 +8383,12 @@ def main():
     ht.add_argument("action", nargs="?", choices=["run", "discard", "status"], default="run")
     ht.add_argument("fingerprint", nargs="?", help="discard: the lead's id")
     ht.set_defaults(fn=cmd_hunt)
+    bk = sub.add_parser("backup", help="write the governance to a directory, a ref or a private remote")
+    bk.add_argument("--to", help="a directory, `ref`, or `remote:<name>`; default backup.to in the config")
+    bk.set_defaults(fn=cmd_backup)
+    rsr = sub.add_parser("restore", help="reconstruct the governance from a backup directory")
+    rsr.add_argument("source", help="a backup directory with its manifest.json")
+    rsr.set_defaults(fn=cmd_restore)
     dg = sub.add_parser("digest", help="what happened, read from the ledgers")
     dg.add_argument("--days", type=float, default=1.0)
     dg.add_argument("-n", type=int, default=6)

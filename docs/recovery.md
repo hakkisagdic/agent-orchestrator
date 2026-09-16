@@ -81,6 +81,29 @@ the whole reason this system exists is to stop treating "it was true earlier" as
   ao now resolves the newest one, but the stale copy is still worth removing.
 
 
+## The governance survives the disk
+
+On 2026-09-07 the whole control plane of a project - authority, the board, the backlog, every
+decision - existed on one laptop; the code was safe on a remote and the decisions that
+authorised it were not. `ao backup` writes the governance to a destination the project names:
+
+```bash
+ao backup --to ~/Backups/ao         # a directory: <project>/<stamp>/ with a manifest of digests
+ao backup --to ref                  # refs/ao/backup/latest, a commit made without the index
+ao backup --to remote:governance    # that ref pushed, only if the host says the remote is private
+```
+
+It covers config, authority, board, backlog, gates and sources, decisions and parked work,
+every ledger with its sealed archives, the mailbox, and the review artefacts a grant rests on;
+locks and temporary files are not governance. Each backup is recorded in
+`.ao/ledger/backups.jsonl`, and `ao doctor` says how old the newest one is, or that there is
+none. A remote is refused unless the host confirms the repository is private, because a push
+to a public product remote would publish the coordination history.
+
+`ao restore <directory>` puts the files back, restoring only those whose bytes match the digest
+they were backed up with and naming the rest, then checks that the authority chain and the
+board validate.
+
 ## What is deliberately not recovered
 
 The orchestrator's *reasoning* in a dead session is gone, and that is fine — the ledger has

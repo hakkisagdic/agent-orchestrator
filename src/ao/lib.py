@@ -5184,6 +5184,164 @@ def parse_leads(out):
     return leads
 
 
+# ---- the governance survives the disk (#46) ---------------------------------------------
+
+_BACKUP_SKIP = re.compile(r"(\.lock|\.tmp|\.pending|\.bak[^/]*|~)$|(^|/)\.ao/reviews/|(^|/)\.ao/hunter\.json$")
+
+
+def governance_files(root, cfg):
+    """Every file a project's control plane lives in, relative to the root (#46).
+
+    Config, authority, board, backlog, gates and sources; decisions, parked work and
+    every ledger with its sealed archives; the mailbox; and the review artefacts a
+    grant rests on. Locks, temporary files and config backups are not governance.
+    """
+    out = []
+    for top in (".ao", cfg.get("mailbox", "agent-mail")):
+        base = os.path.join(root, top)
+        for directory, subdirs, files in os.walk(base):
+            subdirs[:] = [d for d in subdirs if not os.path.islink(os.path.join(directory, d))]
+            for name in files:
+                rel = os.path.relpath(os.path.join(directory, name), root).replace(os.sep, "/")
+                if not _BACKUP_SKIP.search(rel) and os.path.isfile(os.path.join(root, rel)):
+                    out.append(rel)
+    reviews_dir = cfg.get("reviews", "semantic-review")
+    try:
+        for name in {row.get("review") for row in authority_rows(root)
+                     if isinstance(row, dict) and row.get("granted") is True and row.get("review")}:
+            rel = f"{reviews_dir}/{name}"
+            if os.path.isfile(os.path.join(root, rel)):
+                out.append(rel)
+    except Exception:
+        pass
+    return sorted(set(out))
+
+
+def _manifest(root, files):
+    entries = {}
+    for rel in files:
+        with open(os.path.join(root, rel), "rb") as fh:
+            entries[rel] = "sha256:" + hashlib.sha256(fh.read()).hexdigest()
+    return {"schema": 1, "project": project_key(root), "at": int(time.time()),
+            "head": git_text(root, "rev-parse", "HEAD") or None, "files": entries}
+
+
+def write_backup(root, cfg, destination):
+    """Write the governance to a destination the project names: a directory, `ref`, or `remote:<name>` (#46).
+
+    A directory gets `<project>/<stamp>/` with a manifest of every file's digest. A
+    ref is a commit of the same files under refs/ao/backup/latest, made from blob
+    and tree objects without touching the index or the worktree. A remote gets that
+    ref pushed, and only after the host says the repository is private.
+    Returns the manifest with where it went, and it is recorded in the ledger.
+    """
+    files = governance_files(root, cfg)
+    manifest = _manifest(root, files)
+    stamp = datetime.fromtimestamp(manifest["at"]).strftime("%Y%m%d-%H%M%S")
+    if destination.startswith("remote:"):
+        remote = destination.split(":", 1)[1]
+        if remote_is_private(root, remote) is not True:
+            raise RuntimeError(f"not pushing governance to {remote}: the host did not confirm it is private")
+    if destination == "ref" or destination.startswith("remote:"):
+        where = _backup_ref(root, manifest)
+        if destination.startswith("remote:"):
+            _git_output(root, "push", remote, "refs/ao/backup/latest:refs/ao/backup/latest", timeout=300)
+            where = f"{remote} {where}"
+    else:
+        target = os.path.join(os.path.expanduser(destination), manifest["project"], stamp)
+        from .storage import replace_file_durably
+        for rel in files:
+            with open(os.path.join(root, rel), "rb") as fh:
+                replace_file_durably(os.path.join(target, rel), fh.read())
+        replace_file_durably(os.path.join(target, "manifest.json"),
+                             (json.dumps(manifest, indent=1, sort_keys=True) + "\n").encode(UTF8))
+        where = target
+    manifest["where"] = where
+    from .storage import append_jsonl
+    append_jsonl(os.path.join(root, ".ao", "ledger", "backups.jsonl"),
+                 {"at": manifest["at"], "where": where, "files": len(files), "head": manifest["head"]})
+    return manifest
+
+
+def _backup_ref(root, manifest):
+    """A commit holding the governance files and the manifest, made without an index (#46)."""
+    tree = {}
+    for rel in list(manifest["files"]) + ["ao-backup-manifest.json"]:
+        data = (json.dumps(manifest, indent=1, sort_keys=True) + "\n").encode(UTF8) if rel == "ao-backup-manifest.json" \
+            else open(os.path.join(root, rel), "rb").read()
+        blob = subprocess.run([git_binary(), "hash-object", "-w", "--stdin"], cwd=root, input=data,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout.decode().strip()
+        node = tree
+        parts = rel.split("/")
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node[parts[-1]] = blob
+
+    def write(node):
+        lines = []
+        for name in sorted(node):
+            if isinstance(node[name], dict):
+                lines.append(f"040000 tree {write(node[name])}\t{name}")
+            else:
+                lines.append(f"100644 blob {node[name]}\t{name}")
+        return subprocess.run([git_binary(), "mktree"], cwd=root, input=("\n".join(lines) + "\n").encode(UTF8),
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout.decode().strip()
+
+    commit = subprocess.run([git_binary(), "-c", "user.name=ao", "-c", "user.email=ao@localhost", "commit-tree",
+                             write(tree), "-m", f"ao backup of {manifest['project']} governance"], cwd=root,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout.decode().strip()
+    _git_output(root, "update-ref", "refs/ao/backup/latest", commit)
+    return f"refs/ao/backup/latest {commit[:12]}"
+
+
+def remote_is_private(root, remote):
+    """True only when the host says the remote's repository is private; None when it cannot say (#46, #83)."""
+    import shutil
+    url = git_text(root, "remote", "get-url", remote)
+    found = re.search(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?$", url or "")
+    if not found or not shutil.which("gh"):
+        return None
+    try:
+        answer = subprocess.run(["gh", "api", f"repos/{found.group(1)}/{found.group(2)}", "--jq", ".private"],
+                                capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return {"true": True, "false": False}.get(answer.stdout.strip())
+
+
+def restore_backup(root, source):
+    """Put the governance back from a backup directory, verifying every file against its manifest (#46).
+
+    Returns (restored, unverified): a file whose bytes do not match the digest it was
+    backed up with is not restored, and is named.
+    """
+    with open(os.path.join(source, "manifest.json"), encoding=UTF8) as fh:
+        manifest = json.load(fh)
+    from .storage import replace_file_durably
+    restored, unverified = [], []
+    for rel, digest in sorted(manifest["files"].items()):
+        path = os.path.join(source, rel)
+        try:
+            with open(path, "rb") as fh:
+                data = fh.read()
+        except OSError:
+            unverified.append(f"{rel}: missing from the backup")
+            continue
+        if "sha256:" + hashlib.sha256(data).hexdigest() != digest:
+            unverified.append(f"{rel}: its bytes do not match the manifest")
+            continue
+        replace_file_durably(os.path.join(root, rel), data)
+        restored.append(rel)
+    return restored, unverified
+
+
+def backup_age(root):
+    """(seconds since the newest backup, where it went), or None when there is none (#46)."""
+    from .storage import read_jsonl
+    rows = [row for row in read_jsonl(os.path.join(root, ".ao", "ledger", "backups.jsonl")) if isinstance(row, dict)]
+    return (time.time() - float(rows[-1]["at"]), rows[-1].get("where")) if rows else None
+
+
 def safe_slug(text, fallback="note", limit=40):
     """A file-name part holding only [A-Za-z0-9._-] (#19).
 
