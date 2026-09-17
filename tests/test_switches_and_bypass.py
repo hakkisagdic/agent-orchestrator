@@ -262,7 +262,8 @@ def test_catchup_reviews_the_landed_range_and_closes_the_waiver(project, tmp_pat
                                   "print('BLOCKER: 0'); print('HIGH: 0'); print('MEDIUM: 0'); print('LOW: 0'); print('VERDICT: APPROVED')", "{prompt}"]})
     from ao import watchdog as W
     monkeypatch.setattr(W, "run", lambda ns: 0)
-    assert cli.cmd_catchup(cfg, SimpleNamespace(boundary=None)) == 0
+    # Nothing recorded who wrote a legacy waiver's range; a person names the family (#65).
+    assert cli.cmd_catchup(cfg, SimpleNamespace(boundary=None, author_family="author-family", by="A. Person")) == 0
     assert A.open_waivers(root) == []
     body = open(os.path.join(root, "semantic-review", os.listdir(os.path.join(root, "semantic-review"))[0]), encoding="utf-8").read()
     assert "- commits:" in body and "VERDICT: APPROVED" in body
@@ -281,7 +282,7 @@ def _catchup_with_recorded_ranges(project, monkeypatch):
     monkeypatch.setattr(cli, "cmd_review", fake_review)
     from ao import watchdog as W
     monkeypatch.setattr(W, "run", lambda ns: (_ for _ in ()).throw(AssertionError("no watchdog cycle expected")))
-    assert cli.cmd_catchup(project, SimpleNamespace(boundary=None)) == 0
+    assert cli.cmd_catchup(project, SimpleNamespace(boundary=None, author_family="author-family", by="A. Person")) == 0
     return seen
 
 

@@ -614,12 +614,97 @@ def cmd_waive(cfg, args):
     return 0
 
 
+def _catchup_statement(cfg, args):
+    """(the family a person names as the author's for this run, or None; why the command is refused, or None).
+
+    Naming the family that wrote a waived range is a person's statement. It is recorded
+    with every review it decides, beside what ao can check about who made it - the login
+    and whether a terminal was attached - as a waiver is.
+    """
+    family = str(getattr(args, "author_family", None) or "").strip().lower()
+    by = str(getattr(args, "by", None) or "").strip()
+    if not family:
+        return None, ("--by names the person who states --author-family; give both" if by else None)
+    if not A.re.fullmatch(r"[a-z0-9][a-z0-9._:-]{0,63}", family):
+        return None, "--author-family is one family name, such as the lowercase id its model family goes by"
+    if not by:
+        return None, "--by is required with --author-family: name the person who says which family wrote the ranges"
+    if by.lower() in _agent_names(cfg):
+        return None, f"--by names an agent or a role ({by}); naming the author's family is a person's statement"
+    user, interactive = A._login_and_terminal()
+    return {"family": family, "by": by, "user": user, "interactive": interactive}, None
+
+
+def _catchup_author(item, statement):
+    """What a waived range's review is told about who wrote it: its grant's record, and a person's statement."""
+    recorded = item.get("author") if isinstance(item.get("author"), dict) else {}
+    author = {key: recorded.get(key) for key in ("role", "actor", "adapter")}
+    author.update(family=str(recorded.get("family") or "").strip().lower() or None,
+                  grant=item.get("grant"), stated=statement)
+    return author
+
+
+def _catchup_reviewer_note(cfg, author):
+    """Why the configured reviewers may not review a range this author wrote, or None; a plan names it early."""
+    if M.is_strict(cfg):
+        try:
+            M.resolve(cfg, require_independent=True, author_families=_author_families(author))
+        except M.MatrixError as exc:
+            return "; ".join(exc.problems[:2])
+        return None
+    reviewer = cfg.get("reviewer") or {}
+    if not reviewer.get("argv"):
+        return "no reviewer is configured"
+    refused = _reviewer_ineligible(cfg, reviewer, author=author)
+    return f"the reviewer may not review it: {refused}" if refused else None
+
+
+def _catchup_mail(root, cfg, waiver, rng, artefact):
+    """The architect's decision request after a waived range is reviewed NEEDS_CHANGES.
+
+    Named and addressed as every message ao writes (#31): to whoever holds the architect
+    role, from the role this command runs for, or from a person when ao did not start it.
+    """
+    implementer, architect = A.mail_names(cfg)
+    sender = {"implementer": implementer, "architect": architect}.get(A.invoking_role(), "human")
+    # The waiver's fields come from a ledger anyone on the machine can edit: one line each (#55).
+    slice_id, wid, by, why = (A.review_header_value(waiver.get(key) or "") for key in ("slice", "id", "by", "why"))
+    name = (f"{time.strftime('%Y%m%d-%H%M')}-{sender}-to-{architect}-REVIEW-"
+            f"{A.safe_slug(str(waiver.get('slice') or '').lower(), 'slice')}-needs-changes.md")
+    findings = A.review_header_value(f"{cfg['reviews']}/{artefact or ''}")
+    body = (f"# The waived review of {slice_id} needs changes\n\n## Decision required\n\n"
+            f"The retrospective review of {rng}, which landed under waiver {wid} ({by}: {why}), "
+            f"returned NEEDS_CHANGES. The findings are in {findings}.\n\n"
+            "The waiver is closed. Decide the fix slice.\n")
+    return A.write_mail(root, cfg, name, body, {"kind": "review", "class": "needs-decision", "from": sender,
+                                                 "to": architect, "slice": slice_id})
+
+
 def cmd_catchup(cfg, args):
-    """Replay what could not run: waived reviews, deferred wakes and nudges."""
+    """Replay what could not run: waived reviews, deferred wakes and nudges.
+
+    A waived range is reviewed by a model family other than the one that wrote it (#65):
+    the family the grant under the waiver recorded, and any a person names with
+    --author-family and --by. With neither, its review is refused and the waiver stays
+    open. --plan says what a run would do and changes nothing; --slice and --limit bound
+    a run. A review stays synchronous: a waiver closes in the same run, on the review
+    recorded for exactly its range, or stays open.
+    """
     from types import SimpleNamespace
     root = cfg["root"]
-    did = 0
+    plan = bool(getattr(args, "plan", False))
+    limit = getattr(args, "limit", None)
+    only = getattr(args, "slice", None)
+    statement, refusal = _catchup_statement(cfg, args)
+    if refusal:
+        print(refusal)
+        return 2
+    if limit is not None and limit < 1:
+        print("--limit is at least 1: the number of reviews this run may start")
+        return 2
+    did = started = 0
     failed = []
+    totals = {"waivers": 0, "commits": 0, "lines": 0, "unnamed": 0}      # what --plan sums up
 
     def close(wid, outcome):
         # A waiver retires on a durable append or not at all; a failure is reported
@@ -632,21 +717,31 @@ def cmd_catchup(cfg, args):
             failed.append(wid)
             return False
 
+    if plan:
+        print(f"{C['b']}catchup plan{C['reset']}{C['dim']}: nothing is reviewed or written{C['reset']}")
     try:
         targets = A.review_waiver_ranges(root)
     except Exception as exc:
         print(f"  {C['red']}waivers cannot be read{C['reset']}: {exc}")
         targets = []
         failed.append("ledger")
-    for item in targets:
+    if only:
+        targets = [item for item in targets if item["waiver"].get("slice") == only]
+    for position, item in enumerate(targets):
         w = item["waiver"]
         label = f"{w['id']} ({w['slice']})"
+        if limit is not None and started >= limit:
+            print(f"  --limit {limit}: {len(targets) - position} waiver(s) wait for the next run")
+            break
+        totals["waivers"] += 1
         if item["problem"]:
             print(f"  {label}: {item['problem']}; keeping it open")
             continue
         if item.get("unused"):
             if not item.get("expired"):
                 print(f"  {label}: nothing was granted under it yet; keeping it open until it expires")
+            elif plan:
+                print(f"  {label}: expired unused; a run closes it")
             elif close(w["id"], "nothing was granted under it before it expired"):
                 print(f"  {label}: expired unused; closed")
                 did += 1
@@ -654,14 +749,38 @@ def cmd_catchup(cfg, args):
         if not item["landed"]:
             if item["newest"]:
                 print(f"  {label}: nothing landed yet after the waiver; keeping it open")
+            elif plan:
+                print(f"  {label}: no commits landed before the next waiver; a run closes it")
             elif close(w["id"], "no commits landed before the next waiver was opened"):
                 print(f"  {label}: no commits landed before the next waiver; closed")
                 did += 1
             continue
         rng = f"{item['start'][:12]}..{item['end'][:12]}"
-        print(f"  {label}: reviewing its own landed range {rng} ({item['landed']} commit(s))")
+        lines = A.range_changed_lines(root, item["start"], item["end"])
+        size = f"{item['landed']} commit(s), {'unknown' if lines is None else lines} changed line(s)"
+        author = _catchup_author(item, statement)
+        families = _author_families(author)
+        if not families:
+            # A review by the family that wrote the range would not be independent (#65).
+            totals["unnamed"] += 1
+            landed_by = " ".join(str(author[key]) for key in ("role", "actor") if author.get(key))
+            print(f"  {label}: {rng}, {size}: the family of the model that wrote it is not established"
+                  + (f" (landed by the {landed_by})" if landed_by else "")
+                  + "; a person names it with --author-family <family> --by <name>; keeping it open")
+            continue
+        started += 1
+        totals["commits"] += item["landed"]
+        totals["lines"] += lines or 0
+        if plan:
+            note = _catchup_reviewer_note(cfg, author)
+            print(f"  {label}: {rng}, {size}: review by a family other than {', '.join(families)}"
+                  + (f"; {note}" if note else ""))
+            continue
+        print(f"  {label}: reviewing its own landed range {rng}, {size}, by a family other than {', '.join(families)}")
+        # No deadline is passed: a reviewer's time is review_timeout per call, and a silent
+        # one is killed after review.stall_minutes (#63, #25).
         ns = SimpleNamespace(boundary=args.boundary or f"waived review for {w['slice']}: {w['why']}",
-                             timeout=900, paths=None, commits=f"{item['start']}..{item['end']}")
+                             paths=None, commits=f"{item['start']}..{item['end']}", author=author)
         try:
             before = A.review_row_count(root)
         except Exception as exc:
@@ -672,22 +791,23 @@ def cmd_catchup(cfg, args):
         # The exit code is not a verdict: a review that refused to run exits 1 or 2
         # too. A waiver closes on the review recorded for exactly this range.
         try:
-            verdict = A.range_review_verdict(root, ns.commits, since=before)
+            recorded = A.range_review(root, ns.commits, since=before) or {}
         except Exception as exc:
             print(f"  {C['red']}review ledger cannot be read{C['reset']}: {exc}; {w['id']} stays open")
             failed.append(w["id"])
             continue
+        verdict = recorded.get("verdict")
         if verdict == "APPROVED":
             if close(w["id"], "reviewed: APPROVED"):
                 did += 1
         elif verdict == "NEEDS_CHANGES":
             if close(w["id"], "reviewed: NEEDS_CHANGES — fix slice needed"):
-                impl, arch = A.mail_names(cfg)
-                A.write_mail(root, cfg, f"{time.strftime('%Y%m%d-%H%M')}-catchup-to-{arch}-REVIEW-{w['slice'].lower()}-needs-changes.md",
-                             f"# Muafiyet kapandı: {w['slice']} retro review NEEDS_CHANGES\n\n## KARAR GEREKLİ\n\n"
-                             f"{w['id']} ({w['by']}: {w['why']}) için inmiş aralık {rng} review edildi; bulgular semantic-review/ altında. "
-                             f"Bir düzeltme dilimi gerekir.\n", {"kind": "review", "from": "catchup", "to": arch, "slice": w["slice"]})
                 did += 1
+                try:
+                    _catchup_mail(root, cfg, w, rng, recorded.get("artefact"))
+                except OSError as exc:
+                    print(f"  {C['red']}the architect's decision request was not written{C['reset']}: {exc}")
+                    failed.append(w["id"])
         elif verdict is None and code == 0:
             if close(w["id"], "nothing to review: the landed range has no net change"):
                 print(f"  {label}: the landed range has no net change; closed")
@@ -700,6 +820,11 @@ def cmd_catchup(cfg, args):
             print(f"  reviewer configuration invalid, or the range cannot be reviewed; {w['id']} stays open")
         else:
             print(f"  no review was recorded (exit {code}); {w['id']} stays open")
+    if plan:
+        print(f"totals: {totals['waivers']} waiver(s); {started} review(s) of {totals['commits']} commit(s) and "
+              f"{totals['lines']} changed line(s); {totals['unnamed']} refused until a person names the author's "
+              f"family; {len(A.deferred_open(root))} deferred wake(s) and nudge(s) a run replays")
+        return 1 if failed else 0
     for r in A.deferred_open(root):
         print(f"  deferred {r['kind']} ({r.get('reason', '')}) since {time.strftime('%d %b %H:%M', time.localtime(r['at']))}")
         A.deferred_close(root, r["id"], "replayed by catchup")

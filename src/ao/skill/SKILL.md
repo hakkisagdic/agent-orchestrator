@@ -192,8 +192,9 @@ A reviewer out of quota is exit 3, not a verdict; the architect out of quota
 means wakes wait for the reset and the queue must already hold work; the
 implementer out of credits is a red alarm days ahead (`ao doctor` shows the
 burn rate). A person may bypass a gate with `ao waive` — on the record — and
-`ao catchup` reconciles it when the way is clear. Nothing is skipped silently
-and nothing is lost.
+`ao catchup` reconciles it when the way is clear, with a reviewer of a model family
+other than the one that wrote the work. Nothing is skipped silently and nothing is
+lost.
 
 ## 11. Never
 
@@ -250,7 +251,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao features [on|off <key>]` | the switches and what each costs; all off = deterministic ao |
 | `ao config [list|get|set|unset] [<setting> <value>] [--machine]` | what a person can set: every threshold with its value, default and source (docs/configuration.md); a person's command, not an implementer's |
 | `ao collect-review <nonce> --response F --model M --by NAME` | a person records a stand-in session's answer to the review request ao wrote when no reviewer could be reached; never an agent's command |
-| `ao waive <gate> --slice S --why …` / `ao catchup` | a person's bypass on the record; catchup reviews the landed range and replays deferred work |
+| `ao waive review --slice S --by NAME --why …` / `ao catchup` | a person's bypass on the record; catchup reviews each landed range with a model family other than the one that wrote it, and replays deferred work. `ao catchup --plan` previews and writes nothing; `ao catchup --limit 10` and `ao catchup --slice S` bound a run; `ao catchup --author-family F --by NAME` is a person naming the family where the grant recorded none, never an agent's command |
 | `ao pings setup --url …` / `ao hooks [status|install|uninstall] [--allow-shared-hooks]` / `ao push allow` | dead man's switch; static AO hook intent plus Git-executed, nonce-bound pre-commit proof; explicit authorization for shared/external/global mutation; human push window |
 | `ao cost [--since 24h]` | what the coordination spends: implementer turns by class, wasted turns, review counts |
 | `ao since last|2h|<git ref>` | what happened since; the ref reaches git as one argument, never shell text |

@@ -600,7 +600,8 @@ def test_strict_catchup_keeps_waiver_open_on_configuration_exit_two(
     monkeypatch.setattr(A, "write_mail", unexpected_mail)
     monkeypatch.setattr(W, "run", lambda args: 0)
 
-    assert cli.cmd_catchup(cfg, SimpleNamespace(boundary=None)) == 0
+    # Named as the author's, the family both reviewers declare leaves none independent (#65).
+    assert cli.cmd_catchup(cfg, SimpleNamespace(boundary=None, author_family="writer-family", by="A. Person")) == 0
     assert [item["id"] for item in A.open_waivers(root)] == [waiver["id"]]
     assert os.listdir(os.path.join(root, cfg["reviews"])) == []
     assert "reviewer configuration invalid" in capsys.readouterr().out

@@ -109,7 +109,7 @@ scope is the one authority an implementer must not have.
 | `ao cost --since 24h` | what the coordination itself spends: implementer turns by class (product / analysis / ceremony / coordination), wasted turns, reviews |
 | `ao features [on|off <key>]` | the switches and what each costs; all off = deterministic ao, zero model spend ([features.md](docs/features.md)) |
 | platforms | macOS and Linux native; Windows first cut ([windows.md](docs/windows.md)); tests run on all three in CI |
-| `ao waive review --slice B7 --why …` / `ao catchup` | a person bypasses a gate on the record; catchup reviews the landed range and replays deferred wakes and nudges |
+| `ao waive review --slice B7 --by <name> --why …` / `ao catchup` | a person bypasses a gate on the record; catchup reviews each landed range with a model family other than the one that wrote it, and replays deferred wakes and nudges. `ao catchup --plan` previews it and writes nothing, `ao catchup --limit 10` and `ao catchup --slice B7` bound a run, and `ao catchup --author-family <family> --by <name>` is a person naming a family ao did not record |
 | `ao pings setup --url …` | dead man's switch: external pings that alarm when the watchdog and its doctor job both die |
 | `ao hooks [status|install|uninstall] [--allow-shared-hooks]` / `ao push allow` | resolve Git's effective hook path; each role is independent, and shared/external/global mutations require explicit command-wide authorization |
 | `ao skill install` / `ao skill show` | the playbook (roles, loop, authority, protocol, alarms, every command) rendered for the agents this repo uses: Claude skill, Kiro steering, AGENTS.md |

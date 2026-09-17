@@ -1255,7 +1255,45 @@ def _implementer_engines(cfg):
     return names
 
 
-def _reviewer_ineligible(cfg, route, sessions=None):
+def _author_families(author):
+    """The model families that wrote a waived range: as its grant recorded, and as a person named it."""
+    author = author if isinstance(author, dict) else {}
+    stated = author.get("stated") if isinstance(author.get("stated"), dict) else {}
+    return sorted({str(value).strip().lower() for value in (author.get("family"), stated.get("family"))
+                   if str(value or "").strip()})
+
+
+def _author_refusal(route, author):
+    """Why a route may not review a range this author wrote, or None (#65).
+
+    A route whose family cannot be named could be the author's, so it is refused too.
+    """
+    families = _author_families(author)
+    if not families:
+        return "the family of the model that wrote this range is not established"
+    family, why = A.declared_family(route)
+    if family is None:
+        return f"{why}, so it cannot be shown to differ from the author's ({', '.join(families)})"
+    if family in families:
+        return f"it declares the author's model family ({family})"
+    return None
+
+
+def _author_line(author):
+    """Who wrote a waived range, and who said so, for its retrospective review's header."""
+    parts = []
+    if author.get("family"):
+        who = " ".join(str(author[key]) for key in ("role", "actor") if author.get(key))
+        parts.append(f"{author['family']}, recorded by grant {author.get('grant') or 'unnamed'}"
+                     + (f" ({who})" if who else ""))
+    stated = author.get("stated") if isinstance(author.get("stated"), dict) else {}
+    if stated.get("family"):
+        parts.append(f"{stated['family']}, named by {stated.get('by')} (login {stated.get('user') or 'unknown'}, "
+                     f"{'a terminal attached' if stated.get('interactive') else 'no terminal attached'})")
+    return "; ".join(parts) or "not established"
+
+
+def _reviewer_ineligible(cfg, route, sessions=None, author=None):
     """Why a reviewer route may not review this implementer where no matrix decides, or None (#65).
 
     Strict mode refuses the implementer's own binding and model family. This is
@@ -1265,6 +1303,12 @@ def _reviewer_ineligible(cfg, route, sessions=None):
     runs the implementer's own engine. A model reviewing its own output shares its
     blind spots, and a fallback naming the implementer's binary with no id ran
     unrefused (audit).
+
+    A retrospective review of a waived range is a review of whoever wrote it, which
+    need not be the implementer configured now, or any (#65). With `author`,
+    independence is judged against the author instead: a route is refused when it
+    declares the author's family, or none; the implementer's engine may review what
+    another family wrote.
     """
     if not isinstance(route, dict):
         return "it is not a reviewer route"
@@ -1275,6 +1319,8 @@ def _reviewer_ineligible(cfg, route, sessions=None):
         # A tool reaches many families through its provider, and a model name is not a family (#86).
         return ("it is a tool reviewer that names no model family: ao role set reviewer <adapter> "
                 "--model <model> --family <family>")
+    if author is not None:
+        return _author_refusal(route, author)
     impl = cfg.get("implementer") or {}
     family = str(route.get("family") or "").strip().lower()
     implementer_family = str(impl.get("family") or "").strip().lower()
@@ -1654,10 +1700,17 @@ def cmd_review(cfg, args):
     strict = M.is_strict(cfg)
     # An answer a person carried from a stand-in session; set only by collect-review (#75).
     carried = getattr(args, "carried", None)
+    # Who wrote a waived range under retrospective review; set only by catchup (#65).
+    author = getattr(args, "author", None)
+    if author is not None and not _author_families(author):
+        print(f"{C['red']}No reviewer may review this range:{C['reset']} the family of the model that "
+              "wrote it is not established.")
+        return 2
     matrix_resolution = None
     if strict:
         try:
-            matrix_resolution = M.resolve(cfg, require_independent=True)
+            matrix_resolution = M.resolve(cfg, require_independent=True,
+                                          author_families=_author_families(author))
         except M.MatrixError as exc:
             print(f"{C['red']}{C['b']}CONFIGURATION ERROR{C['reset']}")
             for problem in exc.problems:
@@ -1676,9 +1729,10 @@ def cmd_review(cfg, args):
             print(f"\n{C['dim']}It must not be the implementer. A model reviewing its own")
             print(f"output shares its own blind spots.{C['reset']}")
             return 1
-        refused = None if carried else _reviewer_ineligible(cfg, rv)
+        refused = None if carried else _reviewer_ineligible(cfg, rv, author=author)
         if refused:
-            print(f"{C['red']}The reviewer may not review this implementer:{C['reset']} {refused}. "
+            print(f"{C['red']}The reviewer may not review "
+                  f"{'this range' if author is not None else 'this implementer'}:{C['reset']} {refused}. "
                   "A model reviewing its own output shares its own blind spots.")
             return 2
 
@@ -1730,6 +1784,9 @@ def cmd_review(cfg, args):
             "candidate": candidate, "scope": scope,
             "diff_digest": "sha256:" + __import__("hashlib").sha256(diff_bytes).hexdigest(),
         }
+    if author is not None:
+        # The family it was held to, and who said so: the grant's record, or a named person.
+        evidence["author"] = author
     strict_attempts = M.initial_attempts(matrix_resolution) if strict else None
     if strict:
         M.add_evidence_context(evidence, matrix_resolution, strict_attempts)
@@ -1818,7 +1875,7 @@ def cmd_review(cfg, args):
         for fallback in rv.get("fallbacks") or []:
             if not fallback.get("argv"):
                 continue
-            refused = _reviewer_ineligible(cfg, fallback, sessions)
+            refused = _reviewer_ineligible(cfg, fallback, sessions, author=author)
             if refused:
                 print(f"{C['dim']}fallback {fallback.get('id') or 'reviewer'} not run: {refused}{C['reset']}")
                 continue
@@ -1982,6 +2039,8 @@ def cmd_review(cfg, args):
             ])
         if args.commits:
             header.append(f"- commits: {A.review_header_value(args.commits)}")
+        if author is not None:
+            header.append(f"- author's family: {A.review_header_value(_author_line(author))}")
         if args.paths:
             header.append(
                 "- paths: " + json.dumps(args.paths, ensure_ascii=True)
@@ -2108,6 +2167,8 @@ def cmd_review(cfg, args):
         ])
     if args.commits:
         header.append(f"- commits: {A.review_header_value(args.commits)}")
+    if author is not None:
+        header.append(f"- author's family: {A.review_header_value(_author_line(author))}")
     if args.paths:
         header.append(
             "- paths: " + json.dumps(args.paths, ensure_ascii=True)

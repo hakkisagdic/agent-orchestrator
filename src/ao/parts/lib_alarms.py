@@ -867,14 +867,16 @@ def open_waiver_report(root, now=None):
 _OBJECT_ID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
 
-def _bound_waiver_target(root, waiver, trees):
+def _bound_waiver_target(root, waiver, grants):
     """The one landed commit a bounded waiver covers, found by the tree granted under it (#17).
 
     A waiver that nothing was granted under covers no commit; one whose granted tree
-    never landed is UNRESOLVED rather than reviewed by guess.
+    never landed is UNRESOLVED rather than reviewed by guess. The newest grant of the
+    tree that landed says who landed it, where it recorded that (#65).
     """
+    trees = {(row.get("candidate") or {}).get("index_tree") for row in grants}
     item = {"waiver": waiver, "start": "", "end": "", "landed": 0,
-            "newest": False, "problem": None, "unused": not trees,
+            "newest": False, "problem": None, "unused": not trees, "author": None, "grant": None,
             "expired": (waiver.get("expires") or 0) <= time.time()}
     if not trees:
         return item
@@ -883,8 +885,8 @@ def _bound_waiver_target(root, waiver, trees):
     except (RuntimeError, UnicodeError):
         item["problem"] = "UNRESOLVED: git cannot list the landed commits"
         return item
-    sha = next((parts[0] for parts in (line.split() for line in log.splitlines())
-                if len(parts) == 2 and parts[1] in trees), None)
+    sha, tree = next(((parts[0], parts[1]) for parts in (line.split() for line in log.splitlines())
+                      if len(parts) == 2 and parts[1] in trees), (None, None))
     if not sha:
         item["problem"] = "UNRESOLVED: no landed commit carries the tree granted under it"
         return item
@@ -893,7 +895,9 @@ def _bound_waiver_target(root, waiver, trees):
     except (RuntimeError, UnicodeError):
         item["problem"] = "UNRESOLVED: its landed commit has no parent to review against"
         return item
-    item.update(start=parent, end=sha, landed=1)
+    grant = next((row for row in reversed(grants) if (row.get("candidate") or {}).get("index_tree") == tree), {})
+    item.update(start=parent, end=sha, landed=1, grant=grant.get("token"),
+                author=grant.get("author") if isinstance(grant.get("author"), dict) else None)
     return item
 
 
@@ -910,7 +914,9 @@ def review_waiver_ranges(root):
     Heads come from a ledger file anyone on the machine can edit, so each is
     required to be a full object id and git runs without a shell.
 
-    Returns dicts: waiver, start, end, landed (commit count), newest, problem.
+    Returns dicts: waiver, start, end, landed (commit count), newest, problem, and
+    for a bounded waiver's landed commit the grant that landed it and the author that
+    grant recorded; a waiver from before waivers were bounded has neither.
     """
     waived, closed = [], set()
     for r in waiver_rows(root):
@@ -925,7 +931,7 @@ def review_waiver_ranges(root):
     granted = {}
     for row in authority_rows(root):
         if isinstance(row, dict) and row.get("granted") is True and row.get("waiver"):
-            granted.setdefault(row["waiver"], set()).add((row.get("candidate") or {}).get("index_tree"))
+            granted.setdefault(row["waiver"], []).append(row)
     try:
         current = _git_output(root, "rev-parse", "--verify", "HEAD").decode("ascii").strip()
     except (RuntimeError, UnicodeError):
@@ -935,13 +941,13 @@ def review_waiver_ranges(root):
         if w.get("id") in closed:
             continue
         if "expires" in w:
-            out.append(_bound_waiver_target(root, w, granted.get(w["id"], set())))
+            out.append(_bound_waiver_target(root, w, granted.get(w["id"], [])))
             continue
         later = waived[i + 1] if i + 1 < len(waived) else None
         start = str(w.get("head") or "")
         end = str(later.get("head") or "") if later else (current or "")
         item = {"waiver": w, "start": start, "end": end, "landed": 0,
-                "newest": later is None, "problem": None}
+                "newest": later is None, "problem": None, "author": None, "grant": None}
         if not _OBJECT_ID.fullmatch(start):
             item["problem"] = "its recorded head is not a full object id"
         elif not _OBJECT_ID.fullmatch(end):
@@ -966,6 +972,25 @@ def review_waiver_ranges(root):
                     item["problem"] = "git cannot count the commits in its range"
         out.append(item)
     return out
+
+
+def range_changed_lines(root, start, end):
+    """Lines a landed range adds and removes, as git counts them for its diff; None when git cannot say.
+
+    A binary file counts none. `ao catchup --plan` sizes a sitting of retrospective
+    reviews from these before any reviewer is asked.
+    """
+    try:
+        out = _git_output(root, "diff", "--numstat", "--no-ext-diff", f"{start}..{end}", "--").decode(UTF8, "replace")
+    except RuntimeError:
+        return None
+    total = 0
+    for line in out.splitlines():
+        added, _, rest = line.partition("\t")
+        removed = rest.partition("\t")[0]
+        if added.isdigit() and removed.isdigit():
+            total += int(added) + int(removed)
+    return total
 
 
 # ---- credits: burn rate and the day the work stops -------------------------------

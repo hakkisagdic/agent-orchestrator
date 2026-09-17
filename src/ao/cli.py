@@ -361,6 +361,15 @@ def build_parser():
     wv.set_defaults(fn=cmd_waive)
     cu = sub.add_parser("catchup", help="replay what could not run: waived reviews, deferred wakes and nudges")
     cu.add_argument("--boundary")
+    cu.add_argument("--plan", action="store_true",
+                    help="list each open review waiver, its range, commits and changed lines, and the totals; "
+                         "review nothing and write nothing")
+    cu.add_argument("--limit", type=int, help="start at most this many reviews in this run")
+    cu.add_argument("--slice", help="only the waivers for this slice")
+    cu.add_argument("--author-family", dest="author_family",
+                    help="a person names the model family that wrote the waived ranges, for those whose grant "
+                         "recorded none; a reviewer of a family named either way is refused. Needs --by")
+    cu.add_argument("--by", help="with --author-family: the person who names it, recorded with each review")
     cu.set_defaults(fn=cmd_catchup)
     pg = sub.add_parser("pings", help="dead man's switch: external pings that alarm when they stop")
     pg.add_argument("action", choices=["status", "setup", "test"], nargs="?", default="status")

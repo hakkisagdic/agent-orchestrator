@@ -110,6 +110,14 @@ Inline `reviewer.family` and fallback `family` fields cannot change this: family
 comes only from the model declaration. Ineligible routes are never spawned. `ao`
 continues in declaration order to the first independently eligible fallback.
 
+A retrospective review of a waived range (`ao catchup`) reviews whoever wrote the
+range, who need not hold the implementer binding by then. Its independence is judged
+against the family that wrote it instead: a binding whose bound model has that family
+is ineligible, and the implementer binding may review what another family wrote. The
+family comes from the grant under the waiver - the implementer binding's family when
+ao started the implementer's turn - or from a person, with
+`ao catchup --author-family <family> --by <name>`.
+
 Among eligible reviewers, existing runtime behavior is preserved. Missing tools,
 timeouts, silence, quota and authentication failures advance to the next eligible
 fallback. A substantive response with malformed review output becomes `INVALID`;

@@ -84,6 +84,73 @@ def role_of(name, cfg):
     return "human" if lowered in ("human", "person", "owner") else None
 
 
+def block_adapter(block):
+    """The adapter a role block or reviewer route runs: the one it names, else the shipped one whose command it runs.
+
+    None when it names none and its command is no shipped adapter's, or more than one's.
+    """
+    block = block if isinstance(block, dict) else {}
+    named = str(block.get("adapter") or "").strip()
+    if named:
+        return named
+    argv = block.get("argv") or []
+    program = _program_name(argv[0]) if argv and isinstance(argv[0], str) else ""
+    if not program:
+        return None
+    found = [ident for ident, adapter in package_adapters().items()
+             if program in {_program_name(name) for name in
+                            [ident, *adapter_binaries(adapter), *((adapter.get("detect") or {}).get("processes") or [])]
+                            if name}]
+    return found[0] if len(found) == 1 else None
+
+
+def declared_family(block):
+    """(family, None) as a role block or reviewer route declares it, lowercased, or (None, why none can be named).
+
+    Its own `family`, or the family its shipped adapter declares. Two that disagree name
+    no family: one of the statements is wrong and ao cannot tell which. A model name is
+    never read as a family (#86).
+    """
+    block = block if isinstance(block, dict) else {}
+    own = str(block.get("family") or "").strip().lower()
+    ident = block_adapter(block)
+    theirs = str((package_adapters().get(ident) or {}).get("family") or "").strip().lower() if ident else ""
+    if own and theirs and own != theirs:
+        return None, f"it declares the {own} family and its adapter {ident} the {theirs} family"
+    if own or theirs:
+        return own or theirs, None
+    return None, "it declares no model family, and neither does its adapter"
+
+
+def grant_author(cfg, matrix_identity=None):
+    """Who lands a candidate under a review waiver, as far as ao can establish it: role, actor, adapter, family.
+
+    The grant records it because the waived range is reviewed later against whoever wrote
+    it, and the implementer configured by then need not be that actor, nor any (#65). A
+    turn ao started names its role (AO_ROLE); that role's block names the actor, its
+    adapter and the family declared for it. In a capability-matrix project the
+    implementer's family is its binding's, and a family written inline names none. A
+    caller ao did not start - a person, or a session someone opened - names no role ao
+    can check, so every field stays None and the retrospective review waits for a person
+    to name the family.
+    """
+    role = invoking_role()
+    author = {"role": role, "actor": None, "adapter": None, "family": None}
+    if role is None:
+        return author
+    block = cfg.get(role) if isinstance(cfg.get(role), dict) else {}
+    implementer, architect = mail_names(cfg)
+    author["actor"] = str(block.get("actor") or block.get("name")
+                          or (implementer if role == "implementer" else architect))
+    author["adapter"] = block_adapter(block)
+    if matrix_identity is None:
+        author["family"] = declared_family(block)[0]
+    elif role == "implementer":
+        author.update(adapter=matrix_identity.get("adapter") or author["adapter"],
+                      family=str(matrix_identity.get("family") or "").strip().lower() or None)
+    return author
+
+
 def write_project_config(root, text):
     """Write `.ao/config.json` whole or not at all (#56)."""
     from .storage import replace_file_durably

@@ -220,12 +220,17 @@ def _concrete(value):
     return isinstance(value, str) and bool(value.strip()) and value.strip().lower() != "auto"
 
 
-def resolve(cfg, require_independent=True):
+def resolve(cfg, require_independent=True, author_families=()):
     """Validate and resolve a strict config.
 
     Returned dictionaries contain runtime argv templates for the CLI, but callers
     must persist only ``matrix``, identities and attempt summaries.  ``argv`` is
     intentionally absent from every identity snapshot.
+
+    ``author_families`` are the model families that wrote a waived range under
+    retrospective review. Its independence is judged against them instead of the
+    implementer binding, which need not be the author: a binding of one of those
+    families is ineligible, and the implementer's may review what another wrote.
     """
     if not is_strict(cfg):
         raise MatrixError(("capability_matrix is absent",))
@@ -401,7 +406,10 @@ def resolve(cfg, require_independent=True):
                     problems, path,
                     "reviewer argv must expand placeholders: %s" % ", ".join(missing),
                 )
-        if binding_id == impl_binding:
+        if author_families:
+            eligible = identity["family"] not in author_families
+            reason = "" if eligible else "same model family as the author"
+        elif binding_id == impl_binding:
             eligible, reason = False, "same binding as implementer"
         elif identity["family"] == implementer_identity["family"]:
             eligible, reason = False, "same model family as implementer"
@@ -419,7 +427,8 @@ def resolve(cfg, require_independent=True):
         raise MatrixError(problems)
     if require_independent and not any(route["eligible"] for route in routes):
         raise MatrixError(
-            ("reviewer chain has no binding independent of the implementer binding and model family",),
+            ("reviewer chain has no binding independent of the author's model family" if author_families
+             else "reviewer chain has no binding independent of the implementer binding and model family",),
             key="no-independent-reviewer",
         )
 

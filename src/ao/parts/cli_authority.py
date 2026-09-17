@@ -582,11 +582,15 @@ def cmd_commit_ok(cfg, args):
         return 1
 
     token = f"C-{A.unique_ns()}"
+    waived = review_required and waiver
     try:
+        # A waived candidate is reviewed after it lands, held to the family that wrote it (#65).
+        author = A.grant_author(cfg, matrix_resolution["implementer_identity"] if strict else None) \
+            if waived else None
         A.record_authority(
             root, True, [], now, ver["id"], token,
             review=review_name, reviewer=rwho, candidate=candidate, scope=scope,
-            waiver=waiver["id"] if review_required and waiver else None,
+            waiver=waiver["id"] if waived else None, author=author,
             **strict_authority,
         )
     except Exception as exc:

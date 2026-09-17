@@ -11,6 +11,8 @@ from ao import cli, lib as A, storage
 from tests.test_switches_and_bypass import _allow_candidate_verification
 
 WAIVE = dict(gate="review", slice="B7", why="reviewer at quota", by="Hakkı (owner)", hours=24.0)
+# A catch-up that reaches a review names the family that wrote the range (#65).
+NAMED = SimpleNamespace(boundary=None, author_family="author-family", by="A. Person")
 
 
 def _running(root, *slices):
@@ -146,7 +148,7 @@ def test_catchup_reviews_exactly_the_commit_granted_under_a_bounded_waiver(proje
     from ao import watchdog as W
     monkeypatch.setattr(W, "run", lambda ns: 0)
 
-    assert cli.cmd_catchup(project, SimpleNamespace(boundary=None)) == 0
+    assert cli.cmd_catchup(project, NAMED) == 0
     assert seen == [f"{parent}..{landed}"]
     assert [w["id"] for w in A.open_waivers(project["root"])] == [waiver["id"]]
 
@@ -160,7 +162,7 @@ def test_catchup_does_not_close_a_waiver_when_no_review_was_recorded(project, mo
 
     for code in (1, 2):
         monkeypatch.setattr(cli, "cmd_review", lambda cfg, ns, code=code: code)
-        assert cli.cmd_catchup(project, SimpleNamespace(boundary=None)) == 0
+        assert cli.cmd_catchup(project, NAMED) == 0
         assert [w["id"] for w in A.open_waivers(project["root"])] == [waiver["id"]]
     assert mailed == []
 

@@ -100,8 +100,11 @@ waiver (`ao waive review`) is a person's
 act and is bounded: it names one slice and a person, expires (24 hours unless `--hours`
 says otherwise, at most a week), stands in for the review of one candidate only, and is
 opened and retired by chained appends. `ao catchup` retires it only on a review that was
-recorded for the exact commit granted under it. A retrospective `ao review --commits` artifact
-can reconcile landed work but can never authorize a candidate.
+recorded for the exact commit granted under it, and that review may not come from the model
+family that wrote the commit: the grant records who landed it where ao can establish that (a
+turn ao started names its role), and where it could not, a person names the family with
+`ao catchup --author-family <family> --by <name>`, on the record. A retrospective
+`ao review --commits` artifact can reconcile landed work but can never authorize a candidate.
 
 Hook ownership is content- and topology-sensitive, not marker-based. Project
 enrollment is marker-based: only a root `.ao-project` with exact

@@ -104,7 +104,7 @@ gereken tek yetkidir.
 | `ao cost --since 24h` | koordinasyonun kendisi ne harcıyor: uygulayıcı turları sınıfa göre (ürün / analiz / tören / koordinasyon), boşa giden turlar, review sayısı |
 | `ao features [on|off <anahtar>]` | anahtarlar ve her birinin maliyeti; hepsi kapalı = deterministik ao, sıfır model harcaması ([features.md](docs/features.md)) |
 | platformlar | macOS ve Linux yerel; Windows ilk sürüm ([windows.md](docs/windows.md)); testler üçünde de CI'da koşar |
-| `ao waive review --slice B7 --why …` / `ao catchup` | insan bir kapıyı kayıtlı biçimde atlar; catchup inen aralığı review eder, ertelenen uyandırma/dürtmeleri yeniden oynatır |
+| `ao waive review --slice B7 --by <ad> --why …` / `ao catchup` | insan bir kapıyı kayıtlı biçimde atlar; catchup inen her aralığı onu yazan model ailesinden başka bir aileyle review eder, ertelenen uyandırma/dürtmeleri yeniden oynatır. `ao catchup --plan` hiçbir şey yazmadan önizler, `ao catchup --limit 10` ve `ao catchup --slice B7` bir koşuyu sınırlar, `ao catchup --author-family <aile> --by <ad>` ao'nun kaydedemediği aileyi bir insanın adlandırmasıdır |
 | `ao pings setup --url …` | dead man's switch: watchdog ve doctor işi birlikte ölünce alarm veren dış ping |
 | `ao hooks [status|install|uninstall] [--allow-shared-hooks]` / `ao push allow` | Git'in etkin hook yolunu çöz; roller bağımsızdır, paylaşılan/harici/global mutasyonlar komutun tamamı için açık yetki ister |
 | `ao skill install` / `ao skill show` | playbook (roller, döngü, yetki, protokol, alarmlar, tüm komutlar) deponun ajanları için: Claude skill, Kiro steering, AGENTS.md |

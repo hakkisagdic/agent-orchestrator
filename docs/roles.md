@@ -113,6 +113,15 @@ The author is whoever holds the implementer role when the slice runs, resolved f
 table, so after a swap the reviewer that runs the new implementer's engine, or declares its
 family, is refused for every grant - whichever actor that is.
 
+A slice landed under a review waiver is reviewed after it lands, when the table may name
+another implementer, or none. So the grant under the waiver records who landed it - the role
+of a turn ao started, the actor holding that role, its adapter and the family declared for
+it - and `ao catchup` judges the retrospective review's independence against that author, not
+against whoever implements now: a reviewer that declares the author's family, or no family, is
+refused, and the implementer's own engine may review what another family wrote. A family ao
+could not record is named by a person, with `--author-family` and `--by`; ao never reads a
+family from a model name.
+
 ## The bug-hunter lane
 
 The `bug-hunter` finds defects with no slice assigned. It runs as a read lane: no worktree,

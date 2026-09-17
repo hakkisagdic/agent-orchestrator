@@ -54,9 +54,25 @@ waiver; `ao commit-ok` honours it only for a matching running slice, and the
 pre-commit `ao commit-check` requires that waiver to remain open when the grant
 names no review. `ao catchup` later reviews the landed range with `ao review
 --commits` and closes the waiver, or writes the architect a decision request when
-the retrospective review finds problems. Retrospective evidence reconciles the
-record; it never authorizes a candidate. Nothing is skipped silently, and
-nothing is lost when the run degrades:
+the retrospective review finds problems. That review is held to the model
+family that wrote the range, not to whoever implements by then: the grant under
+a waiver records who landed it - the role of a turn ao started, the actor holding
+that role, its adapter and the family declared for it - and a reviewer that
+declares that family, or none, is refused. Where no family was recorded, which
+is every waiver from before this and any grant from a caller ao did not start,
+the review is refused until a person names one with
+`ao catchup --author-family <family> --by <name>`; the family, the person, the
+login and whether a terminal was attached are recorded with each review it
+decides, and no actor's grant admits the flag. `ao catchup --plan` lists each
+open waiver with its range, commits and changed lines, and the totals, and
+changes nothing; `ao catchup --limit 10` starts at most ten reviews, and
+`ao catchup --slice B7` takes one slice's waivers. The reviews stay synchronous
+rather than going through `ao review submit`, which pins a staged candidate for
+the running slice and hands back an id: a waived range is already landed, and a
+waiver closes only on the review recorded for exactly its range, in the run that
+asked for it. Whatever a run does not reach waits for the next one.
+Retrospective evidence reconciles the record; it never authorizes a candidate.
+Nothing is skipped silently, and nothing is lost when the run degrades:
 
 - deferred nudges and wakes (quota) are queued in `.ao/ledger/deferred.jsonl`
   and replayed by `ao catchup`;

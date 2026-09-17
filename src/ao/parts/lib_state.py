@@ -234,14 +234,14 @@ def candidate_review_decision(root, review_dir, candidate_digest):
     return {"match": None, "problem": None}
 
 
-def range_review_verdict(root, commits, since=0):
-    """The verdict of a retrospective review of exactly this range, recorded after `since` rows, or None."""
+def range_review(root, commits, since=0):
+    """The ledger row of a retrospective review of exactly this range, recorded after `since` rows, or None."""
     from .storage import read_chained_jsonl
     rows = read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN)
     for row in reversed(rows[since:]):
         if isinstance(row, dict) and row.get("kind") == "commit-range" \
                 and row.get("commits") == commits:
-            return row.get("verdict")
+            return row
     return None
 
 
@@ -499,7 +499,7 @@ def commits_without_grant(root, limit=50):
 def record_authority(root, granted, reasons, tree, verification, token=None,
                      review=None, reviewer=None, candidate=None, scope=None,
                      matrix=None, role_bindings=None, implementer_identity=None,
-                     reviewer_identity=None, waiver=None):
+                     reviewer_identity=None, waiver=None, author=None):
     """Persist one hash-chained authority decision, raising on any broken prefix."""
     from .storage import append_chained_jsonl
     record = {"at": int(time.time()), "granted": bool(granted),
@@ -521,6 +521,9 @@ def record_authority(root, granted, reasons, tree, verification, token=None,
     if waiver is not None:
         # The waiver a grant stood on; it covers no other candidate after this (#67).
         record["waiver"] = waiver
+    if author is not None:
+        # Who landed work a waiver stood in for; its later review is held to that family (#65).
+        record["author"] = author
     path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
     # Keep the reviewer's identity here, not only in the review file. A grant is
     # not real until the chain prefix validates and the locked append, file

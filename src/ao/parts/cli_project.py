@@ -299,7 +299,7 @@ def _models(adapter_id):
 # through -exec.
 ARCHITECT_TOOLS = ("Read,Grep,Glob,"
                    "Bash(ao status:*),Bash(ao board:*),Bash(ao mail:*),Bash(ao decide:*),Bash(ao note:*),"
-                   "Bash(ao answer:*),Bash(ao review:*),Bash(ao catchup:*),Bash(ao doctor),"
+                   "Bash(ao answer:*),Bash(ao review:*),Bash(ao catchup),Bash(ao catchup --plan),Bash(ao doctor),"
                    "Bash(ao doctor --check),Bash(ao digest:*),Bash(ao notices:*),Bash(ao alarms),"
                    "Bash(ao alarms list:*),Bash(ao cost:*),Bash(ao credits:*),Bash(ao tail:*),"
                    "Bash(ao watchdog status:*),Bash(ao watchdog explain:*),Bash(ao watchdog trace:*),"
