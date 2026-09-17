@@ -47,12 +47,44 @@ its "needs you", and it says what waits and why no architect acts: the reports i
 for and since when they have waited, by the stamp their names carry, or else what it
 measured. With architect wakes switched off, the mailbox check rings `reports-no-wake`
 only for the reports no such anomaly stands for: a report that asks nothing while no work
-is open, a lead, the watchdog's report of a condition that has ended. The first anomaly of
-a kind is the one its alarm speaks for, so a request behind an open decision is told by
-`reports-no-wake` rather than hidden under the decision's alarm. Rebuilt in the same
-project, the request was mailed twice on each red repeat, once under each key, and neither
-mail said which report waited. A snooze on the anomaly's alarm keeps its reports off every
-channel; a snooze on `reports-no-wake` holds the reports it still names.
+is open, a lead, the watchdog's report of a condition that has ended. An open decision is
+told by its own alarm (below), so a request behind it is the one its anomaly's "needs you"
+names. Rebuilt in the same project, the request was mailed twice on each red repeat, once
+under each key, and neither mail said which report waited. A snooze on the anomaly's alarm
+keeps its reports off every channel; a snooze on `reports-no-wake` holds the reports it
+still names.
+
+An architect at the keyboard is told the same way. Its session acts only when someone
+prompts it, so an anomaly reaches a person and its "needs you" says so, and
+`present-pending` - "reports wait for the architect" - names only the reports no anomaly
+stands for, with since when, rung once for the newest of them and again when another
+waits. It used to ring beside "needs you" about the same request, and both were mailed on
+every red repeat.
+
+An open decision is one alarm, `decision-open:<id>`: it names the decision, its question
+and how to answer it, rings the desktop and the phone once, turns red after its hour and
+mails on red's schedule until it is answered. Another decision is another alarm. It reaches
+a person whatever the architect does: `decisions.human_after_minutes` after it was asked,
+or at once when no architect will act on it, in place of a "needs you" about the same
+decision. Rebuilt in a temporary project, one decision nobody answered rang the desktop and
+the phone every hour, 23 times in a day, and was mailed under two keys.
+
+A decision request nobody has been shown rings as it crosses each of its thresholds (#30):
+the architect is told at `mail.unseen_yellow_minutes`, the desktop and the phone at
+`mail.unseen_orange_minutes`, and at `mail.unseen_red_minutes` it turns red, rings them again
+and is mailed, then mails on red's schedule while nobody is shown it. Its red is that
+threshold, not an hour of orange. Rebuilt, one unseen request rang 15 times on each in a day
+and was first mailed two hours before its red threshold.
+
+A wake that keeps failing is one condition too. `architect-wake-failed` says the failure's
+kind, binary and words, without the time it was read at or an id that changes on every
+attempt, so the same failure rings the desktop and the phone once and mails on red's
+schedule whether the watchdog or the doctor raises it; a failure of another kind, binary or
+wording is told again. The phone's "architect woken" line goes out as a wake starts unless
+the wake before it failed within the last day. Such a retry is told once a later cycle reads
+that it did not fail - it has ended, or has run for fifteen minutes, with no failure in its
+log - and a retry that fails is not told at all. Rebuilt, a day of 529s sent the phone 95
+"architect woken" lines about an architect nobody woke.
 
 Some conditions ring red at once, because waiting cannot help:
 

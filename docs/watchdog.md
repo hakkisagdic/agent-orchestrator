@@ -114,6 +114,7 @@ test that would fail if it came back.
 | F20 | the first cycle after a two-week stop would mail an unread request red, ring an open decision, announce a standing red as no longer raised, mail credits whose snooze had ended and tell the phone of a wake | every record kept its date, and every check measured age as if the watchdog had been watching | a cycle after `watchdog.resume_gap_hours` of silence is a resume: one notice names what stands, carried episodes close unannounced, and ages count from the resume | test_resume_quiet | — |
 | F21 | rebuilt with credits spent and no architect to wake, the first day back after two weeks off would have sent 172 desktop and 172 phone notices and 11 mails about four conditions: credits mailed every six hours, a dead watchdog and the credits paged at load, "needs you" every ten minutes | the credits alarm was raised without the reset its reading named; the doctor judged a watchdog its job had just started and kept its own copy of the credits alarm; a window was all that limited a condition that never changed | the credits alarm is held until its reset; the doctor gives a watchdog that came back one cycle and raises the watchdog's own alarm; a condition that says what it is about rings once for it and mails on the ladder's schedule | test_notice_noise | — |
 | F22 | with architect wakes switched off, a decision request nobody could act on was mailed twice on each red repeat - "needs you" under its anomaly, and "2 report(s) waiting and architect wakes are off" - and neither mail said which report waited or since when | the wake path alarmed every report no architect was woken for, the request and the watchdog's own report of its anomaly among them, beside the anomaly's alarm for the same request | a report an anomaly stands for is named by that anomaly's alarm, with since when and why no architect acts; `reports-no-wake` rings only for the reports no anomaly stands for, and an open decision's alarm never stands for a request | test_waiting_one_alarm | — |
+| F23 | rebuilt in the same project, four conditions still repeated through a day: an open decision rang the desktop and the phone 23 times, an unseen request 15, a request an architect at the keyboard had not read was mailed under two keys on every red repeat, and a wake failing on a transport error sent the phone 95 "architect woken" lines | a window was all that limited the decision and the unseen request, and an hour of orange turned the unseen request red before its threshold; `present-pending` rang beside the anomaly; the "architect woken" line went out as each retry started, and every retry read the failure with a new time | an open decision is its own alarm, rung once for its question and not also "needs you"; `present-pending` names only the reports no anomaly stands for; an unseen request rings as it crosses a threshold and is red at its red threshold; a failed wake is named without its time or ids, and a retry is told only once it has not failed | test_noise_repeats | — |
 
 ## Scenarios: testing the decision, not the measurement
 
@@ -162,11 +163,16 @@ Best practice, applied:
   on its schedule, and a red with a known end - spent credits until their reset -
   is held until that end. Another request, a projection come true or another
   account is told again. With no quota to wake the architect, one handoff goes
-  to the phone for the reports that wait, not one every hour.
+  to the phone for the reports that wait, not one every hour. An open decision
+  rings once for its question, an unseen request as it crosses each of its
+  thresholds, and a failed wake once for what failed; the phone hears of a wake
+  retried after a failure only once it has not failed.
 - **One alarm for what waits.** A report an anomaly stands for is told by that
   anomaly's "needs you", which names it, since when it has waited and why no
   architect acts. With wakes switched off, `reports-no-wake` rings only for the
-  reports no anomaly stands for.
+  reports no anomaly stands for, and with an architect at the keyboard
+  `present-pending` does the same. An open decision is told by its own alarm,
+  `decision-open:<id>`, and not as "needs you" as well.
 - **Resolved.** When an episode goes quiet for two hours, the same channels
   hear it end — an alert with no "over" teaches people to keep worrying.
 - **Storm-capped.** Twelve sent alerts in an hour and the rest are recorded

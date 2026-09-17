@@ -123,14 +123,14 @@ def test_a_present_architect_is_told_about_waiting_reports(world):
     world.transcript_age(900)
     world.mail("20260916-1200-kiro-to-fable-BLOCKED-queue.md", BLOCKED)
     world.architect()
-    # A second older than the anomaly the cycle writes, as when a slow cycle crosses a second.
-    blocked = os.path.join(world.root, world.cfg["mailbox"], "20260916-1200-kiro-to-fable-BLOCKED-queue.md")
-    os.utime(blocked, (time.time() - 60, time.time() - 60))
 
     world.cycle(dry_run=False)
 
-    told = [notice for notice in world.notices if "reports wait for the architect" in notice[0]]
+    # The request is named by its anomaly's alarm alone, which says the session is interactive (NOISE-REPEATS).
+    told = [notice for notice in world.notices if notice[0] == "proj: needs you"]
     assert told and told[0][2] == "human" and "20260916-1200-kiro-to-fable-BLOCKED-queue.md" in told[0][1]
+    assert "the architect session is interactive" in told[0][1]
+    assert not [notice for notice in world.notices if "reports wait for the architect" in notice[0]]
     assert _architect_wakes(world) == []
 
 

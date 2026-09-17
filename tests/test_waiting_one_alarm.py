@@ -163,14 +163,17 @@ def test_a_report_no_anomaly_stands_for_is_told_on_its_own_beside_the_request(pr
 def test_a_request_behind_an_open_decision_is_not_hidden_by_the_decisions_alarm(project, monkeypatch, tmp_path):
     world, sent, clock = _world(project, monkeypatch, tmp_path)
     decision = A.ask(world.root, "which store keeps the ledger?", ["files", "sqlite"])
-    _mail(world, REQUEST, BLOCKED)                        # its anomaly shares the decision's key and is held by it
+    _mail(world, REQUEST, BLOCKED)                        # its anomaly is of the decision's kind
 
     _cycles(world, clock, HOUR)
 
-    told = [msg for kind, title, msg in sent if kind == "desktop" and title == "proj: needs you"]
-    assert any(msg.startswith(f"decision-requested: {decision['id']} is open since") for msg in told)
-    assert any(msg.startswith(f"{REQUEST} in agent-mail/, waiting since {_since(REQUEST)}") for msg in told)
-    assert {"anomaly:decision-requested", "reports-no-wake"} <= {alarm["key"] for alarm in A.active_alarms("proj")}
+    # The decision is told by its own alarm, so the anomaly's "needs you" names the request (NOISE-REPEATS).
+    told = [(title, msg) for kind, title, msg in sent if kind == "desktop"]
+    assert [title for title, _ in told] == ["proj: decision waiting", "proj: needs you"]
+    assert told[0][1].startswith(f"{decision['id']}: which store keeps the ledger?")
+    assert told[1][1].startswith(f"decision-requested: {REQUEST} in agent-mail/, waiting since {_since(REQUEST)}")
+    assert {alarm["key"] for alarm in A.active_alarms("proj")} == {f"decision-open:{decision['id']}",
+                                                                    "anomaly:decision-requested"}
 
 
 def test_a_plain_report_alone_is_still_told_that_no_architect_will_read_it(project, monkeypatch, tmp_path):

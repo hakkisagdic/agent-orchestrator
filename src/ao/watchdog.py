@@ -276,7 +276,7 @@ def desktop_notify(title, msg, cfg=None):
 
 
 def notify(title, msg, root=None, key=None, window=1800, audience=None, level=None,
-           quiet_until=None, evidence=None, what=None):
+           quiet_until=None, evidence=None, what=None, red_after=None):
     """Raise an alert at most once per window, and always record that we did.
 
     An explicit audience is a routing decision and is never inferred again from
@@ -292,6 +292,11 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
     without ringing them again - red mails on its schedule - until it says
     something else. A window alone repeats: on 2026-09-17 "needs you" rang every
     ten minutes about one request nobody could answer (NOTICE-NOISE).
+
+    A check whose own thresholds say when it is red passes `red_after`, the seconds an
+    orange stands before the ladder rings it red; otherwise it is
+    `alarms.red_after_minutes`. An unseen request is red at its red threshold, and an
+    hour of orange mailed it two hours before that (NOISE-REPEATS).
 
     Recording happens either way. A suppressed alert is evidence too: a long run
     of them says the condition has held for a long time.
@@ -316,10 +321,11 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
     # The ladder: this is an orange (a person must act). Standing an hour, it
     # rings red and goes to mail — the channel people open when they wake up.
     project = (A.project_key(root) if root else "ao")
-    try:
-        red_after = S.get(A.load_config(root) if root else None, "alarms.red_after_minutes") * 60
-    except Exception:
-        red_after = A.ALARM_RED_AFTER
+    if red_after is None:
+        try:
+            red_after = S.get(A.load_config(root) if root else None, "alarms.red_after_minutes") * 60
+        except Exception:
+            red_after = A.ALARM_RED_AFTER
     # Dry-run uses the same alarm state and calculation as a live cycle, but the
     # preview is deliberately not persisted.
     # A snoozed alarm is recorded, not rung: off the channels and off the ladder, so
@@ -647,6 +653,8 @@ def escalate(root, cfg, adapter, age, args, st):
     architect is woken only if one is configured, because a report nobody reads is
     not an escalation.
     """
+    # A wake retried after a failed one is told once it is known not to have failed (NOISE-REPEATS).
+    tell_retried_wake(root, cfg, st, dry_run=args.dry_run)
     # The architect we spawned resumes with this repo as its cwd, so it reads as a
     # second turn to the process check. We know its pid; exclude it and our own
     # rather than making the detector guess.
@@ -681,14 +689,20 @@ def escalate(root, cfg, adapter, age, args, st):
     project = A.project_key(root)
     hold = None
     standing = {}
+    asked = {decision.get("id"): decision for decision in A.decisions(root, "open")}
     for a in found:
         key = f"anomaly:{a['kind']}"
+        # An open decision reaches a person under its own alarm, `decision-open:<id>`, which names its
+        # question and rings whatever the architect does (#20); it is not told as "needs you" as well.
+        decision = asked.get(a.get("key")) if a["kind"] == "decision-requested" else None
+        alarm = f"decision-open:{decision['id']}" if decision else key
         window = 600 if a["kind"] == "decision-requested" else 3600
         if a["kind"] == "report-waiting" and not open_work(cfg, root):
             continue                     # nothing is stuck; it can wait for a human
         # The first anomaly of a kind is the one its alarm speaks for: any after it shares its key and
-        # is held by the row the first one wrote, so an open decision's alarm never names a request.
-        standing.setdefault(key, a)
+        # is held by the row the first one wrote. A decision speaks under its own alarm, so a request
+        # behind it is the one the anomaly's alarm names (NOISE-REPEATS).
+        standing.setdefault(alarm, a)
         # Suppression is read-only and therefore part of explain's decision path.
         # A dry-run must not claim it would write a report that a live cycle would
         # suppress; it merely skips the suppressed-notice ledger write.
@@ -714,6 +728,11 @@ def escalate(root, cfg, adapter, age, args, st):
         if hold["holdable"]:
             notify(f"{project}: anomaly", f"{a['kind']} — {hold['reason']}", root,
                    key=key, window=window, audience="architect")
+        elif decision:
+            # Its own check rings it once it has waited `decisions.human_after_minutes`; before that, and
+            # with no architect to act, it rings from here. A raise inside the window is not repeated.
+            if not A.notice_recently_recorded(root, alarm, window):
+                ring_decision(root, project, decision, why=hold["reason"])
         else:
             # What stands is what waits: rung once, it climbs to red without ringing again
             # until another request waits. A quota block names its own end (NOTICE-NOISE).
@@ -760,11 +779,8 @@ def escalate(root, cfg, adapter, age, args, st):
     # for good whenever that wake died at once. A wake whose log shows a transport
     # failure hands nothing back. A model's own prose saying "Error:" does not count.
     handed = dict(st.get("handed") or {})
-    if handed:
-        failure = wake_error(os.path.join(STATE_DIR, f"escalate-{project}.log"))
-        if failure and (failure.get("at") or 0) >= int(last_wake) - 2 \
-                and (failure.get("kind") != "other" or "API Error" in failure.get("text", "")):
-            handed = {}
+    if handed and wake_failed(wake_error(os.path.join(STATE_DIR, f"escalate-{project}.log")), last_wake):
+        handed = {}
     mtimes = {}
     for m in pending:
         try:
@@ -809,15 +825,25 @@ def escalate(root, cfg, adapter, age, args, st):
     if woke and A.architect_present(root, arch):
         print("reports pending, but the architect is already at the keyboard")
         # Suppressing the wake must not silence the reports (#23): the session acts
-        # when someone prompts it, so tell that someone, once per newest report.
-        if not args.dry_run:
+        # when someone prompts it, so tell that someone. One condition rings one alarm (#106): a
+        # report an anomaly stands for is that anomaly's, which names it and says the session is
+        # interactive, and telling it here as well mailed one request twice on every red repeat.
+        # This alarm names the rest, as reports-no-wake does with wakes off, and rings again when
+        # another report waits (NOISE-REPEATS).
+        hold = hold or architect_hold_reason(root, cfg, adapter, st, found)
+        named = set() if hold["holdable"] else anomaly_reports(standing.values(), stale)
+        rest = [m for m in stale if m not in named]
+        if named:
+            print(f"{len(named)} report(s) named by the alarm of the anomaly they stand for; "
+                  f"{len(rest)} other(s) alarmed here")
+        if rest and not args.dry_run:
             # The report that asks, not the watchdog's echo of it written this cycle: mtimes are whole
             # seconds, so the echo won only when the cycle crossed a second.
-            newest = max(stale, key=lambda m: (not A.from_watchdog(m), mtimes.get(m, 0)))
+            newest = max(rest, key=lambda m: (not A.from_watchdog(m), mtimes.get(m, 0), m))
             notify(f"{project}: reports wait for the architect",
-                   f"{len(stale)} report(s) in {cfg['mailbox']}/, newest {newest}; the "
-                   "architect session is interactive and reads them when prompted",
-                   root, key=f"present-pending:{newest}", window=24 * 3600, audience="human")
+                   f"{waiting_reports(root, cfg, rest, newest)} — the architect session is interactive and "
+                   f"reads {'it' if len(rest) == 1 else 'them'} when prompted",
+                   root, key="present-pending", window=3600, audience="human", what=newest)
         woke = False
     from . import features as F
     if woke and not F.enabled(cfg, "architect_wake"):
@@ -906,9 +932,11 @@ def escalate(root, cfg, adapter, age, args, st):
                 if kind == "quota":
                     touch_architect_quota(root, st)
                 else:
+                    # Every retry reads a failure with a new time, so a window alone rang the same 529
+                    # again every six hours: rung once for what it says, a new failure is told (NOISE-REPEATS).
                     notify(f"{key}: mimar uyandırılamadı", f"{kind}: {text[:110]} — ikili: "
                            f"{used or '?'}; `ao doctor`", root, key="architect-wake-failed",
-                           window=6 * 3600, audience="human")
+                           window=6 * 3600, audience="human", what=wake_failure_told(err))
             same = used == f"{resolved} {ver}"
             if kind == "binary" and same and time.time() - (st.get("wake_error") or {}).get("at", 0) < 6 * 3600:
                 print(f"architect wake failed with this same binary ({used}); not retrying: {text[:90]}")
@@ -953,6 +981,9 @@ def escalate(root, cfg, adapter, age, args, st):
             if refused:
                 print(f"the architect's prompt cannot be handed over: {refused}; not waking")
                 return woke
+            # A wake after one that failed in the last day is a retry: it was the same line to the phone
+            # every fifteen minutes while a transport kept failing, and none of them was a woken architect.
+            retried = wake_failed(err, last_wake) and time.time() - float(err.get("at") or 0) < 24 * 3600
             os.makedirs(STATE_DIR, exist_ok=True)
             with open(log_path, "a", encoding=UTF8) as log:
                 log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} escalate {resolved} {ver} ===\n")
@@ -976,11 +1007,18 @@ def escalate(root, cfg, adapter, age, args, st):
             st["last_arch_wake"] = time.time()
             st["handed"] = {m: mtimes[m] for m in pending if m in mtimes}
             st["arch_session"] = sess
+            st.pop("wake_retry", None)
+            if retried:
+                # Told by tell_retried_wake once a later cycle reads that it did not fail (NOISE-REPEATS).
+                st["wake_retry"] = {"at": st["last_arch_wake"], "pid": proc.pid, "reports": len(stale)}
             A.helper_register(root, proc.pid, "architect")   # a judge, not a writer
             A.acquire_architect(root, proc.pid, "watchdog wake")   # one judge at a time
             save_state(root, st)
-            _tell_phone(root, f"🤖 *Mimar uyandırıldı* — {len(stale)} rapor işleniyor (pid {proc.pid})")
-            print(f"woke the architect (pid {proc.pid}) to judge it")
+            if retried:
+                print(f"retried the architect's wake (pid {proc.pid}); the phone hears of it once it has not failed")
+            else:
+                _tell_phone(root, f"🤖 *Mimar uyandırıldı* — {len(stale)} rapor işleniyor (pid {proc.pid})")
+                print(f"woke the architect (pid {proc.pid}) to judge it")
     return woke
 
 
@@ -1243,6 +1281,58 @@ def wake_error(log_path):
     return None
 
 
+def wake_failed(failure, since):
+    """Whether the wake started at `since` failed, from what `wake_error` read of the log (#69).
+
+    A failure written before that wake belongs to an earlier one, and a model's own prose
+    saying "Error:" is not a failure.
+    """
+    return bool(failure) and (failure.get("at") or 0) >= int(since or 0) - 2 \
+        and (failure.get("kind") != "other" or "API Error" in failure.get("text", ""))
+
+
+def wake_failure_told(failure):
+    """What a failed wake says, for the ladder: its kind, its binary and its words (NOISE-REPEATS).
+
+    Not the time it was read at, and not an id that changes on every attempt, such as the
+    request id a provider puts in its error: each retry after a 529 read as another failure.
+    Another kind, another binary or other words is something new, and is told.
+    """
+    failure = failure or {}
+    words = re.sub(r"(?<![\w-])(?=[\w-]*\d)[\w-]{8,}", "…", A.redact(str(failure.get("text") or "")))
+    return f"{failure.get('kind')}:{failure.get('binary') or '?'}:{' '.join(words.split())}"
+
+
+def tell_retried_wake(root, cfg, st, dry_run=False):
+    """Tell the phone of a wake retried after a failed one, once it is known not to have failed (NOISE-REPEATS).
+
+    The line went out as the wake started, before anything said how it went, and a wake is
+    retried every fifteen minutes while a transport error lasts: rebuilt in a temporary
+    project, a day of 529s sent the phone 95 "architect woken" lines about an architect
+    nobody woke, beside the alarm that said the wake was failing. A retry is told when its own
+    log segment shows no failure and it has ended, or has run for the fifteen minutes the
+    watchdog leaves between wakes; one that failed was no woken architect, and its failure is
+    already on the ladder. Returns whether it was told.
+    """
+    retry = st.get("wake_retry")
+    if not isinstance(retry, dict):
+        return False
+    if arch_alive(root, cfg.get("architect") or {}) and time.time() - float(retry.get("at") or 0) < 900:
+        return False                      # still running, and a failing one can take minutes to say so
+    failure = wake_error(os.path.join(STATE_DIR, f"escalate-{A.project_key(root)}.log"))
+    worked = not wake_failed(failure, retry.get("at") or 0)
+    if dry_run:
+        if worked:
+            print("DRY RUN: would tell the phone the architect was woken after failed attempts")
+        return False
+    st.pop("wake_retry", None)
+    save_state(root, st)
+    if worked:
+        _tell_phone(root, f"🤖 *Mimar uyandırıldı* — başarısız denemelerin ardından, {retry.get('reports')} "
+                          f"rapor için (pid {retry.get('pid')})")
+    return worked
+
+
 def quota_block_until(err, now=None):
     """Until when a quota error read from the wake log blocks a wake; None once it no longer does.
 
@@ -1460,8 +1550,8 @@ def escalate_open_decisions(root, project, dry_run=False, now=None, since=0):
     """A decision nobody has answered reaches a person (#20).
 
     Fifteen minutes after it was asked (`decisions.human_after_minutes`) it rings
-    orange on the human channel, once
-    an hour, and the alarm ladder turns it red and mails after its hour. The wake
+    orange on the human channel, once for the decision it names, and the alarm ladder
+    turns it red after its hour and mails on red's schedule until it is answered. The wake
     is not waited for: on 2026-09-07 a decision stood three hours while the only
     notice about it was held for an architect that never came. An answered
     decision stops being raised and its alarm ends on its own. Returns the ids
@@ -1479,11 +1569,31 @@ def escalate_open_decisions(root, project, dry_run=False, now=None, since=0):
         if dry_run:
             print(f"DRY RUN: would ring a person about decision {decision.get('id')}")
             continue
-        notify(f"{project}: decision waiting",
-               f"{decision.get('id')}: {str(decision.get('question') or '')[:120]} — open "
-               f"{int((now - asked) / 60)}m; ao answer {decision.get('id')} <key>",
-               root, key=f"decision-open:{decision.get('id')}", window=3600, audience="human")
+        ring_decision(root, project, decision, now=now)
     return ringing
+
+
+def decision_told(decision):
+    """What an open decision's alarm says, for the ladder: which decision, and its question (NOISE-REPEATS)."""
+    return f"{decision.get('id')}: {' '.join(str(decision.get('question') or '').split())[:120]}"
+
+
+def ring_decision(root, project, decision, now=None, why=None):
+    """Raise an open decision's own alarm, `decision-open:<id>`: its question and how to answer it (NOISE-REPEATS).
+
+    It rang every hour, and the anomaly's "needs you" told the same decision beside it: one
+    decision nobody answered reached the desktop and the phone 23 times in a day and was
+    mailed under both keys. Now it rings once for the decision it names and climbs the ladder;
+    another decision is another alarm, and is told. `why` says why no architect acts on it,
+    when that is why it rings before its time.
+    """
+    now = time.time() if now is None else now
+    did = decision.get("id")
+    return notify(f"{project}: decision waiting",
+                  f"{did}: {str(decision.get('question') or '')[:120]} — open "
+                  f"{int((now - (decision.get('asked_at') or now)) / 60)}m; ao answer {did} <key>"
+                  + (f" — no architect will act on it: {why}" if why else ""),
+                  root, key=f"decision-open:{did}", window=3600, audience="human", what=decision_told(decision))
 
 
 def report_ungranted_commits(root, project, st, limit=20):
@@ -1864,9 +1974,13 @@ def _cycle_impl(args, root):
         if level:
             text = f"{message['id']} has waited {int(message['age'] / 60)}m and nobody has been shown it" \
                 + (f" ({int(minutes)}m since the watchdog resumed)" if carried else "")
+            # It rings as it crosses a threshold, and its red is the red threshold: rung every hour between
+            # them, one unseen request reached the desktop and the phone 15 times in a day, and an hour of
+            # orange mailed it two hours before its red (NOISE-REPEATS).
             notify(f"{project}: unread decision request", text, root, key=f"unseen:{message['id']}", window=3600,
                    audience="architect" if level == "yellow" else "human",
-                   level=None if level == "yellow" else level)
+                   level=None if level == "yellow" else level, what=level,
+                   red_after=S.get(cfg, "mail.unseen_red_minutes") * 60)
     # An agent that is busy and producing nothing never trips the idle guard, so
     # check it before the guard chain rather than inside it. Notify only; a nudge
     # would add a turn to a loop that is already spending them.

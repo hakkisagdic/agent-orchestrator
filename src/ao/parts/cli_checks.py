@@ -501,8 +501,12 @@ def _doctor_check(cfg, page=False):
                    audience="human", level=shared["level"], quiet_until=credit_reset(last.get("reset_at")),
                    what=credits_told("exhausted", last.get("account")))
         elif shared:
+            # A failed wake says what the watchdog's own raise of it says, so the same failure rings once
+            # whoever sees it (NOISE-REPEATS).
+            from .watchdog import STATE_DIR, wake_error, wake_failure_told
+            failed = wake_error(os.path.join(STATE_DIR, f"escalate-{project}.log")) if key == "wake-failed" else None
             notify(f"{project}: {key}", text, root, key=shared["key"], window=shared["window"],
-                   audience="human", level=shared["level"])
+                   audience="human", level=shared["level"], what=wake_failure_told(failed) if failed else None)
         else:
             notify(f"{project}: {key}", text, root, key=f"doctor:{key}", window=3600,
                    audience="human")
