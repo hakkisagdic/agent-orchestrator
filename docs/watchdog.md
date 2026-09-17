@@ -113,6 +113,7 @@ test that would fail if it came back.
 | F19 | an old transcript caused a second live architect, while a fresh transcript or reused remembered pid kept a dead one "present" | transcript mtime/pid state was treated as liveness; refill lacked a guard; filtered PIDs broke ancestry; generic agent/Windows matching blurred role identity | exact configured launcher/runtime + cwd over full parent graph; interactive root only; cycle-safe helper exclusion; fresh process-start + `architect`-role duplicate guard; identical dry/live verdicts | test_processes, test_scenarios | — |
 | F20 | the first cycle after a two-week stop would mail an unread request red, ring an open decision, announce a standing red as no longer raised, mail credits whose snooze had ended and tell the phone of a wake | every record kept its date, and every check measured age as if the watchdog had been watching | a cycle after `watchdog.resume_gap_hours` of silence is a resume: one notice names what stands, carried episodes close unannounced, and ages count from the resume | test_resume_quiet | — |
 | F21 | rebuilt with credits spent and no architect to wake, the first day back after two weeks off would have sent 172 desktop and 172 phone notices and 11 mails about four conditions: credits mailed every six hours, a dead watchdog and the credits paged at load, "needs you" every ten minutes | the credits alarm was raised without the reset its reading named; the doctor judged a watchdog its job had just started and kept its own copy of the credits alarm; a window was all that limited a condition that never changed | the credits alarm is held until its reset; the doctor gives a watchdog that came back one cycle and raises the watchdog's own alarm; a condition that says what it is about rings once for it and mails on the ladder's schedule | test_notice_noise | — |
+| F22 | with architect wakes switched off, a decision request nobody could act on was mailed twice on each red repeat - "needs you" under its anomaly, and "2 report(s) waiting and architect wakes are off" - and neither mail said which report waited or since when | the wake path alarmed every report no architect was woken for, the request and the watchdog's own report of its anomaly among them, beside the anomaly's alarm for the same request | a report an anomaly stands for is named by that anomaly's alarm, with since when and why no architect acts; `reports-no-wake` rings only for the reports no anomaly stands for, and an open decision's alarm never stands for a request | test_waiting_one_alarm | — |
 
 ## Scenarios: testing the decision, not the measurement
 
@@ -162,6 +163,10 @@ Best practice, applied:
   is held until that end. Another request, a projection come true or another
   account is told again. With no quota to wake the architect, one handoff goes
   to the phone for the reports that wait, not one every hour.
+- **One alarm for what waits.** A report an anomaly stands for is told by that
+  anomaly's "needs you", which names it, since when it has waited and why no
+  architect acts. With wakes switched off, `reports-no-wake` rings only for the
+  reports no anomaly stands for.
 - **Resolved.** When an episode goes quiet for two hours, the same channels
   hear it end — an alert with no "over" teaches people to keep worrying.
 - **Storm-capped.** Twelve sent alerts in an hour and the rest are recorded

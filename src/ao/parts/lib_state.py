@@ -686,12 +686,13 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
         kind = "decision-requested" if asking else "report-waiting"
         contradiction = report_inconsistency(root, body)
         if contradiction:
-            out.append({"kind": "inconsistent-report", "key": m,
+            out.append({"kind": "inconsistent-report", "key": m, "reports": [m],
                         "facts": [f"{m}: {contradiction}"]})
-        g = groups.setdefault(kind, {"n": 0, "first": m})
+        g = groups.setdefault(kind, {"n": 0, "first": m, "reports": []})
         g["n"] += 1
         g["latest"] = m
         g["title"] = first.lstrip("# ").strip()[:200]
+        g["reports"].append(m)
     # A review that came back and nobody took is a slice left unattended (#28, W1).
     waited = settings.get(cfg, "review.unhandled_minutes") * 60
     for state in returned_reviews(root):
@@ -711,13 +712,15 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
                               str(decision.get("question") or "")[:200]]})
     # One anomaly per kind, however many reports carry it. Eighty "queue empty"
     # reports in eleven hours became eighty anomaly files and forty wake attempts;
-    # the architect needed one line saying "eighty, since 06:31".
+    # the architect needed one line saying "eighty, since 06:31". It carries the
+    # reports it stands for, so what tells a person of it can name them and nothing
+    # else tells a person of them again (WAITING-ONE-ALARM).
     for kind, g in groups.items():
         since = g["first"][:13] if re.match(r"\d{8}-\d{4}", g["first"]) else g["first"][:20]
         head = f"the implementer wrote {g['latest']}"
         if g["n"] > 1:
             head += f" — {g['n']} report(s) of this kind standing, the first since {since}"
-        out.append({"kind": kind, "key": "implementer",
+        out.append({"kind": kind, "key": "implementer", "reports": g["reports"],
                     "facts": [head, g["title"],
                               "an explicit request — not a symptom needing corroboration"
                               if kind == "decision-requested" else "a report, not a blocker"]})

@@ -411,7 +411,9 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
     desktop_notify(title, safe, channel_cfg)
     try:
         from . import telegram
-        telegram.send(f"*{title}*\n{msg}", root)
+        # The message as written, as the resume notice is sent: it can name a report, and one stray
+        # underscore in a name makes the phone refuse the whole message as markup (WAITING-ONE-ALARM).
+        telegram.send(f"*{title}*\n{_markdown_plain(msg)}", root)
     except Exception:
         pass                                # a phone being unreachable is not a failure
     A.alarm_rang(project, key, what=what)
@@ -678,11 +680,15 @@ def escalate(root, cfg, adapter, age, args, st):
     woke = False
     project = A.project_key(root)
     hold = None
+    standing = {}
     for a in found:
         key = f"anomaly:{a['kind']}"
         window = 600 if a["kind"] == "decision-requested" else 3600
         if a["kind"] == "report-waiting" and not open_work(cfg, root):
             continue                     # nothing is stuck; it can wait for a human
+        # The first anomaly of a kind is the one its alarm speaks for: any after it shares its key and
+        # is held by the row the first one wrote, so an open decision's alarm never names a request.
+        standing.setdefault(key, a)
         # Suppression is read-only and therefore part of explain's decision path.
         # A dry-run must not claim it would write a report that a live cycle would
         # suppress; it merely skips the suppressed-notice ledger write.
@@ -711,8 +717,10 @@ def escalate(root, cfg, adapter, age, args, st):
         else:
             # What stands is what waits: rung once, it climbs to red without ringing again
             # until another request waits. A quota block names its own end (NOTICE-NOISE).
+            # It names the reports, since when and why nobody is woken: with wakes off it
+            # is the only alarm for them (WAITING-ONE-ALARM).
             notify(f"{project}: needs you",
-                   f"{a['kind']} — no architect will act on it: {hold['reason']}", root,
+                   f"{anomaly_waits(root, cfg, a)} — no architect will act on it: {hold['reason']}", root,
                    key=key, window=window, audience="human", what=anomaly_subject(a),
                    quiet_until=st.get("arch_quota_until") if hold["code"] == "quota-block" else None)
         print(f"anomaly {a['kind']}: {'reported as ' + name if name else 'already reported'}")
@@ -814,8 +822,25 @@ def escalate(root, cfg, adapter, age, args, st):
     from . import features as F
     if woke and not F.enabled(cfg, "architect_wake"):
         print("reports pending; architect_wake feature is off — recorded and alarmed, not woken")
-        notify(f"{A.project_key(root)}: needs you", f"{len(stale)} report(s) waiting and architect wakes are off",
-               root, key="reports-no-wake", window=3600, audience="human", what=waiting)
+        # One condition rings one alarm, whoever sees it (#106). A report an anomaly stands for -
+        # the request it groups, or the watchdog's own report of it - is already a person's
+        # "needs you", which names it and says why nobody is woken; ringing it here too sent a
+        # day's red mail about one request twice. This alarm names the rest: a report that asks
+        # nothing while no work is open, a lead, an anomaly's report whose condition has ended.
+        # With wakes off no anomaly is held for the architect, so every standing one reached a
+        # person (WAITING-ONE-ALARM).
+        hold = hold or architect_hold_reason(root, cfg, adapter, st, found)
+        named = set() if hold["holdable"] else anomaly_reports(standing.values(), stale)
+        rest = [m for m in stale if m not in named]
+        if named:
+            print(f"{len(named)} report(s) named by the alarm of the anomaly they stand for; "
+                  f"{len(rest)} other(s) alarmed here")
+        if rest:
+            newest = max(rest, key=lambda m: (not A.from_watchdog(m), mtimes.get(m, 0), m))
+            notify(f"{project}: needs you",
+                   f"{waiting_reports(root, cfg, rest, newest)} — no architect will act on "
+                   f"{'it' if len(rest) == 1 else 'them'}: {hold['reason']}",
+                   root, key="reports-no-wake", window=3600, audience="human", what=newest)
         woke = False
     if woke:
         provider = A.provider_of(arch.get("argv"))
@@ -970,6 +995,59 @@ def anomaly_subject(anomaly):
         if wrote:
             return f"{anomaly.get('kind')}:{wrote.group(1)}"
     return f"{anomaly.get('kind')}:{anomaly.get('key') or ''}"
+
+
+def waiting_reports(root, cfg, names, newest=None):
+    """Which reports wait and since when, as a person reads it (WAITING-ONE-ALARM).
+
+    One report by its name, several by their count and the newest. Since when is the oldest
+    report's own time - the stamp its name carries, else its file's - never its alarm's: an
+    alarm starts again after a resume, and the request under it may have waited for weeks.
+    """
+    box = cfg.get("mailbox", "agent-mail")
+    times = []
+    for name in names:
+        try:
+            times.append(A._name_time(name) or os.path.getmtime(os.path.join(root, box, name)))
+        except OSError:
+            continue                  # handled while this cycle ran
+    since = f", waiting since {_when(min(times))}" if times else ""
+    if len(names) == 1:
+        return f"{names[0]} in {box}/{since}"
+    return f"{len(names)} reports in {box}/{since}, the newest {newest or names[-1]}"
+
+
+def anomaly_waits(root, cfg, anomaly):
+    """What an anomaly that reaches a person says of itself: its kind, and what waits (WAITING-ONE-ALARM).
+
+    A request or report the implementer wrote is named with since when; any other anomaly
+    says its first fact, which names what it measured.
+    """
+    kind = anomaly.get("kind")
+    names = [str(name) for name in anomaly.get("reports") or []]
+    if names and kind in ("decision-requested", "report-waiting"):
+        return f"{kind}: {waiting_reports(root, cfg, names)}"
+    facts = anomaly.get("facts")
+    return f"{kind}: {facts[0]}" if isinstance(facts, list) and facts else str(kind)
+
+
+def anomaly_reports(anomalies, names):
+    """The reports among `names` a standing anomaly stands for: those it groups, and its own (WAITING-ONE-ALARM).
+
+    The watchdog's report of an anomaly is known by the kind its name carries, whatever
+    follows it: one written under an older name is a report of the same kind of condition,
+    and the alarm for that kind stands for it as well. The implementer's reports are known
+    by name, from the anomaly that groups them.
+    """
+    kinds = {str(anomaly.get("kind")) for anomaly in anomalies}
+    grouped = {name for anomaly in anomalies for name in anomaly.get("reports") or []}
+    out = set()
+    for name in names:
+        own = re.search(r"-ANOMALY-(.+)\.md$", name) if A.from_watchdog(name) else None
+        if name in grouped or (own and any(own.group(1) == kind or own.group(1).startswith(kind + "-")
+                                           for kind in kinds)):
+            out.add(name)
+    return out
 
 
 def queue_past_a_question(root):

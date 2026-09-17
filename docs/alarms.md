@@ -41,6 +41,19 @@ window allows, and by mail at once when the alarm is already red. Rebuilt in a
 temporary project, a "needs you" about one request no architect could be woken for
 rang every ten minutes: 143 times in a day on the desktop, and as many on the phone.
 
+What waits for an architect nobody will wake is one alarm as well. An anomaly that reaches
+a person - a decision request, a report while work is open, a review nobody collected - is
+its "needs you", and it says what waits and why no architect acts: the reports it stands
+for and since when they have waited, by the stamp their names carry, or else what it
+measured. With architect wakes switched off, the mailbox check rings `reports-no-wake`
+only for the reports no such anomaly stands for: a report that asks nothing while no work
+is open, a lead, the watchdog's report of a condition that has ended. The first anomaly of
+a kind is the one its alarm speaks for, so a request behind an open decision is told by
+`reports-no-wake` rather than hidden under the decision's alarm. Rebuilt in the same
+project, the request was mailed twice on each red repeat, once under each key, and neither
+mail said which report waited. A snooze on the anomaly's alarm keeps its reports off every
+channel; a snooze on `reports-no-wake` holds the reports it still names.
+
 Some conditions ring red at once, because waiting cannot help:
 
 - the implementer's credits are exhausted for the billing period
@@ -101,7 +114,9 @@ resume would send and writes nothing. A silence under the threshold changes noth
 ## Channels
 
 - Desktop: `osascript` notification, always on.
-- Telegram: `ao telegram setup` — see [telegram.md](telegram.md).
+- Telegram: `ao telegram setup` — see [telegram.md](telegram.md). An alarm's text is sent
+  as written, so an underscore in a report's name cannot make the phone refuse the message
+  as broken markup.
 - E-mail: `ao email setup --token … --to …` — formsubmit.co relays a JSON POST,
   no server; the token lives in `~/.ao/email.json` (0600), never in a repo.
   `ao doctor` warns when neither Telegram nor e-mail is configured: an orange

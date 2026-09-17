@@ -276,9 +276,9 @@ def test_needs_you_says_what_waits(project, monkeypatch, tmp_path):
 
     world.cycle(dry_run=False)
 
+    # The request and the watchdog's report of it are named by the anomaly's alarm alone (WAITING-ONE-ALARM).
     assert {kw["key"]: kw.get("what") for title, kw in told if title == "proj: needs you"} == {
-        "anomaly:decision-requested": f"decision-requested:{REQUEST}",
-        "reports-no-wake": REQUEST}
+        "anomaly:decision-requested": f"decision-requested:{REQUEST}"}
 
 
 def test_a_request_that_arrives_just_after_a_resume_is_told(project, monkeypatch, tmp_path):
@@ -382,7 +382,9 @@ def test_a_day_after_two_weeks_off_tells_each_condition_once_on_each_channel_its
     assert _on(sent, "desktop") == ["proj: watchdog resumed after 14d"]
     assert len(_on(sent, "telegram")) == 1
     mailed = [body.split("\n")[0] for kind, _, body in sent if kind == "email"]
-    assert sorted(mailed) == ["2 report(s) waiting and architect wakes are off"] * 4 + [NEEDS_YOU] * 4
+    # One alarm for the request, which says which report waits and since when (WAITING-ONE-ALARM).
+    assert mailed == [f"decision-requested: {REQUEST} in agent-mail/, waiting since {W._when(A._name_time(REQUEST))} "
+                      "— no architect will act on it: architect wakes are switched off"] * 4
     alarms = {alarm["key"]: alarm for alarm in A.active_alarms("proj")}
     assert alarms["credits-exhaust"].get("red_sent") is None and alarms["credits-exhaust"]["quiet_until"] == reset
     assert "doctor:watchdog-dead" not in alarms and "doctor:credits-exhaust" not in alarms
