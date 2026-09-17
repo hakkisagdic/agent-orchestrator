@@ -327,10 +327,13 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
             try:
                 from . import email
                 since = time.strftime("%d %b %H:%M", time.localtime(episode.get("first", time.time())))
-                if email.send(f"{title}", f"{msg}\n\nDuruyor: {since}'den beri ({episode.get('count', 1)} kez). "
-                              f"Proje: {root or '?'}\n`ao alarms` merdiveni, `ao status` durumu gösterir."
-                              + ("\n\nKanıt:\n" + "\n".join(A.evidence_lines(evidence))
-                                 if evidence else ""), root):
+                # The mail is worded in the project's language; its key is the same in any (LANGUAGE-OUTPUT).
+                written = _written_in(root)
+                body = (f"{msg}\n\n" + language.text(written, "alarm.standing", since=since,
+                                                     count=episode.get("count", 1), project=root or "?")
+                        + ("\n\n" + language.text(written, "alarm.evidence") + "\n"
+                           + "\n".join(A.evidence_lines(evidence)) if evidence else ""))
+                if email.send(f"{title}", body, root):
                     A.alarm_mailed(project, key, what=what)
                     if root:
                         A.record_notice(root, title, msg, sent=True, key="mail:" + key)
@@ -395,22 +398,32 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
     return True
 
 
-def touch_architect_quota(root, st):
+def _written_in(root):
+    """The project config a text for a person is worded from, for a caller that holds none (LANGUAGE-OUTPUT).
+
+    Read from the file as it stands, without resolving a session as load_config does: only its
+    `language` is wanted. None without a root, which is the machine's choice.
+    """
+    return A.project_config_document(root)["config"] if root else None
+
+
+def touch_architect_quota(root, st, cfg=None):
     """Keep a standing architect-quota alarm alive until its reset window.
 
     ``notify`` touches the alarm episode before applying its desktop rate limit,
     so calling this on every watchdog cycle rings orange once, advances to red
     after the configured interval, and does not create a notification storm.
+    Its words are in the project's language, and its key is not (LANGUAGE-OUTPUT).
     """
     until = st.get("arch_quota_until", 0)
     if until <= time.time():
         return False
+    written = _written_in(root) if cfg is None else cfg
     text = (st.get("wake_error") or {}).get("text") or "architect quota exhausted"
     reset = time.strftime("%H:%M", time.localtime(until))
     return notify(
-        f"{A.project_key(root)}: mimar kotada",
-        f"{text[:100]} — uyandırma {reset}'e kadar bekletiliyor; mimarın uygulamasında "
-        "auto-continue açıksa oturum kendi devam eder",
+        language.text(written, "alarm.architect-quota-title", project=A.project_key(root)),
+        language.text(written, "alarm.architect-quota", error=text[:100], reset=reset),
         root,
         key="architect-quota",
         window=6 * 3600,
@@ -745,7 +758,7 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
         if args.dry_run:
             print(f"DRY RUN: would announce {st['arch_pending']} completed architect report(s)")
         else:
-            _tell_phone(root, f"✅ *Mimar bitirdi* — {st['arch_pending']} rapor kapandı, kuyruk boş")
+            _tell_phone(root, language.text(cfg, "watchdog.architect-done", n=st["arch_pending"]))
             st["arch_pending"] = 0
             save_state(root, st)
     elif pending and not args.dry_run:
@@ -789,7 +802,7 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
                 exe = shutil.which("ao", path=child_path())
                 if exe:
                     subprocess.run([exe, "-C", root, "handoff", "--reason",
-                                    "mimar uyandırılamadı — kota yok"] + _handoff_quiet(),
+                                    language.text(cfg, "watchdog.handoff-no-wake")] + _handoff_quiet(),
                                    capture_output=True, timeout=120)
                     st.update(last_handoff=time.time(), handoff_for=waiting)
                     save_state(root, st)
@@ -916,12 +929,13 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
                 # notify records the notice; a row written first under the same key
                 # made notify's own rate limit swallow the ring (#69).
                 if kind == "quota":
-                    touch_architect_quota(root, st)
+                    touch_architect_quota(root, st, cfg)
                 else:
                     # Every retry reads a failure with a new time, so a window alone rang the same 529
                     # again every six hours: rung once for what it says, a new failure is told (NOISE-REPEATS).
-                    notify(f"{key}: mimar uyandırılamadı", f"{kind}: {text[:110]} — ikili: "
-                           f"{used or '?'}; `ao doctor`", root, key="architect-wake-failed",
+                    notify(language.text(cfg, "alarm.wake-failed-title", project=key),
+                           language.text(cfg, "alarm.wake-failed", kind=kind, error=text[:110], binary=used or "?"),
+                           root, key="architect-wake-failed",
                            window=6 * 3600, audience="human", what=wake_failure_told(err))
             same = used == f"{resolved} {ver}"
             if kind == "binary" and same and time.time() - (st.get("wake_error") or {}).get("at", 0) < 6 * 3600:
@@ -1007,7 +1021,7 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
             if retried:
                 print(f"retried the architect's wake (pid {proc.pid}); the phone hears of it once it has not failed")
             else:
-                _tell_phone(root, f"🤖 *Mimar uyandırıldı* — {len(stale)} rapor işleniyor (pid {proc.pid})")
+                _tell_phone(root, language.text(cfg, "watchdog.architect-woken", n=len(stale), pid=proc.pid))
                 print(f"woke the architect (pid {proc.pid}) to judge it")
     return woke
 
@@ -1327,8 +1341,8 @@ def tell_retried_wake(root, cfg, st, dry_run=False):
     st.pop("wake_retry", None)
     save_state(root, st)
     if worked:
-        _tell_phone(root, f"🤖 *Mimar uyandırıldı* — başarısız denemelerin ardından, {retry.get('reports')} "
-                          f"rapor için (pid {retry.get('pid')})")
+        _tell_phone(root, language.text(cfg, "watchdog.architect-woken-retried", n=retry.get("reports"),
+                                        pid=retry.get("pid")))
     return worked
 
 
@@ -2004,7 +2018,7 @@ def _cycle_impl(args, root):
         st.pop("arch_quota_until", None)
         save_state(root, st)
         print("the architect is present and working; its cached quota block is cleared")
-    touch_architect_quota(root, st)
+    touch_architect_quota(root, st, cfg)
     if not args.dry_run:
         for e in A.expire_alarms(project):
             _announce_resolved(root, e)
@@ -2400,7 +2414,7 @@ def _cycle_impl(args, root):
                     exe = shutil.which("ao", path=child_path())
                     if exe:
                         _sp.run([exe, "-C", root, "handoff", "--reason",
-                                 "sağlayıcı kotası tükendi"] + _handoff_quiet(),
+                                 language.text(cfg, "watchdog.handoff-provider")] + _handoff_quiet(),
                                 capture_output=True, timeout=120)
                         st["last_handoff"] = time.time()
                         save_state(root, st)

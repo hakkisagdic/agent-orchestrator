@@ -232,12 +232,12 @@ def cmd_telegram(cfg, args):
     label = _launchd_label("telegram", A.project_key(cfg["root"]))
 
     if args.action == "setup":
+        # The phone channel is the machine's, so its steps are in the machine's language (LANGUAGE-OUTPUT).
         print(f"{C['b']}1.{C['reset']} Telegram: {C['b']}@BotFather{C['reset']} → /newbot → token")
-        print(f"{C['b']}2.{C['reset']} Bota bir mesaj yaz, sonra chat id'ni al:")
+        print(f"{C['b']}2.{C['reset']} {language.text(None, 'telegram.setup-chat')}")
         print(f"   {C['dim']}curl -s \"https://api.telegram.org/bot<TOKEN>/getUpdates\" \\\\{C['reset']}")
         print(f"   {C['dim']}  | python3 -c \"import sys,json; print([u['message']['chat']['id'] for u in json.load(sys.stdin)['result']])\"{C['reset']}")
-        print(f"{C['b']}3.{C['reset']} Dosyayı {C['b']}sen{C['reset']} yaz — bir bot token'ı "
-              f"kimlik bilgisidir; ne repoya ne bir sohbete girer:")
+        print(f"{C['b']}3.{C['reset']} {language.text(None, 'telegram.setup-file', b=C['b'], reset=C['reset'])}")
         print(f"   {C['dim']}mkdir -p ~/.ao{C['reset']}")
         print(f"   {C['dim']}echo '{{\"token\":\"<BOT_TOKEN>\",\"chats\":[\"<CHAT_ID>\"]}}' > {conf}{C['reset']}")
         print(f"   {C['dim']}chmod 600 {conf}{C['reset']}")
@@ -251,10 +251,7 @@ def cmd_telegram(cfg, args):
             print(f"{C['red']}No config at {conf}{C['reset']} — run {C['b']}ao telegram setup{C['reset']}")
             return 1
         name = cfg.get("project") or os.path.basename(cfg["root"])
-        n = telegram.send(f"*{name}* — bağlantı testi.\n\nBu sohbete yazdığın her mesaj "
-                          f"acil karar olarak kutuya düşer ve uygulayıcı onaylamadan "
-                          f"commit edemez.\n\nKomutlar: /status /board /credits /notices /fleet",
-                          cfg["root"])
+        n = telegram.send(language.text(cfg, "telegram.test", name=name), cfg["root"])
         print(f"{C['green']}sent to {n} chat(s){C['reset']}" if n else
               f"{C['red']}send failed{C['reset']} — check the token and the chat ids")
         return 0 if n else 1
@@ -314,19 +311,24 @@ def cmd_telegram(cfg, args):
     return 0
 
 
-def _decision_text(rec):
+def _decision_text(rec, cfg=None):
+    """A decision as the phone shows it, worded in the project's language (LANGUAGE-OUTPUT).
+
+    `cfg` is the project's config, and without one the machine's choice is read. The keys, and the
+    reply typed with them, are the same in either language.
+    """
     lines = [f"❓ *{rec['question']}*"]
     if rec.get("context"):
         lines.append(f"\n_{rec['context']}_")
     if rec.get("slice"):
-        lines.append(f"\ndilim: `{rec['slice']}`")
+        lines.append("\n" + language.text(cfg, "decision.slice", slice=rec["slice"]))
     for found in rec.get("precedents") or []:
-        lines.append(f"\nönceden: {found['project']} {found['kind']} {found['id']} — {found['outcome']}")
+        lines.append("\n" + language.text(cfg, "decision.precedent", project=found["project"], kind=found["kind"],
+                                          id=found["id"], outcome=found["outcome"]))
     lines.append("")
     for o in rec["options"]:
         lines.append(f"*{o['key']})* {o['label']}")
-    lines.append(f"\nCevap: butona bas, ya da `{rec['id']} <harf>` yaz. "
-                 f"Serbest metin için `{rec['id']} x <cevabın>`.")
+    lines.append("\n" + language.text(cfg, "decision.answer", id=rec["id"]))
     return "\n".join(lines)
 
 
@@ -664,7 +666,7 @@ def cmd_ask(cfg, args):
         print(f"usage: {C['b']}ao ask \"question\" \"option a\" \"option b\" …{C['reset']}")
         return 0
     rec = A.ask(root, args.question, args.options or [], context=args.context,
-                slice_id=args.slice)
+                slice_id=args.slice, cfg=cfg)
     print(f"{C['b']}{rec['id']}{C['reset']}  {rec['question']}")
     for o in rec["options"]:
         print(f"   {C['b']}{o['key']}){C['reset']} {o['label']}")
@@ -676,7 +678,7 @@ def cmd_ask(cfg, args):
         kb = [[{"text": f"{o['key']}) {o['label'][:40]}",
                 "callback_data": f"{rec['id']}:{o['key']}"}]
               for o in rec["options"] if not o.get("free_text")]
-        n = telegram.send(_decision_text(rec), root, keyboard=kb)
+        n = telegram.send(_decision_text(rec, cfg), root, keyboard=kb)
         print(f"\n{C['dim']}sent to {n} chat(s){C['reset']}" if n else
               f"\n{C['dim']}no phone channel configured — answer with "
               f"`ao answer {rec['id']} <key>`{C['reset']}")
@@ -730,6 +732,17 @@ def cmd_decisions(cfg, args):
     return 0
 
 
+def _handoff_head(text):
+    """What of a handoff note goes to the phone: everything above what a successor can do.
+
+    The note is written in the project's language; the heading is looked for in every language, as a
+    marker is (LANGUAGE-OUTPUT).
+    """
+    for heading in language.forms("handoff-successor"):
+        text = text.split(heading)[0]
+    return text
+
+
 def cmd_handoff(cfg, args):
     """Write down everything a successor needs, and send it.
 
@@ -759,28 +772,31 @@ def cmd_handoff(cfg, args):
     acct = A.account_usage(adapter_id=ident) if readable else None
     state, age, doing = A.busy(cfg, adapter) if impl else ("unknown", None, "")
 
-    lines = [f"# Devir — {cfg.get('project') or os.path.basename(root)}",
+    # In the project's language, as a person reads it (LANGUAGE-OUTPUT).
+    lines = [language.text(cfg, "handoff.title", project=cfg.get("project") or os.path.basename(root)),
              f"_{datetime.now():%Y-%m-%d %H:%M}_", ""]
     if args.reason:
-        lines += [f"**Sebep:** {args.reason}", ""]
+        lines += [language.text(cfg, "handoff.reason", reason=args.reason), ""]
 
-    lines += ["## Şu an", f"- uygulayıcı: **{state}**"
-              + (f", son yazım {age // 60}dk önce" if age is not None else ""),
+    lines += [language.text(cfg, "handoff.now"), language.text(cfg, "handoff.implementer", state=state)
+              + (language.text(cfg, "digest.last-write", minutes=age // 60) if age is not None else ""),
               f"- HEAD `{(g['log'][0] if g['log'] else '?')[:60]}`",
-              f"- {len(g['dirty'])} dosya commit'siz, {g['ahead']} commit push'suz, "
-              f"{g['behind'] if g.get('behind') is not None else '?'} commit geride ({g.get('base') or 'karşılaştırılacak uzak dal yok'})"]
+              language.text(cfg, "handoff.git", dirty=len(g["dirty"]), ahead=g["ahead"],
+                            behind=g["behind"] if g.get("behind") is not None else "?",
+                            base=g.get("base") or language.text(cfg, "handoff.no-remote"))]
     if revs:
-        lines.append(f"- son review: {revs[0][1]} ({revs[0][0]})")
+        lines.append(language.text(cfg, "handoff.last-review", verdict=revs[0][1], name=revs[0][0]))
     if doing:
-        lines.append(f"- diyor ki: _{doing[:200]}_")
+        lines.append(language.text(cfg, "handoff.saying", doing=doing[:200]))
     if impl and not readable:
-        lines.append(f"- kredi: {_no_account(ident)}")
+        lines.append(language.text(cfg, "handoff.credit", credit=_no_account(ident)))
     elif acct and not acct.get("error") and not acct.get("expired") and acct.get("limit"):
-        lines.append(f"- kredi: {acct['used']:,.0f} / {acct['limit']:,.0f}"
-                     f" ({acct['limit'] - acct['used']:,.0f} kaldı)")
+        left = language.text(cfg, "digest.left", n=f"{acct['limit'] - acct['used']:,.0f}")
+        lines.append(language.text(cfg, "handoff.credit",
+                                   credit=f"{acct['used']:,.0f} / {acct['limit']:,.0f} ({left})"))
 
     if opens:
-        lines += ["", "## Cevap bekleyen kararlar — **bunlar işi açar**"]
+        lines += ["", language.text(cfg, "handoff.open-decisions")]
         for d in opens:
             lines.append(f"- `{d['id']}` {d['question']}")
             for o in d["options"]:
@@ -790,21 +806,16 @@ def cmd_handoff(cfg, args):
         lines += ["", "## Blocked"]
         for it in bd["blocked"]:
             lines.append(f"- **{it['id']}** {it['title']} — "
-                         f"{it['notes'].get('needs', 'sebep kayıtlı değil')}")
+                         f"{it['notes'].get('needs', language.text(cfg, 'handoff.no-reason'))}")
     if bd["running"]:
-        lines += ["", "## Yürüyen"]
+        lines += ["", language.text(cfg, "handoff.running")]
         for it in bd["running"]:
             lines.append(f"- **{it['id']}** {it['title']}")
     if bd["queued"]:
-        lines += ["", f"## Sıradaki ({len(bd['queued'])} madde)",
+        lines += ["", language.text(cfg, "handoff.next", n=len(bd["queued"])),
                   f"- **{bd['queued'][0]['id']}** {bd['queued'][0]['title']}"]
 
-    lines += ["", "## Devralan ne yapabilir",
-              "- Bekleyen kararı cevapla: telefondan butona bas, ya da "
-              "`ao answer <id> <harf>`",
-              "- Serbest karar yaz: Telegram'a mesaj at — acil olarak kutuya düşer",
-              "- Durumu gör: `ao status`, `ao board`, `ao decisions`",
-              "", "_push, PR ve epic kapatma hiçbir devirde aktarılmaz._"]
+    lines += ["", language.text(cfg, "handoff.successor", heading=language.marker(cfg, "handoff-successor"))]
 
     text = "\n".join(lines)
     # Named in the project's language; a note named in either is listed and read the same (LANGUAGE-FILES).
@@ -818,8 +829,7 @@ def cmd_handoff(cfg, args):
     if not args.no_send:
         try:
             from . import telegram
-            head = text.split("## Devralan")[0]
-            n = telegram.send(head[:3800], root)
+            n = telegram.send(_handoff_head(text)[:3800], root)
             print(f"\n{C['dim']}sent to {n} chat(s) · saved to "
                   f"{os.path.relpath(path, root)}{C['reset']}")
         except Exception as e:

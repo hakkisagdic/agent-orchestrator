@@ -19,8 +19,13 @@ def cmd_digest(cfg, args):
     """
     root = cfg["root"]
     d = A.digest(root, cfg, args.days)
-    win = ("24 saat" if args.days == 1 else
-           f"{int(args.days)} gün" if args.days == int(args.days) else f"{args.days} gün")
+
+    def say(key, **values):
+        # In the project's language; a count, a verdict and a command read the same in any (LANGUAGE-OUTPUT).
+        return language.text(cfg, key, **values)
+
+    days = int(args.days) if args.days == int(args.days) else args.days
+    win = say("digest.day") if args.days == 1 else say("digest.days", n=days)
 
     # Lead with the blocking answer. Someone opening this at 3am wants "what is
     # in the way", not a scoreboard.
@@ -29,43 +34,43 @@ def cmd_digest(cfg, args):
     state, age, doing = A.busy(cfg, adapter) if impl else ("unknown", None, "")
     spin = A.spinning(root)
     print(f"{C['b']}{cfg.get('project') or os.path.basename(root)}{C['reset']}"
-          f"{C['dim']}  son {win}{C['reset']}\n")
+          f"{C['dim']}  {say('digest.window', window=win)}{C['reset']}\n")
 
     col = {"working": C["green"], "slowing": C["yellow"]}.get(state, C["red"])
     line = f"{col}{state}{C['reset']}"
     if age is not None:
-        line += f"{C['dim']}, son yazım {age // 60}dk önce{C['reset']}"
+        line += f"{C['dim']}{say('digest.last-write', minutes=age // 60)}{C['reset']}"
     if spin:
-        line += f"  {C['red']}⚠ {spin}dk meşgul, üretim yok{C['reset']}"
-    print(f"  durum    {line}")
+        line += f"  {C['red']}{say('digest.spinning', minutes=spin)}{C['reset']}"
+    print(f"  {say('digest.state'):<9}{line}")
     if doing:
         print(f"  {C['dim']}↳ {doing[:110]}{C['reset']}")
 
     if d["decisions"]["open"]:
-        print(f"\n  {C['yellow']}{d['decisions']['open']} cevap bekleyen karar{C['reset']}"
-              f"{C['dim']} — bunlar işi açar: ao decisions{C['reset']}")
+        print(f"\n  {C['yellow']}{say('digest.open-decisions', n=d['decisions']['open'])}{C['reset']}"
+              f"{C['dim']} — {say('digest.unblocks')}{C['reset']}")
     for b in d["blocked"]:
         print(f"  {C['red']}⊘{C['reset']} {b['id']}  {C['dim']}{b['needs'][:88]}{C['reset']}")
 
-    print(f"\n{C['b']}{C['mag']}── İNEN İŞ {'─' * 46}{C['reset']}")
+    print(_digest_heading(say("digest.landed")))
     print(f"  {C['b']}{len(d['commits'])}{C['reset']} commit"
-          f"{C['dim']}, {d['unpushed']} push'suz{C['reset']}")
+          f"{C['dim']}, {say('digest.unpushed', n=d['unpushed'])}{C['reset']}")
     for c in d["commits"][:args.n]:
         print(f"    {C['dim']}{c['sha']}{C['reset']} {c['subject'][:76]}")
 
     v, a, r = d["verifications"], d["authority"], d["reviews"]
-    print(f"\n{C['b']}{C['mag']}── KAPILAR {'─' * 46}{C['reset']}")
-    vf = f", {C['red']}{v['failed']} düştü{C['reset']}" if v["failed"] else ""
-    rc = f", {C['yellow']}{r['changes']} değişiklik{C['reset']}" if r["changes"] else ""
-    ar = f", {C['yellow']}{a['refused']} reddedildi{C['reset']}" if a["refused"] else ""
-    print(f"  doğrulama  {C['green']}{v['passed']} geçti{C['reset']}{vf}")
+    print(_digest_heading(say("digest.gates")))
+    vf = f", {C['red']}{say('digest.failed', n=v['failed'])}{C['reset']}" if v["failed"] else ""
+    rc = f", {C['yellow']}{say('digest.changes', n=r['changes'])}{C['reset']}" if r["changes"] else ""
+    ar = f", {C['yellow']}{say('digest.refused', n=a['refused'])}{C['reset']}" if a["refused"] else ""
+    print(f"  {say('digest.verify'):<11}{C['green']}{say('digest.passed', n=v['passed'])}{C['reset']}{vf}")
     print(f"  review     {C['green']}{r['approved']} APPROVED{C['reset']}{rc}")
     if a.get("integrity") == "broken":
-        print(f"  commit-ok  {C['red']}YETKİ DEFTERİ BÜTÜNLÜĞÜ BOZUK{C['reset']}")
+        print(f"  commit-ok  {C['red']}{say('digest.ledger-broken')}{C['reset']}")
         if a.get("error"):
             print(f"    {C['dim']}{a['error'][:110]}{C['reset']}")
     else:
-        print(f"  commit-ok  {C['green']}{a['granted']} verildi{C['reset']}{ar}")
+        print(f"  commit-ok  {C['green']}{say('digest.granted', n=a['granted'])}{C['reset']}{ar}")
     # A refusal repeated all week is a process problem, not an incident.
     for reason, n in d["refusal_reasons"]:
         if n > 1:
@@ -73,30 +78,37 @@ def cmd_digest(cfg, args):
 
     dec = d["decisions"]
     if dec["asked"]:
-        med = f"{dec['median_minutes']}dk" if dec["median_minutes"] is not None else "—"
-        print(f"\n  karar      {dec['answered']}/{dec['asked']} cevaplandı"
-              f"{C['dim']}, ortanca {med}{C['reset']}")
+        med = say("digest.minutes", n=dec["median_minutes"]) if dec["median_minutes"] is not None else "—"
+        answered = say("digest.answered", answered=dec["answered"], asked=dec["asked"])
+        print(f"\n  {say('digest.decisions'):<11}{answered}"
+              f"{C['dim']}, {say('digest.median', median=med)}{C['reset']}")
 
     account = d.get("account") or {}
     if d.get("credits"):
         c = d["credits"]
         pct = c["used"] / c["limit"] * 100 if c["limit"] else 0
         cc = C["red"] if pct > 90 else C["yellow"] if pct > 70 else C["green"]
-        print(f"\n{C['b']}{C['mag']}── KREDİ {'─' * 48}{C['reset']}")
+        print(_digest_heading(say("digest.credit")))
+        left = say("digest.left", n=f"{c['remaining']:,.0f}")
         print(f"  {cc}{c['used']:,.0f}{C['reset']} / {c['limit']:,.0f}"
-              f"{C['dim']}  ({c['remaining']:,.0f} kaldı){C['reset']}")
+              f"{C['dim']}  ({left}){C['reset']}")
     elif account and not account.get("readable"):
         # Where the figure stood, the implementer's adapter declares no account (ACCOUNT-READERS).
-        print(f"\n{C['b']}{C['mag']}── KREDİ {'─' * 48}{C['reset']}")
+        print(_digest_heading(say("digest.credit")))
         print(f"  {C['dim']}{_no_account(account.get('adapter'))}{C['reset']}")
     for day, val in d["credit_days"][-args.n:]:
         print(f"    {C['dim']}{day}{C['reset']}  {val:>8,.0f}")
 
     al = d["alerts"]
-    print(f"\n{C['dim']}pano: " +
+    print(f"\n{C['dim']}{say('digest.board')} " +
           " · ".join(f"{k} {n}" for k, n in d["board"].items()) +
-          f"  |  uyarı: {al['sent']} gönderildi, {al['held']} susturuldu{C['reset']}")
+          f"  |  {say('digest.alerts', sent=al['sent'], held=al['held'])}{C['reset']}")
     return 0
+
+
+def _digest_heading(label):
+    """A digest section's heading, ruled to the same width whatever the length of its label in a language."""
+    return f"\n{C['b']}{C['mag']}── {label} {'─' * (53 - len(label))}{C['reset']}"
 
 
 def cmd_note(cfg, args):
@@ -389,6 +401,12 @@ def cmd_init(cfg, args):
         base_config = {"project": name, "round_budget": S.default("round_budget")}
 
     planned_config, added = _profile_config(root, args, base_config)
+    # --language is chosen before init writes a word, where `ao config set` needs the config init writes
+    # (LANGUAGE-OUTPUT). A person asked for it, so it replaces a language the config holds.
+    chosen = getattr(args, "language", None)
+    if chosen and S.lookup(planned_config, "language") != chosen:
+        planned_config = S.assign(dict(planned_config), "language", chosen)
+        added.append(f"language {chosen}")
     config_text, config_problem = _planned_project_config_text(planned_config)
     if config_problem:
         print(f"{C['red']}init refused{C['reset']}: {_project_refusal(config_problem)}")
@@ -661,10 +679,11 @@ def cmd_decide(cfg, args):
         except A.AnswerRefused as exc:
             # Recorded in the ledger all the same; an answer already given is not overwritten by it.
             print(f"  {C['yellow']}{args.answers} not answered{C['reset']}: {exc}")
-    body = f"{args.decision}\n\n**Neden:** {args.why or '—'}"
+    # The note is in the project's language (LANGUAGE-OUTPUT).
+    body = f"{args.decision}\n\n" + language.text(cfg, "decide.why", why=args.why or "—")
     if args.scope:
-        body += f"\n\n**Kapsam:** {args.scope}"
-    body += f"\n\n_karar kaydı: {rec['id']}_"
+        body += "\n\n" + language.text(cfg, "decide.scope", scope=args.scope)
+    body += "\n\n" + language.text(cfg, "decide.record", id=rec["id"])
     name = A.note(root, cfg, args.to, args.decision[:60], body, urgent=args.urgent)
     print(f"  {C['green']}recorded{C['reset']} {rec['id']}  →  {cfg['mailbox']}/{name}")
     return 0
@@ -938,9 +957,8 @@ def cmd_hold(cfg, args):
             impl, arch = A.mail_names(cfg)
             name = f"{datetime.now():%Y%m%d-%H%M}-{arch}-to-{impl}-INFO-hold-released.md"
             with open(os.path.join(box, name), "w", encoding=UTF8) as fh:
-                fh.write(f"# INFO — hold released\n\nDuruldu: {st.get('minutes',0)} dakika\n"
-                         f"Sebep: {st.get('reason','')}\n\n## Bu sürede ne değişti\n\n"
-                         f"{args.note}\n")
+                fh.write(language.text(cfg, "hold.released", minutes=st.get("minutes", 0),
+                                       reason=st.get("reason", ""), note=args.note))
             print(f"handover note → {cfg['mailbox']}/{name}")
         return 0
 
@@ -1159,7 +1177,8 @@ def cmd_email(cfg, args):
             print(f"{C['green']}saved{C['reset']} {email.CONF} (0600) → {c.get('to') or 'address hidden behind token'}")
             print(f"now: {C['b']}ao email test{C['reset']}")
             return 0
-        print(email.SETUP.format(conf=email.CONF))
+        # The channel is the machine's, so its steps are in the machine's language (LANGUAGE-OUTPUT).
+        print(language.text(None, "email.setup", conf=email.CONF))
         return 0
     c = email.config()
     if args.action == "status":
@@ -1170,9 +1189,7 @@ def cmd_email(cfg, args):
     if args.action == "test":
         if not c:
             print(f"{C['red']}not configured{C['reset']} — ao email setup"); return 1
-        ok = email.send("test", f"ao e-posta kanalı çalışıyor. Proje: {cfg['root']}\n"
-                        f"Kırmızı alarmlar buraya gelir: bir saatten uzun süren turuncu durumlar, "
-                        f"tükenmiş kota, başarısız mimar uyandırma.", cfg["root"])
+        ok = email.send("test", language.text(cfg, "email.test", root=cfg["root"]), cfg["root"])
         print(f"{C['green']}sent{C['reset']}" if ok else f"{C['red']}relay refused{C['reset']} — token/activation?")
         return 0 if ok else 1
     return 0
@@ -1212,7 +1229,9 @@ def cmd_alarms(cfg, args):
     if args.action == "test":
         from .watchdog import notify
         lvl = args.level or "orange"
-        ok = notify(f"{project}: alarm testi", f"{lvl} seviyesi testi — ao alarms test", root,
+        # Worded in the project's language, keyed and routed the same in any (LANGUAGE-OUTPUT).
+        ok = notify(language.text(cfg, "alarm.test-title", project=project),
+                    language.text(cfg, "alarm.test", level=lvl), root,
                     key=f"alarm-test-{int(time.time())}", window=0, audience="human", level=lvl)
         print(f"{lvl}: desktop+telegram {'sent' if ok else 'suppressed'}"
               + (" · e-mail attempted (see ao notices)" if lvl == "red" else ""))

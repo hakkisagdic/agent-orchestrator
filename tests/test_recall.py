@@ -51,6 +51,6 @@ def test_opening_a_decision_carries_a_near_match_to_the_person_it_reaches(projec
                 ["widen", "split"])
 
     assert [(found["project"], found["id"]) for found in rec["precedents"]] == [("acme-api", before["id"])]
-    assert f"önceden: acme-api question {before['id']} — answered: widen" in cli._decision_text(rec)
+    assert f"before: acme-api question {before['id']} — answered: widen" in cli._decision_text(rec, project)
     stored = json.load(open(os.path.join(root, ".ao", "decisions", rec["id"] + ".json"), encoding="utf-8"))
     assert stored["precedents"][0]["source"] == f".ao/decisions/{before['id']}.json"

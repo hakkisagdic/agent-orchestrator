@@ -146,26 +146,3 @@ def send(subject, body, root=None, opener=None):
     if root:
         A.record_notice(root, f"mail: {subject}", body[:200], sent=ok, key="mail:" + subject[:40])
     return ok
-
-
-SETUP = """\
-E-posta kanalı (kırmızı alarm) — sunucu gerekmez, formsubmit.co üzerinden gider.
-
-1. Bir kez doğrulama: aşağıdaki komutu KENDİ adresinle çalıştır; formsubmit sana
-   bir aktivasyon e-postası gönderir, içindeki bağlantıya tıkla.
-     curl -s -X POST -H "Content-Type: application/json" -H "Accept: application/json" \\
-       -d '{{"message":"ao aktivasyon"}}' https://formsubmit.co/ajax/SENIN@ADRESIN
-2. Aktivasyondan sonra formsubmit sana adresini gizleyen rastgele bir token verir
-   (https://formsubmit.co/ajax/<token>). Adresin kendisi de token olarak çalışır.
-3. Kaydet:  ao email setup --token <token> --to SENIN@ADRESIN
-4. Dene:    ao email test        → gelen kutunda "[ao/<proje>] test" görmelisin.
-
-Kendi posta sunucun varsa formsubmit yerine SMTP (parola komut satırına yazılmaz,
-bir ortam değişkeninden bir kez okunur):
-     AO_SMTP_PASSWORD=… ao email setup --provider smtp --host smtp.ornek.com \\
-       --user SEN@ORNEK.COM --password-env AO_SMTP_PASSWORD --to SEN@ORNEK.COM
-
-Token {conf} dosyasında 0600 ile durur; hiçbir depoya yazılmaz. Kırmızı alarmlar
-(bir saatten uzun süren turuncu durumlar, tükenmiş kota, başarısız mimar uyandırma)
-bu adrese gider; `ao alarms` merdiveni gösterir.
-"""

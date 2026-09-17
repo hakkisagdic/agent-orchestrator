@@ -16,6 +16,12 @@ of that boundary. `ao watchdog explain`/`--dry-run` computes the same routing
 and verdicts but never writes a notice or alarm episode and never invokes the
 desktop, Telegram, e-mail, or dead-man-switch ping channels.
 
+Some of what an alarm says follows the project's `language` ([configuration.md](configuration.md)),
+and a project whose `language` is `tr` reads it in Turkish: the architect at quota, a failed wake,
+`ao alarms test`, the lines a red mail adds below an alarm's text, and the phone's "architect woken"
+and "architect done" lines. An alarm's key never follows the language, and neither does its audience:
+a project that changes its language raises the episode that stands, and nothing rings again for it.
+
 Orange assumes the person is
 near a screen. On 2026-09-05 they were asleep: a queue sat empty for eleven
 hours, forty architect wakes failed, and every alert went to a notification

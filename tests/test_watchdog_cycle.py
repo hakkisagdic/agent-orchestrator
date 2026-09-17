@@ -128,7 +128,7 @@ def test_standing_architect_quota_advances_from_orange_to_red(project, monkeypat
     standing = A.active_alarms("proj", now=clock[0])[0]
     assert standing["ring"] == "red"
     assert standing["count"] == 2 and standing["red_sent"] == clock[0]
-    assert mailed == [("proj: mimar kotada", root)]
+    assert mailed == [("proj: architect at quota", root)]
 
 
 def test_cycle_previews_and_persists_quota_ladder_until_reset(
@@ -203,7 +203,7 @@ def test_cycle_previews_and_persists_quota_ladder_until_reset(
     standing = A.active_alarms("proj", now=clock[0])[0]
     assert standing["ring"] == "red" and standing["count"] == 2
     assert standing["red_sent"] == clock[0]
-    assert mailed == [("proj: mimar kotada", root)]
+    assert mailed == [("proj: architect at quota", root)]
     assert len(desktop) == 1 and len(phone) == 1
 
     clock[0] += 30 * 60
@@ -212,7 +212,7 @@ def test_cycle_previews_and_persists_quota_ladder_until_reset(
     capsys.readouterr()
     after_reset = A.active_alarms("proj", now=clock[0])[0]
     assert after_reset["count"] == 2 and after_reset["red_sent"] == standing["red_sent"]
-    assert mailed == [("proj: mimar kotada", root)]
+    assert mailed == [("proj: architect at quota", root)]
 
 
 def test_omitted_audience_retains_legacy_title_inference(project, monkeypatch):

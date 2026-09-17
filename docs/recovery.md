@@ -67,6 +67,10 @@ and the transcript: what the implementer is doing and when it last wrote, HEAD a
 uncommitted or unpushed, the newest review's verdict, every open decision with its exact
 reply syntax, what is blocked and on what, what is running, and what is next in the queue.
 
+The note is written in the project's `language` ([configuration.md](configuration.md)), and so is the
+reason the watchdog hands off with. The phone is sent everything above `## What a successor can do`,
+which a Turkish note heads `## Devralan ne yapabilir`; either heading is found in any project.
+
 Paste it into a new session, or let an MCP client read the same state through `ao_status`,
 `ao_board` and `ao_decisions` — see [`mcp.md`](mcp.md). Either way the recovery is seconds,
 not an archaeology session.

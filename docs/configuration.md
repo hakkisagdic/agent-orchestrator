@@ -91,13 +91,23 @@ authority, board and backlog under `.ao/` and `agent-mail/README.md` - and the m
 into mail, such as `## URGENT` and `## DECISION REQUIRED` in English and `## ACİL` and
 `## KARAR GEREKLİ` in Turkish ([protocol.md](protocol.md#markers) lists them all).
 
+It decides what ao writes for a person as well: `ao digest`, the note `ao handoff` writes and sends,
+the notes `ao decide` and `ao hold release --note` leave, a decision's free-text option, the watchdog's
+lines to the phone, its architect-at-quota and failed-wake alarms, the lines a red alarm's mail adds,
+and every reply the phone is sent. `ao email setup` and `ao telegram setup` set up a channel the whole
+machine shares and print their steps in the machine's choice. What a person types on the phone - a
+command, an answer - is read the same in either language, and an alarm is keyed the same in both, so a
+change of language rings no standing alarm again.
+
 ```
 ao config set language tr --machine          # every project on this machine that sets none
 ao config set language tr                    # one project, in the .ao/config.json ao init wrote
+ao init --language tr                        # a new project, before init writes a file
 ```
 
 `ao init` writes its files in the language in force when it runs, and a project has no config of
-its own until then: to have a new project's files in Turkish, set the machine's choice first.
+its own until then: `ao init --language tr` sets the project's choice in the config it writes, before
+any other file, and a machine's choice set first serves as well.
 `ao init` never rewrites a file that exists, so a project keeps the files it was given, and a
 change of language changes what ao writes from then on. The markers of both languages are read in
 every project whatever it chose: mail written before a change, or by an agent following an older

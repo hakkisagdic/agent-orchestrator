@@ -693,6 +693,6 @@ def test_digest_surfaces_broken_authority_chain_without_trusting_counts(
     output = capsys.readouterr().out
 
     assert code == 0
-    assert "YETKİ DEFTERİ BÜTÜNLÜĞÜ BOZUK" in output
+    assert "AUTHORITY LEDGER INTEGRITY BROKEN" in output
     # Captured output is no terminal, so it carries no colour (CLI-ROBUST): the line is looked for as printed.
-    assert "commit-ok  0 verildi" not in output
+    assert "commit-ok  0 granted" not in output

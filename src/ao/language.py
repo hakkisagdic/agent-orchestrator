@@ -477,6 +477,227 @@ MARKERS = {
 }
 
 
+# LANGUAGE-OUTPUT: what a person reads - in the terminal, on the phone, in e-mail, on the desktop, in the
+# handoff note and in the digest - in the project's language. The setup of a channel the whole machine
+# shares belongs to no project and reads the machine's choice. A command, a key, a number and a marker
+# read the same in both languages, and an alarm's key is never a text: a project that changes its
+# language does not ring a standing alarm again.
+TEXTS.update({
+    # `ao email setup` with no token; {conf}: the file the channel's settings are kept in
+    "email.setup": {
+        "en": """\
+The e-mail channel (the red alarm) — no server needed, it goes through formsubmit.co.
+
+1. Verify once: run the command below with YOUR OWN address; formsubmit sends you
+   an activation e-mail, and you click the link in it.
+     curl -s -X POST -H "Content-Type: application/json" -H "Accept: application/json" \\
+       -d '{{"message":"ao activation"}}' https://formsubmit.co/ajax/YOUR@ADDRESS
+2. After activation formsubmit gives you a random token that hides your address
+   (https://formsubmit.co/ajax/<token>). The address itself works as a token too.
+3. Save:    ao email setup --token <token> --to YOUR@ADDRESS
+4. Try:     ao email test        → "[ao/<project>] test" should arrive in your inbox.
+
+With a mail server of your own, SMTP instead of formsubmit (the password is never typed
+on the command line; it is read once from an environment variable):
+     AO_SMTP_PASSWORD=… ao email setup --provider smtp --host smtp.example.com \\
+       --user YOU@EXAMPLE.COM --password-env AO_SMTP_PASSWORD --to YOU@EXAMPLE.COM
+
+The token stays in {conf}, mode 0600, and is never written to a repository. Red alarms
+(an orange condition standing longer than an hour, an exhausted quota, a failed architect
+wake) go to this address; `ao alarms` shows the ladder.
+""",
+        "tr": """\
+E-posta kanalı (kırmızı alarm) — sunucu gerekmez, formsubmit.co üzerinden gider.
+
+1. Bir kez doğrulama: aşağıdaki komutu KENDİ adresinle çalıştır; formsubmit sana
+   bir aktivasyon e-postası gönderir, içindeki bağlantıya tıkla.
+     curl -s -X POST -H "Content-Type: application/json" -H "Accept: application/json" \\
+       -d '{{"message":"ao aktivasyon"}}' https://formsubmit.co/ajax/SENIN@ADRESIN
+2. Aktivasyondan sonra formsubmit sana adresini gizleyen rastgele bir token verir
+   (https://formsubmit.co/ajax/<token>). Adresin kendisi de token olarak çalışır.
+3. Kaydet:  ao email setup --token <token> --to SENIN@ADRESIN
+4. Dene:    ao email test        → gelen kutunda "[ao/<proje>] test" görmelisin.
+
+Kendi posta sunucun varsa formsubmit yerine SMTP (parola komut satırına yazılmaz,
+bir ortam değişkeninden bir kez okunur):
+     AO_SMTP_PASSWORD=… ao email setup --provider smtp --host smtp.ornek.com \\
+       --user SEN@ORNEK.COM --password-env AO_SMTP_PASSWORD --to SEN@ORNEK.COM
+
+Token {conf} dosyasında 0600 ile durur; hiçbir depoya yazılmaz. Kırmızı alarmlar
+(bir saatten uzun süren turuncu durumlar, tükenmiş kota, başarısız mimar uyandırma)
+bu adrese gider; `ao alarms` merdiveni gösterir.
+""",
+    },
+    # `ao email test`; {root}: the project
+    "email.test": {
+        "en": "ao's e-mail channel works. Project: {root}\n"
+              "Red alarms come here: orange conditions standing longer than an hour, an exhausted quota, a failed "
+              "architect wake.",
+        "tr": "ao e-posta kanalı çalışıyor. Proje: {root}\n"
+              "Kırmızı alarmlar buraya gelir: bir saatten uzun süren turuncu durumlar, tükenmiş kota, başarısız "
+              "mimar uyandırma.",
+    },
+    # `ao telegram setup`, steps 2 and 3; {b} and {reset} set a word in bold
+    "telegram.setup-chat": {"en": "Write the bot a message, then get your chat id:",
+                            "tr": "Bota bir mesaj yaz, sonra chat id'ni al:"},
+    "telegram.setup-file": {"en": "{b}You{reset} write the file — a bot token is a credential; it goes into neither "
+                                  "a repository nor a chat:",
+                            "tr": "Dosyayı {b}sen{reset} yaz — bir bot token'ı kimlik bilgisidir; ne repoya ne bir "
+                                  "sohbete girer:"},
+    # `ao telegram test`; {name}: the project
+    "telegram.test": {
+        "en": "*{name}* — connection test.\n\nEvery message you write in this chat lands in the mailbox as an urgent "
+              "decision, and the implementer cannot commit until it acknowledges it.\n\n"
+              "Commands: /status /board /credits /notices /fleet",
+        "tr": "*{name}* — bağlantı testi.\n\nBu sohbete yazdığın her mesaj acil karar olarak kutuya düşer ve "
+              "uygulayıcı onaylamadan commit edemez.\n\nKomutlar: /status /board /credits /notices /fleet",
+    },
+    # what the poller answers on the phone: a button tapped in a chat off the allowlist, an answer recorded
+    # ({option}: its key), a button of a decision that is gone, an answer typed to a decision there is not
+    # ({id}), a message written to the mailbox ({name}: its file), and a command it does not know
+    "telegram.unauthorised": {"en": "unauthorised", "tr": "yetkisiz"},
+    "telegram.recorded": {"en": "{option}) recorded", "tr": "{option}) kaydedildi"},
+    "telegram.no-decision": {"en": "decision not found", "tr": "karar bulunamadı"},
+    "telegram.no-such-decision": {"en": "There is no decision `{id}`.", "tr": "`{id}` diye bir karar yok."},
+    "telegram.saved": {
+        "en": "✅ Saved: `{name}`\n\n"
+              "It reaches the implementer through `ao lock`, `ao verify` and `ao commit-ok`; it cannot commit until "
+              "it acknowledges it.",
+        "tr": "✅ Kaydedildi: `{name}`\n\n"
+              "Uygulayıcıya `ao lock`, `ao verify` ve `ao commit-ok` üzerinden ulaşacak; onaylamadan commit edemez.",
+    },
+    "telegram.commands": {
+        "en": "Commands: /status /board /credits /notices /fleet /decisions\n\n"
+              "To answer a pending decision: tap a button, or type `D-123 b`.\n"
+              "Every message that is not a command is written to the mailbox as an urgent decision.",
+        "tr": "Komutlar: /status /board /credits /notices /fleet /decisions\n\n"
+              "Bekleyen bir karara cevap: butona bas, ya da `D-123 b` yaz.\n"
+              "Komut olmayan her mesaj acil karar olarak kutuya yazılır.",
+    },
+    # a blocked report on the phone; {needs}: what it needs, else its detail
+    "report.blocked-phone": {
+        "en": "⛔ *{summary}*\n\n{needs}\n\n_the implementer is stuck; a reply you write lands as an urgent decision_",
+        "tr": "⛔ *{summary}*\n\n{needs}\n\n_uygulayıcı takıldı; cevap yazarsan acil karar olarak düşer_",
+    },
+    # a decision on the phone: its slice, a precedent found for it, and how to answer it ({id}: the decision)
+    "decision.slice": {"en": "slice: `{slice}`", "tr": "dilim: `{slice}`"},
+    "decision.precedent": {"en": "before: {project} {kind} {id} — {outcome}",
+                           "tr": "önceden: {project} {kind} {id} — {outcome}"},
+    "decision.answer": {"en": "Answer: tap a button, or type `{id} <letter>`. For free text, `{id} x <your answer>`.",
+                        "tr": "Cevap: butona bas, ya da `{id} <harf>` yaz. Serbest metin için `{id} x <cevabın>`."},
+    # below the decision in the note `ao decide` leaves the implementer
+    "decide.why": {"en": "**Why:** {why}", "tr": "**Neden:** {why}"},
+    "decide.scope": {"en": "**Scope:** {scope}", "tr": "**Kapsam:** {scope}"},
+    "decide.record": {"en": "_decision record: {id}_", "tr": "_karar kaydı: {id}_"},
+    # the note `ao hold release --note` leaves the implementer
+    "hold.released": {
+        "en": "# INFO — hold released\n\nHeld: {minutes} minutes\nReason: {reason}\n\n"
+              "## What changed meanwhile\n\n{note}\n",
+        "tr": "# INFO — hold released\n\nDuruldu: {minutes} dakika\nSebep: {reason}\n\n"
+              "## Bu sürede ne değişti\n\n{note}\n",
+    },
+    # `ao alarms test`
+    "alarm.test-title": {"en": "{project}: alarm test", "tr": "{project}: alarm testi"},
+    "alarm.test": {"en": "{level} level test — ao alarms test", "tr": "{level} seviyesi testi — ao alarms test"},
+    # a red alarm's mail, below its text; then the evidence, when it has some
+    "alarm.standing": {
+        "en": "Standing since {since}, raised {count}×. Project: {project}\n"
+              "`ao alarms` shows the ladder, `ao status` the state.",
+        "tr": "Duruyor: {since}'den beri ({count} kez). Proje: {project}\n"
+              "`ao alarms` merdiveni, `ao status` durumu gösterir.",
+    },
+    "alarm.evidence": {"en": "Evidence:", "tr": "Kanıt:"},
+    # the architect at quota, and a wake that failed ({kind}, {error}, {binary}: the failure's)
+    "alarm.architect-quota-title": {"en": "{project}: architect at quota", "tr": "{project}: mimar kotada"},
+    "alarm.architect-quota": {
+        "en": "{error} — wakes are held until {reset}; if auto-continue is on in the architect's app, the session "
+              "goes on by itself",
+        "tr": "{error} — uyandırma {reset}'e kadar bekletiliyor; mimarın uygulamasında auto-continue açıksa "
+              "oturum kendi devam eder",
+    },
+    "alarm.wake-failed-title": {"en": "{project}: architect wake failed", "tr": "{project}: mimar uyandırılamadı"},
+    "alarm.wake-failed": {"en": "{kind}: {error} — binary: {binary}; `ao doctor`",
+                          "tr": "{kind}: {error} — ikili: {binary}; `ao doctor`"},
+    # the watchdog's lines to the phone about the architect ({n}: reports, {pid}: the process woken)
+    "watchdog.architect-done": {"en": "✅ *Architect done* — {n} report(s) closed, queue empty",
+                                "tr": "✅ *Mimar bitirdi* — {n} rapor kapandı, kuyruk boş"},
+    "watchdog.architect-woken": {"en": "🤖 *Architect woken* — handling {n} report(s) (pid {pid})",
+                                 "tr": "🤖 *Mimar uyandırıldı* — {n} rapor işleniyor (pid {pid})"},
+    "watchdog.architect-woken-retried": {
+        "en": "🤖 *Architect woken* — after failed attempts, for {n} report(s) (pid {pid})",
+        "tr": "🤖 *Mimar uyandırıldı* — başarısız denemelerin ardından, {n} rapor için (pid {pid})",
+    },
+    # the reason the watchdog gives `ao handoff` when nobody can decide
+    "watchdog.handoff-no-wake": {"en": "the architect could not be woken — no quota",
+                                 "tr": "mimar uyandırılamadı — kota yok"},
+    "watchdog.handoff-provider": {"en": "the provider's quota is exhausted", "tr": "sağlayıcı kotası tükendi"},
+    # `ao handoff`: the note a successor is given
+    "handoff.title": {"en": "# Handoff — {project}", "tr": "# Devir — {project}"},
+    "handoff.reason": {"en": "**Reason:** {reason}", "tr": "**Sebep:** {reason}"},
+    "handoff.now": {"en": "## Now", "tr": "## Şu an"},
+    "handoff.implementer": {"en": "- implementer: **{state}**", "tr": "- uygulayıcı: **{state}**"},
+    "handoff.git": {
+        "en": "- {dirty} file(s) uncommitted, {ahead} commit(s) unpushed, {behind} commit(s) behind ({base})",
+        "tr": "- {dirty} dosya commit'siz, {ahead} commit push'suz, {behind} commit geride ({base})",
+    },
+    "handoff.no-remote": {"en": "no remote branch to compare with", "tr": "karşılaştırılacak uzak dal yok"},
+    "handoff.last-review": {"en": "- last review: {verdict} ({name})", "tr": "- son review: {verdict} ({name})"},
+    "handoff.saying": {"en": "- it says: _{doing}_", "tr": "- diyor ki: _{doing}_"},
+    "handoff.credit": {"en": "- credit: {credit}", "tr": "- kredi: {credit}"},
+    "handoff.open-decisions": {"en": "## Decisions waiting for an answer — **these unblock the work**",
+                               "tr": "## Cevap bekleyen kararlar — **bunlar işi açar**"},
+    "handoff.no-reason": {"en": "no reason recorded", "tr": "sebep kayıtlı değil"},
+    "handoff.running": {"en": "## Running", "tr": "## Yürüyen"},
+    "handoff.next": {"en": "## Next ({n} item(s))", "tr": "## Sıradaki ({n} madde)"},
+    # {heading}: MARKERS["handoff-successor"], above which the note goes to the phone
+    "handoff.successor": {
+        "en": "{heading}\n- Answer a pending decision: tap a button on the phone, or `ao answer <id> <letter>`\n"
+              "- Write a decision of your own: send a message on Telegram — it lands in the mailbox as urgent\n"
+              "- See the state: `ao status`, `ao board`, `ao decisions`\n\n"
+              "_push, PRs and closing an epic never transfer in a handoff._",
+        "tr": "{heading}\n- Bekleyen kararı cevapla: telefondan butona bas, ya da `ao answer <id> <harf>`\n"
+              "- Serbest karar yaz: Telegram'a mesaj at — acil olarak kutuya düşer\n"
+              "- Durumu gör: `ao status`, `ao board`, `ao decisions`\n\n"
+              "_push, PR ve epic kapatma hiçbir devirde aktarılmaz._",
+    },
+    # `ao digest`: its window, the implementer's state, and its sections ({n}: how many)
+    "digest.day": {"en": "24 hours", "tr": "24 saat"},
+    "digest.days": {"en": "{n} days", "tr": "{n} gün"},
+    "digest.window": {"en": "last {window}", "tr": "son {window}"},
+    "digest.state": {"en": "state", "tr": "durum"},
+    "digest.spinning": {"en": "⚠ {minutes}m busy, nothing produced", "tr": "⚠ {minutes}dk meşgul, üretim yok"},
+    "digest.open-decisions": {"en": "{n} decision(s) waiting for an answer", "tr": "{n} cevap bekleyen karar"},
+    "digest.unblocks": {"en": "these unblock the work: ao decisions", "tr": "bunlar işi açar: ao decisions"},
+    "digest.landed": {"en": "LANDED WORK", "tr": "İNEN İŞ"},
+    "digest.unpushed": {"en": "{n} unpushed", "tr": "{n} push'suz"},
+    "digest.gates": {"en": "GATES", "tr": "KAPILAR"},
+    "digest.verify": {"en": "verify", "tr": "doğrulama"},
+    "digest.passed": {"en": "{n} passed", "tr": "{n} geçti"},
+    "digest.failed": {"en": "{n} failed", "tr": "{n} düştü"},
+    "digest.changes": {"en": "{n} NEEDS_CHANGES", "tr": "{n} değişiklik"},
+    "digest.granted": {"en": "{n} granted", "tr": "{n} verildi"},
+    "digest.refused": {"en": "{n} refused", "tr": "{n} reddedildi"},
+    "digest.ledger-broken": {"en": "AUTHORITY LEDGER INTEGRITY BROKEN", "tr": "YETKİ DEFTERİ BÜTÜNLÜĞÜ BOZUK"},
+    "digest.decisions": {"en": "decisions", "tr": "karar"},
+    "digest.answered": {"en": "{answered}/{asked} answered", "tr": "{answered}/{asked} cevaplandı"},
+    "digest.median": {"en": "median {median}", "tr": "ortanca {median}"},
+    "digest.credit": {"en": "CREDIT", "tr": "KREDİ"},
+    "digest.board": {"en": "board:", "tr": "pano:"},
+    "digest.alerts": {"en": "alerts: {sent} sent, {held} suppressed",
+                      "tr": "uyarı: {sent} gönderildi, {held} susturuldu"},
+    # the digest's and the handoff's both: when the implementer last wrote, minutes, and credit left
+    "digest.last-write": {"en": ", last wrote {minutes}m ago", "tr": ", son yazım {minutes}dk önce"},
+    "digest.minutes": {"en": "{n}m", "tr": "{n}dk"},
+    "digest.left": {"en": "{n} left", "tr": "{n} kaldı"},
+})
+MARKERS.update({
+    # the heading of what a successor can do: a handoff note goes to the phone up to it (cli.cmd_handoff)
+    "handoff-successor": {"en": "## What a successor can do", "tr": "## Devralan ne yapabilir"},
+    # the label of a decision's last option, answered in one's own words (lib.ask, lib.free_text_option)
+    "free-text": {"en": "Other (free text)", "tr": "Başka (serbest metin)"},
+})
+
+
 WORDS = {
     # a mail's kind, from its envelope or its file name: one asking for a decision, one that informs
     # (lib.mail_class)

@@ -1305,18 +1305,22 @@ def decisions(root, state=None):
     return out
 
 
-def ask(root, question, options, context=None, slice_id=None):
+def ask(root, question, options, context=None, slice_id=None, cfg=None):
     """Record a question. Free text is always the last option.
 
     Options are a convenience, never a cage: the answer that matters is often the
     one nobody listed, and a form that cannot express it produces a wrong answer
     chosen because it was available.
+
+    The free-text option is labeled in the project's language, read from `cfg` or, without one,
+    from the project's config on disk (LANGUAGE-OUTPUT).
     """
     d = os.path.join(root, DECISION_DIR)
     os.makedirs(d, exist_ok=True)
     did = f"D-{int(time.time())}"
     opts = [{"key": chr(ord('a') + i), "label": o} for i, o in enumerate(options[:8])]
-    opts.append({"key": "x", "label": "Başka (serbest metin)", "free_text": True})
+    written = cfg if cfg is not None else project_config_document(root)["config"]
+    opts.append({"key": "x", "label": language.marker(written, "free-text"), "free_text": True})
     # The same question answered before, here or in another project, travels with it (#43).
     try:
         precedents = [{key: found.get(key) for key in ("project", "kind", "id", "at", "outcome", "source")}
@@ -1337,6 +1341,17 @@ class AnswerRefused(ValueError):
     """An answer a question does not take: a key it does not offer, or a second answer given as a first."""
 
 
+def free_text_option(option):
+    """Whether a decision's option takes the answer in one's own words: flagged so, or ask's `x` labeled so.
+
+    ask flags the option it appends as `x`. Its label is read as well, as a marker is (LANGUAGE-OUTPUT):
+    an `x` that carries the label and no flag is answered in words, whichever language labeled it. An
+    option a person named so under another key stays one to choose.
+    """
+    return isinstance(option, dict) and (bool(option.get("free_text")) or (
+        option.get("key") == "x" and option.get("label") in language.forms("free-text")))
+
+
 def answer(root, did, key_or_text, by="human", change=False):
     """Answer one question. Returns the updated record, or None if unknown.
 
@@ -1355,19 +1370,19 @@ def answer(root, did, key_or_text, by="human", change=False):
     key, words = (given[0].lower() if given else ""), (given[1].strip() if len(given) > 1 else "")
     options = [o for o in rec.get("options") or [] if isinstance(o, dict)]
     chosen = next((o for o in options if o.get("key") == key), None)
-    free = next((o for o in options if o.get("free_text")), None)
+    free = next((o for o in options if free_text_option(o)), None)
     if chosen is None:
         offered = ", ".join(f"{o.get('key')}) {o.get('label')}" for o in options)
         raise AnswerRefused(f"{did} offers {offered or 'no options'}; {key!r} is not one of them")
-    if chosen.get("free_text") and not words:
+    if free_text_option(chosen) and not words:
         raise AnswerRefused(f"{key} is answered in your own words: ao answer {did} {key} <text>")
-    if words and not chosen.get("free_text"):
+    if words and not free_text_option(chosen):
         raise AnswerRefused(f"{key}) {chosen.get('label')} takes no words after it"
                             + (f"; answer in your own words with {free.get('key')} <text>" if free else ""))
     if rec.get("state") == "answered" and not change:
         raise AnswerRefused(f"{did} is already answered: {rec.get('answer')}; "
                             f"ao answer {did} <key> --change replaces it, and both stay on the record")
-    row = {"answer": words if chosen.get("free_text") else chosen.get("label"), "answer_key": chosen.get("key"),
+    row = {"answer": words if free_text_option(chosen) else chosen.get("label"), "answer_key": chosen.get("key"),
            "answered_at": int(time.time()), "answered_by": by}
     rows = rec.get("answers")
     if not isinstance(rows, list):

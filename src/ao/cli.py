@@ -216,6 +216,9 @@ def build_parser():
                           "the implementer's family, labeled weaker independence, which needs --by; person: no model "
                           "reviewer, a person reviews each candidate with ao person-review")
     ini.add_argument("--by", help="with --review-tier same-family: the person who opts in, recorded with the login")
+    ini.add_argument("--language", choices=list(S.CHOICES["language"]),
+                     help="the project's language, set in its config before init writes a file: en (the default) "
+                          "or tr; what ao writes into the project and for its people follows it")
     ini.set_defaults(fn=_init_then_prove)
     pv = sub.add_parser("prove", help="run the guarantees: the hook refuses, the reviewer answers, a slice lands")
     pv.add_argument("--no-review", action="store_true",

@@ -115,7 +115,7 @@ def test_a_failed_wake_rings_a_person(world, monkeypatch):
     world.notices.clear()
     world.cycle(dry_run=False)
 
-    rung = [notice for notice in world.notices if notice[2] == "human" and "uyandırılamadı" in notice[0]]
+    rung = [notice for notice in world.notices if notice[2] == "human" and "wake failed" in notice[0]]
     assert rung and TOKEN not in rung[0][1] and "[redacted]" in rung[0][1]
 
 

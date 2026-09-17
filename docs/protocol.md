@@ -108,6 +108,8 @@ markers in the project's language.
 | decision heading | `## DECISION REQUIRED` | `## KARAR GEREKLİ` | `ao_report` with `kind: "blocked"` | the watchdog escalates the report on its next cycle; unseen, it climbs the alarm ladder as a message that needs a decision |
 | urgent note's kind | `-URGENT-` | `-ACIL-` | with the urgent heading | the kind in the file name |
 | handoff's kind | `-HANDOFF.md` | `-DEVIR.md` | `ao handoff` | the kind in the file name |
+| what a successor can do | `## What a successor can do` | `## Devralan ne yapabilir` | `ao handoff` | the phone is sent the note above it |
+| a decision's free-text option | `Other (free text)` | `Başka (serbest metin)` | `ao ask`, `ao_ask` | an option labeled so is answered in words, `x <text>` |
 | a folded report's repeats | `Repeat: N` | `Tekrar: N` | `ao_report`, when the same report is standing | the count is read back and raised |
 | kinds of message | `DECISION`, `REPORT` | `KARAR`, `RAPOR` | agents; `ao note` writes `DECISION` in both | a decision asks for one; a report only informs |
 

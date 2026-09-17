@@ -252,8 +252,8 @@ def call(name, args, cfg, allow_verify):
             try:
                 from . import telegram
                 delivered = telegram.send(
-                    f"⛔ *{args['summary']}*\n\n{args.get('needs') or args.get('detail') or ''}"
-                    f"\n\n_uygulayıcı takıldı; cevap yazarsan acil karar olarak düşer_",
+                    language.text(cfg, "report.blocked-phone", summary=args["summary"],
+                                  needs=args.get("needs") or args.get("detail") or ""),
                     root)
             except Exception:
                 pass
@@ -277,7 +277,7 @@ def call(name, args, cfg, allow_verify):
         return A.fanout_verdict(root, cfg, int(args["agents"]), args.get("per_agent_tokens"))
     if name == "ao_ask":
         rec = A.ask(root, args["question"], args.get("options") or [],
-                    context=args.get("context"), slice_id=args.get("slice"))
+                    context=args.get("context"), slice_id=args.get("slice"), cfg=cfg)
         # Delivery is decided here, not by the caller. An implementer with its own
         # channel to a phone is a spam surface; an implementer that reports and
         # lets the centre route is not.
@@ -288,7 +288,7 @@ def call(name, args, cfg, allow_verify):
             kb = [[{"text": f"{o['key']}) {o['label'][:40]}",
                     "callback_data": f"{rec['id']}:{o['key']}"}]
                   for o in rec["options"] if not o.get("free_text")]
-            delivered = telegram.send(_decision_text(rec), root, keyboard=kb)
+            delivered = telegram.send(_decision_text(rec, cfg), root, keyboard=kb)
         except Exception:
             pass
         return {"id": rec["id"], "options": rec["options"],

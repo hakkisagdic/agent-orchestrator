@@ -161,10 +161,10 @@ def test_the_handoff_names_the_implementers_own_credit_or_that_its_adapter_decla
     args = SimpleNamespace(reason=None, no_send=True)
 
     assert cli.cmd_handoff(_implementer(project, PLAIN), args) == 0
-    assert f"- kredi: {PLAIN} declares none ao can read" in _plain(capsys) and asked == []
+    assert f"- credit: {PLAIN} declares none ao can read" in _plain(capsys) and asked == []
 
     assert cli.cmd_handoff(_implementer(project, METERED), args) == 0
-    assert "- kredi: 4,000 / 10,000 (6,000 kaldı)" in _plain(capsys) and asked == [METERED]
+    assert "- credit: 4,000 / 10,000 (6,000 left)" in _plain(capsys) and asked == [METERED]
     assert _ledger(project["root"]) == [] and A.active_alarms("proj") == []
 
 

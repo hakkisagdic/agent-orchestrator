@@ -26,8 +26,8 @@ PLAIN = "# b6 done\n\nBlockers: none\n"
 INTERACTIVE = "no architect will act on it: the architect session is interactive and acts only when someone prompts it"
 WAKES_OFF = "no architect will act on it: architect wakes are switched off"
 OVERLOADED = 'API Error: 529 {"type":"error","error":{"type":"overloaded_error"},"request_id":"req_011CT%08dabcdefgh"}'
-WOKEN = "🤖 *Mimar uyandırıldı* — 2 rapor işleniyor (pid 99999)"
-WOKEN_AT_LAST = "🤖 *Mimar uyandırıldı* — başarısız denemelerin ardından, 2 rapor için (pid 99999)"
+WOKEN = "🤖 *Architect woken* — handling 2 report(s) (pid 99999)"
+WOKEN_AT_LAST = "🤖 *Architect woken* — after failed attempts, for 2 report(s) (pid 99999)"
 
 
 def _since(name):
@@ -281,10 +281,10 @@ def test_a_wake_failing_on_a_transport_error_is_one_alarm_and_no_architect_woken
     _cycles(world, clock, 8 * HOUR)
 
     assert len(started) == 32                                                 # retried every fifteen minutes
-    assert _on(sent, "telegram", "Mimar uyandırıldı") == [WOKEN]              # the first, before any failed
-    assert _on(sent, "desktop", "uyandırılamadı") == ["proj: mimar uyandırılamadı"]
-    assert len(_on(sent, "telegram", "uyandırılamadı")) == 1
-    assert len(_mails(sent, "uyandırılamadı")) == 2                           # red after its hour, six hours on
+    assert _on(sent, "telegram", "Architect woken") == [WOKEN]                # the first, before any failed
+    assert _on(sent, "desktop", "wake failed") == ["proj: architect wake failed"]
+    assert len(_on(sent, "telegram", "wake failed")) == 1
+    assert len(_mails(sent, "wake failed")) == 2                              # red after its hour, six hours on
     assert [alarm["key"] for alarm in A.active_alarms("proj")] == ["architect-wake-failed"]
 
 
@@ -296,7 +296,7 @@ def test_a_wake_that_works_after_failures_is_told_once(project, monkeypatch, tmp
     _cycles(world, clock, 3 * HOUR)
 
     assert len(started) == 5                              # the fifth worked, and was handed the reports
-    assert _on(sent, "telegram", "Mimar uyandırıldı") == [WOKEN, WOKEN_AT_LAST]
+    assert _on(sent, "telegram", "Architect woken") == [WOKEN, WOKEN_AT_LAST]
     assert "wake_retry" not in W.load_state(world.root)
 
 
@@ -308,7 +308,7 @@ def test_a_transport_that_fails_in_another_way_is_told_again(project, monkeypatc
 
     _cycles(world, clock, 3 * HOUR)
 
-    mailed = _mails(sent, "uyandırılamadı")
+    mailed = _mails(sent, "wake failed")
     assert len(mailed) == 2 and "API Error: 529" in mailed[0] and "API Error: 500" in mailed[1]
 
 

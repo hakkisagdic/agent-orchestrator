@@ -19,6 +19,10 @@ ao telegram test       # confirms the bot reaches you
 ao telegram install    # launchd job, long-polls for your replies
 ```
 
+The bot and its allowlist serve every project on the machine, so `ao telegram setup` prints its steps in
+the machine's `language` ([configuration.md](configuration.md)); `ao telegram test` sends its message in
+the project's.
+
 **You write the config file, not the tool and not an assistant.** A bot token can
 instruct the implementer, so it is a credential: it belongs in `~/.ao/telegram.json`
 with mode 600, and never in the repository or in a conversation.
@@ -45,12 +49,16 @@ response, and blocking `ao commit-ok` until acknowledged.
 A project whose `language` is `tr` names it `-ACIL-` and marks it `## ACİL`; ao reads both in
 every project ([protocol.md](protocol.md#markers)).
 
+The phone is answered in the project's language: the confirmation that a message was written, an
+answer recorded, a decision that is not there, the list of commands. What you type is read the same
+in either language - a command, `D-123 b`, `D-123 x <text>`.
+
 It is urgent by default on purpose. Someone who reaches for a phone to type a
 decision has already judged that it matters, and making them remember a marker is
 how a channel stops being used.
 
 Read-only commands answer the other question: `/status` `/board` `/credits`
-`/notices` `/fleet`.
+`/notices` `/fleet` `/decisions`.
 
 ## Outbound: what happened, and what is being done about it
 
@@ -63,9 +71,13 @@ But they do reach the phone, with their **action state**, because "an anomaly wa
 detected" and nothing further is the half that makes someone check by hand:
 
 ```
-🤖 Mimar uyandırıldı — 3 rapor işleniyor (pid 5676)
-✅ Mimar bitirdi — 3 rapor kapandı, kuyruk boş
+🤖 Architect woken — handling 3 report(s) (pid 5676)
+✅ Architect done — 3 report(s) closed, queue empty
 ```
+
+A project whose `language` is `tr` is told `🤖 Mimar uyandırıldı — 3 rapor işleniyor (pid 5676)` and
+`✅ Mimar bitirdi — 3 rapor kapandı, kuyruk boş`; a blocked report, a question and a handoff note reach
+its phone in Turkish as well.
 
 Detection alone tells you the system noticed. Detection plus disposition tells you
 whether to get involved, which is the only thing the alert was for.
@@ -86,7 +98,7 @@ for people who install it, never a dependency.
 ## Decisions: one tap instead of a paragraph
 
 ```bash
-ao ask "B2 için OS kimlik deposu?" "Keychain" "DPAPI fixture" "Ertele" --slice B2
+ao ask "Which OS credential store for B2?" "Keychain" "DPAPI fixture" "Defer" --slice B2
 ao decisions            # what is open, what was answered
 ao answer D-123 b       # from the terminal
 ```
@@ -100,10 +112,10 @@ An answer is a key the question offers; anything else is refused, with the keys 
 question answered once keeps its answer, so a second tap is refused too: `ao answer D-123 a --change`
 replaces it from the terminal, and the first answer stays in the decision's record beside the new one.
 
-Free text is always the last option, appended automatically. Options are a
-convenience, never a cage: the answer that matters is often the one nobody
-listed, and a form that cannot express it produces a wrong answer chosen because
-it was available.
+Free text is always the last option, appended automatically: `x) Other (free text)`, or
+`x) Başka (serbest metin)` in a Turkish project, and an option labeled either way is answered in
+words. Options are a convenience, never a cage: the answer that matters is often the one nobody
+listed, and a form that cannot express it produces a wrong answer chosen because it was available.
 
 The implementer does not get its own channel to a phone. It reports — `ao_ask`,
 or `ao_report {kind: "blocked"}` — and delivery is decided centrally. An agent

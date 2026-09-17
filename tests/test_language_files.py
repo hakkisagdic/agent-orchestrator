@@ -36,25 +36,6 @@ PROMPTS, OUTPUT = "LANGUAGE-PROMPTS", "LANGUAGE-OUTPUT"
 # (path, top-level definition, a piece of the literal - "" for every literal the definition holds):
 # the slice that converts it and removes the entry.
 ALLOWLIST = {
-    # the digest, the handoff, e-mail and Telegram setup and messages, notifications, decisions text
-    ("src/ao/email.py", "SETUP", ""): OUTPUT,
-    ("src/ao/mcp.py", "call", "uygulayıcı takıldı"): OUTPUT,
-    ("src/ao/telegram.py", "poll", "karar bulunamadı"): OUTPUT,
-    ("src/ao/telegram.py", "poll", "Kaydedildi"): OUTPUT,
-    ("src/ao/telegram.py", "_command", ""): OUTPUT,
-    ("src/ao/parts/cli_channels.py", "cmd_telegram", ""): OUTPUT,
-    ("src/ao/parts/cli_channels.py", "_decision_text", ""): OUTPUT,
-    ("src/ao/parts/cli_channels.py", "cmd_handoff", ""): OUTPUT,
-    ("src/ao/parts/cli_project.py", "cmd_digest", ""): OUTPUT,
-    ("src/ao/parts/cli_project.py", "cmd_decide", ""): OUTPUT,
-    ("src/ao/parts/cli_project.py", "cmd_hold", ""): OUTPUT,
-    ("src/ao/parts/cli_project.py", "cmd_email", ""): OUTPUT,
-    ("src/ao/parts/lib_state.py", "ask", ""): OUTPUT,
-    ("src/ao/watchdog.py", "notify", ""): OUTPUT,
-    ("src/ao/watchdog.py", "touch_architect_quota", ""): OUTPUT,
-    ("src/ao/watchdog.py", "escalate", ""): OUTPUT,
-    ("src/ao/watchdog.py", "tell_retried_wake", ""): OUTPUT,
-    ("src/ao/watchdog.py", "_cycle_impl", "kotası tükendi"): OUTPUT,
 }
 
 

@@ -113,6 +113,10 @@ def poll(root, cfg_project, seconds=25):
 
     box = cfg_project.get("mailbox", "agent-mail")
     os.makedirs(os.path.join(root, box), exist_ok=True)
+    # What a person is answered in, and what their message is written as, is the project's language as it
+    # stands now: a poller runs for days, and a project can choose another meanwhile (LANGUAGE-OUTPUT).
+    # What they type or tap is read the same in every language.
+    project = A.load_config(root) if r.get("result") else cfg_project
     written, ignored, last = [], 0, offset
     for u in r.get("result", []):
         last = max(last, u.get("update_id", 0) + 1)
@@ -125,7 +129,7 @@ def poll(root, cfg_project, seconds=25):
             if chat not in cfg["chats"]:
                 ignored += 1
                 api(cfg, "answerCallbackQuery", callback_query_id=cq["id"],
-                    text="yetkisiz")
+                    text=language.text(project, "telegram.unauthorised"))
                 continue
             did, _, keyv = (cq.get("data") or "").partition(":")
             try:
@@ -137,12 +141,12 @@ def poll(root, cfg_project, seconds=25):
                 continue
             if rec:
                 api(cfg, "answerCallbackQuery", callback_query_id=cq["id"],
-                    text=f"{keyv}) kaydedildi")
+                    text=language.text(project, "telegram.recorded", option=keyv))
                 send(f"✅ *{rec['question']}*\n→ {rec['answer']}", root)
                 written.append(f"{did}={keyv}")
             else:
                 api(cfg, "answerCallbackQuery", callback_query_id=cq["id"],
-                    text="karar bulunamadı")
+                    text=language.text(project, "telegram.no-decision"))
             continue
 
         m = u.get("message") or u.get("channel_post") or {}
@@ -154,7 +158,7 @@ def poll(root, cfg_project, seconds=25):
             ignored += 1                    # not on the allowlist: it never happened
             continue
         if text.startswith("/"):
-            written.append(_command(root, cfg_project, text, chat))
+            written.append(_command(root, project, text, chat))
             continue
 
         # "D-123 b" or "D-123 x <free text>" answers a pending question by typing,
@@ -173,11 +177,10 @@ def poll(root, cfg_project, seconds=25):
                 send(f"✅ *{rec['question']}*\n→ {rec['answer']}", root)
                 written.append(f"{did}={rec.get('answer_key') or 'free'}")
                 continue
-            send(f"`{did}` diye bir karar yok.", root)
+            send(language.text(project, "telegram.no-such-decision", id=did), root)
             continue
         # Everything a person types is urgent. They reached for a phone to say it.
         # Marked in the project's language; every reader knows both (LANGUAGE-FILES).
-        project = A.load_config(root)
         slug = A.safe_slug(text.lower(), language.text(project, "mail.untitled-message"))
         # From a person, to whoever holds the implementer role (#31).
         name = (f"{time.strftime('%Y%m%d-%H%M%S')}-human-to-{A.mail_names(project)[0]}-"
@@ -187,15 +190,17 @@ def poll(root, cfg_project, seconds=25):
             fh.write(f"# {text.splitlines()[0][:120]}\n\n{language.marker(project, 'urgent')}\n\n{text}\n\n"
                      f"---\n_Telegram, {who}, {time.strftime('%Y-%m-%d %H:%M')}_\n")
         written.append(name)
-        send(f"✅ Kaydedildi: `{name}`\n\nUygulayıcıya `ao lock`, `ao verify` ve "
-             f"`ao commit-ok` üzerinden ulaşacak; onaylamadan commit edemez.", root)
+        send(language.text(project, "telegram.saved", name=name), root)
     if last != offset:
         open(_offset_path(), "w", encoding=UTF8).write(str(last))
     return {"written": written, "ignored_unauthorised": ignored}
 
 
 def _command(root, cfg_project, text, chat):
-    """A few read-only commands, so the phone can answer 'what is happening'."""
+    """A few read-only commands, so the phone can answer 'what is happening'.
+
+    The commands are the same words in every language; the list of them is in the project's (LANGUAGE-OUTPUT).
+    """
     import subprocess
     cmd = text.split()[0].lstrip("/").split("@")[0]
     exe = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -205,9 +210,7 @@ def _command(root, cfg_project, text, chat):
                "notices": ["notices", "-n", "8"], "fleet": ["fleet"],
                "decisions": ["decisions", "-n", "6"]}
     if cmd not in allowed:
-        send("Komutlar: /status /board /credits /notices /fleet /decisions\n\n"
-             "Bekleyen bir karara cevap: butona bas, ya da `D-123 b` yaz.\n"
-             "Komut olmayan her mesaj acil karar olarak kutuya yazılır.", root)
+        send(language.text(cfg_project, "telegram.commands"), root)
         return f"/{cmd} (unknown)"
     try:
         out = subprocess.run([exe, "-C", root] + allowed[cmd], capture_output=True,
