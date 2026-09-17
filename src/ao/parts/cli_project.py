@@ -1246,7 +1246,7 @@ def _watchdog_debug(cfg, args):
     from . import watchdog as W
     root = cfg["root"]
     if args.action == "explain":
-        ns = SimpleNamespace(root=root, idle_minutes=S.get(cfg, "watchdog.idle_minutes"), dry_run=True, prompt=W.NUDGE_PROMPT)
+        ns = SimpleNamespace(root=root, idle_minutes=S.get(cfg, "watchdog.idle_minutes"), dry_run=True)
         W.run(ns)
         print(f"\n{C['b']}{C['mag']}── MEASUREMENTS ──{C['reset']}")
         for k, v in W._FACTS.items():

@@ -73,6 +73,16 @@ boundary's numbered scenarios; each answer is appended to `.ao/reviews/sections/
 before the next is asked, a re-run of `ao review` on the same candidate asks only what is
 unanswered, and the verdict is computed from the sections' counts.*
 
+*In ao since slice LANGUAGE-PROMPTS: the prompt, the headings it asks for and the markers ao writes
+into it are in the project's `language` ([configuration.md](configuration.md)) - `--- CANDIDATE DIFF ---`,
+`--- CONTEXT (read-only; not under review) ---` and `--- THIS SECTION'S QUESTION ---` in English,
+`--- ADAY DIFF ---`, `--- BAĞLAM (salt okunur; incelemenin konusu değil) ---` and
+`--- BU BÖLÜMÜN SORUSU ---` in Turkish. A section's answer is read the same in both
+([protocol.md](protocol.md#verdicts)), and the journal's key holds no word of the prompt. A Turkish
+project is handed the prompt it always was, byte for byte, so a review cut off there resumes; one now
+written in English resumes as well, unless its prompt leaves room beside the diff for a different set
+of a waived range's commit messages, and then its sections are asked again.*
+
 A review of eight scenarios is eight questions, not one. ao splits the prompt into
 **sections** — from the numbered scenarios in the boundary, or failing that from the
 candidate's file groups — and runs them as separate bounded calls, appending each result

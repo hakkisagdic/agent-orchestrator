@@ -60,8 +60,9 @@ def test_with_nothing_ready_here_the_nudge_names_the_secondary_projects_ready_it
 
     assert any("READY S9 in ao" in line for line in trace)
     assert "DRY RUN" in world.verdict or "nudging" in world.verdict
-    found = A.secondary_ready(A.load_config(world.root))
-    assert found["item"] == "S9" and "ikincil proje ao" in W.secondary_note(found)
+    cfg = A.load_config(world.root)
+    found = A.secondary_ready(cfg)
+    assert found["item"] == "S9" and "secondary project ao" in W.secondary_note(cfg, found)
 
 
 def test_a_blocker_declared_for_a_person_reaches_a_person_and_is_never_held(world):

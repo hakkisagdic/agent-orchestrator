@@ -27,8 +27,8 @@ def test_a_question_parks_its_slice_and_the_nudge_names_the_next_ready_item(worl
     assert any(f"READY S2 while {decision} waits" in line for line in trace)
     assert "DRY RUN" in world.verdict or "nudging" in world.verdict
     assert W.queue_past_a_question(world.root) == (decision, "S2")
-    note = W.parked_note(decision, "S2")
-    assert f"needs: {decision}" in note and "READY S2" in note and "soruyu yeniden sorma" in note
+    note = W.parked_note(world.cfg, decision, "S2")
+    assert f"needs: {decision}" in note and "READY S2" in note and "do not ask the question again" in note
 
 
 def test_with_nothing_ready_an_open_question_still_stands_the_implementer_down(world):

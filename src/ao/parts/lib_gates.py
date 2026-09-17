@@ -1310,12 +1310,13 @@ STANDIN_LIMITS = (
 )
 
 
-def write_review_request(root, candidate, scope, diff_digest, boundary, slice_id, paths, prompt):
+def write_review_request(root, cfg, candidate, scope, diff_digest, boundary, slice_id, paths, prompt):
     """A review request a person can carry to a session ao cannot reach (#75).
 
     Written when no reviewer could be reached for a staged candidate: the exact
-    prompt the reviewer would have received, and a nonce the answer must lead with.
-    The metadata beside it binds the request to that candidate.
+    prompt the reviewer would have received, and a nonce the answer must lead with,
+    asked for in the project's language (LANGUAGE-PROMPTS). The metadata beside it
+    binds the request to that candidate.
     """
     import secrets
     from .storage import replace_file_durably
@@ -1334,7 +1335,7 @@ def write_review_request(root, candidate, scope, diff_digest, boundary, slice_id
             f"    ao collect-review {nonce} --response <file> --model <the model that answered> --by <your name>\n\n"
             f"The request binds to candidate `{candidate['digest']}`; if the staged bytes change,\n"
             "it no longer applies.\n\n---\n\n"
-            f"Cevabının İLK satırı tam olarak şu olsun: NONCE: {nonce}\n\n{prompt}\n")
+            + language.text(cfg, "prompt.review-request", nonce=nonce) + f"\n\n{prompt}\n")
     replace_file_durably(path, text.encode(UTF8))
     return dict(meta, path=path)
 

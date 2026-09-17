@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A
+from ao import cli, language, lib as A
 from tests.test_review_chain import _args, _repo_with_change
 from tests.test_reviewer_identity import _commit_ok
 
@@ -108,7 +108,7 @@ def test_ao_hands_the_tool_the_exact_staged_candidate_and_the_evidence_names_it(
     assert evidence["verdict"] == "APPROVED" and A.reviews(root, "semantic-review")[0][1] == "APPROVED"
     assert f"- tool: `pr-agent`  model: `{MODEL}`  handed: `{digest}`" in body
     # ao's own prompt, the candidate in it, as the question; the answer read is the one after it.
-    assert seen["command"] == "ask" and cli.REVIEW_CANDIDATE_MARKER in seen["question"]
+    assert seen["command"] == "ask" and language.text(project, "prompt.review-candidate") in seen["question"]
     assert "+x = 2" in seen["question"] and "SEEN: " + digest in body
     assert not seen["repository_above"] and seen["env"]["GIT_DIR"] is None
     assert os.path.commonpath((os.path.realpath(root), seen["cwd"])) != os.path.realpath(root)

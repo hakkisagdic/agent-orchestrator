@@ -3,7 +3,7 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
-from ao import allowlist as AL, cli, lib as A, storage
+from ao import allowlist as AL, cli, language, lib as A, storage
 from tests.test_capability_matrix import _strict_config
 from tests.test_commit_authority import _allow_commit_prerequisites
 from tests.test_review_chain import _args, _fake, _repo_with_change
@@ -53,7 +53,7 @@ def test_an_unreachable_reviewer_leaves_a_request_a_person_can_carry(project, ca
     text = open(os.path.join(A.review_requests_dir(root), f"{request['nonce']}.md"), encoding="utf-8").read()
     assert request["candidate"] == A.index_candidate(root)["digest"] and request["collected"] is None
     assert f"NONCE: {request['nonce']}" in text
-    assert cli.REVIEW_CANDIDATE_MARKER in text and "VERDICT: APPROVED" in text
+    assert language.text(cfg, "prompt.review-candidate") in text and "VERDICT: APPROVED" in text
     assert f"ao collect-review {request['nonce']}" in capsys.readouterr().out
 
 

@@ -36,18 +36,6 @@ PROMPTS, OUTPUT = "LANGUAGE-PROMPTS", "LANGUAGE-OUTPUT"
 # (path, top-level definition, a piece of the literal - "" for every literal the definition holds):
 # the slice that converts it and removes the entry.
 ALLOWLIST = {
-    # the reviewer, nudge, wake, refill, hunter and stand-in prompts
-    ("src/ao/parts/cli_review.py", "REVIEW_PROMPT", ""): PROMPTS,
-    ("src/ao/parts/cli_review.py", "REVIEW_CONTEXT_MARKER", ""): PROMPTS,
-    ("src/ao/parts/cli_review.py", "REVIEW_SECTION_MARKER", ""): PROMPTS,
-    ("src/ao/parts/lib_gates.py", "write_review_request", ""): PROMPTS,
-    ("src/ao/parts/cli_channels.py", "HUNT_PROMPT", ""): PROMPTS,
-    ("src/ao/watchdog.py", "NUDGE_PROMPT", ""): PROMPTS,
-    ("src/ao/watchdog.py", "WAKE_PROMPT", ""): PROMPTS,
-    ("src/ao/watchdog.py", "REFILL_PROMPT", ""): PROMPTS,
-    ("src/ao/watchdog.py", "parked_note", ""): PROMPTS,
-    ("src/ao/watchdog.py", "secondary_note", ""): PROMPTS,
-    ("src/ao/watchdog.py", "_cycle_impl", "dosyaları düzenliyor"): PROMPTS,
     # the digest, the handoff, e-mail and Telegram setup and messages, notifications, decisions text
     ("src/ao/email.py", "SETUP", ""): OUTPUT,
     ("src/ao/mcp.py", "call", "uygulayıcı takıldı"): OUTPUT,

@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, watchdog as W
+from ao import cli, language, lib as A, watchdog as W
 from tests.test_prompt_channel import _declare, _git, _linux, _route
 
 PIPED = {"argv": ["piped", "{prompt}"], "stdin": {"replaces": ["{prompt}"], "with": ["--from-stdin"]}}
@@ -61,8 +61,9 @@ def _claims_as_one_argument_held_them(root, commits):
     """The claims a range was given when one argument's worth held them, as review had always measured."""
     diff = A._git_output(root, "diff", "--binary", "--full-index", "--no-ext-diff", commits, "--").decode(
         "utf-8", "replace")
-    smallest = cli.REVIEW_PROMPT.format(boundary=cli._claims_statement(BOUNDARY, "")) \
-        + f"\n\n{cli.REVIEW_CANDIDATE_MARKER}\n" + diff
+    cfg = A.load_config(root)
+    smallest = language.text(cfg, "prompt.review", boundary=cli._claims_statement(BOUNDARY, "")) \
+        + f"\n\n{language.text(cfg, 'prompt.review-candidate')}\n" + diff
     room = max(0, min(A.REVIEW_CONTEXT_BUDGET, cli.REVIEW_PROMPT_ARG_BYTES - len(smallest.encode("utf-8")) - 200))
     return A.review_range_claims(root, commits, room)
 

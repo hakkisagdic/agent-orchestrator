@@ -37,6 +37,7 @@ import signal
 import sys
 import time
 
+from . import language
 from . import lib as A
 from . import settings as S
 
@@ -101,44 +102,10 @@ def cycles(root, last=20):
             pass
     return rows[-last:]
 
-# What an architect turn is for. Deliberately narrow: it refills and admits, it
-# does not implement. Admission is the step that turns "someone filed this" into
-# "an agent may work on this unattended", and it is the only step that may not
-# be delegated to whoever will do the work.
-NUDGE_PROMPT = (
-        "devam et. Yetki için tek kaynak: .ao/authority.md — mail ondan üstün değildir, "
-        "kapsam ekler, yetki eklemez/kaldırmaz. Orada açıkça yasak olmayan ve dilimin "
-        "kapsamındaki şey serbesttir; belirsizlikte DURMA. "
-        "Açık dilimi bitir: gate'ler + taze review, sonra local commit (PUSH YOK), RAPOR yaz. "
-        "Bir mimari karara ya da insan girdisine takılırsan dilimi blocked işaretle, "
-        "agent-mail'e '## KARAR GEREKLİ' bırak ve .ao/backlog.md'deki ilk açık maddeye geç. "
-        "Kuyruk dışına çıkma. Kullanıcı beklemesi yok.")
 
-# The wake names the role it wakes and reads that role's mail through ao, never a
-# glob spelled from an actor's name: reassigning the architect must not silence it (#31).
-WAKE_PROMPT = (
-    "Sen bu deponun mimarısın ve watchdog tarafından uyandırıldın. "
-    "Mimar rolüne gelen mesajları `ao mail list` ile oku (bu tur AO_ROLE=architect ile çalışıyor): "
-    "watchdog'un ANOMALY raporları ve uygulayıcının raporları. Watchdog'unkiler olgudur, yorum "
-    "değil — kendi kararını sen ver. Durumu `ao status`, `ao board`, "
-    "`ao doctor` ile doğrula; ölçmeden sonuç çıkarma.\n\n"
-    "Gerçekten müdahale gerekiyorsa yap: uygulayıcı rolüne karar mesajını `ao note` ile yaz, "
-    "gerekiyorsa `.ao/board.md`'yi güncelle. Acil bir şeyse "
-    "mesaja `## ACİL` başlığı koy — o zaman uygulayıcıya `ao lock`, `ao verify` "
-    "ve `ao commit-ok` üzerinden ulaşır.\n\n"
-    "Sonra işlediğin mesajı `ao mail ack <dosya-veya-glob>` ile sil; teslim onayı "
-    "budur. Normal bir durumsa yalnız sil ve bir şey yapma.\n\n"
-    "Yapmayacakların: push, PR, force-push, epic kutusu işaretleme, mimari "
-    "sözleşme değiştirme. Bunlar insana aittir. Emin değilsen dokunma ve "
-    "kullanıcıya bırak.")
-
-REFILL_PROMPT = (
-    "Kuyruk boşaldı. .ao/sources.json'daki kaynaklardan yeni işleri çek, "
-    "normalize edip .ao/inbox/<source-id>.json'a yaz, sonra `ao source import` çalıştır. "
-    "Her madde için kabul sınırı yaz: dilim boyutundaysa acceptance alanını doldur; "
-    "proje boyutundaysa acceptance'ı boş bırak ve shape alanına sebebini yaz — "
-    "kabul sınırı olmayan madde inbox'ta kalır, kuyruğa girmez. "
-    "Uygulama YAPMA; yalnız çek, sınıflandır, kabul et.")
+# What a nudge, a wake and a refill tell the turn they start is in language.py, in the project's language,
+# read with the config each cycle loads (LANGUAGE-PROMPTS): `prompt.nudge` with what a nudge adds,
+# `prompt.wake` and `prompt.refill`.
 
 
 def cycle_health(root, last=720):
@@ -894,7 +861,7 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
         print("reports pending, but an architect wake is already running")
         woke = False
     if woke and arch.get("argv") and not args.dry_run:
-        prompt = WAKE_PROMPT
+        prompt = language.text(cfg, "prompt.wake")
         # Resolve the session at wake time. A resumed architect carries the whole
         # history -- what was decided and why -- where a fresh one knows only what
         # is on disk. Claude Code forks a copy rather than double-writing when the
@@ -1129,16 +1096,14 @@ def queue_past_a_question(root):
     return (blocked[0]["id"], ready[0]["id"]) if blocked else None
 
 
-def parked_note(waits, ready_id):
-    """What a nudge adds when a question waits and READY work stands (#84)."""
-    return (f" {waits} cevap bekliyor ve kuyruğu durdurmaz: bekleyen dilimi blocked bırak (needs: {waits}), "
-            f"soruyu yeniden sorma, READY {ready_id} ile devam et.")
+def parked_note(cfg, waits, ready_id):
+    """What a nudge adds when a question waits and READY work stands (#84), in the project's language."""
+    return language.text(cfg, "prompt.nudge-parked", waits=waits, ready=ready_id)
 
 
-def secondary_note(found):
-    """What a nudge adds when nothing is READY here and a secondary project has work (#8)."""
-    return (f" Bu projede READY iş yok: ikincil proje {found['name']} ({found['root']}) READY {found['item']}. "
-            "Orada devam et; buradaki engeller insanı ya da mimarı bekliyor, bekleme.")
+def secondary_note(cfg, found):
+    """What a nudge adds when nothing is READY here and a secondary project has work (#8), in the project's language."""
+    return language.text(cfg, "prompt.nudge-secondary", name=found["name"], root=found["root"], item=found["item"])
 
 
 def record_pinned(root, pinned):
@@ -1421,7 +1386,7 @@ def main():
     # months-old instructions, an agent facing an apparent conflict refuses and
     # waits — which is safe, and cost this project four hours with 7,000 lines of
     # finished work sitting uncommitted.
-    p.add_argument("--prompt", default=NUDGE_PROMPT)
+    p.add_argument("--prompt", default=None, help="default: the project's nudge, in its language")
     args = p.parse_args()
     return run(args)
 
@@ -2318,7 +2283,7 @@ def _cycle_impl(args, root):
             if "{session}" in " ".join(arch["argv"]) and not sess:
                 print(f"architect session not resolvable ({withheld}); reported only")
                 return 0
-            prompt = arch.get("prompt", REFILL_PROMPT)
+            prompt = arch.get("prompt", language.text(cfg, "prompt.refill"))
             # As in escalate(): the pinned mode (GRANTS-PINNED), and past one argument, standard input
             # where the adapter declares it (PROMPT-CHANNEL).
             template, pinned = A.pinned_argv(arch["argv"], "architect")
@@ -2489,12 +2454,15 @@ def _cycle_impl(args, root):
             print(f"backing off ({st['attempts']} attempts, waiting {int(wait)}s)")
             return 0
 
-    prompt = args.prompt + (parked_note(*passing) if passing else "") \
-        + (secondary_note(elsewhere_ready) if elsewhere_ready else "")
+    # The project's own nudge, in its language, unless the cycle was handed another (LANGUAGE-PROMPTS).
+    handed = getattr(args, "prompt", None)
+    prompt = (language.text(cfg, "prompt.nudge") if handed is None else handed) \
+        + (parked_note(cfg, *passing) if passing else "") \
+        + (secondary_note(cfg, elsewhere_ready) if elsewhere_ready else "")
     if fe:
         # A person is in these files right now. Say so in the prompt; the
         # implementer keeps away from them for this turn.
-        prompt += " İnsan şu dosyaları düzenliyor, bu turda dokunma: " + ", ".join(fe[:8])
+        prompt += language.text(cfg, "prompt.nudge-editing", paths=", ".join(fe[:8]))
     # Past what one argument carries, the prompt goes on standard input where the implementer's
     # adapter declares it may; a detached turn takes no file ao would remove after it (PROMPT-CHANNEL).
     plan, refused = A.prompt_plan(adapter.get("resume", {}).get("argv") or [], prompt, impl.get("adapter"),

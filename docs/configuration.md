@@ -103,6 +103,12 @@ change of language changes what ao writes from then on. The markers of both lang
 every project whatever it chose: mail written before a change, or by an agent following an older
 playbook, is still found, surfaced and escalated.
 
+`language` decides the instructions ao gives agents as well: the reviewer's prompt, the headings it
+asks for and the markers between its parts, a stand-in review request, the bug hunter's prompt, and
+the watchdog's nudge, wake and refill. A project that chose Turkish is given the Turkish texts it
+always was, byte for byte, and what ao reads back from an answer - a verdict with its counts and
+findings, a lead, a nonce - is spelled the same in both ([pipeline.md](pipeline.md)).
+
 `review.context_bytes` is what a waived range's commit messages and a test-only candidate's
 read-only context share in a review prompt, and they never take more than the 400 KB diff budget
 leaves beside the diff. A prompt so bounded costs at most what a largest diff does, some 100 to 130

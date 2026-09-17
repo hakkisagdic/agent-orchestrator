@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, procs, watchdog as W
+from ao import cli, language, lib as A, procs, watchdog as W
 from tests.scenarios import World
 
 APPROVED = "print('VERDICT: APPROVED\\nBLOCKER: 0\\nHIGH: 0\\nMEDIUM: 0\\nLOW: 0')"
@@ -231,7 +231,7 @@ def test_a_review_past_one_argument_is_recorded_when_its_reviewer_takes_the_prom
 
     handed = record.read_bytes()
     assert len(handed) > A.LINUX_ARGUMENT_BYTES and _seen(record)["argv"] == ["--from-stdin"]
-    assert (cli.REVIEW_CANDIDATE_MARKER + "\n").encode("utf-8") in handed
+    assert (language.text(project, "prompt.review-candidate") + "\n").encode("utf-8") in handed
     assert "değer = 'bir satır'".encode("utf-8") in handed
     assert [verdict for _, verdict in A.reviews(root, "semantic-review")] == ["APPROVED"]
 

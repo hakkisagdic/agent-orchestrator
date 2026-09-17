@@ -20,7 +20,7 @@ import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from ao import cli, lib as A, watchdog as W
+from ao import cli, language, lib as A, watchdog as W
 from tests.scenarios import World
 
 SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
@@ -91,7 +91,8 @@ def _world(project, monkeypatch, tmp_path, **blocks):
 
 
 def _wakes(world):
-    return [argv for argv in world.spawned if isinstance(argv, list) and W.WAKE_PROMPT in argv]
+    wake = language.text(world.cfg, "prompt.wake")
+    return [argv for argv in world.spawned if isinstance(argv, list) and wake in argv]
 
 
 def _init(tmp_path, monkeypatch, name, profile):

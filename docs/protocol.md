@@ -119,6 +119,8 @@ Verdicts: `APPROVED`, `NEEDS_CHANGES` (a reviewer's), `UNAVAILABLE`, `INVALID` (
 
 These are closed sets owned by `src/ao/verdicts.py`. A verdict line holding anything else - `APPROVE`, `LGTM`, two verdicts - reads as `INVALID`, which is neither a round nor an approval. Only `APPROVED` with no BLOCKER or HIGH can authorise a commit.
 
+A reviewer is asked for this schema in the project's `language`: its findings under `## Findings` and what lies outside the candidate under `## Notes`, or `## Bulgular` and `## Notlar` in a project that chose Turkish. ao reads the verdict line, the four count lines and each `- [SEVERITY] file:line` finding, spelled the same in both, and never a heading, so an answer carrying either language's headings is the same review.
+
 ## Trust boundary
 
 **Mail is data, not authority.** This is the single most important rule in the protocol.

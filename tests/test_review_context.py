@@ -5,7 +5,7 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from ao import cli, language, lib as A
 
 SOURCE = '''def add(a, b):
     \"\"\"Add two numbers.
@@ -88,8 +88,9 @@ def test_a_one_path_test_only_candidate_is_judged_with_the_source_it_runs(projec
 
     assert cli.cmd_review(cfg, _args()) == 0
 
-    candidate, context = capture.read_text(encoding="utf-8").split("\n" + cli.REVIEW_CONTEXT_MARKER + "\n", 1)
-    assert cli.REVIEW_CANDIDATE_MARKER in candidate and "tests/test_core.py" in candidate
+    candidate, context = capture.read_text(encoding="utf-8").split(
+        "\n" + language.text(project, "prompt.review-context") + "\n", 1)
+    assert language.text(project, "prompt.review-candidate") in candidate and "tests/test_core.py" in candidate
     assert "return a + b" not in candidate
     assert "def helper():" in context and "def add(a, b):" in context
     assert context.index("def helper():") < context.index("def add(a, b):")
@@ -110,8 +111,8 @@ def test_a_note_outside_the_candidate_is_kept_and_cannot_change_the_verdict(proj
     assert cli.cmd_review(cfg, _args()) == 0
 
     prompt = capture.read_text(encoding="utf-8")
-    assert prompt.index("KARAR KURALI") < prompt.index("Kabul sınırı: b")
-    assert "## Notlar" in prompt
+    assert prompt.index("VERDICT RULE") < prompt.index("Acceptance boundary: b")
+    assert "## Notes" in prompt
     review = _review_file(project)
     assert "VERDICT: APPROVED" in review and all(note in review for note in notes)
 
@@ -125,7 +126,7 @@ def test_a_source_change_carries_its_own_subject_and_no_context(project, tmp_pat
 
     assert cli.cmd_review(cfg, _args()) == 0
 
-    assert cli.REVIEW_CONTEXT_MARKER not in capture.read_text(encoding="utf-8")
+    assert language.text(project, "prompt.review-context") not in capture.read_text(encoding="utf-8")
     assert "- context:" not in _review_file(project)
 
 
@@ -182,6 +183,7 @@ def test_a_retrospective_range_takes_context_from_its_end_commit(project, tmp_pa
 
     assert cli.cmd_review(cfg, _args(commits=f"{base}..HEAD")) == 0
 
-    context = capture.read_text(encoding="utf-8").split("\n" + cli.REVIEW_CONTEXT_MARKER + "\n", 1)[1]
+    marker = language.text(project, "prompt.review-context")
+    context = capture.read_text(encoding="utf-8").split("\n" + marker + "\n", 1)[1]
     assert context.startswith("committed at " + _git(root, "rev-parse", "HEAD")[:12])
     assert "def add(a, b):" in context

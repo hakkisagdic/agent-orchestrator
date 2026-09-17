@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import allowlist as AL, cli, lib as A, storage, watchdog as W
+from ao import allowlist as AL, cli, language, lib as A, storage, watchdog as W
 from tests.scenarios import World
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -105,11 +105,14 @@ def _grant(ident, role):
 def _texts(role):
     playbook = open(PLAYBOOK, encoding="utf-8").read()
     sections = [part for part in re.split(r"(?m)^## ", playbook)[1:] if part.split(" ", 1)[0] in SECTIONS[role]]
-    if role == "implementer":
-        prompts = [W.NUDGE_PROMPT, W.parked_note("D-1", "S2"),
-                   W.secondary_note({"name": "other", "root": "/elsewhere", "item": "S9"})]
-    else:
-        prompts = [W.WAKE_PROMPT, W.REFILL_PROMPT]
+    # Every language's prompts: a Turkish project's turns are told the same commands (LANGUAGE-PROMPTS).
+    prompts = []
+    for chosen in ({"language": lang} for lang in language.LANGUAGES):
+        if role == "implementer":
+            prompts += [language.text(chosen, "prompt.nudge"), W.parked_note(chosen, "D-1", "S2"),
+                        W.secondary_note(chosen, {"name": "other", "root": "/elsewhere", "item": "S9"})]
+        else:
+            prompts += [language.text(chosen, "prompt.wake"), language.text(chosen, "prompt.refill")]
     return "\n".join(sections + prompts)
 
 

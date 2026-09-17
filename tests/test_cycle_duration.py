@@ -7,7 +7,7 @@ from ao import watchdog as W
 
 
 def test_a_real_cycle_records_when_it_started_and_how_long_it_took(project):
-    ns = SimpleNamespace(root=project["root"], idle_minutes=6.0, dry_run=False, prompt=W.NUDGE_PROMPT)
+    ns = SimpleNamespace(root=project["root"], idle_minutes=6.0, dry_run=False)
     before = int(time.time())
 
     W.run(ns)

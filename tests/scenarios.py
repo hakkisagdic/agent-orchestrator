@@ -126,7 +126,7 @@ class World:
 
     # ---- run
     def cycle(self, dry_run=True, idle_minutes=6.0):
-        ns = SimpleNamespace(root=self.root, idle_minutes=idle_minutes, dry_run=dry_run, prompt=W.NUDGE_PROMPT)
+        ns = SimpleNamespace(root=self.root, idle_minutes=idle_minutes, dry_run=dry_run)
         W.run(ns)
         return list(W._TRACE)
 

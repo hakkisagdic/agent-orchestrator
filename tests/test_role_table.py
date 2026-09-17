@@ -4,7 +4,7 @@ import pathlib
 import re
 from types import SimpleNamespace
 
-from ao import cli, lib as A, watchdog as W
+from ao import cli, language, lib as A, watchdog as W
 
 
 def _stored(root):
@@ -68,8 +68,9 @@ def test_messages_and_prompts_address_roles_after_both_actors_are_renamed(projec
 
     name = A.note(root, cfg, None, "take the next item", "body")
     assert "-lead-to-dev-" in name
-    assert "architect" in W.WAKE_PROMPT.lower() or "mimar" in W.WAKE_PROMPT
-    assert not re.search(r"fable|kiro", W.WAKE_PROMPT)
+    wakes = language.TEXTS["prompt.wake"]
+    assert "architect" in wakes["en"].lower() and "mimar" in wakes["tr"]
+    assert not any(re.search(r"fable|kiro", wake) for wake in wakes.values())
 
 
 def test_no_actor_name_is_used_as_an_address_outside_the_adapters():

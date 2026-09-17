@@ -7,7 +7,7 @@ from ao import watchdog as W
 
 def test_dry_cycle_is_traced_and_not_recorded(project):
     root = project["root"]
-    ns = SimpleNamespace(root=root, idle_minutes=6.0, dry_run=True, prompt=W.NUDGE_PROMPT)
+    ns = SimpleNamespace(root=root, idle_minutes=6.0, dry_run=True)
     assert W.run(ns) == 0
     assert W._TRACE and "nothing to watch" in W._TRACE[-1]
     assert not os.path.exists(W.cycles_path(root))
@@ -15,7 +15,7 @@ def test_dry_cycle_is_traced_and_not_recorded(project):
 
 def test_real_cycle_is_recorded(project):
     root = project["root"]
-    ns = SimpleNamespace(root=root, idle_minutes=6.0, dry_run=False, prompt=W.NUDGE_PROMPT)
+    ns = SimpleNamespace(root=root, idle_minutes=6.0, dry_run=False)
     W.run(ns)
     rows = W.cycles(root)
     assert rows and rows[-1]["verdict"] == W._TRACE[-1] and "trace" in rows[-1]
@@ -171,10 +171,10 @@ def test_cycle_previews_and_persists_quota_ladder_until_reset(
     monkeypatch.setattr(W, "load_state", lambda target: state)
 
     dry_args = SimpleNamespace(
-        root=root, idle_minutes=6.0, dry_run=True, prompt=W.NUDGE_PROMPT,
+        root=root, idle_minutes=6.0, dry_run=True,
     )
     live_args = SimpleNamespace(
-        root=root, idle_minutes=6.0, dry_run=False, prompt=W.NUDGE_PROMPT,
+        root=root, idle_minutes=6.0, dry_run=False,
     )
 
     assert W._cycle(dry_args, root) == 0
@@ -304,7 +304,7 @@ def test_dry_cycle_escalation_has_no_alarm_or_channel_side_effects(
     )
 
     args = SimpleNamespace(
-        root=root, idle_minutes=6.0, dry_run=True, prompt=W.NUDGE_PROMPT,
+        root=root, idle_minutes=6.0, dry_run=True,
     )
     assert W.run(args) == 0
     assert any(

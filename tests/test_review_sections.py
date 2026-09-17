@@ -1,14 +1,17 @@
 import os
+import re
 import sys
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from ao import cli, language, lib as A
 from tests.test_review_chain import _repo_with_change
 
-REVIEWER = """
+# A section's question follows the section marker, read here in either language (LANGUAGE-PROMPTS).
+MARKERS = "|".join(re.escape(marker) for marker in language.TEXTS["prompt.review-section"].values())
+REVIEWER = f"MARKERS = {MARKERS!r}\n" + """
 import os, re, sys
 prompt = sys.argv[1]
-section = re.search(r"(Scenario \\d+|Lens `[a-z]+`)", prompt.split("--- BU BÖLÜMÜN SORUSU ---")[-1])
+section = re.search(r"(Scenario \\d+|Lens `[a-z]+`)", re.split(MARKERS, prompt)[-1])
 name = section.group(1) if section else "whole"
 open(os.environ["AO_TEST_CALLS"], "a").write(name + "\\n")
 if name in os.environ.get("AO_TEST_FAIL", "").split(","):

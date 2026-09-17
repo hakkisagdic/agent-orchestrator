@@ -1296,7 +1296,7 @@ def cmd_catchup(cfg, args):
     else:
         print(f"{C['dim']}running one watchdog cycle to act on what is now possible{C['reset']}")
         from . import watchdog as W
-        W.run(SimpleNamespace(root=root, idle_minutes=S.get(cfg, "watchdog.idle_minutes"), dry_run=False, prompt=W.NUDGE_PROMPT))
+        W.run(SimpleNamespace(root=root, idle_minutes=S.get(cfg, "watchdog.idle_minutes"), dry_run=False))
     code = _catchup_exit(failed, started, decided)
     print(f"{C['green']}catchup{C['reset']} handled {did} item(s)"
           + (f"; none of the {started} review(s) it started decided anything" if code == 3 else ""))

@@ -36,7 +36,7 @@ def test_a_second_live_cycle_stands_down_while_one_runs(world):
 def test_the_heartbeat_is_written_before_a_cycle_ends_early(project):
     root = project["root"]
     assert A.heartbeat_age(root) is None
-    W.run(SimpleNamespace(root=root, idle_minutes=6.0, dry_run=False, prompt=W.NUDGE_PROMPT))
+    W.run(SimpleNamespace(root=root, idle_minutes=6.0, dry_run=False))
     assert A.heartbeat_age(root) is not None
 
 

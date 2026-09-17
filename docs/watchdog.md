@@ -68,6 +68,12 @@ Order matters: each guard sees only what the ones above left standing.
 Anomalies (`anomalies()`) are computed before the chain and delivered as facts:
 one file per condition, grouped per kind with a count.
 
+A nudge, a wake and a refill tell their turn what to do in the project's `language`
+([configuration.md](configuration.md)). The nudge names `## DECISION REQUIRED` for a slice parked on a
+decision and the wake `## URGENT` for a message that must reach the implementer - `## KARAR GEREKLİ`
+and `## ACİL` in Turkish - and the headings of both languages are read in every project. A Turkish
+project's turns are told what they always were, byte for byte.
+
 ## One agent, more than one queue
 
 An implementer can hold work in two projects: a primary one and a secondary one named in
