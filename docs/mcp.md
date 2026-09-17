@@ -40,12 +40,12 @@ without knowing about each other.
 
 ## Capability gating
 
-Tools are grouped, and groups are enabled explicitly:
+Grouping the tools and enabling each group explicitly is the design, and it is not built yet.
+The server has one switch today, for the one tool that spends the machine:
 
 ```bash
-ao mcp serve --allow read,write          # default: coordination only
-ao mcp serve --allow read,write,run      # plus gate execution
-ao mcp serve --allow read,write,run,drive # plus driving other sessions
+ao mcp serve                  # every tool but ao_verify
+ao mcp serve --allow-verify   # ao_verify too: it runs the project's real gates
 ```
 
 `drive` and `authority` are never on by default. An agent that can inject prompts into

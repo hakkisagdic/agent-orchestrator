@@ -5,6 +5,20 @@ and they should be a property of **the slice**, not a setting you forget you cha
 
 ## Commands
 
+Today a model and an effort are chosen for a role when it is assigned
+([`profiles.md`](profiles.md)):
+
+```bash
+ao init --implementer kiro --model <model> --effort high   # written to .ao/config.json
+ao role set reviewer claude-code --model <model>           # the reviewer, composed from its adapter
+```
+
+An effort the adapter does not list in its `effort_values` is refused for a reviewer and left
+out of the implementer's nudge, with a note.
+
+Not built yet: reading or changing them while a project runs, and a one-turn override.
+
+<!-- not built: ao has no model, effort or run command -->
 ```bash
 ao model                          # what the implementer is running now
 ao model list                     # models the adapter's CLI reports
@@ -14,8 +28,8 @@ ao effort set max                 # low | medium | high | xhigh | max (adapter-c
 ao run --model <m> --effort <e> "<prompt>"   # one turn only, no persistent change
 ```
 
-Values are validated against the adapter's `effort_values` and clamped, so a profile
-written for a CLI with five levels still works against one that has three.
+In the design, values are clamped to the adapter's `effort_values`, so a profile written
+for a CLI with five levels still works against one that has three.
 
 ## Per-slice policy
 

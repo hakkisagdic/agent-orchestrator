@@ -21,6 +21,7 @@ issues. Three things must happen there, and three tools already do one each:
 
 ## What ao would need: a donor profile
 
+<!-- not built: the donor profile is a proposal; ao init offers claude-kiro and claude-claude -->
 - `ao init --profile donor`: implementer + reviewer + gates; `architect_wake`,
   `refill`, `reports` off. There is no human architect on a donor machine; the
   work order carries the boundary and Voltrai core answers the questions.

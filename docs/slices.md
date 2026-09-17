@@ -5,8 +5,8 @@ unit everything else is counted against: rounds, cost, decisions, commits.
 
 ## An acceptance boundary is mandatory
 
-`ao slice start` refuses a slice with no written boundary. Not a title — the conditions
-under which the work is finished:
+`ao source import` queues no tracker item without a written boundary; it holds the item in
+the inbox. Not a title — the conditions under which the work is finished:
 
 ```yaml
 slice: claim-admission
@@ -197,6 +197,17 @@ project; `--since` and `--until` cut the window a change is compared across.
 
 ## Commands
 
+A slice is a row on `.ao/board.md` and moves between its sections as it is worked:
+
+```bash
+ao board                         # every item by state, what may start now first
+ao board ready                   # exactly the queued items whose needs: have landed
+ao stats --slices                # one line per landed slice: rounds, time, size, later defects
+```
+
+Not built yet: commands that start, block and abandon a slice and record each transition.
+
+<!-- not built: ao has no slice or slices command; a slice is a board row -->
 ```bash
 ao slice start claim-admission --boundary-file boundary.yml
 ao slice status                  # state, rounds used, cost, open findings

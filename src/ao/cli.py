@@ -53,7 +53,13 @@ A._part("cli_hooks", globals())
 A._part("cli_maintenance", globals())
 
 
-def main():
+def build_parser():
+    """The whole `ao` command line, built without running a command.
+
+    main parses with it, and tests/test_docs_commands.py walks it, so a document that shows
+    an invocation this parser refuses fails there rather than in a reader's terminal. Building
+    it reads the adapter catalog once, for the --agent names init and skill share.
+    """
     p = argparse.ArgumentParser(prog="ao", description="agent-orchestrator (observation layer)")
     p.add_argument("-C", "--root", help="project directory (default: nearest .ao/ or git root)")
     sub = p.add_subparsers(dest="cmd")
@@ -425,7 +431,11 @@ def main():
     sk.add_argument("action", choices=["install", "show"], nargs="?", default="install")
     sk.add_argument("--agent", choices=agents, default="auto")
     sk.set_defaults(fn=cmd_skill)
+    return p
 
+
+def main():
+    p = build_parser()
     args = p.parse_args()
     if not getattr(args, "fn", None):
         p.print_help()

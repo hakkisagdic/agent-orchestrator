@@ -81,8 +81,9 @@ to `.ao/reviews/R-<id>.jsonl` as it lands.
 **Invariant P1.** Every finished section is durable before the next one starts. Kill the
 process, reboot the machine, hit the ceiling: what was answered stays answered.
 
-**Invariant P2.** `ao review resume R-<id>` re-runs only the sections with no recorded
-result. A resumed review is the same review — same id, same pinned tree, same round.
+**Invariant P2.** Running `ao review` again on the same candidate, boundary and reviewers asks
+only the sections with no recorded result. A resumed review is the same review — same
+candidate, same sections, one round.
 
 **Invariant P3.** The verdict is computed, not asked for: any section reporting BLOCKER
 or HIGH makes the review `NEEDS_CHANGES`; all sections clean makes it `APPROVED`; a
@@ -135,7 +136,7 @@ is the only way to find out.
 heartbeat for a stall window (ten minutes proposed; not a setting until this lands) — never for
 having taken a long time.
 A stalled section is recorded as unanswered with its partial output kept as evidence; the
-rest of the review is untouched and `ao review resume` retries just that one.
+rest of the review is untouched and running `ao review` again retries just that one.
 
 **Invariant Z2.** Total work is bounded by structure, not by a clock: a review has a
 finite number of sections, each bounded by the stall detector. `ao reviews` shows

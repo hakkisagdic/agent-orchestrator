@@ -32,8 +32,10 @@ Two pairs look similar but are not:
 
 ## Integration point 1 — remote implementers (fleet transport)
 
-Run the implementer on another machine while the architect stays local.
+Run the implementer on another machine while the architect stays local. Not built yet: this
+integration is the design.
 
+<!-- not built: fleet transport is a design; ao has no resume command -->
 - The mailbox directory is placed inside keyflip's encrypted fleet rendezvous, so
   messages ride the existing origin-authenticated, replay-guarded bus.
 - `ao resume --machine <name>` delegates to `keyflip swarm run` with the adapter's argv
@@ -124,8 +126,9 @@ keyflip — or do without.
 ## Using them separately
 
 Neither tool requires the other. agent-orchestrator works fine on a single machine with
-one account; keyflip works fine without any orchestration. The integration is opt-in and
-lives behind `ao config set transport keyflip`.
+one account; keyflip works fine without any orchestration. The integration is opt-in: with
+keyflip installed ao reads its usage windows, budgets and surfaces, and it switches an account
+only after `ao config set keyflip.rotation on --machine`.
 
 ## Integration point 7 — MCP server definitions
 

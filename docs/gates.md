@@ -41,9 +41,8 @@ An agent cannot reliably see its own mess. `ls -d` can. Sweep from the outside.
 ## Running
 
 ```bash
-ao verify                 # profile: full. Runs the gates, writes a verification record.
-ao verify --profile quick
-ao verify --slice claim-admission
+ao verify                 # runs the gates, writes a verification record
+ao verify --profile full  # a named profile; without one, gates.json's default_profile or quick
 ```
 
 Two properties that are not negotiable:
@@ -149,7 +148,8 @@ no passing run vouches for, and one whose recorded run failed.
 ## Commit authority is bound to a verification
 
 ```bash
-ao commit-ok --verification V-041 --files "src/…,test/…" --message-file msg.txt
+ao commit-ok                  # the newest verification passed on exactly the staged candidate
+ao commit-ok --review R-<id>  # and a finished submitted review pinned that same tree
 ```
 
 `ao` refuses to grant commit authority against a stale verification — one taken before the

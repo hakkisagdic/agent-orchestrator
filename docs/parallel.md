@@ -6,15 +6,15 @@ They have completely different hazards, so treat them separately.
 ## Axis 1 — many projects
 
 ```bash
-ao projects                       # everything registered, with per-project state
-ao projects add ~/work/voltrai --implementer kiro
-ao use voltrai                    # set the active project for subsequent commands
-ao watch --all                    # one panel, every project
+ao projects                       # every workspace with a local agent session
+ao fleet                          # one row per project, what needs a human first
+ao watch --all                    # the same rows, live
+ao -C ~/work/voltrai status       # any command, against another project
 ```
 
-State lives per project in `.ao/` (roles, policy, lane registry); the global registry at
-`~/.ao/projects.yml` only maps names to paths. Nothing is shared between projects, so a
-runaway lane in one cannot touch another.
+State lives per project in `.ao/` (config, board, ledgers); the machine's registry at
+`~/.ao/projects.json` only maps project names to paths. Nothing is shared between projects,
+so a runaway lane in one cannot touch another.
 
 This axis is cheap. The only shared resource is your machine.
 
@@ -32,6 +32,11 @@ Bug-hunting, review, analysis and documentation-reading are read lanes: they nee
 worktree and can all run at once. Implementation, test-writing and refactoring are write
 lanes and each needs its own worktree.
 
+Not built yet: lanes are a design, and ao has no lane command. Today a review runs in the
+background through `ao review submit`, a bug hunt through `ao hunt`, and a write lane is a
+worktree added with `git worktree add`.
+
+<!-- not built: lanes are a design; ao has no lane or lanes command -->
 ```bash
 ao lane start impl-updater  --role implementer --worktree
 ao lane start hunt-races    --role bug-hunter            # read lane, no worktree
@@ -78,6 +83,15 @@ Parallel lanes converge serially. The architect owns a queue:
 3. Green merges; red goes back to its lane with the failure.
 4. One merge at a time, in queue order.
 
+Step 2 is `ao merge-check`, which records the run ([gates.md](gates.md)):
+
+```bash
+ao merge-check impl-updater          # the full profile on HEAD merged with impl-updater
+```
+
+Not built yet: the queue itself, so its order is the architect's.
+
+<!-- not built: the merge queue is a design; ao has no queue command -->
 ```bash
 ao queue                    # what is waiting to integrate
 ao queue merge impl-updater # verify-then-merge, one lane

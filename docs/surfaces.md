@@ -114,8 +114,10 @@ That is a real TUI, in about two hundred lines, that runs anywhere.
 
 If `rich` or `textual` happens to be importable, the panel uses it for nicer tables and
 truecolor. If not, the ANSI renderer runs. The feature set is identical; only the polish
-differs. Nothing is gated behind an install.
+differs. Nothing is gated behind an install. Not built yet: `ao watch` has only the ANSI
+renderer today.
 
+<!-- not built: ao watch has no --rich; the ANSI renderer is the only one -->
 ```bash
 ao watch              # stdlib ANSI renderer
 ao watch --rich       # uses rich/textual if present, otherwise falls back with a note

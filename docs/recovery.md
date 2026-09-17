@@ -21,46 +21,61 @@ is equivalent to a continuing one.
 
 ```bash
 ao since last          # everything since this orchestrator last looked
-ao since 2h            # or a window
-ao since --slice claim-admission
+ao since 2h            # or a window: 30m, 2h, 1d
+ao since HEAD~5        # or since a commit, named by any git ref
+ao since 1d --no-mark  # a look that does not reset "last"
 ```
 
 Output is a digest, not a log dump:
 
-```
-Since 19:04 (2h 11m) — slice: claim-admission, in-review, round 8/5 ⚠ over budget
+```text
+since 2h 11m ago
 
-  reviews    3   → NEEDS_CHANGES ×2, APPROVED ×1 (latest 21:10:56)
-  findings   1 open: HIGH canonical lease extractor bypass (unchanged since 20:29 ⚠ loop)
-  commits    0   · working tree: 8 files modified
-  mail       2 sent, 2 acknowledged · 1 report received
-  decisions  D-014 non-extractable authority, D-015 timer epoch guard
-  cost       612 credits · context 74% ⚠
-  agent      active, last write 12s ago
+  0 commit
+
+  3 review
+    NEEDS_CHANGES  2026-09-03-190412-4f2c1a9.md
+    NEEDS_CHANGES  2026-09-03-202914-4f2c1a9.md
+    NEEDS_CHANGES  2026-09-03-211056-4f2c1a9.md
+
+  1 decision
+    D-1788462310  Timer guard: an epoch counter or a generation id?  → epoch counter
+
+  2 message in the mailbox now
+    20260903-2104-implementer-to-architect-REPORT-claim-admission.md
+    20260903-2112-architect-to-implementer-DECISION-timer-epoch-guard.md
+
+  2 alert sent
+    voltrai: over budget: round 8/5 — re-specify, split or change actor
+    voltrai: agent spinning: 42m busy, nothing committed or changed — needs re-specifying
+
+  board now: running 1 · blocked 1 · queued 4 · done 12
 ```
 
-The warnings are the point. A digest that only reports activity makes you read it; one that
-flags the over-budget round count, the unchanged finding and the context pressure tells you
-what to *do*.
+The alerts are the point. A digest that only reports activity makes you read it; the alerts
+raised while you were away — a slice over its round budget, an agent busy and producing
+nothing — tell you what to *do*.
 
 ## Briefing a fresh session
 
 ```bash
-ao brief
+ao handoff --no-send
 ```
 
-Reconstructs the working context from the ledger, the repository and the transcript tails:
-the open slice and its acceptance boundary, decisions that apply to it, the last
-verification and what it granted, open findings, what is blocked and on whom, and what the
-orchestrator was about to do next.
+Writes into the mailbox, and prints, what a successor needs from the board, the repository
+and the transcript: what the implementer is doing and when it last wrote, HEAD and what is
+uncommitted or unpushed, the newest review's verdict, every open decision with its exact
+reply syntax, what is blocked and on what, what is running, and what is next in the queue.
 
-Paste it into a new session, or let the MCP surface fetch it — see
-[`surfaces.md`](surfaces.md). Either way the recovery is seconds, not an archaeology
-session.
+Paste it into a new session, or let an MCP client read the same state through `ao_status`,
+`ao_board` and `ao_decisions` — see [`mcp.md`](mcp.md). Either way the recovery is seconds,
+not an archaeology session.
 
 ## Restart checklist
 
-`ao doctor --resume` performs it, but knowing it matters more than the command:
+No single command performs it, and knowing it matters more than a command would. `ao doctor`,
+`ao mail list`, `ao doctor --consistency`, `ao since last` and `ao status` answer its steps in
+order:
 
 1. Re-arm watchers — they are always dead after a restart.
 2. Read the mailbox — messages may have arrived while nothing was listening.

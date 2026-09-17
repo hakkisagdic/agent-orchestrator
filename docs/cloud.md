@@ -60,8 +60,10 @@ Marked from documented behaviour and one local inspection; correct any row you c
 
 ## The cloud lane
 
-A cloud lane is a lane whose workspace is remote and whose deliverable is a branch:
+A cloud lane is a lane whose workspace is remote and whose deliverable is a branch. Not built
+yet: ao has no lane command, local or cloud, and what follows is the design:
 
+<!-- not built: cloud lanes are a design; ao has no lane, lanes or queue command -->
 ```bash
 ao lane start impl-migrations --role implementer --cloud kiro \
    --brief "Epic 19 analytics migrations, fixture-only, no schema changes outside src/db"
@@ -109,8 +111,9 @@ work to the cloud and keep the expensive local engine for the work that needs ju
 
 ## Dispatch brief
 
+<!-- not built: ao lane start --cloud belongs to the cloud-lane design above -->
 A cloud agent cannot ask a follow-up question cheaply, so the brief carries what a
 conversation would have supplied: the exact acceptance boundary, the files it may touch,
 the gates that will judge it, and the explicit statement that fixture or partial evidence
-does not count as done. `ao lane start --cloud` refuses a brief without an acceptance
-boundary, for the same reason it refuses a slice without one locally.
+does not count as done. In the design, `ao lane start --cloud` refuses a brief without an
+acceptance boundary, for the same reason `ao source import` queues no tracker item without one.

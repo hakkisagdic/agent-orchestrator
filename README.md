@@ -219,8 +219,9 @@ qualification, including unsupported and network filesystems.
 ## Status
 
 Working today: everything in the command table above, exercised daily against a real
-project. Still specification: `ao init`, `ao decide`, `ao since`, and cross-project
-parallel *execution* (the view exists; running several implementers at once is
-governed by the machine gate lock but has not been run in anger).
+project. Still specification: every passage the documents mark as not built yet, lanes and
+the merge queue among them, and cross-project parallel *execution* (the view exists; running
+several implementers at once is governed by the machine gate lock but has not been run in
+anger).
 
 MIT.

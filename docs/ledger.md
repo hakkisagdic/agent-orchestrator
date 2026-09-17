@@ -103,10 +103,18 @@ restarted session know what it was doing without asking anybody.
 ## Commands
 
 ```bash
-ao decide "…" --slice claim-admission --rejected "…"   # append a decision
-ao decisions [--slice X] [--grep authority]            # search
-ao ledger show D-014                                   # one entry with its links
-ao ledger render                                       # regenerate INDEX.md
+ao decide "…" --why "…" --scope claim-admission   # append a decision, mailed to the implementer
+ao decide --list                                   # the decisions recorded, newest last
+ao recall authority                                # decided, answered or found, in every project
+```
+
+Not built yet: one entry shown with its links, and `INDEX.md` rendered from the ledger;
+nothing writes `INDEX.md` today.
+
+<!-- not built: ao has no ledger command, and nothing renders INDEX.md -->
+```bash
+ao ledger show D-014                               # one entry with its links
+ao ledger render                                   # regenerate INDEX.md
 ```
 
 `ao verify` writes its own record; you never hand-author a verification.

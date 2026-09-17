@@ -203,8 +203,8 @@ olup olmadığını söyler. Yeni adaptör bir JSON dosyasıdır;
 ## Durum
 
 Bugün çalışan: yukarıdaki komut tablosundaki her şey, gerçek bir projede günlük
-kullanımda. Hâlâ şartname: `ao init`, `ao decide`, `ao since`, ve projeler arası
-paralel **koşum** (görünüm var; birkaç uygulayıcıyı aynı anda çalıştırmak makine gate
-kilidine bağlandı ama gerçek yükte denenmedi).
+kullanımda. Hâlâ şartname: belgelerin "Not built yet" diye işaretlediği her bölüm (lane'ler
+ve birleştirme kuyruğu bunlardan) ve projeler arası paralel **koşum** (görünüm var; birkaç
+uygulayıcıyı aynı anda çalıştırmak makine gate kilidine bağlandı ama gerçek yükte denenmedi).
 
 MIT.
