@@ -1885,7 +1885,9 @@ def _cycle_impl(args, root):
         print("no transcript; nothing to watch")
         return 0
 
-    age = time.time() - os.path.getmtime(msgs)
+    # The implementer's silence ends at its last write, a subagent's included: a session whose transcript is
+    # quiet while its subagent works is not idle, and its lingering runtime is not hung.
+    age = time.time() - A.last_write(msgs, A.transcript_shape(adapter))
     size = os.path.getsize(msgs)
     st = load_state(root)
     if not args.dry_run:

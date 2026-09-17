@@ -1360,6 +1360,13 @@ def recent_errors(recs, limit=3, adapter=None):
     The record, the verdict field, the value that means failed and where the output
     is are the adapter's `telemetry.failure`; asked without an adapter, the
     implementer's adapter declares them.
+
+    A subagent's failed calls are not read (`transcript.subagents`). They are steps the
+    subagent recovers from inside - nearly every subagent that failed a call still returned
+    a result - and what the implementer is told is how the subagent ended, in its own
+    transcript: the result of the call that waited for it, read here when it failed, or the
+    notification of its end. Read beside the implementer's own failures, the subagents'
+    would crowd them out of the panel's two lines.
     """
     shape = transcript_shape(implementer_adapter() if adapter is None else adapter)
     failure = shape["failure"]

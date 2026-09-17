@@ -509,13 +509,14 @@ def is_bookkeeping(kind, shape):
 
 # A subagent's spend is its session's, charged to the turn that started it (`transcript.subagents`).
 
-def subagents(transcript, shape):
+def subagents(transcript, shape, sidecars=True):
     """What names each subagent transcript beside a session transcript: {"files", "named", "calls"}; None if undeclared.
 
     `files` holds every transcript a declared `path` reaches under the session's subagent
     directory; `named` maps (the declaration's index, the name its `{id}` stands for) to the
     transcripts of that name, and `calls` a tool call's id to the transcripts whose sidecar
-    names it. One listing of the directory serves a whole reading.
+    names it. One listing of the directory serves a whole reading. A reader that needs only
+    the transcripts asks without `sidecars`, and no sidecar is opened.
     """
     import glob
     declared = shape.get("subagents")
@@ -541,7 +542,7 @@ def subagents(transcript, shape):
                 found["files"].append(path)
             if entry["named_by"] and match.groupdict().get("id"):
                 found["named"].setdefault((number, match.group("id")), []).append(path)
-    sidecar = declared["sidecar"]
+    sidecar = declared["sidecar"] if sidecars else None
     for path in found["files"] if sidecar else []:
         name = os.path.splitext(os.path.basename(path))[0]
         try:
@@ -618,7 +619,7 @@ def subagent_tails(transcript, shape, since, nbytes):
     starts it, so what one wrote is never taken for another writer's.
     """
     out = []
-    for path in (subagents(transcript, shape) or {}).get("files") or []:
+    for path in (subagents(transcript, shape, sidecars=False) or {}).get("files") or []:
         try:
             if os.path.getmtime(path) < since:
                 continue
@@ -626,6 +627,37 @@ def subagent_tails(transcript, shape, since, nbytes):
             continue
         out += read_tail(path, nbytes)
     return out
+
+
+# A subagent at work is its implementer at work (`transcript.subagents`): whether the implementer is
+# working, idle or done is read from the subagent transcripts too. Those readers run every watchdog
+# cycle, so they stat the subagent transcripts and open none of them.
+
+def subagent_writes(transcript, shape):
+    """[(modification time, size)] of each subagent transcript beside a session transcript; [] if undeclared.
+
+    Read from one listing and a stat of each transcript: no subagent transcript and no
+    sidecar is opened, however many a session holds or however long they grew.
+    """
+    out = []
+    for path in (subagents(transcript, shape, sidecars=False) or {}).get("files") or []:
+        try:
+            stat = os.stat(path)
+        except OSError:
+            continue
+        out.append((stat.st_mtime, stat.st_size))
+    return out
+
+
+def last_write(transcript, shape):
+    """When the implementer last wrote, in epoch seconds: to its session transcript or to a subagent's beside it.
+
+    A session waits for a subagent with its own transcript quiet, or ends its turn while the
+    subagent works on in the background, and the session transcript alone then reads as an
+    implementer silent for as long as the subagent works: over an hour, measured. A subagent
+    that has finished writes no more, so its last write only ages.
+    """
+    return max([os.path.getmtime(transcript)] + [mtime for mtime, _ in subagent_writes(transcript, shape)])
 
 
 def _strings(o, out, keys, depth=0):
@@ -952,11 +984,15 @@ def quota_budget(adapter, ttl=300):
 
 
 def busy(cfg, adapter):
-    """(state, seconds_since_write, description). Conservative: status AND age."""
+    """(state, seconds_since_write, description). Conservative: status AND age.
+
+    The age is the implementer's last write, a subagent's included (`last_write`): a session
+    whose transcript is quiet while its subagent writes is working, not idle.
+    """
     msgs, meta = session_paths(cfg)
     if not msgs or not os.path.exists(msgs):
         return "unknown", None, ""
-    age = int(time.time() - os.path.getmtime(msgs))
+    age = int(time.time() - last_write(msgs, transcript_shape(adapter)))
     status, desc = "", ""
     if meta and os.path.exists(meta):
         try:
@@ -1221,6 +1257,12 @@ def record_progress(root, cfg):
     # to its notices every cycle, and while those writes counted as editing the
     # spin check could never see a frozen run (#96).
     porcelain, churn = _product_changes(root, cfg)
+    size = 0
+    if msgs and os.path.exists(msgs):
+        # A subagent that writes keeps its implementer working (`last_write`), so what it writes is the
+        # transcript growing too: a subagent looping on nothing is busy without progress, not busy.
+        shape = transcript_shape(implementer_adapter(cfg))
+        size = os.path.getsize(msgs) + sum(grown for _, grown in subagent_writes(msgs, shape))
     # Content churn, not file count. A slice deep in editing its established file
     # set holds the dirty *count* stable for many minutes — same eight files, new
     # content each cycle — and a count-only check reads that as frozen and cries
@@ -1229,8 +1271,7 @@ def record_progress(root, cfg):
     # it correctly stays frozen, and the minute threshold covers that case.
     rec = {"at": int(time.time()),
            "head": _git_text(root, "rev-parse", "--short", "HEAD"),
-           "dirty": len(porcelain), "churn": churn,
-           "size": os.path.getsize(msgs) if msgs and os.path.exists(msgs) else 0}
+           "dirty": len(porcelain), "churn": churn, "size": size}
     d = os.path.join(root, ".ao", "ledger")
     os.makedirs(d, exist_ok=True)
     p = os.path.join(d, "progress.jsonl")

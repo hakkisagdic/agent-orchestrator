@@ -1326,7 +1326,17 @@ def turn_ended(cfg):
     occurrence. The transcript's own word is enough to reap at the idle window.
 
     Which kinds close a turn and which are bookkeeping that may follow it is the
-    implementer's adapter's to declare (`transcript.turn`)."""
+    implementer's adapter's to declare (`transcript.turn`).
+
+    A session may end its turn while a subagent it started works on in the background
+    (`transcript.subagents`), and its runtime then lingers for the subagent, not because it
+    forgot to exit. A subagent transcript written after the session transcript's own last
+    write holds work the session has not taken back, so the turn has not ended. The session
+    takes a finished subagent back with a record of its own - the result of the call that
+    waited for it, or the notification of its end - so a finished subagent leaves the turn
+    to what the session says. Only modification times are read: a subagent's own records
+    cannot say it finished, since an agent a workflow started ends on the result of a call,
+    not on a response that ends a turn."""
     msgs, _ = session_paths(cfg)
     if not msgs or not os.path.exists(msgs):
         return False
@@ -1336,5 +1346,8 @@ def turn_ended(cfg):
         t = record_kind(d, shape)
         if is_bookkeeping(t, shape):
             continue                                        # bookkeeping after the turn
-        return closes_turn(d, shape)
+        if not closes_turn(d, shape):
+            return False
+        written = os.path.getmtime(msgs)
+        return all(mtime <= written for mtime, _ in subagent_writes(msgs, shape))
     return False

@@ -347,7 +347,7 @@ def working_elsewhere(cfg, idle_seconds):
     for other in secondary_projects(cfg):
         try:
             transcript, _ = session_paths(other["cfg"])
-            age = time.time() - os.path.getmtime(transcript)
+            age = time.time() - last_write(transcript, transcript_shape(implementer_adapter(other["cfg"])))
         except (OSError, TypeError, ValueError):
             continue
         if age < idle_seconds:

@@ -446,11 +446,11 @@ A store like that declares:
 
 | Field | What it declares | Used by |
 |---|---|---|
-| `transcript.subagents.dir` | the directory of a session's subagent transcripts, relative to the session transcript's own directory; `{session}` is the session transcript's name without its extension | `ao cost`, the panel, `ao_status`, the credit estimate, foreign edits |
+| `transcript.subagents.dir` | the directory of a session's subagent transcripts, relative to the session transcript's own directory; `{session}` is the session transcript's name without its extension | `ao cost`, the panel, `ao_status`, the credit estimate, foreign edits, and whether the implementer is working: its state in the panel and `ao_status`, the watchdog's idle guard, reap and spin check |
 | `transcript.subagents.transcripts` | `[{path, named_by}]`: where a subagent's transcript is under that directory, `*` standing for any name and `{id}` for the value a record of the session holds at `named_by` when that record starts it - the result of the call that started it, naming it | the same |
-| `transcript.subagents.sidecar` | `{path, call}`: the file beside a subagent's transcript, `{name}` standing for the transcript's name without its extension, whose `call` field holds the id of the tool call that started it, in the session's transcript or in another subagent's | the same |
+| `transcript.subagents.sidecar` | `{path, call}`: the file beside a subagent's transcript, `{name}` standing for the transcript's name without its extension, whose `call` field holds the id of the tool call that started it, in the session's transcript or in another subagent's | `ao cost`, the panel, `ao_status`, the credit estimate |
 | `transcript.tool_call.id` | the path to a tool call's id, read where its name is | the same |
-| `transcript.messages.not_words` | a list of matches, paths with the values they hold: a prompt or a reply holding every value of one - a note the harness writes, the summary of a compacted conversation - has no words | the panel's messages, `ao tail` |
+| `transcript.messages.not_words` | a list of matches, paths with the values they hold: a prompt or a reply holding every value of one - a note the harness writes, the summary of a compacted conversation - has no words; it still opens the turn the model answers | the panel's messages, `ao tail` |
 
 A subagent works for the turn that started it. Each reading reads a subagent's transcript right after
 the record that starts it - whichever comes first of the call its sidecar names and the record that
@@ -509,12 +509,76 @@ declares no subagents, and its readings over its 17 stores are unchanged: every 
 reading's digest once the new `delegated` fields, all zero, are set aside. `tests/test_subagent_spend.py`
 holds these readings from synthetic records, and fails when a core module names a field they declare.
 
+A subagent at work is its implementer at work. A session waits for a subagent with its own transcript
+quiet, or ends its turn while one works on in the background, so every reader that asks whether the
+implementer is working reads the subagent transcripts too. The implementer's last write is the latest of
+its session transcript's and theirs: its state in the panel and `ao_status` reads it, and so do the
+watchdog's idle guard, its reap, and its check that the implementer is working in a secondary project. A
+turn has not ended while a subagent transcript was written after the session transcript was: the session
+writes a record of each subagent it takes back - the notification of its end, or the result of the call
+that waited for it - and until it does, the watchdog treats the runtime waiting for the subagent as a
+turn, reaped only after three idle windows of silence. What a subagent writes is the transcript growing
+for the spin check, so one looping while nothing is produced is busy without progress, not busy. These
+readers run every cycle: they list the directory and read each subagent transcript's modification time
+and size, and none of them opens a subagent transcript or a sidecar. A subagent's own records could not
+tell them it finished, since an agent a workflow run starts ends on the result of the call that returns
+its output, not on a response that ends a turn.
+
+A subagent's failed calls are not the implementer's errors. They are steps the subagent recovers from
+inside, and what the implementer is told is how the subagent ended, in its own transcript: the result of
+the call that waited for it, which the panel's problems read when it failed, or the notification of its
+end. And `not_words` is about words, not turns: a task notification or a note the harness writes after a
+turn's end - another session's message among them - asks the model to answer, and opens the turn its
+answer makes as a prompt does; a compaction summary written while a turn runs stays inside that turn.
+
+These were measured on the stores at rest, from each record's time. The 59 stores that delegate hold
+2,916 subagent transcripts and 257,598 records in them. 77,402 of the records were written while the
+session transcript had been silent for six minutes or more, the watchdog's idle window, in 40 of the
+stores, and the session transcript alone read idle while a subagent had written within that window for
+2,900 minutes, in 308 stretches of up to 85 minutes. 143,529 were written while the session's turn read
+as ended, in 41 stores. Of the 444 closed turns during which a subagent wrote, it went on for 203 s after
+the close at the median and 108 minutes at most, and in 179 the session had been silent for the idle
+window while a subagent was still to write, which is when the watchdog reaped a runtime lingering for it.
+Each of the 444 ended at a record of the session - a task notification in 251, 0.1 s after the last
+subagent write at the median - and no subagent transcript at rest was written after its session
+transcript. Read against the session transcript's last write, one of the 444 still reads as ended while
+its subagent is silent for the idle window and then writes again, as a session's own long tool call
+would; read against the time of the record that closed the turn, the same one does, and two stores at
+rest would read as running for ever, their subagent transcripts modified 22 hours and 15 days after their
+last records. A subagent's own last record closes its turn in 624 of the 2,916: in 194 of the 239 agents
+a call started, and in 430 of the 2,677 a workflow run started, whose 2,187 more end on the result of the
+call that returns their output.
+
+In the same stores the sessions hold 1,011 failed results and their subagents 2,154, 1,858 of them shell
+commands, more than the session's own in 34 of the 59. 1,116 of the 1,171 subagents that failed a call
+returned a result after it, and their sessions were told of 737 as completed, 45 as stopped and 3 as
+failed; 10 of the sessions' own failures were calls that started a subagent. Read beside the session's
+own, the subagents' failures would take a line of the panel's two in 20 of the 58 stores that show one,
+and both lines in 13. Of the 5,035 turns `ao cost` reads in the 419 stores, 1,477 open at a task
+notification and 512 at a note, 295 of those another session's message, and 1,378 and 371 of them charge
+the model's tokens. Were those records bookkeeping, it would read 4,645 turns with the same tokens: a
+follow-up's first response would fall in the turn before it, and the tool result after that response
+would open another. The 344 turns that charge nothing were opened by notes (141), notifications (99), a
+person's prompts (102) and summaries (2) alike, and 328 of them hold only a reply the harness writes
+itself.
+
+The readers were compared before and after on the same stores at rest. Kiro declares no subagents, and
+every reading of its 17 stores is unchanged: `ao cost`, the panel's figures, failures and messages, the
+turn end, the busy state, the spin check's growth, foreign-edit writes and the credit estimate. On the
+419 stores of the second harness, the turn end (373 ended), the busy state, `ao cost`, the panel's
+figures, failures and messages and foreign-edit writes read as before, and the spin check's growth now
+holds the subagent transcripts of the 59 that delegate, all 2,916 found through the declaration. The
+slowest busy reading took 6.3 ms of CPU against 0.02 before, for a session with 458 subagent transcripts,
+and the slowest turn end 6.6 ms against 2.9. `tests/test_subagent_liveness.py` holds these readings from
+synthetic records.
+
 ## Busy detection
 
 Two signals, both cheap, used together:
 
 1. Session metadata status field, where the CLI exposes one.
-2. Age of the last write to the transcript file.
+2. Age of the last write to the transcript file, or to a subagent transcript beside it
+   (`transcript.subagents`).
 
 A session counts as safe to inject into only when the status is not running **and** the
 last write is older than the idle threshold (default 240s). This conservative AND is
