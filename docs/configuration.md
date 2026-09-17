@@ -46,6 +46,7 @@ machine setting written into a project.
 | `repository.kind` | `product` | project | product: the architect does not implement beyond a named hotfix; tool: roles may rotate per slice |
 | `review.lenses` | `declared` | project | declared: lenses only where a slice names them; auto: defaults from what the candidate touches; off: none |
 | `review.stall_minutes` | `10` | project | minutes a reviewer may spend no CPU before it is killed as stalled, its partial answer kept |
+| `review.context_bytes` | `100000` | project | bytes of commit-message claims and read-only context a review prompt may carry beside its diff, where no reviewer route holds it to one argument |
 | `hunter.every_hours` | `24` | project | hours between bug hunts the watchdog starts, when the hunter feature is on |
 | `hunter.files_per_run` | `8` | project | tracked files one hunt reads, going round the tree run by run |
 | `hunter.bytes_per_run` | `60000` | project | bytes of source one hunt reads |
@@ -81,6 +82,18 @@ machine setting written into a project.
 
 The scheduled watchdog reads `watchdog.idle_minutes` when it is installed; run
 `ao watchdog install` again after changing it. Everything else is read when it is used.
+
+`review.context_bytes` is what a waived range's commit messages and a test-only candidate's
+read-only context share in a review prompt, and they never take more than the 400 KB diff budget
+leaves beside the diff. A prompt so bounded costs at most what a largest diff does, some 100 to 130
+thousand tokens, which leaves a 200-thousand-token window room for the harness's own instructions and
+the answer. 100000 is the context a review could already carry on its own; the claims share it rather
+than add to it, so no call asks more of a reviewer's window than one did before, and a sectioned review
+pays it once per question. Every route of the reviewer chain is handed the same prompt, built to the
+least a route that may run can carry. A route whose command would not fit with the claims and context
+and whose adapter declares no other channel for its prompt - and on Windows any route that takes its
+prompt in its argument - holds them to one argument's worth: 120 KB with the diff, 30 KB on Windows
+([adapters.md](adapters.md)).
 
 The two filter settings are machine settings on purpose: they decide which programs
 `ao doctor` may run, unattended, and a project's own files are writable by the agents it

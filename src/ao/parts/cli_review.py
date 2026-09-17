@@ -70,19 +70,53 @@ def _claims_statement(boundary, claims):
             f"{REVIEW_CLAIMS_MARKER}\n{claims}")
 
 
-# The prompt travels as one argv element: Linux refuses a single argument over
-# 128 KiB and Windows a command line over 32,767 characters.
+# A route that takes its prompt as one argv element holds it to one argument's worth:
+# Linux refuses a single argument over 128 KiB and Windows a command line over 32,767 characters.
 REVIEW_PROMPT_ARG_BYTES = 30_000 if os.name == "nt" else 120_000
+# A diff past this is refused rather than reviewed truncated. Where no route holds the prompt to one
+# argument, claims and context fill no more than the room it leaves beside the diff (REVIEW-BUDGET).
+REVIEW_DIFF_BYTES = 400_000
 
 
-def _review_context_budget(prompt):
-    """Bytes of context a prompt can carry without context being what breaks the call.
+def _review_context_budget(prompt, bound=None, share=None):
+    """Bytes of claims or context a prompt can carry without them being what breaks the call.
 
-    A diff already past the bound fails on its own; context must never tip a
-    smaller one over, so it gets whatever room is left and otherwise goes by name.
+    A diff already past the bound fails on its own; claims and context must never tip a
+    smaller one over, so they get whatever room is left and otherwise go by name. `bound`
+    is the prompt the review's routes can carry, one argument's worth unless given
+    (`_review_prompt_bound`), and `share` what claims and context may still take together.
     """
-    return max(0, min(A.REVIEW_CONTEXT_BUDGET,
-                      REVIEW_PROMPT_ARG_BYTES - len(prompt.encode(UTF8)) - 200))
+    bound = REVIEW_PROMPT_ARG_BYTES if bound is None else bound
+    share = A.REVIEW_CONTEXT_BUDGET if share is None else share
+    return max(0, min(share, bound - len(prompt.encode(UTF8)) - 200))
+
+
+def _review_prompt_bound(chain, fixed, asked, share, diff_bytes):
+    """(bytes a prompt may reach before its section question, the route holding it to one argument or None).
+
+    Every route of a chain is handed one prompt: a fallback answers what the primary was asked,
+    a section journal keeps answers about one set of claims, a stand-in request carries one
+    prompt. So the prompt is built to the least a route that may run can carry (REVIEW-BUDGET).
+    A route may run when it can be handed the smallest prompt, with no claims and no context;
+    one that cannot is refused before it starts and holds nobody down. A route that declares a
+    channel for its prompt, or whose command fits here with all the claims and context the review
+    could add, carries them: the prompt is then bounded by the diff budget, and claims and context
+    fill the room it leaves beside the diff, up to review.context_bytes. Any other route, and on
+    Windows any that takes its prompt in its argument, holds the prompt to one argument's worth, as
+    before. `fixed` is the smallest prompt's size and `asked` its longest section question's, so
+    each section's prompt is measured with its question.
+    """
+    carried = [route for route in chain if not _reviewer_prompt_plan(route, "x" * (fixed + asked))[1]]
+    widest = fixed + asked + min(share, max(0, REVIEW_DIFF_BYTES - diff_bytes)) \
+        + len(f"\n\n{REVIEW_CONTEXT_MARKER}\n".encode(UTF8))
+    for route in carried:
+        plan, refused = _reviewer_prompt_plan(route, "x" * widest)
+        if refused or (plan["channel"] == "argument" and os.name == "nt"):
+            return REVIEW_PROMPT_ARG_BYTES - asked, str((route.get("identity") or {}).get("binding")
+                                                        or route.get("id") or "reviewer")
+    if not carried:
+        return REVIEW_PROMPT_ARG_BYTES - asked, None
+    return fixed + REVIEW_DIFF_BYTES - diff_bytes, None
 
 
 REVIEW_ATTEMPTS = 2
@@ -1848,8 +1882,8 @@ def cmd_review(cfg, args):
     if not diff_bytes.strip():
         print(f"{C['dim']}Nothing to review.{C['reset']}")
         return 0
-    if len(diff_bytes) > 400_000:
-        print(f"{C['red']}Candidate diff is {len(diff_bytes)} bytes; limit is 400000. "
+    if len(diff_bytes) > REVIEW_DIFF_BYTES:
+        print(f"{C['red']}Candidate diff is {len(diff_bytes)} bytes; limit is {REVIEW_DIFF_BYTES}. "
               f"Stage a smaller candidate rather than approving truncated input.{C['reset']}")
         return 2
     diff = diff_bytes.decode(UTF8, "replace")
@@ -1906,32 +1940,6 @@ def cmd_review(cfg, args):
                   f"{verification.get('id')} passed on this candidate: do not reshape verified code to "
                   "meet a size number")
     statement = (source or {}).get("text") or boundary
-    claims = None
-    if args.commits and getattr(args, "claims", False):
-        # Set only by catchup, without --boundary: a waived range is judged against what its
-        # commits say they did. The claims get the room the diff leaves, and context what
-        # the claims leave: neither may push the prompt past one argument (#97).
-        tail = size_note + f"\n\n{REVIEW_CANDIDATE_MARKER}\n" + diff
-        room = _review_context_budget(REVIEW_PROMPT.format(boundary=_claims_statement(statement, "")) + tail)
-        claims = A.review_range_claims(root, str(args.commits), room)
-        if claims is None:
-            print(f"{C['dim']}the range's commit messages cannot be read; it is judged against its "
-                  f"boundary alone{C['reset']}")
-        else:
-            statement = _claims_statement(statement, claims["text"])
-            evidence["claims"] = {key: claims[key] for key in ("commits", "inlined", "redacted", "digest")}
-    prompt = REVIEW_PROMPT.format(boundary=statement) \
-        + size_note + f"\n\n{REVIEW_CANDIDATE_MARKER}\n" + diff
-    budget = _review_context_budget(prompt)
-    if candidate is not None:
-        limits = [path.rstrip("/") for path in (scope.get("paths") or [])]
-        reviewed = [path for path in candidate["changed_paths"]
-                    if not limits or any(path == s or path.startswith(s + "/") for s in limits)]
-        context = A.review_context(root, reviewed, candidate["index_tree"], candidate["head"], budget)
-    else:
-        context = A.review_range_context(root, str(args.commits), budget)
-    if context is not None:
-        prompt += f"\n\n{REVIEW_CONTEXT_MARKER}\n" + context["text"]
     # Strict mode resolves and validates the complete declared chain before this
     # point. Ineligible routes are evidence, never subprocess candidates.
     if strict:
@@ -1949,6 +1957,43 @@ def cmd_review(cfg, args):
                 print(f"{C['dim']}fallback {fallback.get('id') or 'reviewer'} not run: {refused}{C['reset']}")
                 continue
             chain.append(fallback)
+    sections, lenses = review_sections(cfg, running, statement, diff)
+    # Claims and context share what the chain can carry beside the diff, built to the least a
+    # route that may run can carry, each section measured with its question (REVIEW-BUDGET).
+    wanted = bool(args.commits and getattr(args, "claims", False))
+    smallest = REVIEW_PROMPT.format(boundary=_claims_statement(statement, "") if wanted else statement) \
+        + size_note + f"\n\n{REVIEW_CANDIDATE_MARKER}\n" + diff
+    asked = max((len(f"\n\n{REVIEW_SECTION_MARKER}\n{section['question']}".encode(UTF8)) for section in sections),
+                default=0)
+    share = S.get(cfg, "review.context_bytes")
+    bound, held = _review_prompt_bound(chain, len(smallest.encode(UTF8)), asked, share, len(diff_bytes))
+    claims = None
+    if wanted:
+        # Set only by catchup, without --boundary: a waived range is judged against what its
+        # commits say they did. The claims take the share first, and context what they leave (#97).
+        claims = A.review_range_claims(root, str(args.commits), _review_context_budget(smallest, bound, share))
+        if claims is None:
+            print(f"{C['dim']}the range's commit messages cannot be read; it is judged against its "
+                  f"boundary alone{C['reset']}")
+        else:
+            statement = _claims_statement(statement, claims["text"])
+            share -= len(claims["text"].encode(UTF8))
+            evidence["claims"] = {key: claims[key] for key in ("commits", "inlined", "redacted", "digest")}
+    prompt = REVIEW_PROMPT.format(boundary=statement) \
+        + size_note + f"\n\n{REVIEW_CANDIDATE_MARKER}\n" + diff
+    budget = _review_context_budget(prompt, bound, share)
+    if candidate is not None:
+        limits = [path.rstrip("/") for path in (scope.get("paths") or [])]
+        reviewed = [path for path in candidate["changed_paths"]
+                    if not limits or any(path == s or path.startswith(s + "/") for s in limits)]
+        context = A.review_context(root, reviewed, candidate["index_tree"], candidate["head"], budget)
+    else:
+        context = A.review_range_context(root, str(args.commits), budget)
+    if context is not None:
+        prompt += f"\n\n{REVIEW_CONTEXT_MARKER}\n" + context["text"]
+    if held and ((claims or {}).get("inlined", 0) < (claims or {}).get("commits", 0) or (context or {}).get("omitted")):
+        print(f"{C['dim']}claims and context were held to one argument's worth, {REVIEW_PROMPT_ARG_BYTES} bytes: "
+              f"{held} takes its prompt in its argument alone{C['reset']}")
     if carried:
         # A person carried this answer from a session ao could not reach (#75).
         invocation = {"used": carried["route"], "used_position": 0, "failures": {}, "labels": {},
@@ -1956,7 +2001,6 @@ def cmd_review(cfg, args):
                       "attempt": {"ok": True, "out": carried["out"], "binary": "human-carried"}}
         evidence.update(carried["evidence"])
     else:
-        sections, lenses = review_sections(cfg, running, (source or {}).get("text") or boundary, diff)
         # Past what one argument carries here, a prompt reaches a route only as its adapter declares.
         # When no route can be handed the largest prompt this review sends, none is started: that is
         # a configuration to change, once filed as an unreachable reviewer (#65, PROMPT-CHANNEL).

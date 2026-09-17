@@ -96,7 +96,10 @@ Past that ao uses what the adapter declares for the command: `resume`'s channels
 of mode 0600 in a directory of its own, never inside the repository, handed over as standard input or by
 its path, and removed when the process ends. Every prompt ao hands an agent's CLI goes this way: a
 reviewer's, the bug hunter's, and those of the watchdog's nudges and architect wakes. A watchdog turn runs
-detached and nothing waits to remove a file after it, so it takes standard input or nothing.
+detached and nothing waits to remove a file after it, so it takes standard input or nothing. A review
+prompt grows with it: while every reviewer route that may run declares a channel or fits here, a waived
+range's commit messages and a candidate's context take `review.context_bytes` beside the diff instead of
+what one argument leaves ([configuration.md](configuration.md)).
 
 With nothing declared nothing starts, and the refusal names the prompt's size, what the platform carries
 and that the adapter declares no other channel. `ao review` exits 2 with it, as a configuration error: it

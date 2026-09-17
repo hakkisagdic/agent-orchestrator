@@ -774,7 +774,8 @@ def one_slice_statement(item, boundary=None):
     return ((((item or {}).get("notes") or {}).get("one slice")) or "").strip()
 
 
-REVIEW_CONTEXT_BUDGET = 100_000
+# What a review prompt's claims and context may take together, as review.context_bytes defaults to (REVIEW-BUDGET).
+REVIEW_CONTEXT_BUDGET = settings.default("review.context_bytes")
 
 
 def _is_test_path(path):

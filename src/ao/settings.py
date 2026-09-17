@@ -89,6 +89,10 @@ SETTINGS = {
     "review.stall_minutes": Setting(
         10, int, 1, None, "project",
         "minutes a reviewer may spend no CPU before it is killed as stalled, its partial answer kept"),
+    "review.context_bytes": Setting(
+        100_000, int, 0, None, "project",
+        "bytes of commit-message claims and read-only context a review prompt may carry beside its diff, "
+        "where no reviewer route holds it to one argument"),
     "hunter.every_hours": Setting(
         24, int, 1, None, "project",
         "hours between bug hunts the watchdog starts, when the hunter feature is on"),

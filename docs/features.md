@@ -70,10 +70,13 @@ diff against - what each says was wrong, what changed and what the tests prove -
 and is told they are claims to verify, not facts. Each message is scanned for
 credentials first; its subject stays on one line and its body is indented, so no
 line of it can pass for a line of the prompt; and one the prompt has no room for
-is named by its commit and subject, never cut. A person's `--boundary` replaces
-them. The review is recorded as the waived slice's, not as whichever slice runs
-during the sitting, so a defect it finds counts against the slice that landed it
-in `ao stats`.
+is named by its commit and subject, never cut. The room is `review.context_bytes`,
+shared with any read-only context and never more than the diff budget leaves beside
+the diff, unless a reviewer route that takes its prompt only in its argument holds
+it to one argument's worth ([configuration.md](configuration.md)). A person's
+`--boundary` replaces them. The review is recorded as the waived slice's, not as
+whichever slice runs during the sitting, so a defect it finds counts against the
+slice that landed it in `ao stats`.
 
 A split closes by proof instead: the grant for a slice the board marks
 `move-only` records its `ao split-check` proof, and `ao catchup` runs that proof
