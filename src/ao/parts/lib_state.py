@@ -227,8 +227,10 @@ def candidate_review_decision(root, review_dir, candidate_digest):
         rejection = next((earlier for earlier in reversed(rows[:position])
                           if earlier.get("verdict") == "NEEDS_CHANGES"), None)
         if row.get("fallback") and rejection:
+            # A person's own review is not the configured reviewer either (REVIEW-TIERS).
+            who = "a person's" if row.get("tier") == "person" else "a fallback reviewer's"
             return {"match": None,
-                    "problem": f"{name} is a fallback reviewer's approval; it cannot supersede "
+                    "problem": f"{name} is {who} approval; it cannot supersede "
                                f"the rejection of this candidate in {rejection.get('artefact')}"}
         return {"match": (name, verdict, body, evidence), "problem": None}
     return {"match": None, "problem": None}

@@ -29,6 +29,14 @@ Reviewer ≠ implementer is enforced by `ao commit-ok`. Authority never lives on
 the MCP surface: `ao commit-ok` and `push` are not tools an agent can call for
 itself.
 
+Every review stands in one tier, recorded and labeled wherever it shows: **another
+model family** (the default and the strongest); **same family** — another model of the
+implementer's family, only once a person opted in with `review.same_family` `labeled`,
+labeled `same family: weaker independence`; **person review** — a person read the diff
+(`ao person-review`). A reviewer no tier admits is refused by `ao role set`, the probe
+and `ao review` in the same words. Never opt in, and never record a person's review:
+both are a person's acts.
+
 ## 2. Authority: one file wins
 
 `.ao/authority.md` is the only source of what is free and what is forbidden. A
@@ -182,7 +190,10 @@ root `.ao-project` marker, the mailbox, this playbook, and the MCP registration.
 never stages `.ao-project`: a person includes that marker in the first authorized
 candidate. Enforcement begins when its exact `ao-project-v1\n` bytes reach HEAD or
 the active index. Removal is two-phase: commit the marker deletion while state still
-enforces, then run `ao remove --yes` again to remove the remaining state.
+enforces, then run `ao remove --yes` again to remove the remaining state. A single-harness
+profile reviews with another model of the implementer's family only when a person chooses it
+(`--review-tier same-family --by NAME`), or with no model reviewer at all (`--review-tier
+person`); `ao doctor` names the tier in force.
 
 The MCP server is registered for detected agents (`.mcp.json` for Claude Code,
 `.kiro/settings/mcp.json` for Kiro). Ask the human before running init; afterwards
@@ -256,8 +267,9 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao fanout ok|record|history` | budget gate for sub-agent fan-outs; `--roots R --per-root K` for pipelines |
 | `ao credits` | the implementer's own credit account and offline estimate, or that its adapter declares none ao can read |
 | `ao features [on|off <key>]` | the switches and what each costs; all off = deterministic ao |
-| `ao config [list|get|set|unset] [<setting> <value>] [--machine]` | what a person can set: every threshold with its value, default and source (docs/configuration.md); a person's command, not an implementer's |
+| `ao config [list|get|set|unset] [<setting> <value>] [--machine]` | what a person can set: every threshold with its value, default and source (docs/configuration.md); a person's command, not an implementer's. `review.same_family` changes only with `--by NAME`, on the record |
 | `ao collect-review <nonce> --response F --model M --by NAME` | a person records a stand-in session's answer to the review request ao wrote when no reviewer could be reached; never an agent's command |
+| `ao person-review --by NAME [--commits <range>]` / `--verdict APPROVED\|NEEDS_CHANGES --digest D [--findings F]` | a person reads the staged diff (or a landed range) and its digest, then records the verdict on exactly those bytes; `ao commit-ok` grants on it and `ao catchup` closes a waived range on it, labeled `person review`; never an agent's command |
 | `ao waive review --slice S --by NAME --why …` / `ao catchup` | a person's bypass on the record; catchup reviews each landed range with a model family other than the one that wrote it, against what its commit messages claim, closes a `move-only` split on the proof its grant recorded, run again, and replays deferred work. `ao catchup --plan` previews, names what closes by proof, and writes nothing; `ao catchup --limit 10` and `ao catchup --slice S` bound a run; `ao catchup --author-family F --by NAME` is a person naming the family where the grant recorded none, and `ao catchup --move-only S --by NAME` a person stating which waived slices only moved code, each closing only where the proof holds; neither is an agent's command. A run exits 3 when the reviews it started decided nothing, and 0 when it made progress or had nothing to do |
 | `ao pings setup --url …` / `ao hooks [status|install|uninstall] [--allow-shared-hooks]` / `ao push allow` | dead man's switch; static AO hook intent plus Git-executed, nonce-bound pre-commit proof; explicit authorization for shared/external/global mutation; human push window |
 | `ao cost [--since 24h]` | what the coordination spends: implementer turns by class, wasted turns, review counts |

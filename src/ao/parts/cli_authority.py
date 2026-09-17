@@ -425,7 +425,7 @@ def cmd_commit_ok(cfg, args):
         try:
             # A waiver may bypass a review, but never malformed declarations or
             # a runtime implementer that disagrees with its bound identity.
-            matrix_resolution = M.resolve(cfg, require_independent=False)
+            matrix_resolution = _resolve_matrix(cfg, require_independent=False)
         except M.MatrixError as exc:
             print(f"{C['red']}{C['b']}REFUSED{C['reset']}")
             for problem in exc.problems:
@@ -535,6 +535,7 @@ def cmd_commit_ok(cfg, args):
     match = decision["match"]
     review_name, rbody, evidence, rwho = None, "", None, None
     strict_reviewer_identity = None
+    review_tier = None
     scope = A.candidate_scope(candidate)
     if not review_required:
         pass
@@ -564,6 +565,8 @@ def cmd_commit_ok(cfg, args):
                 if isinstance(evidence, dict) else None
             rwho = (strict_reviewer_identity or {}).get("binding") \
                 if isinstance(strict_reviewer_identity, dict) else None
+            review_tier = next((route.get("tier") for route in matrix_resolution["reviewers"]
+                                if route["eligible"] and route["identity"] == strict_reviewer_identity), None)
         else:
             # Who reviewed is read from the evidence ao wrote, never from the
             # artefact's text, where the implementer's boundary appears too (#60).
@@ -573,11 +576,13 @@ def cmd_commit_ok(cfg, args):
                 rwho = None
                 reasons.append(f"{review_name} records no reviewer in its evidence — "
                                "run `ao review` again")
-            elif _reviewer_ineligible(cfg, _configured_reviewer(cfg, rwho)) == "it runs as the implementer":
-                reasons.append(f"the review was written by the implementer ({rwho})")
-            elif _reviewer_ineligible(cfg, _configured_reviewer(cfg, rwho)):
-                reasons.append(f"the review's reviewer {rwho} may not review this implementer: "
-                               f"{_reviewer_ineligible(cfg, _configured_reviewer(cfg, rwho))}")
+            else:
+                # The tier it was recorded in must still hold: a withdrawn opt-in grants nothing (REVIEW-TIERS).
+                review_tier, refused = _recorded_review_tier(cfg, evidence, rwho)
+                if refused == "it runs as the implementer":
+                    reasons.append(f"the review was written by the implementer ({rwho})")
+                elif refused:
+                    reasons.append(f"the review's reviewer {rwho} may not review this implementer: {refused}")
 
     held = A.hold_state(root)
     if held:
@@ -629,6 +634,13 @@ def cmd_commit_ok(cfg, args):
     print(f"{C['green']}{C['b']}GRANTED{C['reset']}  {token}")
     print(f"  {C['dim']}verified{C['reset']} {ver['id']} · "
           f"{C['dim']}review{C['reset']} {review_name or 'waived/off'}")
+    from . import tiers as T
+    if review_name and T.weaker(review_tier):
+        person = f" ({_person_line(evidence.get('person'))})" if review_tier == T.PERSON else ""
+        print(f"  {C['yellow']}tier{C['reset']} {T.label(review_tier)}{person}")
+    elif review_name and review_tier is None and not strict:
+        print(f"  {C['yellow']}tier{C['reset']} not established: no implementer is configured to compare the "
+              "reviewer with — ao doctor")
     print(f"  {C['dim']}index tree{C['reset']} {candidate['index_tree']}")
     if move_proof:
         print(f"  {C['dim']}move proof{C['reset']} {move_proof['moved']} definition(s) moved byte for byte, "
@@ -1083,7 +1095,7 @@ def cmd_commit_check(cfg, args):
     matrix_resolution = None
     if strict:
         try:
-            matrix_resolution = M.resolve(cfg, require_independent=False)
+            matrix_resolution = _resolve_matrix(cfg, require_independent=False)
         except M.MatrixError as exc:
             reasons.extend("capability matrix: " + problem for problem in exc.problems)
     candidate = None

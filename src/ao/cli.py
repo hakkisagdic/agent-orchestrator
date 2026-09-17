@@ -209,6 +209,12 @@ def build_parser():
                      help="write quick gates that exercise none of the detected toolchains")
     ini.add_argument("--prove", action="store_true", help="finish by running ao prove")
     ini.add_argument("--no-review", action="store_true", help="with --prove: skip the throwaway review")
+    from . import tiers as _tiers
+    ini.add_argument("--review-tier", dest="review_tier", choices=list(_tiers.TIERS),
+                     help="independent (default): a reviewer of another model family; same-family: another model of "
+                          "the implementer's family, labeled weaker independence, which needs --by; person: no model "
+                          "reviewer, a person reviews each candidate with ao person-review")
+    ini.add_argument("--by", help="with --review-tier same-family: the person who opts in, recorded with the login")
     ini.set_defaults(fn=_init_then_prove)
     pv = sub.add_parser("prove", help="run the guarantees: the hook refuses, the reviewer answers, a slice lands")
     pv.add_argument("--no-review", action="store_true",
@@ -264,6 +270,18 @@ def build_parser():
     cr.add_argument("--model", required=True, help="the model the session ran, as you know it")
     cr.add_argument("--by", required=True, help="the person who carried the answer")
     cr.set_defaults(fn=cmd_collect_review)
+    pr = sub.add_parser("person-review",
+                        help="a person reads the staged candidate's diff and records APPROVED or NEEDS_CHANGES")
+    pr.add_argument("--by", required=True, help="the person who reads the diff; never an agent or a role")
+    pr.add_argument("--verdict", choices=list(REVIEWER_VERDICTS),
+                    help="record this verdict; without it the diff and its digest are shown and nothing is recorded")
+    pr.add_argument("--digest", help="with --verdict: the digest shown beside the diff you read")
+    pr.add_argument("--findings", help="a file of findings, one a line: - [BLOCKER|HIGH|MEDIUM|LOW] file:line - what "
+                                       "breaks; NEEDS_CHANGES needs a BLOCKER or HIGH one")
+    pr.add_argument("--boundary", help="acceptance boundary; defaults to the running slice")
+    pr.add_argument("--paths", nargs="*", help="narrow the review to these staged paths")
+    pr.add_argument("--commits", help="a landed range instead of the staged candidate: what catch-up closes a waiver on")
+    pr.set_defaults(fn=cmd_person_review)
     tg = sub.add_parser("telegram", help="phone channel: alerts out, decisions in")
     tg.add_argument("action", nargs="?", default="status",
                     choices=["status", "setup", "test", "poll", "install", "uninstall"])
@@ -358,6 +376,8 @@ def build_parser():
     cf.add_argument("key", nargs="?")
     cf.add_argument("value", nargs="?")
     cf.add_argument("--machine", action="store_true", help="the machine's settings, not the project's")
+    cf.add_argument("--by", help="the person who changes a setting that weakens a guarantee (review.same_family), "
+                                 "recorded with the login")
     cf.set_defaults(fn=cmd_config)
     ft = sub.add_parser("features", help="the switches and what each costs; all off = deterministic ao")
     ft.add_argument("action", choices=["list", "on", "off"], nargs="?", default="list")

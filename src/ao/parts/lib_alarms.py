@@ -940,6 +940,37 @@ def close_waiver(root, wid, outcome, evidence=None):
     return append_chained_jsonl(waivers_path(root), row, WAIVER_CHAIN, legacy_prefix=True)
 
 
+# ---- opt-ins: a person weakens a guarantee, on the record (REVIEW-TIERS) -----------------
+
+OPT_IN_CHAIN = "ao-opt-in-row-v1"
+
+
+def opt_ins_path(root):
+    return os.path.join(root, ".ao", "ledger", "opt-ins.jsonl")
+
+
+def record_opt_in(root, setting, value, by):
+    """Record that a person set or cleared a setting that weakens a guarantee (settings.RECORDED).
+
+    A chained append like a waiver: the value, the name the person gave, and beside it
+    what ao can check - the login and whether a terminal was attached. A value of None
+    is the setting cleared.
+    """
+    from .storage import append_chained_jsonl
+    user, interactive = _login_and_terminal()
+    row = {"at": int(time.time()), "setting": setting, "value": value, "by": by,
+           "user": user, "interactive": interactive}
+    return append_chained_jsonl(opt_ins_path(root), row, OPT_IN_CHAIN)
+
+
+def recorded_opt_in(root, setting):
+    """The newest recorded row for one setting, or None; raises when the ledger cannot be read."""
+    from .storage import read_chained_jsonl
+    rows = [row for row in read_chained_jsonl(opt_ins_path(root), OPT_IN_CHAIN)
+            if isinstance(row, dict) and row.get("setting") == setting]
+    return rows[-1] if rows else None
+
+
 def open_waivers(root, gate=None, slice_id=None):
     rows, closed = {}, set()
     for r in waiver_rows(root):

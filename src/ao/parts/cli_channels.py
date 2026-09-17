@@ -369,6 +369,11 @@ def cmd_stats(cfg, args):
     projects = sorted({o["project"] for o in outcomes})
     print(f"{C['b']}{stats['slices']} slices landed{C['reset']}  {C['dim']}{', '.join(projects)}"
           f"{' · ' + str(stats['waived']) + ' with review waived' if stats['waived'] else ''}{C['reset']}")
+    # A slice that landed on a weaker tier is counted under its label, never mixed into the rest (REVIEW-TIERS).
+    from . import tiers as T
+    for tier, count in (stats.get("tiers") or {}).items():
+        if T.weaker(tier):
+            print(f"  {'review tier':<22} {count} slice(s) on {C['yellow']}{T.label(tier)}{C['reset']}")
     show("review rounds", stats["rounds"])
     if stats["first_pass_pct"] is not None:
         print(f"  {'approved first time':<22} {stats['first_pass_pct']}%")
@@ -378,6 +383,7 @@ def cmd_stats(cfg, args):
     if getattr(args, "slices", False):
         for o in outcomes:
             print(f"    {o['project']:<14} {o['slice']:<16} {' → '.join(o['verdicts']) or 'waived'}"
+                  f"{'  ' + T.label(o.get('tier')) if T.weaker(o.get('tier')) else ''}"
                   f"{'  defect found later' if o['defect_found'] else ''}")
     return 0
 
@@ -437,17 +443,36 @@ def cmd_role(cfg, args):
     if problem:
         print(f"{C['red']}refused{C['reset']}: {problem}")
         return 2
+    # The reviewer that will hold the role is asked what `ao review` and the probe ask, and refused
+    # in their words: `ao role set` assigned reviewers they then refused (REVIEW-TIERS).
+    from . import tiers as T
+    trial = dict(cfg)
+    for role in ("implementer", "reviewer"):
+        if isinstance(actors.get(new.get(role)), dict):
+            trial[role] = dict(actors[new[role]], actor=new[role])
+    reviewer = actors.get(new.get("reviewer"))
+    tier, code, refused = _review_decision(trial, trial["reviewer"]) \
+        if isinstance(reviewer, dict) and reviewer.get("argv") else (None, None, None)
+    if refused:
+        touched = {role for role in A.ROLE_BLOCKS if new.get(role) != eventual.get(role)}
+        # A reviewer being assigned is refused whatever the reason. A new implementer is refused, as it
+        # was, when both declare one family; one that shares only an engine is refused at review (#79).
+        if "reviewer" in touched or code.partition("/")[0] == "family":
+            print(f"{C['red']}refused{C['reset']}: {_tier_refusal(refused)}")
+            return 2
+        print(f"{C['yellow']}note{C['reset']}: {_tier_refusal(refused)}")
     stored = dict(stored, actors=actors)
     running = A.running_slice(root)
     changed = {role: actor for role, actor in new.items() if held.get(role) != actor}
+    tiered = f"; the reviewer stands in {T.label(tier)}" if T.weaker(tier) else ""
     if running:
         # Work in flight keeps its actor; the next slice gets the new one.
         stored.update(roles=held, roles_next={"after": running["id"], "roles": changed})
-        print(f"takes effect once {running['id']} leaves running: {changed}")
+        print(f"takes effect once {running['id']} leaves running: {changed}{tiered}")
     else:
         stored.update(roles=new)
         stored.pop("roles_next", None)
-        print(f"assigned: {changed}")
+        print(f"assigned: {changed}{tiered}")
     A.write_project_config(root, json.dumps(stored, indent=2, ensure_ascii=False) + "\n")
     return 0
 

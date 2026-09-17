@@ -1231,7 +1231,7 @@ def _reviewer_probe(cfg, timeout=REVIEW_PROBE_TIMEOUT):
     resolution = None
     if strict:
         try:
-            resolution = M.resolve(cfg, require_independent=True)
+            resolution = _resolve_matrix(cfg, require_independent=True)
         except M.MatrixError as exc:
             return {
                 "configured": True, "ok": False, "route": None,
@@ -1248,15 +1248,15 @@ def _reviewer_probe(cfg, timeout=REVIEW_PROBE_TIMEOUT):
                 "binary": None, "version": None, "reason": "not configured",
                 "kind": "not-configured",
             }
-        # The probe applies the rule `ao review` applies (#65).
+        # The probe applies the rule `ao review` applies (#65), in the words it refuses with (REVIEW-TIERS).
         sessions = _implementer_sessions(cfg)
         refused = _reviewer_ineligible(cfg, rv, sessions)
         if refused:
             return {
                 "configured": True, "ok": False, "route": rv.get("id"),
                 "binary": None, "version": None,
-                "reason": f"the reviewer may not review this implementer: {refused}",
-                "kind": "configuration-error",
+                "reason": _tier_refusal(refused),
+                "kind": "configuration-error", "tier": None, "tier_refused": True,
             }
         chain = [rv] + [
             item for item in (rv.get("fallbacks") or [])
@@ -1279,11 +1279,13 @@ def _reviewer_probe(cfg, timeout=REVIEW_PROBE_TIMEOUT):
     if invocation["used"] is not None:
         position = invocation["used_position"]
         attempt = invocation["attempt"]
+        used = invocation["used"]
         return {
             "configured": True, "ok": True,
             "route": invocation["labels"][position],
             "binary": attempt.get("binary"), "version": attempt.get("version"),
             "reason": "exact nonce echoed", "kind": "success",
+            "tier": used.get("tier") if strict else _review_tier(cfg, used)[0],
         }
 
     details = []
@@ -1307,13 +1309,23 @@ def _reviewer_probe(cfg, timeout=REVIEW_PROBE_TIMEOUT):
 
 
 def _reviewer_probe_text(probe):
+    """One line for a probe: what answered, through which binary, and the tier it stands in.
+
+    A reviewer refused by its configuration was never started, so no binary was looked for:
+    naming an "unresolved binary" there sent a person with the binary on PATH looking for a
+    fault that did not exist (REVIEW-TIERS).
+    """
     if not probe["configured"]:
         return "not configured"
     route = probe.get("route") or "reviewer"
+    if not probe["ok"] and probe.get("kind") == "configuration-error":
+        return f"failed — {route}: {probe['reason']}"
     binary = probe.get("binary") or "unresolved binary"
     version = probe.get("version") or "version unknown"
     if probe["ok"]:
-        return f"ok — {route} via {binary} ({version}); {probe['reason']}"
+        from . import tiers as T
+        weaker = f"; {T.label(probe.get('tier'))}" if T.weaker(probe.get("tier")) else ""
+        return f"ok — {route} via {binary} ({version}); {probe['reason']}{weaker}"
     return f"failed — {route} via {binary} ({version}); {probe['reason']}"
 
 
@@ -1377,22 +1389,6 @@ def _author_families(author):
                    if str(value or "").strip()})
 
 
-def _author_refusal(route, author):
-    """Why a route may not review a range this author wrote, or None (#65).
-
-    A route whose family cannot be named could be the author's, so it is refused too.
-    """
-    families = _author_families(author)
-    if not families:
-        return "the family of the model that wrote this range is not established"
-    family, why = A.declared_family(route)
-    if family is None:
-        return f"{why}, so it cannot be shown to differ from the author's ({', '.join(families)})"
-    if family in families:
-        return f"it declares the author's model family ({family})"
-    return None
-
-
 def _author_line(author):
     """Who wrote a waived range, and who said so, for its retrospective review's header."""
     parts = []
@@ -1434,29 +1430,178 @@ def _reviewer_ineligible(cfg, route, sessions=None, author=None):
     independence is judged against the author instead: a route is refused when it
     declares the author's family, or none; the implementer's engine may review what
     another family wrote.
+
+    Where a person opted in, another model of the implementer's family is admitted,
+    labeled (REVIEW-TIERS): tiers.tier decides, through _review_tier.
     """
-    if not isinstance(route, dict):
-        return "it is not a reviewer route"
-    sessions = _implementer_sessions(cfg) if sessions is None else sessions
-    if _reviewer_is_implementer(route, sessions):
-        return "it runs as the implementer"
-    if _tool_route(route) and not str(route.get("family") or "").strip():
-        # A tool reaches many families through its provider, and a model name is not a family (#86).
-        return ("it is a tool reviewer that names no model family: ao role set reviewer <adapter> "
-                "--model <model> --family <family>")
-    if author is not None:
-        return _author_refusal(route, author)
-    impl = cfg.get("implementer") or {}
-    family = str(route.get("family") or "").strip().lower()
-    implementer_family = str(impl.get("family") or "").strip().lower()
-    if family and implementer_family:
-        return (f"it declares the implementer's model family ({family})"
-                if family == implementer_family else None)
-    argv = route.get("argv") or []
-    engine = A._program_name(argv[0]) if argv and isinstance(argv[0], str) else ""
-    if engine and engine in _implementer_engines(cfg):
-        return f"it runs the implementer's own engine ({engine})"
+    return _review_tier(cfg, route, sessions, author)[1]
+
+
+def _stated_family(block):
+    """The family a role block or reviewer route states itself, lowercased; None when it states none."""
+    if not isinstance(block, dict):
+        return None
+    return str(block.get("family") or "").strip().lower() or None
+
+
+def _route_model(block):
+    """The model a role block or reviewer route runs: the one it names, else the one its argv passes; None.
+
+    A composed reviewer names its model; a reviewer block written by `ao init` carries it only
+    in its argv, after its adapter's model option.
+    """
+    if not isinstance(block, dict):
+        return None
+    named = str(block.get("model") or "").strip()
+    if named:
+        return named
+    argv = [str(part) for part in block.get("argv") or []]
+    ident = A.block_adapter(block)
+    option = ((A.load_adapter(ident) if ident else {}).get("options") or {}).get("model") or []
+    if len(option) == 2 and option[1] == "{model}":
+        return next((argv[at + 1] for at in range(len(argv) - 1) if argv[at] == option[0]), None)
+    if len(option) == 1 and str(option[0]).endswith("{model}"):
+        prefix = str(option[0])[:-len("{model}")]
+        return next((part[len(prefix):] for part in argv if prefix and part.startswith(prefix)
+                     and len(part) > len(prefix)), None)
     return None
+
+
+def _same_family_opt_in(cfg):
+    """The recorded opt-in that puts the same-family tier in force, or None (REVIEW-TIERS).
+
+    `review.same_family` must read `labeled` in the project's own config, and the newest
+    record of that setting must say the same and name a person. A value written into the
+    config by hand - which an agent that edits files can do - is not in force alone, and
+    neither is one in the machine's settings: the record is per project. While its probe runs,
+    `ao init` holds the opt-in it is about to record under the config key of this function's name.
+    """
+    from . import tiers as T
+    value, source, _ = S.resolve(cfg, "review.same_family")
+    if value != T.LABELED or source != "project":
+        return None
+    pending = cfg.get("_same_family_opt_in")
+    if isinstance(pending, dict):
+        return pending
+    try:
+        row = A.recorded_opt_in(cfg["root"], "review.same_family")
+    except Exception:
+        return None                                     # a ledger that cannot be read opts nobody in
+    return row if isinstance(row, dict) and row.get("value") == T.LABELED and str(row.get("by") or "").strip() \
+        else None
+
+
+def _resolve_matrix(cfg, **kwargs):
+    """M.resolve with the same-family opt-in this project has in force, so every caller sees one tier."""
+    return M.resolve(cfg, same_family=_same_family_opt_in(cfg) is not None, **kwargs)
+
+
+def _review_tier(cfg, route, sessions=None, author=None):
+    """(tier, None), or (None, why): the tier a reviewer route stands in where no matrix decides (REVIEW-TIERS)."""
+    tier, _, why = _review_decision(cfg, route, sessions, author)
+    return tier, why
+
+
+def _review_decision(cfg, route, sessions=None, author=None):
+    """(tier, refusal code, refusal words) for a reviewer route where no matrix decides (REVIEW-TIERS).
+
+    What the route and the implementer - or a waived range's author - say about themselves is
+    gathered here: session, family, model, engine. Which tier that makes is decided by
+    tiers.tier alone, and a refusal reads as it always did. A route never stands in the
+    person tier: only `ao person-review` records one.
+    """
+    from . import tiers as T
+    if not isinstance(route, dict):
+        return None, "route", "it is not a reviewer route"
+    sessions = _implementer_sessions(cfg) if sessions is None else sessions
+    argv = route.get("argv") or []
+    declared, why = A.declared_family(route)
+    reviewer = {"identity": _reviewer_is_implementer(route, sessions), "tool": _tool_route(route),
+                "family": _stated_family(route), "declared": declared, "model": _route_model(route),
+                "engine": A._program_name(argv[0]) if argv and isinstance(argv[0], str) else None}
+    if author is not None:
+        # A waived range is held to the family that wrote it, and no opt-in reaches it (#65).
+        subject, same_family = {"range": True, "families": _author_families(author)}, False
+    else:
+        impl = cfg.get("implementer") or {}
+        subject = {"known": bool(impl), "family": _stated_family(impl),
+                   "declared": A.declared_family(impl)[0] if impl else None, "model": _route_model(impl),
+                   "engines": sorted(_implementer_engines(cfg))}
+        same_family = _same_family_opt_in(cfg) is not None
+    tier, code = T.tier(reviewer, subject, same_family=same_family)
+    return tier, code, _tier_refusal_text(code, reviewer, subject, why)
+
+
+def _tier_refusal_text(code, reviewer, subject, why=None):
+    """The words for a refusal tiers.tier gave where no matrix decides; each is the sentence ao always used."""
+    if not code:
+        return None
+    from . import tiers as T
+    base, _, detail = code.partition("/")
+    text = {
+        "author": "it runs as the implementer",
+        "person-family": f"it declares the {T.PERSON_FAMILY} family, which only a person's own review records",
+        # A tool reaches many families through its provider, and a model name is not a family (#86).
+        "tool-unnamed": ("it is a tool reviewer that names no model family: ao role set reviewer <adapter> "
+                         "--model <model> --family <family>"),
+        "range-unnamed": "the family of the model that wrote this range is not established",
+        "unnamed-family": f"{why}, so it cannot be shown to differ from the author's "
+                          f"({', '.join(subject.get('families') or ())})",
+        "author-family": f"it declares the author's model family ({reviewer.get('declared')})",
+        "family": f"it declares the implementer's model family ({reviewer.get('family')})",
+        "engine": f"it runs the implementer's own engine ({reviewer.get('engine')})",
+    }.get(base, base)
+    more = {
+        "families": "and the two do not declare one model family, so it cannot be shown to be another model "
+                    "of the implementer's family",
+        "model-unnamed": f"and {'the implementer' if not subject.get('model') else 'it'} names no model, so it "
+                         "cannot be shown to be another model of that family",
+        "model": f"and it runs the implementer's own model ({reviewer.get('model')})",
+    }.get(detail)
+    return f"{text}, {more}" if more else text
+
+
+def _tier_refusal(refused, author=None):
+    """The one sentence `ao role set`, the reviewer probe and `ao review` refuse a reviewer with (REVIEW-TIERS).
+
+    They used to refuse in three sets of words, or not at all: `ao role set` assigned a
+    reviewer that `ao review` then refused. Each names the ways forward.
+    """
+    from . import tiers as T
+    what, ways = ("this range", T.RANGE_WAYS_FORWARD) if author is not None \
+        else ("this implementer", T.WAYS_FORWARD)
+    return (f"the reviewer may not review {what}: {refused}. A model reviewing its own output shares its "
+            f"own blind spots. {ways}")
+
+
+def _recorded_review_tier(cfg, evidence, reviewer_id):
+    """(tier, None) that a recorded review still stands in, or (None, why it grants nothing now) (REVIEW-TIERS).
+
+    A person's review is checked for what makes it one: its transport and a person's name that
+    is no agent's. A model's review is judged again by the configured route its id names, and
+    must stand in the tier it was recorded in: a reviewer that became the implementer's
+    family, or an opt-in that was withdrawn, grants nothing on an old review.
+    """
+    from . import tiers as T
+    evidence = evidence if isinstance(evidence, dict) else {}
+    recorded = evidence.get("review_tier")
+    if recorded == T.PERSON:
+        person = evidence.get("person") if isinstance(evidence.get("person"), dict) else {}
+        by = str(person.get("by") or "").strip()
+        if evidence.get("transport") != "person" or not by or reviewer_id != f"person:{by}":
+            return None, "it is recorded as a person's review and names no person"
+        if by.lower() in _agent_names(cfg):
+            return None, f"its person, {by}, is the name of an agent or a role"
+        return T.tier({"person": True}, {})
+    tier, refused = _review_tier(cfg, _configured_reviewer(cfg, reviewer_id))
+    if refused:
+        return None, refused
+    if recorded in T.TIERS and tier != recorded and (tier is not None or recorded == T.SAME_FAMILY):
+        return None, (f"it was recorded as {T.label(recorded)} and stands in {T.label(tier) or 'no tier'} now; "
+                      "review the candidate again")
+    if recorded is None and tier == T.SAME_FAMILY:
+        return None, "it was recorded without a tier, and its reviewer is of the implementer's family now"
+    return (tier if tier is not None else recorded), None
 
 
 def _reviewer_group():
@@ -1553,6 +1698,191 @@ def cmd_collect_review(cfg, args):
         for limit in A.STANDIN_LIMITS:
             print(f"{C['dim']}limit: {limit}{C['reset']}")
     return code
+
+
+# ---- a person reviews: the third tier, for whoever runs one harness (REVIEW-TIERS) --------
+
+PERSON_FINDING = A.re.compile(r"^-\s*\[(BLOCKER|HIGH|MEDIUM|LOW)\]\s*\S")
+PERSON_FINDINGS_BYTES = 400_000
+PERSON_DIGEST_HEX = 16                      # what the shown command quotes; any 12 or more hex characters match
+
+
+def _person_line(person):
+    """Who recorded a person's review, and what ao can check about them: the login and the terminal."""
+    person = person if isinstance(person, dict) else {}
+    return (f"{person.get('by')}, login {person.get('user') or 'unknown'}, "
+            f"{'a terminal attached' if person.get('interactive') else 'no terminal attached'}")
+
+
+def _digest_read(given, digest):
+    """Whether the digest a person quotes is the diff's: the whole `sha256:` value, or 12 or more of its hex digits."""
+    text = str(given or "").strip().lower()
+    text = text[len("sha256:"):] if text.startswith("sha256:") else text
+    whole = str(digest or "")[len("sha256:"):]
+    return len(text) >= 12 and bool(A.re.fullmatch(r"[0-9a-f]+", text)) and whole.startswith(text)
+
+
+def _show_person_review(person, diff, evidence, boundary, args):
+    """Print what a reviewer would be handed, with the digest a person records a verdict against; nothing is written."""
+    import shlex
+    sys.stdout.write(diff if diff.endswith("\n") else diff + "\n")
+    short = evidence["diff_digest"][len("sha256:"):][:PERSON_DIGEST_HEX]
+    scope = f"--commits {shlex.quote(args.commits)}" if args.commits else " ".join(
+        ["--paths"] + [shlex.quote(path) for path in args.paths]) if args.paths else ""
+    base = " ".join(part for part in ("ao person-review", f"--by {shlex.quote(person['by'])}", scope) if part)
+    print(f"\n{C['b']}what a reviewer would be handed{C['reset']}  {evidence['diff_digest']}")
+    print(f"  boundary: {A.review_header_value(boundary)}")
+    print(f"  {C['dim']}nothing was recorded; judge the diff above against the boundary, then record the verdict on "
+          f"exactly these bytes:{C['reset']}")
+    print(f"  {base} --verdict APPROVED --digest {short}")
+    print(f"  {base} --verdict NEEDS_CHANGES --digest {short} --findings <file>")
+    print(f"  {C['dim']}a findings file holds one finding a line: - [BLOCKER|HIGH|MEDIUM|LOW] file:line - what "
+          f"breaks; only BLOCKER and HIGH decide{C['reset']}")
+
+
+def _person_answer(verdict, path):
+    """(the answer a person's verdict and findings make, in the reviewer's schema, None), or (None, why not).
+
+    Counts are read from the findings, never typed, and they decide as a model's do: an
+    approval with a BLOCKER or HIGH finding is refused, and so is a rejection naming none.
+    Lines that are not findings are kept indented, so no line of the file reads as a verdict.
+    """
+    lines = []
+    if path:
+        try:
+            with open(path, "rb") as fh:
+                data = fh.read(PERSON_FINDINGS_BYTES + 1)
+        except OSError as exc:
+            return None, f"cannot read {path}: {exc}"
+        if len(data) > PERSON_FINDINGS_BYTES:
+            return None, f"the findings are over {PERSON_FINDINGS_BYTES} bytes"
+        lines = [line.rstrip() for line in data.decode(UTF8, "replace").splitlines() if line.strip()]
+    counts = dict.fromkeys(("BLOCKER", "HIGH", "MEDIUM", "LOW"), 0)
+    kept = []
+    for line in lines:
+        found = PERSON_FINDING.match(line.strip())
+        if found:
+            counts[found.group(1)] += 1
+            kept.append(line.strip())
+        else:
+            kept.append("    " + line)
+    blocking = counts["BLOCKER"] + counts["HIGH"]
+    if verdict == "APPROVED" and blocking:
+        return None, (f"an approval with {blocking} BLOCKER or HIGH finding(s) is not one: only those decide, "
+                      "and they make it NEEDS_CHANGES")
+    if verdict == "NEEDS_CHANGES" and not blocking:
+        return None, "NEEDS_CHANGES names what must change: --findings with at least one - [BLOCKER] or - [HIGH] line"
+    return "\n".join([f"VERDICT: {verdict}"] + [f"{key}: {value}" for key, value in counts.items()] + kept), None
+
+
+def _person_range(root, commits):
+    """A landed range as `<full id>..<full id>`, so catch-up finds a person's review of exactly its waiver's range.
+
+    `ao catchup --plan` names ranges by their first twelve characters, and catch-up records
+    and looks reviews up by the whole ids. Anything else is passed on as given.
+    """
+    text = str(commits)
+    start, dots, end = text.partition("..")
+    if dots != ".." or not start or not end or end.startswith((".", "-")) or start.startswith("-"):
+        return text
+    full = []
+    for side in (start, end):
+        try:
+            full.append(A._git_output(root, "rev-parse", "--verify", "--quiet", f"{side}^{{commit}}",
+                                      timeout=30).decode("ascii").strip())
+        except (RuntimeError, UnicodeError):
+            return text
+    return f"{full[0]}..{full[1]}" if all(A.re.fullmatch(r"[0-9a-f]{40,64}", sha) for sha in full) else text
+
+
+def cmd_person_review(cfg, args):
+    """A person reads the diff a reviewer would be handed and records the verdict (REVIEW-TIERS).
+
+    The third review tier, for whoever runs a single harness and wants no model of the
+    implementer's family to judge its work. Without --verdict it shows the staged candidate's
+    diff - or a landed range's, with --commits - and the digest of those bytes, and records
+    nothing. With --verdict and that digest it records a review bound to the candidate exactly
+    as a model's is, so `ao commit-ok` grants on it as it does on any; a range's review is what
+    `ao catchup` closes a waiver on. The candidate must still be the bytes shown.
+
+    It is a person's command, as `ao waive` and `ao collect-review` are: ao cannot know that no
+    agent typed it. So --by names a person and never an agent or a role, the login and whether a
+    terminal was attached are recorded beside the name, and no grant ao checks admits the command.
+    A capability-matrix project records reviews only from its declared bindings.
+    """
+    from types import SimpleNamespace
+    root = cfg["root"]
+    if M.is_strict(cfg):
+        print(f"{C['red']}refused{C['reset']}: a capability-matrix project records reviews only from its declared "
+              "bindings")
+        return 2
+    by = (getattr(args, "by", None) or "").strip()
+    if not by or not by.isprintable() or len(by) > 80:
+        print("--by is required: the person who reads the diff, in one line of at most 80 characters")
+        return 2
+    if by.lower() in _agent_names(cfg):
+        print(f"--by names an agent or a role ({by}); a person's review is a person's act")
+        return 2
+    person = {"by": by}
+    verdict = getattr(args, "verdict", None)
+    if verdict:
+        if not (getattr(args, "digest", None) or "").strip():
+            print("--digest is required with --verdict: the digest ao showed beside the diff you read")
+            return 2
+        out, problem = _person_answer(verdict, getattr(args, "findings", None))
+        if problem:
+            print(f"{C['red']}refused{C['reset']}: {problem}")
+            return 2
+        user, interactive = A._login_and_terminal()
+        person.update(verdict=verdict, digest=args.digest, out=out, user=user, interactive=interactive)
+    elif getattr(args, "digest", None) or getattr(args, "findings", None):
+        print("--digest and --findings record a verdict: give --verdict APPROVED or NEEDS_CHANGES with them")
+        return 2
+    commits = _person_range(root, args.commits) if getattr(args, "commits", None) else None
+    boundary, waived = getattr(args, "boundary", None), None
+    if commits:
+        # A waived range's review is the waived slice's, as catch-up records its own (#49).
+        try:
+            waiver = next((item["waiver"] for item in A.review_waiver_ranges(root)
+                           if item.get("landed") and f"{item['start']}..{item['end']}" == commits), None)
+        except Exception:
+            waiver = None
+        if waiver:
+            waived = waiver.get("slice")
+            boundary = boundary or f"waived review for {waiver.get('slice')}: {waiver.get('why')}"
+    return cmd_review(cfg, SimpleNamespace(boundary=boundary, paths=getattr(args, "paths", None), commits=commits,
+                                           person=person, range_slice=waived))
+
+
+def _person_range_review(root, cfg, commits):
+    """The newest recorded person's review of exactly this landed range, when ao can still stand on it; else None.
+
+    A catch-up closes a waiver on it (REVIEW-TIERS): a person is of no model family, so a
+    person's review holds whatever family wrote the range. It stands only while its artefact
+    is the file ao recorded, its diff is still the range's, and its person is no agent's name.
+    """
+    import hashlib
+    from . import tiers as T
+    from .storage import read_chained_jsonl
+    rows = [row for row in read_chained_jsonl(A.review_ledger_path(root), A.REVIEW_CHAIN)
+            if isinstance(row, dict) and row.get("kind") == "commit-range" and row.get("commits") == commits
+            and row.get("tier") == T.PERSON and row.get("verdict") in REVIEWER_VERDICTS]
+    if not rows:
+        return None
+    row = rows[-1]
+    try:
+        with open(os.path.join(root, cfg["reviews"], str(row.get("artefact"))), "rb") as fh:
+            data = fh.read()
+        diff = A._git_output(root, "diff", "--binary", "--full-index", "--no-ext-diff", commits, "--", timeout=60)
+    except (OSError, RuntimeError):
+        return None
+    if "sha256:" + hashlib.sha256(data).hexdigest() != row.get("sha256"):
+        return None
+    evidence = A.review_evidence(data.decode(UTF8, "replace")) or {}
+    tier, _ = _recorded_review_tier(cfg, evidence, row.get("reviewer"))
+    if tier != T.PERSON or evidence.get("diff_digest") != "sha256:" + hashlib.sha256(diff).hexdigest():
+        return None
+    return dict(row, person=evidence.get("person"))
 
 
 # ---- the review pipeline: submitted and collected, never waited on (#27) ----------------
@@ -1713,7 +2043,7 @@ def cmd_review_run(cfg, rid):
         verdict = (newest or {}).get("verdict")
         state.update(state="finished" if verdict in REVIEWER_VERDICTS else "unavailable" if code == 3 else "failed",
                      exit=code, verdict=verdict, artefact=(newest or {}).get("artefact"),
-                     finished_at=int(time.time()))
+                     tier=(newest or {}).get("tier"), finished_at=int(time.time()))
         _write_review_state(root, state)
         return code
     finally:
@@ -1747,8 +2077,10 @@ def cmd_review_collect(cfg, args):
             print("nothing finished to collect" + (f"; in flight: {', '.join(flying)}" if flying else ""))
             return 1
         state = done[0]
+    from . import tiers as T
     print(f"{C['b']}{state['id']}{C['reset']}  {state.get('state')}  slice {state.get('slice')}  "
-          f"verdict {state.get('verdict') or '—'}")
+          f"verdict {state.get('verdict') or '—'}"
+          + (f"  {C['yellow']}{T.label(state.get('tier'))}{C['reset']}" if T.weaker(state.get("tier")) else ""))
     if state.get("artefact"):
         print(f"  review: {cfg.get('reviews', 'semantic-review')}/{state['artefact']}")
     if state.get("reason"):
@@ -1760,7 +2092,8 @@ def cmd_review_collect(cfg, args):
 
 
 def cmd_reviews(cfg, args):
-    """Every submitted review: its state, its slice, how long it has run, and its verdict."""
+    """Every submitted review: its state, its slice, how long it has run, its verdict, and a weaker tier's label."""
+    from . import tiers as T
     root = cfg["root"]
     states = _review_states(root)
     if not states:
@@ -1774,6 +2107,7 @@ def cmd_reviews(cfg, args):
             shown = "lost"                     # its runner is gone and wrote no result
         print(f"  {state['id']}  {shown:<11} {str(state.get('slice') or '—'):<18} "
               f"{_elapsed(ended - state.get('submitted_at', ended)):>8}  {state.get('verdict') or ''}"
+              f"{'  ' + T.label(state.get('tier')) if T.weaker(state.get('tier')) else ''}"
               f"{'  collected' if state.get('collected_at') else ''}")
     return 0
 
@@ -1807,6 +2141,8 @@ def cmd_review(cfg, args):
     strict = M.is_strict(cfg)
     # An answer a person carried from a stand-in session; set only by collect-review (#75).
     carried = getattr(args, "carried", None)
+    # A person reading the diff and recording the verdict; set only by person-review (REVIEW-TIERS).
+    person = getattr(args, "person", None)
     # Who wrote a waived range under retrospective review; set only by catchup (#65).
     author = getattr(args, "author", None)
     if author is not None and not _author_families(author):
@@ -1816,19 +2152,19 @@ def cmd_review(cfg, args):
     matrix_resolution = None
     if strict:
         try:
-            matrix_resolution = M.resolve(cfg, require_independent=True,
-                                          author_families=_author_families(author))
+            matrix_resolution = _resolve_matrix(cfg, require_independent=True,
+                                                author_families=_author_families(author))
         except M.MatrixError as exc:
             print(f"{C['red']}{C['b']}CONFIGURATION ERROR{C['reset']}")
             for problem in exc.problems:
                 print(f"  {C['red']}·{C['reset']} {problem}")
             return 2
     else:
-        if not rv.get("argv") and not carried and _waiting_reviewer(cfg):
+        if not rv.get("argv") and not carried and not person and _waiting_reviewer(cfg):
             # A reviewer named while a slice ran holds the role once that slice leaves (OCT1-FIXES).
             print(f"{C['yellow']}No reviewer holds the role yet{C['reset']}{_waiting_reviewer(cfg)}.")
             return 1
-        if not rv.get("argv") and not carried:
+        if not rv.get("argv") and not carried and not person:
             print(f"{C['yellow']}No reviewer configured.{C['reset']} Add to .ao/config.json, or "
                   f"`ao role set reviewer <adapter> --model <model>`:")
             reviewer = (A.profiles().get(A.default_profile()) or {}).get("reviewer") or ""
@@ -1838,13 +2174,12 @@ def cmd_review(cfg, args):
                 example = {"id": "reviewer", "argv": ["<command>", "{prompt}"]}
             print(json.dumps({"reviewer": example}, indent=2))
             print(f"\n{C['dim']}It must not be the implementer. A model reviewing its own")
-            print(f"output shares its own blind spots.{C['reset']}")
+            print("output shares its own blind spots. A person can review the candidate instead:")
+            print(f"ao person-review --by <name>{C['reset']}")
             return 1
-        refused = None if carried else _reviewer_ineligible(cfg, rv, author=author)
+        refused = None if carried or person else _reviewer_ineligible(cfg, rv, author=author)
         if refused:
-            print(f"{C['red']}The reviewer may not review "
-                  f"{'this range' if author is not None else 'this implementer'}:{C['reset']} {refused}. "
-                  "A model reviewing its own output shares its own blind spots.")
+            print(f"{C['red']}refused{C['reset']}: {_tier_refusal(refused, author)}")
             return 2
 
     candidate, scope, included = None, None, []
@@ -1940,6 +2275,17 @@ def cmd_review(cfg, args):
     if source:
         evidence["boundary_file"] = {key: source[key] for key in ("file", "commit", "sha256", "changed")}
     evidence["measured_by"] = A.measured_by()
+    if person:
+        # A person reads the bytes a reviewer would be handed and records a verdict on exactly
+        # those: shown first with their digest, recorded only when the digest still matches, so
+        # a candidate restaged while the person read is never the one approved (REVIEW-TIERS).
+        if not person.get("verdict"):
+            _show_person_review(person, diff, evidence, boundary, args)
+            return 0
+        if not _digest_read(person.get("digest"), evidence["diff_digest"]):
+            print(f"{C['red']}refused{C['reset']}: the diff is not the one you read - it is "
+                  f"{evidence['diff_digest']} now; read it again with ao person-review --by <name>")
+            return 1
 
     # The candidate is what may land; the context is committed source it is judged
     # against and enters neither the diff nor the digest (#97).
@@ -1970,8 +2316,8 @@ def cmd_review(cfg, args):
         # Legacy selection remains byte-for-byte compatible when no matrix exists,
         # except that a fallback running as the implementer is never spawned (#60).
         sessions = _implementer_sessions(cfg)
-        chain = [rv]
-        for fallback in rv.get("fallbacks") or []:
+        chain = [] if person else [rv]
+        for fallback in [] if person else rv.get("fallbacks") or []:
             if not fallback.get("argv"):
                 continue
             refused = _reviewer_ineligible(cfg, fallback, sessions, author=author)
@@ -2004,7 +2350,9 @@ def cmd_review(cfg, args):
     prompt = REVIEW_PROMPT.format(boundary=statement) \
         + size_note + f"\n\n{REVIEW_CANDIDATE_MARKER}\n" + diff
     budget = _review_context_budget(prompt, bound, share)
-    if candidate is not None:
+    if person:
+        context = None                          # a person reads the candidate, and what else they choose
+    elif candidate is not None:
         limits = [path.rstrip("/") for path in (scope.get("paths") or [])]
         reviewed = [path for path in candidate["changed_paths"]
                     if not limits or any(path == s or path.startswith(s + "/") for s in limits)]
@@ -2016,7 +2364,14 @@ def cmd_review(cfg, args):
     if held and ((claims or {}).get("inlined", 0) < (claims or {}).get("commits", 0) or (context or {}).get("omitted")):
         print(f"{C['dim']}claims and context were held to one argument's worth, {REVIEW_PROMPT_ARG_BYTES} bytes: "
               f"{held} takes its prompt in its argument alone{C['reset']}")
-    if carried:
+    if person:
+        # A person read the diff and gave the verdict; ao records who, and what it can check about them.
+        from . import tiers as T
+        route = {"id": f"person:{person['by']}", "family": T.PERSON_FAMILY}
+        invocation = {"used": route, "used_position": 0, "failures": {}, "labels": {}, "chain": [route],
+                      "attempt": {"ok": True, "out": person["out"], "binary": "person"}}
+        evidence.update(transport="person", person={key: person.get(key) for key in ("by", "user", "interactive")})
+    elif carried:
         # A person carried this answer from a session ao could not reach (#75).
         invocation = {"used": carried["route"], "used_position": 0, "failures": {}, "labels": {},
                       "chain": [carried["route"]],
@@ -2122,9 +2477,17 @@ def cmd_review(cfg, args):
     reviewer_executable = invocation["attempt"].get("binary") or "reviewer"
     rv = used
     # A fallback is recorded as one; it cannot supersede a rejection (#63). An answer
-    # a person carried from a stand-in session is not the configured reviewer either (#65).
-    fallback_used = True if carried else (
+    # a person carried from a stand-in session is not the configured reviewer either (#65),
+    # and neither is a person's own review: a rejection of the same bytes still stands.
+    fallback_used = True if carried or person else (
         used["index"] > 0 if strict else used is not (cfg.get("reviewer") or {}))
+    # The tier the review stands in goes wherever the review does (REVIEW-TIERS). A stand-in's
+    # answer has none: which model answered is the person's word, not ao's.
+    from . import tiers as T
+    review_tier = T.PERSON if person else None if carried else used.get("tier") if strict \
+        else _review_tier(cfg, used, author=author)[0]
+    if review_tier:
+        evidence["review_tier"] = review_tier
     if strict:
         M.add_evidence_context(
             evidence, matrix_resolution, strict_attempts,
@@ -2289,6 +2652,7 @@ def cmd_review(cfg, args):
             f"- reviewer: `{A.review_header_value(rv.get('id') or reviewer_executable)}`  "
             f"family: `{A.review_header_value(rv.get('family', '?'))}`"
             + ("  (carried by a person from a session ao did not run)" if carried
+               else f"  (a person read the diff: {A.review_header_value(_person_line(person))})" if person
                else "  (fallback — the primary reviewer was unavailable)" if rv is not primary else "")
         )
         implementer_line = _implementer_line(
@@ -2300,6 +2664,7 @@ def cmd_review(cfg, args):
     header = [f"# Review {name}", "",
               A.review_evidence_line(evidence),
               reviewer_line] + _tool_review_lines(evidence) + [
+              f"- tier: {T.label(review_tier)}" if review_tier else "- tier: not established",
               implementer_line,
               f"- tree: `{A.tree_digest(root, cfg)}`",
               f"- boundary: {A.review_header_value(boundary)}"]
@@ -2335,6 +2700,11 @@ def cmd_review(cfg, args):
           f"BLOCKER {sev['BLOCKER']} · HIGH {sev['HIGH']} · "
           f"MEDIUM {sev['MEDIUM']} · LOW {sev['LOW']}")
     print(f"{C['dim']}{cfg['reviews']}/{name}{C['reset']}")
+    if T.weaker(review_tier):
+        print(f"{C['yellow']}tier{C['reset']}  {T.label(review_tier)}")
+    elif review_tier is None and not carried and not strict:
+        print(f"{C['yellow']}tier{C['reset']}  not established: no implementer is configured, so the reviewer "
+              "was compared with nobody — ao doctor")
     if verdict != "APPROVED":
         for line in out.split("\n"):
             if line.strip().startswith("- ["):

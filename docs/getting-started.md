@@ -14,7 +14,18 @@ ao init --profile claude-kiro        # or claude-claude
 
 `ao init` writes `.ao/` (config, gates, board), the mailbox, the playbook and the MCP
 registration, and the `.ao-project` marker, which you commit: it is what turns enforcement on.
-It refuses when no reviewer answers or when the quick gates exercise none of your code.
+It refuses when no reviewer answers, when the reviewer is of the implementer's own model family,
+or when the quick gates exercise none of your code.
+
+With one harness for both roles, `claude-claude` is refused until you choose a
+[review tier](roles.md#review-tiers): another model of the same family, labeled as weaker
+independence wherever its reviews show, or no model reviewer at all and a person reviewing each
+candidate.
+
+```bash
+ao init --profile claude-claude --review-tier same-family --by <name>
+ao init --profile claude-claude --review-tier person
+```
 
 ## 2. Wire what makes the guarantees hold
 
@@ -23,8 +34,9 @@ ao hooks install                     # the pre-commit hook that refuses unauthor
 git add .ao-project && git commit -m "adopt ao"
 ```
 
-Name a reviewer from another model family than the implementer in `.ao/config.json`
-(`reviewer.argv`): a reviewer that is the same actor is refused ([roles](roles.md)).
+The reviewer is another model family than the implementer's, another model of its family where
+a person opted in, or a person with `ao person-review --by <name>`; a reviewer that is the same
+actor, or of no [review tier](roles.md#review-tiers), is refused.
 
 ## 3. Prove it
 
@@ -36,8 +48,9 @@ Three checks, each run, not described:
 
 - **the hook refuses an unauthorised commit** — Git runs the active pre-commit hook against
   a synthetic candidate and it must refuse;
-- **the reviewer answers and is another actor** — it must echo a nonce, and it must not be
-  the implementer's engine;
+- **the reviewer answers and is another actor** — it must echo a nonce, and a review tier must
+  admit it; a same-family reviewer is proven and labeled, and a project reviewed only by a person
+  has no reviewer to prove;
 - **a throwaway slice lands end to end** — a one-line change in a temporary worktree goes
   through `ao verify`, `ao review` and `ao commit-ok`. Nothing is committed, the worktree is
   removed, and its review is kept under `~/.ao/archive/<project>/`.

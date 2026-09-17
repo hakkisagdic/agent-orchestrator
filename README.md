@@ -86,8 +86,14 @@ scope is the one authority an implementer must not have.
 ## Setup, step by step
 
 1. `pip install ao-orchestrator` (or `uv tool install ao-orchestrator`, or the Homebrew tap).
-2. In the repository: `ao init --profile claude-kiro` (or `claude-claude`). Writes `.ao/`, the mailbox,
-   the playbook, and registers the MCP server for the agents it detects.
+2. In the repository: `ao init --profile claude-kiro`. Writes `.ao/`, the mailbox,
+   the playbook, and registers the MCP server for the agents it detects. With one harness for every role,
+   `claude-claude` needs a review tier, because its reviewer is of the implementer's own model family:
+   `ao init --profile claude-claude --review-tier same-family --by <name>` lets another model of that
+   family review, and every such review says `same family: weaker independence`;
+   `ao init --profile claude-claude --review-tier person` configures no model reviewer, and a person
+   reviews each candidate with `ao person-review --by <name>`. A reviewer of another family stays the
+   default and the strongest ([review tiers](docs/roles.md#review-tiers)).
 3. **Wire the rules.** ao does not write your `CLAUDE.md` / `AGENTS.md`: paste the printed pointer
    there, or re-run `ao init --rules`. Until then `ao doctor` says `rules-not-wired` — the playbook
    is written but no agent reads it. (A Claude Code skill file is discovered on its own.)
@@ -121,7 +127,7 @@ scope is the one authority an implementer must not have.
 | `ao hooks [status|install|uninstall] [--allow-shared-hooks]` / `ao push allow` | resolve Git's effective hook path; each role is independent, and shared/external/global mutations require explicit command-wide authorization |
 | `ao skill install` / `ao skill show` | the playbook (roles, loop, authority, protocol, alarms, every command) rendered for the agents this repo uses: Claude skill, Kiro steering, AGENTS.md |
 | `ao remove --yes [--allow-shared-hooks]` | two-phase removal: delete and commit `.ao-project` while enforcement remains active, then remove AO state after HEAD and index no longer contain it; foreign/protected hooks stay untouched. The second phase takes off the project's scheduled jobs and exactly its own files in `~/.ao`, lists each by name in the dry run, and exits 1 naming what it could not remove ([watchdog.md](docs/watchdog.md)) |
-| `ao init --profile claude-kiro|claude-claude` | write role blocks and exact `.ao-project` enrollment marker without staging it ([profiles.md](docs/profiles.md)) |
+| `ao init --profile claude-kiro|claude-claude [--review-tier same-family|person]` | write role blocks and exact `.ao-project` enrollment marker without staging it; a single-harness profile chooses a review tier ([profiles.md](docs/profiles.md)) |
 | `ao doctor --check` | quiet doctor for a scheduler: one line per problem, exit 1, alarms raised — installed as a 15-minute launchd job by `ao watchdog install` |
 | `ao email setup` / `ao email test` | the red alarm channel: e-mail via formsubmit.co, no server ([alarms.md](docs/alarms.md)) |
 | `ao alarms` / `ao alarms test --level red` | live alarm episodes and their level; test rings every channel |
@@ -136,6 +142,7 @@ scope is the one authority an implementer must not have.
 | `ao ask` · `ao answer` · `ao decisions` | questions answerable in one tap; free text always last; an answer must be an offered key, and `ao answer <D-id> <key> --change` replaces one while the first stays on the record |
 | `ao note` | an architect message into the mailbox, through the tool |
 | `ao review` | review the tree with an actor that did not write it |
+| `ao person-review --by <name>` | a person reads the staged diff, then records `--verdict APPROVED` or `NEEDS_CHANGES` with the `--digest` it showed; bound to the candidate like any review, labeled `person review`, never an agent's command |
 | `ao review --commits <range>` | review landed work after the fact; exit 3 means no reviewer could review (never a verdict), fallbacks in `reviewer.fallbacks` ([roles.md](docs/roles.md)) |
 | `ao handoff` | write and send everything a successor needs |
 | `ao a2a-mcp serve` | reach A2A agents from an MCP-only client |

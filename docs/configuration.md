@@ -47,6 +47,7 @@ machine setting written into a project.
 | `review.lenses` | `declared` | project | declared: lenses only where a slice names them; auto: defaults from what the candidate touches; off: none |
 | `review.stall_minutes` | `10` | project | minutes a reviewer may spend no CPU before it is killed as stalled, its partial answer kept |
 | `review.context_bytes` | `100000` | project | bytes of commit-message claims and read-only context a review prompt may carry beside its diff, where no reviewer route holds it to one argument |
+| `review.same_family` | `refused` | project | refused: a reviewer of the implementer's model family is refused; labeled: another model of that family may review, labeled weaker independence, once a person opts in with --by, on the record |
 | `hunter.every_hours` | `24` | project | hours between bug hunts the watchdog starts, when the hunter feature is on |
 | `hunter.files_per_run` | `8` | project | tracked files one hunt reads, going round the tree run by run |
 | `hunter.bytes_per_run` | `60000` | project | bytes of source one hunt reads |
@@ -99,6 +100,16 @@ prompt in its argument - holds them to one argument's worth: 120 KB with the dif
 The two filter settings are machine settings on purpose: they decide which programs
 `ao doctor` may run, unattended, and a project's own files are writable by the agents it
 governs ([gates.md](gates.md#a-filters-exclusions-are-proved-not-trusted)).
+
+`review.same_family` weakens a guarantee, so it is a person's act on one project, on the
+record, as a waiver is. `ao config set review.same_family labeled --by <name>` (and `unset`)
+needs `--by` naming a person, never an agent or a role, refuses `--machine`, and appends the
+name, the login and whether a terminal was attached to `.ao/ledger/opt-ins.jsonl`. The
+setting is in force only while the project's own `.ao/config.json` reads `labeled` and the
+newest record says the same: a value written into the file by hand - which an agent that edits
+files can do - or into the machine's settings is not, and `ao doctor` names it. What each value
+means is in [review tiers](roles.md#review-tiers); `ao init --review-tier same-family --by <name>`
+opts a new project in.
 
 An implementer whose tool grant admits `ao config set` could lengthen or shorten what
 governs its own review, and `ao doctor` names such a grant. Credentials - the e-mail relay

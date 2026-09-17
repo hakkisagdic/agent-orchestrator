@@ -1073,9 +1073,17 @@ def cmd_prove(cfg, args):
                     None if probe["installed"] else f"{_hook_probe_text(probe)} — {hook_fix}"))
     reviewer = _reviewer_probe(cfg)
     reviewer_ok = reviewer["ok"] and reviewer["configured"]
-    results.append(("reviewer answers and is another actor", reviewer_ok, None if reviewer_ok else
-                    f"{_reviewer_probe_text(reviewer)} — name a reviewer of another model family in .ao/config.json "
-                    "(docs/roles.md)"))
+    # What would fix it names the review tiers; a reviewer of a weaker tier is proven, and labeled (REVIEW-TIERS).
+    from . import tiers as T
+    if reviewer_ok:
+        note = f"tier: {T.label(reviewer.get('tier'))}" if T.weaker(reviewer.get("tier")) else None
+    elif not reviewer["configured"]:
+        note = f"not configured — {T.WAYS_FORWARD} (docs/roles.md)"
+    elif reviewer.get("kind") == "configuration-error":
+        note = f"{_reviewer_probe_text(reviewer)} (docs/roles.md)"
+    else:
+        note = f"{_reviewer_probe_text(reviewer)} — name a reviewer that answers in .ao/config.json (docs/roles.md)"
+    results.append(("reviewer answers and is another actor", reviewer_ok, note))
     if getattr(args, "no_review", False):
         results.append(("a throwaway slice lands end to end", False, "skipped with --no-review: not proven"))
     elif not reviewer_ok:
@@ -1224,6 +1232,13 @@ def cmd_doctor(cfg, args):
         f"reviewer probe  {probe_tone}{_reviewer_probe_text(reviewer_probe)}"
         f"{C['reset']}"
     )
+    # The tier the next review would stand in, and whether any does (REVIEW-TIERS).
+    from . import tiers as T
+    tier_text, tier_problems = _active_review_tier(cfg)
+    strongest = tier_text.startswith(T.LABELS[T.INDEPENDENT]) and not tier_problems
+    print(f"review tier     {C['green'] if strongest else C['yellow']}{tier_text}{C['reset']}")
+    for _, text in tier_problems:
+        print(f"                {C['yellow']}{text}{C['reset']}")
     print(f"review budget   {C['dim']}{_review_budget_text(_review_timeout(cfg))}{C['reset']}")
     guard = _implementer_commit_guard(cfg)
     if guard:

@@ -110,6 +110,12 @@ Inline `reviewer.family` and fallback `family` fields cannot change this: family
 comes only from the model declaration. Ineligible routes are never spawned. `ao`
 continues in declaration order to the first independently eligible fallback.
 
+The one exception is the same-family [review tier](roles.md#review-tiers): once a
+person has opted the project in, on the record (`review.same_family` `labeled`), a
+binding whose bound model has the implementer's family and a different `argument`
+is eligible, and its reviews are labeled `same family: weaker independence`. The
+implementer's own binding, and a binding of the same model argument, never are.
+
 A retrospective review of a waived range (`ao catchup`) reviews whoever wrote the
 range, who need not hold the implementer binding by then. Its independence is judged
 against the family that wrote it instead: a binding whose bound model has that family

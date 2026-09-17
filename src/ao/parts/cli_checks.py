@@ -87,6 +87,54 @@ def _implementer_commit_guard(cfg):
     return f"{impl['adapter']}'s grant admits no hook bypass; ao commit and the hook hold commits"
 
 
+def _active_review_tier(cfg):
+    """(the review tier a review would stand in now, [(key, problem)]), from the configuration alone (REVIEW-TIERS).
+
+    No reviewer is run. A project with no implementer to compare a reviewer with passed
+    every check while checking nothing, and a reviewer no tier admits was named only by
+    a probe: both are problems now, and so is an opt-in written into a config by hand
+    with no person's record, which is not in force.
+    """
+    from . import tiers as T
+    root = cfg["root"]
+    problems = []
+    value, source, _ = S.resolve(cfg, "review.same_family")
+    opt_in = _same_family_opt_in(cfg)
+    if value == T.LABELED and opt_in is None:
+        where = ".ao/config.json" if source == "project" else f"the {source} settings"
+        problems.append(("review-opt-in", f"review.same_family is labeled in {where}, but no person's opt-in is "
+                                          "recorded for this project, so a reviewer of the implementer's family "
+                                          "is still refused — ao config set review.same_family labeled --by <name>"))
+    opted = f"; opted in by {_person_line(opt_in)}" if opt_in is not None else ""
+    if M.is_strict(cfg):
+        try:
+            eligible = [route for route in _resolve_matrix(cfg, require_independent=False)["reviewers"]
+                        if route["eligible"]]
+        except M.MatrixError:
+            return "not established: the capability matrix cannot be resolved", problems
+        if not eligible:
+            return "none: no reviewer binding may review the implementer's work", problems
+        tier = eligible[0].get("tier")
+        return f"{T.label(tier)} ({eligible[0]['identity']['binding']}){opted if tier == T.SAME_FAMILY else ''}", \
+            problems
+    reviewer = cfg.get("reviewer") or {}
+    if not cfg.get("implementer") and os.path.exists(os.path.join(root, ".ao", "config.json")):
+        problems.append(("no-implementer", "no implementer is configured, so no reviewer can be shown to be of "
+                                           "another model family than the author and no review tier holds — "
+                                           f"ao init --profile {A.default_profile()}, or an implementer in "
+                                           ".ao/config.json"))
+    if not reviewer.get("argv"):
+        return ("person review: no model reviewer is configured, and each candidate lands on "
+                "ao person-review --by <name>" + _waiting_reviewer(cfg)), problems
+    tier, refused = _review_tier(cfg, reviewer)
+    if refused:
+        problems.append(("review-tier", _tier_refusal(refused)))
+        return f"none: {refused}", problems
+    if tier is None:
+        return "not established: no implementer is configured to compare the reviewer with", problems
+    return f"{T.label(tier)} ({reviewer.get('id') or 'reviewer'}){opted if tier == T.SAME_FAMILY else ''}", problems
+
+
 def doctor_problems(cfg):
     """What `ao doctor --check` acts on: conditions a person must fix, as (key, text)."""
     from .watchdog import wake_error, STATE_DIR
@@ -96,7 +144,7 @@ def doctor_problems(cfg):
     strict_matrix = M.is_strict(cfg)
     if strict_matrix:
         try:
-            matrix_resolution = M.resolve(cfg, require_independent=False)
+            matrix_resolution = _resolve_matrix(cfg, require_independent=False)
         except M.MatrixError as exc:
             out.append(("capability-matrix", "; ".join(exc.problems[:3])))
         else:
@@ -105,6 +153,7 @@ def doctor_problems(cfg):
                     "no-independent-reviewer",
                     "capability matrix reviewer chain has no binding outside the implementer binding and model family",
                 ))
+    out.extend(_active_review_tier(cfg)[1])
     hb = A.heartbeat_age(root)
     if hb is not None and hb > WATCHDOG_SILENT_AFTER:
         out.append(("watchdog-dead", f"watchdog silent for {hb // 60}m — launchctl / ao watchdog status"))
@@ -721,6 +770,23 @@ def cmd_config(cfg, args):
     if S.SETTINGS[key].scope == "machine" and not machine:
         print(f"{key} governs the whole machine; set it with --machine")
         return 2
+    by = (getattr(args, "by", None) or "").strip()
+    if key in S.RECORDED:
+        # A setting that weakens a guarantee is a person's act on one project, on the record (REVIEW-TIERS).
+        if machine:
+            print(f"{key} is a person's choice for one project, recorded there; set it without --machine")
+            return 2
+        if not by:
+            print(f"--by is required: {key} changes what a review must be independent of, and a person "
+                  "changes it on the record")
+            return 2
+        if by.lower() in _agent_names(cfg):
+            print(f"--by names an agent or a role ({by}); changing {key} is a person's act")
+            return 2
+    elif by:
+        print(f"--by records who changed a setting that weakens a guarantee ({', '.join(S.RECORDED)}); "
+              f"{key} is not one")
+        return 2
     if args.action == "set":
         try:
             value = S.parse(key, args.value)
@@ -747,9 +813,16 @@ def cmd_config(cfg, args):
         except OSError as exc:
             print(f"{C['red']}not changed{C['reset']}: {exc}")
             return 1
+        if key in S.RECORDED:
+            # Written after the config: a value with no record is not in force, never the other way round.
+            try:
+                A.record_opt_in(root, key, None if value is S._MISSING else value, by)
+            except Exception as exc:
+                print(f"{C['red']}not recorded{C['reset']}: {exc}; {key} is not in force until it is")
+                return 1
         cfg = dict(A.load_config(root), root=root)
     value, source, _ = S.resolve(cfg, key)
-    print(f"{key} = {value!r} ({source})")
+    print(f"{key} = {value!r} ({source})" + (f", recorded as set by {by}" if key in S.RECORDED else ""))
     return 0
 
 
@@ -795,7 +868,11 @@ def cmd_features(cfg, args):
 
 
 def _agent_names(cfg):
-    """Names that belong to agents or roles, never to the person a waiver must name."""
+    """Names that belong to agents or roles, never to the person a waiver or a person's review must name.
+
+    Every actor in the role table counts, not only those holding a role now: an actor
+    waiting for the next slice is an agent all the same (REVIEW-TIERS).
+    """
     names = {"architect", "implementer", "reviewer", "watchdog", "ao", "agent", "human"}
     for role in ("implementer", "architect"):
         block = cfg.get(role) or {}
@@ -803,6 +880,11 @@ def _agent_names(cfg):
     primary = cfg.get("reviewer") or {}
     names.update(str(route.get("id") or "") for route in [primary] + list(primary.get("fallbacks") or [])
                  if isinstance(route, dict))
+    actors = cfg.get("actors") if isinstance(cfg.get("actors"), dict) else {}
+    for actor, block in actors.items():
+        names.add(str(actor))
+        if isinstance(block, dict):
+            names.update(str(block.get(key) or "") for key in ("id", "name", "adapter", "session"))
     return {name.strip().lower() for name in names if name.strip()}
 
 
@@ -878,7 +960,7 @@ def _catchup_reviewer_note(cfg, author):
     """Why the configured reviewers may not review a range this author wrote, or None; a plan names it early."""
     if M.is_strict(cfg):
         try:
-            M.resolve(cfg, require_independent=True, author_families=_author_families(author))
+            _resolve_matrix(cfg, require_independent=True, author_families=_author_families(author))
         except M.MatrixError as exc:
             return "; ".join(exc.problems[:2])
         return None
@@ -968,6 +1050,11 @@ def cmd_catchup(cfg, args):
     exactly its range, or stays open. A range whose last review decided nothing waits behind
     the rest, and once a review finds the reviewer unavailable the run starts no other. --limit
     bounds the reviews a run starts in the same way: what needs no review is still done.
+
+    A person's review of exactly a waived range (`ao person-review --commits <range>`) closes
+    its waiver with no reviewer started (REVIEW-TIERS): a person is of no model family, so the
+    author-family rule holds whichever family wrote the range. No same-family tier reaches a
+    range: its grant recorded the family that wrote it, never the model.
 
     The exit code says what a run did (CATCHUP-POLISH): 3 when it started reviews and none of
     them decided anything, whatever else it closed; 1 when a close, a ledger or a decision
@@ -1081,6 +1168,28 @@ def cmd_catchup(cfg, args):
                 print(f"  {label}: {rng}, {size}: {claimed}; {proven}; closed by proof, with no reviewer")
                 did += 1
             continue
+        try:
+            person = _person_range_review(root, cfg, f"{item['start']}..{item['end']}")
+        except Exception as exc:
+            person = None
+            print(f"  {C['red']}review ledger cannot be read{C['reset']}: {exc}")
+        if person:
+            # A person is of no model family, so a person's review of exactly this range holds whichever
+            # family wrote it: the waiver closes on it, with no reviewer started (REVIEW-TIERS).
+            who = _person_line(person.get("person"))
+            if plan:
+                print(f"  {label}: {rng}, {size}: {person['verdict']} in a person's review ({who}); a run closes on it")
+            elif close(w["id"], f"reviewed by a person: {person['verdict']}",
+                       {"review": person.get("artefact"), "person": person.get("person")}):
+                print(f"  {label}: {rng}, {size}: closed on a person's review ({who}): {person['verdict']}")
+                did += 1
+                if person["verdict"] == "NEEDS_CHANGES":
+                    try:
+                        _catchup_mail(root, cfg, w, rng, person.get("artefact"))
+                    except OSError as exc:
+                        print(f"  {C['red']}the architect's decision request was not written{C['reset']}: {exc}")
+                        failed.append(w["id"])
+            continue
         author = _catchup_author(item, statement)
         families = _author_families(author)
         if not families:
@@ -1089,7 +1198,8 @@ def cmd_catchup(cfg, args):
             landed_by = " ".join(str(author[key]) for key in ("role", "actor") if author.get(key))
             print(f"  {label}: {rng}, {size}: the family of the model that wrote it is not established"
                   + (f" (landed by the {landed_by})" if landed_by else "")
-                  + "; a person names it with --author-family <family> --by <name>; keeping it open")
+                  + "; a person names it with --author-family <family> --by <name>, or reviews the range: "
+                    "ao person-review --commits <range> --by <name>; keeping it open")
             continue
         if unavailable:
             # Every review after one that found the reviewer unavailable waits on it too; each

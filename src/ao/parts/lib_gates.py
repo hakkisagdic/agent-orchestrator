@@ -1395,6 +1395,9 @@ def record_review(root, name, data, evidence, verdict, reviewer=None, fallback=F
     }
     if row["kind"] == "commit-range":
         row["commits"] = evidence.get("commits")
+    if evidence.get("review_tier"):
+        # The tier the review stands in, so a grant, `ao reviews` and `ao stats` label it (REVIEW-TIERS).
+        row["tier"] = evidence["review_tier"]
     return append_chained_jsonl(review_ledger_path(root), row, REVIEW_CHAIN)
 
 

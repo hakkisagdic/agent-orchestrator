@@ -445,6 +445,8 @@ def slice_outcomes(root, project=None):
             "started_at": started, "landed_at": landed,
             "hours": round((landed - started) / 3600, 2) if landed and started and landed >= started else None,
             "size": size, "defect_found": bool(retro) or slice_id in fixed,
+            # The tier of the review the grant stood on, so weaker independence is counted (REVIEW-TIERS).
+            "tier": linked.get("tier"),
         }
     return list(out.values())
 
@@ -466,6 +468,8 @@ def outcome_stats(outcomes):
         "product_lines": spread((o["size"]["kinds"]["product"]["added"] + o["size"]["kinds"]["product"]["deleted"])
                                 if isinstance(o.get("size"), dict) else None for o in outcomes),
         "defects_pct": round(100 * sum(o["defect_found"] for o in outcomes) / len(outcomes)) if outcomes else None,
+        "tiers": {tier: sum(1 for o in outcomes if o.get("tier") == tier)
+                  for tier in sorted({o.get("tier") for o in outcomes if o.get("tier")})},
     }
 
 

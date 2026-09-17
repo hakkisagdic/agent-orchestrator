@@ -333,13 +333,24 @@ def _architect_argv(adapter_id):
 
 
 def _profile_config(root, args, base):
-    """Return the profile's intended config and added block names without writing."""
+    """Return the profile's intended config and added block names without writing.
+
+    --review-tier chooses the tier a single harness reviews at (REVIEW-TIERS): `person` writes no
+    model reviewer, and `same-family` writes review.same_family labeled, which init records as the
+    person's opt-in once it writes.
+    """
     cfg = dict(base) if isinstance(base, dict) else {}
     presets = A.profiles()
     prof = presets.get(getattr(args, "profile", None) or "")
     impl_adapter = getattr(args, "implementer", None) or (prof or {}).get("implementer")
+    tier = getattr(args, "review_tier", None)
+    opted = []
+    if tier == "same-family" and S.lookup(cfg, "review.same_family") != "labeled":
+        cfg["review"] = dict(cfg["review"]) if isinstance(cfg.get("review"), dict) else {}
+        S.assign(cfg, "review.same_family", "labeled")
+        opted.append("review.same_family labeled")
     if not impl_adapter and not prof:
-        return cfg, []
+        return cfg, opted
     roles = prof or presets.get(A.default_profile()) or {}
     added = []
     if "implementer" not in cfg:
@@ -353,7 +364,8 @@ def _profile_config(root, args, base):
             block["effort"] = args.effort
         cfg["implementer"] = block
         added.append("implementer")
-    if "reviewer" not in cfg:
+    if "reviewer" not in cfg and tier != "person":
+        # With --review-tier person no model reviews: a person reviews each candidate.
         reviewer = roles.get("reviewer")
         rmodel = getattr(args, "reviewer_model", None) or _models(reviewer).get("review")
         cfg["reviewer"] = dict(_reviewer_block(reviewer, rmodel),
@@ -365,7 +377,7 @@ def _profile_config(root, args, base):
                             "argv": _architect_argv(architect),
                             "_why": "resumable and woken only into absence; read-only tools plus ao"}
         added.append("architect")
-    return cfg, added
+    return cfg, added + opted
 
 
 def _apply_profile(root, args):
@@ -414,6 +426,22 @@ def _planned_runtime_config(root, cfg):
     return runtime
 
 
+def _init_tier_hints(args):
+    """How `ao init` goes on after its probe refused a reviewer no review tier admits (REVIEW-TIERS)."""
+    profile = getattr(args, "profile", None)
+    base = f"ao init --profile {profile}" if profile else " ".join(
+        ["ao init"] + ([f"--implementer {args.implementer}"] if getattr(args, "implementer", None) else []))
+    other = A.default_profile()
+    lines = [f"{C['dim']}or, at init:{C['reset']}"]
+    if other and other != profile:
+        lines.append(f"ao init --profile {other}   a reviewer of another model family: the strongest tier")
+    lines.append(f"{base} --review-tier same-family --by <name>   another model of the same family, labeled "
+                 "weaker independence; a person opts in, on the record")
+    lines.append(f"{base} --review-tier person   no model reviewer: a person reviews each candidate with "
+                 "ao person-review --by <name>")
+    return lines
+
+
 def cmd_init(cfg, args):
     """Put `ao` on a project. Idempotent: existing files are left alone.
 
@@ -458,6 +486,23 @@ def cmd_init(cfg, args):
     if config_problem:
         print(f"{C['red']}init refused{C['reset']}: {_project_refusal(config_problem)}")
         return 1
+    # Opting into the same-family tier is a person's act, on the record, as `ao config set` makes it (REVIEW-TIERS).
+    by = (getattr(args, "by", None) or "").strip()
+    opt_in = None
+    if getattr(args, "review_tier", None) == "same-family":
+        if not by:
+            print(f"{C['red']}init refused{C['reset']}: --by is required with --review-tier same-family: a person "
+                  "opts into weaker independence, on the record")
+            return 1
+        if by.lower() in _agent_names(planned_config):
+            print(f"{C['red']}init refused{C['reset']}: --by names an agent or a role ({by}); opting into "
+                  "same-family review is a person's act")
+            return 1
+        user, interactive = A._login_and_terminal()
+        opt_in = {"value": "labeled", "by": by, "user": user, "interactive": interactive}
+    elif by:
+        print(f"{C['red']}init refused{C['reset']}: --by names the person who opts in with --review-tier same-family")
+        return 1
     # A quick profile that exercises none of the code gives every verify a green it did
     # not earn (#5). Checked while planning, before anything is written.
     detected_gates = _detect_gates(root)
@@ -474,12 +519,17 @@ def cmd_init(cfg, args):
                   "or pass --allow-uncovered-gates")
             return 1
     runtime_cfg = _planned_runtime_config(root, planned_config)
+    if opt_in:
+        runtime_cfg["_same_family_opt_in"] = opt_in
     reviewer_probe = _reviewer_probe(runtime_cfg)
     if not reviewer_probe["ok"]:
         print(
             f"{C['red']}init refused{C['reset']}: reviewer probe "
             f"{_reviewer_probe_text(reviewer_probe)}"
         )
+        if reviewer_probe.get("tier_refused"):
+            for line in _init_tier_hints(args):
+                print(f"  {line}")
         return 1
 
     # The probe may take time. Revalidate both planning inputs immediately
@@ -549,6 +599,16 @@ def cmd_init(cfg, args):
     if config_problem:
         print(f"{C['red']}init refused{C['reset']}: {_project_refusal(config_problem)}")
         return 1
+    if opt_in:
+        try:
+            newest = A.recorded_opt_in(root, "review.same_family")
+            if not newest or newest.get("value") != "labeled":
+                A.record_opt_in(root, "review.same_family", "labeled", opt_in["by"])
+                wrote.append(f".ao/ledger/opt-ins.jsonl (review.same_family labeled by {opt_in['by']})")
+        except Exception as exc:
+            print(f"{C['red']}init stopped{C['reset']}: the opt-in into same-family review could not be recorded "
+                  f"({exc}), so it is not in force: ao config set review.same_family labeled --by <name>")
+            return 1
     put(PROJECT_MARKER, PROJECT_MARKER_BYTES.decode("ascii"))
     marker_problem = _worktree_project_marker_problem(root)
     if marker_problem:

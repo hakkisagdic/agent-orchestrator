@@ -72,7 +72,10 @@ def assignment_problem(actors, roles, repository="tool", hotfix=False):
 
     Roles may rotate per slice on a tool repository. On a product repository the
     architect does not implement, except a hotfix a person names as one. Wherever
-    roles stand, the reviewer is never the implementer's actor or family.
+    roles stand, the reviewer is never the implementer's actor. Whether it may review
+    the implementer's work at all - another family, another model of the same family
+    where a person opted in, or neither - is its review tier, which `ao role set` asks
+    with the rule `ao review` applies (REVIEW-TIERS).
     """
     implementer, reviewer = roles.get("implementer"), roles.get("reviewer")
     if repository != "tool" and not hotfix and implementer and implementer == roles.get("architect"):
@@ -80,9 +83,6 @@ def assignment_problem(actors, roles, repository="tool", hotfix=False):
                 "on a tool repository (repository.kind tool), or name a hotfix with --hotfix")
     if implementer and reviewer and implementer == reviewer:
         return f"the reviewer and the implementer would both be {implementer}; no actor reviews its own work"
-    families = [str((actors.get(actor) or {}).get("family") or "").lower() for actor in (implementer, reviewer)]
-    if all(families) and families[0] == families[1]:
-        return f"the reviewer and the implementer would both be of the {families[0]} family"
     return None
 
 

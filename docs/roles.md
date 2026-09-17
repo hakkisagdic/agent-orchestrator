@@ -81,8 +81,9 @@ ao role swap implementer reviewer    # exchange two roles' actors
 ```
 
 A project without a table gets one from its role blocks the first time a role is set.
-`ao role set` refuses an assignment that breaks separation of duties (the reviewer the same
-actor, or the same declared family, as the implementer). The other roles in the table above
+`ao role set` refuses an assignment that breaks separation of duties: the reviewer the same
+actor as the implementer, or a reviewer no [review tier](#review-tiers) admits, refused in the
+words `ao review` would use. The other roles in the table above
 and the presets below are the shape it grows into; each new role must name the failure it
 catches that no existing role catches.
 
@@ -188,8 +189,74 @@ presets:
 
 `ao` refuses that assignment rather than warning about it. A model reviewing its own work
 shares its own blind spots, and the whole reason for a second agent evaporates. When only
-one engine is available, the reviewer must at least be a different *model family* on that
-engine — enforced through the role's model policy, not by trust.
+one harness is available, the [review tiers](#review-tiers) say what may stand in: another
+model of the same family once a person opts in, labeled as weaker independence, or a
+person's own review.
+
+## Review tiers
+
+A candidate lands only on a review by someone who did not write it, and a model reviewing
+the output of its own family shares that family's blind spots. Someone who runs a single
+harness has one family to hand, so ao recognises three tiers. The tier is recorded with every
+review and named wherever the review shows: the artefact's `- tier:` line, the review
+ledger row's `tier`, `ao commit-ok`, `ao reviews` and `ao stats`.
+
+| tier | who reviews | when ao accepts it | label |
+|---|---|---|---|
+| another model family | a model of a family other than the implementer's | always: the default, and the strongest | none |
+| same family | another model of the implementer's family | only once a person has opted in, on the record | same family: weaker independence |
+| person | a person, who reads the diff and records the verdict | always, through `ao person-review` | person review |
+
+One rule decides the tier. `ao role set`, the reviewer probe that `ao init`, `ao doctor` and
+`ao prove` run, `ao review`, `ao commit-ok`, the [capability matrix](capability-matrix.md) and
+`ao catchup` all ask it, and a reviewer no tier admits is refused in the same words everywhere,
+naming the three ways forward.
+
+**Same family.** The families are the ones the reviewer and the implementer declare, or their
+adapters declare; the models are the ones the configuration names, as `model` or through the
+adapter's model option in the reviewer's argv. The reviewer is admitted only when both declare
+one family, both name a model and the two models differ. A person opts a project in with
+`ao config set review.same_family labeled --by <name>`, or at init with
+`ao init --profile claude-claude --review-tier same-family --by <name>`: the name, the login
+and whether a terminal was attached go to `.ao/ledger/opt-ins.jsonl`. A value written into
+`.ao/config.json` by hand is not in force, because an agent that edits files can write it, and
+`ao doctor` names it. Withdrawn (`ao config set review.same_family refused --by <name>`), the
+opt-in leaves every same-family review granting nothing. In a capability-matrix project the
+opt-in makes a binding of the implementer's family and another model argument eligible; the
+implementer's own binding never is.
+
+**Person.** A person reviews in two steps, so what they approve is exactly what they read:
+
+```bash
+ao person-review --by <name>                                        # the staged diff and its digest; records nothing
+ao person-review --by <name> --verdict APPROVED --digest <digest>   # recorded on those bytes, or refused
+ao person-review --by <name> --verdict NEEDS_CHANGES --digest <digest> --findings <file>
+```
+
+A findings file holds one finding a line, `- [BLOCKER|HIGH|MEDIUM|LOW] file:line - what
+breaks`; the counts are read from it and decide as a reviewer's do, so an approval with a
+BLOCKER or HIGH finding is refused, and so is a rejection naming none. The review is bound to
+the candidate exactly as a model's, and `ao commit-ok` grants on it as on any. It is a
+person's command, as `ao waive` and `ao collect-review` are: `--by` never names an agent or a
+role, the login and whether a terminal was attached are recorded beside the name, and no grant
+ao checks admits it. It is not a flag of `ao review`, because every grant that lets an agent
+run its own reviews would then admit a person's too. A person's approval cannot supersede a
+rejection of the same bytes: stage the fix, or waive the review. A capability-matrix project
+records reviews only from its declared bindings and refuses it.
+
+**Catch-up** keeps its rule: a waived range is held to the family that wrote it, and no
+same-family tier reaches it, since the grant recorded that family and never its model. A
+person's review of exactly the range (`ao person-review --commits <range> --by <name>`, with
+the range `ao catchup --plan` names) holds whichever family wrote it, and `ao catchup` closes the
+waiver on it with no reviewer started.
+
+`ao doctor` names the active tier, and `ao doctor --check` names three problems: `no-implementer`
+(nothing to compare a reviewer with, so no tier holds), `review-tier` (the configured reviewer
+stands in none) and `review-opt-in` (a `labeled` value no person recorded). What ao cannot see
+stays a limit: it compares the models the configuration names, not the one a session ran, so an
+alias of the implementer's model passes as another; and it cannot know that no agent typed a
+person's command, which is why the command is recorded, checked against agent names and kept
+out of every grant, as a waiver is.
 
 The same rule applies between `implementer` and `verifier`: whoever wrote the code does
 not get to decide the gates passed.
@@ -285,15 +352,16 @@ additionally issue an exact-nonce probe and report the selected route, resolved
 binary, version, and reason; scheduled `doctor --check` stays static and spends no
 reviewer quota.
 
-Legacy configs prefer a different family but permit a fresh session of the
-implementer's family as a last resort. In that mode, `reviewer.id` is the
-operator's actor declaration: AO refuses an exact match with the implementer
-session, while the nonce probe proves transport liveness only—not runtime actor
-attestation. Comparing launcher binaries would wrongly collapse independent
-sessions that share one CLI. Projects that need enforced declared separation opt
+Configs without a capability matrix refuse a reviewer that runs as the
+implementer's session, declares the implementer's family, or - where the two do
+not both declare families - runs the implementer's engine, unless a review tier
+admits it: another model of that family, once a person opted in. In that mode,
+`reviewer.id` is the operator's actor declaration: AO refuses an exact match with
+the implementer session, while the nonce probe proves transport liveness only—not
+runtime actor attestation. Projects that need enforced declared separation opt
 into the version-1 [capability matrix](capability-matrix.md): a reviewer with the
 implementer's binding **or bound model family** is ineligible and is never
-spawned. Family comes only from the bound model declaration, so inline family
+spawned, but for the opted-in same-family tier. Family comes only from the bound model declaration, so inline family
 fields cannot spoof independence. Runtime-unavailable eligible reviewers still
 advance in order; malformed substantive output is `INVALID` and does not trigger
 approval shopping. A schema-valid reviewer response is the review artifact. Every

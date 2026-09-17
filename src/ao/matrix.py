@@ -10,12 +10,23 @@ import json
 import re
 import string
 
+from . import tiers
+
 MATRIX_VERSION = 1
 MATRIX_DIGEST_PREFIX = "sha256:"
 
 _ID_RE = re.compile(r"^[^\s\x00-\x1f\x7f]+$")
 _NORMAL_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._:-]*$")
 _ALLOWED_PLACEHOLDERS = frozenset(("prompt", "model"))
+
+# A route's ineligible_reason, for each refusal tiers.tier can give a declared binding. Evidence
+# persists these closed words and compares them on every grant, so they never change.
+MATRIX_REFUSALS = {
+    "author": "same binding as implementer",
+    "family": "same model family as implementer",
+    "family/model": "same model as implementer",
+    "author-family": "same model family as the author",
+}
 
 IMPLEMENTER_REQUIREMENTS = {
     "provider": frozenset(("invoke",)),
@@ -220,7 +231,7 @@ def _concrete(value):
     return isinstance(value, str) and bool(value.strip()) and value.strip().lower() != "auto"
 
 
-def resolve(cfg, require_independent=True, author_families=()):
+def resolve(cfg, require_independent=True, author_families=(), same_family=False):
     """Validate and resolve a strict config.
 
     Returned dictionaries contain runtime argv templates for the CLI, but callers
@@ -231,6 +242,12 @@ def resolve(cfg, require_independent=True, author_families=()):
     retrospective review. Its independence is judged against them instead of the
     implementer binding, which need not be the author: a binding of one of those
     families is ineligible, and the implementer's may review what another wrote.
+
+    Which tier a binding stands in is decided by tiers.tier, as it is for every
+    reviewer (REVIEW-TIERS). ``same_family`` is whether a person's recorded opt-in
+    into the same-family tier is in force, which only the caller can read: a
+    binding of the implementer's family and another model argument is then
+    eligible, and its route says so in ``tier``.
     """
     if not is_strict(cfg):
         raise MatrixError(("capability_matrix is absent",))
@@ -406,21 +423,26 @@ def resolve(cfg, require_independent=True, author_families=()):
                     problems, path,
                     "reviewer argv must expand placeholders: %s" % ", ".join(missing),
                 )
+        # Family comes only from the bound model declaration, so an inline field cannot spoof a tier.
         if author_families:
-            eligible = identity["family"] not in author_families
-            reason = "" if eligible else "same model family as the author"
-        elif binding_id == impl_binding:
-            eligible, reason = False, "same binding as implementer"
-        elif identity["family"] == implementer_identity["family"]:
-            eligible, reason = False, "same model family as implementer"
+            decided, refusal = tiers.tier({"declared": identity["family"]},
+                                          {"range": True, "families": list(author_families)})
         else:
-            eligible, reason = True, ""
+            decided, refusal = tiers.tier(
+                {"identity": binding_id == impl_binding, "family": identity["family"],
+                 "declared": identity["family"], "model": identity["model_argument"]},
+                {"known": True, "family": implementer_identity["family"],
+                 "declared": implementer_identity["family"], "model": implementer_identity["model_argument"]},
+                same_family=same_family,
+            )
         routes.append({
             "index": index,
             "identity": identity,
             "argv": list(tool.get("argv") or []),
-            "eligible": eligible,
-            "ineligible_reason": reason,
+            "eligible": decided is not None,
+            "ineligible_reason": "" if decided is not None else MATRIX_REFUSALS.get(refusal, "not independent of the "
+                                                                                          "implementer"),
+            "tier": decided,
         })
 
     if problems:
@@ -428,7 +450,9 @@ def resolve(cfg, require_independent=True, author_families=()):
     if require_independent and not any(route["eligible"] for route in routes):
         raise MatrixError(
             ("reviewer chain has no binding independent of the author's model family" if author_families
-             else "reviewer chain has no binding independent of the implementer binding and model family",),
+             else "reviewer chain has no binding independent of the implementer binding and model family"
+                  + ("" if same_family else "; a binding of the implementer's family and another model reviews "
+                                            "only where a person opted in (review.same_family labeled)"),),
             key="no-independent-reviewer",
         )
 

@@ -8,14 +8,38 @@ Existing blocks are never overwritten — a project's cast is its own decision.
 | profile | implementer | reviewer | architect |
 |---|---|---|---|
 | `claude-kiro` | Kiro (`kiro-cli`, headless, resumable session; model/effort optional) | Claude, `claude-opus-5`, read-only tools | a resumable Claude Code session, woken into absence |
-| `claude-claude` | Claude Code headless (`claude -p`), `claude-sonnet-5` by default, one per worktree | Claude, `claude-opus-5` — a different model, so it is not the implementer reviewing itself | a resumable Claude Code session |
+| `claude-claude` | Claude Code headless (`claude -p`), `claude-sonnet-5` by default, one per worktree | Claude, `claude-opus-5`: another model, but of the implementer's own family, so `ao init` refuses it until you choose a review tier (below) | a resumable Claude Code session |
 | custom | any adapter in `ao adapters` (`--implementer codex` …) | `--reviewer-model` | the same architect block |
 
 ```bash
 ao init --profile claude-kiro --effort high        # a Kiro implementer at high effort
-ao init --profile claude-claude --model claude-sonnet-5 --reviewer-model claude-opus-5
+ao init --profile claude-claude --model claude-sonnet-5 --reviewer-model claude-opus-5 --review-tier same-family --by <name>
 ao init --implementer codex --reviewer-model claude-opus-5
 ```
+
+## One harness: choose a review tier
+
+A review counts only when someone other than the author's model family reads the work, so a
+project whose implementer and reviewer run on one harness chooses what stands in. `ao init`
+refuses `claude-claude` until it is told, and the refusal names the three choices:
+
+- **another model family** (the default, and the strongest): a reviewer from another harness or
+  provider, as `claude-kiro` has. Nothing is labeled.
+- **same family, labeled** (`--review-tier same-family --by <name>`): another model of the
+  implementer's family reviews. It shares more of the author's blind spots than another family
+  would, so every review, grant and statistic it produces says `same family: weaker
+  independence`, and it holds only while the person's opt-in stands (`review.same_family`,
+  recorded with their name and login).
+- **person review** (`--review-tier person`): no model reviews. A person reads each staged
+  candidate's diff and records the verdict with `ao person-review --by <name>`; every such review
+  is labeled `person review`.
+
+```bash
+ao init --profile claude-claude --review-tier same-family --by <name>   # another model of the same family, labeled
+ao init --profile claude-claude --review-tier person                    # a person reviews each candidate
+```
+
+[Review tiers](roles.md#review-tiers) has the rule each tier is held to.
 
 ## What the blocks mean
 
@@ -26,7 +50,8 @@ ao init --implementer codex --reviewer-model claude-opus-5
   flag, so only the model applies).
 - **reviewer** — its own `argv`; `ao commit-ok` refuses a review whose author is
   the implementer — its id is the implementer's session, or its command resumes that
-  session. Different family or different model, never the same session.
+  session. Another model family by default; another model of the same family only in the
+  labeled same-family tier; never the same session.
 - **architect** — resumable, `session: auto`, read-only tools plus `ao`; the
   watchdog wakes it only when nobody is at the keyboard.
 
@@ -70,4 +95,4 @@ Whatever the cast, the playbook (`ao skill install`) is the same: one writer per
 tree, pre-authorised slices with invariant boundaries, independent review,
 commit authority granted by `ao commit-ok`, push by a person. Sub-agents in
 worktrees — several Claude implementers under one Claude architect — are the
-`claude-claude` profile plus `ao fanout ok` before every fan-out.
+`claude-claude` profile, with a review tier chosen, plus `ao fanout ok` before every fan-out.

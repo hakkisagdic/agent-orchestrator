@@ -117,6 +117,15 @@ closed by one only when a person states that its slice only moved code, with
 is recorded beside the proof, and no actor's grant admits it. A retrospective
 `ao review --commits` artifact can reconcile landed work but can never authorize a candidate.
 
+Two more acts weaken what a review is independent of, and both are a person's in the same way
+([review tiers](roles.md#review-tiers)). `ao person-review --by <name>` records a person's verdict on
+the exact bytes it showed them, bound to the candidate as a model's review is.
+`ao config set review.same_family labeled --by <name>` lets another model of the implementer's family
+review, labeled as weaker independence wherever its reviews show, and it is in force only while a
+person's record in `.ao/ledger/opt-ins.jsonl` says so. Each records the name, the login and whether a
+terminal was attached, refuses a name that belongs to an agent or a role, and is on the list of commands
+no actor's grant may admit; ao still cannot prove that no agent typed it.
+
 Hook ownership is content- and topology-sensitive, not marker-based. Project
 enrollment is marker-based: only a root `.ao-project` with exact
 `ao-project-v1\n` bytes in HEAD or the active index activates enforcement. The

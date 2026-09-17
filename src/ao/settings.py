@@ -93,6 +93,10 @@ SETTINGS = {
         100_000, int, 0, None, "project",
         "bytes of commit-message claims and read-only context a review prompt may carry beside its diff, "
         "where no reviewer route holds it to one argument"),
+    "review.same_family": Setting(
+        "refused", str, None, None, "project",
+        "refused: a reviewer of the implementer's model family is refused; labeled: another model of that "
+        "family may review, labeled weaker independence, once a person opts in with --by, on the record"),
     "hunter.every_hours": Setting(
         24, int, 1, None, "project",
         "hours between bug hunts the watchdog starts, when the hunter feature is on"),
@@ -196,6 +200,19 @@ SETTINGS = {
         "seconds a probed filter hook may take to answer for one measurement command before ao stops asking it"),
 }
 
+# A setting whose values are words, and the words it takes. Any other value is unusable: set by
+# hand, it is passed over for the default, and `ao doctor` names it.
+CHOICES = {
+    "review.same_family": ("refused", "labeled"),
+}
+
+# A setting that weakens a guarantee is a person's act, on the record, as a waiver is (REVIEW-TIERS).
+# `ao config set` and `unset` change it only with --by naming a person, never --machine, and append
+# who did it - the name, the login, whether a terminal was attached - to .ao/ledger/opt-ins.jsonl.
+# A value written into .ao/config.json by hand, which an agent that edits files can do, is not in
+# force until a person's record says the same.
+RECORDED = ("review.same_family",)
+
 _MISSING = object()
 
 
@@ -248,6 +265,8 @@ def lookup(document, key):
 def usable(key, value):
     """Whether a value can be used for this setting."""
     spec = SETTINGS[key]
+    if key in CHOICES:
+        return isinstance(value, str) and value in CHOICES[key]
     if spec.kind is int:
         if isinstance(value, bool) or not isinstance(value, int):
             return False
@@ -269,6 +288,8 @@ def usable(key, value):
 
 def expected(key):
     spec = SETTINGS[key]
+    if key in CHOICES:
+        return "one of " + ", ".join(CHOICES[key])
     if spec.kind is list:
         return "a list of non-empty strings"
     if spec.kind is Location:

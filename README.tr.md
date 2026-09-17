@@ -86,8 +86,14 @@ gereken tek yetkidir.
 ## Kurulum, adım adım
 
 1. `pip install ao-orchestrator` (ya da `uv tool install ao-orchestrator`, ya da Homebrew tap).
-2. Depoda: `ao init --profile claude-kiro` (ya da `claude-claude`). `.ao/`, posta kutusu, playbook yazılır,
-   tespit edilen ajanlar için MCP sunucusu kaydedilir.
+2. Depoda: `ao init --profile claude-kiro`. `.ao/`, posta kutusu, playbook yazılır,
+   tespit edilen ajanlar için MCP sunucusu kaydedilir. Her rol için tek bir harness varsa `claude-claude`
+   bir review katmanı ister, çünkü reviewer'ı uygulayıcıyla aynı model ailesindendir:
+   `ao init --profile claude-claude --review-tier same-family --by <ad>` aynı aileden başka bir modelin
+   review etmesine izin verir ve bu review'ların her biri `same family: weaker independence` (aynı aile: daha
+   zayıf bağımsızlık) diye etiketlenir; `ao init --profile claude-claude --review-tier person` hiçbir model
+   reviewer kurmaz ve her adayı bir insan `ao person-review --by <ad>` ile review eder. Başka aileden bir
+   reviewer varsayılan ve en güçlü katman olarak kalır ([review katmanları](docs/roles.md#review-tiers)).
 3. **Kuralları bağla.** ao `CLAUDE.md` / `AGENTS.md` dosyana yazmaz: basılan işaretçiyi oraya yapıştır ya da
    `ao init --rules` çalıştır. O zamana kadar `ao doctor` `rules-not-wired` der: playbook yazılmış ama hiçbir
    ajan okumuyor. (Claude Code skill dosyasını ajan kendi bulur.)
@@ -116,7 +122,7 @@ gereken tek yetkidir.
 | `ao hooks [status|install|uninstall] [--allow-shared-hooks]` / `ao push allow` | Git'in etkin hook yolunu çöz; roller bağımsızdır, paylaşılan/harici/global mutasyonlar komutun tamamı için açık yetki ister |
 | `ao skill install` / `ao skill show` | playbook (roller, döngü, yetki, protokol, alarmlar, tüm komutlar) deponun ajanları için: Claude skill, Kiro steering, AGENTS.md |
 | `ao remove --yes [--allow-shared-hooks]` | iki aşamalı kaldırma: dayatma etkinken `.ao-project` dosyasını silip commit et, HEAD ve index artık taşımayınca AO durumunu kaldır; yabancı/korunan hook'lara dokunma. İkinci aşama projenin zamanlanmış işlerini ve `~/.ao` içindeki yalnız kendi dosyalarını kaldırır, kuru koşuda her birini adıyla listeler ve kaldıramadığını adıyla söyleyip 1 ile çıkar ([watchdog.md](docs/watchdog.md)) |
-| `ao init --profile claude-kiro|claude-claude` | rol bloklarını ve exact `.ao-project` kayıt işaretini yaz, ama stage etme ([profiles.md](docs/profiles.md)) |
+| `ao init --profile claude-kiro|claude-claude [--review-tier same-family|person]` | rol bloklarını ve exact `.ao-project` kayıt işaretini yaz, ama stage etme; tek harness'lı profil bir review katmanı seçer ([profiles.md](docs/profiles.md)) |
 | `ao doctor --check` | zamanlayıcı için sessiz doctor: problem başına bir satır, exit 1, alarm — `ao watchdog install` 15 dakikalık launchd işi olarak kurar |
 | `ao email setup` / `ao email test` | kırmızı alarm kanalı: formsubmit.co ile e-posta, sunucu yok ([alarms.md](docs/alarms.md)) |
 | `ao alarms` / `ao alarms test --level red` | canlı alarm bölümleri ve seviyeleri; test tüm kanalları çaldırır |
@@ -131,6 +137,7 @@ gereken tek yetkidir.
 | `ao ask` · `ao answer` · `ao decisions` | tek dokunuşla cevaplanan sorular; serbest metin hep sonda; cevap sorunun sunduğu bir harf olmalı, `ao answer <D-id> <harf> --change` bir cevabı değiştirir ve ilki kayıtta kalır |
 | `ao note` | kutuya mimar mesajı, araç üzerinden |
 | `ao review` | ağacı, onu yazmayan bir aktörle gözden geçir |
+| `ao person-review --by <ad>` | bir insan stage edilmiş diff'i okur, sonra gösterilen `--digest` ile `--verdict APPROVED` ya da `NEEDS_CHANGES` kaydeder; her review gibi adaya bağlanır, `person review` diye etiketlenir, asla bir ajanın komutu değildir |
 | `ao review --commits <aralık>` | inmiş işi sonradan review et; çıkış 3 = reviewer erişilemedi (asla verdict değil), yedekler `reviewer.fallbacks` ([roles.md](docs/roles.md)) |
 | `ao handoff` | devralanın ihtiyacı olan her şeyi yaz ve gönder |
 | `ao a2a-mcp serve` | MCP-only istemciden A2A ajanlarına ulaş |
