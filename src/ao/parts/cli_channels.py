@@ -543,7 +543,7 @@ def cmd_hunt(cfg, args):
 
 
 def cmd_content(cfg, args):
-    """Borrow third-party skills pinned to a commit, text only, and verify them later (#14)."""
+    """Borrow third-party skills, steering and agents pinned to a commit, text only; verify them (#14, #15)."""
     from . import skillkit
     root = cfg["root"]
     if args.action == "verify":
@@ -553,21 +553,42 @@ def cmd_content(cfg, args):
         print(f"{C['green']}vendored content matches its pins{C['reset']}" if not drift else f"{len(drift)} file(s) drifted")
         return 1 if drift else 0
     source, _, pin = (args.spec or "").rpartition("@")
-    skills = [name.strip() for name in (args.skills or "").split(",") if name.strip()]
-    if not source or not skills:
-        print("usage: ao content add <source>@<40-character commit> --skills a,b [--harness <adapter>,<adapter>]")
+    # A caller that predates steering and agents hands skills alone.
+    chosen = {kind: [name.strip() for name in (getattr(args, kind, None) or "").split(",") if name.strip()]
+              for kind, _ in A.CONTENT_KINDS}
+    if not source or not any(chosen.values()):
+        print("usage: ao content add <source>@<40-character commit> [--skills a,b] [--steering c,d] [--agents e,f] "
+              "[--from <dir>] [--harness <adapter>,<adapter>] [--dry-run]")
         return 2
     harnesses = [name.strip() for name in (args.harness or "").split(",") if name.strip()] \
         or sorted(skillkit.detect_agents(root)[1])
+    dry_run = bool(getattr(args, "dry_run", False))
     try:
-        written = A.vendor_skills(root, source, pin, skills, harnesses)
+        plan = A.vendor_content(root, source, pin, harnesses, base=getattr(args, "base", None) or "",
+                                dry_run=dry_run, **chosen)
     except (ValueError, RuntimeError, OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         print(f"{C['red']}not vendored{C['reset']}: {exc}")
         return 2
-    for name, digests, skipped in written:
-        print(f"{C['green']}vendored{C['reset']} {name}@{pin[:12]} → {', '.join(sorted(digests)) or 'no harness takes skills'}")
-        for rel in skipped:
-            print(f"  {C['dim']}skipped {rel}: only text is borrowed{C['reset']}")
+    written = not (dry_run or plan["refused"])
+    for item in plan["items"]:
+        print(f"{C['green'] if written else C['b']}{'vendored' if written else 'would vendor'}{C['reset']} "
+              f"{dict(A.CONTENT_KINDS)[item['kind']]} {item['name']}@{pin[:12]} → "
+              f"{', '.join(sorted(item['files'])) or 'nothing'}")
+        for path, why in item["skipped"]:
+            print(f"  {C['dim']}skipped {path} ({why}){C['reset']}")
+        for target, why in item["unsupported"]:
+            print(f"  {C['yellow']}unsupported {target} ({why}){C['reset']}")
+        for note in item["notes"]:
+            print(f"  {C['dim']}{note}{C['reset']}")
+    for path, why in plan["hooks"]:
+        print(f"{C['dim']}skipped {path} ({why}){C['reset']}")
+    for why in plan["refused"]:
+        print(f"{C['red']}refused{C['reset']} {why}")
+    if plan["refused"]:
+        print(f"{C['red']}not vendored{C['reset']}: nothing was written")
+        return 2
+    if dry_run:
+        print(f"{C['dim']}dry run: nothing was written{C['reset']}")
     return 0
 
 

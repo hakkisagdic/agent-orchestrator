@@ -26,7 +26,7 @@ not a prohibition.
 
 | Project | Licence | Pinned | Borrowed (ported, not linked) | Deliberately not borrowed |
 |---|---|---|---|---|
-| [affaan-m/ECC](https://github.com/affaan-m/ECC) | MIT | `e04ea0b9cc82` (main, 2026-09-03); release v2.2.0 | AgentShield's *check categories* for agent configuration files — secrets in agent files, overly permissive allow rules, missing deny list, hook safety, MCP package hygiene — re-implemented natively behind `ao doctor` (backlog #14); the "turn a repeated win into a skill" idea (instincts) as an `ao` lessons→playbook proposal; a Kiro install target contributed upstream (backlog #15) | the 286-skill/68-agent content pack, hooks, the `ecc-universal`/`ecc-agentshield` npm packages as dependencies |
+| [affaan-m/ECC](https://github.com/affaan-m/ECC) | MIT | `e04ea0b9cc82` (main, 2026-09-03); release v2.2.0 | AgentShield's *check categories* for agent configuration files — secrets in agent files, overly permissive allow rules, missing deny list, hook safety, MCP package hygiene — re-implemented natively behind `ao doctor` (backlog #14); the "turn a repeated win into a skill" idea (instincts) as an `ao` lessons→playbook proposal; its Kiro layer's steering, agents and skills, which a Kiro CLI user borrows pinned through the content seam rather than from a Kiro target in a fork of its installer (backlog #15) | the 286-skill/68-agent content pack, hooks, the `ecc-universal`/`ecc-agentshield` npm packages as dependencies |
 | [Fredrin](https://fredrin.com/) | proprietary, closed source, cloud control plane | site read 2026-09-07 (landing + [pricing](https://www.fredrin.com/pricing)) | **Ideas only, nothing ported yet.** Its goal→ticket→dependency model: a goal holds tickets, the tool derives the dependency order and runs every unlocked ticket in parallel. That is ao's weakest surface — our board is hand-maintained prose and READY is judged by a human reading it (backlog #33–#35). Also: one board visible from desktop, browser and phone, and BYO subscription with model calls going straight from the machine to the provider (which is already ao+keyflip's split) | The cloud control plane and hosted board — ao is local-first and the umbrella platform's recorded invariant is no central identity. "Review and auto-merge" as a product feature: landing without evidence of an independent review of the exact candidate is the failure ao exists to prevent. Also its agent-usage billing, which duplicates keyflip |
 | [Bernstein](https://github.com/andyrewlee/awesome-agent-orchestrators) and the goal→DAG orchestrators surveyed with it | mixed, mostly MIT | surveyed 2026-09-07 via awesome-agent-orchestrators | One principle worth keeping: **scheduling decisions are made in code, never by a model** — same inputs, same order, however the agents' replies interleave. ao already holds this (`ao features` all-off is deterministic); the decomposition work in #33–#35 must not break it by asking a model what is READY | Their planner agents deciding task order at runtime, and merge steps that land work without an authority grant |
 | [iokaio/munarium](https://github.com/iokaio/munarium) | Apache 2.0 | read 2026-09-08, v1.0.0 (6 stars, 7 commits) | **Ideas only.** Two framings worth keeping: governance enforced at *write* time rather than read time (ao already does this — a grant is issued when the candidate is staged, not when someone asks), and every retrieval carrying a provenance envelope naming the evidence it rested on. The second generalises what ao does for reviews and grants but not for its own answers: `ao status`, `digest` and every notice should be able to name the ledger rows behind them (#37, #43) | The implementation. It needs Docker, PostgreSQL 16 and pgvector; `pyproject.toml` says `dependencies = []` on purpose, because ao watches agents on machines it does not control and `ao status` must work before anything is installed. Making the authority ledger — the one component we just made tamper-evident — depend on a network service at v1.0.0 with 7 commits would trade a proven local guarantee for an unproven remote one |
@@ -52,21 +52,86 @@ not a prohibition.
 
 ## The content seam, as built
 
-`ao content add <source>@<commit> --skills a,b [--harness claude-code,kiro]` borrows a curated
-subset of a skills repository without installing it wholesale. The pin must be a full commit id -
-a branch or a tag is refused - and ao fetches exactly that commit and only the named `skills/`
-directories. Only text is borrowed: a file with its exec bit, a `#!` script, anything that is not
-Markdown, text, JSON or YAML, and every `hooks/` directory is skipped and named. Each harness gets
-the skill where its adapter says skills are discovered: `directives.skills_dir` keeps the skill's
-files, `directives.steering_dir` turns its SKILL.md into a manually included steering file. The
-digest of every written file is recorded in `.ao/content.json`; `ao content verify` and `ao doctor`
-name a vendored file that drifted from its pin.
+`ao content add <source>@<commit> [--skills a,b] [--steering c,d] [--agents e,f] [--from <dir>] [--harness claude-code,kiro] [--dry-run]`
+borrows a curated subset of a content repository without installing it wholesale. The pin must be
+a full commit id - a branch or a tag is refused - and ao fetches exactly that commit and reads only
+the named entries under `--from`, the source's root unless it is given: `skills/<name>/`,
+`steering/<name>.md` and `agents/<name>.json`. Nothing is checked out: each file is read from the
+commit by its object id, so its bytes are the commit's on every platform and a symbolic link is a
+mode, never a path ao follows. Only text is borrowed: a symbolic link, a submodule, a file the
+commit marks executable, a `#!` script, anything that is not Markdown, text, JSON or YAML, and
+every `hooks/` directory is skipped and named.
+
+Each harness takes what its adapter declares. `directives.skills_dir` keeps a skill's files, and
+`directives.steering_dir` turns its SKILL.md into a steering file under
+`directives.steering_inclusion.skill_header`. `directives.steering_dir` also takes a steering file
+byte for byte, its inclusion front matter and all. When `steering_inclusion.honoured` does not list
+the file's inclusion, the file is still written as it is and named unsupported with the adapter's
+reason, never rewritten into a mode the harness would honour. `directives.agents_dir` takes an agent
+definition in `directives.agent_format`: a JSON object whose `name`, when it has one, is its file's.
+Every field `agent_format.commands` names, in the package's adapter or in a layer over it - hooks,
+servers the harness starts - is taken out and named, so a borrowed definition is data and nothing in
+it runs; the fields `agent_format.grants` names are kept and named, and so is an empty
+`agent_format.context`. Hooks are never imported: beside borrowed steering or agents, every file of
+the source's `hooks/` is named as skipped, with what `directives.hook_files` says of its format.
+
+A write lands only inside the harness's own directory as the package's adapter declares it
+(`detect.dirs`). A directory a user's or a project's adapter layer names elsewhere, a path through a
+symbolic link, a file a harness or ao keeps for itself (a playbook, an MCP registration, settings),
+a file that exists and was not vendored there, and a file two entries would both write are refused,
+and one refusal writes nothing. `--dry-run` prints the same account - what would be written where,
+what is skipped, unsupported or refused - and writes nothing, `.ao/content.json` included.
+Otherwise the digest of every written file is recorded in `.ao/content.json`; `ao content verify`
+and `ao doctor` name a vendored file that drifted from its pin.
 
 `ao doctor` also checks the project's agent configuration by AgentShield's categories, natively and
 with no dependency: a credential in an agent file (CLAUDE.md, AGENTS.md, `.claude/settings*.json`,
 `.mcp.json`, Kiro steering), an allow rule that admits every command, permissions with no deny list,
 a hook that pipes a download into a shell or removes a home directory, and an MCP server run from an
 unpinned package. Findings are problems named `agent-config:<category>`.
+
+### ECC's Kiro layer, for a Kiro CLI user (#15)
+
+ECC keeps a Kiro layer in `.kiro/`: 33 agents, each as JSON for the CLI and as Markdown for the IDE;
+43 skills; 22 steering files, 8 of them `auto`, 11 `fileMatch` and 3 `manual`; 13 hooks in the IDE's
+0.x format (`.kiro.hook`) and their README; the two shell scripts those hooks run; an MCP example;
+three guides. ECC's installer has no Kiro target, and the layer's own `install.sh` copies all of it,
+scripts and hooks included. A Kiro CLI user takes what they choose through the seam instead, and no
+fork of ECC is needed:
+
+```bash
+ao content add https://github.com/affaan-m/ECC@<commit> --from .kiro --harness kiro \
+  --steering coding-style,security,testing --agents planner,code-reviewer --skills tdd-workflow --dry-run
+```
+
+The kiro adapter declares what Kiro's documentation says (read 2026-09-17), and the seam reports it:
+
+- Kiro CLI 2.x - the CLI the kiro adapter runs, since 3.0 is an early release started with `kiro-cli
+  --v3` - reads workspace steering from `.kiro/steering` and supports no inclusion mode: it loads
+  every file there in every session. `fileMatch`, `manual` and `auto` hold in the IDE, and the first
+  two in 3.0 (the steering page's own capability table already marks them for the CLI). So a
+  steering file in one of those modes - and every skill, which becomes a `manual` steering file - is
+  written as it is and named unsupported.
+- Kiro CLI reads agent definitions from `.kiro/agents` as JSON, ECC's CLI form. The IDE and 3.0 also
+  read the Markdown twin, a second agent of the same name, so ao installs the JSON alone. ECC's
+  agents hold empty `hooks` and `mcpServers`, so nothing is taken out; their `allowedTools` are
+  named - 30 of the 33 run `shell` without asking - and so are their empty `resources`, since a
+  custom agent loads no steering and no skills unless its resources name them.
+- Kiro CLI reads hooks from an agent's `hooks` or, in the v1 format, from JSON files in
+  `.kiro/hooks`; ECC's `.kiro.hook` files are IDE hooks in the 0.x format, which it does not read.
+  None is imported, and each is named with that reason. The scripts, the MCP example and the guides
+  are not borrowed.
+
+Measured on 2026-09-17 against a local repository holding ECC's `.kiro/` as it stands at
+`e04ea0b9cc82`. Asking for the whole layer is refused and writes nothing: four skills -
+`golang-patterns`, `kotlin-patterns`, `python-patterns` and `rust-patterns` - share a name with a
+steering file, and a skill becomes a steering file of its own name. Without those four skills the
+seam writes 94 files: the 22 steering files and 33 agents byte for byte, since no agent holds a hook
+or a server to take out, and 39 skills as steering files. That is 61 steering files, about 450 KB,
+which Kiro CLI 2.x's default agent loads in every session - 407 KB of it the skills - while ECC's
+own agents, whose resources name nothing, load none of them. Kiro also reads skills itself, from
+`.kiro/skills`, and loads one only when it is wanted; the kiro adapter declares no `skills_dir`, so
+the seam still turns a skill into steering.
 
 ## Asking the codebase, as built
 

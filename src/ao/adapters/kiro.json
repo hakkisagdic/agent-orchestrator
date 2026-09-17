@@ -155,6 +155,32 @@
     "ao_files": [".kiro/steering/ao-coordination.md", ".kiro/steering/ao-playbook.md",
                  ".kiro/steering/ao-single-writer.md", ".kiro/steering/ao-machine.md"],
     "steering_format": "markdown with `inclusion: always` frontmatter",
+    "steering_inclusion": {
+      "field": "inclusion",
+      "default": "always",
+      "honoured": ["always"],
+      "unhonoured": "Kiro CLI 2.x, which this adapter runs, supports no inclusion mode and loads every steering file in every session; fileMatch, manual and auto hold in the IDE, and the first two in the 3.0 early release",
+      "skill_header": "---\ninclusion: manual\n---\n\n",
+      "note": "Modes: always, the default; fileMatch with fileMatchPattern, one pattern or a list; manual, included by #name in chat; auto, with name and description. Workspace steering is .kiro/steering and global steering ~/.kiro/steering; AGENTS.md is always loaded; a custom agent loads steering only through its resources. The steering page says Kiro CLI supports no inclusion mode and loads every steering file, while its capability table marks always, fileMatch and manual for the CLI: the 3.0 early release (kiro-cli --v3, beside 2.x) adds that front matter, and leaves auto to the engine. send and resume run 2.x, the newest CLI in the changelog being 2.21.4 of 2026-09-11. Read from kiro.dev/docs/steering, kiro.dev/docs/cli/v3 and kiro.dev/changelog/cli on 2026-09-17."
+    },
+    "agents_dir": ".kiro/agents",
+    "agent_format": {
+      "extension": ".json",
+      "commands": {
+        "hooks": "hooks are never imported: each runs a command when its trigger fires",
+        "mcpServers": "an MCP server is a command the CLI starts: never imported"
+      },
+      "grants": {
+        "allowedTools": "the tools it uses without asking",
+        "toolsSettings": "the paths and commands its tools may use without asking",
+        "permissions": "the rules that allow or deny what its tools may do"
+      },
+      "context": { "field": "resources", "empty": "a custom agent loads no steering and no skills unless its resources name them" },
+      "note": "Workspace agents are .kiro/agents/<name>.json and global ones ~/.kiro/agents, the workspace's winning by name; name defaults to the file name and prompt is inline or a file:// URI. Fields: name, description, prompt, model, tools, toolAliases, allowedTools, toolsSettings, resources (file://, skill://, knowledgeBase), mcpServers, useLegacyMcpJson or includeMcpJson, hooks (agentSpawn, userPromptSubmit, preToolUse, postToolUse, stop), keyboardShortcut, welcomeMessage. The IDE ignores an agent's hooks. The 3.0 early release (kiro-cli --v3) reads a universal format that 2.x reads too (/upgrade-agent writes it), replaces toolsSettings with permissions, reads Markdown agents with YAML front matter as the IDE does, and moves hooks to .kiro/hooks. Read from kiro.dev/docs/custom-agents/configuration-reference and kiro.dev/docs/cli/v3 on 2026-09-17."
+    },
+    "hook_files": {
+      ".kiro.hook": "an IDE hook in the 0.x format (when, then), which Kiro CLI does not read"
+    },
     "hooks_dir": ".kiro/hooks",
     "hooks_format": "{\"version\":\"v1\",\"hooks\":[{name,trigger,action:{type:\"agent\"|\"command\",prompt|command}}]}",
     "triggers": [

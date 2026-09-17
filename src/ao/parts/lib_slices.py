@@ -753,9 +753,14 @@ def backup_age(root):
     return (time.time() - float(rows[-1]["at"]), rows[-1].get("where")) if rows else None
 
 
-# ---- the harness content seam: borrow, pin, verify (#14) ---------------------------------
+# ---- the harness content seam: borrow, pin, verify (#14, #15) ----------------------------
 
 CONTENT_TEXT = (".md", ".txt", ".json", ".yaml", ".yml")
+# Each kind of content a source keeps, and the key naming an entry of its list in .ao/content.json.
+CONTENT_KINDS = (("skills", "skill"), ("steering", "steering"), ("agents", "agent"))
+CONTENT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+# A tree entry of one of these modes is not a text file, whatever its name says.
+_NOT_TEXT_MODES = {"120000": "a symbolic link", "160000": "a submodule", "100755": "executable"}
 
 
 def content_manifest_path(root):
@@ -763,16 +768,27 @@ def content_manifest_path(root):
 
 
 def content_manifest(root):
+    """{kind: [entry]} as .ao/content.json records them; a kind it lacks, or holds as no list, is empty."""
     try:
         with open(content_manifest_path(root), encoding=UTF8) as fh:
             data = json.load(fh)
     except (OSError, ValueError):
-        return {"skills": []}
-    return data if isinstance(data, dict) and isinstance(data.get("skills"), list) else {"skills": []}
+        data = {}
+    data = data if isinstance(data, dict) else {}
+    return {kind: [entry for entry in data[kind] if isinstance(entry, dict)] if isinstance(data.get(kind), list)
+            else [] for kind, _ in CONTENT_KINDS}
 
 
 def fetch_pinned(source, pin, paths, workdir):
-    """Check out exactly `paths` of `source` at commit `pin`; nothing unpinned is ever fetched (#14)."""
+    """{path: (mode, blob id)} for each file under `paths` of `source` at commit `pin` (#14).
+
+    Nothing unpinned is ever fetched, and nothing is checked out: a file is read by its
+    blob id when it is wanted (`pinned_blobs`). So its bytes are the commit's whatever this
+    machine converts - Git for Windows checks text out with CRLF by default, and neither
+    the files nor their digests were the commit's (#71) - and a symbolic link is a mode
+    here, never a path ao follows to a file of this machine. A path the commit does not
+    hold is absent from the answer.
+    """
     if not re.fullmatch(r"[0-9a-f]{40}", str(pin or "")):
         raise ValueError(f"{pin!r} is not a pin: name a full 40-character commit id, never a branch or a tag")
     git = git_binary()
@@ -783,85 +799,347 @@ def fetch_pinned(source, pin, paths, workdir):
                              text=True).stdout.strip()
     if fetched != pin:
         raise RuntimeError(f"{source} answered {fetched[:12]}, not the pinned {pin[:12]}")
-    # The pinned bytes, whatever this machine converts: Git for Windows checks text out with
-    # CRLF by default, and neither the files nor their digests were the commit's (#71).
-    subprocess.run([git, "-C", workdir, "-c", "core.autocrlf=false", "-c", "core.eol=lf", "checkout", "-q", pin,
-                    "--", *paths], check=True, capture_output=True)
+    if not paths:
+        return {}
+    listing = subprocess.run([git, "-C", workdir, "--literal-pathspecs", "ls-tree", "-r", "-z", pin, "--", *paths],
+                             check=True, capture_output=True, timeout=300).stdout
+    files = {}
+    for record in listing.split(b"\0"):
+        meta, _, path = record.partition(b"\t")
+        fields = meta.decode(UTF8, "replace").split()
+        if path and len(fields) == 3:
+            files[path.decode(UTF8, "surrogateescape")] = (fields[0], fields[2])
+    return files
 
 
-def vendor_skills(root, source, pin, skills, harnesses):
-    """Copy chosen skills, text files only, into each harness's discovery directory at a pinned commit (#14).
+def pinned_blobs(workdir, ids):
+    """{blob id: bytes} for each id, read from the fetched commit by one `git cat-file --batch` (#15)."""
+    wanted = sorted(set(ids))
+    if not wanted:
+        return {}
+    out = subprocess.run([git_binary(), "-C", workdir, "cat-file", "--batch"],
+                         input="".join(f"{oid}\n" for oid in wanted).encode(UTF8), check=True, capture_output=True,
+                         timeout=300).stdout
+    blobs, at = {}, 0
+    for oid in wanted:
+        end = out.find(b"\n", at)
+        header = out[at:end].split() if end >= 0 else []
+        if len(header) != 3 or header[1] != b"blob":
+            raise RuntimeError(f"the pinned commit holds no blob {oid[:12]}")
+        size = int(header[2])
+        blobs[oid] = out[end + 1:end + 1 + size]
+        at = end + 1 + size + 1
+    return blobs
 
-    Where a harness's adapter declares `directives.skills_dir` a skill keeps its
-    files; where it declares `directives.steering_dir` the skill's SKILL.md becomes
-    a manually included steering file. Anything executable - a file with its exec
-    bit, a `#!` script, anything but text - and every `hooks/` directory is skipped
-    and named. Each written file's digest is recorded in .ao/content.json.
+
+def _not_borrowed(path, mode, data=None):
+    """Why a file of a pinned tree is not borrowed, or None when it is text (#14).
+
+    The mode is the commit's, so an executable is one on every platform: Windows keeps
+    no execute bit on disk, and os.access says every file there has one (#71).
+    """
+    if mode in _NOT_TEXT_MODES:
+        return f"{_NOT_TEXT_MODES[mode]}: only text is borrowed"
+    if not path.lower().endswith(CONTENT_TEXT):
+        return "not Markdown, text, JSON or YAML: only text is borrowed"
+    if data is not None and data[:2] == b"#!":
+        return "a script: only text is borrowed"
+    return None
+
+
+def _front_matter(data, field):
+    """What a Markdown file's front matter says for a top-level `field`, or None."""
+    block = re.match(rb"\A---\r?\n(.*?)\r?\n---(?:\r?\n|\Z)", data, re.S)
+    found = block and re.search(rb"^" + re.escape(field.encode(UTF8)) + rb"[ \t]*:[ \t]*['\"]?([^'\"\s#]+)",
+                                block.group(1), re.M)
+    return found.group(1).decode(UTF8, "replace") if found else None
+
+
+def _declared(*blocks):
+    """One {name: text} from each block that is a dict, a later block's names winning."""
+    merged = {}
+    for block in blocks:
+        merged.update(block if isinstance(block, dict) else {})
+    return merged
+
+
+def _kept_files(root):
+    """Files an adapter says a harness or ao keeps for itself; borrowed content replaces none (#15).
+
+    A playbook, a coordination file, an MCP registration, settings whose hooks run
+    commands: a borrowed file landing on one would speak for ao or run what nobody
+    pinned. A path ending in `/` stands for everything under it.
+    """
+    kept = set()
+    for adapter in list(package_adapters().values()) + [entry["adapter"] for entry in adapter_catalog(root).values()]:
+        adapter = adapter if isinstance(adapter, dict) else {}
+        directives = adapter.get("directives") if isinstance(adapter.get("directives"), dict) else {}
+        named = [_declared(directives.get("playbook")).get("path"), directives.get("coordination"),
+                 directives.get("config"), directives.get("mcp"), _declared(adapter.get("mcp")).get("file")]
+        for field in ("ao_files", "rule_files", "steering_files"):
+            named += directives.get(field) if isinstance(directives.get(field), list) else []
+        named += _declared(directives.get("command_hooks")).get("files") or []
+        kept.update(rel for rel in named if isinstance(rel, str) and rel)
+    return kept
+
+
+def _content_refusal(root, harness, target, kept):
+    """Why ao must not write `target` for `harness`, or None (#15).
+
+    Borrowed content lands in the harness's own directory, as the package's adapter
+    declares it in `detect.dirs`, and nowhere else. A user's or a project's adapter layer
+    is writable by the agents it describes, so a directory it names elsewhere - the
+    product, ao's state, another harness's settings - is refused, as is a symbolic link
+    on the way and a file a harness or ao keeps for itself.
+    """
+    homes = [str(d).strip("/") for d in ((package_adapters().get(harness) or {}).get("detect") or {}).get("dirs") or []
+             if str(d).strip("/")]
+    steps = _plain_steps(target)
+    if not steps:
+        return f"{target} is not a path inside the project"
+    if not any(target.startswith(home + "/") for home in homes):
+        return f"{target} is outside {harness}'s own directory ({', '.join(homes) or 'the package declares none'})"
+    if any(target == rel or (rel.endswith("/") and target.startswith(rel)) for rel in kept):
+        return f"{target} is a file a harness or ao keeps for itself"
+    real = os.path.realpath(root)
+    if os.path.normcase(os.path.realpath(os.path.join(root, *steps))) != os.path.normcase(os.path.join(real, *steps)):
+        return f"{target} passes through a symbolic link"
+    return None
+
+
+def _content_item(kind, name):
+    return {"kind": kind, "name": name, "files": {}, "skipped": [], "unsupported": [], "notes": []}
+
+
+def _skill_item(name, head, tree, blobs, declared):
+    """A skill's text files for each harness that takes skills, or its SKILL.md as a steering file (#14)."""
+    item, texts = _content_item("skills", name), {}
+    for path, (mode, oid) in sorted(tree.items()):
+        if not path.startswith(head):
+            continue
+        rel = path[len(head):]
+        steps = rel.split("/")
+        if "hooks" in steps[:-1]:
+            hooks = ("/".join(steps[:steps.index("hooks") + 1]) + "/", "hooks are never imported")
+            if hooks not in item["skipped"]:
+                item["skipped"].append(hooks)
+            continue
+        why = _not_borrowed(rel, mode, blobs.get(oid))
+        if why:
+            item["skipped"].append((rel, why))
+        else:
+            texts[rel] = blobs[oid]
+    for harness, (directives, _, _) in declared.items():
+        if directives.get("skills_dir"):
+            item["files"].update({f"{directives['skills_dir']}/{name}/{rel}": (harness, data)
+                                  for rel, data in texts.items()})
+        elif directives.get("steering_dir") and "SKILL.md" in texts:
+            body = re.sub(r"\A---\n.*?\n---\n+", "", texts["SKILL.md"].decode(UTF8, "replace"), flags=re.S)
+            header = str(_declared(directives.get("steering_inclusion")).get("skill_header") or "")
+            item["files"][f"{directives['steering_dir']}/{name}.md"] = (harness, (header + body).encode(UTF8))
+    return item
+
+
+def _steering_item(name, path, tree, blobs, declared):
+    """A steering file, byte for byte and front matter and all, for each harness that reads steering (#15)."""
+    item = _content_item("steering", name)
+    mode, oid = tree[path]
+    why = _not_borrowed(path, mode, blobs.get(oid))
+    if why:
+        item["skipped"].append((f"steering/{name}.md", why))
+        return item
+    for harness, (directives, _, known) in declared.items():
+        if directives.get("steering_dir"):
+            item["files"][f"{directives['steering_dir']}/{name}.md"] = (harness, blobs[oid])
+        elif known:
+            item["notes"].append(f"{harness} reads no steering files")
+    return item
+
+
+def _agent_item(name, path, tree, blobs, declared, takes_agents):
+    """An agent definition in each harness's declared format, with no field in it that runs a command (#15).
+
+    A field the package's adapter or a layer over it names in `agent_format.commands` -
+    hooks, servers the harness starts - is taken out and named, so a layer cannot take one
+    back in. The fields that grant trust, and an empty field that loads context, are kept
+    and named: whoever runs the agent should see them before it runs.
+    """
+    item = _content_item("agents", name)
+    for harness, (directives, shipped, known) in declared.items():
+        if harness not in takes_agents:
+            if known:
+                item["notes"].append(f"{harness} reads no agent definitions ao can borrow")
+            continue
+        shape, (mode, oid) = _declared(directives.get("agent_format")), tree[path]
+        why = _not_borrowed(path, mode, blobs.get(oid))
+        try:
+            definition = None if why else json.loads(blobs[oid].decode("utf-8-sig"))
+        except ValueError:
+            definition = None
+        if not why and not isinstance(definition, dict):
+            why = "not a JSON object, which an agent definition is"
+        elif not why and definition.get("name", name) != name:
+            why = f"it names itself {definition.get('name')!r}, and an agent is named as its file"
+        if why:
+            if (f"agents/{name}.json", why) not in item["skipped"]:
+                item["skipped"].append((f"agents/{name}.json", why))
+            continue
+        commands = _declared(shape.get("commands"), _declared(shipped.get("agent_format")).get("commands"))
+        taken = [field for field in sorted(commands) if definition.get(field)]
+        for field in taken:
+            definition.pop(field)
+            item["skipped"].append((f"agents/{name}.json {field}", str(commands[field])))
+        target = f"{directives['agents_dir']}/{name}.json"
+        item["files"][target] = (harness, (json.dumps(definition, indent=2, ensure_ascii=False) + "\n").encode(UTF8)
+                                 if taken else blobs[oid])
+        for field, meaning in sorted(_declared(shape.get("grants")).items()):
+            value = definition.get(field)
+            if value:
+                shown = value if isinstance(value, list) else sorted(value) if isinstance(value, dict) else [value]
+                item["notes"].append(f"{target} keeps {field} {', '.join(map(str, shown))}: {meaning}")
+        context = _declared(shape.get("context"))
+        if context.get("field") and not definition.get(context["field"]):
+            item["notes"].append(f"{target} names no {context['field']}: {context.get('empty')}")
+    return item
+
+
+def _unsupported_inclusion(item, declared):
+    """Name each steering file whose inclusion its harness does not honour; the file is written as it is (#15)."""
+    for target, (harness, data) in sorted(item["files"].items()):
+        directives = declared[harness][0]
+        rules = _declared(directives.get("steering_inclusion"))
+        if not (rules.get("field") and directives.get("steering_dir")
+                and target.startswith(f"{directives['steering_dir']}/")):
+            continue
+        mode = _front_matter(data, rules["field"]) or str(rules.get("default") or "")
+        if mode not in (rules.get("honoured") or []):
+            item["unsupported"].append((target, f"{rules['field']}: {mode} - {rules.get('unhonoured')}"))
+
+
+def _content_refusals(root, items):
+    """Every reason a planned write must not be made; one of them stops them all (#15)."""
+    record, kept, refused, writers = content_manifest(root), _kept_files(root), [], {}
+    for item in items:
+        key = dict(CONTENT_KINDS)[item["kind"]]
+        label = f"{key} {item['name']}"
+        for target, (harness, data) in sorted(item["files"].items()):
+            why = _content_refusal(root, harness, target, kept)
+            if not why and target in writers:
+                why = f"{target} would be written by both {writers[target]} and {label}"
+            writers.setdefault(target, label)
+            path = os.path.join(root, *target.split("/"))
+            if not why and os.path.isdir(path):
+                why = f"{target} is a directory"
+            elif not why and os.path.exists(path):
+                with open(path, "rb") as fh:
+                    current = fh.read()
+                # A file ao vendored here before is ao's to replace; any other file is someone's work.
+                vendored = any(target in (entry.get("files") or {}) for entry in record[item["kind"]]
+                               if entry.get(key) == item["name"])
+                if current != data and not vendored:
+                    why = f"{target} exists and ao did not vendor it as {label}: move it aside first"
+            if why:
+                refused.append(why)
+    return refused
+
+
+def vendor_content(root, source, pin, harnesses, skills=(), steering=(), agents=(), base="", dry_run=False):
+    """Borrow skills, steering files and agent definitions pinned to a commit, text only, into each harness (#14, #15).
+
+    A source keeps `skills/<name>/`, `steering/<name>.md` and `agents/<name>.json` under
+    `base`, its root unless named: a repository that ships one harness's layer keeps it in
+    that harness's own directory. Each harness takes what its adapter declares. Only text
+    is borrowed and hooks never are, and both are named; what a harness does not honour,
+    such as an inclusion only its IDE reads, is written as it is and named unsupported,
+    never faked. Every write is checked before any is made, one refusal writes nothing,
+    and a dry run writes nothing at all. Each written file's digest is recorded in
+    .ao/content.json.
+
+    Returns {"items", "hooks", "refused"}: each item {kind, name, files: {target: (harness,
+    bytes)}, skipped: [(path, why)], unsupported: [(target, why)], notes: [text]}, each hook
+    (path, why), and each refusal a sentence.
     """
     import tempfile
-    record = content_manifest(root)
-    written = []
+    for kind, names in (("skills", skills), ("steering", steering), ("agents", agents)):
+        for name in names:
+            if not CONTENT_NAME.fullmatch(name):
+                raise ValueError(f"{name!r} is not a {dict(CONTENT_KINDS)[kind]} name")
+    base = str(base or "").strip("/")
+    if base and not _plain_steps(base):
+        raise ValueError(f"{base!r} is not a directory inside the source: names joined by `/`, with no `.` or `..`")
+    prefix = f"{base}/" if base else ""
+    declared = {}                   # harness: (its directives, the package's directives for it, has it an adapter)
+    for harness in harnesses:
+        adapter = load_adapter(harness, root)
+        declared[harness] = (_declared(adapter.get("directives")),
+                             _declared((package_adapters().get(harness) or {}).get("directives")), bool(adapter))
+    takes_agents = [harness for harness, (directives, _, _) in declared.items() if directives.get("agents_dir")
+                    and _declared(directives.get("agent_format")).get("extension") == ".json"]
+    wanted = [f"{prefix}skills/{name}" for name in skills] + [f"{prefix}steering/{name}.md" for name in steering]
+    wanted += [f"{prefix}agents/{name}.json" for name in agents] if takes_agents else []
+    wanted += [f"{prefix}hooks"] if steering or agents else []
+    where = f" at {pin[:12]}" + (f" in {base}" if base else "")
     with tempfile.TemporaryDirectory(prefix="ao-content-") as work:
-        fetch_pinned(source, pin, [f"skills/{name}" for name in skills], work)
-        for name in skills:
-            if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
-                raise ValueError(f"{name!r} is not a skill name")
-            base = os.path.join(work, "skills", name)
-            if not os.path.isdir(base):
-                raise ValueError(f"{name} is not a skill at {pin[:12]}")
-            files, skipped = [], []
-            for directory, subdirs, names in os.walk(base):
-                if "hooks" in subdirs:
-                    subdirs.remove("hooks")
-                    skipped.append(os.path.relpath(os.path.join(directory, "hooks"), base) + "/ (hooks are never imported)")
-                for file_name in sorted(names):
-                    full = os.path.join(directory, file_name)
-                    rel = os.path.relpath(full, base).replace(os.sep, "/")
-                    with open(full, "rb") as fh:
-                        data = fh.read()
-                    # Windows keeps no execute bit, and os.access says every file there has one (#71).
-                    executable = os.name != "nt" and os.access(full, os.X_OK)
-                    if not file_name.lower().endswith(CONTENT_TEXT) or executable or data[:2] == b"#!":
-                        skipped.append(rel)
-                        continue
-                    files.append((rel, data))
-            digests = {}
-            from .storage import replace_file_durably
-            for harness in harnesses:
-                directives = load_adapter(harness, root).get("directives") or {}
-                if directives.get("skills_dir"):
-                    for rel, data in files:
-                        target = f"{directives['skills_dir']}/{name}/{rel}"
-                        replace_file_durably(os.path.join(root, target), data)
-                        digests[target] = "sha256:" + hashlib.sha256(data).hexdigest()
-                elif directives.get("steering_dir") and dict(files).get("SKILL.md"):
-                    body = dict(files)["SKILL.md"].decode(UTF8, "replace")
-                    body = re.sub(r"\A---\n.*?\n---\n+", "", body, flags=re.S)
-                    data = ("---\ninclusion: manual\n---\n\n" + body).encode(UTF8)
-                    target = f"{directives['steering_dir']}/{name}.md"
-                    replace_file_durably(os.path.join(root, target), data)
-                    digests[target] = "sha256:" + hashlib.sha256(data).hexdigest()
-            record["skills"] = [entry for entry in record["skills"] if entry.get("skill") != name]
-            record["skills"].append({"skill": name, "source": source, "pin": pin, "files": digests, "skipped": skipped})
-            written.append((name, digests, skipped))
+        tree = fetch_pinned(source, pin, wanted, work)
+        missing = [f"{name} is not a skill{where}" for name in skills
+                   if not any(path.startswith(f"{prefix}skills/{name}/") for path in tree)]
+        missing += [f"{name} is not a steering file{where}" for name in steering
+                    if f"{prefix}steering/{name}.md" not in tree]
+        missing += [f"{name} is not an agent{where}" for name in agents
+                    if takes_agents and f"{prefix}agents/{name}.json" not in tree]
+        if missing:
+            raise ValueError("; ".join(missing))
+        blobs = pinned_blobs(work, [oid for path, (mode, oid) in tree.items()
+                                    if not path.startswith(f"{prefix}hooks/") and not _not_borrowed(path, mode)])
+    items = [_skill_item(name, f"{prefix}skills/{name}/", tree, blobs, declared) for name in skills]
+    items += [_steering_item(name, f"{prefix}steering/{name}.md", tree, blobs, declared) for name in steering]
+    items += [_agent_item(name, f"{prefix}agents/{name}.json", tree, blobs, declared, takes_agents) for name in agents]
+    for item in items:
+        _unsupported_inclusion(item, declared)
+    hooks = []
+    for path in sorted(path for path in tree if path.startswith(f"{prefix}hooks/")):
+        rel, why = path[len(prefix):], ["hooks are never imported"]
+        for harness, (directives, _, _) in declared.items():
+            formats = _declared(directives.get("hook_files"))
+            suffix = max((suffix for suffix in formats if rel.endswith(suffix)), key=len, default=None)
+            if suffix:
+                why.append(f"{harness}: {formats[suffix]}")
+        hooks.append((rel, "; ".join(why)))
+    plan = {"items": items, "hooks": hooks, "refused": _content_refusals(root, items)}
+    if plan["refused"] or dry_run:
+        return plan
+
     from .storage import replace_file_durably
+    record = content_manifest(root)
+    for item in items:
+        key, digests = dict(CONTENT_KINDS)[item["kind"]], {}
+        for target, (_, data) in sorted(item["files"].items()):
+            replace_file_durably(os.path.join(root, *target.split("/")), data)
+            digests[target] = "sha256:" + hashlib.sha256(data).hexdigest()
+        record[item["kind"]] = [entry for entry in record[item["kind"]] if entry.get(key) != item["name"]]
+        record[item["kind"]].append({key: item["name"], "source": source, "pin": pin, "files": digests,
+                                     "skipped": [f"{path} ({why})" for path, why in item["skipped"]]})
     replace_file_durably(content_manifest_path(root), (json.dumps(record, indent=1, sort_keys=True) + "\n").encode(UTF8))
-    return written
+    return plan
 
 
 def verify_content(root):
-    """Vendored files whose bytes no longer match the digest they were vendored with (#14)."""
+    """Vendored files whose bytes no longer match the digest they were vendored with (#14, #15)."""
     drift = []
-    for entry in content_manifest(root)["skills"]:
-        for target, digest in sorted((entry.get("files") or {}).items()):
-            try:
-                with open(os.path.join(root, target), "rb") as fh:
-                    actual = "sha256:" + hashlib.sha256(fh.read()).hexdigest()
-            except OSError:
-                drift.append(f"{target} ({entry['skill']}@{entry['pin'][:12]}) is missing")
-                continue
-            if actual != digest:
-                drift.append(f"{target} ({entry['skill']}@{entry['pin'][:12]}) changed since it was vendored")
+    for kind, entries in content_manifest(root).items():
+        key = dict(CONTENT_KINDS)[kind]
+        for entry in entries:
+            # A skill is named as it always was; the kinds borrowed since say which kind they are.
+            label = f"{'' if kind == 'skills' else key + ' '}{entry.get(key)}@{str(entry.get('pin') or '')[:12]}"
+            for target, digest in sorted((entry.get("files") or {}).items()):
+                try:
+                    with open(os.path.join(root, target), "rb") as fh:
+                        actual = "sha256:" + hashlib.sha256(fh.read()).hexdigest()
+                except OSError:
+                    drift.append(f"{target} ({label}) is missing")
+                    continue
+                if actual != digest:
+                    drift.append(f"{target} ({label}) changed since it was vendored")
     return drift
 
 

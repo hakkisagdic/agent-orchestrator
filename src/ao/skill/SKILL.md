@@ -216,7 +216,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao status` / `ao watch` / `ao watch --all` | the panel: who is working, quota, problems, mail |
 | `ao board` | READY / running / blocked (`needs:`) / verified / done |
 | `ao room search <words>` / `ao mail compact <days>` | stored messages across projects; collapse old bodies to stubs |
-| `ao content add <source>@<commit> --skills a,b` / `verify` | borrow skills pinned and text-only; check they have not drifted |
+| `ao content add <source>@<commit> [--skills a,b] [--steering c,d] [--agents e,f] [--from <dir>] [--dry-run]` / `verify` | borrow skills, steering and agent definitions pinned and text-only, hooks never; check they have not drifted |
 | `ao backup --to <dir|ref|remote:name>` / `ao restore <dir>` | the governance off this disk, and back, verified |
 | `ao hunt [run|discard <id>|status]` | a bounded read-only bug hunt; leads to the architect, never a verdict |
 | `ao split-check` | is the staged candidate a pure move? a `move-only` slice cannot land otherwise, and its grant records the proof its waived review later closes on |

@@ -170,11 +170,17 @@ def build_parser():
     rsr = sub.add_parser("restore", help="reconstruct the governance from a backup directory")
     rsr.add_argument("source", help="a backup directory with its manifest.json")
     rsr.set_defaults(fn=cmd_restore)
-    ct = sub.add_parser("content", help="borrow third-party skills pinned to a commit, text only; verify them")
+    ct = sub.add_parser("content", help="borrow third-party skills, steering and agent definitions pinned to a "
+                                        "commit, text only; verify them")
     ct.add_argument("action", choices=["add", "verify"])
     ct.add_argument("spec", nargs="?", help="add: <source>@<40-character commit>")
     ct.add_argument("--skills", help="add: the skills to borrow, comma-separated")
+    ct.add_argument("--steering", help="add: the steering files to borrow, comma-separated")
+    ct.add_argument("--agents", help="add: the agent definitions to borrow, comma-separated")
+    ct.add_argument("--from", dest="base", help="add: the directory in the source that holds skills/, steering/, "
+                                                "agents/ and hooks/ (default: its root)")
     ct.add_argument("--harness", help="add: harness adapters to install into (default: those detected)")
+    ct.add_argument("--dry-run", action="store_true", help="add: say what would be written where; write nothing")
     ct.set_defaults(fn=cmd_content)
     rm_ = sub.add_parser("room", help="messages across every registered project")
     rm_.add_argument("action", choices=["search"])
