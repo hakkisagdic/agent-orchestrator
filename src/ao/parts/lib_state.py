@@ -838,23 +838,25 @@ def credit_usage(monthly_budget=None):
     (`KIRO_API_KEY`); it is not a REST credential, and the published docs
     describe no usage or quota route. The dashboard in the app is the authority.
 
-    Locally, each session writes `usage_summary` records carrying
-    `{unit: "credit", usage: <float>}`. The values climb and then drop, because a
-    record reports the running total *of the turn in progress* and a drop means a
-    new turn began. So a turn costs the peak it reached, and a session costs the
-    sum of those peaks.
+    Locally, a session's usage records are read through what each shipped adapter
+    declares (#76): which transcripts (`billing.fallback.transcripts`), which records
+    carry usage and where its values are (`telemetry.cost`, `transcript.record`), and
+    the reading that adds them up (`billing.fallback.reading`) - `sum` when a record is
+    the whole cost of the turn it reports, `peak-per-turn` when it is the running total
+    of the turn in progress. A fallback declaring no reading, or one ao does not
+    implement, is not read rather than misread. The turns are the ones `ao cost` counts
+    (`next_turn`), under the reading it applies too.
 
-    Two simpler readings are wrong by large factors and both were tried first:
-    summing every record counts each turn once per progress update (30x high),
-    and taking only the final record counts one turn per session (40x low). The
-    peaks reading was confirmed against a known 10,000/month allowance — the
-    month of heaviest use came to 10,148, where the others gave 13,168 and 258.
+    The reading is measured, not assumed. Kiro's records were once read as running
+    totals, with a drop between two records taken for a new turn; in one machine's
+    store (July to September 2026, 455 records) no turn wrote two, consecutive records
+    never shared a request id, and taking peaks merged every run of turns whose cost
+    rose into its last, reading 79% of what the records add up to. Every record there
+    is a whole turn's cost.
 
-    Which transcripts are read, which records carry usage and where its values are
-    come from each shipped adapter (`billing.fallback.transcripts`, `telemetry.cost`,
-    `transcript.record`); the reading is its `billing.fallback.reading`, and only the
-    peak-per-turn reading is implemented, so a fallback declaring another is not read
-    rather than misread (#76).
+    What a record adds is charged to the day it was written, not to whenever the session
+    was last touched: a long session crosses billing periods, and charging all of it to
+    its final month is how a month reads as full while the previous one reads as empty.
     """
     import glob
     from collections import defaultdict
@@ -863,13 +865,13 @@ def credit_usage(monthly_budget=None):
     for _, adapter in sorted(package_adapters().items()):
         fallback = (adapter.get("billing") or {}).get("fallback") or {}
         shape = transcript_shape(adapter)
-        if fallback.get("transcripts") and fallback.get("reading") == "peak-per-turn" and shape["usage"]:
-            # A line that does not name the usage field holds no usage, and is never parsed.
-            marks = sorted({'"' + field.split(".")[0].split("[")[0] + '"' for field in shape["usage"]["fields"]})
+        if fallback.get("transcripts") and fallback.get("reading") in USAGE_READINGS and shape["usage"]:
+            # A line naming neither the usage field nor a kind that opens or ends a turn is never parsed.
+            marks = sorted({'"' + field.split(".")[0].split("[")[0] + '"' for field in shape["usage"]["fields"]}
+                           | {'"' + kind + '"' for kind in shape["start"] + shape["prompt"] + shape["end"]})
             sources += [(path, shape, marks) for path in glob.glob(_home_path(fallback["transcripts"]))]
     for f, shape, marks in sources:
-        peaks, cur, month, turns = 0.0, 0.0, "", 0
-        cur_day = ""
+        usage, turn, turns, credits, day, month = shape["usage"], None, 0, 0.0, "", ""
         try:
             with open(f, errors="replace", encoding=UTF8) as fh:
                 for line in fh:
@@ -879,31 +881,26 @@ def credit_usage(monthly_budget=None):
                         rec = json.loads(line)
                     except Exception:
                         continue
+                    kind = record_kind(rec, shape)
+                    turn, _ = next_turn(turn, kind, shape)
                     pl = record_body(rec, shape)
-                    if pl is None or record_kind(rec, shape) != shape["usage"]["type"]:
+                    if pl is None or kind != usage["type"]:
                         continue
-                    v = sum(value for values, _ in usage_entries(pl, shape["usage"]) for value in values
-                            if isinstance(value, (int, float)))
-                    ts = record_time(rec, shape)
-                    if v < cur:                  # dropped: the previous turn ended at cur
-                        peaks += cur
+                    turn = {} if turn is None else turn      # usage before any turn opens is a turn of its own
+                    if "usage" not in turn:
                         turns += 1
-                        # Attribute the turn to the day it ran, not to whenever the
-                        # session was last touched. A long session crosses billing
-                        # periods, and charging all of it to the final period is how
-                        # a month reads as full while the previous one reads as empty.
-                        days[cur_day or ts[:10]] += cur
-                    cur, cur_day = v, ts[:10]
-                    month = ts[:7]
+                    grown = add_usage(turn, pl, usage)
+                    credits += grown
+                    day = record_time(rec, shape)[:10] or day
+                    if day:
+                        days[day] += grown
+                        months[day[:7]] += grown
+                        month = day[:7]
         except OSError:
             continue
-        if cur or peaks:
-            peaks += cur
-            turns += 1
-            days[cur_day or month + "-01"] += cur
-            months[month] += peaks
+        if turns:
             sessions.append({"session": os.path.basename(os.path.dirname(f)),
-                             "month": month, "turns": turns, "credits": round(peaks, 2),
+                             "month": month, "turns": turns, "credits": round(credits, 2),
                              "mtime": os.path.getmtime(f)})
     sessions.sort(key=lambda r: r["mtime"], reverse=True)
     this_month = time.strftime("%Y-%m")

@@ -550,8 +550,11 @@ def turn_costs(cfg, since=None):
 
     Which records open and close a turn, carry usage or call a tool is the
     implementer's adapter's to declare (`transcript.turn`, `transcript.messages`,
-    `transcript.tool_call`, `telemetry.cost`): a turn opens at a start record, or at
-    a prompt when none is open or the open one ended.
+    `transcript.tool_call`, `telemetry.cost`), and so is the reading that adds usage
+    up (`billing.fallback.reading`), the one the credit estimate applies. A turn opens
+    at a start record, or at a prompt when none is open or the open one ended; the
+    start record that follows a turn's prompt is that turn's start, not a second turn
+    (`next_turn`). Counting both doubled every turn count and left spend where it was.
     """
     import collections
     msgs, _ = session_paths(cfg)
@@ -573,22 +576,16 @@ def turn_costs(cfg, since=None):
     for d in recs:
         pl = record_body(d, shape) or {}
         t = record_kind(d, shape)
-        if t in shape["start"] or (t in shape["prompt"] and (cur is None or cur.get("closed"))):
-            cur = {"start": ts(d), "usage": 0.0, "product_writes": 0, "coord_writes": 0, "tool_calls": 0,
-                   "reviews": 0, "commits": 0, "blocked_report": False, "ao": collections.Counter()}
+        cur, opened = next_turn(cur, t, shape)
+        if opened:
+            cur.update({"start": ts(d), "usage": 0.0, "product_writes": 0, "coord_writes": 0, "tool_calls": 0,
+                        "reviews": 0, "commits": 0, "blocked_report": False, "ao": collections.Counter()})
             out["turns"].append(cur)
             continue
         if cur is None:
             continue
         if usage and t == usage["type"]:
-            for values, _ in usage_entries(pl, usage):
-                for value in values:
-                    try:
-                        cur["usage"] += float(value or 0)
-                    except (TypeError, ValueError):
-                        pass
-        elif t in shape["end"]:
-            cur["closed"] = True
+            add_usage(cur, pl, usage)
         elif tool and t == tool["type"]:
             cur["tool_calls"] += 1
             name = str(_path_value(pl, tool["name"]) or "")

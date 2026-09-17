@@ -103,13 +103,17 @@
       "turn_start",
       "turn_end",
       "sub_agent_start",
-      "sub_agent_complete"
+      "sub_agent_complete",
+      "session_start",
+      "tombstone"
     ],
     "messages": { "prompt": ["user"], "reply": ["assistant"] },
     "turn": { "start": ["turn_start"], "end": ["turn_end"],
-              "bookkeeping": ["session_metadata", "usage_summary", "session_event"] },
-    "tool_call": { "type": "tool_call", "name": "toolName", "args": "args", "path_keys": ["path"],
-                   "write_tools": ["fs_write"], "write_words": ["write"] },
+              "bookkeeping": ["session_metadata", "usage_summary", "session_event", "session_start", "tombstone"] },
+    "tool_call": { "type": "tool_call", "name": "toolName", "args": "args",
+                   "path_keys": ["path", "targetFile", "destinationPath"],
+                   "write_tools": ["fs_write", "fs_append", "str_replace", "delete_file", "semantic_rename",
+                                   "smart_relocate"], "write_words": ["write"] },
     "tail_bytes": 900000
   },
   "sessions": {
@@ -233,10 +237,10 @@
     "api_key_note": "A ksk_ API key is NOT a bearer token for this endpoint — it is rejected with AccessDeniedException on codewhisperer and 'Invalid token' on management.kiro.dev. It authenticates the CLI via KIRO_API_KEY. The CLI's cached OIDC access token is what works here.",
     "fallback": {
       "source": "transcript",
-      "reading": "peak-per-turn",
+      "reading": "sum",
       "transcripts": "~/.kiro/sessions/*/*/messages.jsonl",
-      "note": "usage_summary reports the running total of the turn in progress; a turn costs the peak it reached before the next turn resets it. Summing every record over-counts ~3x, taking only the last under-counts ~18x.",
-      "accuracy": "a floor — measured at 69% of the account figure, since sessions on other machines are invisible"
+      "note": "Each usage_summary closes one turn and carries that turn's whole cost, so the records add up. Measured on one machine's store, July to September 2026: 455 records and never two for one turn, no request id shared by two consecutive records, and the older records that carry no request ids never two for one turn either. The peak-per-turn reading declared here before took a drop between two records for a new turn and read 79% of the sum; each session's last record alone reads under 1% of it.",
+      "accuracy": "a floor: sessions on other machines are invisible. The 69% of the account figure recorded here was measured under the peak-per-turn reading; the sum has not been measured against the account."
     }
   },
   "models": {

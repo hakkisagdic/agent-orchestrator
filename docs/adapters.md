@@ -274,18 +274,28 @@ adapter does not declare is read as nothing, never as another harness's field.
 | `transcript.record.time` | the path to a record's ISO timestamp, from the record itself | every reader |
 | `transcript.record.text_keys` | the keys whose string values are a message's text, at any depth; a dotted path is read by its last key | the panel's messages, `ao tail` |
 | `transcript.messages` | `{prompt, reply}`: the kinds of the owner's prompt and of the agent's reply | the panel's messages, `ao tail`, `ao cost` |
-| `transcript.turn` | `{start, end, bookkeeping}`: the kinds that open and close a turn, and those that may follow its end without meaning a turn is running | `ao cost`, the watchdog's reap and idle answer |
+| `transcript.turn` | `{start, end, bookkeeping}`: the kinds that open and close a turn, and those that may follow its end without meaning a turn is running | `ao cost`, the credit estimate, the watchdog's reap and idle answer |
 | `transcript.tool_call` | `{type, name, args, path_keys, write_tools, write_words}`: a tool call's kind, the paths to its name and arguments, the arguments naming a file, and the tools that write one - by name, or by a word their name holds in any case | `ao cost`, foreign edits |
 | `telemetry.context` | `{from: "transcript", type, match, field}`: the record and the path of the context percentage | the panel, `ao_status` |
 | `telemetry.cost` | `{from: "transcript", type, field, tools, unit}`: the usage record, the path to its value - or `fields`, several paths that add up - and the path to the tools each entry used | the panel, `ao cost`, the credit estimate |
 | `telemetry.failure` | `{from: "transcript", type, field, failed_when, text}`: the verdict on a tool result, the value that means it failed, and the path to its output | the panel's problems |
-| `billing.fallback.reading` | how usage records add up to spend; ao implements `peak-per-turn`, and does not read a fallback that declares another | `ao credits --offline`, `ao digest` |
+| `billing.fallback.reading` | how usage records add up to spend: `sum` when every record is the whole cost of the turn it reports, `peak-per-turn` when a record is the running total of the turn in progress and a turn costs the highest total it reached. The panel and `ao cost` add usage up by it too, and add records up when none is declared; the estimate reads only a declared reading, and under a reading ao does not implement no reader reads usage | the panel, `ao cost`, `ao credits --offline`, `ao digest` |
 
 A path steps into objects with dots (`value.usagePercentage`), and `[]` steps into each element
 of a list (`promptTurnSummaries[].usage`), one entry per element. A turn opens at a `start` kind,
-or at a `prompt` when no turn is open or the open one ended. `tests/test_transcript_shape.py`
+or at a `prompt` when no turn is open or the open one ended; a `start` that follows the prompt of
+a turn not yet started is that turn's start, not a second turn. `tests/test_transcript_shape.py`
 reads a harness ao never shipped, declared only in a project's adapter layer, and fails when a
 core module names a kind, a field or a tool of a shipped adapter's shape.
+
+A shipped declaration says what a harness writes, measured rather than believed. Kiro's turns,
+usage, writes and turn ends were measured on one machine's store, July to September 2026. It
+writes a turn's prompt and then its start. Each `usage_summary` carries the whole cost of the one
+turn it closes, so it declares `sum`: the `peak-per-turn` reading it declared before took a drop
+between two records for a new turn and read 79% of what the records add up to. Its tools that
+replace text in, append to, delete or move a file are writes, and a `session_start` or a
+`tombstone` may follow the end of its last turn. `tests/test_transcript_readings.py` holds each of
+these readings.
 
 ## Busy detection
 

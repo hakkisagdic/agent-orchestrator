@@ -133,9 +133,11 @@ def cmd_credits(cfg, args):
     Prefer the account. `GetUsageLimits` returns exactly what the dashboard shows,
     authenticated with the token the CLI already holds, so there is no reason to
     estimate when the real number is one request away. The transcript reading
-    stays as the offline path and is labelled as the floor it is — measured here
-    at roughly two thirds of the true figure, because it cannot see what ran on
-    another machine.
+    stays as the offline path and is labelled as the floor it is, because it
+    cannot see what ran on another machine. The two thirds of the true figure it
+    was once measured at came from reading usage records as running totals, a
+    reading that comes to 79% of what this machine's records add up to; the sum
+    they are read as now has not been measured against the account.
     """
     from datetime import date, datetime
 
@@ -199,8 +201,8 @@ def cmd_credits(cfg, args):
     print(f"\n{C['b']}{C['mag']}── ESTIMATE FROM LOCAL TRANSCRIPTS {'─' * 22}{C['reset']}")
     for pm in sorted(periods):
         print(f"   {pm}   {periods[pm]:>9,.2f}")
-    print(f"\n{C['dim']}A floor: only sessions stored here are visible. Measured against"
-          f"\nthe account figure it came to about two thirds of the truth.{C['reset']}")
+    print(f"\n{C['dim']}A floor: only sessions stored here are visible, and the account's"
+          f"\nown figure is the one to trust.{C['reset']}")
     return 0
 
 

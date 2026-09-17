@@ -220,7 +220,9 @@ def transcript_shape(adapter):
     read from the object holding it: the payload when the kind is `payload.type`, the
     record itself when it is `type`. `record.time` is read from the record. A part the
     adapter does not declare comes back empty or None, and a reader then reads nothing
-    for it rather than another harness's field.
+    for it rather than another harness's field. Usage carries the reading that adds it
+    up (`billing.fallback.reading`, `sum` when none is declared); under a reading ao
+    does not implement there is no usage to read, rather than usage misread.
     """
     transcript, signals = _block(adapter, "transcript"), _block(adapter, "telemetry")
     record, message_kinds, turn = (_block(transcript, key) for key in ("record", "messages", "turn"))
@@ -239,8 +241,10 @@ def transcript_shape(adapter):
     cost = _block(signals, "cost")
     shape["unit"] = _name(cost.get("unit")) or "unit"
     fields = _names(cost.get("fields")) or _names(cost.get("field"))
-    if cost.get("from") == "transcript" and _name(cost.get("type")) and fields:
-        shape["usage"] = {"type": cost["type"], "fields": fields, "tools": _name(cost.get("tools"))}
+    reading = _block(_block(adapter, "billing"), "fallback").get("reading", "sum")
+    if cost.get("from") == "transcript" and _name(cost.get("type")) and fields and reading in USAGE_READINGS:
+        shape["usage"] = {"type": cost["type"], "fields": fields, "tools": _name(cost.get("tools")),
+                          "reading": reading}
     context = _block(signals, "context")
     if context.get("from") == "transcript" and _name(context.get("type")) and _name(context.get("field")):
         shape["context"] = {"type": context["type"], "match": _block(context, "match"), "field": context["field"]}
@@ -283,6 +287,54 @@ def usage_entries(body, usage):
     tools = _path_values(body, usage["tools"]) if usage["tools"] else []
     return [([column[i] if i < len(column) else None for column in columns], tools[i] if i < len(tools) else None)
             for i in range(max(len(column) for column in columns))]
+
+
+# How usage records add up to spend is the adapter's to declare too (`billing.fallback.reading`):
+# `sum` when every record is the whole usage of the turn it reports, `peak-per-turn` when a
+# record is the running total of the turn in progress. The panel, `ao cost` and the credit
+# estimate apply the same reading over the same turns, so no two of them tell a different spend.
+USAGE_READINGS = ("sum", "peak-per-turn")
+
+
+def record_usage(body, usage):
+    """The usage one record reports: the numbers at every declared field of every entry, added up."""
+    return sum(value for values, _ in usage_entries(body, usage) for value in values
+               if isinstance(value, (int, float)) and not isinstance(value, bool))
+
+
+def add_usage(turn, body, usage):
+    """Charge a usage record to its turn under the declared reading, and return how much the turn's usage grew.
+
+    Under `sum` the record adds on; under `peak-per-turn` the turn costs the highest total its
+    records reached. What grew is what a reader adds to a total, or to the day the record was
+    written, so a total is always the sum of its turns.
+    """
+    value, before = record_usage(body, usage), turn.get("usage") or 0.0
+    if usage["reading"] == "sum":
+        turn["usage"] = before + value
+        return value
+    turn["usage"] = max(before, value)
+    return turn["usage"] - before
+
+
+def next_turn(turn, kind, shape):
+    """(the turn a record of this kind falls in, whether the record opened it); None until a turn opens.
+
+    A start marker opens a turn, and a prompt opens one when none is open or the open one
+    ended. A harness may write its prompt before the start marker of the same turn, so a
+    start marker opens no second turn while the open one holds only its prompt: opened by a
+    prompt, not started and not ended. A call the harness makes of its own between the two
+    does not split them. An end marker ends the turn it falls in.
+    """
+    waiting = turn is not None and turn.get("prompted") and not turn.get("started") and not turn.get("closed")
+    ended = turn is None or turn.get("closed")
+    opened = (kind in shape["start"] and not waiting) or (kind in shape["prompt"] and ended)
+    if opened:
+        turn = {"prompted": kind in shape["prompt"]}
+    if turn is not None:
+        turn["started"] = bool(turn.get("started")) or kind in shape["start"]
+        turn["closed"] = bool(turn.get("closed")) or kind in shape["end"]
+    return turn, bool(opened)
 
 
 def tool_writes_file(name, tool):
@@ -366,10 +418,17 @@ def messages(recs, limit=8, adapter=None):
 
 
 def telemetry(recs, adapter):
-    """Context %, per-turn and session cost, driven by the adapter's block."""
+    """Context %, per-turn and session cost, driven by the adapter's block.
+
+    Usage adds up under the adapter's reading, as `ao cost` and the credit estimate add it:
+    under `sum` every usage entry is one turn's cost, as written; under `peak-per-turn` a turn
+    - the one already under way where the records begin included - costs the highest total
+    its records reached.
+    """
     shape = transcript_shape(implementer_adapter() if adapter is None else adapter)
     ctx_spec, cost_spec = shape["context"], shape["usage"]
     out = {"ctx": None, "total": 0.0, "turns": 0, "last": None, "unit": shape["unit"]}
+    turn = None
     for r in recs:
         pl = record_body(r, shape)
         if pl is None:
@@ -380,7 +439,12 @@ def telemetry(recs, adapter):
                 val = _path_value(pl, ctx_spec["field"])
                 if isinstance(val, (int, float)):
                     out["ctx"] = val
-        if cost_spec and t == cost_spec["type"]:
+        if not cost_spec:
+            continue
+        turn, _ = next_turn(turn, t, shape)
+        if t != cost_spec["type"]:
+            continue
+        if cost_spec["reading"] == "sum":
             for values, tools in usage_entries(pl, cost_spec):
                 values = [value or 0 for value in values]
                 if all(isinstance(value, (int, float)) for value in values):
@@ -388,6 +452,15 @@ def telemetry(recs, adapter):
                     out["total"] += u
                     out["turns"] += 1
                     out["last"] = (u, len(tools or []))
+            continue
+        entries = usage_entries(pl, cost_spec)
+        if not entries:
+            continue
+        turn = {} if turn is None else turn
+        if "usage" not in turn:
+            out["turns"] += 1
+        out["total"] += add_usage(turn, pl, cost_spec)
+        out["last"] = (turn["usage"], sum(len(tools or []) for _, tools in entries))
     return out
 
 

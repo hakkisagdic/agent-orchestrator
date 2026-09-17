@@ -20,6 +20,9 @@ Verified for Kiro CLI:
   {"unit":"credit","usage":354.82,"usedTools":["read_file","execute_bash", …]}]}
 ```
 
+Each turn writes one `usage_summary`, carrying that turn's whole cost, so a session's spend is
+those records added up: the adapter declares the reading `sum` (`billing.fallback.reading`).
+
 From those two records alone you get: context pressure, cost of the last turn, session
 total, average burn per turn, and tool-call volume. In a real session that read
 **355 credits for one turn with 540 tool calls** — which tells you something no
