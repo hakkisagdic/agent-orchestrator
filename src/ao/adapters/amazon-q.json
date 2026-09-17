@@ -2,6 +2,7 @@
   "id": "amazon-q", "name": "Amazon Q Developer CLI", "verified": "untested",
   "disclaimer": "Written from documented interface, not verified against an install.",
   "note": "Shares lineage with Kiro CLI: the flag surface is nearly identical, so the kiro adapter is the best starting point if this one drifts.",
+  "detect": { "headless": ["--no-interactive"] },
   "send":   { "argv": ["q", "chat", "--no-interactive", "{prompt}"] },
   "resume": { "argv": ["q", "chat", "--resume", "--no-interactive", "{prompt}"] },
   "options": { "trust_none": null, "trust_none_why": "no flag verified to deny every tool; --trust-tools narrows the set but was not run tool-less", "model": ["--model", "{model}"], "effort": null, "trust_all": ["--trust-all-tools"], "trust_some": ["--trust-tools={tools}"] },

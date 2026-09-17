@@ -263,19 +263,22 @@ def nested_shape(shape, transcript, signals):
     Another holds calls and results as blocks of a message, ends a turn in a field of
     the response that ends it, and writes one response as several records that repeat
     its usage. That store declares `blocks`, the path to the blocks a record holds, and
-    the `match` a block holds, in `transcript.tool_call` and `telemetry.failure`;
-    `turn.end_when`, the kind, field and values that close a turn; `turn.conversation`,
-    the kinds a turn is made of, every other kind being bookkeeping; and, for the
-    `per-response` reading, `telemetry.cost.response`, the path to a response's id.
-    Usage read per response without that path is not read, rather than counted once
-    per record. A shape that declares none of these reads as it did.
+    the `match` a block holds, in `transcript.tool_call` and `telemetry.failure`, and in
+    `transcript.messages` for the blocks that are a message's words; `turn.end_when`,
+    the kind, field and values that close a turn; `turn.conversation`, the kinds a turn
+    is made of, every other kind being bookkeeping; and, for the `per-response` reading,
+    `telemetry.cost.response`, the path to a response's id. Usage read per response
+    without that path is not read, rather than counted once per record. A shape that
+    declares none of these reads as it did.
     """
-    turn = _block(transcript, "turn")
+    turn, words = _block(transcript, "turn"), _block(transcript, "messages")
     conditions = turn.get("end_when") if isinstance(turn.get("end_when"), list) else [turn.get("end_when")]
     shape["end_when"] = [{"type": when["type"], "field": when["field"], "values": when["values"]}
                          for when in conditions if isinstance(when, dict) and _name(when.get("type"))
                          and _name(when.get("field")) and isinstance(when.get("values"), list)]
     shape["conversation"] = _names(turn.get("conversation"))
+    shape["words"] = {"blocks": words["blocks"], "match": _block(words, "match")} if _name(words.get("blocks")) \
+        else None
     for part, declared in (("tool", _block(transcript, "tool_call")), ("failure", _block(signals, "failure"))):
         if shape[part] is not None:
             shape[part].update(blocks=_name(declared.get("blocks")), match=_block(declared, "match"))
@@ -332,16 +335,18 @@ def record_usage(body, usage):
                if isinstance(value, (int, float)) and not isinstance(value, bool))
 
 
-def add_usage(turn, body, usage):
+def add_usage(turn, body, usage, counted):
     """Charge a usage record to its turn under the declared reading, and return how much the turn's usage grew.
 
     Under `sum` the record adds on; under `peak-per-turn` the turn costs the highest total its
     records reached; under `per-response` a record adds on unless a record of the same response
-    already did in this turn. What grew is what a reader adds to a total, or to the day the
-    record was written, so a total is always the sum of its turns.
+    was already charged in this reading. `counted` holds the responses a reading has charged, one
+    set for everything it adds up: every turn of a transcript, and every transcript of the credit
+    estimate. What grew is what a reader adds to a total, or to the day the record was written,
+    so a total is always the sum of its turns.
     """
     value, before = record_usage(body, usage), turn.get("usage") or 0.0
-    if usage["reading"] == "per-response" and not _first_of_response(turn, body, usage):
+    if usage["reading"] == "per-response" and not _first_of_response(counted, body, usage):
         turn["usage"] = before
         return 0.0
     if usage["reading"] in ("sum", "per-response"):
@@ -351,16 +356,18 @@ def add_usage(turn, body, usage):
     return turn["usage"] - before
 
 
-def _first_of_response(turn, body, usage):
-    """Is this the first record of its response the turn meets, by the id at `response`?
+def _first_of_response(counted, body, usage):
+    """Is this the first record of its response the reading meets, by the id at `response`?
 
     Every record of one response repeats the response's usage, so only the first is charged,
-    whichever record a tail begins at. A record that names no response is its own.
+    whichever record a tail begins at. A store can also write a response again later - the
+    same records, turns after the first, or a session's records copied into another session's
+    transcript - and a copy is not a second spend, so a response is charged once per reading,
+    not once per turn. A record that names no response is its own.
     """
     ident = _path_value(body, usage["response"])
     if not isinstance(ident, (str, int)) or isinstance(ident, bool):
         return True
-    counted = turn.setdefault("responses", set())
     if ident in counted:
         return False
     counted.add(ident)
@@ -487,11 +494,29 @@ def local_hhmm(ts):
         return ts[11:16]
 
 
+def message_words(body, shape):
+    """The text a message record holds, as one line: all of it, or only its word blocks when it holds blocks.
+
+    A store that nests blocks in a message writes a tool's result as a block of the
+    prompt's kind and a tool call as a block of the reply's, and neither is a person or
+    the agent speaking. `transcript.messages.blocks` and `match` declare the blocks that
+    are words; a record holding blocks of which none match holds no words, and a record
+    whose content is not blocks - a prompt typed as one string - is read whole.
+    """
+    words = shape.get("words")
+    parts = declared_items(body, words) if words and _path_values(body, words["blocks"]) else [body]
+    buf = []
+    for part in parts:
+        _strings(part, buf, shape["text_keys"])
+    return " ".join(" ".join(buf).split())
+
+
 def messages(recs, limit=8, adapter=None):
     """[(HH:MM, "user" | "assistant", text)] oldest→newest.
 
-    A prompt and a reply are the kinds the adapter declares in `transcript.messages`;
-    asked without an adapter, the implementer's adapter says which they are.
+    A prompt and a reply are the kinds the adapter declares in `transcript.messages`,
+    and their words the text `message_words` reads; asked without an adapter, the
+    implementer's adapter says which they are.
     """
     shape = transcript_shape(implementer_adapter() if adapter is None else adapter)
     roles = dict.fromkeys(shape["reply"], "assistant")
@@ -501,9 +526,7 @@ def messages(recs, limit=8, adapter=None):
         kind = record_kind(r, shape)
         if kind not in roles:
             continue
-        buf = []
-        _strings(record_body(r, shape), buf, shape["text_keys"])
-        text = " ".join(" ".join(buf).split())
+        text = message_words(record_body(r, shape), shape)
         if len(text) < 40:
             continue
         out.append((local_hhmm(record_time(r, shape)), roles[kind], text))
@@ -518,13 +541,14 @@ def telemetry(recs, adapter):
     Usage adds up under the adapter's reading, as `ao cost` and the credit estimate add it:
     under `sum` every usage entry is one turn's cost, as written; under `peak-per-turn` a turn
     - the one already under way where the records begin included - costs the highest total
-    its records reached; under `per-response` a turn costs each of its responses once. A
-    turn whose usage names no tools beside it has the tool calls its records hold.
+    its records reached; under `per-response` a turn costs each response it holds that no
+    earlier turn of these records held. A turn whose usage names no tools beside it has the
+    tool calls its records hold.
     """
     shape = transcript_shape(implementer_adapter() if adapter is None else adapter)
     ctx_spec, cost_spec = shape["context"], shape["usage"]
     out = {"ctx": None, "total": 0.0, "turns": 0, "last": None, "unit": shape["unit"]}
-    turn = None
+    turn, counted = None, set()
     for r in recs:
         pl = record_body(r, shape)
         if pl is None:
@@ -561,7 +585,7 @@ def telemetry(recs, adapter):
         turn["calls"] = turn.get("calls", 0) + calls
         if "usage" not in turn:
             out["turns"] += 1
-        out["total"] += add_usage(turn, pl, cost_spec)
+        out["total"] += add_usage(turn, pl, cost_spec, counted)
         out["last"] = (turn["usage"], sum(len(tools or []) for _, tools in entries) if cost_spec["tools"]
                        else turn["calls"])
     return out
@@ -1088,9 +1112,9 @@ def agent_pids(root, adapter, headless_only=False):
         # Never a human's interactive session. `ao hold` once stopped seven
         # processes in a repository; two were the orchestrator's own turn and
         # five were the owner's live Claude sessions, cut mid-work. A hold
-        # exists to stop unattended turns — the ones started with -p/--print —
-        # and an interactive session, by definition, has a person in it who did
-        # not ask to be stopped.
+        # exists to stop unattended turns — the ones started with an argument
+        # their harness declares for that — and an interactive session, by
+        # definition, has a person in it who did not ask to be stopped.
         out = [p for p in out if _is_headless(p)]
     return out
 
@@ -1188,10 +1212,32 @@ def _is_configured_agent_process(names, argv):
 
 
 def _is_headless(pid):
-    """A turn started non-interactively (-p / --print / --no-interactive)."""
+    """A turn started without a person in it, by what its own harness declares (`_headless_argv`)."""
     from . import procs
-    args = procs.argv(pid) or []
-    return any(f in args for f in ("-p", "--print", "--no-interactive"))
+    return _headless_argv(procs.argv(pid) or [])
+
+
+def _headless_argv(argv):
+    """Does a command line hold an argument its own harness declares for a turn started without a person?
+
+    Each shipped adapter declares those arguments (`detect.headless`, #76): a flag, alone or
+    with its value attached after `=`, or a subcommand. They were one list written here, and
+    any of them made any agent's process unattended, but a flag belongs to the grammar of its
+    own command - one harness prints a single answer with -p where another selects a profile
+    with it. An argument counts only for the harness whose names, its adapter's id, binaries
+    and processes, the command line runs as, and a command line no shipped adapter answers to
+    is not one. The package's adapters only: `ao hold` and the reaper stop what this calls
+    unattended, and a layer an agent can write must not make a person's session one.
+    """
+    args = [str(arg) for arg in argv or []]
+    for ident, adapter in sorted(package_adapters().items()):
+        detect = _block(adapter, "detect")
+        words = _names(detect.get("headless"))
+        if not any(arg == word or arg.startswith(word + "=") for arg in args for word in words):
+            continue
+        if _is_agent_process(None, {ident, *adapter_binaries(adapter), *_names(detect.get("processes"))}, args):
+            return True
+    return False
 
 
 def _proc_table():

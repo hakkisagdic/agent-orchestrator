@@ -1,6 +1,7 @@
 {
   "id": "opencode", "name": "opencode", "verified": "partial",
   "disclaimer": "Storage location verified on a real install; command flags from documentation.",
+  "detect": { "headless": ["run"] },
   "send":   { "argv": ["opencode", "run", "{prompt}"] },
   "resume": { "argv": ["opencode", "run", "--session", "{session}", "{prompt}"], "continue_last": ["opencode", "run", "--continue", "{prompt}"] },
   "options": { "trust_none": null, "trust_none_why": "no flag verified to deny every tool", "model": ["--model", "{model}"], "model_format": "provider/model", "effort": null, "agent_profile": ["--agent", "{agent}"] },

@@ -6,6 +6,7 @@
               "https://github.com/can1357/oh-my-pi/blob/main/docs/approval-mode.md",
               "https://github.com/can1357/oh-my-pi/blob/main/docs/session.md",
               "https://github.com/can1357/oh-my-pi/blob/main/docs/context-files.md"],
+  "detect": { "headless": ["-p"] },
   "send":   { "argv": ["omp", "-p", "{prompt}"], "cwd_matters": true },
   "resume": { "argv": ["omp", "--resume", "{session}", "-p", "{prompt}"], "continue_last": ["omp", "--continue", "-p", "{prompt}"],
               "note": "--resume takes an id prefix or a path" },

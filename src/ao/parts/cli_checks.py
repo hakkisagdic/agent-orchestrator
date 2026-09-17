@@ -376,9 +376,19 @@ SHARED_POOL_NOTE = ("the account's figure counts every session on it - another p
 
 
 def _account_beside_share(cfg, since=None):
-    """Lines setting the account's figure beside ao's own transcript share, labelled as such."""
+    """Lines setting the implementer's own account beside ao's own transcript share, labelled as such.
+
+    The account is the one the implementer's adapter declares a lookup for. The first shipped
+    adapter's was read whatever the implementer ran, so an implementer on a harness that bills
+    another pool in another unit was shown a credit account it never spends; it has none ao
+    can read, and the line says so.
+    """
+    ident = str(A.implementer_adapter(cfg).get("id") or "")
+    if not A.usage_api(ident):
+        return [f"{C['dim']}the account: {ident or 'the implementer'} declares none ao can read; what follows "
+                f"is ao's transcript only{C['reset']}"]
     try:
-        acct = A.account_usage()
+        acct = A.account_usage(adapter_id=ident)
     except Exception:
         acct = None
     if not acct or acct.get("error") or acct.get("expired") or not acct.get("limit"):
@@ -389,10 +399,7 @@ def _account_beside_share(cfg, since=None):
         mine = A.turn_costs(cfg, since=since)
     except Exception:
         mine = None
-    # A share of the account only when the implementer bills it: a harness that declares no account
-    # spends another pool in another unit, and its tokens as a percentage of these credits mean nothing.
-    bills_it = ((A.implementer_adapter(cfg).get("billing") or {}).get("api") or {}).get("driver")
-    if mine and mine.get("turns") and float(acct["used"] or 0) > 0 and bills_it:
+    if mine and mine.get("turns") and float(acct["used"] or 0) > 0:
         lines.append(f"ao's own share, from its transcript: {mine['total']:,.0f} {mine['unit']} "
                      f"({100 * mine['total'] / float(acct['used']):.0f}% of the account's used)")
     lines.append(f"{C['dim']}{SHARED_POOL_NOTE}{C['reset']}")

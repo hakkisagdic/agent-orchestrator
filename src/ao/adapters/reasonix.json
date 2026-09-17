@@ -5,6 +5,7 @@
   "sources": ["https://github.com/esengine/DeepSeek-Reasonix/blob/main-v2/docs/CLI.md",
               "https://github.com/esengine/DeepSeek-Reasonix/blob/main-v2/docs/CONFIG_PATHS.md",
               "https://github.com/esengine/DeepSeek-Reasonix/blob/main-v2/docs/GUIDE.md"],
+  "detect": { "headless": ["-p", "run"] },
   "send":   { "argv": ["reasonix", "-p", "{prompt}"], "cwd_matters": true },
   "resume": { "argv": ["reasonix", "run", "--resume", "{session}", "{prompt}"], "note": "--resume takes an id, a path or a unique title" },
   "options": {

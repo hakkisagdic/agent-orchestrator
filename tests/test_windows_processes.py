@@ -12,7 +12,7 @@ from ao import cli, lib as A, procs
 pytestmark = pytest.mark.skipif(sys.platform != "win32",
                                 reason="reads a live Windows process; the Windows lane runs it (#9)")
 
-PROBE = ["-c", "import time; time.sleep(60)", "-p"]      # -p: an unattended turn, as a hold stops
+PROBE = ["-c", "import time; time.sleep(60)", "-p"]      # -p: an unattended turn, as its adapter declares
 
 
 def _spawn(cwd):
@@ -38,8 +38,10 @@ def test_a_windows_process_s_working_directory_is_read_from_its_environment_bloc
 
 def test_an_agent_in_the_tree_is_placed_by_its_directory_and_a_hold_stops_it(project, monkeypatch, capsys):
     root = project["root"]
-    adapter = {"send": {"argv": [os.path.basename(sys.executable), "-p", "{prompt}"]}}
+    adapter = {"send": {"argv": [os.path.basename(sys.executable), "-p", "{prompt}"]}, "detect": {"headless": ["-p"]}}
     monkeypatch.setattr(A, "load_adapter", lambda ident, root=None: adapter)
+    # A hold stops what the shipped adapters call unattended, read for the harness a process runs as.
+    monkeypatch.setattr(A, "package_adapters", lambda: {"probe": adapter})
     child = _spawn(root)
     try:
         assert child.pid in A.agent_pids(root, adapter)

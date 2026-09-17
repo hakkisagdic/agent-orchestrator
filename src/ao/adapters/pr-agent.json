@@ -49,5 +49,5 @@
     "limits": ["pr-agent does not report which model answered; ao records the model it pinned in every model setting pr-agent reads",
                "pr-agent's own settings files on this machine are read below the environment, and ao does not read or check them"]
   },
-  "detect": { "binaries": ["pr-agent"] }
+  "detect": { "binaries": ["pr-agent"], "headless": ["ask"] }
 }

@@ -3,6 +3,7 @@
   "disclaimer": "Written from the documented interface, not verified against an install. Flags drift; correct and open a PR.",
   "notes": "badlogic/pi-mono now redirects to earendil-works/pi (npm @earendil-works/pi-coding-agent). pi has no permission prompts by design. -p is a switch and the prompt is positional.",
   "sources": ["https://github.com/earendil-works/pi/blob/main/packages/coding-agent/README.md"],
+  "detect": { "headless": ["-p", "--print"] },
   "send":   { "argv": ["pi", "-p", "{prompt}"], "cwd_matters": true },
   "resume": { "argv": ["pi", "--session", "{session}", "-p", "{prompt}"], "continue_last": ["pi", "--continue", "-p", "{prompt}"],
               "note": "--session takes a path or a partial id" },

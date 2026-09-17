@@ -10,7 +10,7 @@ def _plain(capsys):
 
 
 def _usage(monkeypatch):
-    monkeypatch.setattr(A, "account_usage", lambda timeout=20: {
+    monkeypatch.setattr(A, "account_usage", lambda timeout=20, adapter_id=None: {
         "used": 5000.0, "limit": 10000.0, "reset_at": None, "plan": "KIRO PRO+", "overage_status": "DISABLED"})
     monkeypatch.setattr(A, "turn_costs", lambda cfg, since=None: {
         "turns": 10, "total": 1250.0, "unit": "credits", "ao_commands": Counter(),

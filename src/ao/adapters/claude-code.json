@@ -66,14 +66,15 @@
         "message"
       ]
     },
-    "messages": { "prompt": ["user"], "reply": ["assistant"] },
+    "messages": { "prompt": ["user"], "reply": ["assistant"], "blocks": "message.content[]", "match": { "type": "text" } },
     "turn": { "end": ["result"],
-              "end_when": { "type": "assistant", "field": "message.stop_reason", "values": ["end_turn", "stop_sequence"] },
+              "end_when": { "type": "assistant", "field": "message.stop_reason",
+                            "values": ["end_turn", "stop_sequence", "refusal"] },
               "conversation": ["user", "assistant"] },
     "tool_call": { "type": "assistant", "blocks": "message.content[]", "match": { "type": "tool_use" },
                    "name": "name", "args": "input", "path_keys": ["file_path", "notebook_path"],
                    "write_words": ["write", "edit"] },
-    "note": "No record starts a turn, so a prompt opens one. The session store writes no closing record (`result` closes a turn only in --output-format stream-json output): the response that ends a turn says so in message.stop_reason, which every record of that response carries. end_turn ends one, and so does stop_sequence, which marks a reply the harness writes itself (an API error, for one) and after which the store holds the next prompt or nothing; tool_use means the harness runs the calls and asks again. A tool call is a tool_use block in an assistant record's message.content, and its result a tool_result block in the user record that follows. Every kind but user and assistant - titles, prompt queues, hook summaries, attachments, file history, and whatever kind a release adds - may follow a turn's end. Verified on 2.1 session stores.",
+    "note": "No record starts a turn, so a prompt opens one. The session store writes no closing record (`result` closes a turn only in --output-format stream-json output): the response that ends a turn says so in message.stop_reason, which every record of that response carries. end_turn ends one, and so does stop_sequence, which marks a reply the harness writes itself (an API error, for one) and after which the store holds the next prompt or nothing, and so does refusal, after which the store held the next prompt; tool_use means the harness runs the calls and asks again, and after max_tokens it asks again too: another response of the same turn followed every one. A Stop hook runs after an end_turn response and writes nothing when it starts: its system record, stop_hook_summary, comes when it ends and not after every end_turn, and no hook went on with the turn, so the turn has ended at the response and the summary is bookkeeping. A tool call is a tool_use block in an assistant record's message.content, and its result a tool_result block in the user record that follows, which holds nothing else; the words of a prompt or a reply are its text blocks, or its content when that is a string. Every kind but user and assistant - titles, prompt queues, hook summaries, attachments, file history, and whatever kind a release adds - may follow a turn's end. Verified on 2.1 session stores.",
     "tail_bytes": 900000
   },
   "telemetry": {
@@ -94,7 +95,7 @@
       "unit": "token",
       "counted": "Every token a response read or wrote, once per response: input_tokens (input after the last cache breakpoint), cache_creation_input_tokens (input written to the prompt cache), cache_read_input_tokens (input read from it) and output_tokens (thinking included).",
       "not_counted": "server_tool_use (web search and fetch requests: counts of requests, not tokens); output_tokens_details and cache_creation (breakdowns already inside output_tokens and cache_creation_input_tokens); iterations (a per-iteration breakdown that repeats the total). Tokens are not priced: a cache read is priced far below an input token and is most of a long session's tokens, so a turn's count follows its context size times its responses more closely than its price.",
-      "note": "One response is written as one record per content block, each repeating the response's usage, so a response is read once, by message.id, under the per-response reading (billing.fallback.reading); adding the records up counted about twice its tokens.",
+      "note": "One response is written as one record per content block, each repeating the response's usage, so a response is read once, by message.id, under the per-response reading (billing.fallback.reading); adding the records up counted about twice its tokens. A store also writes a response again, turns after the first, and a resumed session's transcript can hold another's responses, so a response is read once in a reading rather than once in a turn.",
       "verified": true
     },
     "failure": {
@@ -130,6 +131,7 @@
     "files": [".mcp.json", "CLAUDE.md"],
     "binaries": ["claude"],
     "processes": ["claude", "claude-code"],
+    "headless": ["-p", "--print"],
     "install_dirs": ["~/.claude/local"],
     "update": ["claude", "update"]
   },

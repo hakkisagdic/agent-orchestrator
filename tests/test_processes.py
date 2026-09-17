@@ -78,7 +78,7 @@ def test_architect_presence_measures_a_live_interactive_configured_process(monke
     assert A.architect_present("/repo", {"argv": ["claude", "-p", "{prompt}"]})
 
 
-@pytest.mark.parametrize("flag", ["-p", "--print", "--no-interactive"])
+@pytest.mark.parametrize("flag", ["-p", "--print"])
 def test_architect_presence_classifies_headless_at_the_full_process_tree_root(monkeypatch, flag):
     vectors = {
         210: ["/agents/claude", flag, "triage"],

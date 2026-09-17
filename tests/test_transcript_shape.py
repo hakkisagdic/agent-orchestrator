@@ -173,7 +173,7 @@ def test_an_adapter_that_declares_no_shape_has_nothing_read_from_another_harness
 
 # Words a shipped shape declares that are plain words, or ao's own field names.
 ORDINARY = {"type", "timestamp", "text", "content", "message", "user", "assistant", "args", "path", "key", "value",
-            "success", "result", "name", "usage", "tool_call", "input"}
+            "success", "result", "name", "usage", "tool_call", "input", "refusal"}
 
 
 def _steps(value):

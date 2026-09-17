@@ -3,6 +3,7 @@
   "disclaimer": "Written from the documented interface, not verified against an install. Flags drift; correct and open a PR.",
   "sources": ["https://docs.factory.ai/reference/cli-reference", "https://docs.factory.ai/droid-exec/overview",
               "https://docs.factory.ai/harness/agents-md", "https://docs.factory.ai/harness/hooks"],
+  "detect": { "headless": ["exec"] },
   "send":   { "argv": ["droid", "exec", "{prompt}"], "cwd_matters": true },
   "resume": { "argv": ["droid", "exec", "-s", "{session}", "{prompt}"], "note": "exec resumes by --session-id and still takes a prompt; --fork <id> branches instead" },
   "options": {

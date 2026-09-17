@@ -1,6 +1,7 @@
 {
   "id": "copilot", "name": "GitHub Copilot CLI", "verified": "untested",
   "disclaimer": "Written from documented interface, not verified against an install.",
+  "detect": { "headless": ["-p"] },
   "send":   { "argv": ["copilot", "-p", "{prompt}"] },
   "resume": { "argv": ["copilot", "--resume", "{session}", "-p", "{prompt}"], "continue_last": ["copilot", "--continue", "-p", "{prompt}"] },
   "quota": { "provider": "copilot" },

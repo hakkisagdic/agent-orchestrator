@@ -5,6 +5,7 @@
   "sources": ["https://moonshotai.github.io/kimi-code/en/reference/kimi-command",
               "https://moonshotai.github.io/kimi-code/en/configuration/data-locations",
               "https://moonshotai.github.io/kimi-code/en/customization/agents"],
+  "detect": { "headless": ["-p", "--prompt"] },
   "send":   { "argv": ["kimi", "-p", "{prompt}"], "cwd_matters": true },
   "resume": { "argv": ["kimi", "--session", "{session}", "-p", "{prompt}"], "continue_last": ["kimi", "--continue", "-p", "{prompt}"] },
   "options": {

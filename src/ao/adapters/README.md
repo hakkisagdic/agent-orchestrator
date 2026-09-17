@@ -75,3 +75,7 @@ pull request. Include the CLI version you tested against.
 - **Name it in `vendors.json`.** Every shipped adapter is named by one vendor there, and a vendor
   with no adapter says why; a test fails when the list and the files disagree (#89). If the
   command it runs is not `send.argv[0]`, declare it in `detect.binaries`.
+- **Declare how an unattended turn looks.** `detect.headless` lists the arguments of the
+  non-interactive form (`-p`, `--print`, a subcommand such as `exec`). `ao hold` and the
+  watchdog's reap stop only a process holding one its own harness declares, and a test fails
+  when a command the adapter's `send` or `resume` runs holds none.

@@ -7,6 +7,7 @@
               "https://hermes-agent.nousresearch.com/docs/user-guide/features/context-files",
               "https://hermes-agent.nousresearch.com/docs/user-guide/security",
               "https://hermes-agent.nousresearch.com/docs/reference/toolsets-reference"],
+  "detect": { "headless": ["-z", "-Q", "--oneshot"] },
   "send":   { "argv": ["hermes", "-z", "{prompt}"], "cwd_matters": true },
   "resume": { "argv": ["hermes", "chat", "--resume", "{session}", "-Q", "-q", "{prompt}"],
               "note": "resuming under -z is not documented; chat --resume takes an id, a title or latest" },

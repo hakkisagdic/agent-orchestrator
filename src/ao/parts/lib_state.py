@@ -807,24 +807,33 @@ def write_report(root, cfg, kind, facts, key=None):
         return None
 
 
-def usage_api():
-    """The first shipped adapter's account lookup that ao has a driver for, or {} (#76)."""
+def usage_api(adapter_id=None):
+    """An account lookup ao has a driver for: the shipped adapter's of this id, else the first shipped one's; {} (#76).
+
+    Asked for an adapter, only that adapter's own lookup answers: an implementer whose
+    harness bills no account ao can read has none, not the first harness's that does.
+    Read from the package's adapters only, since a lookup runs the command its adapter
+    names, and a layer an agent can write must not name that command.
+    """
     from . import drivers
-    for _, adapter in sorted(package_adapters().items()):
+    for ident, adapter in sorted(package_adapters().items()):
+        if adapter_id is not None and ident != adapter_id:
+            continue
         api = (adapter.get("billing") or {}).get("api") or {}
         if api.get("driver") in drivers.USAGE:
             return api
     return {}
 
 
-def account_usage(timeout=20):
+def account_usage(timeout=20, adapter_id=None):
     """Real usage from the provider, through the driver an adapter's billing names; None when none can.
 
     The protocol lives in drivers.py and every path, key, command and endpoint in
-    the adapter, so this core function names no harness (#76).
+    the adapter, so this core function names no harness (#76). `adapter_id` asks for
+    that adapter's own account (`usage_api`).
     """
     from . import drivers
-    api = usage_api()
+    api = usage_api(adapter_id)
     return drivers.USAGE[api["driver"]](api, timeout=timeout) if api else None
 
 
@@ -840,9 +849,11 @@ def credit_usage(monthly_budget=None):
     carry usage and where its values are (`telemetry.cost`, `transcript.record`), and
     the reading that adds them up (`billing.fallback.reading`) - `sum` when a record is
     the whole cost of the turn it reports, `peak-per-turn` when it is the running total
-    of the turn in progress. A fallback declaring no reading, or one ao does not
-    implement, is not read rather than misread. The turns are the ones `ao cost` counts
-    (`next_turn`), under the reading it applies too.
+    of the turn in progress, `per-response` when a response repeats its usage in several
+    records and is charged once, whichever of the adapter's transcripts holds a copy. A
+    fallback declaring no reading, or one ao does not implement, is not read rather than
+    misread. The turns are the ones `ao cost` counts (`next_turn`), under the reading it
+    applies too.
 
     The reading is measured, not assumed. Kiro's records were once read as running
     totals, with a drop between two records taken for a new turn; in one machine's
@@ -867,8 +878,9 @@ def credit_usage(monthly_budget=None):
             marks = sorted({'"' + field.split(".")[0].split("[")[0] + '"' for field in shape["usage"]["fields"]}
                            | {'"' + kind + '"' for kind in shape["start"] + shape["prompt"] + shape["end"]
                               + [when["type"] for when in shape["end_when"]]})
-            sources += [(path, shape, marks) for path in glob.glob(_home_path(fallback["transcripts"]))]
-    for f, shape, marks in sources:
+            counted = set()             # one reading of this adapter's transcripts: a response is charged once
+            sources += [(path, shape, marks, counted) for path in glob.glob(_home_path(fallback["transcripts"]))]
+    for f, shape, marks, counted in sources:
         usage, turn, turns, credits, day, month = shape["usage"], None, 0, 0.0, "", ""
         try:
             with open(f, errors="replace", encoding=UTF8) as fh:
@@ -887,7 +899,7 @@ def credit_usage(monthly_budget=None):
                     turn = {} if turn is None else turn      # usage before any turn opens is a turn of its own
                     if "usage" not in turn:
                         turns += 1
-                    grown = add_usage(turn, pl, usage)
+                    grown = add_usage(turn, pl, usage, counted)
                     credits += grown
                     day = record_time(rec, shape)[:10] or day
                     if day:
@@ -1203,12 +1215,12 @@ def architect_present(root, architect=None):
 
     Presence is a process fact, not transcript recency. Match only the configured
     architect command in its configured cwd, exclude AO helpers and descendants,
-    and classify headlessness at the full process-tree root. No positive result
-    is cached, so process exit releases presence on the next scan.
+    and classify headlessness at the full process-tree root, by the arguments the
+    harness it runs as declares (`_headless_argv`). No positive result is cached,
+    so process exit releases presence on the next scan.
     """
-    headless_flags = ("-p", "--print", "--no-interactive")
     return any(
-        not any(flag in argv for flag in headless_flags)
+        not _headless_argv(argv)
         for _, argv in _architect_process_roots(root, architect)
     )
 

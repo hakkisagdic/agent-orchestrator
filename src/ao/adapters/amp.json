@@ -1,6 +1,7 @@
 {
   "id": "amp", "name": "Amp (Sourcegraph)", "verified": "untested",
   "disclaimer": "Written from documented interface, not verified against an install.",
+  "detect": { "headless": ["-x"] },
   "send":   { "argv": ["amp", "-x", "{prompt}"] },
   "resume": { "argv": ["amp", "threads", "continue", "{session}", "-x", "{prompt}"] },
   "list_sessions": { "argv": ["amp", "threads", "list"] },

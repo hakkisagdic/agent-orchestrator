@@ -566,7 +566,7 @@ def turn_costs(cfg, since=None):
     if not msgs or not os.path.exists(msgs):
         return out
     recs = read_tail(msgs, 400_000_000)
-    cur = None
+    cur, counted = None, set()
 
     def ts(d):
         raw = record_time(d, shape)
@@ -587,7 +587,7 @@ def turn_costs(cfg, since=None):
         if cur is None:
             continue
         if usage and t == usage["type"]:
-            add_usage(cur, pl, usage)
+            add_usage(cur, pl, usage, counted)
         # Not an elif: one record of a store that nests its calls carries a response's usage and its tool calls.
         if tool and t == tool["type"]:
             for name, args in tool_calls(pl, tool):
@@ -1123,9 +1123,11 @@ def release_architect(root, pid=None):
 def implementer_recent_writes(cfg, minutes=15):
     """Paths the implementer's tools wrote in the last N minutes, from its transcript.
 
-    A tool call and the argument naming its file are what the implementer's adapter
-    declares in `transcript.tool_call`; one that declares none has written nothing
-    ao can see.
+    A tool call, the argument naming its file and the tools that write one are what the
+    implementer's adapter declares in `transcript.tool_call` (`write_tools`, `write_words`),
+    as `ao cost` reads them; one that declares none has written nothing ao can see. Every
+    call naming a file was taken for a write, reads and directory listings too, so a person
+    editing a file the implementer had only read was never told apart from the implementer.
     """
     msgs, _ = session_paths(cfg)
     if not msgs or not os.path.exists(msgs):
@@ -1146,8 +1148,8 @@ def implementer_recent_writes(cfg, minutes=15):
             continue
         if at < cut:
             continue
-        for _, args in tool_calls(record_body(d, shape), tool):
-            path = tool_path(args, tool)
+        for name, args in tool_calls(record_body(d, shape), tool):
+            path = tool_path(args, tool) if tool_writes_file(name, tool) else None
             if path:
                 out.add(os.path.realpath(str(path)))
     return out

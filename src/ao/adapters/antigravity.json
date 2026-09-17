@@ -8,6 +8,8 @@
 
   "syntax_warning": "Go-style flags: the prompt must be ATTACHED to the flag. `agy --print='...'` works; `agy -p '...'` silently takes the next argument as the flag value and drops the prompt. A space-separated form fails without writing anything, which looks exactly like the agent doing nothing.",
 
+  "detect": { "headless": ["--print"] },
+
   "send": {
     "argv": ["agy", "--print={prompt}", "--output-format=json"],
     "cwd_matters": true

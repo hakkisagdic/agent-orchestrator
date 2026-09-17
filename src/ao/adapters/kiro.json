@@ -139,7 +139,8 @@
   "detect": {
     "dirs": [".kiro"],
     "binaries": ["kiro-cli"],
-    "processes": ["kiro-cli"]
+    "processes": ["kiro-cli"],
+    "headless": ["--no-interactive"]
   },
   "mcp": {
     "file": ".kiro/settings/mcp.json",

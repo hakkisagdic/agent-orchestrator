@@ -221,13 +221,14 @@ def test_the_turn_ends_at_the_response_that_ends_it_whatever_bookkeeping_follows
 
 def test_its_tokens_are_not_set_as_a_share_of_an_account_it_does_not_bill(project, monkeypatch, tmp_path, capsys):
     cfg, _ = _world(project, monkeypatch, tmp_path)
-    monkeypatch.setattr(A, "account_usage", lambda timeout=20: {"used": 5000.0, "limit": 10000.0, "reset_at": None})
+    monkeypatch.setattr(A, "account_usage", lambda timeout=20, adapter_id=None: {"used": 5000.0, "limit": 10000.0,
+                                                                                 "reset_at": None})
 
     assert cli.cmd_cost(cfg, SimpleNamespace(since=None)) == 0
 
     out = capsys.readouterr().out
     assert "implementer spend by turn class" in out and "token; whole transcript" in out
-    assert "the account: 5,000 of 10,000 used" in out and "ao's own share" not in out
+    assert f"the account: {HARNESS} declares none ao can read" in out and "ao's own share" not in out
 
 
 # ── the core names nothing the nesting declares ──

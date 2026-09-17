@@ -2,6 +2,7 @@
   "id": "command-code", "name": "Command Code (cmd)", "verified": "partial",
   "verified_version": "cmd 1.32.2",
   "notes": "Command surface and session store verified on a real install. Rich CLI: print mode, JSON output, resume by id or transcript path, managed worktrees, model+effort, MCP, skills, and cross-tool import. Transcript field names not fully mapped, so telemetry is left partial.",
+  "detect": { "headless": ["--print"] },
   "send":   { "argv": ["cmd", "--print={prompt}", "--output-format=json", "--skip-onboarding"] },
   "resume": { "argv": ["cmd", "--resume={session}", "--print={prompt}", "--output-format=json"],
               "by_path": ["cmd", "--session={path}", "--print={prompt}", "--output-format=json"],

@@ -5,7 +5,7 @@
   "sources": ["https://kilo.ai/docs/code-with-ai/platforms/cli", "https://kilo.ai/docs/code-with-ai/platforms/cli-reference",
               "https://kilo.ai/docs/code-with-ai/agents/using-agents", "https://kilo.ai/docs/code-with-ai/agents/session-history",
               "https://kilo.ai/docs/customize/agents-md"],
-  "detect": { "binaries": ["kilo", "kilocode"] },
+  "detect": { "binaries": ["kilo", "kilocode"], "headless": ["run"] },
   "send":   { "argv": ["kilo", "run", "{prompt}"], "cwd_matters": true },
   "resume": { "argv": ["kilo", "run", "-s", "{session}", "{prompt}"],
               "note": "the CLI page says --continue takes neither a prompt nor --auto while the generated reference lists both under kilo run; resume by id instead" },

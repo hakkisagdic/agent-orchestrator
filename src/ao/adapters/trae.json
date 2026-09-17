@@ -1,6 +1,7 @@
 {
   "id": "trae", "name": "Trae Agent (ByteDance)", "verified": "untested",
   "disclaimer": "Written from the documented interface, not verified against an install. Flags drift; correct and open a PR.",
+  "detect": { "headless": ["run"] },
   "send":   { "argv": ["trae-cli", "run", "{prompt}"], "cwd_matters": true },
   "options": {
     "provider": ["--provider", "{provider}"],

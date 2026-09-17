@@ -119,6 +119,16 @@ can add a harness but cannot move a product path out of review by calling it a h
 agent's names when it asks whether the architect is already at the keyboard (#76). Like the
 directories, these are read from the package's adapters only.
 
+`detect.headless` names the arguments that make a process of that harness a turn started without a
+person: a flag, alone or with its value attached after `=` (`--print=…`), or a subcommand (`exec`,
+`run`). `ao hold` and the watchdog's reap stop only such turns, `ao writers` labels them, and an
+architect process holding one is not a person at the keyboard. An argument counts only for the
+harness whose names the command line runs as - hermes selects a profile with the `-p` that makes
+other harnesses print one answer - and only the package's adapters are read, so a layer an agent can
+write cannot turn a person's session into an unattended one; a command line no shipped adapter
+answers to is never taken for one. Every shipped adapter declares its list, and every command its
+`send` and `resume` run holds one of them; an adapter that starts no local turn declares `[]`.
+
 `options.mcp_isolation` (`{required, forbidden}`) is the flags a harness needs so a reviewer starts
 no MCP server it was not given (#24); `ao doctor` and the reviewer check read it by binary.
 
@@ -279,7 +289,7 @@ adapter does not declare is read as nothing, never as another harness's field.
 | `telemetry.context` | `{from: "transcript", type, match, field}`: the record and the path of the context percentage | the panel, `ao_status` |
 | `telemetry.cost` | `{from: "transcript", type, field, tools, unit}`: the usage record, the path to its value - or `fields`, several paths that add up - and the path to the tools each entry used | the panel, `ao cost`, the credit estimate |
 | `telemetry.failure` | `{from: "transcript", type, field, failed_when, text}`: the verdict on a tool result, the value that means it failed, and the path to its output | the panel's problems |
-| `billing.fallback.reading` | how usage records add up to spend: `sum` when every record is the whole cost of the turn it reports, `peak-per-turn` when a record is the running total of the turn in progress and a turn costs the highest total it reached, `per-response` when a response is written as several records that each repeat its usage and each response counts once, by the path to its id (`telemetry.cost.response`). The panel and `ao cost` add usage up by it too, and add records up when none is declared; the estimate reads only a declared reading, and under a reading ao does not implement no reader reads usage | the panel, `ao cost`, `ao credits --offline`, `ao digest` |
+| `billing.fallback.reading` | how usage records add up to spend: `sum` when every record is the whole cost of the turn it reports, `peak-per-turn` when a record is the running total of the turn in progress and a turn costs the highest total it reached, `per-response` when a response is written as several records that each repeat its usage and each response counts once in a reading, whichever turn or transcript holds a copy, by the path to its id (`telemetry.cost.response`). The panel and `ao cost` add usage up by it too, and add records up when none is declared; the estimate reads only a declared reading, and under a reading ao does not implement no reader reads usage | the panel, `ao cost`, `ao credits --offline`, `ao digest` |
 
 A path steps into objects with dots (`value.usagePercentage`), and `[]` steps into each element
 of a list (`promptTurnSummaries[].usage`), one entry per element. A turn opens at a `start` kind,
@@ -311,13 +321,15 @@ turn. Beside the fields above, a store like it declares:
 | `telemetry.failure.blocks`, `match` | the same for tool results; `field`, `failed_when` and `text` are read from each such block | the panel's problems |
 | `transcript.turn.end_when` | `{type, field, values}`, or a list of them: a record of that kind whose field holds one of the values ends the turn it falls in, as an `end` kind does, under the one turn rule every reader applies | `ao cost`, the panel, the credit estimate, the watchdog's reap and idle answer |
 | `transcript.turn.conversation` | the kinds a turn is made of; every other kind is bookkeeping that may follow a turn's end, so a kind a later release adds does not read as a running turn | the watchdog's reap and idle answer |
-| `telemetry.cost.response` | the path to a response's id, which the `per-response` reading counts each response once by; under that reading without it, no usage is read | the panel, `ao cost`, `ao_status` |
+| `transcript.messages.blocks`, `match` | the path to the blocks a prompt or a reply holds, and the values a block holds to be its words; a record holding blocks of which none match - a tool's result, a tool call - is no message, and one whose content is not blocks is read whole | the panel's messages, `ao tail` |
+| `telemetry.cost.response` | the path to a response's id, by which the `per-response` reading counts each response once in a reading: across every turn of a transcript, and every transcript the credit estimate adds up; under that reading without it, no usage is read | the panel, `ao cost`, `ao_status`, the credit estimate |
 
 ```jsonc
 // transcript
+"messages": { "prompt": ["user"], "reply": ["assistant"], "blocks": "message.content[]", "match": { "type": "text" } },
 "turn": { "end": ["result"], "conversation": ["user", "assistant"],
           "end_when": { "type": "assistant", "field": "message.stop_reason",
-                        "values": ["end_turn", "stop_sequence"] } },
+                        "values": ["end_turn", "stop_sequence", "refusal"] } },
 "tool_call": { "type": "assistant", "blocks": "message.content[]", "match": { "type": "tool_use" },
                "name": "name", "args": "input", "path_keys": ["file_path", "notebook_path"],
                "write_words": ["write", "edit"] },
@@ -337,13 +349,34 @@ of one response carried the same usage and the same stop reason (83,779 response
 written as several records), so adding the records up counted about twice the tokens. A parallel
 call's result may sit between two records of its response (4,799 responses); none of the 183 stores
 of print-mode runs (`-p`, the way ao starts an implementer) had a response whose records spanned two
-turns, or a record written twice, so a response is counted once in its turn. No response that ended
-a turn held a tool call. A store at rest ended with an `end_turn` response, or with a
-`stop_sequence` one - a reply the harness writes itself, an API error among them - in 375 of them,
-followed only by kinds such as titles, prompt queues, hook summaries and attachments. The stores
-hold twenty kinds besides `user` and `assistant`, which is why the turn names its conversation
-rather than its bookkeeping. Every failed tool result carried `is_error: true`, and every `user`
-record held one result.
+turns, or a record written twice. No response that ended a turn held a tool call. A store at rest
+ended with an `end_turn` response, or with a `stop_sequence` one - a reply the harness writes
+itself, an API error among them - in 375 of them, followed only by kinds such as titles, prompt
+queues, hook summaries and attachments. The stores hold twenty kinds besides `user` and `assistant`,
+which is why the turn names its conversation rather than its bookkeeping. Every failed tool result
+carried `is_error: true`, and every `user` record held one result.
+
+The readings that followed were measured on the same stores before they changed, and the readers
+compared before and after on the 419 at rest. A Stop hook runs after an `end_turn` response and
+writes nothing when it starts: its `stop_hook_summary` system record comes when it ends - 1.7 s
+later at the median, 13 s at the 99th percentile, 278 s at most - after 3,764 of the 4,760
+`end_turn` responses in the 172 stores that hold one, and after no other stop reason. No hook went
+on with a turn: a prompt, a meta record or nothing came after every summary. So a turn has ended at
+its response while its hook runs; waiting for a summary would leave one turn in five running for
+ever, and the watchdog's reap still waits its idle window of silence. A `refusal` ended its turn
+both times one was written, and a prompt followed; `max_tokens` never did: another response of the
+same turn followed all five. Of the panel's last eight messages per store, 1,468 of 2,548 were tool
+results shown as the person's words and 164 were tool calls shown as the agent's (542 of 794 in
+print-mode stores), so a message's words are its `text` blocks. 89 responses were written again
+turns after the first, 83 with the same record ids and times, and 10,145 appear in more than one
+store, copied into a resumed session's transcript: desktop-app stores read 0.2% more tokens than
+once per response, and the stores added up transcript by transcript read 34,107,386,097 tokens
+against 27,529,044,146, so a response is counted once in a reading. A `Read` names its file by the
+same `file_path` an `Edit` does, and foreign-edit detection took every call naming a file for a
+write: 4,503 paths in the stores' last 3 MB, of which 3,007 were written (8 of 466 in print-mode
+stores). Kiro's `read_file`, `readFile`, `read_files` and `list_directory` name a `path` too, and
+146 of its 152 were only read or listed. A write is now what `write_tools` and `write_words`
+declare, as `ao cost` reads it; every other kiro reading over its 17 stores is unchanged.
 
 The unit is the token, and every token a response read or wrote counts once: uncached input, input
 written to and read from the prompt cache, and output. Server tool requests are counts of requests,
@@ -352,7 +385,8 @@ inside the totals, so neither is added. A token count is not a price: cache read
 session's tokens (91-98% measured) and are priced far below the rest. No record carries a context
 percentage or the model's window, so no context is read. `tests/test_second_harness_cost.py` reads
 the nesting from synthetic records, and fails when a core module names a field or a value it
-declares.
+declares; `tests/test_harness_readings_2.py` holds each reading measured since, and the
+declarations of `detect.headless`.
 
 ## Busy detection
 
@@ -404,6 +438,7 @@ that test by declaring itself ineligible, which is a pass.
   "verified": "partial",             // full | partial | untested
   "send":   { "argv": ["mytool", "--print", "{prompt}"] },
   "resume": { "argv": ["mytool", "--session", "{session}", "--print", "{prompt}"] },
+  "detect": { "headless": ["--print"] },    // what makes a running mytool an unattended turn
   "transcript": {
     "kind": "jsonl",
     "path": "~/.mytool/sessions/{session}/messages.jsonl",

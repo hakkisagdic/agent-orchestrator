@@ -140,7 +140,7 @@ def test_headless_tree_through_nonmatching_process_does_not_suppress_refill(worl
 def test_headless_tree_through_nonmatching_process_is_not_report_presence(world):
     architect_tree = world.tmp / "architect-worktree"
     world.architect_cwd(architect_tree)
-    world.process(760, ["/agents/claude", "--no-interactive", "triage"], cwd=architect_tree)
+    world.process(760, ["/agents/claude", "-p", "triage"], cwd=architect_tree)
     world.process(761, ["/bin/sh", "-c", "runtime"], cwd=architect_tree, ppid=760)
     world.process(
         762,
