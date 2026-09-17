@@ -223,19 +223,27 @@ def transcript_shape(adapter):
     for it rather than another harness's field. Usage carries the reading that adds it
     up (`billing.fallback.reading`, `sum` when none is declared); under a reading ao
     does not implement there is no usage to read, rather than usage misread.
+
+    `transcript.messages.not_words` lists the values a prompt or a reply holds when it is
+    no one speaking - a harness's own note, a summary it wrote of a compacted
+    conversation - each a `match` of paths and values; a record holding every value of
+    one of them has no words.
     """
     transcript, signals = _block(adapter, "transcript"), _block(adapter, "telemetry")
     record, message_kinds, turn = (_block(transcript, key) for key in ("record", "messages", "turn"))
     body, _, kind = _name(record.get("kind")).rpartition(".")
+    not_words = message_kinds.get("not_words") if isinstance(message_kinds.get("not_words"), list) else []
     shape = {"time": _name(record.get("time")), "body": body, "kind": kind,
              "text_keys": [key.rpartition(".")[2] for key in _names(record.get("text_keys"))],
              "prompt": _names(message_kinds.get("prompt")), "reply": _names(message_kinds.get("reply")),
+             "not_words": [match for match in not_words if isinstance(match, dict) and match],
              "start": _names(turn.get("start")), "end": _names(turn.get("end")),
              "bookkeeping": _names(turn.get("bookkeeping")),
              "tool": None, "usage": None, "context": None, "failure": None}
     tool = _block(transcript, "tool_call")
     if _name(tool.get("type")):
         shape["tool"] = {"type": tool["type"], "name": _name(tool.get("name")), "args": _name(tool.get("args")),
+                         "id": _name(tool.get("id")),
                          "path_keys": _names(tool.get("path_keys")), "write_tools": _names(tool.get("write_tools")),
                          "write_words": [word.lower() for word in _names(tool.get("write_words"))]}
     cost = _block(signals, "cost")
@@ -253,7 +261,7 @@ def transcript_shape(adapter):
             and "failed_when" in failure:
         shape["failure"] = {"type": failure["type"], "field": failure["field"],
                             "failed_when": failure["failed_when"], "text": _name(failure.get("text"))}
-    return nested_shape(shape, transcript, signals)
+    return subagent_shape(nested_shape(shape, transcript, signals), transcript)
 
 
 def nested_shape(shape, transcript, signals):
@@ -285,6 +293,33 @@ def nested_shape(shape, transcript, signals):
     if shape["usage"] is not None and shape["usage"]["reading"] == "per-response":
         response = _name(_block(signals, "cost").get("response"))
         shape["usage"] = dict(shape["usage"], response=response) if response else None
+    return shape
+
+
+def subagent_shape(shape, transcript):
+    """A transcript shape with the subagent transcripts a session's records start, when its adapter declares them.
+
+    A harness that delegates to subagents may write each one's records to a transcript of
+    its own beside the session's, and no reading of the session's records then holds that
+    spend or those writes. `transcript.subagents` declares them: `dir`, the directory of a
+    session's subagent transcripts relative to the session transcript's own, `{session}`
+    standing for the session transcript's name without its extension; `transcripts`, each
+    a `path` under that directory, `*` standing for any name and `{id}` for the value a
+    record of the session holds at `named_by` when it starts that transcript; and
+    `sidecar`, a file beside a subagent's transcript (`{name}` its name without its
+    extension) whose `call` field holds the id of the tool call that started it, the id
+    of a call being at `transcript.tool_call.id`. A shape declaring no `dir` or no
+    transcript under it has no subagents.
+    """
+    declared = _block(transcript, "subagents")
+    entries = declared.get("transcripts") if isinstance(declared.get("transcripts"), list) else []
+    entries = [{"path": entry["path"], "named_by": _name(entry.get("named_by"))} for entry in entries
+               if isinstance(entry, dict) and _name(entry.get("path")) and entry["path"].count("{id}") <= 1]
+    sidecar = _block(declared, "sidecar")
+    shape["subagents"] = {"dir": declared["dir"], "transcripts": entries,
+                          "sidecar": {"path": sidecar["path"], "call": sidecar["call"]}
+                          if _name(sidecar.get("path")) and _name(sidecar.get("call")) else None} \
+        if _name(declared.get("dir")) and entries else None
     return shape
 
 
@@ -335,20 +370,29 @@ def record_usage(body, usage):
                if isinstance(value, (int, float)) and not isinstance(value, bool))
 
 
-def add_usage(turn, body, usage, counted):
+def add_usage(turn, body, usage, counted, subagent=None):
     """Charge a usage record to its turn under the declared reading, and return how much the turn's usage grew.
 
     Under `sum` the record adds on; under `peak-per-turn` the turn costs the highest total its
-    records reached; under `per-response` a record adds on unless a record of the same response
-    was already charged in this reading. `counted` holds the responses a reading has charged, one
-    set for everything it adds up: every turn of a transcript, and every transcript of the credit
-    estimate. What grew is what a reader adds to a total, or to the day the record was written,
-    so a total is always the sum of its turns.
+    records reached; under `per-response` a response costs the highest total its records reached,
+    once in this reading. `counted` holds what a reading has charged each response, one dict for
+    everything it adds up: every turn of a transcript, every subagent transcript read with it,
+    and every transcript of the credit estimate. What grew is what a reader adds to a total, or
+    to the day the record was written, so a total is always the sum of its turns.
+
+    A subagent's record (`subagent`, the reading's state of its transcript, from
+    `with_subagents`) is read under the reading in the subagent's own turn, and what grew there
+    is charged to `turn`, the session's turn that started the subagent, as delegated too.
     """
+    if subagent is not None:
+        subagent["turn"] = {} if subagent["turn"] is None else subagent["turn"]
+        grown = add_usage(subagent["turn"], body, usage, counted)
+        turn["usage"] = (turn.get("usage") or 0.0) + grown
+        turn["delegated"] = (turn.get("delegated") or 0.0) + grown
+        return grown
     value, before = record_usage(body, usage), turn.get("usage") or 0.0
-    if usage["reading"] == "per-response" and not _first_of_response(counted, body, usage):
-        turn["usage"] = before
-        return 0.0
+    if usage["reading"] == "per-response":
+        value = _response_growth(counted, body, usage, value)
     if usage["reading"] in ("sum", "per-response"):
         turn["usage"] = before + value
         return value
@@ -356,25 +400,26 @@ def add_usage(turn, body, usage, counted):
     return turn["usage"] - before
 
 
-def _first_of_response(counted, body, usage):
-    """Is this the first record of its response the reading meets, by the id at `response`?
+def _response_growth(counted, body, usage, value):
+    """What a record adds to its response, by the id at `response`: what it holds beyond the response's charge so far.
 
-    Every record of one response repeats the response's usage, so only the first is charged,
-    whichever record a tail begins at. A store can also write a response again later - the
-    same records, turns after the first, or a session's records copied into another session's
-    transcript - and a copy is not a second spend, so a response is charged once per reading,
-    not once per turn. A record that names no response is its own.
+    A session's store repeats a response's whole usage in every record of it, so only the
+    first record the reading meets is charged, whichever record a tail begins at. A subagent's
+    transcript writes a response's records as it streams them, each with the output tokens so
+    far, so the response costs the most its records reached. A store can also write a response
+    again later - the same records, turns after the first, or a session's records copied into
+    another session's transcript - and a copy is not a second spend, so a response is charged
+    once per reading, not once per turn. A record that names no response is its own.
     """
     ident = _path_value(body, usage["response"])
     if not isinstance(ident, (str, int)) or isinstance(ident, bool):
-        return True
-    if ident in counted:
-        return False
-    counted.add(ident)
-    return True
+        return value
+    charged = counted.get(ident)
+    counted[ident] = value if charged is None else max(charged, value)
+    return value if charged is None else max(0.0, value - charged)
 
 
-def next_turn(turn, rec, shape):
+def next_turn(turn, rec, shape, subagent=None):
     """(the turn a record falls in, whether the record opened it); None until a turn opens.
 
     A start marker opens a turn, and a prompt opens one when none is open or the open one
@@ -383,7 +428,13 @@ def next_turn(turn, rec, shape):
     prompt, not started and not ended. A call the harness makes of its own between the two
     does not split them. An end marker ends the turn it falls in, and so does a record whose
     field holds a value the adapter declares to end one (`closes_turn`).
+
+    A subagent's record (`subagent`, from `with_subagents`) falls in the session's turn that
+    started the subagent: its prompts and ends move only the subagent's own turn.
     """
+    if subagent is not None:
+        subagent["turn"], _ = next_turn(subagent["turn"], rec, shape)
+        return turn, False
     kind = record_kind(rec, shape)
     waiting = turn is not None and turn.get("prompted") and not turn.get("started") and not turn.get("closed")
     ended = turn is None or turn.get("closed")
@@ -456,6 +507,127 @@ def is_bookkeeping(kind, shape):
     return kind in shape["bookkeeping"] or (bool(conversation) and kind not in conversation)
 
 
+# A subagent's spend is its session's, charged to the turn that started it (`transcript.subagents`).
+
+def subagents(transcript, shape):
+    """What names each subagent transcript beside a session transcript: {"files", "named", "calls"}; None if undeclared.
+
+    `files` holds every transcript a declared `path` reaches under the session's subagent
+    directory; `named` maps (the declaration's index, the name its `{id}` stands for) to the
+    transcripts of that name, and `calls` a tool call's id to the transcripts whose sidecar
+    names it. One listing of the directory serves a whole reading.
+    """
+    import glob
+    declared = shape.get("subagents")
+    if not declared or not transcript:
+        return None
+    session = os.path.splitext(os.path.basename(transcript))[0]
+    directory = os.path.join(os.path.dirname(transcript), *declared["dir"].replace("{session}", session).split("/"))
+    found = {"files": [], "named": {}, "calls": {}}
+    if not os.path.isdir(directory):
+        return found
+    listed = set()
+    for number, entry in enumerate(declared["transcripts"]):
+        steps = entry["path"].split("/")
+        pattern = re.compile("/".join(re.escape(step).replace(re.escape("{id}"), "(?P<id>[^/]+)")
+                                      .replace(re.escape("*"), "[^/]*") for step in steps))
+        for path in sorted(glob.glob(os.path.join(glob.escape(directory),
+                                                  *(step.replace("{id}", "*") for step in steps)))):
+            match = pattern.fullmatch(os.path.relpath(path, directory).replace(os.sep, "/"))
+            if match is None or not os.path.isfile(path):
+                continue
+            if path not in listed:
+                listed.add(path)
+                found["files"].append(path)
+            if entry["named_by"] and match.groupdict().get("id"):
+                found["named"].setdefault((number, match.group("id")), []).append(path)
+    sidecar = declared["sidecar"]
+    for path in found["files"] if sidecar else []:
+        name = os.path.splitext(os.path.basename(path))[0]
+        try:
+            with open(os.path.join(os.path.dirname(path), sidecar["path"].replace("{name}", name)),
+                      encoding=UTF8) as fh:
+                call = _path_value(json.load(fh), sidecar["call"])
+        except (OSError, ValueError):
+            continue
+        if isinstance(call, str) and call:
+            found["calls"].setdefault(call, []).append(path)
+    return found
+
+
+def started_subagents(rec, shape, found, joined):
+    """The subagent transcripts a record starts that no record before it in the reading started.
+
+    A record starts the transcripts the value at a declared `named_by` names, and a tool
+    call the transcripts whose sidecar names its id. `joined` holds what the reading has
+    started, so a transcript that two records name - the call that started it and its
+    result - is read once, after the first.
+    """
+    body = record_body(rec, shape) if found else None
+    if body is None:
+        return []
+    paths = []
+    for number, entry in enumerate(shape["subagents"]["transcripts"]):
+        value = _path_value(body, entry["named_by"]) if entry["named_by"] else None
+        if isinstance(value, str) and value:
+            paths += found["named"].get((number, value), [])
+    tool = shape["tool"]
+    if found["calls"] and tool and tool["id"] and record_kind(rec, shape) == tool["type"]:
+        for item in declared_items(body, tool):
+            value = _path_value(item, tool["id"])
+            if isinstance(value, str) and value:
+                paths += found["calls"].get(value, [])
+    fresh = [path for path in dict.fromkeys(paths) if path not in joined]
+    joined.update(fresh)
+    return fresh
+
+
+def subagent_records(path):
+    """A subagent transcript's records: all of them, since its whole spend is charged to the turn that started it."""
+    return read_tail(path, 400_000_000)
+
+
+def with_subagents(recs, shape, transcript, read=subagent_records):
+    """(record, subagent) for each record of a session, each followed by the records of the subagents it starts.
+
+    `subagent` is None for a record of the session, and for a subagent's record the reading's
+    state of the transcript it came from, {"path", "turn"}: `next_turn` and `add_usage` charge
+    it to the session's turn it falls in, which is the turn that started it. A subagent a
+    subagent starts follows the record that starts it, charged to the same turn. `read(path)`
+    gives a subagent transcript's records. A transcript no record of `recs` starts is not
+    read: its spend belongs to no turn of the reading - in the panel, a subagent started
+    before the tail it reads - and a total stays the sum of its turns.
+    """
+    found = subagents(transcript, shape)
+    if not (found or {}).get("files"):
+        return ((rec, None) for rec in recs)
+    joined = set()
+
+    def spliced(records, subagent):
+        for rec in records:
+            yield rec, subagent
+            for path in started_subagents(rec, shape, found, joined):
+                yield from spliced(read(path), {"path": path, "turn": None})
+    return spliced(recs, None)
+
+
+def subagent_tails(transcript, shape, since, nbytes):
+    """The records of every subagent transcript beside a session's that was written since `since`, joined or not.
+
+    A subagent's tool calls are the implementer's whether or not a record of the tail read
+    starts it, so what one wrote is never taken for another writer's.
+    """
+    out = []
+    for path in (subagents(transcript, shape) or {}).get("files") or []:
+        try:
+            if os.path.getmtime(path) < since:
+                continue
+        except OSError:
+            continue
+        out += read_tail(path, nbytes)
+    return out
+
+
 def _strings(o, out, keys, depth=0):
     if depth > 7:
         return
@@ -502,7 +674,14 @@ def message_words(body, shape):
     the agent speaking. `transcript.messages.blocks` and `match` declare the blocks that
     are words; a record holding blocks of which none match holds no words, and a record
     whose content is not blocks - a prompt typed as one string - is read whole.
+
+    A store also writes notes of its own, and the summary of a compacted conversation, as
+    records of the prompt's kind. They are no one speaking, and a record holding what one of
+    `transcript.messages.not_words` declares holds no words either.
     """
+    if any(all(_declared_value(_path_value(body, path), value) for path, value in match.items())
+           for match in shape.get("not_words") or []):
+        return ""
     words = shape.get("words")
     parts = declared_items(body, words) if words and _path_values(body, words["blocks"]) else [body]
     buf = []
@@ -535,33 +714,39 @@ def messages(recs, limit=8, adapter=None):
     return list(reversed(out))
 
 
-def telemetry(recs, adapter):
+def telemetry(recs, adapter, transcript=None):
     """Context %, per-turn and session cost, driven by the adapter's block.
 
     Usage adds up under the adapter's reading, as `ao cost` and the credit estimate add it:
     under `sum` every usage entry is one turn's cost, as written; under `peak-per-turn` a turn
     - the one already under way where the records begin included - costs the highest total
-    its records reached; under `per-response` a turn costs each response it holds that no
-    earlier turn of these records held. A turn whose usage names no tools beside it has the
-    tool calls its records hold.
+    its records reached; under `per-response` a turn costs each response it holds, at its
+    highest record, that no earlier turn of these records held. A turn whose usage names no
+    tools beside it has the tool calls its records hold.
+
+    Given the path of the session `transcript` the records were read from, the subagents a
+    record starts are read after it (`with_subagents`): their spend is in the total, in the
+    turn that started them and in `delegated`, and their tool calls are that turn's. Under
+    `sum`, where a usage record is a turn of its own, a subagent's adds to the total and to
+    `delegated` and is no turn of the session. The context is the session's own.
     """
     shape = transcript_shape(implementer_adapter() if adapter is None else adapter)
     ctx_spec, cost_spec = shape["context"], shape["usage"]
-    out = {"ctx": None, "total": 0.0, "turns": 0, "last": None, "unit": shape["unit"]}
-    turn, counted = None, set()
-    for r in recs:
+    out = {"ctx": None, "total": 0.0, "turns": 0, "last": None, "unit": shape["unit"], "delegated": 0.0}
+    turn, counted = None, {}
+    for r, subagent in with_subagents(recs, shape, transcript if cost_spec else None):
         pl = record_body(r, shape)
         if pl is None:
             continue
         t = record_kind(r, shape)
-        if ctx_spec and t == ctx_spec["type"]:
+        if ctx_spec and subagent is None and t == ctx_spec["type"]:
             if all(pl.get(k) == v for k, v in ctx_spec["match"].items()):
                 val = _path_value(pl, ctx_spec["field"])
                 if isinstance(val, (int, float)):
                     out["ctx"] = val
         if not cost_spec:
             continue
-        turn, _ = next_turn(turn, r, shape)
+        turn, _ = next_turn(turn, r, shape, subagent)
         # A turn read from its records, not from a summary, has the tool calls those records hold.
         calls = len(tool_calls(pl, shape["tool"])) if cost_spec["reading"] != "sum" and shape["tool"] \
             and t == shape["tool"]["type"] else 0
@@ -575,6 +760,9 @@ def telemetry(recs, adapter):
                 if all(isinstance(value, (int, float)) for value in values):
                     u = sum(values)
                     out["total"] += u
+                    if subagent is not None:
+                        out["delegated"] += u
+                        continue
                     out["turns"] += 1
                     out["last"] = (u, len(tools or []))
             continue
@@ -585,7 +773,9 @@ def telemetry(recs, adapter):
         turn["calls"] = turn.get("calls", 0) + calls
         if "usage" not in turn:
             out["turns"] += 1
-        out["total"] += add_usage(turn, pl, cost_spec, counted)
+        grown = add_usage(turn, pl, cost_spec, counted, subagent)
+        out["total"] += grown
+        out["delegated"] += grown if subagent is not None else 0.0
         out["last"] = (turn["usage"], sum(len(tools or []) for _, tools in entries) if cost_spec["tools"]
                        else turn["calls"])
     return out

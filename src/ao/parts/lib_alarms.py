@@ -592,12 +592,17 @@ def feature_costs(cfg, since=None):
 def turn_costs(cfg, since=None):
     """Per-turn cost and class from the implementer's transcript.
 
-    Returns {"unit", "turns": [ {start, usage, cls, tool_calls, product_writes,
-    reviews, commits, blocked_report} ], "by_class": {cls: {turns, usage}},
-    "ao_commands": Counter, "total"}. Classes: product (wrote product files or
+    Returns {"unit", "turns": [ {start, usage, delegated, cls, tool_calls, product_writes,
+    reviews, commits, blocked_report} ], "by_class": {cls: {turns, usage, delegated}},
+    "ao_commands": Counter, "total", "delegated"}. Classes: product (wrote product files or
     committed), ceremony (review / verify / lock / commit-ok, nothing written),
     coordination (only inbox/report/writers/board, few calls), analysis (read and
     reasoned, wrote nothing).
+
+    A subagent the implementer started works for it: the records of its transcript
+    (`transcript.subagents`) are read after the record that starts it, its spend is in the
+    usage of the turn that started it and in that turn's `delegated`, and its tool calls,
+    writes and commits are that turn's (`with_subagents`).
 
     Which records open and close a turn, carry usage or call a tool is the
     implementer's adapter's to declare (`transcript.turn`, `transcript.messages`,
@@ -611,11 +616,12 @@ def turn_costs(cfg, since=None):
     msgs, _ = session_paths(cfg)
     shape = transcript_shape(implementer_adapter(cfg))
     usage, tool = shape["usage"], shape["tool"]
-    out = {"unit": shape["unit"], "turns": [], "by_class": {}, "ao_commands": collections.Counter(), "total": 0.0}
+    out = {"unit": shape["unit"], "turns": [], "by_class": {}, "ao_commands": collections.Counter(), "total": 0.0,
+           "delegated": 0.0}
     if not msgs or not os.path.exists(msgs):
         return out
     recs = read_tail(msgs, 400_000_000)
-    cur, counted = None, set()
+    cur, counted = None, {}
 
     def ts(d):
         raw = record_time(d, shape)
@@ -624,19 +630,20 @@ def turn_costs(cfg, since=None):
             return _dt.datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
         except Exception:
             return None
-    for d in recs:
+    for d, subagent in with_subagents(recs, shape, msgs):
         pl = record_body(d, shape) or {}
         t = record_kind(d, shape)
-        cur, opened = next_turn(cur, d, shape)
+        cur, opened = next_turn(cur, d, shape, subagent)
         if opened:
-            cur.update({"start": ts(d), "usage": 0.0, "product_writes": 0, "coord_writes": 0, "tool_calls": 0,
-                        "reviews": 0, "commits": 0, "blocked_report": False, "ao": collections.Counter()})
+            cur.update({"start": ts(d), "usage": 0.0, "delegated": 0.0, "product_writes": 0, "coord_writes": 0,
+                        "tool_calls": 0, "reviews": 0, "commits": 0, "blocked_report": False,
+                        "ao": collections.Counter()})
             out["turns"].append(cur)
             continue
         if cur is None:
             continue
         if usage and t == usage["type"]:
-            add_usage(cur, pl, usage, counted)
+            add_usage(cur, pl, usage, counted, subagent)
         # Not an elif: one record of a store that nests its calls carries a response's usage and its tool calls.
         if tool and t == tool["type"]:
             for name, args in tool_calls(pl, tool):
@@ -672,13 +679,16 @@ def turn_costs(cfg, since=None):
         else:
             cls = "analysis"
         tn["cls"] = cls
-        b = out["by_class"].setdefault(cls, {"turns": 0, "usage": 0.0, "wasted": 0, "wasted_usage": 0.0})
+        b = out["by_class"].setdefault(cls, {"turns": 0, "usage": 0.0, "wasted": 0, "wasted_usage": 0.0,
+                                             "delegated": 0.0})
         b["turns"] += 1
         b["usage"] += tn["usage"]
+        b["delegated"] += tn["delegated"]
         if tn["blocked_report"] and not tn["product_writes"]:
             b["wasted"] += 1
             b["wasted_usage"] += tn["usage"]
         out["total"] += tn["usage"]
+        out["delegated"] += tn["delegated"]
     return out
 
 
@@ -1238,6 +1248,8 @@ def implementer_recent_writes(cfg, minutes=15):
     as `ao cost` reads them; one that declares none has written nothing ao can see. Every
     call naming a file was taken for a write, reads and directory listings too, so a person
     editing a file the implementer had only read was never told apart from the implementer.
+    A subagent's calls are the implementer's too: every subagent transcript beside the
+    session's written in the window is read (`transcript.subagents`), whichever turn started it.
     """
     msgs, _ = session_paths(cfg)
     if not msgs or not os.path.exists(msgs):
@@ -1248,7 +1260,7 @@ def implementer_recent_writes(cfg, minutes=15):
         return set()
     cut = time.time() - minutes * 60
     out = set()
-    for d in read_tail(msgs, 3_000_000):
+    for d in read_tail(msgs, 3_000_000) + subagent_tails(msgs, shape, cut, 3_000_000):
         if record_kind(d, shape) != tool["type"]:
             continue
         try:

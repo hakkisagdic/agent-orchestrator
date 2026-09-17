@@ -339,7 +339,7 @@ adapter does not declare is read as nothing, never as another harness's field.
 | `telemetry.context` | `{from: "transcript", type, match, field}`: the record and the path of the context percentage | the panel, `ao_status` |
 | `telemetry.cost` | `{from: "transcript", type, field, tools, unit}`: the usage record, the path to its value - or `fields`, several paths that add up - and the path to the tools each entry used | the panel, `ao cost`, the credit estimate |
 | `telemetry.failure` | `{from: "transcript", type, field, failed_when, text}`: the verdict on a tool result, the value that means it failed, and the path to its output | the panel's problems |
-| `billing.fallback.reading` | how usage records add up to spend: `sum` when every record is the whole cost of the turn it reports, `peak-per-turn` when a record is the running total of the turn in progress and a turn costs the highest total it reached, `per-response` when a response is written as several records that each repeat its usage and each response counts once in a reading, whichever turn or transcript holds a copy, by the path to its id (`telemetry.cost.response`). The panel and `ao cost` add usage up by it too, and add records up when none is declared; the estimate reads only a declared reading, and under a reading ao does not implement no reader reads usage | the panel, `ao cost`, `ao credits --offline`, `ao digest` |
+| `billing.fallback.reading` | how usage records add up to spend: `sum` when every record is the whole cost of the turn it reports, `peak-per-turn` when a record is the running total of the turn in progress and a turn costs the highest total it reached, `per-response` when a response is written as several records that each carry its usage so far and each response counts once in a reading, at the highest usage its records reached, whichever turn or transcript holds a copy, by the path to its id (`telemetry.cost.response`). The panel and `ao cost` add usage up by it too, and add records up when none is declared; the estimate reads only a declared reading, and under a reading ao does not implement no reader reads usage | the panel, `ao cost`, `ao credits --offline`, `ao digest` |
 
 A path steps into objects with dots (`value.usagePercentage`), and `[]` steps into each element
 of a list (`promptTurnSummaries[].usage`), one entry per element. A turn opens at a `start` kind,
@@ -372,7 +372,7 @@ turn. Beside the fields above, a store like it declares:
 | `transcript.turn.end_when` | `{type, field, values}`, or a list of them: a record of that kind whose field holds one of the values ends the turn it falls in, as an `end` kind does, under the one turn rule every reader applies | `ao cost`, the panel, the credit estimate, the watchdog's reap and idle answer |
 | `transcript.turn.conversation` | the kinds a turn is made of; every other kind is bookkeeping that may follow a turn's end, so a kind a later release adds does not read as a running turn | the watchdog's reap and idle answer |
 | `transcript.messages.blocks`, `match` | the path to the blocks a prompt or a reply holds, and the values a block holds to be its words; a record holding blocks of which none match - a tool's result, a tool call - is no message, and one whose content is not blocks is read whole | the panel's messages, `ao tail` |
-| `telemetry.cost.response` | the path to a response's id, by which the `per-response` reading counts each response once in a reading: across every turn of a transcript, and every transcript the credit estimate adds up; under that reading without it, no usage is read | the panel, `ao cost`, `ao_status`, the credit estimate |
+| `telemetry.cost.response` | the path to a response's id, by which the `per-response` reading counts each response once in a reading, at its highest record: across every turn of a transcript, every subagent transcript read with it, and every transcript the credit estimate adds up; under that reading without it, no usage is read | the panel, `ao cost`, `ao_status`, the credit estimate |
 
 ```jsonc
 // transcript
@@ -437,6 +437,77 @@ percentage or the model's window, so no context is read. `tests/test_second_harn
 the nesting from synthetic records, and fails when a core module names a field or a value it
 declares; `tests/test_harness_readings_2.py` holds each reading measured since, and the
 declarations of `detect.headless`.
+
+### Subagents, and records that are no one's words
+
+A harness that delegates may write each subagent's records to a transcript of its own, beside the
+session's rather than in it, and a store may write records of the prompt's kind that no one said.
+A store like that declares:
+
+| Field | What it declares | Used by |
+|---|---|---|
+| `transcript.subagents.dir` | the directory of a session's subagent transcripts, relative to the session transcript's own directory; `{session}` is the session transcript's name without its extension | `ao cost`, the panel, `ao_status`, the credit estimate, foreign edits |
+| `transcript.subagents.transcripts` | `[{path, named_by}]`: where a subagent's transcript is under that directory, `*` standing for any name and `{id}` for the value a record of the session holds at `named_by` when that record starts it - the result of the call that started it, naming it | the same |
+| `transcript.subagents.sidecar` | `{path, call}`: the file beside a subagent's transcript, `{name}` standing for the transcript's name without its extension, whose `call` field holds the id of the tool call that started it, in the session's transcript or in another subagent's | the same |
+| `transcript.tool_call.id` | the path to a tool call's id, read where its name is | the same |
+| `transcript.messages.not_words` | a list of matches, paths with the values they hold: a prompt or a reply holding every value of one - a note the harness writes, the summary of a compacted conversation - has no words | the panel's messages, `ao tail` |
+
+A subagent works for the turn that started it. Each reading reads a subagent's transcript right after
+the record that starts it - whichever comes first of the call its sidecar names and the record that
+names it - and charges the subagent's spend to the turn that record falls in, however many turns later
+the subagent wrote. Its own prompts and turn ends move only its own turn, under the adapter's reading,
+and a subagent it starts is charged to the same turn. The spend stays inside the turn's, so a total is
+still the sum of its turns, and `ao cost` shows how much of each class's was delegated, the panel how
+much of the total, and `ao_status` as `cost_delegated`. A subagent's tool calls, writes and commits are
+its turn's, and every subagent transcript written within the foreign-edit window is the implementer's,
+whichever turn started it. A subagent transcript that no record of a reading starts is not counted: its
+spend is in no turn the reading holds. The panel reads a tail, and a subagent started before the tail
+belongs to a turn outside it, as `ao cost` leaves out the turn already under way where a transcript's
+records begin. A response written as several records costs the most its records reached.
+
+```jsonc
+// transcript, beside what the store above declares
+"messages": { "not_words": [{ "isMeta": true }, { "isCompactSummary": true },
+                            { "origin.kind": "task-notification" }] },
+"tool_call": { "id": "id" },
+"subagents": { "dir": "{session}/subagents",
+               "transcripts": [{ "path": "agent-{id}.jsonl", "named_by": "toolUseResult.agentId" },
+                               { "path": "workflows/{id}/agent-*.jsonl", "named_by": "toolUseResult.runId" }],
+               "sidecar": { "path": "{name}.meta.json", "call": "toolUseId" } }
+```
+
+It was measured on the same machine's stores of release 2.1, read-only. A subagent writes its records to
+`agent-<id>.jsonl` under its session's `subagents` directory, or to `workflows/<run>/agent-<id>.jsonl`
+for the agents a workflow run starts, each with a `.meta.json` sidecar: 3,563 of them beside a session
+transcript. The result of the call that started one names it at `toolUseResult.agentId`, whether the
+agent ran to its end or went on in the background, and a workflow's result names its run at
+`toolUseResult.runId`: 3,545 are joined that way. The sidecar of an agent a call started names the call
+at `toolUseId`, and joins the 17 agents another subagent started, whose calls' results carry no
+`toolUseResult`, and one agent whose result named nothing. None beside a session transcript is left
+unjoined; 139 more sit in three directories whose session transcript is gone, where no reading looks.
+The prompt id a subagent's records carry is not the link: 961 of the 3,268 agents workflow runs started
+carry a later turn's, the prompt current when the run started them. No response is in both a subagent's
+transcript and its session's, nor in two subagents', and the usage a call's result carries sits on a
+`user` record no reading reads; its total matched the subagent's spend in none of 38 results. A
+subagent's transcript writes a response's records as it streams them: 53,498 of the 66,125 responses
+written as several records grew in output tokens from record to record, and reading their first records
+missed 67,037,492 tokens. A session transcript repeats one usage in every record of a response, so
+reading each response at its highest record moved no session's own tokens; the credit estimate reads
+2,990,529 more, from three responses two transcripts hold with different usage.
+
+The readers were compared before and after on the 419 stores at rest, and every store's own tokens and
+turns read as before. The desktop app's 180 stores hold 2,908 subagent transcripts, all joined: `ao cost`
+read 26,128,151,129 tokens before and 34,913,789,378 after, 8,785,638,249 of them delegated, over the
+same 3,927 turns, and its tool calls went from 60,613 to 147,140 and its product writes from 2,006 to
+5,743. The 183 print-mode stores hold one: 210,548,799 tokens before, 213,215,662 after, over the same
+184 turns. The panel's 12 MB tails joined 1,918 transcripts, and its slowest reading took 545 ms of CPU
+against 61. In the 59 stores that delegate the subagents spent a median 21% of the session's tokens, and
+more than the session itself in 11; 177 of the 274 turns that started one spent more through it than in
+their own records. Of the panel's last eight messages per store, 82 notes the harness wrote (`isMeta`),
+3 compaction summaries and 54 task notifications were shown as the person's words, and none are now. Kiro
+declares no subagents, and its readings over its 17 stores are unchanged: every figure, and every
+reading's digest once the new `delegated` fields, all zero, are set aside. `tests/test_subagent_spend.py`
+holds these readings from synthetic records, and fails when a core module names a field they declare.
 
 ## Busy detection
 

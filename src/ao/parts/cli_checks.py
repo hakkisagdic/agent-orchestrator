@@ -587,14 +587,21 @@ def cmd_cost(cfg, args):
     tot = c["total"] or 1
     print(f"{C['b']}implementer spend by turn class{C['reset']}  {C['dim']}({c['unit']}; "
           f"{'last ' + args.since if args.since else 'whole transcript'}){C['reset']}")
-    print(f"  {'class':<14}{'turns':>6}{'spend':>10}{'share':>7}   {'wasted turns':>12}")
+    # What the subagents a turn started spent is inside that turn's spend; a column says how much, when any did.
+    delegated = any(b.get("delegated") for b in c["by_class"].values())
+    column = f"{'delegated':>11}" if delegated else ""
+    print(f"  {'class':<14}{'turns':>6}{'spend':>10}{'share':>7}{column}   {'wasted turns':>12}")
     for cls in ("product", "analysis", "ceremony", "coordination"):
         b = c["by_class"].get(cls)
         if not b:
             continue
         w = f"{b['wasted']} ({b['wasted_usage']:.0f})" if b["wasted"] else ""
-        print(f"  {cls:<14}{b['turns']:>6}{b['usage']:>10.0f}{100 * b['usage'] / tot:>6.0f}%   {w:>12}")
-    print(f"  {'total':<14}{sum(b['turns'] for b in c['by_class'].values()):>6}{tot:>10.0f}")
+        d = f"{b.get('delegated', 0.0):>11.0f}" if delegated else ""
+        print(f"  {cls:<14}{b['turns']:>6}{b['usage']:>10.0f}{100 * b['usage'] / tot:>6.0f}%{d}   {w:>12}")
+    d = f"{'':>7}{sum(b.get('delegated', 0.0) for b in c['by_class'].values()):>11.0f}" if delegated else ""
+    print(f"  {'total':<14}{sum(b['turns'] for b in c['by_class'].values()):>6}{tot:>10.0f}{d}")
+    if delegated:
+        print(f"  {C['dim']}delegated: what the subagents a turn started spent, inside that turn's spend{C['reset']}")
     overhead = sum(c["by_class"].get(k, {}).get("usage", 0) for k in ("ceremony", "coordination"))
     for line in _account_beside_share(cfg, since):
         print(f"  {line}")

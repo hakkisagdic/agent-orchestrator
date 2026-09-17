@@ -113,7 +113,7 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0):
     if impl:
         msgs_path, _ = A.session_paths(cfg)
         recs = A.read_tail(msgs_path, 12_000_000) if msgs_path else []
-        tel = A.telemetry(recs, adapter)
+        tel = A.telemetry(recs, adapter, msgs_path)
         q = A.quota(adapter)
         if tel.get("ctx") is not None or tel.get("last") or q:
             a(f"\n{C['b']}{C['mag']}── QUOTA / CONTEXT {'─' * max(0, w - 20)}{C['reset']}")
@@ -124,9 +124,11 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0):
                 lu, lt = tel["last"]
                 avg = tel["total"] / max(1, tel["turns"])
                 warn = f"  {C['yellow']}⚠ {lu/max(avg,1):.1f}× average{C['reset']}" if lu > 2 * avg else ""
+                # The subagents a turn started spent inside its cost, and inside the total.
+                delegated = f", {tel['delegated']:.0f} delegated" if tel.get("delegated") else ""
                 a(f"   cost     last turn {C['b']}{lu:.0f}{C['reset']} {tel['unit']} "
                   f"({lt} tool calls) · {tel['turns']} turns, total {C['b']}{tel['total']:.0f}{C['reset']}"
-                  f"{C['dim']} (avg {avg:.0f}){C['reset']}{warn}")
+                  f"{C['dim']} (avg {avg:.0f}{delegated}){C['reset']}{warn}")
             if q:
                 # keyflip reports machine-wide provider windows, which are NOT the
                 # implementer's own pool — Kiro bills credits, Claude Code bills a

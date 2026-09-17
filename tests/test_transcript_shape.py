@@ -165,7 +165,8 @@ def test_an_adapter_that_declares_no_shape_has_nothing_read_from_another_harness
 
     assert A.turn_costs(cfg)["turns"] == [] and A.turn_ended(cfg) is False
     assert A.implementer_recent_writes(cfg) == set()
-    assert A.telemetry(recs, bare) == {"ctx": None, "total": 0.0, "turns": 0, "last": None, "unit": "unit"}
+    assert A.telemetry(recs, bare) == {"ctx": None, "total": 0.0, "turns": 0, "last": None, "unit": "unit",
+                                       "delegated": 0.0}
     assert A.recent_errors(recs, 3, bare) == [] and A.messages(recs, 8, bare) == []
 
 

@@ -123,7 +123,7 @@ def status_payload(cfg):
     state, age, desc = A.busy(cfg, adapter) if impl else ("unknown", None, "")
     msgs, _ = A.session_paths(cfg)
     recs = A.read_tail(msgs, 4_000_000) if msgs else []
-    tel = A.telemetry(recs, adapter) if recs else {}
+    tel = A.telemetry(recs, adapter, msgs) if recs else {}
     g = A.git_state(root)
     revs = A.reviews(root, cfg["reviews"], limit=3)
     return {"project": cfg.get("project") or os.path.basename(root), "root": root,
@@ -131,7 +131,7 @@ def status_payload(cfg):
             "doing": desc, "spinning_minutes": A.spinning(root),
             "nothing_to_do_since": (W.load_state(root).get("idle_answer") or {}).get("since"),
             "context_percent": tel.get("ctx"), "turns": tel.get("turns"),
-            "cost_total": tel.get("total"), "cost_unit": tel.get("unit"),
+            "cost_total": tel.get("total"), "cost_delegated": tel.get("delegated"), "cost_unit": tel.get("unit"),
             "head": g["log"][0] if g["log"] else None,
             "dirty_files": len(g["dirty"]), "unpushed": g["ahead"],
             "behind": g.get("behind"), "base": g.get("base"), "merged": g.get("merged"),

@@ -842,6 +842,22 @@ def account_usage(timeout=20, adapter_id=None):
     return drivers.USAGE[api["driver"]](api, timeout=timeout) if api else None
 
 
+def _marked_records(path, marks):
+    """The records of a transcript's lines that hold one of `marks`; a line holding none is never parsed."""
+    try:
+        with open(path, errors="replace", encoding=UTF8) as fh:
+            for line in fh:
+                if not any(mark in line for mark in marks):
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                yield rec
+    except OSError:
+        return
+
+
 def credit_usage(adapter_id, monthly_budget=None):
     """Credit spend read from local transcripts, by billing month.
 
@@ -875,6 +891,10 @@ def credit_usage(adapter_id, monthly_budget=None):
     What a record adds is charged to the day it was written, not to whenever the session
     was last touched: a long session crosses billing periods, and charging all of it to
     its final month is how a month reads as full while the previous one reads as empty.
+
+    A subagent a session started is that session's spend (`transcript.subagents`): its
+    records are read after the record that starts it, charged to that turn and to the day
+    each was written, under the same reading.
     """
     import glob
     from collections import defaultdict
@@ -886,40 +906,35 @@ def credit_usage(adapter_id, monthly_budget=None):
         fallback = (adapter.get("billing") or {}).get("fallback") or {}
         shape = transcript_shape(adapter)
         if fallback.get("transcripts") and fallback.get("reading") in USAGE_READINGS and shape["usage"]:
-            # A line naming neither the usage field nor a kind that opens or ends a turn is never parsed.
-            marks = sorted({'"' + field.split(".")[0].split("[")[0] + '"' for field in shape["usage"]["fields"]}
+            # A line naming neither the usage field nor a kind that opens or ends a turn is never parsed,
+            # unless it may start a subagent: a field that names one, or the kind of a tool call.
+            starts = [entry["named_by"] for entry in (shape["subagents"] or {}).get("transcripts") or []]
+            calls = [shape["tool"]["type"]] if shape["subagents"] and shape["tool"] else []
+            marks = sorted({'"' + field.split(".")[0].split("[")[0] + '"'
+                            for field in shape["usage"]["fields"] + [path for path in starts if path]}
                            | {'"' + kind + '"' for kind in shape["start"] + shape["prompt"] + shape["end"]
-                              + [when["type"] for when in shape["end_when"]]})
-            counted = set()             # one reading of this adapter's transcripts: a response is charged once
+                              + [when["type"] for when in shape["end_when"]] + calls})
+            counted = {}                # one reading of this adapter's transcripts: a response is charged once
             sources += [(path, shape, marks, counted) for path in glob.glob(_home_path(fallback["transcripts"]))]
     for f, shape, marks, counted in sources:
         usage, turn, turns, credits, day, month = shape["usage"], None, 0, 0.0, "", ""
-        try:
-            with open(f, errors="replace", encoding=UTF8) as fh:
-                for line in fh:
-                    if not any(mark in line for mark in marks):
-                        continue
-                    try:
-                        rec = json.loads(line)
-                    except Exception:
-                        continue
-                    kind = record_kind(rec, shape)
-                    turn, _ = next_turn(turn, rec, shape)
-                    pl = record_body(rec, shape)
-                    if pl is None or kind != usage["type"]:
-                        continue
-                    turn = {} if turn is None else turn      # usage before any turn opens is a turn of its own
-                    if "usage" not in turn:
-                        turns += 1
-                    grown = add_usage(turn, pl, usage, counted)
-                    credits += grown
-                    day = record_time(rec, shape)[:10] or day
-                    if day:
-                        days[day] += grown
-                        months[day[:7]] += grown
-                        month = day[:7]
-        except OSError:
-            continue
+        for rec, subagent in with_subagents(_marked_records(f, marks), shape, f,
+                                            lambda path, marks=marks: _marked_records(path, marks)):
+            kind = record_kind(rec, shape)
+            turn, _ = next_turn(turn, rec, shape, subagent)
+            pl = record_body(rec, shape)
+            if pl is None or kind != usage["type"]:
+                continue
+            turn = {} if turn is None else turn      # usage before any turn opens is a turn of its own
+            if "usage" not in turn:
+                turns += 1
+            grown = add_usage(turn, pl, usage, counted, subagent)
+            credits += grown
+            day = record_time(rec, shape)[:10] or day
+            if day:
+                days[day] += grown
+                months[day[:7]] += grown
+                month = day[:7]
         if turns:
             sessions.append({"session": os.path.basename(os.path.dirname(f)),
                              "month": month, "turns": turns, "credits": round(credits, 2),
