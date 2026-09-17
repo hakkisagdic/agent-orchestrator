@@ -227,16 +227,20 @@ def transcript_shape(adapter):
     `transcript.messages.not_words` lists the values a prompt or a reply holds when it is
     no one speaking - a harness's own note, a summary it wrote of a compacted
     conversation - each a `match` of paths and values; a record holding every value of
-    one of them has no words.
+    one of them has no words. `transcript.messages.harness_replies` lists, the same way,
+    the values a reply holds when the harness wrote it in the model's place
+    (`in_place_reply`), and `telemetry.failure.ends` the records that tell a session a
+    task it ran in the background ended (`ended_shape`).
     """
     transcript, signals = _block(adapter, "transcript"), _block(adapter, "telemetry")
     record, message_kinds, turn = (_block(transcript, key) for key in ("record", "messages", "turn"))
     body, _, kind = _name(record.get("kind")).rpartition(".")
-    not_words = message_kinds.get("not_words") if isinstance(message_kinds.get("not_words"), list) else []
+    matches = {key: [match for match in message_kinds[key] if isinstance(match, dict) and match]
+               if isinstance(message_kinds.get(key), list) else [] for key in ("not_words", "harness_replies")}
     shape = {"time": _name(record.get("time")), "body": body, "kind": kind,
              "text_keys": [key.rpartition(".")[2] for key in _names(record.get("text_keys"))],
              "prompt": _names(message_kinds.get("prompt")), "reply": _names(message_kinds.get("reply")),
-             "not_words": [match for match in not_words if isinstance(match, dict) and match],
+             "not_words": matches["not_words"], "harness_replies": matches["harness_replies"],
              "start": _names(turn.get("start")), "end": _names(turn.get("end")),
              "bookkeeping": _names(turn.get("bookkeeping")),
              "tool": None, "usage": None, "context": None, "failure": None}
@@ -261,7 +265,29 @@ def transcript_shape(adapter):
             and "failed_when" in failure:
         shape["failure"] = {"type": failure["type"], "field": failure["field"],
                             "failed_when": failure["failed_when"], "text": _name(failure.get("text"))}
+    shape["ends"] = ended_shape(_block(failure, "ends")) if failure.get("from") == "transcript" else None
     return subagent_shape(nested_shape(shape, transcript, signals), transcript)
+
+
+def ended_shape(declared):
+    """What the end of a task run in the background looks like, from `telemetry.failure.ends`; None if unusable.
+
+    A harness may tell a session that a task it started in the background ended - a command, a
+    subagent - in a record of its own rather than in a tool's result, the call that started the
+    task having returned when the task began. `records` are the records that tell it, each a kind,
+    the `match` it holds and the `field` holding its text; the text says the end between pairs of
+    markers: `status` the end's status, of which `failed_when` lists the ones that are a failure,
+    `id` the task it ends, and `text` what a person reads of it. Without a status, a failing status
+    or a record to read, nothing is read.
+    """
+    records = declared.get("records") if isinstance(declared.get("records"), list) else []
+    records = [{"type": record["type"], "match": _block(record, "match"), "field": record["field"]}
+               for record in records if isinstance(record, dict) and _name(record.get("type"))
+               and _name(record.get("field"))]
+    markers = {key: list(declared[key]) for key in ("status", "id", "text") if isinstance(declared.get(key), list)
+               and len(declared[key]) == 2 and all(_name(marker) for marker in declared[key])}
+    failed = _names(declared.get("failed_when"))
+    return dict(markers, records=records, failed_when=failed) if records and failed and "status" in markers else None
 
 
 def nested_shape(shape, transcript, signals):
@@ -310,17 +336,112 @@ def subagent_shape(shape, transcript):
     extension) whose `call` field holds the id of the tool call that started it, the id
     of a call being at `transcript.tool_call.id`. A shape declaring no `dir` or no
     transcript under it has no subagents.
+
+    Each of these paths is read below the directory it is relative to, and one that is not
+    plain names (`_plain_steps`) - `..`, an absolute path, a drive - is refused where it is
+    declared: a `dir` gives the shape no subagents, a transcript or a sidecar is left out. A
+    `dir` names its session, `{session}` standing in it, so no session reads another's.
     """
     declared = _block(transcript, "subagents")
     entries = declared.get("transcripts") if isinstance(declared.get("transcripts"), list) else []
     entries = [{"path": entry["path"], "named_by": _name(entry.get("named_by"))} for entry in entries
-               if isinstance(entry, dict) and _name(entry.get("path")) and entry["path"].count("{id}") <= 1]
+               if isinstance(entry, dict) and _name(entry.get("path")) and entry["path"].count("{id}") <= 1
+               and _plain_steps(entry["path"])]
     sidecar = _block(declared, "sidecar")
     shape["subagents"] = {"dir": declared["dir"], "transcripts": entries,
                           "sidecar": {"path": sidecar["path"], "call": sidecar["call"]}
-                          if _name(sidecar.get("path")) and _name(sidecar.get("call")) else None} \
-        if _name(declared.get("dir")) and entries else None
+                          if _name(sidecar.get("path")) and _name(sidecar.get("call")) and _plain_steps(sidecar["path"])
+                          else None} \
+        if "{session}" in _name(declared.get("dir")) and _plain_steps(declared["dir"]) and entries else None
     return shape
+
+
+def subagent_problems(adapter):
+    """Each path `transcript.subagents` declares that ao will not read, and why; [] when it reads them all (#77).
+
+    `subagent_shape` refuses such a path without a word, since a reading must not fail on a
+    layer's mistake; `ao adapters validate` says why before anyone relies on the declaration.
+    """
+    declared = _block(_block(adapter, "transcript"), "subagents")
+    if not declared:
+        return []
+    plain = "names joined by `/`, with no empty step, `.`, `..`, absolute path or drive"
+    problems = [] if "{session}" in _name(declared.get("dir")) and _plain_steps(declared["dir"]) else [
+        f"`transcript.subagents.dir` must be {plain}, and hold {{session}}"]
+    entries = declared.get("transcripts") if isinstance(declared.get("transcripts"), list) else []
+    problems += [f"`transcript.subagents.transcripts` path {entry.get('path')!r} must be {plain}"
+                 for entry in entries if isinstance(entry, dict) and not _plain_steps(_name(entry.get("path")))]
+    sidecar = _block(declared, "sidecar")
+    if sidecar and not _plain_steps(_name(sidecar.get("path"))):
+        problems.append(f"`transcript.subagents.sidecar.path` must be {plain}")
+    return problems
+
+
+def _plain_steps(path):
+    """A declared path's steps when each names an entry below the directory it is read in, else None.
+
+    A declared path is names joined by `/`. An empty step (a path starting or ending with `/`, or
+    holding `//`), `.`, `..`, and a step holding this platform's separator or a drive name no entry
+    below: they are how a path leaves the directory it is read in, so it is refused, never
+    followed.
+    """
+    steps = str(path).split("/")
+    if any(step in ("", ".", "..") or os.sep in step or (os.altsep and os.altsep in step)
+           or os.path.splitdrive(step)[0] for step in steps):
+        return None
+    return steps
+
+
+def _inside(path, directory):
+    """Is a real path inside a real directory, and not the directory itself, as this platform compares names?"""
+    path, directory = os.path.normcase(path), os.path.normcase(directory)
+    return path.startswith(directory.rstrip(os.sep) + os.sep)
+
+
+def _declared_files(directory, steps):
+    """[(real path, what `{id}` stood for or None)] for each file a declared path's steps reach below a real directory.
+
+    A step names entries of the directory reached so far, `*` standing for any run of characters
+    and `{id}` for one or more, and a name starting with a dot is reached only by a step starting
+    with one, as a shell's glob reads them; a step with neither is the one name it spells. Every
+    step but the last reaches directories, and the last reaches files. An entry that is a symbolic
+    link - or on Windows any directory, since a junction does not say it is a link before Python
+    3.12 - is followed only when its real path is inside `directory`: a path is read inside the
+    directory it is declared in, or not at all.
+    """
+    reached = [(directory, None)]
+    for depth, step in enumerate(steps):
+        last = depth == len(steps) - 1
+        pattern = re.compile(re.escape(step).replace(re.escape("{id}"), "(?P<id>[^/]+)")
+                             .replace(re.escape("*"), "[^/]*"))
+        wild = pattern.pattern != re.escape(step)
+        following = []
+        for parent, ident in reached:
+            try:
+                if wild:
+                    with os.scandir(parent) as listing:
+                        entries = [(entry.name, entry) for entry in listing]
+                else:
+                    entries = [(step, None)]
+            except OSError:
+                continue
+            for name, entry in entries:
+                match = pattern.fullmatch(name)
+                if match is None or (wild and name.startswith(".") and not step.startswith(".")):
+                    continue
+                path = os.path.join(parent, name)
+                try:
+                    if entry is None or entry.is_symlink() or (os.name == "nt" and not last):
+                        path = os.path.realpath(path)
+                        if not _inside(path, directory) or not (os.path.isfile(path) if last else os.path.isdir(path)):
+                            continue
+                    elif not (entry.is_file() if last else entry.is_dir()):
+                        continue
+                except OSError:
+                    continue
+                following.append((path, match.groupdict().get("id") or ident))
+        reached = following
+    return sorted(reached)
 
 
 def record_body(rec, shape):
@@ -464,6 +585,12 @@ def _declared_value(value, expected):
     return value is expected if expected is None or isinstance(expected, bool) else value == expected
 
 
+def _matches(body, matches):
+    """Does a body hold every value of one of the declared matches, each a mapping of paths to values?"""
+    return any(all(_declared_value(_path_value(body, path), value) for path, value in match.items())
+               for match in matches)
+
+
 def declared_items(body, declared):
     """The objects a tool call's or a tool result's fields are read from, in one record's body.
 
@@ -517,37 +644,40 @@ def subagents(transcript, shape, sidecars=True):
     transcripts of that name, and `calls` a tool call's id to the transcripts whose sidecar
     names it. One listing of the directory serves a whole reading. A reader that needs only
     the transcripts asks without `sidecars`, and no sidecar is opened.
+
+    Every path stays inside the session's own subagent directory. `dir` names a directory for the
+    session inside the session transcript's own, and every transcript and sidecar must be inside
+    that one, their real paths compared, so neither `..`, an absolute path, a wildcard nor a
+    symbolic link takes a reading anywhere else the user can read. The paths returned are the
+    real ones. A declaration may come from an adapter layer the agent it describes can write;
+    confined, it chooses only which of the files the store keeps for that session are its
+    subagents.
     """
-    import glob
     declared = shape.get("subagents")
     if not declared or not transcript:
         return None
-    session = os.path.splitext(os.path.basename(transcript))[0]
-    directory = os.path.join(os.path.dirname(transcript), *declared["dir"].replace("{session}", session).split("/"))
     found = {"files": [], "named": {}, "calls": {}}
-    if not os.path.isdir(directory):
+    session = os.path.splitext(os.path.basename(transcript))[0]
+    steps = _plain_steps(declared["dir"].replace("{session}", session))
+    directory = os.path.realpath(os.path.join(os.path.dirname(transcript), *steps)) if steps else ""
+    if not _inside(directory, os.path.realpath(os.path.dirname(transcript))) or not os.path.isdir(directory):
         return found
     listed = set()
     for number, entry in enumerate(declared["transcripts"]):
-        steps = entry["path"].split("/")
-        pattern = re.compile("/".join(re.escape(step).replace(re.escape("{id}"), "(?P<id>[^/]+)")
-                                      .replace(re.escape("*"), "[^/]*") for step in steps))
-        for path in sorted(glob.glob(os.path.join(glob.escape(directory),
-                                                  *(step.replace("{id}", "*") for step in steps)))):
-            match = pattern.fullmatch(os.path.relpath(path, directory).replace(os.sep, "/"))
-            if match is None or not os.path.isfile(path):
-                continue
+        for path, ident in _declared_files(directory, entry["path"].split("/")):
             if path not in listed:
                 listed.add(path)
                 found["files"].append(path)
-            if entry["named_by"] and match.groupdict().get("id"):
-                found["named"].setdefault((number, match.group("id")), []).append(path)
+            if entry["named_by"] and ident:
+                found["named"].setdefault((number, ident), []).append(path)
     sidecar = declared["sidecar"] if sidecars else None
     for path in found["files"] if sidecar else []:
-        name = os.path.splitext(os.path.basename(path))[0]
+        steps = _plain_steps(sidecar["path"].replace("{name}", os.path.splitext(os.path.basename(path))[0]))
+        meta = os.path.realpath(os.path.join(os.path.dirname(path), *steps)) if steps else ""
+        if not _inside(meta, directory):
+            continue
         try:
-            with open(os.path.join(os.path.dirname(path), sidecar["path"].replace("{name}", name)),
-                      encoding=UTF8) as fh:
+            with open(meta, encoding=UTF8) as fh:
                 call = _path_value(json.load(fh), sidecar["call"])
         except (OSError, ValueError):
             continue
@@ -711,8 +841,7 @@ def message_words(body, shape):
     records of the prompt's kind. They are no one speaking, and a record holding what one of
     `transcript.messages.not_words` declares holds no words either.
     """
-    if any(all(_declared_value(_path_value(body, path), value) for path, value in match.items())
-           for match in shape.get("not_words") or []):
+    if _matches(body, shape.get("not_words") or []):
         return ""
     words = shape.get("words")
     parts = declared_items(body, words) if words and _path_values(body, words["blocks"]) else [body]
@@ -720,6 +849,60 @@ def message_words(body, shape):
     for part in parts:
         _strings(part, buf, shape["text_keys"])
     return " ".join(" ".join(buf).split())
+
+
+def in_place_reply(rec, shape):
+    """Is a record a reply the harness wrote in the model's place, reporting no usage (`harness_replies`)?
+
+    A store may write a reply of its own where the model gave none - the error its service
+    returned, or an answer to a note that asked the model nothing - holding no usage. It answers
+    nothing and spends nothing: no reading counts it as the implementer's turn, and a turn that
+    holds no other reply was not answered. A reply of those that did report usage is read as any
+    other.
+    """
+    kind = record_kind(rec, shape) if shape.get("harness_replies") else None
+    if kind not in shape["reply"]:
+        return False
+    body, usage = record_body(rec, shape), shape["usage"]
+    return _matches(body, shape["harness_replies"]) and not (usage and kind == usage["type"]
+                                                             and record_usage(body, usage))
+
+
+def _between(text, markers):
+    """Each piece of a text that stands between the two markers of a declared pair, in order."""
+    start, end = markers
+    pieces, at = [], 0
+    while True:
+        first = text.find(start, at)
+        last = text.find(end, first + len(start)) if first >= 0 else -1
+        if last < 0:
+            return pieces
+        pieces.append(text[first + len(start):last])
+        at = last + len(end)
+
+
+def failed_ends(rec, shape):
+    """[(task, text)] when a record tells of a background task's end whose status is a failure (`telemetry.failure.ends`).
+
+    `task` names the end: the ids its text holds between the `id` markers, or the whole text when it
+    holds none, so an end told twice - once while a turn ran, once after it - is one end to a reader
+    that keeps the names it has read. `text` is what stands between the `text` markers, else all of it.
+    """
+    ends = shape.get("ends")
+    body = record_body(rec, shape) if ends else None
+    kind = record_kind(rec, shape) if body is not None else None
+    for record in ends["records"] if kind else []:
+        value = _path_value(body, record["field"]) if kind == record["type"] and _matches(body, [record["match"]]) \
+            else None
+        if not isinstance(value, str):
+            continue
+        status = _between(value, ends["status"])
+        if not status or status[0].strip() not in ends["failed_when"]:
+            return []
+        ids = _between(value, ends["id"]) if "id" in ends else []
+        text = _between(value, ends["text"]) if "text" in ends else []
+        return [(" ".join(ident.strip() for ident in ids) if ids else value, text[0] if text else value)]
+    return []
 
 
 def messages(recs, limit=8, adapter=None):
@@ -761,6 +944,10 @@ def telemetry(recs, adapter, transcript=None):
     turn that started them and in `delegated`, and their tool calls are that turn's. Under
     `sum`, where a usage record is a turn of its own, a subagent's adds to the total and to
     `delegated` and is no turn of the session. The context is the session's own.
+
+    A reply the harness wrote in the model's place with no usage (`in_place_reply`) is not read:
+    a turn holding no other reply is no turn of the implementer's, and the average is over the
+    turns the model answered.
     """
     shape = transcript_shape(implementer_adapter() if adapter is None else adapter)
     ctx_spec, cost_spec = shape["context"], shape["usage"]
@@ -785,6 +972,8 @@ def telemetry(recs, adapter, transcript=None):
         if t != cost_spec["type"]:
             if calls and turn is not None:
                 turn["calls"] = turn.get("calls", 0) + calls
+            continue
+        if in_place_reply(r, shape):
             continue
         if cost_spec["reading"] == "sum":
             for values, tools in usage_entries(pl, cost_spec):

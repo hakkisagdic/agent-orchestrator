@@ -606,7 +606,13 @@ def cmd_cost(cfg, args):
         d = f"{b.get('delegated', 0.0):>11.0f}" if delegated else ""
         print(f"  {cls:<14}{b['turns']:>6}{b['usage']:>10.0f}{100 * b['usage'] / tot:>6.0f}%{d}   {w:>12}")
     d = f"{'':>7}{sum(b.get('delegated', 0.0) for b in c['by_class'].values()):>11.0f}" if delegated else ""
-    print(f"  {'total':<14}{sum(b['turns'] for b in c['by_class'].values()):>6}{tot:>10.0f}{d}")
+    # A turn the model never answered is the implementer's work in no class, and in no total of turns.
+    work = [b for cls, b in c["by_class"].items() if cls != A.UNANSWERED]
+    print(f"  {'total':<14}{sum(b['turns'] for b in work):>6}{tot:>10.0f}{d}")
+    unanswered = c["by_class"].get(A.UNANSWERED)
+    if unanswered:
+        print(f"  {C['dim']}{A.UNANSWERED}: {unanswered['turns']} more turn(s) the model never answered, the harness "
+              f"replying in its place with nothing spent{C['reset']}")
     if delegated:
         print(f"  {C['dim']}delegated: what the subagents a turn started spent, inside that turn's spend{C['reset']}")
     overhead = sum(c["by_class"].get(k, {}).get("usage", 0) for k in ("ceremony", "coordination"))

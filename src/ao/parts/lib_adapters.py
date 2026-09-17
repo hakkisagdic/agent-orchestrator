@@ -573,7 +573,7 @@ def validate_adapter(adapter):
         unknown = sorted({p for a in argv for p in re.findall(r"\{([a-z_]+)\}", a)} - set(ADAPTER_PLACEHOLDERS))
         if unknown:
             problems.append(f"`{capability}.argv` uses placeholders ao does not fill: {', '.join(unknown)}")
-    return problems + prompt_channel_problems(adapter) + tool_review_problems(adapter)
+    return problems + prompt_channel_problems(adapter) + tool_review_problems(adapter) + subagent_problems(adapter)
 
 
 def conform_adapter(adapter, harness, workdir):

@@ -894,7 +894,8 @@ def credit_usage(adapter_id, monthly_budget=None):
 
     A subagent a session started is that session's spend (`transcript.subagents`): its
     records are read after the record that starts it, charged to that turn and to the day
-    each was written, under the same reading.
+    each was written, under the same reading. A reply the harness wrote in the model's place
+    with no usage (`in_place_reply`) is not read, so a turn holding no other is no session turn.
     """
     import glob
     from collections import defaultdict
@@ -923,7 +924,7 @@ def credit_usage(adapter_id, monthly_budget=None):
             kind = record_kind(rec, shape)
             turn, _ = next_turn(turn, rec, shape, subagent)
             pl = record_body(rec, shape)
-            if pl is None or kind != usage["type"]:
+            if pl is None or kind != usage["type"] or in_place_reply(rec, shape):
                 continue
             turn = {} if turn is None else turn      # usage before any turn opens is a turn of its own
             if "usage" not in turn:
@@ -1367,39 +1368,50 @@ def recent_errors(recs, limit=3, adapter=None):
     transcript: the result of the call that waited for it, read here when it failed, or the
     notification of its end. Read beside the implementer's own failures, the subagents'
     would crowd them out of the panel's two lines.
+
+    A task the implementer ran in the background - a subagent, a command - ends after the call
+    that started it returned, and the session is told in a record of its own: an end whose
+    status the adapter declares a failure (`telemetry.failure.ends`) is read here as its failed
+    result would be, once however many times the session was told of it.
     """
     shape = transcript_shape(implementer_adapter() if adapter is None else adapter)
     failure = shape["failure"]
-    if not failure:
+    if not failure and not shape["ends"]:
         return []
-    out = []
+    out, told = [], set()
     for r in reversed(recs):
+        raws = []
+        for task, text in failed_ends(r, shape):
+            if task not in told:
+                told.add(task)
+                raws.append(text)
         pl = record_body(r, shape)
-        if pl is None or record_kind(r, shape) != failure["type"]:
-            continue
-        failed = [item for item in declared_items(pl, failure)
-                  if _declared_value(_path_value(item, failure["field"]), failure["failed_when"])]
-        if not failed:
-            continue
-        pl = failed[-1]                    # a result nested in a message: its verdict and output are the block's
-        # Failed tool output is usually a wall of passing lines with the real
-        # cause buried in it. Lead with the line that actually failed.
-        raw = str(_path_value(pl, failure["text"]) or "") if failure["text"] else ""
-        lines = [ln.strip() for ln in raw.split("\n") if ln.strip()]
-        def is_signal(ln):
-            low = ln.lower()
-            if ln.startswith("✔") or low.startswith("output:"):
-                return False
-            return (ln.startswith("✖") or "error ts" in low or "error:" in low
-                    or low.startswith("fail") or " failing tests" in low
-                    or "exit code: 1" in low or low.startswith("✗"))
-        signal = next((ln for ln in lines if is_signal(ln)), None)
-        if not signal:
-            signal = next((ln for ln in lines if not ln.lower().startswith("output:")
-                           and not ln.startswith("✔")), lines[0] if lines else raw)
-        text = " ".join(str(signal)[:260].split())
-        out.append((local_hhmm(record_time(r, shape)) or "--:--", text))
-        if len(out) >= limit:
+        if failure and pl is not None and record_kind(r, shape) == failure["type"]:
+            failed = [item for item in declared_items(pl, failure)
+                      if _declared_value(_path_value(item, failure["field"]), failure["failed_when"])]
+            if failed:
+                # A result nested in a message: its verdict and output are the block's.
+                raws.append(str(_path_value(failed[-1], failure["text"]) or "") if failure["text"] else "")
+        for raw in raws:
+            # Failed tool output is usually a wall of passing lines with the real
+            # cause buried in it. Lead with the line that actually failed.
+            lines = [ln.strip() for ln in raw.split("\n") if ln.strip()]
+            def is_signal(ln):
+                low = ln.lower()
+                if ln.startswith("✔") or low.startswith("output:"):
+                    return False
+                return (ln.startswith("✖") or "error ts" in low or "error:" in low
+                        or low.startswith("fail") or " failing tests" in low
+                        or "exit code: 1" in low or low.startswith("✗"))
+            signal = next((ln for ln in lines if is_signal(ln)), None)
+            if not signal:
+                signal = next((ln for ln in lines if not ln.lower().startswith("output:")
+                               and not ln.startswith("✔")), lines[0] if lines else raw)
+            text = " ".join(str(signal)[:260].split())
+            out.append((local_hhmm(record_time(r, shape)) or "--:--", text))
+            if len(out) >= limit:
+                break
+        if raws and len(out) >= limit:
             break
     return list(reversed(out))
 

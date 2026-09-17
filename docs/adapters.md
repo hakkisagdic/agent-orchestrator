@@ -446,7 +446,7 @@ A store like that declares:
 
 | Field | What it declares | Used by |
 |---|---|---|
-| `transcript.subagents.dir` | the directory of a session's subagent transcripts, relative to the session transcript's own directory; `{session}` is the session transcript's name without its extension | `ao cost`, the panel, `ao_status`, the credit estimate, foreign edits, and whether the implementer is working: its state in the panel and `ao_status`, the watchdog's idle guard, reap and spin check |
+| `transcript.subagents.dir` | the directory of a session's subagent transcripts, relative to the session transcript's own directory; `{session}` is the session transcript's name without its extension, and stands in every `dir`, so no session reads another's (below: where a subagent path may lead) | `ao cost`, the panel, `ao_status`, the credit estimate, foreign edits, and whether the implementer is working: its state in the panel and `ao_status`, the watchdog's idle guard, reap and spin check |
 | `transcript.subagents.transcripts` | `[{path, named_by}]`: where a subagent's transcript is under that directory, `*` standing for any name and `{id}` for the value a record of the session holds at `named_by` when that record starts it - the result of the call that started it, naming it | the same |
 | `transcript.subagents.sidecar` | `{path, call}`: the file beside a subagent's transcript, `{name}` standing for the transcript's name without its extension, whose `call` field holds the id of the tool call that started it, in the session's transcript or in another subagent's | `ao cost`, the panel, `ao_status`, the credit estimate |
 | `transcript.tool_call.id` | the path to a tool call's id, read where its name is | the same |
@@ -527,9 +527,10 @@ its output, not on a response that ends a turn.
 A subagent's failed calls are not the implementer's errors. They are steps the subagent recovers from
 inside, and what the implementer is told is how the subagent ended, in its own transcript: the result of
 the call that waited for it, which the panel's problems read when it failed, or the notification of its
-end. And `not_words` is about words, not turns: a task notification or a note the harness writes after a
-turn's end - another session's message among them - asks the model to answer, and opens the turn its
-answer makes as a prompt does; a compaction summary written while a turn runs stays inside that turn.
+end, which they read when it failed or was stopped (below). And `not_words` is about words, not turns: a
+task notification or a note the harness writes after a turn's end - another session's message among them -
+asks the model to answer, and opens the turn its answer makes as a prompt does; a compaction summary
+written while a turn runs stays inside that turn.
 
 These were measured on the stores at rest, from each record's time. The 59 stores that delegate hold
 2,916 subagent transcripts and 257,598 records in them. 77,402 of the records were written while the
@@ -571,6 +572,99 @@ holds the subagent transcripts of the 59 that delegate, all 2,916 found through 
 slowest busy reading took 6.3 ms of CPU against 0.02 before, for a session with 458 subagent transcripts,
 and the slowest turn end 6.6 ms against 2.9. `tests/test_subagent_liveness.py` holds these readings from
 synthetic records.
+
+### Where a subagent path may lead, a background task's end, and a reply no model wrote
+
+A subagent declaration names files ao lists, stats and reads, and an adapter layer the agents it describes
+can write may declare it (#77). So every path it names stays in the session's own subagent directory. `dir`,
+each transcript's `path` and the sidecar's `path` are names joined by `/`, with no empty step, `.`, `..`,
+absolute path or drive, and `dir` holds `{session}`: a declaration that breaks this is not read, and
+`ao adapters validate` names the path. A reading then compares real paths: the subagent directory must be
+inside the session transcript's own directory, and every transcript and sidecar inside the subagent
+directory. A symbolic link whose target leaves it is not followed - a transcript, a sidecar, or a directory
+a wildcard reaches - and a link whose target stays inside is. `*` and `{id}` still match within one name,
+and a name starting with a dot only where the step starts with one, as a glob matches.
+
+The declaration is still read from every layer, unlike the sets that decide authority. Those are read from
+the package's adapters because a layer could take a product path out of review, hide a writer from a hold or
+name a command ao runs. Confined, a subagent declaration chooses only which of the files a store keeps for
+that session are its subagents, and what that moves - spend, writes, whether the implementer is working -
+the same layer already moves through the rest of `transcript`, which is how a project declares a harness ao
+never shipped. Read from the package alone, it would guard nothing confinement leaves open, and one adapter's
+shape would come from two layers.
+
+| Field | What it declares | Used by |
+|---|---|---|
+| `telemetry.failure.ends` | the records that tell a session a task it ran in the background ended: `records`, each `{type, match, field}` - the kind, the values the record holds and the field holding its text - and the pairs of markers the end stands between in that text: `status`, of which `failed_when` lists the failures, `id`, naming the task, and `text`, what a person reads | the panel's problems |
+| `transcript.messages.harness_replies` | a list of matches: a reply holding every value of one, with no usage, was written by the harness in the model's place, and a turn holding no other reply was not answered | `ao cost`, `ao cost --features`, the panel's turns, `ao_status`, the credit estimate |
+
+```jsonc
+// transcript.messages and telemetry.failure, beside what the stores above declare
+"messages": { "harness_replies": [{ "message.model": "<synthetic>" }] },
+"failure": { "ends": { "records": [{ "type": "user", "match": { "origin.kind": "task-notification" },
+                                     "field": "message.content" },
+                                   { "type": "attachment",
+                                     "match": { "attachment.commandMode": "task-notification" },
+                                     "field": "attachment.prompt" }],
+                       "status": ["<status>", "</status>"], "failed_when": ["failed", "stopped"],
+                       "id": ["<task-id>", "</task-id>"], "text": ["<summary>", "</summary>"] } }
+```
+
+A task the implementer runs in the background - a shell command, a monitor, a subagent, a workflow - ends
+after the call that started it returned, so no tool result says how it ended: the harness tells the session
+in a notification. An end whose status is a failure reaches the panel's problems as a failed result does,
+once however many times the session is told of it. The second harness writes a notification as a `user`
+record holding `origin.kind` `task-notification` when no turn runs, and as an `attachment` holding
+`attachment.commandMode` `task-notification` queued into a turn that runs; `queue-operation` records repeat
+its text while it waits, and are not read.
+
+It was measured read-only on the 419 stores at rest. Their sessions hold 1,517 such records and 1,771 such
+attachments, none holding two notifications. 1,010 carry no status - a monitor's or a workflow's progress -
+and the others tell an end: 2,000 completed, 183 failed, 90 stopped and 5 killed. A failed end is a command
+that exited non-zero (116), an agent that terminated early or stalled (41), and a monitor's script (10), an
+MCP task (10) or a workflow's script (6) that failed. A stopped end is work a session's previous process
+ended before it finished, told when the session resumed: tasks it found no completion record for (64),
+background commands of the previous session (23), agents that did not finish before it ended (3). A killed
+end is a task stopped on purpose, by the person in 3 of the 5, so it is no failure. 228 of the 273 failed
+and stopped ends name the call that started their task, and none of those calls has a failed result. An end
+is told again at times - 9 of the 2,269, all completed - and is read once, by the ids of the tasks it ends.
+None of these ends reached the panel before. Its two lines per store now show 555 failures in the 289 stores
+that show one, against 554, and 44 of them are background ends, in 38 stores; its 12 MB tails read 205 ends
+beside the 2,234 failed results they read before.
+
+A store also writes replies of its own where the model gave none. All 515 in those stores' sessions and 180
+in their subagents hold `message.model` `<synthetic>` and no usage, 693 ending at `stop_sequence` and 2 at
+`refusal`: 510 are an error the service or the account returned - a usage limit, an API error, a failed
+authentication - and 185 the words "No response requested.". Such a reply still ends its turn, for the
+watchdog as for every reading. But a turn holding no other reply was not answered: of the 5,035 turns
+`ao cost` reads, 344 charge nothing, and 328 of them hold no reply but these - 180 an error after a person's
+prompt (96), a notification (79) or a note (5), and 148 "No response requested." after a note (133) or a
+notification (15). The other 16 hold no reply at all (14), each the last turn of its transcript, or a
+response that charged nothing (2), and read as before; 187 more turns hold such a reply beside the model's
+own response, and keep their class.
+
+So a turn holding only replies written in the model's place, with no usage, is `unanswered`: `ao cost`
+counts it on a line of its own below the total, and no class, total or feature count holds it; the turns of
+the panel, `ao_status` and the credit estimate leave it out, and the panel's average is over the turns the
+model answered. It is no turn of work, and no bookkeeping either, which would let the next prompt run on in a
+turn that has ended. Compared before and after on the same stores, `ao cost` read the same 42,850,456,356
+tokens over the same 5,035 turns, analysis 2,968 turns before and 2,640 after beside 328 unanswered, every
+other class unchanged. The panel read the same 29,852,261,803 tokens over 3,348 turns against 3,634; its last
+turn is another in 59 stores, and the 49 stores whose every turn is unanswered show no cost line. The credit
+estimate, had the adapter declared these stores, read the same 36,329,609,271 tokens over 4,693 turns against
+5,021.
+
+Kiro declares none of the three, and every reading of its 17 stores is the same before and after, each
+reading's digest included: `ao cost` (470 turns, 26,457.94 credits), the panel's figures (90 turns, 4,575.93
+credits), its 21 failure lines in 12 stores and its messages, the turn end, the busy state, foreign-edit
+writes and the credit estimate (26,457.92 credits over 447 turns). On the second harness's 419 stores the
+listing found the same 2,916 subagent transcripts, names and sidecar calls, and no subagent directory holds
+a symbolic link or a hidden name; the turn end, the busy state, messages, the spin check's growth and
+foreign-edit writes read as before. The listing reads each entry's kind from the directory listing and
+costs less: 34 ms of CPU over the 419 stores against 46, 2.3 ms against 5.9 for the session with 458
+subagent transcripts, and 2.8 ms against 6.4 for the slowest busy reading. `tests/test_subagent_bounds.py`
+holds these readings from synthetic records, and fails when a core module names a value these declarations
+hold.
 
 ## Busy detection
 

@@ -561,11 +561,12 @@ def feature_costs(cfg, since=None):
     work, not overhead. The architect's wakes and refills spend the architect's
     pool, not this transcript, so they are counted and not priced, and an
     inventory review cannot be told from a review in a transcript, so it is
-    counted with review.
+    counted with review. A turn the model never answered (`UNANSWERED`) is no turn
+    of the implementer's.
     """
     root = cfg["root"]
     costs = turn_costs(cfg, since)
-    turns = [turn for turn in costs["turns"] if turn.get("cls")]
+    turns = [turn for turn in costs["turns"] if turn.get("cls") not in (None, UNANSWERED)]
     nudges = spawn_times(root, "nudge", since)
     features = {name: {"turns": 0, "usage": 0.0} for name in ("review", "reports", "nudge")}
     for turn in turns:
@@ -589,6 +590,12 @@ def feature_costs(cfg, since=None):
                                        and (since is None or row.get("at", 0) >= since)))}
 
 
+# The class of a turn the model never answered: every reply in it the harness wrote in the model's place,
+# with no usage (`in_place_reply`). It spent nothing and did nothing, and is counted apart from the classes
+# of the implementer's work.
+UNANSWERED = "unanswered"
+
+
 def turn_costs(cfg, since=None):
     """Per-turn cost and class from the implementer's transcript.
 
@@ -597,7 +604,9 @@ def turn_costs(cfg, since=None):
     "ao_commands": Counter, "total", "delegated"}. Classes: product (wrote product files or
     committed), ceremony (review / verify / lock / commit-ok, nothing written),
     coordination (only inbox/report/writers/board, few calls), analysis (read and
-    reasoned, wrote nothing).
+    reasoned, wrote nothing). A turn whose every reply the harness wrote in the model's
+    place, with no usage (`in_place_reply`) - an error of the model's service, a reply to a
+    note that asked the model nothing - is `UNANSWERED`: counted, and counted apart.
 
     A subagent the implementer started works for it: the records of its transcript
     (`transcript.subagents`) are read after the record that starts it, its spend is in the
@@ -622,6 +631,7 @@ def turn_costs(cfg, since=None):
         return out
     recs = read_tail(msgs, 400_000_000)
     cur, counted = None, {}
+    in_place, answered = set(), set()           # the turns holding a reply written in the model's place, or its own
 
     def ts(d):
         raw = record_time(d, shape)
@@ -642,6 +652,8 @@ def turn_costs(cfg, since=None):
             continue
         if cur is None:
             continue
+        if subagent is None and t in shape["reply"]:
+            (in_place if in_place_reply(d, shape) else answered).add(id(cur))
         if usage and t == usage["type"]:
             add_usage(cur, pl, usage, counted, subagent)
         # Not an elif: one record of a store that nests its calls carries a response's usage and its tool calls.
@@ -670,7 +682,9 @@ def turn_costs(cfg, since=None):
         if since and (not tn["start"] or tn["start"] < since):
             tn["cls"] = None
             continue
-        if tn["product_writes"] or tn["commits"]:
+        if id(tn) in in_place and id(tn) not in answered and not tn["usage"]:
+            cls = UNANSWERED
+        elif tn["product_writes"] or tn["commits"]:
             cls = "product"
         elif tn["reviews"] or any(c in tn["ao"] for c in ("verify", "lock", "commit-ok")):
             cls = "ceremony"
