@@ -11,6 +11,7 @@
   --bg:#fbfaf8; --fg:#1a1a19; --muted:#6b6a66; --line:#e5e2dc;
   --card:#ffffff; --accent:#b4562a; --accent-soft:#f5ede7;
   --term-bg:#1c1b19; --term-fg:#e8e5df; --green:#5c8a4a; --red:#b8443a; --dim:#8a8781;
+  --yellow:#c29a3c; --blue:#6f8fbf;
   --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
   --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
 }
@@ -43,6 +44,7 @@ pre.term{background:var(--term-bg);color:var(--term-fg);font-family:var(--mono);
   overflow-x:auto;margin:32px 0;border:1px solid var(--line)}
 pre.term .g{color:var(--green)} pre.term .r{color:var(--red)}
 pre.term .d{color:var(--dim)} pre.term .a{color:var(--accent)}
+pre.term .y{color:var(--yellow)} pre.term .u{color:var(--blue)}
 pre.sh{background:var(--card);border:1px solid var(--line);border-radius:10px;
   padding:16px 18px;font-family:var(--mono);font-size:13px;overflow-x:auto}
 
@@ -105,26 +107,46 @@ cd ~/your-project &amp;&amp; ao status</pre>
     yapılandırma gerekmez: çalışan oturumu ajanın kendi deposundan keşfeder.</span></p>
 
 <pre class="term"><span class="a">══════════════════════════════════════════════════════════════════</span>
-  <b>VOLTRAI</b><span class="d">   agent-orchestrator   04 Sep 03:44:44</span>
+  <b>ACME-API</b><span class="d">   agent-orchestrator   12 Sep 14:44:44</span>
 <span class="a">══════════════════════════════════════════════════════════════════</span>
 
 <span class="g">● WORKING</span>  <span class="d">kiro · last write 0m 32s ago</span>
-  <span class="d">↳</span> closing the half-applied rename, then gates
+  <span class="d">↳</span> wiring the rate limiter into the login route, then gates
 
-<span class="a">── QUOTA / CONTEXT ───────────────────────────────────────────────</span>
+<span class="a">── QUOTA / CONTEXT ──────────────────────────────────────────────</span>
    context  <span class="g">█████████████░░░░░░░</span> 68%
-   cost     last turn <b>99</b> credit (162 tool calls) · 5 turns
+   cost     last turn <b>99</b> credit (162 tool calls) · 5 turns, total <b>412</b><span class="d"> (avg 82)</span>
 
-<span class="r">── PROBLEMS ──────────────────────────────────────────────────────</span>
+<span class="r">── PROBLEMS ─────────────────────────────────────────────────────</span>
    <span class="r">spinning</span> <span class="d">41m busy, nothing committed or changed</span>
-     <span class="d">activity is not progress — re-specify, or check for a wait loop</span>
+     <span class="d">activity is not progress — re-specify, split, or check for a wait loop</span>
 
-<span class="a">── REVIEWS ───────────────────────────────────────────────────────</span>
+<span class="a">── REVIEWS ──────────────────────────────────────────────────────</span>
    <span class="d">round 5/5</span>
-   2026-09-04-023522   <span class="r">NEEDS_CHANGES</span>
+   2026-09-12-141502-8c1d2e4.md   <span class="y">NEEDS_CHANGES</span>
+   2026-09-12-121930-8c1d2e4.md   <span class="y">NEEDS_CHANGES</span>
 
-   <b>Board:</b>   1 running · 2 blocked · 6 queued · 2 done
-     <span class="r">⊘</span> E15-close  needs: Windows signing certificate, 6 host profiles</pre>
+<span class="a">── THROUGHPUT 24h ───────────────────────────────────────────────</span>
+   <span class="d">staged 2 · landed 1 · decisions 1 asked, 1 waiting (oldest 0h 52m)</span>
+   <span class="g">landing: candidates are reaching commits</span>
+
+<span class="a">── REPOSITORY ───────────────────────────────────────────────────</span>
+   8c1d2e4 feat: count failed logins per account
+   3b7a9f0 fix: keep the session cookie on token refresh
+   e41c5d2 docs: describe the webhook retry policy
+   <span class="d">2 files uncommitted · 3 ahead / 0 behind origin/main</span>
+
+   <b>Mailbox:</b> 20260912-1352-kiro-to-architect-QUESTION-lockout-scope.md
+   <span class="d">1 other message(s) waiting in agent-mail/</span>
+   <b>Board:</b>   1 running · 1 blocked · 4 queued · 6 done
+     <span class="r">⊘</span> ACME-142  rotate webhook secrets — new key from ops
+
+<span class="a">── RECENT MESSAGES ──────────────────────────────────────────────</span>
+   <span class="d">14:36</span> <span class="u">YOU  </span>  Count failures per account, not per IP address; the
+        <span class="d">│</span>      decision is in the mailbox.
+   <span class="d">14:41</span> <span class="a">AGENT</span>  Moving the counter to the account key; the migration
+        <span class="d">│</span>      and its test come next.
+<span class="d">  every 15s · Ctrl+C to exit</span></pre>
 </div></section>
 
 <section><div class="wrap">

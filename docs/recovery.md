@@ -46,8 +46,8 @@ since 2h 11m ago
     20260903-2112-architect-to-implementer-DECISION-timer-epoch-guard.md
 
   2 alert sent
-    voltrai: over budget: round 8/5 — re-specify, split or change actor
-    voltrai: agent spinning: 42m busy, nothing committed or changed — needs re-specifying
+    acme-api: over budget: round 8/5 — re-specify, split or change actor
+    acme-api: agent spinning: 42m busy, nothing committed or changed — needs re-specifying
 
   board now: running 1 · blocked 1 · queued 4 · done 12
 ```

@@ -20,7 +20,7 @@ Run them from inside the project you are orchestrating, or point at one from
 anywhere with `-C`:
 
 ```bash
-bin/ao -C ~/work/voltrai watch
+bin/ao -C ~/work/acme-api watch
 ```
 
 Run from a directory with no project, `ao` says so and lists the workspaces it
@@ -36,7 +36,7 @@ readability; these scripts read JSON so they stay dependency-free.
 
 ```json
 {
-  "project": "voltrai",
+  "project": "acme-api",
   "implementer": { "adapter": "kiro", "session": "sess_…", "workspace_hash": "…" },
   "mailbox": "agent-mail",
   "reviews": "semantic-review",

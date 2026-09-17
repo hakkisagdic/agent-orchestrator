@@ -34,7 +34,7 @@ def _answer(tmp_path, nonce, lines):
 
 def _collect(cfg, nonce, response, capsys, **overrides):
     capsys.readouterr()
-    args = SimpleNamespace(nonce=nonce, response=response, model="gpt-5.5", by="Hakkı (owner)")
+    args = SimpleNamespace(nonce=nonce, response=response, model="gpt-5.5", by="alice (owner)")
     for key, value in overrides.items():
         setattr(args, key, value)
     code = cli.cmd_collect_review(cfg, args)
@@ -67,7 +67,7 @@ def test_a_collected_rejection_is_a_round_recorded_with_its_transport_and_limits
     (row,) = _carried_rows(root)
     assert row["reviewer"] == "human-assisted:gpt-5.5" and row["fallback"] is True
     evidence = A.review_evidence(open(os.path.join(root, "semantic-review", row["artefact"]), encoding="utf-8").read())
-    assert evidence["transport"] == "human-carried" and evidence["collected_by"] == "Hakkı (owner)"
+    assert evidence["transport"] == "human-carried" and evidence["collected_by"] == "alice (owner)"
     assert evidence["limits"] == list(A.STANDIN_LIMITS) and evidence["nonce"] == request["nonce"]
     assert A.review_request(root, request["nonce"])["collected"]["artefact"] == row["artefact"]
 

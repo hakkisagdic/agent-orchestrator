@@ -9,7 +9,7 @@ They have completely different hazards, so treat them separately.
 ao projects                       # every workspace with a local agent session
 ao fleet                          # one row per project, what needs a human first
 ao watch --all                    # the same rows, live
-ao -C ~/work/voltrai status       # any command, against another project
+ao -C ~/work/acme-api status      # any command, against another project
 ```
 
 State lives per project in `.ao/` (config, board, ledgers); the machine's registry at

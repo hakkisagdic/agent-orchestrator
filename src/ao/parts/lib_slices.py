@@ -339,8 +339,8 @@ def secondary_projects(cfg):
 def working_elsewhere(cfg, idle_seconds):
     """The secondary project the implementer is writing in now, if it is (#22).
 
-    2026-09-07: while the implementer worked in an ao worktree, the Voltrai
-    watchdog read the same agent as idle with a slice running and nudged it
+    While the implementer worked in an ao worktree, the watchdog of the project
+    it had left read the same agent as idle with a slice running and nudged it
     back. Presence belongs to the agent: a transcript moving in a secondary
     project is the agent working.
     """

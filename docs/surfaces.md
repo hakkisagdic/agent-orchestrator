@@ -16,11 +16,11 @@ the board and the ledgers, as `ao status` does.
 ```
 
 ```jsonc
-{"ts":"2026-09-03T19:23:11Z","project":"voltrai","actor":"kiro","lane":"impl",
+{"ts":"2026-09-03T19:23:11Z","project":"acme-api","actor":"kiro","lane":"impl",
  "kind":"turn_end","summary":"reviewer retried after load failure",
  "credits":354.8,"context_pct":67.5,"tools":540}
-{"ts":"…","project":"voltrai","actor":"self","kind":"gate","result":"pass","tests":"326/326"}
-{"ts":"…","project":"voltrai","actor":"kiro","kind":"review","verdict":"NEEDS_CHANGES","findings":1}
+{"ts":"…","project":"acme-api","actor":"self","kind":"gate","result":"pass","tests":"326/326"}
+{"ts":"…","project":"acme-api","actor":"kiro","kind":"review","verdict":"NEEDS_CHANGES","findings":1}
 ```
 
 Three kinds of producer feed it:

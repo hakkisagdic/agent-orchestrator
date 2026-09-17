@@ -66,7 +66,7 @@ def test_waiver_is_honoured_by_commit_ok_and_recorded(project, monkeypatch, caps
     out = capsys.readouterr().out
     assert "no APPROVED prospective review is bound" in out
 
-    w = A.waive(root, "review", "B7", "reviewer at quota; human accepts the risk", by="hakki")
+    w = A.waive(root, "review", "B7", "reviewer at quota; human accepts the risk", by="alice")
     assert A.open_waivers(root, gate="review", slice_id="B7")[0]["id"] == w["id"]
     assert cli.cmd_commit_ok(project, args) == 0
     out = capsys.readouterr().out

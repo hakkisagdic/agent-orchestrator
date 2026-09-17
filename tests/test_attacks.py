@@ -130,7 +130,7 @@ def test_attack_05_waiver_replay(project, capsys):
     board = os.path.join(root, ".ao", "board.md")
     text = open(board, encoding="utf-8").read()
     open(board, "w", encoding="utf-8").write(text.replace("## running\n", "## running\n- [B7] slice\n"))
-    waiver = A.waive(root, "review", "B7", "reviewer at quota", by="Hakkı (owner)")
+    waiver = A.waive(root, "review", "B7", "reviewer at quota", by="alice (owner)")
     _stage(root, "src/a.py", "value = 1\n")
     _verified(root)
     assert _commit_ok(project, capsys)[0] == 0

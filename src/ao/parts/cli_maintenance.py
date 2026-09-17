@@ -460,7 +460,7 @@ def cmd_prune(cfg, args):
             print(f"  {C['green']}sealed{C['reset']}  {'authority':<14} through row {sealed['retired']}; "
                   f"{C['dim']}ao commit-check validates across the seal{C['reset']}")
     # Dedupe by inode, not by path string: this filesystem is case-insensitive, so
-    # "nudge-Voltrai.log" and "nudge-voltrai.log" are one file that would
+    # "nudge-Acme-API.log" and "nudge-acme-api.log" are one file that would
     # otherwise be counted — and truncated — twice.
     seen_inodes = set()
     for name in HOME_LOGS:

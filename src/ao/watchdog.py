@@ -146,9 +146,9 @@ def cycle_health(root, last=720):
 
     A gap in the cycle log has two causes - no cycle ran, or one ran for minutes
     and held the next back - and a row that carries only its end time cannot tell
-    them apart. On 2026-09-15 the Voltrai log showed gaps of 5 to 27 minutes
-    between 12:02 and 16:33 with no sleep recorded, and nothing on disk could say
-    which it was. Rows written before `started` existed count by their end times.
+    them apart. One project's log once showed gaps of 5 to 27 minutes over four
+    and a half hours with no sleep recorded, and nothing on disk could say which
+    it was. Rows written before `started` existed count by their end times.
     """
     rows = [r for r in cycles(root, last) if isinstance(r.get("at"), (int, float))]
     if not rows:

@@ -26,11 +26,11 @@ admits it. So:
 ## Pulling is not authorising
 
 This is the load-bearing distinction. A tracker item is something a person wrote;
-it is not a specification anyone verified. Titles from a real board:
+it is not a specification anyone verified. Two titles as a board lists them:
 
 ```
-DKK-510  ACİL - DEFAULT SMS ALANI PASİF HATASI                  ← a slice
-DKK-484  YENİ NAVİGASYON SİSTEMİ VE DESKTOP ÇALIŞMA ALANI       ← a project
+ACME-212  URGENT - SAVE BUTTON DOES NOTHING ON SETTINGS PAGE    ← a slice
+ACME-187  NEW NAVIGATION SYSTEM AND DESKTOP WORKSPACE           ← a project
 ```
 
 Both are one line in the same list. An agent told to "work through the backlog"
@@ -53,7 +53,7 @@ an item being large. An item nobody decomposes is an item that never gets done.
 ```
 
 ```markdown
-# DKK-484 — new navigation system
+# ACME-187 — new navigation system
 source: linear · url: … · shape: project · phases: 3
 
 ## Phase 1 — route table extraction
@@ -67,7 +67,7 @@ gates: quick
 Each phase becomes one board line, so the queue holds slices, never projects:
 
 ```
-- [DKK-484/1] route table extraction · plan: .ao/plans/DKK-484.md · acceptance: …
+- [ACME-187/1] route table extraction · plan: .ao/plans/ACME-187.md · acceptance: …
 ```
 
 The classification is worth doing with a cheap local model and the boundary with
@@ -81,8 +81,8 @@ actor that defines or verifies it — applied to the specification itself.
 
 Without the rule, drift is invisible and self-justifying: an agent that finds the
 spec inconvenient edits the spec, and every later check then measures the work
-against a document the work itself produced. It is not hypothetical. In this
-project's own run the implementer had `.kiro/specs/voltrai/design.md` in its
+against a document the work itself produced. It is not hypothetical. In the run
+ao grew out of, the implementer had `.kiro/specs/<project>/design.md` in its
 working set while implementing against it.
 
 `ao source import` records each plan's hash when the item is admitted, and

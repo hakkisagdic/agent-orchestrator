@@ -62,11 +62,11 @@ def _save_alarm_snoozes(d):
 def alarm_snooze(project, key, until, by="human", why=""):
     """Keep one alarm off the human channels until a date; it stays on the record.
 
-    A snooze is for a condition that is real, known and waiting on someone. On
-    2026-09-15 the doctor check reported Voltrai's legacy commit hook, whose fix
-    only the owner can make and not before 1 October; left alone it would ring red
-    and mail every six hours about something nobody could act on yet. The snooze
-    names who set it and why, and it ends by itself on the date.
+    A snooze is for a condition that is real, known and waiting on someone. The
+    doctor check once reported a project's legacy commit hook, whose fix only the
+    owner could make, and not before a date already set; left alone it would ring
+    red and mail every six hours about something nobody could act on yet. The
+    snooze names who set it and why, and it ends by itself on the date.
     """
     d = load_alarm_snoozes()
     d[f"{project}:{key}"] = {"until": int(until), "by": by, "why": why, "at": int(time.time())}

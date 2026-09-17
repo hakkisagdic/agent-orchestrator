@@ -5,14 +5,14 @@ enforces. A project chooses its cast in `.ao/config.json`, and `ao init
 --profile` writes the three blocks so nothing has to be typed from memory.
 Existing blocks are never overwritten — a project's cast is its own decision.
 
-| profile | implementer | reviewer | architect | where it runs today |
-|---|---|---|---|---|
-| `claude-kiro` | Kiro (`kiro-cli`, headless, resumable session; model/effort optional) | Claude, `claude-opus-5`, read-only tools | a resumable Claude Code session, woken into absence | Voltrai |
-| `claude-claude` | Claude Code headless (`claude -p`), `claude-sonnet-5` by default, one per worktree | Claude, `claude-opus-5` — a different model, so it is not the implementer reviewing itself | a resumable Claude Code session | Dükkan Defteri (in preparation) |
-| custom | any adapter in `ao adapters` (`--implementer codex` …) | `--reviewer-model` | the same architect block | — |
+| profile | implementer | reviewer | architect |
+|---|---|---|---|
+| `claude-kiro` | Kiro (`kiro-cli`, headless, resumable session; model/effort optional) | Claude, `claude-opus-5`, read-only tools | a resumable Claude Code session, woken into absence |
+| `claude-claude` | Claude Code headless (`claude -p`), `claude-sonnet-5` by default, one per worktree | Claude, `claude-opus-5` — a different model, so it is not the implementer reviewing itself | a resumable Claude Code session |
+| custom | any adapter in `ao adapters` (`--implementer codex` …) | `--reviewer-model` | the same architect block |
 
 ```bash
-ao init --profile claude-kiro --effort high        # Voltrai's shape
+ao init --profile claude-kiro --effort high        # a Kiro implementer at high effort
 ao init --profile claude-claude --model claude-sonnet-5 --reviewer-model claude-opus-5
 ao init --implementer codex --reviewer-model claude-opus-5
 ```

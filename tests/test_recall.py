@@ -6,11 +6,11 @@ from ao import cli, lib as A
 
 
 def _other_project(tmp_path):
-    other = tmp_path / "voltrai-like"
+    other = tmp_path / "acme-api"
     (other / ".ao").mkdir(parents=True)
     subprocess.run(["git", "init", "-q"], cwd=other, check=True)
     with open(A.project_registry_path(), "w", encoding="utf-8") as fh:
-        json.dump({"voltrai-like": {"root": str(other)}}, fh)
+        json.dump({"acme-api": {"root": str(other)}}, fh)
     return str(other)
 
 
@@ -31,7 +31,7 @@ def test_recall_reads_questions_findings_lessons_and_decisions_across_projects(p
     results = A.recall("delivery binding boundary", root)
 
     by_kind = {found["kind"]: found for found in results}
-    assert by_kind["question"]["project"] == "voltrai-like"
+    assert by_kind["question"]["project"] == "acme-api"
     assert by_kind["question"]["outcome"] == "answered: split the slice"
     assert by_kind["question"]["source"] == f".ao/decisions/{asked['id']}.json"
     assert by_kind["finding"]["source"] == "semantic-review/2026-09-07-101010-abc.md:3"
@@ -50,7 +50,7 @@ def test_opening_a_decision_carries_a_near_match_to_the_person_it_reaches(projec
     rec = A.ask(root, "model.ts falls outside the declared paths of this slice — widen or split the boundary?",
                 ["widen", "split"])
 
-    assert [(found["project"], found["id"]) for found in rec["precedents"]] == [("voltrai-like", before["id"])]
-    assert f"önceden: voltrai-like question {before['id']} — answered: widen" in cli._decision_text(rec)
+    assert [(found["project"], found["id"]) for found in rec["precedents"]] == [("acme-api", before["id"])]
+    assert f"önceden: acme-api question {before['id']} — answered: widen" in cli._decision_text(rec)
     stored = json.load(open(os.path.join(root, ".ao", "decisions", rec["id"] + ".json"), encoding="utf-8"))
     assert stored["precedents"][0]["source"] == f".ao/decisions/{before['id']}.json"

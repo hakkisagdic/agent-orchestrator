@@ -10,7 +10,7 @@ import pytest
 from ao import cli, lib as A, storage
 from tests.test_switches_and_bypass import _allow_candidate_verification
 
-WAIVE = dict(gate="review", slice="B7", why="reviewer at quota", by="Hakkı (owner)", hours=24.0)
+WAIVE = dict(gate="review", slice="B7", why="reviewer at quota", by="alice (owner)", hours=24.0)
 # A catch-up that reaches a review names the family that wrote the range (#65).
 NAMED = SimpleNamespace(boundary=None, author_family="author-family", by="A. Person")
 
@@ -62,7 +62,7 @@ def test_a_waiver_is_a_chained_row_with_an_expiry_and_who_ran_it(project):
     assert cli.cmd_waive(project, SimpleNamespace(**WAIVE)) == 0
 
     (row,) = storage.read_chained_jsonl(A.waivers_path(root), A.WAIVER_CHAIN)
-    assert row["slice"] == "B7" and row["by"] == "Hakkı (owner)"
+    assert row["slice"] == "B7" and row["by"] == "alice (owner)"
     assert 0 < row["expires"] - row["at"] <= 24 * 3600
     assert "user" in row and isinstance(row["interactive"], bool)
     assert A.open_waiver_report(root)[0].startswith(f"{row['id']} review for B7")
@@ -72,7 +72,7 @@ def test_an_expired_waiver_authorises_nothing(project, monkeypatch, capsys):
     root = project["root"]
     _running(root, "B7")
     _allow_candidate_verification(monkeypatch, _stage(root, "a.py", "value = 1\n"))
-    A.waive(root, "review", "B7", "quota", by="Hakkı (owner)", hours=0.0002)
+    A.waive(root, "review", "B7", "quota", by="alice (owner)", hours=0.0002)
     time.sleep(1)
 
     code, out = _commit_ok(project, capsys)
@@ -84,7 +84,7 @@ def test_a_waiver_cannot_be_replayed_for_other_bytes(project, monkeypatch, capsy
     _running(root, "B7")
     first = _stage(root, "a.py", "value = 1\n")
     _allow_candidate_verification(monkeypatch, first)
-    waiver = A.waive(root, "review", "B7", "quota", by="Hakkı (owner)")
+    waiver = A.waive(root, "review", "B7", "quota", by="alice (owner)")
 
     code, out = _commit_ok(project, capsys)
     assert code == 0 and "review waived" in out
@@ -115,7 +115,7 @@ def test_a_row_appended_without_a_link_makes_waivers_unreadable(project, monkeyp
     root = project["root"]
     _running(root, "B7")
     _allow_candidate_verification(monkeypatch, _stage(root, "a.py", "value = 1\n"))
-    A.waive(root, "review", "B7", "quota", by="Hakkı (owner)")
+    A.waive(root, "review", "B7", "quota", by="alice (owner)")
     with open(A.waivers_path(root), "a", encoding="utf-8") as fh:
         fh.write(json.dumps({"event": "closed", "id": "W-other", "at": 1, "outcome": "forged"}) + "\n")
 
@@ -131,7 +131,7 @@ def _landed_under_a_waiver(project, monkeypatch, capsys):
     _commit(root, "base")
     _running(root, "B7")
     _allow_candidate_verification(monkeypatch, _stage(root, "a.py", "value = 2\n"))
-    waiver = A.waive(root, "review", "B7", "quota", by="Hakkı (owner)")
+    waiver = A.waive(root, "review", "B7", "quota", by="alice (owner)")
     assert _commit_ok(project, capsys)[0] == 0
     landed = _commit(root, "b7")
     parent = subprocess.run(["git", "rev-parse", f"{landed}^"], cwd=root, check=True,
@@ -171,7 +171,7 @@ def test_a_close_that_cannot_be_written_fails_catchup(project, monkeypatch, caps
     root = project["root"]
     _stage(root, "a.py", "value = 1\n")
     _commit(root, "base")
-    empty = A.waive(root, "review", "B7", "quota", by="Hakkı (owner)", hours=0.0002)
+    empty = A.waive(root, "review", "B7", "quota", by="alice (owner)", hours=0.0002)
     time.sleep(1)
     from ao import watchdog as W
     monkeypatch.setattr(W, "run", lambda ns: 0)
