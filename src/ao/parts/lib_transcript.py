@@ -1478,7 +1478,7 @@ def notice_evidence(check, samples, source=None):
     return {"check": check, "samples": rows}
 
 
-def record_notice(root, title, msg, sent, key=None, evidence=None):
+def record_notice(root, title, msg, sent, key=None, evidence=None, named=None):
     """Every notification we raise, kept where the architect can read it.
 
     A desktop notification is fire-and-forget: it reaches the human and vanishes,
@@ -1498,6 +1498,8 @@ def record_notice(root, title, msg, sent, key=None, evidence=None):
                    "msg": msg, "sent": bool(sent), "key": key or title}
             if evidence:
                 row["evidence"] = evidence
+            if named:
+                row["named"] = list(named)      # the conditions one resume notice told (RESUME-QUIET)
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
         # Observation is held to its bound as it is written (#50).
         bound_store(os.path.join(d, "notices.jsonl"), settings.get(load_config(root), "retention.observation_kb"))
@@ -1555,7 +1557,8 @@ def notice_recently_sent(root, key, window):
             continue
         if rec.get("at", 0) < cutoff:
             return False
-        if rec.get("key") == key and rec.get("sent"):
+        # A resume notice is the ring of every condition it named (RESUME-QUIET).
+        if rec.get("sent") and (rec.get("key") == key or key in (rec.get("named") or ())):
             return True
     return False
 

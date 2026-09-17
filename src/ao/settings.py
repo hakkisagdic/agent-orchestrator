@@ -125,6 +125,10 @@ SETTINGS = {
     "watchdog.max_attempts": Setting(
         3, int, 1, None, "project",
         "nudges without progress before a person is told the implementer is stuck"),
+    "watchdog.resume_gap_hours": Setting(
+        2, int, 1, None, "project",
+        "hours without a watchdog cycle after which the next one is a resume: one notice names what stands "
+        "and its clocks restart"),
     "decisions.human_after_minutes": Setting(
         15, int, 1, None, "project",
         "minutes an open decision waits before it rings a person"),

@@ -520,7 +520,7 @@ def notice_recently_recorded(root, key, window):
             continue
         if rec.get("at", 0) < cutoff:
             return False
-        if rec.get("key") == key:
+        if rec.get("key") == key or key in (rec.get("named") or ()):
             return True
     return False
 

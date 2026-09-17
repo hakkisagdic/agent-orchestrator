@@ -58,6 +58,7 @@ machine setting written into a project.
 | `gates.coverage_min_files` | `5` | project | source files of one toolchain a top-level tree must hold before a gate must exercise it |
 | `watchdog.idle_minutes` | `6.0` | project | minutes of implementer silence before the watchdog acts |
 | `watchdog.max_attempts` | `3` | project | nudges without progress before a person is told the implementer is stuck |
+| `watchdog.resume_gap_hours` | `2` | project | hours without a watchdog cycle after which the next one is a resume: one notice names what stands and its clocks restart |
 | `decisions.human_after_minutes` | `15` | project | minutes an open decision waits before it rings a person |
 | `waivers.default_hours` | `24` | project | hours a review waiver stays open when --hours is not given |
 | `waivers.max_hours` | `168` | project | the longest a review waiver may be granted for |

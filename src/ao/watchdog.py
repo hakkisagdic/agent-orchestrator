@@ -42,6 +42,8 @@ from . import settings as S
 
 STATE_DIR = os.path.join(A.HOME, ".ao")
 _DRY_RUN = ContextVar("ao_watchdog_dry_run", default=False)
+# A cycle after a long silence gathers what it would ring into one notice (RESUME-QUIET).
+_RESUME = ContextVar("ao_watchdog_resume", default=None)
 
 # Every decision line this module prints is also kept, so a cycle can be read
 # back as a trace: what was measured, what was decided, in what order. The one
@@ -294,6 +296,7 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
     if audience not in ("architect", "human"):
         raise ValueError("unknown notification audience: %s" % audience)
     dry_run = _DRY_RUN.get()
+    resuming = _RESUME.get()
     # Architect-audience alerts are recorded and delivered through the mailbox and
     # the wake; they never use a human channel.
     if audience == "architect":
@@ -301,6 +304,8 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
             print(f"DRY RUN: would record architect notice: {title}")
         elif root:
             A.record_notice(root, title, msg, sent=False, key=key, evidence=evidence)
+        if resuming is not None:
+            resuming["folded"].append({"key": key, "title": title, "msg": msg, "audience": audience})
         return False
     # The ladder: this is an orange (a person must act). Standing an hour, it
     # rings red and goes to mail — the channel people open when they wake up.
@@ -325,6 +330,16 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
         project, key, level or "orange", red_after=red_after, title=title,
         persist=not dry_run, quiet_until=quiet_until, evidence=evidence,
     )
+    # After a silence the ladder still moves, so one condition keeps one alarm (#106), but
+    # nothing rings on its own: the cycle's one resume notice names it (RESUME-QUIET).
+    if resuming is not None:
+        resuming["folded"].append({"key": key, "title": title, "msg": msg, "audience": audience, "ring": ring})
+        if dry_run:
+            print(f"DRY RUN: would name in the resume notice: {title}")
+        elif root:
+            A.record_notice(root, title, f"{msg} [named in the resume notice]", sent=False, key=key,
+                            evidence=evidence)
+        return False
     if ring == "red" and episode.get("red_due"):
         if dry_run:
             print(f"DRY RUN: would send red e-mail: {title}")
@@ -342,7 +357,9 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
             except Exception:
                 pass
     # Told once, with a known end and nothing new to say before it: record, do not ring.
-    if episode.get("red_sent") is not None and time.time() < float(episode.get("quiet_until") or 0):
+    # A resume notice that named a red told it as a mail does (RESUME-QUIET).
+    told = episode.get("red_sent") if episode.get("red_sent") is not None else episode.get("named_at")
+    if told is not None and time.time() < float(episode.get("quiet_until") or 0):
         until = time.strftime("%d %b %H:%M", time.localtime(float(episode["quiet_until"])))
         if dry_run:
             print(f"DRY RUN: would hold {title}: told once, quiet until {until}")
@@ -705,12 +722,7 @@ def escalate(root, cfg, adapter, age, args, st):
         if args.dry_run:
             print(f"DRY RUN: would announce {st['arch_pending']} completed architect report(s)")
         else:
-            try:
-                from . import telegram
-                telegram.send(f"✅ *Mimar bitirdi* — {st['arch_pending']} rapor kapandı, "
-                              f"kuyruk boş", root)
-            except Exception:
-                pass
+            _tell_phone(root, f"✅ *Mimar bitirdi* — {st['arch_pending']} rapor kapandı, kuyruk boş")
             st["arch_pending"] = 0
             save_state(root, st)
     elif pending and not args.dry_run:
@@ -751,7 +763,7 @@ def escalate(root, cfg, adapter, age, args, st):
                 exe = shutil.which("ao", path=child_path())
                 if exe:
                     subprocess.run([exe, "-C", root, "handoff", "--reason",
-                                    "mimar uyandırılamadı — kota yok"],
+                                    "mimar uyandırılamadı — kota yok"] + _handoff_quiet(),
                                    capture_output=True, timeout=120)
                     st["last_handoff"] = time.time()
                     save_state(root, st)
@@ -903,12 +915,7 @@ def escalate(root, cfg, adapter, age, args, st):
             A.helper_register(root, proc.pid, "architect")   # a judge, not a writer
             A.acquire_architect(root, proc.pid, "watchdog wake")   # one judge at a time
             save_state(root, st)
-            try:
-                from . import telegram
-                telegram.send(f"🤖 *Mimar uyandırıldı* — {len(stale)} rapor "
-                              f"işleniyor (pid {proc.pid})", root)
-            except Exception:
-                pass
+            _tell_phone(root, f"🤖 *Mimar uyandırıldı* — {len(stale)} rapor işleniyor (pid {proc.pid})")
             print(f"woke the architect (pid {proc.pid}) to judge it")
     return woke
 
@@ -1206,12 +1213,25 @@ def run(args):
 
 
 def _cycle(args, root):
-    """Run one cycle with dry-run effects suppressed across nested helpers."""
+    """Run one cycle with dry-run effects suppressed across nested helpers.
+
+    A resume notice the cycle owes is sent here, once every guard has had its say and
+    whichever of them ended the cycle (RESUME-QUIET).
+    """
     token = _DRY_RUN.set(bool(args.dry_run))
+    resuming = _RESUME.set(None)
     try:
         return _cycle_impl(args, root)
     finally:
-        _DRY_RUN.reset(token)
+        owed = _RESUME.get()
+        _RESUME.reset(resuming)
+        try:
+            if owed is not None:
+                announce_resume(root, owed, dry_run=bool(args.dry_run))
+        except Exception as exc:                 # a notice that fails must not take the cycle's record
+            _note_above_verdict(f"the resume notice was not sent: {type(exc).__name__}: {str(exc)[:120]}")
+        finally:
+            _DRY_RUN.reset(token)
 
 
 def _sample_credits(root, st, adapter, project, now=None):
@@ -1271,7 +1291,7 @@ def _sample_credits(root, st, adapter, project, now=None):
 DECISION_HUMAN_AFTER = S.default("decisions.human_after_minutes") * 60
 
 
-def escalate_open_decisions(root, project, dry_run=False, now=None):
+def escalate_open_decisions(root, project, dry_run=False, now=None, since=0):
     """A decision nobody has answered reaches a person (#20).
 
     Fifteen minutes after it was asked (`decisions.human_after_minutes`) it rings
@@ -1280,14 +1300,15 @@ def escalate_open_decisions(root, project, dry_run=False, now=None):
     is not waited for: on 2026-09-07 a decision stood three hours while the only
     notice about it was held for an architect that never came. An answered
     decision stops being raised and its alarm ends on its own. Returns the ids
-    that are ringing.
+    that are ringing. One asked before a resume waits from the resume (`since`),
+    not from before the silence (RESUME-QUIET).
     """
     now = time.time() if now is None else now
     ringing = []
     wait = S.get(A.load_config(root), "decisions.human_after_minutes") * 60
     for decision in A.decisions(root, "open"):
         asked = decision.get("asked_at") or 0
-        if not asked or now - asked < wait:
+        if not asked or now - max(asked, since) < wait:
             continue
         ringing.append(decision.get("id"))
         if dry_run:
@@ -1326,12 +1347,254 @@ def report_ungranted_commits(root, project, st, limit=20):
     return len(stray)
 
 
+# ---- after a silence: one notice, and clocks that restart (RESUME-QUIET) ----------------------
+
+def _span(seconds):
+    """How long a silence lasted, in the unit it is read in: 14d, 5h, 40m."""
+    seconds = max(0, int(seconds))
+    if seconds >= 2 * 86400:
+        return f"{seconds // 86400}d"
+    if seconds >= 2 * 3600:
+        return f"{seconds // 3600}h"
+    return f"{seconds // 60}m"
+
+
+def _when(at):
+    return time.strftime("%d %b %H:%M", time.localtime(float(at or 0)))
+
+
+def _note_above_verdict(line):
+    """A line decided after the verdict was printed, kept above it: a trace ends on its verdict."""
+    _TRACE.insert(max(len(_TRACE) - 1, 0), line)
+    _builtins.print(line)
+
+
+def _markdown_plain(text):
+    """Text Telegram's Markdown shows as written: one stray underscore in a key loses the whole message."""
+    return re.sub(r"([_*`\[])", r"\\\1", str(text))
+
+
+def _tell_phone(root, text):
+    """A courtesy line to the phone; after a silence it joins the resume notice instead (RESUME-QUIET)."""
+    resuming = _RESUME.get()
+    if resuming is not None:
+        resuming["folded"].append({"key": "", "title": "", "msg": text.replace("*", ""), "audience": "architect"})
+        return
+    try:
+        from . import telegram
+        telegram.send(text, root)
+    except Exception:
+        pass                                # a phone being unreachable is not a failure
+
+
+def _handoff_quiet():
+    """What `ao handoff` is also given: after a silence its note is written, not sent (RESUME-QUIET)."""
+    resuming = _RESUME.get()
+    if resuming is None:
+        return []
+    resuming["folded"].append({"key": "", "title": "", "msg": "a handoff note was written to the mailbox, not sent",
+                               "audience": "architect"})
+    return ["--no-send"]
+
+
+def resume_after(root, cfg, silence, dry_run=False, now=None):
+    """The resume this cycle belongs to: {"at", "since", "quiet", "carried", "snoozes", "announced"}, or None.
+
+    On 2026-09-17 an owner switched one project's watchdog and doctor jobs off for two
+    weeks, because they kept ringing about an implementer that had run out of credits.
+    Every record stayed on disk with its date. Rebuilt in a temporary project, the first
+    cycle back mailed an unread request red at once, rang an open decision on the desktop
+    and the phone, announced a red alarm as no longer raised although it still stood,
+    mailed the credits alarm whose snooze had ended while nothing ran, and told the phone
+    it had woken the architect; an hour later the decision mailed too. Each was measured
+    as if the watchdog had been watching all along.
+
+    A cycle that follows more than `watchdog.resume_gap_hours` without one, read from the
+    heartbeat the last cycle left, is a resume. It records when it began, how long the
+    silence was, and what the silence carried: the alarm episodes nothing raised for the
+    gap (or for the quiet that ends an episode, when that is shorter) and the snoozes that
+    ended in it. A heartbeat that cannot be written must not make every cycle a resume, so
+    another needs as long again after this one. A dry run writes nothing.
+    """
+    now = time.time() if now is None else now
+    gap = S.get(cfg, "watchdog.resume_gap_hours") * 3600
+    st = load_state(root)
+    resume = st.get("resume") if isinstance(st.get("resume"), dict) else None
+    if silence is None or silence <= gap or now - float((resume or {}).get("at") or 0) <= gap:
+        return resume
+    project, since, quiet = A.project_key(root), now - silence, min(gap, A._alarm_reset_after())
+    carried = []
+    for name, episode in sorted(A.load_alarms().items()):
+        owner, _, key = name.partition(":")
+        if owner == project and isinstance(episode, dict) and now - float(episode.get("last") or 0) > quiet:
+            carried.append(dict({field: episode.get(field) for field in
+                                 ("title", "level", "ring", "first", "last", "count", "red_sent")}, key=key))
+    snoozes = []
+    for name, snooze in sorted(A.load_alarm_snoozes().items()):
+        owner, _, key = name.partition(":")
+        if owner == project and isinstance(snooze, dict) and since < float(snooze.get("until") or 0) <= now:
+            snoozes.append({"key": key, "until": snooze.get("until"), "by": snooze.get("by"),
+                            "why": snooze.get("why")})
+    resume = {"at": now, "since": since, "quiet": quiet, "carried": carried, "snoozes": snoozes, "announced": None}
+    if not dry_run:
+        st["resume"] = resume
+        save_state(root, st)
+    return resume
+
+
+def resume_items(root, cfg, st, resume, folded, now=None):
+    """What stands at a resume, one entry per condition: {"key", "audience", "lines", "red"}.
+
+    From the cycle that ran - every notice it would have rung, with the audience its own
+    check declared - and from the records the silence left. A record read here keeps the
+    audience its check gives it elsewhere: an alarm episode, a snooze, a decision, deferred
+    work, a hold and an implementer with nothing to do are a person's; an unseen decision
+    request is first the architect's (#30). An entry without a key is something the cycle
+    did; it is told, never named. A condition a person has snoozed stays off the notice as
+    it stays off every channel (#108).
+    """
+    now = time.time() if now is None else now
+    project = A.project_key(root)
+    items = {}
+
+    def add(key, audience, line, red=False):
+        if key and A.alarm_snoozed(project, key, now):
+            return
+        item = items.setdefault(key, {"key": key, "audience": audience, "lines": [], "red": False})
+        item["audience"] = "human" if "human" in (item["audience"], audience) else audience
+        item["red"] = item["red"] or red
+        line = " ".join(str(line).split())[:240]
+        if line and line not in item["lines"]:
+            item["lines"].append(line)
+
+    for note in folded:
+        subject = str(note.get("title") or "").split(": ", 1)[-1]
+        add(note.get("key") or "", note.get("audience") or "human",
+            f"{subject}: {note.get('msg')}" if subject else note.get("msg"), red=note.get("ring") == "red")
+    for episode in resume.get("carried") or []:
+        add(episode["key"], "human", f"stood when the silence began: {episode.get('ring') or episode.get('level')} "
+            f"since {_when(episode.get('first'))}, last raised {_when(episode.get('last'))}"
+            + (f", mailed {_when(episode['red_sent'])}" if episode.get("red_sent") else ""))
+    for snooze in resume.get("snoozes") or []:
+        add(snooze["key"], "human", f"its snooze ended {_when(snooze.get('until'))} "
+                                    f"({snooze.get('by')}: {snooze.get('why')})")
+    # Each record is read on its own: one that cannot be read must not cost the notice the rest.
+    try:
+        for message in A.unseen_messages(root, cfg):
+            if message["class"] == "needs-decision":
+                add(f"unseen:{message['id']}", "architect",
+                    f"a decision request nobody has been shown, written {_when(message['at'])}")
+    except Exception:
+        pass
+    try:
+        for decision in A.decisions(root, "open"):
+            add(f"decision-open:{decision.get('id')}", "human", f"open since {_when(decision.get('asked_at'))}: "
+                                                                f"{str(decision.get('question') or '')[:120]}")
+    except Exception:
+        pass
+    try:
+        for row in A.deferred_open(root):
+            add(f"deferred:{row.get('kind')}", "human", f"deferred since {_when(row.get('at'))}: "
+                                                        f"{row.get('reason') or '?'}; ao catchup replays it")
+    except Exception:
+        pass
+    held = A.hold_state(root)
+    if held:
+        add("hold-standing", "human", f"held by {held.get('by')} since {_when(held.get('at') or now)}: "
+                                      f"{held.get('reason') or ''}")
+    idle = st.get("idle_answer")
+    if isinstance(idle, dict):
+        add("idle-answer", "human", f"no nudges since {_when(idle.get('since') or now)}: the implementer "
+                                    "answered its last one with nothing")
+    return sorted(items.values(), key=lambda item: (not item["key"], item["audience"] != "human"))
+
+
+def announce_resume(root, owed, dry_run=False, now=None):
+    """Send the one notice a resume owes, naming once each condition that stands (RESUME-QUIET).
+
+    It goes to the widest audience among what it names: a person when anything it names is
+    a person's, since a person can act on the architect's business while the architect
+    cannot lift a hold, end a snooze or buy credits; a person too when all of it is the
+    architect's but no architect is going to read it (#69); otherwise the architect,
+    through its mailbox. It uses the orange channels and never e-mail, so it is
+    never louder than what it names (#40). It is the ring of each condition it names for
+    that condition's own window, and a red it names counts as told, so the next cycle does
+    not ring or mail again what the notice has just said. The resume counts as announced
+    before anything here can fail and whatever a channel answers: a notice left owed would
+    keep gathering alarms, cycle after cycle, into a notice that never goes.
+    """
+    now = time.time() if now is None else now
+    resume = owed["resume"]
+    cfg = A.load_config(root)
+    st = load_state(root)
+    if not dry_run:
+        st["resume"] = dict(resume, announced=int(now))
+        save_state(root, st)
+    items = resume_items(root, cfg, st, resume, owed["folded"], now)
+    named = [item["key"] for item in items if item["key"]]
+    audience = "human" if any(item["audience"] == "human" for item in items) else "architect"
+    if audience == "architect" and named:
+        impl = cfg.get("implementer") or {}
+        adapter = A.load_adapter(impl.get("adapter", ""), root) if impl else {}
+        if not architect_hold_reason(root, cfg, adapter, st, now=now)["holdable"]:
+            audience = "human"
+    project = A.project_key(root)
+    silence = float(resume["at"]) - float(resume["since"])
+    title = f"{project}: watchdog resumed after {_span(silence)}"
+    lines = [f"{len(named)} stand: {', '.join(named)}" if named else "nothing stands",
+             f"nothing ran from {_when(resume['since'])} to {_when(resume['at'])}; each clock restarts now"]
+    lines += [f"- {item['key'] or 'this cycle'}: {'; '.join(item['lines'])}" for item in items]
+    lines.append("ao alarms, ao notices and ao status show more")
+    msg = "\n".join(lines)
+    _FACTS["resume"] = {"silence_s": int(silence), "audience": audience, "named": named}
+    if dry_run:
+        _note_above_verdict(f"DRY RUN: would send one resume notice to the {audience} naming {len(named)} "
+                            f"condition(s){': ' + ', '.join(named) if named else ''}")
+        return None
+    st["resume"].update(audience=audience, named=named)
+    save_state(root, st)
+    if not named:
+        A.record_notice(root, title, msg, sent=False, key="resume")
+    elif audience == "human":
+        desktop_notify(title, lines[0].replace('"', "'")[:200], cfg)
+        try:
+            from . import telegram
+            telegram.send(f"*{_markdown_plain(title)}*\n{_markdown_plain(msg)}", root)
+        except Exception:
+            pass
+        A.record_notice(root, title, msg, sent=True, key="resume", named=named)
+        for item in items:
+            if item["key"] and item["red"]:
+                A.alarm_named(project, item["key"], now)
+    else:
+        A.record_notice(root, title, msg, sent=False, key="resume", named=named)
+        A.write_report(root, cfg, "resumed", lines,
+                       key=time.strftime("%Y%m%d-%H%M", time.localtime(float(resume["at"]))))
+    _note_above_verdict(f"resumed after {_span(silence)}: one notice to the {audience} names "
+                        f"{len(named)} condition(s)")
+    return audience
+
+
 def _cycle_impl(args, root):
+    # The silence this cycle ends is read before its own heartbeat overwrites it.
+    silence = A.heartbeat_age(root)
     # Proof the watchdog ran, before anything that can end the cycle early: a
     # broken session binding was reported to people as a dead watchdog (audit).
     if not args.dry_run:
         A.heartbeat(root)
     cfg = A.load_config(root)
+    # After a long silence this cycle is a resume: what stands is named once, in one notice
+    # sent as the cycle ends, and what the silence carried ages from now (RESUME-QUIET).
+    resume = resume_after(root, cfg, silence, dry_run=args.dry_run)
+    restart = float((resume or {}).get("at") or 0)
+    if resume and not resume.get("announced") \
+            and time.time() - restart <= S.get(cfg, "watchdog.resume_gap_hours") * 3600:
+        _RESUME.set({"resume": resume, "folded": []})
+        if not args.dry_run:
+            # Nothing watched these episodes: they close unannounced and the notice names them.
+            A.expire_alarms(A.project_key(root), quiet_for=resume.get("quiet") or A._alarm_reset_after())
+        print(f"resume: no watchdog cycle for {_span(restart - float(resume['since']))} before this one; what "
+              "stands is named in one notice when this cycle ends, and its clocks restart")
     impl = cfg.get("implementer") or {}
     if not impl:
         print("no implementer session; nothing to watch")
@@ -1389,7 +1652,7 @@ def _cycle_impl(args, root):
     _FACTS["foreign_edits"] = fe
     if not args.dry_run:
         _FACTS["ungranted_commits"] = report_ungranted_commits(root, project, st)
-    _FACTS["decisions_ringing"] = escalate_open_decisions(root, project, dry_run=args.dry_run)
+    _FACTS["decisions_ringing"] = escalate_open_decisions(root, project, dry_run=args.dry_run, since=restart)
     parked = A.reviewer_state(root)
     if parked.get("pending_review") and not parked.get("until") and not args.dry_run:
         notify(f"{project}: a review is parked",
@@ -1397,11 +1660,16 @@ def _cycle_impl(args, root):
                "restores it, carries the request with ao collect-review, or waives", root,
                key="review-parked", window=24 * 3600, audience="human")
     for sib, age_s in A.stale_siblings(root).items():
+        # Right after a resume every sibling looks as silent as this watchdog was, until its
+        # own next cycle: a sibling's silence counts from the resume too (RESUME-QUIET).
+        if time.time() - restart <= 15 * 60:
+            continue
         notify(f"{sib}: watchdog silent", f"no heartbeat for {age_s // 60}m — its watchdog is not "
                f"running; launchctl / ao watchdog status", root, key=f"watchdog-dead:{sib}",
                window=3600, audience="human")
     hs = A.hold_state(root)
-    if hs and time.time() - int(hs.get("at") or time.time()) > 4 * 3600:
+    # A hold carried over a silence stands from the resume (RESUME-QUIET).
+    if hs and time.time() - max(int(hs.get("at") or time.time()), restart) > 4 * 3600:
         notify(f"{project}: hold standing {int((time.time() - hs['at']) / 3600)}h",
                f"set by {hs.get('by', '?')}: {hs.get('reason', '')} — ao hold release when done",
                root, key="hold-standing", window=6 * 3600, audience="human", level="red")
@@ -1413,15 +1681,19 @@ def _cycle_impl(args, root):
                window=6 * 3600, audience="human")
     # A decision request nobody has been shown climbs the ladder by its age: the
     # architect first, then a person's desktop and phone, then e-mail (#30).
+    # One written before a resume waits from the resume: nobody could have acted in the
+    # time nothing ran (RESUME-QUIET).
     for message in A.unseen_messages(root, cfg):
         if message["class"] != "needs-decision":
             continue
-        minutes = message["age"] / 60
+        carried = message["at"] < restart
+        minutes = (max(0.0, time.time() - restart) if carried else message["age"]) / 60
         level = ("red" if minutes >= S.get(cfg, "mail.unseen_red_minutes")
                  else "orange" if minutes >= S.get(cfg, "mail.unseen_orange_minutes")
                  else "yellow" if minutes >= S.get(cfg, "mail.unseen_yellow_minutes") else None)
         if level:
-            text = f"{message['id']} has waited {int(minutes)}m and nobody has been shown it"
+            text = f"{message['id']} has waited {int(message['age'] / 60)}m and nobody has been shown it" \
+                + (f" ({int(minutes)}m since the watchdog resumed)" if carried else "")
             notify(f"{project}: unread decision request", text, root, key=f"unseen:{message['id']}", window=3600,
                    audience="architect" if level == "yellow" else "human",
                    level=None if level == "yellow" else level)
@@ -1755,7 +2027,7 @@ def _cycle_impl(args, root):
                     exe = shutil.which("ao", path=child_path())
                     if exe:
                         _sp.run([exe, "-C", root, "handoff", "--reason",
-                                 "sağlayıcı kotası tükendi"],
+                                 "sağlayıcı kotası tükendi"] + _handoff_quiet(),
                                 capture_output=True, timeout=120)
                         st["last_handoff"] = time.time()
                         save_state(root, st)

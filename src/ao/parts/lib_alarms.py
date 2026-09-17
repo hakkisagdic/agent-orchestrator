@@ -119,9 +119,11 @@ def alarm_touch(project, key, level, now=None, red_after=ALARM_RED_AFTER, title=
     e["red_due"] = False
     if level == "red" or (level == "orange" and now - e["first"] >= red_after):
         ring = "red"
-        e["red_due"] = e.get("red_sent") is None or now - e["red_sent"] >= settings.get(None, "alarms.red_repeat_hours") * 3600
+        # A red a resume notice named is told from then, as a mailed one is from its mail (RESUME-QUIET).
+        told = e.get("red_sent") if e.get("red_sent") is not None else e.get("named_at")
+        e["red_due"] = told is None or now - told >= settings.get(None, "alarms.red_repeat_hours") * 3600
         # A standing red with a known end is mailed once, then held until that end (#40).
-        if e.get("red_sent") is not None and now < float(e.get("quiet_until") or 0):
+        if told is not None and now < float(e.get("quiet_until") or 0):
             e["red_due"] = False
     e["ring"] = ring
     d[k] = e
@@ -135,6 +137,20 @@ def alarm_mailed(project, key, now=None):
     k = f"{project}:{key}"
     if k in d:
         d[k]["red_sent"] = now or time.time()
+        d[k]["red_due"] = False
+        save_alarms(d)
+
+
+def alarm_named(project, key, now=None):
+    """Record that a resume notice named a red episode instead of mailing it (RESUME-QUIET).
+
+    Its repeat counts from here, as a mailed red's counts from its mail, so the notice that
+    has just named it is not followed by a mail about the same thing at the next raise.
+    """
+    d = load_alarms()
+    k = f"{project}:{key}"
+    if k in d:
+        d[k]["named_at"] = now or time.time()
         d[k]["red_due"] = False
         save_alarms(d)
 
@@ -268,15 +284,20 @@ def heartbeat_age(root):
         return None
 
 
-def expire_alarms(project, now=None):
-    """Episodes that went quiet are over; return them once and forget them."""
+def expire_alarms(project, now=None, quiet_for=None):
+    """Episodes that went quiet are over; return them once and forget them.
+
+    `quiet_for` is a shorter quiet that ends one: a resume closes every episode its silence
+    carried, which nothing watched, instead of letting them age on (RESUME-QUIET).
+    """
     now = now or time.time()
+    quiet = _alarm_reset_after() if quiet_for is None else quiet_for
     d = load_alarms()
     done = []
     for k in list(d):
         proj, _, key = k.partition(":")
         e = d[k]
-        if proj == project and now - e.get("last", 0) > _alarm_reset_after():
+        if proj == project and now - e.get("last", 0) > quiet:
             done.append(dict(e, project=proj, key=key, age_s=int(e.get("last", now) - e.get("first", now))))
             del d[k]
     if done:

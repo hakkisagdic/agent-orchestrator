@@ -40,6 +40,10 @@ nothing else:
 8. **Alarms follow a policy**, not a mood — see below and [alarms.md](alarms.md).
 9. **It proves it is alive.** A heartbeat every cycle; siblings check each
    other's; `ao doctor` shows the last tick.
+10. **It comes back quietly.** A cycle that follows more than
+    `watchdog.resume_gap_hours` without one is a resume: what stands is named once, in
+    one notice, and nothing turns orange or red on time in which nothing ran — see
+    [alarms.md](alarms.md#after-a-silence).
 
 ## The guard chain
 
@@ -106,6 +110,7 @@ test that would fail if it came back.
 | F17 | eleven hours of orange nobody saw | no channel beyond the desktop and an unconfigured bot | the ladder: orange → red (e-mail) after an hour; resolved notices; `ao doctor` warns on missing channels | test_guards (ladder) | — |
 | F18 | a dead watchdog is silent | nothing watched the watcher | heartbeat per cycle, sibling check, `last tick` in doctor | test_watchdog_cycle | — |
 | F19 | an old transcript caused a second live architect, while a fresh transcript or reused remembered pid kept a dead one "present" | transcript mtime/pid state was treated as liveness; refill lacked a guard; filtered PIDs broke ancestry; generic agent/Windows matching blurred role identity | exact configured launcher/runtime + cwd over full parent graph; interactive root only; cycle-safe helper exclusion; fresh process-start + `architect`-role duplicate guard; identical dry/live verdicts | test_processes, test_scenarios | — |
+| F20 | the first cycle after a two-week stop would mail an unread request red, ring an open decision, announce a standing red as no longer raised, mail credits whose snooze had ended and tell the phone of a wake | every record kept its date, and every check measured age as if the watchdog had been watching | a cycle after `watchdog.resume_gap_hours` of silence is a resume: one notice names what stands, carried episodes close unannounced, and ages count from the resume | test_resume_quiet | — |
 
 ## Scenarios: testing the decision, not the measurement
 
@@ -153,6 +158,10 @@ Best practice, applied:
   hear it end — an alert with no "over" teaches people to keep worrying.
 - **Storm-capped.** Twelve sent alerts in an hour and the rest are recorded
   only, with one notice saying so; red still mails.
+- **Resumed.** After more than `watchdog.resume_gap_hours` without a cycle, what the
+  cycle would ring and what the silence carried go out as one notice, to a person when
+  any of it is a person's; an unseen request, an open decision or a hold from before the
+  resume ages from the resume.
 - **Actionable.** Every message names the project, what stands, since when, how
   many times, and the `ao` command that shows more.
 - **Testable.** `ao alarms test --level red` rings every channel for real.
