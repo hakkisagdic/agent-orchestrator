@@ -229,7 +229,7 @@ def cmd_telegram(cfg, args):
     from . import telegram
     conf = telegram.CONF
     c = telegram.config()
-    label = f"com.agentorchestrator.telegram.{A.project_key(cfg['root']).lower()}"
+    label = _launchd_label("telegram", A.project_key(cfg["root"]))
 
     if args.action == "setup":
         print(f"{C['b']}1.{C['reset']} Telegram: {C['b']}@BotFather{C['reset']} → /newbot → token")
@@ -281,7 +281,7 @@ def cmd_telegram(cfg, args):
             print(f"{C['red']}No config{C['reset']} — run ao telegram setup first")
             return 1
         exe = shutil.which("ao") or os.path.abspath(sys.argv[0])
-        log = os.path.join(A.HOME, ".ao", f"telegram-{A.project_key(cfg['root']).lower()}.log")
+        log = os.path.join(A.HOME, ".ao", A.project_file_name("telegram-log", A.project_key(cfg["root"]).lower()))
         # KeepAlive rather than StartInterval: long polling holds the connection
         # open, so the job wants restarting when it ends, not running on a clock.
         plist = os.path.join(A.HOME, "Library", "LaunchAgents", label + ".plist")

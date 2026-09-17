@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """Run ao straight from a git clone, with nothing installed.
 
-The documented quickstart is a clone plus an alias, and it has to keep working
-after the code moved into an installable package — someone whose only Python is
-the one macOS ships should not have to learn about pip to look at a panel.
+The documented quickstart is a clone plus a symlink to this file on PATH, and it
+has to keep working after the code moved into an installable package — someone
+whose only Python is the one macOS ships should not have to learn about pip to
+look at a panel. The clone is found through the symlink: its own path names the
+directory the link is in, which holds no src/.
 """
 import os
 import sys
 
 sys.path.insert(0, os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
+    os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "src"))
 from ao.cli import main  # noqa: E402
 
 if __name__ == "__main__":

@@ -289,9 +289,84 @@ def project_key_collisions():
     return {base: rows for base, rows in groups.items() if len(rows) > 1}
 
 
+# Every file a project keeps in ~/.ao, named under its key (SAFE-REMOVE). The code that writes one takes its name
+# from here, and `ao remove` deletes exactly these. It deleted every file whose name merely held the key:
+# removing `proj` took the machine's projects.json and its lock with the logs and push windows of `bigproject`
+# and `myproj`, and removing a project called `email` would take the e-mail channel's settings. What ao archived
+# for a project, ~/.ao/archive/<key>/, is not a file of this table: a review moved there is the record, and
+# remove keeps it.
+PROJECT_FILES = {
+    "heartbeat": "heartbeat-{key}",
+    "watchdog-state": "watchdog-{key}.json",
+    "watchdog-cycle-lock": "watchdog-{key}.cycle.lock",
+    "watchdog-log": "watchdog-{key}.log",
+    "cycles": "cycles-{key}.jsonl",
+    "nudge-log": "nudge-{key}.log",
+    "escalate-log": "escalate-{key}.log",
+    "refill-log": "refill-{key}.log",
+    "hunt-log": "hunt-{key}.log",
+    "doctor-log": "doctor-{key}.log",
+    "doctor-runs": "doctor-{key}.json",
+    "telegram-log": "telegram-{key}.log",
+    "push-window": "push-{key}.ok",
+    "helpers": "helpers-{key}.json",
+    "helpers-lock": "helpers-{key}.json.lock",
+    "reviewer": "reviewer-{key}.json",
+    "architect-lock": "architect-{key}.lock",
+}
+
+
+def project_file_name(what, key):
+    """The name one of a project's files has in ~/.ao, from PROJECT_FILES."""
+    return PROJECT_FILES[what].format(key=key)
+
+
+def project_file(root, what):
+    """Where one of this project's files is kept in ~/.ao."""
+    return os.path.join(HOME, ".ao", project_file_name(what, project_key(root)))
+
+
+def project_file_names(key):
+    """Every name one project's files can have in ~/.ao: each PROJECT_FILES name under its key, and in lower case.
+
+    A launchd label is lower-cased and a job's log is named from it; on a case-sensitive
+    filesystem that log is another file than one named from the key as it is.
+    """
+    return sorted({project_file_name(what, name) for what in PROJECT_FILES for name in (key, key.lower())})
+
+
+def registered_key(root):
+    """The name the machine registry holds for this project's resolved path, or None."""
+    real = os.path.realpath(root)
+    return next((name for name, row in project_registry().items() if row.get("root") == real), None)
+
+
+def forget_project(root):
+    """Take this project's rows out of the machine registry, under its lock; the names they held (SAFE-REMOVE).
+
+    The registry names every project on this machine, so it is never deleted: only the rows
+    holding this project's resolved path go, and every other row is written back as it was
+    read. Raises OSError or ValueError when the registry cannot be read or replaced.
+    """
+    from .storage import _exclusive_lock, replace_file_durably
+    real = os.path.realpath(root)
+    registry = project_registry_path()
+    if not os.path.exists(registry):
+        return []
+    with _exclusive_lock(registry + ".lock"):
+        with open(registry, encoding=UTF8) as fh:
+            known = json.load(fh)
+        if not isinstance(known, dict):
+            raise ValueError(f"{registry} holds no JSON object")
+        gone = sorted(name for name, row in known.items() if isinstance(row, dict) and row.get("root") == real)
+        if gone:
+            kept = {name: row for name, row in known.items() if name not in gone}
+            replace_file_durably(registry, json.dumps(kept, indent=1, sort_keys=True).encode("utf-8"))
+    return gone
+
+
 def heartbeat_path(root):
-    key = project_key(root)
-    return os.path.join(HOME, ".ao", f"heartbeat-{key}")
+    return project_file(root, "heartbeat")
 
 
 def heartbeat(root):
@@ -430,8 +505,7 @@ def review_diff(root, cfg, paths=None, budget=1_500_000):
 # ---- helpers: processes ao starts that are not writers -------------------------
 
 def helpers_path(root):
-    key = project_key(root)
-    return os.path.join(HOME, ".ao", f"helpers-{key}.json")
+    return project_file(root, "helpers")
 
 
 def _helpers_update(root, change):
@@ -444,7 +518,7 @@ def _helpers_update(root, change):
     from .storage import _exclusive_lock, replace_file_durably
     path = helpers_path(root)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with _exclusive_lock(path + ".lock"):
+    with _exclusive_lock(project_file(root, "helpers-lock")):
         try:
             with open(path, encoding=UTF8) as fh:
                 d = json.load(fh)
@@ -531,13 +605,13 @@ def _coord_path():
 
 # ---- what each feature costs, measured rather than estimated (#10) ------------------------
 
-SPAWN_LOGS = {"nudge": "nudge-{key}.log", "architect_wake": "escalate-{key}.log", "refill": "refill-{key}.log"}
+SPAWN_LOGS = {"nudge": "nudge-log", "architect_wake": "escalate-log", "refill": "refill-log"}   # PROJECT_FILES
 
 
 def spawn_times(root, what, since=None):
     """When the watchdog started a nudge, an architect wake or a refill, read from its own logs (#10)."""
     from .watchdog import STATE_DIR
-    path = os.path.join(STATE_DIR, SPAWN_LOGS[what].format(key=project_key(root)))
+    path = os.path.join(STATE_DIR, project_file_name(SPAWN_LOGS[what], project_key(root)))
     times = []
     try:
         with open(path, encoding=UTF8, errors="replace") as fh:
@@ -1256,8 +1330,7 @@ def ping(root, opener=None):
 # ---- architect lock: one judge at a time --------------------------------------------
 
 def architect_lock_path(root):
-    key = project_key(root)
-    return os.path.join(HOME, ".ao", f"architect-{key}.lock")
+    return project_file(root, "architect-lock")
 
 
 def architect_lock_holder(root):

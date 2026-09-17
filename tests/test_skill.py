@@ -85,13 +85,8 @@ def test_remove_undoes_init_and_only_removes_ao_owned_hooks(project, monkeypatch
     os.makedirs(os.path.join(root, ".claude"))
     monkeypatch.setattr(skillkit.shutil, "which", lambda n: None)
     real_run = cli.subprocess.run
-
-    def fake_watchdog(argv, *args, **kwargs):
-        if isinstance(argv, (list, tuple)) and "watchdog" in argv and "uninstall" in argv:
-            return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
-        return real_run(argv, *args, **kwargs)
-
-    monkeypatch.setattr(cli.subprocess, "run", fake_watchdog)
+    # Remove takes the jobs off in its own process (SAFE-REMOVE): a launchd holding none of this project's.
+    monkeypatch.setattr(cli.A, "_run_program", lambda argv, **kwargs: ("", 0))
     _, agents = skillkit.detect_agents(root)
     skillkit.install_playbook(root, agents)
     skillkit.register_mcp(root, agents, exe="/x/ao")

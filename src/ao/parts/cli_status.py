@@ -163,7 +163,7 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0):
                   f"exit {nudge_err.get('code')}{C['reset']}")
                 for ln in textwrap.wrap(nudge_err.get("tail", ""), w - 8)[:2]:
                     a(f"     {C['dim']}{ln}{C['reset']}")
-                a(f"     {C['dim']}full log: ~/.ao/nudge-{A.project_key(root)}.log{C['reset']}")
+                a(f"     {C['dim']}full log: {_home_relative(A.project_file(root, 'nudge-log'))}{C['reset']}")
             for hh, text in errs:
                 for i, ln in enumerate(textwrap.wrap(text, w - 12)[:2]):
                     a(f"   {C['dim']}{hh}{C['reset']} {C['yellow']}agent error{C['reset']}  {ln}"

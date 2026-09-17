@@ -1341,9 +1341,8 @@ def answer(root, did, key_or_text, by="human"):
 
 def last_nudge_error(root):
     """The most recent failed nudge, if the watchdog recorded one."""
-    key = project_key(root)
     try:
-        st = json.load(open(os.path.join(HOME, ".ao", f"watchdog-{key}.json"), encoding=UTF8))
+        st = json.load(open(project_file(root, "watchdog-state"), encoding=UTF8))
     except Exception:
         return None
     return st.get("last_error")
@@ -1499,8 +1498,7 @@ REVIEW_UNAVAILABLE_RE = re.compile(
 
 
 def reviewer_state_path(root):
-    key = project_key(root)
-    return os.path.join(HOME, ".ao", f"reviewer-{key}.json")
+    return project_file(root, "reviewer")
 
 
 def reviewer_state(root):

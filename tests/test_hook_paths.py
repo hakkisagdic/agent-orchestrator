@@ -413,14 +413,8 @@ def test_dead_protected_repository_source_warns_but_does_not_block_remove(
     _git(root, "add", ".githooks/pre-commit")
     _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "source-hook")
 
-    real_run = subprocess.run
-
-    def fake_watchdog(argv, *args, **kwargs):
-        if "watchdog" in argv and "uninstall" in argv:
-            return SimpleNamespace(returncode=0, stdout="", stderr="")
-        return real_run(argv, *args, **kwargs)
-
-    monkeypatch.setattr(cli.subprocess, "run", fake_watchdog)
+    # Remove takes the jobs off in its own process (SAFE-REMOVE): a launchd holding none of this project's.
+    monkeypatch.setattr(A, "_run_program", lambda argv, **kwargs: ("", 0))
     assert cli.cmd_remove(project, SimpleNamespace(yes=True, allow_shared_hooks=False)) == 0
     assert not os.path.exists(os.path.join(root, ".ao"))
     assert os.path.exists(hook)
@@ -1214,7 +1208,8 @@ def test_exact_v2_hook_is_legacy_and_upgrades_to_v3(project):
     before = _active(cli._ao_hook_inventory(root), "pre-commit")
     assert before["static_state"] == "legacy (behavior unverified)"
     assert cli.cmd_hooks(project, _args("install")) == 0
-    assert path.read_bytes() == cli._render_local_hook("pre-commit", ".")
+    # In the git directory the body also names the ao that installed it (SAFE-REMOVE).
+    assert path.read_bytes() == cli._render_local_hook("pre-commit", ".", cli._hook_fallback())
     assert b"ao-hook-v3" in path.read_bytes()
 
 
@@ -1286,14 +1281,8 @@ def test_remove_is_two_phase_and_keeps_state_until_marker_commit(
 ):
     root = project["root"]
     marker = _enroll_project(root)
-    real_run = subprocess.run
-
-    def fake_watchdog(argv, *args, **kwargs):
-        if "watchdog" in argv and "uninstall" in argv:
-            return SimpleNamespace(returncode=0, stdout="", stderr="")
-        return real_run(argv, *args, **kwargs)
-
-    monkeypatch.setattr(cli.subprocess, "run", fake_watchdog)
+    # Remove takes the jobs off in its own process (SAFE-REMOVE): a launchd holding none of this project's.
+    monkeypatch.setattr(A, "_run_program", lambda argv, **kwargs: ("", 0))
     args = SimpleNamespace(yes=True, allow_shared_hooks=False)
 
     assert cli.cmd_remove(project, args) == 0

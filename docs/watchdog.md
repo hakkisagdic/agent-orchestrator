@@ -119,6 +119,8 @@ test that would fail if it came back.
 | F25 | a session quiet while its subagent worked read as idle and its turn as ended: in 179 of the 444 closed turns a subagent wrote in, across 59 stores that delegate, the runtime waiting for the subagent would have been reaped at the idle window while the subagent went on | the idle guard, the reap and the spin check read the session transcript alone, and a subagent writes to a transcript of its own | the implementer's last write and the spin check's growth include the subagent transcripts the adapter declares, and a turn has not ended while one was written after the session transcript; read by modification time and size, none opened | test_subagent_liveness | — |
 | F26 | rehearsing the catch-up planned for 2026-10-01, a decision request nobody had been shown and no architect could act on was mailed eight times in a day, four times under its anomaly's "needs you" and four under its own unseen alarm | the unseen check rang every request by its age, whatever other alarm to a person already told it | a request an alarm to a person tells is told by that alarm alone, and a resume notice names it once; its own ladder counts from the last cycle such an alarm told it | test_catchup_polish | — |
 | F27 | in the same rehearsal, with the jobs back six hours after the plan reset and the usage unreadable, the resume notice named the credits as standing | the notice named each episode the silence carried and each snooze that ended in it, whatever its own known end | what the silence carried is not named once its known end has passed: an episode's own, or the reset the implementer's last reading named | test_catchup_polish | — |
+| F28 | installed from a package whose console scripts were not on PATH, launchd ran a missing file every two minutes while `ao watchdog install` said "installed" | install fell back to a clone's `scripts/ao-watchdog` and `bin/ao` whether or not there was a clone | each job names the console script on PATH, the clone's script, or `python -m ao.watchdog` from an interpreter that imports an installed ao; install refuses when there is none, and exits 1 when `schtasks` fails | test_safe_remove | — |
+| F29 | after `ao remove --yes` the watchdog, doctor and telegram jobs ran on against the removed project, and the removal had taken the registry and other projects' logs with it | remove ran `python -m ao watchdog uninstall` without reading the result, and from a clone that interpreter has no ao; it never removed the telegram poller; it deleted every file in `~/.ao` whose name held the key | the jobs are removed in the removal's own process and checked gone before any state goes; then exactly the project's own files and its registry row | test_safe_remove | — |
 
 ## Scenarios: testing the decision, not the measurement
 
@@ -130,6 +132,28 @@ once misread, and each has a scenario now: orphans that looked like writers, a
 shell that mentioned the agent, a request that looked like unread mail, an
 architect at quota. The rule going forward: a fault gets its scenario before
 its fix, and the scenario stays.
+
+## Installing and removing it
+
+`ao watchdog install` schedules two jobs, and each names a program the scheduler can start:
+the `ao-watchdog` and `ao` console scripts when they are on PATH; else a clone's
+`scripts/ao-watchdog` and `bin/ao`, run by the interpreter that ran the install; else that
+interpreter running `python -m ao.watchdog` and `python -m ao`, when it imports ao from its
+own site directories, as a `pip install --user` whose scripts are not on PATH leaves it. When
+there is none, install refuses and writes nothing: a job naming a missing file fails every
+two minutes and says nothing. Windows tasks are resolved the same way, and install exits 1
+when `schtasks` cannot create one.
+
+`ao remove --yes` takes the jobs off in its own process — the watchdog, the doctor and the
+telegram poller on macOS, the two tasks on Windows — and checks each is gone. While one is
+left, the removal stops with the project's state intact and names the job. Then it removes
+exactly the project's own files in `~/.ao/`: the names in one table the code that writes them
+shares, such as `heartbeat-<project>`, `watchdog-<project>.log` and `push-<project>.ok`, under
+the project's key and nothing else, so another project whose name contains it, and the
+machine's own files, are not touched. It takes the project's row out of `~/.ao/projects.json`
+under the registry's lock, and the registry stays for every other project. What ao archived
+for the project under `~/.ao/archive/<project>/` is kept. The dry run lists each job, file and
+row by name, as the removal finds them, and a removal that leaves any of them exits 1.
 
 ## The instruments
 

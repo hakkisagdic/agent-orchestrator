@@ -384,8 +384,85 @@ def _hook_project_marker_guard():
     )
 
 
-def _render_local_hook(role, root_rel):
-    """Portable bytes for one project-local hook; no machine/family binding."""
+_AO_LOOKUP = "ao=$(command -v ao) || { echo 'agent-orchestrator: ao not found' >&2; exit 1; }\n"
+HOOK_AO_NOT_FOUND = "/bin/sh finds no ao on PATH"
+
+
+def _ao_lookup(fallback=None):
+    """How a hook finds ao: on PATH, else the ao that installed the hook, while that file is there (SAFE-REMOVE).
+
+    A hook runs under /bin/sh, which cannot see a shell alias, and the README's zero-install
+    path was an alias: every commit failed with "ao not found", and `ao prove` sent the person
+    back to `ao hooks install`, which found the hook current. The fallback is only used when
+    `command -v ao` finds nothing; without one the hook fails closed as before.
+    """
+    if fallback is None:
+        return _AO_LOOKUP
+    import shlex
+    return (f"ao_fallback={shlex.quote(fallback)}\n"
+            "ao=$(command -v ao) || { ao=$ao_fallback; [ -f \"$ao\" ] && [ -x \"$ao\" ]; } "
+            "|| { echo 'agent-orchestrator: ao not found' >&2; exit 1; }\n")
+
+
+def _hook_fallback():
+    """The absolute path of the ao running now, for a hook to fall back on; None when there is none to name.
+
+    The entry point this process started from is the ao the person runs: the script itself
+    when it is called ao, else the clone's bin/ao, else the console script beside this
+    interpreter. None on Windows, where Git's shell does not read a drive-letter path as
+    absolute (docs/windows.md), and for a path that one line of a hook cannot hold.
+    """
+    if os.name == "nt":
+        return None
+    started = os.path.abspath(sys.argv[0]) if sys.argv and sys.argv[0] else ""
+    candidates = ([started] if os.path.basename(started) == "ao" else []) + [
+        os.path.join(A.REPO, "bin", "ao"), os.path.join(os.path.dirname(sys.executable or ""), "ao")]
+    return next((path for path in candidates if os.path.isabs(path) and os.path.isfile(path)
+                 and os.access(path, os.X_OK) and not any(ch in path for ch in "\n\r\0")), None)
+
+
+def _hook_fallback_of(data):
+    """The ao a hook body falls back on, when it carries exactly one well-formed fallback; else None."""
+    import shlex
+    try:
+        text = data.decode(UTF8)
+    except UnicodeError:
+        return None
+    lines = [line for line in text.split("\n") if line.startswith("ao_fallback=")]
+    if len(lines) != 1:
+        return None
+    try:
+        words = shlex.split(lines[0])
+    except ValueError:
+        return None
+    if len(words) != 1 or not words[0].startswith("ao_fallback="):
+        return None
+    path = words[0][len("ao_fallback="):]
+    if not path.startswith("/") or text.count(_ao_lookup(path)) != 1:
+        return None
+    return path
+
+
+def _hook_portable(data):
+    """A hook body with its ao fallback taken out: the bytes it was rendered from; None when it carries none."""
+    fallback = _hook_fallback_of(data)
+    if fallback is None:
+        return None
+    return data.decode(UTF8).replace(_ao_lookup(fallback), _AO_LOOKUP).encode(UTF8)
+
+
+def _hook_may_name_this_machine(directory, top, git_dir, common_dir):
+    """Whether a hook written here may carry a path of this machine.
+
+    Inside the working tree a hook can be committed and carried to another machine, so only
+    the repository's own git directories, and places outside the tree, get a fallback.
+    """
+    return (_hook_contains(git_dir, directory) or _hook_contains(common_dir, directory)
+            or not _hook_contains(top, directory))
+
+
+def _render_local_hook(role, root_rel, fallback=None):
+    """Portable bytes for one project-local hook; no machine/family binding unless a fallback ao is named."""
     import shlex
     suffix = "" if root_rel in ("", ".") else "/" + shlex.quote(root_rel)
     command = _role_command(role)
@@ -400,12 +477,12 @@ def _render_local_hook(role, root_rel):
         "esac\n"
         + _hook_repository_unset()
         + _hook_project_marker_guard()
-        + "ao=$(command -v ao) || { echo 'agent-orchestrator: ao not found' >&2; exit 1; }\n"
+        + _ao_lookup(fallback)
         + f"exec \"$ao\" -C \"$root\" {command}\n"
     ).encode(UTF8)
 
 
-def _render_scoped_hook(role, root_rel, family, directory_class):
+def _render_scoped_hook(role, root_rel, family, directory_class, fallback=None):
     """Family-bound bytes for a shared/external target; unknown routing is fail-open."""
     import shlex
     suffix = "" if root_rel in ("", ".") else "/" + shlex.quote(root_rel)
@@ -429,7 +506,7 @@ def _render_scoped_hook(role, root_rel, family, directory_class):
         + "top=$(CDPATH= cd \"$top\" 2>/dev/null && pwd -P) || exit 0\n"
         + f"root=\"$top\"{suffix}\n"
         + _hook_project_marker_guard()
-        + "ao=$(command -v ao) || { echo 'agent-orchestrator: ao not found' >&2; exit 1; }\n"
+        + _ao_lookup(fallback)
         + f"exec \"$ao\" -C \"$root\" {command}\n"
     ).encode(UTF8)
 
@@ -556,14 +633,17 @@ def _classify_hook(path, role, local_body=None, scoped_body=None):
         data.decode(UTF8)
     except (OSError, UnicodeError):
         return "foreign", False
-    if local_body is not None and data == local_body:
+    # A body that names the ao which installed it is the same intent as the portable one (SAFE-REMOVE).
+    portable = _hook_portable(data) or data
+    if local_body is not None and portable == local_body:
         return "current-local (behavior unverified)", False
-    if scoped_body is not None and data == scoped_body:
+    if scoped_body is not None and portable == scoped_body:
         return "current-scoped (behavior unverified)", False
     translated = _crlf_translation(data)
     for candidate in (data, translated):
         if candidate is None:
             continue
+        candidate = _hook_portable(candidate) or candidate
         if (local_body is not None and candidate == local_body) \
                 or (scoped_body is not None and candidate == scoped_body) \
                 or _legacy_hook_role(candidate) == role:
@@ -660,6 +740,7 @@ def _ao_hook_inventory(root):
     }
 
     targets = []
+    fallback = _hook_fallback()
     ordered_dirs = sorted(directories.values(), key=lambda row: (row["path"] != active_dir, os.fsencode(row["path"])))
     for directory in ordered_dirs:
         path = directory["path"]
@@ -699,6 +780,8 @@ def _ao_hook_inventory(root):
             needs_auth = eligible and (
                 cls in ("shared", "external") or (active and globally_configured)
             )
+            # What install writes names the ao that installed it, where the hook cannot travel (SAFE-REMOVE).
+            named = fallback if _hook_may_name_this_machine(path, top, git_dir, common_dir) else None
             targets.append({
                 "role": role, "path": target_path, "directory": path,
                 "directory_class": cls, "active": active,
@@ -710,7 +793,8 @@ def _ao_hook_inventory(root):
                 "protected": track in ("tracked", "indeterminate"),
                 "eligible": eligible, "needs_authorization": needs_auth,
                 "crlf_only": crlf_only, "sources": sorted(sources),
-                "body": local_body if expected_local else scoped_body,
+                "body": _render_local_hook(role, project_rel, named) if expected_local
+                else _render_scoped_hook(role, project_rel, common_dir, cls, named),
             })
 
     empty.update({
@@ -841,8 +925,10 @@ def _hook_execution_probe(inv):
         }
     if result.returncode == 0:
         return failed("Git or the resolved hook allowed the synthetic candidate", 0)
+    # Said plainly: an alias is invisible to /bin/sh, and reinstalling the hook changes nothing (SAFE-REMOVE).
+    cause = f": {HOOK_AO_NOT_FOUND}" if b"agent-orchestrator: ao not found" in result.stderr else ""
     return failed(
-        f"the hook exited {result.returncode} without AO's nonce-bound refusal proof",
+        f"the hook exited {result.returncode} without AO's nonce-bound refusal proof{cause}",
         result.returncode,
     )
 
@@ -851,6 +937,40 @@ def _hook_probe_text(probe):
     if probe["installed"]:
         return "installed (execution proved)"
     return "not installed — " + probe["detail"]
+
+
+def _ao_link_fix():
+    """The command that puts this ao on PATH, where /bin/sh, a scheduler and every agent find it (SAFE-REMOVE)."""
+    import shlex
+    if os.name == "nt":
+        return "put the Scripts directory pip installed ao.exe into on PATH"
+    target = shlex.quote(_hook_fallback() or os.path.join(A.REPO, "bin", "ao"))
+    link = os.path.join(A.HOME, ".local", "bin", "ao")
+    on_path = any(os.path.realpath(d) == os.path.realpath(os.path.dirname(link))
+                  for d in os.environ.get("PATH", "").split(os.pathsep) if d)
+    steps = [] if os.path.lexists(link) else [f"mkdir -p ~/.local/bin && ln -s {target} ~/.local/bin/ao"]
+    if not on_path:
+        steps.append("put ~/.local/bin on PATH")
+    return " and ".join(steps) or f"~/.local/bin/ao does not run; point it at this ao: ln -sf {target} ~/.local/bin/ao"
+
+
+def _hook_ao_reach(inv):
+    """(what a hook's /bin/sh finds for ao, the fix) when ao is not on PATH; None when it is (SAFE-REMOVE)."""
+    if shutil.which("ao"):
+        return None
+    target = None if inv.get("error") else _active_hook_targets(inv).get("pre-commit")
+    fallback = None
+    if target and _state_base(target["static_state"]) in ("current-local", "current-scoped"):
+        try:
+            with open(target["path"], "rb") as fh:
+                fallback = _hook_fallback_of(fh.read())
+        except OSError:
+            pass
+    if fallback and os.path.isfile(fallback) and os.access(fallback, os.X_OK):
+        told = f"{HOOK_AO_NOT_FOUND} (a shell alias is invisible to it); the hook falls back on {fallback}"
+    else:
+        told = f"{HOOK_AO_NOT_FOUND} (a shell alias is invisible to it); a commit fails with \"ao not found\""
+    return told, _ao_link_fix()
 
 
 def _authorization_refusal(targets, allow):
@@ -925,6 +1045,10 @@ def _print_hook_status(inv):
             note = " — AO push-window hook unavailable"
         print(f"{role}: {target['static_state']} / {target['track_state']}{note}")
     print(f"pre-commit execution: {_hook_probe_text(proof)}")
+    reach = _hook_ao_reach(inv)
+    if reach:
+        print(f"ao for hooks: {reach[0]}")
+        print(f"  fix: {reach[1]}")
     for target in inv["targets"]:
         if target["active"] or _state_base(target["static_state"]) in ("absent", "foreign"):
             continue
@@ -1056,8 +1180,7 @@ def cmd_hooks(cfg, args):
 def cmd_push(cfg, args):
     """`ao push allow [--minutes N]` opens a window for a person's push; `check` is what the hook runs."""
     root = cfg["root"]
-    key = A.project_key(root)
-    tok = os.path.join(A.HOME, ".ao", f"push-{key}.ok")
+    tok = A.project_file(root, "push-window")
     if args.action == "allow":
         os.makedirs(os.path.dirname(tok), exist_ok=True)
         json.dump({"at": int(time.time()), "minutes": args.minutes, "by": os.environ.get("USER", "human")}, open(tok, "w", encoding=UTF8))

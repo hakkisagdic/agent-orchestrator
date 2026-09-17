@@ -54,10 +54,129 @@ def _remove_hook_preflight(inv, allow):
     return True, plan, inert
 
 
+def _home_relative(path):
+    """A path under the home directory as ~/…, the way a person reads it."""
+    home = A.HOME.rstrip("/\\")
+    return "~" + path[len(home):] if path == home or path.startswith(home + os.sep) else path
+
+
+def _remove_key(root):
+    """(the name this project's files outside its tree are kept under, whether that name is this project's).
+
+    A directory with no .ao/ is named by its basename, and that can be another project's
+    name: a second remove, run after the first took .ao/, would take that project's files.
+    Only a project with .ao/, or one the registry still holds by its path, owns a name.
+    """
+    if os.path.isdir(os.path.join(os.path.realpath(root), ".ao")):
+        return A.project_key(root), True
+    registered = A.registered_key(root)
+    return (registered, True) if registered else (A.project_key(root), False)
+
+
+def _project_home_files(key):
+    """This project's files in ~/.ao that exist, named from PROJECT_FILES (SAFE-REMOVE).
+
+    One path per file: a case-insensitive disk answers to a lower-cased name and to the
+    name as it is, and both would otherwise be listed and removed as two files.
+    """
+    seen, found = set(), []
+    for name in A.project_file_names(key):
+        path = os.path.join(A.HOME, ".ao", name)
+        try:
+            st = os.lstat(path)
+        except OSError:
+            continue
+        identity = (st.st_dev, st.st_ino) if st.st_ino else os.path.normcase(path)
+        if identity not in seen:
+            seen.add(identity)
+            found.append(path)
+    return found
+
+
+def _registry_names(root):
+    """The names the machine registry holds for this project's resolved path."""
+    real = os.path.realpath(root)
+    return sorted(name for name, row in A.project_registry().items() if row.get("root") == real)
+
+
+AO_GITIGNORE = ("agent-mail/*.md", "!agent-mail/README.md", ".ao/inbox/", ".ao/hold")
+
+
+def _gitignore_without_ao(root):
+    """(.gitignore's path, its lines without the ones ao added, how many of those it had)."""
+    path = os.path.join(root, ".gitignore")
+    try:
+        lines = open(path, encoding=UTF8).read().split("\n")
+    except OSError:
+        return path, [], 0
+    keep = [line for line in lines if line.strip() not in AO_GITIGNORE
+            and "agent-orchestrator: mail is transient" not in line]
+    return path, keep, len(lines) - len(keep)
+
+
+# The jobs `ao watchdog install` and `ao telegram install` schedule for a project (SAFE-REMOVE). Windows
+# has no telegram task of ao's: `ao telegram install` refuses there.
+LAUNCHD_JOBS = ("watchdog", "doctor", "telegram")
+WINDOWS_TASKS = ("watchdog", "doctor")
+# How long a booted-out job may take to leave `launchctl list` before it counts as left.
+JOB_GONE_SECONDS = 5
+
+
+def _windows_task(job, key):
+    return f"ao-{job}-{key.lower()}"
+
+
+def _schtasks(*args):
+    """(what schtasks printed, its exit status), asked without a shell; ("", None) when it cannot be run."""
+    try:
+        done = subprocess.run(["schtasks", *args], capture_output=True, text=True, encoding=UTF8, errors="replace")
+    except OSError:
+        return "", None
+    return (done.stdout + done.stderr).strip(), done.returncode
+
+
+def _installed_jobs(key):
+    """(kind, name) of each job ao scheduled for a project that is there to remove on this platform."""
+    if os.name == "nt":
+        return [("scheduled task", name) for name in (_windows_task(job, key) for job in WINDOWS_TASKS)
+                if _schtasks("/Query", "/TN", name)[1] == 0]
+    return [("launchd job", label) for label in (_launchd_label(job, key) for job in LAUNCHD_JOBS)
+            if _launchd_loaded(label) or os.path.lexists(_launchd_plist(label))]
+
+
+def _unschedule(name):
+    """Remove one scheduled job in this process and check that it is gone; what is left of it, or None.
+
+    `ao remove` ran `python -m ao watchdog uninstall` and did not read the result: from a clone
+    that interpreter has no ao module, the jobs went on running against a removed project, and
+    remove said they were gone. The telegram poller, which launchd keeps alive, was never removed.
+    """
+    if os.name == "nt":
+        said, status = _schtasks("/Delete", "/TN", name, "/F")
+        if _schtasks("/Query", "/TN", name)[1] == 0:
+            return f"Task Scheduler still holds it: {said[:120] or f'schtasks exit {status}'}"
+        return None
+    plist, left = _launchd_plist(name), []
+    if _launchd_loaded(name) and _launchctl("bootout", _launchd_domain(name))[1] != 0 and os.path.exists(plist):
+        _launchctl("unload", plist)
+    try:
+        if os.path.lexists(plist):
+            os.remove(plist)
+    except OSError as exc:
+        left.append(f"cannot remove {_home_relative(plist)}: {exc}")
+    deadline = time.monotonic() + JOB_GONE_SECONDS
+    while _launchd_loaded(name):
+        if time.monotonic() >= deadline:
+            left.append(f"still loaded — launchctl bootout {_launchd_domain(name)}")
+            break
+        time.sleep(0.25)
+    return "; ".join(left) or None
+
+
 def cmd_remove(cfg, args):
     """Take ao off only after every reachable hook target passes one preflight."""
     root = cfg["root"]
-    key = A.project_key(root)
+    key, owned = _remove_key(root)
     from . import skillkit
     harness_files, mcp_files = skillkit.ao_files(root)
     plan = [PROJECT_MARKER, ".ao/", "agent-mail/", cfg.get("reviews", "semantic-review") + "/"] + harness_files
@@ -69,11 +188,25 @@ def cmd_remove(cfg, args):
         p = os.path.join(root, f)
         if os.path.exists(p):
             print(f"   {f}: the `{name}` server entry (other entries stay)")
-    print(f"   launchd jobs, ~/.ao state and logs for {key}, .gitignore lines")
+    if _gitignore_without_ao(root)[2]:
+        print("   .gitignore: the lines ao added")
+    # Outside the tree, each thing by name, found as the removal below finds it (SAFE-REMOVE).
+    for kind, name in _installed_jobs(key) if owned else []:
+        print(f"   {kind} {name}")
+    for path in _project_home_files(key) if owned else []:
+        print(f"   {_home_relative(path)}")
+    for name in _registry_names(root):
+        print(f"   {_home_relative(A.project_registry_path())}: the `{name}` entry (other projects stay)")
+    archive = os.path.join(A.HOME, ".ao", "archive", key)
     print(f"   {C['dim']}hook files only when statically AO-owned, untracked, and fully authorized; "
           f"protected dead-misplaced files are preserved{C['reset']}")
     print(f"   {C['dim']}not touched: product files, reviews you moved elsewhere, "
+          + (f"what ao archived in {_home_relative(archive)}/, " if owned and os.path.isdir(archive) else "")
+          + f"other projects' and the machine's files in ~/.ao, "
           f"{' / '.join(skillkit.rule_file_names(root))} text (paste-in was yours){C['reset']}")
+    if not owned:
+        print(f"   {C['dim']}nothing of ~/.ao: no .ao/ here, and the registry holds no project at this path"
+              f"{C['reset']}")
     if not args.yes:
         print(f"\nre-run with {C['b']}--yes{C['reset']} to do it")
         return 0
@@ -124,8 +257,22 @@ def cmd_remove(cfg, args):
         print(f"{C['red']}hook topology changed during remove; state kept intact{C['reset']}")
         return 1
 
+    # The jobs go first, in this process, and each is checked gone (SAFE-REMOVE). A job left
+    # behind runs against the project every few minutes, so its state stays until none is left.
+    left = []
+    for kind, name in _installed_jobs(key) if owned else []:
+        problem = _unschedule(name)
+        if problem:
+            left.append(name)
+            print(f"{C['red']}left{C['reset']} {kind} {name}: {problem}")
+        else:
+            print(f"removed {kind} {name}")
+    if left:
+        print(f"{C['red']}remove stopped; AO state kept intact{C['reset']}: {len(left)} scheduled job(s) would go on "
+              "running against a removed project — remove them, then run: ao remove --yes")
+        return 1
+
     import shutil as _sh
-    subprocess.run([sys.executable, "-m", "ao", "-C", root, "watchdog", "uninstall"], capture_output=True)
     for rel in plan:
         p = os.path.join(root, rel)
         if os.path.isdir(p):
@@ -144,19 +291,31 @@ def cmd_remove(cfg, args):
                     os.remove(p)
             except (OSError, ValueError):
                 pass
-    gi = os.path.join(root, ".gitignore")
-    if os.path.exists(gi):
-        lines = open(gi, encoding=UTF8).read().split("\n")
-        keep = [l for l in lines if l.strip() not in ("agent-mail/*.md", "!agent-mail/README.md", ".ao/inbox/", ".ao/hold")
-                and "agent-orchestrator: mail is transient" not in l]
+    gi, keep, dropped = _gitignore_without_ao(root)
+    if dropped:
         open(gi, "w", encoding=UTF8).write("\n".join(keep))
-    # Backlog #66 owns replacement of this basename/substring state namespace.
-    for f in os.listdir(os.path.join(A.HOME, ".ao")) if os.path.isdir(os.path.join(A.HOME, ".ao")) else []:
-        if key in f:
-            try:
-                os.remove(os.path.join(A.HOME, ".ao", f))
-            except OSError:
-                pass
+    # Exactly this project's files in ~/.ao, named by the table their writers name them from, and
+    # its row of the registry, which stays for every other project (SAFE-REMOVE).
+    removed = 0
+    for path in _project_home_files(key) if owned else []:
+        try:
+            os.remove(path)
+            removed += 1
+        except OSError as exc:
+            left.append(path)
+            print(f"{C['red']}left{C['reset']} {_home_relative(path)}: {exc}")
+    if removed:
+        print(f"removed {removed} file(s) of {key} from {_home_relative(os.path.join(A.HOME, '.ao'))}")
+    registry = _home_relative(A.project_registry_path())
+    try:
+        for name in A.forget_project(root) if owned else []:
+            print(f"removed the `{name}` entry from {registry}")
+    except (OSError, ValueError) as exc:
+        left.append(registry)
+        print(f"{C['red']}left{C['reset']} the `{key}` entry in {registry}: {exc}")
+    if left:
+        print(f"{C['red']}not complete{C['reset']} — phase 2/2 left {len(left)} thing(s) behind, each named above")
+        return 1
     print(f"{C['green']}removed{C['reset']} — phase 2/2 complete; AO state is gone and preserved local source hooks are inert")
     return 0
 
@@ -176,7 +335,7 @@ STORES = [
     ("verifications", "evidence",    ".ao/ledger/verifications.jsonl", "measured gate results"),
     ("plans",         "evidence",    ".ao/ledger/plans.jsonl",         "plan hashes as admitted"),
 ]
-HOME_LOGS = ["nudge-{key}.log", "watchdog-{key}.log", "refill-{key}.log"]
+HOME_LOGS = ["nudge-log", "watchdog-log", "refill-log"]         # PROJECT_FILES
 
 
 def _prune_jsonl(path, cutoff, dry):
@@ -304,9 +463,9 @@ def cmd_prune(cfg, args):
     # "nudge-Voltrai.log" and "nudge-voltrai.log" are one file that would
     # otherwise be counted — and truncated — twice.
     seen_inodes = set()
-    for pattern in HOME_LOGS:
-        path = os.path.join(A.HOME, ".ao", pattern.format(key=key))
-        alt = os.path.join(A.HOME, ".ao", pattern.format(key=key.lower()))
+    for name in HOME_LOGS:
+        path = os.path.join(A.HOME, ".ao", A.project_file_name(name, key))
+        alt = os.path.join(A.HOME, ".ao", A.project_file_name(name, key.lower()))
         for pth in {path, alt}:
             if not os.path.exists(pth):
                 continue
@@ -370,12 +529,59 @@ def cmd_notices(cfg, args):
     return 0
 
 
+def _package_installed():
+    """Whether this interpreter imports ao from its own site directories, as a scheduler starting it would.
+
+    A clone puts its own src/ on the import path; a scheduled `python -m ao` from one fails
+    with "No module named ao".
+    """
+    import site
+    here = os.path.realpath(os.path.dirname(os.path.dirname(os.path.abspath(A.__file__))))
+    sites = list(site.getsitepackages()) if hasattr(site, "getsitepackages") else []
+    sites.append(site.getusersitepackages())
+    return any(os.path.realpath(path) == here for path in sites)
+
+
+def _scheduled_argv(console, clone, module):
+    """The words a scheduled job starts one of ao's entry points with; None when there are none (SAFE-REMOVE).
+
+    Install fell back to the clone's script whether or not there was a clone: a package whose
+    console scripts are not on PATH, as `pip install --user` leaves it, has no such file, and
+    launchd ran a missing file every two minutes while install said "installed". In order:
+    the console script on PATH, which carries its own interpreter in its shebang (prefixing
+    this process's python imports ao from an interpreter that may not have it); the clone's
+    script, with this interpreter, since its shebang is `/usr/bin/env python3`; this
+    interpreter running the module, when it imports ao from its own site directories.
+    """
+    found = shutil.which(console)
+    python = sys.executable if sys.executable and os.path.isfile(sys.executable) else None
+    if found:
+        in_repo = os.path.realpath(found).startswith(os.path.realpath(A.REPO) + os.sep)
+        return ([python] if in_repo and python else []) + [found]
+    script = os.path.join(A.REPO, *clone)
+    if python and os.path.isfile(script):
+        return [python, script]
+    if python and _package_installed():
+        return [python, "-m", module]
+    return None
+
+
+def _schedule_refused(missing):
+    print(f"{C['red']}not installed{C['reset']}: nothing a scheduler can start for {' or '.join(missing)} — not on "
+          "PATH, no clone beside this code, and this interpreter imports no installed ao")
+    print("  put the directory holding ao's console scripts on PATH, or install the jobs from a clone")
+    return 1
+
+
 def _watchdog_windows(cfg, args):
     """Task Scheduler is Windows' launchd: one task every two minutes, one every fifteen."""
     root = cfg["root"]
-    key = A.project_key(root).lower()
-    tasks = {f"ao-watchdog-{key}": (2, f'"{shutil.which("ao-watchdog") or "ao-watchdog"}" --root "{root}" --idle-minutes {getattr(args, "idle_minutes", None) or S.get(cfg, "watchdog.idle_minutes")}'),
-             f"ao-doctor-{key}": (15, f'"{shutil.which("ao") or "ao"}" -C "{root}" doctor --check --notify')}
+    key = A.project_key(root)
+    idle = getattr(args, "idle_minutes", None) or S.get(cfg, "watchdog.idle_minutes")
+    tasks = {_windows_task("watchdog", key): (2, ("ao-watchdog", ("scripts", "ao-watchdog"), "ao.watchdog"),
+                                              ["--root", root, "--idle-minutes", str(idle)]),
+             _windows_task("doctor", key): (15, ("ao", ("bin", "ao"), "ao"),
+                                            ["-C", root, "doctor", "--check", "--notify"])}
     if args.action == "status":
         for name in tasks:
             r = subprocess.run(["schtasks", "/Query", "/TN", name], capture_output=True, text=True, encoding=UTF8, errors="replace")
@@ -386,11 +592,19 @@ def _watchdog_windows(cfg, args):
             subprocess.run(["schtasks", "/Delete", "/TN", name, "/F"], capture_output=True)
             print(f"removed {name}")
         return 0
-    for name, (minutes, cmd) in tasks.items():
-        r = subprocess.run(["schtasks", "/Create", "/F", "/SC", "MINUTE", "/MO", str(minutes), "/TN", name, "/TR", cmd],
-                           capture_output=True, text=True, encoding=UTF8, errors="replace")
-        print(f"{'installed' if r.returncode == 0 else 'FAILED'} {name} (every {minutes}m)" + ("" if r.returncode == 0 else f": {r.stderr.strip()[:120]}"))
-    return 0
+    # A task that names a missing program fails every run and says nothing (SAFE-REMOVE).
+    argvs = {name: _scheduled_argv(*entry) for name, (_, entry, _) in tasks.items()}
+    missing = [entry[0] for name, (_, entry, _) in tasks.items() if argvs[name] is None]
+    if missing:
+        return _schedule_refused(missing)
+    failed = 0
+    for name, (minutes, _, rest) in tasks.items():
+        said, status = _schtasks("/Create", "/F", "/SC", "MINUTE", "/MO", str(minutes), "/TN", name,
+                                 "/TR", subprocess.list2cmdline(argvs[name] + rest))
+        failed += status != 0
+        print(f"{'installed' if status == 0 else 'FAILED'} {name} (every {minutes}m)"
+              + ("" if status == 0 else f": {said[:120] or 'schtasks could not be run'}"))
+    return 1 if failed else 0
 
 
 def _log_tail(path, count=5):
@@ -431,25 +645,13 @@ def _cmd_watchdog(cfg, args):
     import getpass
     root = cfg["root"]
     key = A.project_key(root).lower()
-    label = f"com.agentorchestrator.watchdog.{key}"
-    plist_path = os.path.expanduser(f"~/Library/LaunchAgents/{label}.plist")
-    # After a pip/uv install there is no scripts/ directory; there is a console
-    # script on PATH. launchd needs an absolute path either way, so resolve
-    # whichever one this installation actually has.
-    script = shutil.which("ao-watchdog") or os.path.join(A.REPO, "scripts", "ao-watchdog")
-    # A console script carries its own interpreter in its shebang — the venv's.
-    # Prefixing it with *this* process's python (the system one, if `ao watchdog
-    # install` was run from a checkout) imports `ao` from an interpreter that
-    # does not have it, and launchd logs ModuleNotFoundError every two minutes.
-    # Only our repo shim needs an explicit interpreter, because its shebang is
-    # `/usr/bin/env python3` and launchd's PATH is minimal.
-    in_repo = os.path.realpath(script).startswith(os.path.realpath(A.REPO))
-    python = sys.executable if in_repo else ""
-    log = os.path.expanduser(f"~/.ao/watchdog-{key}.log")
+    label = _launchd_label("watchdog", key)
+    plist_path = _launchd_plist(label)
+    log = os.path.join(A.HOME, ".ao", A.project_file_name("watchdog-log", key))
 
     if args.action == "status":
         loaded = _launchd_listed(label)
-        dloaded = _launchd_listed(f"com.agentorchestrator.doctor.{key}")
+        dloaded = _launchd_listed(_launchd_label("doctor", key))
         print(f"label   {label}")
         print(f"doctor  {'loaded' if dloaded else 'not installed'}  (ao doctor --check every 15m)")
         print(f"plist   {'present' if os.path.exists(plist_path) else 'absent'}")
@@ -473,8 +675,8 @@ def _cmd_watchdog(cfg, args):
         if os.path.exists(plist_path):
             os.remove(plist_path)
         print(f"removed {label}")
-        dlabel = f"com.agentorchestrator.doctor.{key}"
-        dplist = os.path.expanduser(f"~/Library/LaunchAgents/{dlabel}.plist")
+        dlabel = _launchd_label("doctor", key)
+        dplist = _launchd_plist(dlabel)
         _launchctl("bootout", _launchd_domain(dlabel))
         if os.path.exists(dplist):
             os.remove(dplist)
@@ -486,11 +688,18 @@ def _cmd_watchdog(cfg, args):
             pass
         return
 
+    # launchd needs an absolute program that exists: resolve the one this installation has, or
+    # refuse before anything is written, since a job naming a missing file fails silently (SAFE-REMOVE).
+    wargv = _scheduled_argv("ao-watchdog", ("scripts", "ao-watchdog"), "ao.watchdog")
+    dargv = _scheduled_argv("ao", ("bin", "ao"), "ao")
+    missing = [name for name, argv in (("ao-watchdog", wargv), ("ao", dargv)) if argv is None]
+    if missing:
+        return _schedule_refused(missing)
     os.makedirs(os.path.dirname(plist_path), exist_ok=True)
-    os.makedirs(os.path.expanduser("~/.ao"), exist_ok=True)
+    os.makedirs(os.path.join(A.HOME, ".ao"), exist_ok=True)
     open(plist_path, "w", encoding=UTF8).write(PLIST.format(
-        path=_launchd_path(), label=label, python_arg=(f"<string>{python}</string>" if python else ""),
-        script=script, root=root,
+        path=_launchd_path(), label=label, python_arg="".join(f"<string>{a}</string>" for a in wargv[:-1]),
+        script=wargv[-1], root=root,
         idle=args.idle_minutes, interval=args.interval, log=log))
     _launchctl("bootout", _launchd_domain(label))
     # bootout is asynchronous: a bootstrap issued before the old job is fully
@@ -512,14 +721,12 @@ def _cmd_watchdog(cfg, args):
     # The second, independent check. A watchdog cannot report its own death;
     # this job runs `ao doctor --check --notify` every fifteen minutes from its own
     # launchd entry and raises the alarm the watchdog would have.
-    dlabel = f"com.agentorchestrator.doctor.{key}"
-    dplist = os.path.expanduser(f"~/Library/LaunchAgents/{dlabel}.plist")
-    ao_exe = shutil.which("ao") or os.path.join(A.REPO, "bin", "ao")
-    ao_in_repo = os.path.realpath(ao_exe).startswith(os.path.realpath(A.REPO))
-    dargs = ([sys.executable] if ao_in_repo else []) + [ao_exe, "-C", root, "doctor", "--check", "--notify"]
+    dlabel = _launchd_label("doctor", key)
+    dplist = _launchd_plist(dlabel)
+    dargs = dargv + ["-C", root, "doctor", "--check", "--notify"]
     open(dplist, "w", encoding=UTF8).write(PLIST_CMD.format(
         path=_launchd_path(), label=dlabel, args="".join(f"<string>{a}</string>" for a in dargs),
-        interval=900, log=os.path.expanduser(f"~/.ao/doctor-{key}.log")))
+        interval=900, log=os.path.join(A.HOME, ".ao", A.project_file_name("doctor-log", key))))
     _launchctl("bootout", _launchd_domain(dlabel))
     _launchctl("bootstrap", _launchd_domain(), dplist, merge=True)
     print(f"installed {dlabel}  (ao doctor --check --notify every 15m — the second, independent check)")
@@ -836,8 +1043,10 @@ def cmd_prove(cfg, args):
     root = cfg["root"]
     results = []
     probe = _hook_execution_probe(_ao_hook_inventory(root))
+    # A hook whose /bin/sh finds no ao is not fixed by installing it again (SAFE-REMOVE).
+    hook_fix = _ao_link_fix() if HOOK_AO_NOT_FOUND in probe["detail"] else "ao hooks install"
     results.append(("hook refuses an unauthorised commit", probe["installed"],
-                    None if probe["installed"] else f"{_hook_probe_text(probe)} — ao hooks install"))
+                    None if probe["installed"] else f"{_hook_probe_text(probe)} — {hook_fix}"))
     reviewer = _reviewer_probe(cfg)
     reviewer_ok = reviewer["ok"] and reviewer["configured"]
     results.append(("reviewer answers and is another actor", reviewer_ok, None if reviewer_ok else
@@ -1020,10 +1229,10 @@ def cmd_doctor(cfg, args):
     key = A.project_key(root).lower()
     if os.name == "nt":
         # Windows schedules the watchdog with Task Scheduler, not launchd (#71).
-        wd = subprocess.run(["schtasks", "/Query", "/TN", f"ao-watchdog-{key}"], capture_output=True,
+        wd = subprocess.run(["schtasks", "/Query", "/TN", _windows_task("watchdog", key)], capture_output=True,
                             text=True, encoding=UTF8, errors="replace").returncode == 0
     else:
-        wd = _launchd_listed(f"com.agentorchestrator.watchdog.{key}")
+        wd = _launchd_listed(_launchd_label("watchdog", key))
     print(f"watchdog        {C['green']}running{C['reset']}" if wd else
           f"watchdog        {C['dim']}not installed — ao watchdog install{C['reset']}")
     err = A.last_nudge_error(root)
@@ -1074,6 +1283,10 @@ def cmd_doctor(cfg, args):
     hook_proof = _hook_execution_probe(hook_inventory)
     proof_tone = C["green"] if hook_proof["installed"] else C["yellow"]
     print(f"{'commit proof':<16}{proof_tone}{_hook_probe_text(hook_proof)}{C['reset']}")
+    reach = _hook_ao_reach(hook_inventory)
+    if reach:
+        print(f"{'ao for hooks':<16}{C['yellow']}{reach[0]}{C['reset']}")
+        print(f"{'':<16}{C['dim']}fix: {reach[1]}{C['reset']}")
     print(f"{'checkout':<16}{_checkout_position(A.git_state(root))}")
     for line in _measurement_lines(cfg):
         print(line)
@@ -1095,7 +1308,7 @@ def cmd_doctor(cfg, args):
             print(f"architect bin   {C['green'] if rb else C['red']}{rb or 'not found'}{C['reset']} {C['dim']}{rv}{C['reset']}"
                   + (f"  {C['dim']}({len(others)} older copy: {', '.join(others)}){C['reset']}" if others else ""))
             key = A.project_key(root)
-            we = wake_error(os.path.join(STATE_DIR, f"escalate-{key}.log"))
+            we = wake_error(os.path.join(STATE_DIR, A.project_file_name("escalate-log", key)))
             if we:
                 text, used, when = we["text"], we["binary"], we["when"]
                 print(f"last wake       {C['red']}failed{C['reset']} {when} [{used or '?'}]: {text[:90]}")
@@ -1159,8 +1372,7 @@ def cmd_doctor(cfg, args):
         print(f"ao for agents   {C['green']}{reachable}{C['reset']}")
     else:
         print(f"ao for agents   {C['red']}not on a spawned agent's PATH{C['reset']}")
-        print(f"                {C['dim']}a shell alias does not count — "
-              f"uv tool install ao-orchestrator{C['reset']}")
+        print(f"                {C['dim']}a shell alias does not count — {_ao_link_fix()}{C['reset']}")
 
     from . import skillkit as _skillkit
     for steering in _skillkit.steering_dirs(root):

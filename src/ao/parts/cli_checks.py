@@ -69,7 +69,7 @@ def doctor_problems(cfg):
     hb = A.heartbeat_age(root)
     if hb is not None and hb > WATCHDOG_SILENT_AFTER:
         out.append(("watchdog-dead", f"watchdog silent for {hb // 60}m — launchctl / ao watchdog status"))
-    we = wake_error(os.path.join(STATE_DIR, f"escalate-{key}.log"))
+    we = wake_error(os.path.join(STATE_DIR, A.project_file_name("escalate-log", key)))
     if we and we["kind"] in ("binary", "session"):
         try:
             when = time.mktime(time.strptime(we["when"], "%Y-%m-%d %H:%M:%S"))
@@ -278,6 +278,8 @@ def doctor_problems(cfg):
                 "current-local", "current-scoped"
             ):
                 repair = "ao hooks install (restore tracked hooks with Git)"
+            elif HOOK_AO_NOT_FOUND in proof["detail"]:
+                repair = _ao_link_fix()           # an alias is invisible to the hook's /bin/sh (SAFE-REMOVE)
             else:
                 repair = "ensure the hook can resolve this AO executable, then ao hooks status"
             out.append(("commit-hook", "; ".join(reasons) + f" — {repair}"))
@@ -319,9 +321,8 @@ def _watchdog_interval(root):
     the Windows task runs.
     """
     import plistlib
-    label = f"com.agentorchestrator.watchdog.{A.project_key(root).lower()}"
     try:
-        with open(os.path.join(A.HOME, "Library", "LaunchAgents", f"{label}.plist"), "rb") as fh:
+        with open(_launchd_plist(_launchd_label("watchdog", A.project_key(root))), "rb") as fh:
             interval = int(plistlib.load(fh).get("StartInterval") or 120)
     except (OSError, ValueError, TypeError, AttributeError, plistlib.InvalidFileException):
         interval = 120
@@ -348,7 +349,7 @@ def _watchdog_first_cycle_due(root, now=None):
     """
     from .storage import replace_file_durably
     now = time.time() if now is None else now
-    path = os.path.join(A.HOME, ".ao", f"doctor-{A.project_key(root)}.json")
+    path = A.project_file(root, "doctor-runs")
     try:
         with open(path, encoding=UTF8) as fh:
             record = json.load(fh)
@@ -511,7 +512,8 @@ def _doctor_check(cfg, page=False):
             # A failed wake says what the watchdog's own raise of it says, so the same failure rings once
             # whoever sees it (NOISE-REPEATS).
             from .watchdog import STATE_DIR, wake_error, wake_failure_told
-            failed = wake_error(os.path.join(STATE_DIR, f"escalate-{project}.log")) if key == "wake-failed" else None
+            failed = wake_error(os.path.join(STATE_DIR, A.project_file_name("escalate-log", project))) \
+                if key == "wake-failed" else None
             notify(f"{project}: {key}", text, root, key=shared["key"], window=shared["window"],
                    audience="human", level=shared["level"], what=wake_failure_told(failed) if failed else None)
         else:

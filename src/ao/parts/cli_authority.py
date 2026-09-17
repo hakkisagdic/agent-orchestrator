@@ -49,6 +49,24 @@ def _launchd_listed(label):
     """
     return "\n".join(line for line in _launchctl("list")[0].split("\n") if label in line).strip()
 
+
+def _launchd_label(job, key):
+    """The launchd label of one job ao schedules for a project: `watchdog`, `doctor` or `telegram`."""
+    return f"com.agentorchestrator.{job}.{key.lower()}"
+
+
+def _launchd_plist(label):
+    return os.path.join(A.HOME, "Library", "LaunchAgents", label + ".plist")
+
+
+def _launchd_loaded(label):
+    """Whether `launchctl list` names exactly this label.
+
+    `_launchd_listed` reads the listing as grep did, and the watchdog label of a project
+    called `proj` is inside the one of `proj-api`: a removal checks the label itself.
+    """
+    return any(line.rsplit("\t", 1)[-1].strip() == label for line in _launchctl("list")[0].split("\n"))
+
 PLIST_CMD = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>

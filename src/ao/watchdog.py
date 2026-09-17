@@ -64,7 +64,7 @@ def print(*args, **kw):
 
 def cycles_path(root):
     key = A.project_key(root)
-    return os.path.join(STATE_DIR, f"cycles-{key}.jsonl")
+    return os.path.join(STATE_DIR, A.project_file_name("cycles", key))
 
 
 def record_cycle(root, args, started=None):
@@ -485,7 +485,7 @@ def storm(root, limit=12):
 
 def state_path(root):
     key = A.project_key(root)
-    return os.path.join(STATE_DIR, f"watchdog-{key}.json")
+    return os.path.join(STATE_DIR, A.project_file_name("watchdog-state", key))
 
 
 def load_state(root):
@@ -549,7 +549,7 @@ def provider_degraded(root, window=900):
     only if that marker itself is inside the window.
     """
     key = A.project_key(root)
-    p = os.path.join(STATE_DIR, f"nudge-{key}.log")
+    p = os.path.join(STATE_DIR, A.project_file_name("nudge-log", key))
     if not os.path.exists(p):
         return None
     try:
@@ -630,7 +630,7 @@ def architect_hold_reason(root, cfg, adapter, st, found=None, now=None):
     if not resolved:
         return no("binary-missing", f"{argv[0]} cannot be found")
     key = A.project_key(root)
-    err = wake_error(os.path.join(STATE_DIR, f"escalate-{key}.log"))
+    err = wake_error(os.path.join(STATE_DIR, A.project_file_name("escalate-log", key)))
     if err and err.get("kind") == "binary" and err.get("binary") == f"{resolved} {ver}" \
             and now - (st.get("wake_error") or {}).get("at", 0) < 6 * 3600:
         return no("binary-failed", f"the last wake failed with this binary: {err.get('text', '')[:80]}")
@@ -788,7 +788,8 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
     # for good whenever that wake died at once. A wake whose log shows a transport
     # failure hands nothing back. A model's own prose saying "Error:" does not count.
     handed = dict(st.get("handed") or {})
-    if handed and wake_failed(wake_error(os.path.join(STATE_DIR, f"escalate-{project}.log")), last_wake):
+    if handed and wake_failed(wake_error(os.path.join(STATE_DIR, A.project_file_name("escalate-log", project))),
+                              last_wake):
         handed = {}
     mtimes = {}
     for m in pending:
@@ -917,7 +918,7 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
         search = child_path()
         resolved, ver = A.resolve_binary(argv[0], path=search)
         key = A.project_key(root)
-        log_path = os.path.join(STATE_DIR, f"escalate-{key}.log")
+        log_path = os.path.join(STATE_DIR, A.project_file_name("escalate-log", key))
         # Read what the previous wake said before starting another. Same binary,
         # same error, less than six hours old: the human has been told, and a
         # retry is the forty-first identical failure.
@@ -1138,7 +1139,7 @@ def _schedule_hunt(root, cfg, st):
         return False
     if time.time() - float(st.get("last_hunt") or 0) < S.get(cfg, "hunter.every_hours") * 3600:
         return False
-    log = os.path.join(STATE_DIR, f"hunt-{A.project_key(root)}.log")
+    log = os.path.join(STATE_DIR, A.project_file_name("hunt-log", A.project_key(root)))
     os.makedirs(STATE_DIR, exist_ok=True)
     with open(log, "a", encoding=UTF8) as fh:
         fh.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} hunt ===\n")
@@ -1332,7 +1333,7 @@ def tell_retried_wake(root, cfg, st, dry_run=False):
         return False
     if arch_alive(root, cfg.get("architect") or {}) and time.time() - float(retry.get("at") or 0) < 900:
         return False                      # still running, and a failing one can take minutes to say so
-    failure = wake_error(os.path.join(STATE_DIR, f"escalate-{A.project_key(root)}.log"))
+    failure = wake_error(os.path.join(STATE_DIR, A.project_file_name("escalate-log", A.project_key(root))))
     worked = not wake_failed(failure, retry.get("at") or 0)
     if dry_run:
         if worked:
@@ -1405,7 +1406,7 @@ def main():
     return run(args)
 
 
-CYCLE_LOCK = "watchdog-{key}.cycle.lock"
+CYCLE_LOCK = A.PROJECT_FILES["watchdog-cycle-lock"]
 
 
 def run(args):
@@ -2314,7 +2315,7 @@ def _cycle_impl(args, root):
                 print(f"queue low, but {headroom['text']}")
                 return 0
             key = A.project_key(root)
-            log_path = os.path.join(STATE_DIR, f"refill-{key}.log")
+            log_path = os.path.join(STATE_DIR, A.project_file_name("refill-log", key))
             if A.hold_state(root):
                 print("held since this cycle began; not waking the architect to refill")
                 return 0
@@ -2527,7 +2528,7 @@ def _cycle_impl(args, root):
     # an exhausted plan looks exactly like an agent that ignored us, and the
     # difference is the only thing worth knowing at that moment.
     key = A.project_key(root)
-    log_path = os.path.join(STATE_DIR, f"nudge-{key}.log")
+    log_path = os.path.join(STATE_DIR, A.project_file_name("nudge-log", key))
     os.makedirs(STATE_DIR, exist_ok=True)
     env = dict(os.environ, PATH=search, AO_ROLE="implementer")
     if added:

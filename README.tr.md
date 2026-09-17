@@ -25,8 +25,11 @@ Python ile:
 
 ```bash
 git clone https://github.com/hakkisagdic/agent-orchestrator ~/ao
-echo 'alias ao="$HOME/ao/bin/ao"' >> ~/.zshrc && exec zsh
+mkdir -p ~/.local/bin && ln -s ~/ao/bin/ao ~/.local/bin/ao    # ~/.local/bin PATH'te olmalı
 ```
+
+Shell alias değil, symlink: Git ao'nun commit hook'unu `/bin/sh` altında çalıştırır,
+watchdog da ajanları senin shell'in olmadan başlatır; ikisi de alias'ı göremez.
 
 Bağımlılık yok, bilerek — bu araç kontrol etmediğin makinelerdeki ajanları izler ve
 bağımlılık, tam da orada eksik olabilecek şeydir. İlk koşudan önce yapılandırma
@@ -108,7 +111,7 @@ gereken tek yetkidir.
 | `ao pings setup --url …` | dead man's switch: watchdog ve doctor işi birlikte ölünce alarm veren dış ping |
 | `ao hooks [status|install|uninstall] [--allow-shared-hooks]` / `ao push allow` | Git'in etkin hook yolunu çöz; roller bağımsızdır, paylaşılan/harici/global mutasyonlar komutun tamamı için açık yetki ister |
 | `ao skill install` / `ao skill show` | playbook (roller, döngü, yetki, protokol, alarmlar, tüm komutlar) deponun ajanları için: Claude skill, Kiro steering, AGENTS.md |
-| `ao remove --yes [--allow-shared-hooks]` | iki aşamalı kaldırma: dayatma etkinken `.ao-project` dosyasını silip commit et, HEAD ve index artık taşımayınca AO durumunu kaldır; yabancı/korunan hook'lara dokunma |
+| `ao remove --yes [--allow-shared-hooks]` | iki aşamalı kaldırma: dayatma etkinken `.ao-project` dosyasını silip commit et, HEAD ve index artık taşımayınca AO durumunu kaldır; yabancı/korunan hook'lara dokunma. İkinci aşama projenin zamanlanmış işlerini ve `~/.ao` içindeki yalnız kendi dosyalarını kaldırır, kuru koşuda her birini adıyla listeler ve kaldıramadığını adıyla söyleyip 1 ile çıkar ([watchdog.md](docs/watchdog.md)) |
 | `ao init --profile claude-kiro|claude-claude` | rol bloklarını ve exact `.ao-project` kayıt işaretini yaz, ama stage etme ([profiles.md](docs/profiles.md)) |
 | `ao doctor --check` | zamanlayıcı için sessiz doctor: problem başına bir satır, exit 1, alarm — `ao watchdog install` 15 dakikalık launchd işi olarak kurar |
 | `ao email setup` / `ao email test` | kırmızı alarm kanalı: formsubmit.co ile e-posta, sunucu yok ([alarms.md](docs/alarms.md)) |
@@ -150,9 +153,11 @@ değiştirmez. Eksik, yanlış yerde, çalıştırılamayan, bayat, yabancı ya 
 hook `not installed` olur; status, doctor, `doctor --check` ve init aynı sonucu
 kullanır. `status`; etkin yolu, yol sınıfını, kazanan `core.hooksPath`
 scope/origin/value bilgisini, track durumunu ve yanlış yerdeki AO biçimlerini
-gösterir. Install, pre-commit ile pre-push rollerini bağımsız ele
-alır; uygun pre-commit'i kurup özel pre-push'ı bayt düzeyinde koruyabilir,
-push-window hook'unun kullanılamadığını söyleyebilir ve 1 dönebilir. Uygun
+gösterir. Deponun git dizinine kurulan hook, onu kuran ao'nun yolunu da taşır ve o
+dosyaya yalnız `/bin/sh` PATH'te ao bulamadığında başvurur; bulamadığında `hooks status`
+ve `doctor` bunu düzelten symlink'le birlikte söyler. Install, pre-commit ile pre-push
+rollerini bağımsız ele alır; uygun pre-commit'i kurup özel pre-push'ı bayt düzeyinde
+koruyabilir, push-window hook'unun kullanılamadığını söyleyebilir ve 1 dönebilir. Uygun
 hedeflerden biri paylaşılan, harici ya da global/system config ile seçilmişse
 install, uninstall ve remove işlemlerinin tamamı açık `--allow-shared-hooks`
 olmadan reddedilir.

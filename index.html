@@ -96,7 +96,7 @@ html[data-lang=tr] [lang-tr]{display:revert}
 <section><div class="wrap">
   <h2><span lang-en>Sixty seconds</span><span lang-tr>Altmış saniye</span></h2>
   <pre class="sh">git clone https://github.com/hakkisagdic/agent-orchestrator ~/ao
-echo 'alias ao="$HOME/ao/bin/ao"' &gt;&gt; ~/.zshrc &amp;&amp; exec zsh
+mkdir -p ~/.local/bin &amp;&amp; ln -s ~/ao/bin/ao ~/.local/bin/ao
 cd ~/your-project &amp;&amp; ao status</pre>
   <p style="color:var(--muted);font-size:15px">
     <span lang-en>No dependencies — Python standard library only. Nothing to configure

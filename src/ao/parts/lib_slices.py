@@ -462,8 +462,7 @@ def outcome_stats(outcomes):
 
 # ---- every store is bounded, without being asked (#50) -----------------------------------
 
-OBSERVATION_LOGS = ("nudge-{key}.log", "watchdog-{key}.log", "refill-{key}.log", "escalate-{key}.log",
-                    "cycles-{key}.jsonl")
+OBSERVATION_LOGS = ("nudge-log", "watchdog-log", "refill-log", "escalate-log", "cycles")      # PROJECT_FILES
 
 
 def bound_store(path, kb):
@@ -495,7 +494,7 @@ def observation_stores(root, state_dir=None):
     key = project_key(root)
     state_dir = state_dir or os.path.join(HOME, ".ao")
     stores = [os.path.join(root, ".ao", "ledger", name) for name in ("notices.jsonl", "progress.jsonl")]
-    return stores + [os.path.join(state_dir, pattern.format(key=key)) for pattern in OBSERVATION_LOGS]
+    return stores + [os.path.join(state_dir, project_file_name(what, key)) for what in OBSERVATION_LOGS]
 
 
 def bound_observation_logs(root, state_dir=None):

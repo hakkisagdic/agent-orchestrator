@@ -25,8 +25,11 @@ already ship:
 
 ```bash
 git clone https://github.com/hakkisagdic/agent-orchestrator ~/ao
-echo 'alias ao="$HOME/ao/bin/ao"' >> ~/.zshrc && exec zsh
+mkdir -p ~/.local/bin && ln -s ~/ao/bin/ao ~/.local/bin/ao    # ~/.local/bin must be on PATH
 ```
+
+A symlink, not a shell alias: neither `/bin/sh`, which runs ao's commit hook, nor an agent
+the watchdog starts without your shell can see an alias.
 
 No dependencies, by choice — this watches agents on machines it does not control, and
 a dependency is a thing that can be missing exactly there. Nothing to configure before
@@ -113,7 +116,7 @@ scope is the one authority an implementer must not have.
 | `ao pings setup --url …` | dead man's switch: external pings that alarm when the watchdog and its doctor job both die |
 | `ao hooks [status|install|uninstall] [--allow-shared-hooks]` / `ao push allow` | resolve Git's effective hook path; each role is independent, and shared/external/global mutations require explicit command-wide authorization |
 | `ao skill install` / `ao skill show` | the playbook (roles, loop, authority, protocol, alarms, every command) rendered for the agents this repo uses: Claude skill, Kiro steering, AGENTS.md |
-| `ao remove --yes [--allow-shared-hooks]` | two-phase removal: delete and commit `.ao-project` while enforcement remains active, then remove AO state after HEAD and index no longer contain it; foreign/protected hooks stay untouched |
+| `ao remove --yes [--allow-shared-hooks]` | two-phase removal: delete and commit `.ao-project` while enforcement remains active, then remove AO state after HEAD and index no longer contain it; foreign/protected hooks stay untouched. The second phase takes off the project's scheduled jobs and exactly its own files in `~/.ao`, lists each by name in the dry run, and exits 1 naming what it could not remove ([watchdog.md](docs/watchdog.md)) |
 | `ao init --profile claude-kiro|claude-claude` | write role blocks and exact `.ao-project` enrollment marker without staging it ([profiles.md](docs/profiles.md)) |
 | `ao doctor --check` | quiet doctor for a scheduler: one line per problem, exit 1, alarms raised — installed as a 15-minute launchd job by `ao watchdog install` |
 | `ao email setup` / `ao email test` | the red alarm channel: e-mail via formsubmit.co, no server ([alarms.md](docs/alarms.md)) |
@@ -154,7 +157,10 @@ The probe never commits, changes the real index, or writes a Git object. A missi
 misplaced, non-executable, stale, foreign, or fail-open hook is `not installed`, and
 `hooks status`, `doctor`, `doctor --check`, and `init` consume the same result.
 `status` also names the effective path, path class, winning `core.hooksPath`
-scope/origin/value, track state, and misplaced AO forms. Install handles
+scope/origin/value, track state, and misplaced AO forms. A hook installed in the
+repository's git directory also names the ao that installed it, and falls back on that
+file only when `/bin/sh` finds no ao on PATH; `hooks status` and `doctor` say when it
+cannot, with the symlink that fixes it. Install handles
 pre-commit and pre-push independently, so it may install an eligible pre-commit,
 preserve a custom pre-push byte-for-byte, report the push-window hook unavailable,
 and return 1. Install, uninstall, and remove refuse the entire mutation set when
