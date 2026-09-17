@@ -1,6 +1,6 @@
 """What a Windows machine does to ao's files and processes, simulated where it can be (#9, #71).
 
-The Windows lane runs on demand only. These hold on every platform what a Windows
+The Windows lane runs weekly and on demand. These hold on every platform what a Windows
 machine exposed: text written with CRLF, Git converting line endings on checkout,
 and a process table that is a PowerShell query.
 """

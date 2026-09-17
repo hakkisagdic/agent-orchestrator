@@ -121,7 +121,7 @@ scope is the one authority an implementer must not have.
 | `ao fanout ok --agents N` / `ao fanout record …` / `ao fanout history` | may a fan-out of N sub-agents start now (hard cap, recent limit hit, provider window); record what one cost |
 | `ao cost --since 24h` | what the coordination itself spends: implementer turns by class (product / analysis / ceremony / coordination), wasted turns, reviews; `--since`, like every time a command takes, is `30m`, `2h`, `1d`, `today`, `yesterday` or a date |
 | `ao features [on|off <key>]` | the switches and what each costs; all off = deterministic ao, zero model spend ([features.md](docs/features.md)) |
-| platforms | macOS and Linux native; Windows first cut ([windows.md](docs/windows.md)); tests run on all three in CI |
+| platforms | macOS and Linux native; Windows first cut ([windows.md](docs/windows.md)); the suite runs on Ubuntu for every push and pull request, on macOS and Windows weekly |
 | `ao waive review --slice B7 --by <name> --why …` / `ao catchup` | a person bypasses a gate on the record; catchup reviews each landed range with a model family other than the one that wrote it, against what its commit messages claim, closes a `move-only` split on the proof its grant recorded, run again, and replays deferred wakes and nudges. `ao catchup --plan` previews it, names what closes by proof, and writes nothing, `ao catchup --limit 10` and `ao catchup --slice B7` bound a run, `ao catchup --author-family <family> --by <name>` is a person naming a family ao did not record, and `ao catchup --move-only <slices> --by <name>` is a person stating which waived slices only moved code, each closing only where the proof holds; a run exits 3 when the reviews it started decided nothing, and 0 when it made progress or had nothing to do |
 | `ao pings setup --url …` | dead man's switch: external pings that alarm when the watchdog and its doctor job both die |
 | `ao hooks [status|install|uninstall] [--allow-shared-hooks]` / `ao push allow` | resolve Git's effective hook path; each role is independent, and shared/external/global mutations require explicit command-wide authorization |
@@ -212,11 +212,12 @@ These are not style preferences. Each one is a failure that cost real hours.
 even when the CLI does not. Adding one is a JSON file; see
 [`docs/adapters.md`](docs/adapters.md).
 
-The hosted `tests` workflow runs only on demand, one environment at a time
-(`gh workflow run tests -f os=windows-latest -f python=3.11`), because GitHub bills
-macOS minutes at 10x and Windows at 2x; the pre-push hook already runs the suite
-locally on every push. Lanes: Python 3.11 on Ubuntu, Windows and macOS, plus the
-Python 3.9 support floor and Python 3.12 on Ubuntu. Hosted runs cover OS
+The hosted `tests` workflow runs the suite on every push to main and every pull request
+on Ubuntu, with Python 3.9 (the support floor) and 3.12; macOS and Windows run every
+week and on demand (`gh workflow run tests -f os=windows-latest -f python=3.12`). The
+repository is public, so the hosted runners cost nothing, and the pre-push hook still
+runs the suite locally before a push. A release tag runs the suite again before it
+publishes. Hosted runs cover OS
 API behavior and deterministic process crashes with real child processes and
 temporary paths. They are not physical power-loss, storage-controller or filesystem
 qualification, including unsupported and network filesystems.

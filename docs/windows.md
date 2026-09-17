@@ -13,11 +13,10 @@ What works, what does not, and how hosted runners exercise it.
 | commit hook (`ao hooks install`) | installed inside the repository; a shared, external or globally configured hooks directory is refused (#71); its execution proof does not pass yet (below) |
 | pre-push hook | works under Git's own shell |
 
-The hosted `tests` workflow runs only through manual `workflow_dispatch`, one
-environment and interpreter at a time, on the maintainer's word (macOS minutes cost
-10x, Windows 2x). Python 3.11 runs
-on Ubuntu, Windows and macOS; Ubuntu also carries the Python 3.9 support-floor and
-Python 3.12 release/newer lanes. Every lane runs the same suite, and each supported
+The hosted `tests` workflow runs Windows and macOS every week on Python 3.12, and any
+environment on demand (`gh workflow run tests -f os=windows-latest -f python=3.12`);
+Ubuntu runs on every push and pull request with the Python 3.9 support floor and 3.12.
+Every lane runs the same suite, and each supported
 runner must pass the process backend's native self-check rather than silently use
 the shell fallback.
 
