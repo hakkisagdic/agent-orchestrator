@@ -184,13 +184,23 @@ has never shipped in `.ao/adapters/`, and init sets it up the same way.
 
 ## Where a harness keeps its sessions is declared, not coded
 
-Session discovery, the implementer's transcript path and the architect's newest session all
-read an adapter's `sessions` store (#76):
+Session discovery, `session: auto`, each role's transcript path, `ao projects` and `ao fleet`
+all read an adapter's `sessions` store (#76):
 
 | `sessions.kind` | Fields | How ao reads it |
 |---|---|---|
-| `workspace-meta` | `dir`, `meta`, `transcript`, `workspaces`, `title`, `status` | `dir/<workspace>/<session>/meta` names the workspace paths; the newest `transcript` wins |
-| `escaped-cwd` | `dir`, `transcript` (with `{session}`) | the working directory with `/` and `.` made dashes (every other character too on Windows) is a directory under `dir` |
+| `workspace-meta` | `dir`, `meta`, `transcript`, `workspaces`, `title`, `status` | `dir/<workspace>/<session>/meta` names the workspace paths; a session pinned by its id alone is found in the workspace directory that keeps it |
+| `escaped-cwd` | `dir`, `transcript` (with `{session}`), `cwd` | the working directory with `/` and `.` made dashes, or with every character but letters and digits made one, is a directory under `dir`, each transcript in it a session; `cwd` names the record field holding the working directory, which is how `ao projects` reads a directory back to its workspace, the newest records first |
+
+Each store is read for the working directory a role works in. Where one role is alone in
+it, the newest session is that role's; where the implementer and the architect run one
+harness in one directory, ao takes a session only when a pin, a record in
+`.ao/sessions.json` or the one session the other role does not hold says whose it is, and
+names the rest ambiguous. [profiles.md](profiles.md#how-auto-finds-a-session) has the
+rules. A store declared outside the package is never scanned; a role on such an adapter
+pins its session. `resume.continue_last` and `list_sessions` are declared for reference,
+and nothing reads them: ao resolves a session from the store rather than asking the
+harness for its latest.
 
 `directives.command_hooks` (`{format: "pre-tool-use", shell_tool, project_dir_env, files}`) names
 the settings whose hooks can rewrite an agent's shell commands, which `ao doctor` reports as a

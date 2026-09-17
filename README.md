@@ -33,7 +33,11 @@ the watchdog starts without your shell can see an alias.
 
 No dependencies, by choice — this watches agents on machines it does not control, and
 a dependency is a thing that can be missing exactly there. Nothing to configure before
-the first run: `ao` discovers the session from the agent's own store.
+the first run: `ao` discovers the session from the agent's own store — Kiro's and Claude
+Code's today — and `session: auto` in a config written by `ao init --profile` resolves the
+same way. Where the implementer and the architect run one harness in one directory, `ao`
+does not guess which session is whose: `ao doctor` says so, and a pinned id settles it
+([docs/profiles.md](docs/profiles.md#how-auto-finds-a-session)).
 
 **Windows** ships PowerShell and does not ship Python, so `bin/ao.ps1` covers `status`,
 `board` and `doctor` with nothing installed. It is a deliberate subset and stays one —

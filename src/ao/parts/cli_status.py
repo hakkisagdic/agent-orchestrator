@@ -87,6 +87,10 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0):
                  "idle": ("○ IDLE", C["red"])}.get(state, ("? unknown", C["dim"]))
         txt, col = label
         agestr = f"last write {age // 60}m {age % 60}s ago" if age is not None else "no transcript"
+        # An `auto` ao could not resolve says why, where it read as a transcript gone missing (SESSION-IDENTITY).
+        resolved = A.session_state(cfg, "implementer") or {}
+        if age is None and not resolved.get("session") and resolved.get("why"):
+            agestr, desc = f"session {resolved['how']}", resolved["why"]
         a(f"\n{col}{C['b']}{txt}{C['reset']}  {C['dim']}{impl.get('adapter','?')} · {agestr}{C['reset']}")
         for i, ln in enumerate(textwrap.wrap(desc, w - 6)[:2]):
             a(f"  {C['dim']}↳{C['reset']} {ln}" if i == 0 else f"    {ln}")
@@ -330,6 +334,9 @@ def _fleet_rows():
         impl = cfg.get("implementer") or {}
         adapter = A.load_adapter(impl.get("adapter", "")) if impl else {}
         state, age, desc = A.busy(cfg, adapter) if impl else ("unknown", None, "")
+        resolved = A.session_state(cfg, "implementer") or {}
+        if age is None and not resolved.get("session") and resolved.get("why"):
+            desc = f"session {resolved['how']}: {resolved['why']}"          # why it is unknown (SESSION-IDENTITY)
         bd = A.board(root)
         g = A.git_state(root)
         rows.append({"name": cfg.get("project") or os.path.basename(root), "root": root,
@@ -390,7 +397,9 @@ def cmd_tail(cfg, args):
         print(line)
     msgs_path, _ = A.session_paths(cfg)
     if not msgs_path:
-        print("No implementer session found.", file=sys.stderr)
+        session = A.session_state(cfg, "implementer") or {}
+        why = session.get("why") if not session.get("session") else None
+        print(f"No implementer session found: {why}" if why else "No implementer session found.", file=sys.stderr)
         return 1
     _, _, adapter = _ctx(cfg)
     for hh, kind, text in A.messages(A.read_tail(msgs_path), args.n, adapter):

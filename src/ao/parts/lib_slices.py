@@ -143,9 +143,18 @@ def architect_absence(root, cfg):
     """
     seen = []
     try:
-        found = discover_architect((cfg.get("architect") or {}).get("cwd") or root)
-        if found and found.get("age") is not None:
-            seen.append(time.time() - float(found["age"]))
+        # Its own session's last write. The newest transcript where the architect works is as likely
+        # the implementer's, when both run one harness there (SESSION-IDENTITY).
+        state = session_state(cfg, "architect")
+        if state is not None:
+            transcript = role_session_paths(dict(cfg, root=root), "architect")[0] if state["session"] else None
+            if transcript and os.path.exists(transcript):
+                seen.append(os.path.getmtime(transcript))
+        else:
+            found = discover_architect((cfg.get("architect") or {}).get("cwd") or root)
+            if found and found.get("age") is not None \
+                    and found.get("session") != (session_state(cfg, "implementer") or {}).get("session"):
+                seen.append(time.time() - float(found["age"]))
     except Exception:
         pass
     try:

@@ -143,13 +143,27 @@ def doctor_problems(cfg):
         msgs_p, _ = A.session_paths(cfg)
         # The watchdog's heartbeat now comes before its transcript check, so a
         # transcript it cannot find no longer looks like a dead watchdog (#71).
-        if (cfg.get("implementer") or {}).get("session") and _features.enabled(cfg, "nudge") \
+        if (A.session_state(cfg, "implementer") or {}).get("session") and _features.enabled(cfg, "nudge") \
                 and (not msgs_p or not os.path.exists(msgs_p)):
             out.append(("transcript-missing", "the implementer's transcript cannot be found — the "
                         "watchdog has nothing to watch and restarts nobody; check implementer.session"))
         if msgs_p and os.path.exists(msgs_p) and time.time() - os.path.getmtime(msgs_p) < 3600 \
                 and not A.read_tail(msgs_p, 2_000_000):
             out.append(("transcript-blind", "fresh transcript, nothing parsed — the agent CLI's format changed"))
+    except Exception:
+        pass
+    # A role's `auto` that settles on no session it may resume: the watchdog nudges or wakes nobody, and an
+    # ambiguity is named rather than guessed at (SESSION-IDENTITY).
+    try:
+        for role, key, feature in (("implementer", "implementer-session", "nudge"),
+                                   ("architect", "architect-session", "architect_wake")):
+            state = A.session_state(cfg, role)
+            if state is None or state["how"] == "pinned" or not _features.enabled(cfg, feature) \
+                    or (role == "architect" and not any("{session}" in str(part)
+                                                        for part in (cfg.get(role) or {}).get("argv") or [])):
+                continue
+            if not (state["session"] and state["trusted"]):
+                out.append((key, f"the {role}'s session is {state['how']}: {state['why']}"))
     except Exception:
         pass
     # A source tree no gate exercises is a tree nothing verifies (#5).
@@ -498,7 +512,7 @@ def _doctor_credit_lines(cfg):
 
 # Findings that mean work has stopped and only a person can restart it. Everything
 # else a doctor finds is an advisory: recorded for the architect, never paged (#40).
-DOCTOR_RED = {"watchdog-dead", "wake-failed", "transcript-blind", "transcript-missing"}
+DOCTOR_RED = {"watchdog-dead", "wake-failed", "transcript-blind", "transcript-missing", "implementer-session"}
 
 
 def _doctor_severity(key, text):

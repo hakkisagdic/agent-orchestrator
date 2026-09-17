@@ -158,7 +158,9 @@
   "sessions": {
     "kind": "escaped-cwd",
     "dir": "~/.claude/projects",
-    "transcript": "{session}.jsonl"
+    "transcript": "{session}.jsonl",
+    "cwd": "cwd",
+    "note": "A directory's name is its working directory with every character that is not a letter or a digit made a dash (code.claude.com/docs/en/sessions, read 2026-09-17), so it cannot be read back into a path: `cwd` names the record field holding the working directory, and a directory is placed by a value there that escapes to its name. user, assistant, attachment and system records carry it. A session moved with /cd is kept under the directory it moved to while its first records name the old one, so the newest records are read first. Verified on a 2.1 store: every one of 167 directories was placed from the last or the first 64 KB of one of its three newest transcripts, 158 of them by the last record that carries the field."
   },
   "busy": {
     "mtime_file": "{session}.jsonl",

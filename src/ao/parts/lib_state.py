@@ -1037,14 +1037,23 @@ def escaped_cwd_dir(store, cwd):
     directory that already exists under either name is used as found.
     """
     base = _home_path((store or {}).get("dir"))
-    cwd = str(cwd or "")
-    posix = cwd.replace("/", "-").replace(".", "-")
-    portable = re.sub(r"[^A-Za-z0-9-]", "-", cwd)
+    posix, portable = escaped_cwd_names(cwd)
     for name in (posix, portable):
         if name and "/" not in name and "\\" not in name and ":" not in name \
                 and os.path.isdir(os.path.join(base, name)):
             return os.path.join(base, name)
     return os.path.join(base, portable if os.name == "nt" else posix)
+
+
+def escaped_cwd_names(cwd):
+    """(posix, portable): the names an escaped-cwd store may give a working directory's directory.
+
+    "/" and "." made dashes, as ao named it on macOS and Linux; and every character that is
+    not a letter, a digit or a dash made one, as Windows needs and as the store's own
+    documentation describes it.
+    """
+    cwd = str(cwd or "")
+    return cwd.replace("/", "-").replace(".", "-"), re.sub(r"[^A-Za-z0-9-]", "-", cwd)
 
 
 def unplaced_agent_pids(root, adapter):
@@ -1113,23 +1122,23 @@ def discover_architect(cwd):
     conversation, and a watchdog that wakes a dead session fails silently — the
     worst shape of failure, because everything still looks configured. Resolve it
     from disk instead, the same way the implementer's session is resolved.
+
+    The newest is the architect's only where no other role's sessions are kept there:
+    where the implementer runs the same harness in the same directory, the newest was
+    the implementer's own session, and a wake resumed it as the architect. `sessions`
+    names every session found, newest first, for resolve_session to choose among
+    (SESSION-IDENTITY).
     """
     # The store flattens the path into a directory name - a worktree under a
     # dot-directory gets a doubled dash where "/." was - and on Windows the drive
     # and backslashes go the same way (#71).
-    best, best_mt, best_path = None, 0, None
-    for _, store in session_stores("escaped-cwd"):
-        d = escaped_cwd_dir(store, cwd)
-        if not os.path.isdir(d):
-            continue
-        suffix = store["transcript"].replace("{session}", "")
-        for f in os.listdir(d):
-            if not f.endswith(suffix):
-                continue
-            mt = os.path.getmtime(os.path.join(d, f))
-            if mt > best_mt:
-                best, best_mt, best_path = f[:-len(suffix)], mt, os.path.join(d, f)
-    return {"session": best, "transcript": best_path, "age": int(time.time() - best_mt)} if best else None
+    found = sorted((row for ident, _ in session_stores("escaped-cwd") for row in store_sessions(ident, cwd)),
+                   key=lambda row: row["mtime"], reverse=True)
+    if not found:
+        return None
+    best = found[0]
+    return {"session": best["session"], "transcript": best["transcript"], "age": int(time.time() - best["mtime"]),
+            "adapter": best["adapter"], "sessions": [row["session"] for row in found]}
 
 
 def _architect_process_roots(root, architect=None, helper_only=False):

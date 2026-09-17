@@ -82,38 +82,171 @@ def _workspace_sessions(store):
                    "title": m.get(store.get("title") or "title", ""), "status": m.get(store.get("status") or "status", "")}
 
 
-def discover_session(cwd):
+def _declared_store(ident):
+    """The `sessions` store the package adapter `ident` declares, or {}."""
+    store = (package_adapters().get(str(ident or "")) or {}).get("sessions")
+    return store if isinstance(store, dict) else {}
+
+
+def store_sessions(ident, cwd):
+    """[{adapter, session, workspace_hash, transcript, meta, mtime}], newest first: each session that the store
+    the package adapter `ident` declares keeps for the working directory `cwd` (SESSION-IDENTITY).
+
+    A workspace-meta store names a session's workspaces in its metadata; an escaped-cwd store
+    keeps a directory's sessions in a directory named for it, one transcript each. A helper ao
+    starts - a reviewer, a hunter - runs in a directory of its own outside the repository, so
+    no session of one is ever a workspace's.
+    """
+    store = _declared_store(ident)
+    rows = []
+    if store.get("kind") == "workspace-meta":
+        base = _home_path(store.get("dir"))
+        for row in _workspace_sessions(store):
+            if isinstance(row["paths"], list) and cwd in row["paths"]:
+                folder = os.path.join(base, row["workspace_hash"], row["session"])
+                rows.append({"adapter": ident, "session": row["session"], "workspace_hash": row["workspace_hash"],
+                             "transcript": os.path.join(folder, store["transcript"]),
+                             "meta": os.path.join(folder, store["meta"]), "mtime": row["mtime"]})
+    elif store.get("kind") == "escaped-cwd" and cwd:
+        rows = [{"adapter": ident, "session": session, "workspace_hash": None, "transcript": path, "meta": None,
+                 "mtime": mtime} for session, path, mtime in _escaped_transcripts(store, escaped_cwd_dir(store, cwd))]
+    return sorted(rows, key=lambda row: row["mtime"], reverse=True)
+
+
+def _escaped_transcripts(store, directory):
+    """[(session, transcript, mtime)], newest first: each transcript an escaped-cwd store keeps in one directory."""
+    prefix, _, suffix = _name(store.get("transcript")).partition("{session}")
+    found = []
+    try:
+        entries = list(os.scandir(directory))
+    except OSError:
+        return found
+    for entry in entries:
+        name = entry.name
+        if len(name) <= len(prefix) + len(suffix) or not name.startswith(prefix) or not name.endswith(suffix):
+            continue
+        try:
+            if entry.is_file():
+                found.append((name[len(prefix):len(name) - len(suffix)], entry.path, entry.stat().st_mtime))
+        except OSError:
+            continue
+    return sorted(found, key=lambda item: item[2], reverse=True)
+
+
+# How much of a transcript's end and of its beginning is read to place its directory: a
+# directory is placed from the last or the first records of one of its newest transcripts.
+WORKSPACE_READ_BYTES = 65_536
+
+
+def _escaped_workspaces(store):
+    """[(workspace, newest session, its mtime)] for each directory of an escaped-cwd store ao can place.
+
+    A directory's name cannot be read back into a path - one dash stood for "/", for "." and
+    for every other character that is not a letter or a digit - so the path is one the
+    store's own records name at the field it declares as `cwd`, taken only where it escapes to
+    that directory's name: a session moved to another directory is kept under the new one, and
+    its first records still name the old. The ends of the three newest transcripts are read,
+    never a whole one. A store that declares no such field places no directory.
+    """
+    field = _name(store.get("cwd"))
+    if not field:
+        return []
+    try:
+        directories = list(os.scandir(_home_path(store.get("dir"))))
+    except OSError:
+        return []
+    out = []
+    for entry in directories:
+        try:
+            if not entry.is_dir():
+                continue
+        except OSError:
+            continue
+        transcripts = _escaped_transcripts(store, entry.path)
+        path = next((value for _, transcript, _ in transcripts[:3] for value in _recorded_values(transcript, field)
+                     if entry.name in escaped_cwd_names(value)), None)
+        if path:
+            out.append((path, transcripts[0][0], transcripts[0][2]))
+    return out
+
+
+def _recorded_values(path, field, nbytes=WORKSPACE_READ_BYTES):
+    """The text a transcript's records hold at `field`: its last records newest first, then its first ones."""
+    marker = '"' + field.split(".")[0].split("[")[0] + '"'
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as fh:
+            fh.seek(max(0, size - nbytes))
+            tail = fh.read(nbytes)
+            fh.seek(0)
+            head = fh.read(nbytes) if size > nbytes else b""
+    except OSError:
+        return []
+    values = []
+    for blob, newest_first in ((tail, True), (head, False)):
+        lines = blob.decode(UTF8, "replace").split("\n")
+        if newest_first and size > nbytes:
+            lines = lines[1:]                               # the tail starts inside a record
+        for line in (reversed(lines) if newest_first else lines):
+            if marker not in line:
+                continue
+            try:
+                value = _path_value(json.loads(line), field)
+            except (ValueError, RecursionError):
+                continue
+            if isinstance(value, str) and value:
+                values.append(value)
+    return values
+
+
+def discover_session(cwd, exclude=()):
     """Find the most recently active local agent session whose workspace is cwd.
 
-    A store that keeps each session's metadata with its workspace paths (an adapter's
-    `sessions` of kind workspace-meta) is enough to resolve the opaque per-workspace
-    directory without asking the vendor CLI.
+    Every store an adapter declares is read (`sessions`): a workspace-meta store's
+    metadata resolves the opaque per-workspace directory, and an escaped-cwd store keeps
+    the directory's transcripts under its escaped name, without asking the vendor CLI.
+    Only one harness's store was read, and a project running the other one had no
+    session at all. `exclude` holds the sessions another role pins.
     """
     best = None
-    for ident, store in session_stores("workspace-meta"):
-        for row in _workspace_sessions(store):
-            if cwd in row["paths"] and (best is None or row["mtime"] > best["_mtime"]):
+    for ident in sorted(package_adapters()):
+        for row in store_sessions(ident, cwd):
+            if row["session"] in exclude:
+                continue
+            if best is None or row["mtime"] > best["_mtime"]:
                 best = {"adapter": ident, "session": row["session"], "workspace_hash": row["workspace_hash"],
                         "cwd": cwd, "_mtime": row["mtime"]}
+            break
     return best
 
 
 def all_workspaces():
-    """Every local agent session grouped by the workspace it belongs to.
+    """Every local agent session grouped by the workspace it belongs to, for workspaces that still exist.
 
     Lets `ao` answer "which projects can I watch?" without any configuration —
-    the vendor stores already record their own workspace paths.
+    the vendor stores already record their own workspace paths. A workspace-meta store
+    names them in each session's metadata; an escaped-cwd store's directories are placed
+    by the working directory their records name (`sessions.cwd`). A directory gone from
+    disk - a reviewer's temporary one, a deleted checkout - is no project to watch.
     """
     found = {}
+
+    def keep(path, row):
+        current = found.get(path)
+        if current is None or row["mtime"] > current["mtime"]:
+            found[path] = dict(row, path=path)
+
     for ident, store in session_stores("workspace-meta"):
         for row in _workspace_sessions(store):
-            for path in row["paths"]:
-                cur = found.get(path)
-                if cur is None or row["mtime"] > cur["mtime"]:
-                    found[path] = {"path": path, "mtime": row["mtime"], "session": row["session"],
-                                   "workspace_hash": row["workspace_hash"], "adapter": ident,
-                                   "title": row["title"], "status": row["status"]}
-    return sorted(found.values(), key=lambda r: r["mtime"], reverse=True)
+            for path in row["paths"] if isinstance(row["paths"], list) else []:
+                keep(path, {"mtime": row["mtime"], "session": row["session"], "workspace_hash": row["workspace_hash"],
+                            "adapter": ident, "title": row["title"], "status": row["status"]})
+    for ident, store in session_stores("escaped-cwd"):
+        for path, session, mtime in _escaped_workspaces(store):
+            keep(path, {"mtime": mtime, "session": session, "workspace_hash": None, "adapter": ident,
+                        "title": "", "status": ""})
+    rows = [row for path, row in found.items() if isinstance(path, str) and os.path.isdir(path)]
+    return sorted(rows, key=lambda r: r["mtime"], reverse=True)
 
 
 def session_paths(cfg):
@@ -122,21 +255,275 @@ def session_paths(cfg):
     This was hard-wired to one harness's store, which made the watchdog work for
     that harness only: an implementer on another resolved to no transcript, the
     watchdog said "nothing to watch" and quietly never ran. Every adapter declares
-    its store (`sessions`); an implementer whose adapter declares none has no paths.
+    its store (`sessions`); an implementer whose adapter declares none has no paths,
+    and neither has an `auto` ao could not resolve: `auto` is no session's id.
     """
-    impl = cfg.get("implementer") or {}
-    sess = impl.get("session")
+    return role_session_paths(cfg, "implementer")
+
+
+def role_session_paths(cfg, role):
+    """(transcript, metadata) of the session a role's block names, or (None, None) (SESSION-IDENTITY).
+
+    A session pinned by its id alone in a workspace-meta store is found in the workspace
+    directory that keeps it.
+    """
+    block = cfg.get(role) if isinstance(cfg.get(role), dict) else {}
+    sess = _concrete_session(block.get("session"))
     if not sess:
         return None, None
-    store = load_adapter(impl.get("adapter") or "").get("sessions") or {}
+    store = load_adapter(block_adapter(block) or "").get("sessions") or {}
     if store.get("kind") == "escaped-cwd":
-        cwd = impl.get("cwd") or cfg.get("root", "")
+        cwd = block.get("cwd") or cfg.get("root", "")
         return os.path.join(escaped_cwd_dir(store, cwd), store["transcript"].replace("{session}", sess)), None
-    ws = impl.get("workspace_hash")
-    if store.get("kind") != "workspace-meta" or not ws:
+    if store.get("kind") != "workspace-meta":
+        return None, None
+    ws = block.get("workspace_hash") or _session_workspace(store, sess)
+    if not ws:
         return None, None
     d = os.path.join(_home_path(store["dir"]), ws, sess)
     return os.path.join(d, store["transcript"]), os.path.join(d, store["meta"])
+
+
+def _session_workspace(store, session):
+    """The workspace directory a workspace-meta store keeps a session in, or None."""
+    base = _home_path(store.get("dir"))
+    steps = _plain_steps(session)
+    if not steps or len(steps) != 1:
+        return None                                        # an id is one name, never a path
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return None
+    return next((ws for ws in names if os.path.exists(os.path.join(base, ws, session, store["meta"]))), None)
+
+
+# ── session identity: which session is whose (SESSION-IDENTITY) ───────────────
+#
+# Every `ao init --profile` writes `session: auto`, and it was read as a session's id: the
+# implementer's transcript was named auto, the watchdog had nothing to watch, and the nudge
+# would have resumed a session called auto. Where two roles run one harness in one
+# directory, the newest transcript was whichever role wrote last, and a wake resumed the
+# implementer's own session as the architect. `auto` is resolved when the config is loaded,
+# from the store the role's adapter declares, and a role that cannot be resolved says why.
+
+SESSION_ROLES = ("implementer", "architect")
+RESOLVED_HOW = ("discovered", "recorded")       # how a session ao put into a block got there
+
+
+def _concrete_session(value):
+    """The session id a block names: any text but `auto`; else None."""
+    text = value.strip() if isinstance(value, str) else ""
+    return text if text and text != "auto" else None
+
+
+def _pinned_session(block):
+    """The id a block pins itself, never one ao resolved into it."""
+    resolved = block.get("_session") if isinstance(block, dict) and isinstance(block.get("_session"), dict) else {}
+    return None if resolved.get("how") in RESOLVED_HOW else _concrete_session((block or {}).get("session"))
+
+
+def _resumes_session(role, block):
+    """Whether a role holds a session of its own: every implementer, whose nudge resumes one, and
+    an architect whose argv says {session} or whose block names one."""
+    if not isinstance(block, dict) or not block:
+        return False
+    return role == "implementer" or "session" in block or any("{session}" in str(part)
+                                                              for part in block.get("argv") or [])
+
+
+def _role_cwd(root, role, block):
+    """Where a role's sessions are kept: its own `cwd`, else the project root. An architect that
+    resumes no session starts a new one in the project root at every wake."""
+    if role == "architect" and not _resumes_session(role, block):
+        return root
+    return (block or {}).get("cwd") or root
+
+
+def _role_rows(role, ident, cwd):
+    """[{session, workspace_hash}], newest first: the sessions a role could hold in its adapter's store.
+
+    An architect's are read through discover_architect, where every wake has read them,
+    unless its adapter keeps its sessions in another kind of store.
+    """
+    kind = _declared_store(ident).get("kind")
+    if role == "architect" and (not ident or kind == "escaped-cwd"):
+        found = discover_architect(cwd) or {}
+        ids = found.get("sessions") if isinstance(found.get("sessions"), list) else [found.get("session")]
+        return [{"session": str(sid), "workspace_hash": None} for sid in ids if sid]
+    return [{"session": row["session"], "workspace_hash": row["workspace_hash"]} for row in store_sessions(ident, cwd)]
+
+
+def sessions_path(root):
+    """Where ao keeps the sessions it settled for this checkout's roles; never committed."""
+    return os.path.join(root, ".ao", "sessions.json")
+
+
+def session_records(root):
+    """{role: {adapter, session, cwd, workspace_hash, at}} as `.ao/sessions.json` keeps them; {} when it keeps none."""
+    try:
+        with open(sessions_path(root), encoding=UTF8) as fh:
+            document = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    roles = document.get("roles") if isinstance(document, dict) else None
+    if not isinstance(roles, dict):
+        return {}
+    return {role: dict(entry) for role, entry in roles.items()
+            if role in SESSION_ROLES and isinstance(entry, dict) and _concrete_session(entry.get("session"))}
+
+
+def record_session(root, role, found):
+    """Keep the session ao settled for a role in `.ao/sessions.json`, written whole; True when it changed.
+
+    Nothing is written outside a project, or when the record already says it.
+    """
+    if not os.path.isdir(os.path.join(root, ".ao")):
+        return False
+    records = session_records(root)
+    kept = {key: found.get(key) for key in ("adapter", "session", "cwd", "workspace_hash")}
+    if {key: (records.get(role) or {}).get(key) for key in kept} == kept:
+        return False
+    records[role] = dict(kept, at=int(time.time()))
+    from .storage import replace_file_durably
+    try:
+        replace_file_durably(sessions_path(root), (json.dumps({"roles": records}, indent=2, sort_keys=True)
+                                                    + "\n").encode(UTF8))
+    except OSError:
+        return False
+    return True
+
+
+def resolve_session(root, cfg, role, avoid=()):
+    """The session a role holds, and how ao knows: {session, workspace_hash, adapter, cwd, how, why, trusted,
+    record, count} (SESSION-IDENTITY).
+
+    `how` is pinned (the block names an id), recorded (`.ao/sessions.json` keeps the one ao
+    settled on), discovered, ambiguous or unresolved, and `why` is what a person reads beside
+    it. A pinned id wins. Otherwise the candidates are the sessions the role's adapter's store
+    keeps for its working directory, less `avoid`. Where no other role runs that adapter over
+    them, the newest is the role's: a newer one is a conversation a person opened, and `auto`
+    follows it. Where the other role's sessions sit among them, the newest is whichever role
+    wrote last, so what settles identity is a pin, a record, or the one session the other role
+    does not hold. The implementer is resolved first and takes a lone session; the architect
+    never takes the implementer's, and beside an implementer that is not settled it cannot
+    tell its own. Two sessions neither holds are ambiguous. A session taken beside a role that
+    is not settled is read but never resumed (`trusted` false) and never recorded: only what
+    settles identity is kept, and `record` says a result is that.
+    """
+    block = cfg.get(role) if isinstance(cfg.get(role), dict) else {}
+    ident = block_adapter(block) if block else None
+    cwd = _role_cwd(root, role, block)
+    out = {"role": role, "adapter": ident, "cwd": cwd, "session": None, "workspace_hash": None, "how": "unresolved",
+           "why": None, "trusted": False, "record": False, "count": 0}
+    if not block:
+        return dict(out, why=f"no {role} is configured")
+    pinned = _pinned_session(block)
+    if pinned:
+        return dict(out, session=pinned, workspace_hash=block.get("workspace_hash"), how="pinned", trusted=True)
+    if ident and _declared_store(ident).get("kind") not in ("workspace-meta", "escaped-cwd"):
+        return dict(out, why=f"the {ident} adapter declares no session store ao reads; pin the {role}'s session")
+    if not ident and role != "architect":
+        return dict(out, why=f"no adapter says where the {role}'s sessions are; pin its session")
+    rows = [row for row in _role_rows(role, ident, cwd) if row["session"] not in avoid]
+    where = "this workspace" if cwd == root else cwd
+    none_yet = f"no {ident or 'agent'} session for {where}" + (" but the one that failed" if avoid else " yet")
+    other = SESSION_ROLES[1 - SESSION_ROLES.index(role)]
+    oblock = cfg.get(other) if isinstance(cfg.get(other), dict) else {}
+    ocwd = _role_cwd(root, other, oblock)
+    orows = _role_rows(other, ident, ocwd) if ident and oblock and block_adapter(oblock) == ident else []
+    oids = {row["session"] for row in orows}
+    if not {row["session"] for row in rows} & oids:
+        if not rows:
+            return dict(out, why=none_yet)
+        return dict(out, session=rows[0]["session"], workspace_hash=rows[0]["workspace_hash"], how="discovered",
+                    trusted=True, count=len(rows),
+                    why=f"the newest of {len(rows)} {ident or 'agent'} session(s) for {where}")
+    records = session_records(root) if root else {}
+    mine, theirs = records.get(role) or {}, records.get(other) or {}
+    kept = mine.get("session") if (mine.get("adapter"), mine.get("cwd")) == (ident, cwd) else None
+    held = theirs.get("session") if (theirs.get("adapter"), theirs.get("cwd")) == (ident, ocwd) \
+        and _resumes_session(other, oblock) and theirs.get("session") in oids \
+        and theirs.get("session") != kept else None
+    opinned = _pinned_session(oblock) if _resumes_session(other, oblock) else None
+    oresolved = oblock.get("_session") if isinstance(oblock.get("_session"), dict) else {}
+    if opinned or held:
+        claim, settled = opinned or held, True
+    elif role == "architect" and oresolved.get("how") in RESOLVED_HOW and _concrete_session(oblock.get("session")):
+        claim, settled = oblock["session"], bool(oresolved.get("trusted"))
+    else:
+        claim, settled = None, False
+    own = [row for row in rows if row["session"] != claim]
+    kept_row = next((row for row in own if row["session"] == kept), None)
+    if kept_row:
+        return dict(out, session=kept, workspace_hash=kept_row["workspace_hash"], how="recorded", trusted=True,
+                    count=len(own), why="kept in .ao/sessions.json since ao settled it")
+    if not own:
+        return dict(out, why=f"the only {ident} session for {where} is the {other}'s" if rows else none_yet)
+    if role == "architect" and claim is None:
+        return dict(out, how="ambiguous", count=len(own),
+                    why=f"the {other}'s sessions are kept beside the {role}'s in the {ident} store and the "
+                        f"{other}'s is not settled, so ao cannot tell them apart; pin the {other}'s session "
+                        f"in .ao/config.json")
+    if len(own) > 1:
+        return dict(out, how="ambiguous", count=len(own),
+                    why=f"{len(own)} {ident} sessions for {where} that the {other} does not hold, and ao cannot "
+                        f"tell which is the {role}'s; pin it in .ao/config.json")
+    found = dict(out, session=own[0]["session"], workspace_hash=own[0]["workspace_hash"], how="discovered", count=1)
+    if settled:
+        return dict(found, trusted=True, record=True,
+                    why=f"the one {ident} session for {where} that the {other} does not hold")
+    return dict(found, why=f"the only {ident} session for {where}, where the {other}'s sessions are kept too and "
+                           f"the {other}'s is not settled: read, but not resumed until one of the two is pinned "
+                           f"in .ao/config.json")
+
+
+def resolve_sessions(root, cfg):
+    """Resolve each role's `auto` into the block the role is read from, and record what settles it; the config.
+
+    The implementer is resolved before the architect. A block ao resolved keeps `_session`:
+    how, why, whether its session may be resumed, and how many sessions it chose among. A
+    role whose block names a session, or that holds none, is left as written, and nothing is
+    read for a config whose roles all name theirs.
+    """
+    for role in SESSION_ROLES:
+        block = cfg.get(role)
+        if not _resumes_session(role, block) or _concrete_session(block.get("session")):
+            continue
+        found = resolve_session(root, cfg, role)
+        block["_session"] = {key: found[key] for key in ("how", "why", "trusted", "count")}
+        if found["session"]:
+            block["session"] = found["session"]
+            if found["workspace_hash"]:
+                block["workspace_hash"] = found["workspace_hash"]
+        if found["record"]:
+            record_session(root, role, found)
+    return cfg
+
+
+def session_state(cfg, role):
+    """{session, how, why, trusted, count} of a role's session as the loaded config holds it; None for a role
+    that holds none. A block that did not come through load_config is resolved here."""
+    block = cfg.get(role)
+    if not _resumes_session(role, block):
+        return None
+    if isinstance(block.get("_session"), dict):
+        return dict(block["_session"], session=_concrete_session(block.get("session")))
+    found = resolve_session(cfg.get("root") or "", cfg, role)
+    return {key: found[key] for key in ("session", "how", "why", "trusted", "count")}
+
+
+def session_to_resume(cfg, role):
+    """(the session a turn of this role may resume, None), or (None, why none may) (SESSION-IDENTITY).
+
+    Pinned, recorded, or discovered where nothing else could hold it; (None, None) for a role
+    that holds no session of its own.
+    """
+    state = session_state(cfg, role)
+    if state is None:
+        return None, None
+    if state["session"] and state["trusted"]:
+        return state["session"], None
+    return None, state["why"] or f"the {role}'s session is {state['how']}"
 
 
 # ── transcript ────────────────────────────────────────────────────────────────

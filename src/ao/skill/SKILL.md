@@ -266,7 +266,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao notices` / `ao prune` | alert history; trim records and logs |
 | `ao source list|status|import` | external queues (Linear, Jira) feeding the board |
 | `ao handoff` | write a resume briefing when the centre runs out of quota |
-| `ao projects` / `ao adapters` | registered projects; supported agents |
+| `ao projects` / `ao adapters` | every workspace with a local agent session; supported agents |
 | `ao mcp serve` / `ao mcp config` | the MCP server and its client config |
 | `ao a2a serve` / `ao a2a-mcp serve` | A2A: serve the board; bridge remote agents into MCP |
 

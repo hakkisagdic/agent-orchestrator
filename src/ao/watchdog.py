@@ -623,9 +623,10 @@ def architect_hold_reason(root, cfg, adapter, st, found=None, now=None):
     urgent = any(item.get("kind") == "decision-requested" for item in (found or []))
     if left is not None and left < reserve and not urgent:
         return no("window-reserve", f"the machine's {provider} window has {left}% left, below the {reserve}% reserve")
-    if "{session}" in " ".join(argv) and arch.get("session") in (None, "auto") \
-            and not (A.discover_architect(arch.get("cwd") or root) or {}).get("session"):
-        return no("session-unresolved", "the architect session cannot be resolved")
+    # The session a wake would resume, as the config resolved it, and never the implementer's (SESSION-IDENTITY).
+    resumable, withheld = A.session_to_resume(cfg, "architect") if "{session}" in " ".join(argv) else (True, None)
+    if not resumable:
+        return no("session-unresolved", f"the architect session cannot be resolved: {withheld}")
     resolved, ver = A.resolve_binary(argv[0], path=child_path())
     if not resolved:
         return no("binary-missing", f"{argv[0]} cannot be found")
@@ -900,12 +901,13 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
         # session is already running, so resuming cannot repeat the two-writer
         # incident. Pinning an id in config would go stale the moment the human
         # opens a new conversation, and a watchdog waking a dead session fails
-        # silently, which is the worst shape of failure.
-        sess = arch.get("session")
-        if sess in (None, "auto"):
-            sess = (A.discover_architect(arch.get("cwd") or root) or {}).get("session")
+        # silently, which is the worst shape of failure. The session is the one the
+        # config resolved when this cycle loaded it, never the newest transcript: where
+        # the implementer's sessions are kept beside the architect's, the newest was the
+        # implementer's own, and a wake resumed it as the architect (SESSION-IDENTITY).
+        sess, withheld = A.session_to_resume(cfg, "architect")
         if "{session}" in " ".join(arch["argv"]) and not sess:
-            print("architect session not resolvable; reported only")
+            print(f"architect session not resolvable ({withheld}); reported only")
             return woke
         # The permission mode is the one the architect's adapter pins, appended to a block composed
         # before it was pinned (GRANTS-PINNED). Past what one argument carries, the prompt goes on
@@ -967,9 +969,12 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
                 # back to auto after argv was built resumed the same dead session (#69).
                 dead = st.get("arch_session")
                 if sess and (sess == dead or sess in text):
-                    found = (A.discover_architect(arch.get("cwd") or root) or {}).get("session")
+                    other = A.resolve_session(root, cfg, "architect", avoid={sess})
+                    found = other["session"] if other["trusted"] else None
                     if found and found != sess and found not in text:
                         sess = found
+                        if other["record"]:
+                            A.record_session(root, "architect", other)
                         argv = [x.replace("{prompt}", prompt).replace("{session}", sess)
                                 for x in plan["argv"]]
                         print(f"last wake resumed a dead session; resuming {sess[:12]} instead")
@@ -1996,7 +2001,10 @@ def _cycle_impl(args, root):
     adapter = A.load_adapter(impl.get("adapter", ""), root)
     msgs, _ = A.session_paths(cfg)
     if not msgs or not os.path.exists(msgs):
-        print("no transcript; nothing to watch")
+        # An `auto` ao could not resolve says why, where it read as a transcript gone missing (SESSION-IDENTITY).
+        state = A.session_state(cfg, "implementer") or {}
+        print(f"the implementer's session is {state['how']}: {state['why']}; nothing to watch"
+              if not state.get("session") and state.get("why") else "no transcript; nothing to watch")
         return 0
 
     # The implementer's silence ends at its last write, a subagent's included: a session whose transcript is
@@ -2304,12 +2312,11 @@ def _cycle_impl(args, root):
             # session is already running, so resuming cannot repeat the two-writer
             # incident. Pinning an id in config would go stale the moment the human
             # opens a new conversation, and a watchdog waking a dead session fails
-            # silently, which is the worst shape of failure.
-            sess = arch.get("session")
-            if sess in (None, "auto"):
-                sess = (A.discover_architect(arch.get("cwd") or root) or {}).get("session")
+            # silently, which is the worst shape of failure. As in escalate(): the session
+            # the config resolved, never the implementer's (SESSION-IDENTITY).
+            sess, withheld = A.session_to_resume(cfg, "architect")
             if "{session}" in " ".join(arch["argv"]) and not sess:
-                print("architect session not resolvable; reported only")
+                print(f"architect session not resolvable ({withheld}); reported only")
                 return 0
             prompt = arch.get("prompt", REFILL_PROMPT)
             # As in escalate(): the pinned mode (GRANTS-PINNED), and past one argument, standard input
@@ -2495,7 +2502,13 @@ def _cycle_impl(args, root):
     if refused:
         print(f"the nudge's prompt cannot be handed over: {refused}; not nudging")
         return 1
-    argv = [x.replace("{session}", impl["session"]).replace("{prompt}", prompt)
+    # Only a session that is the implementer's is resumed: pinned, recorded, or found where no other
+    # role's sessions are kept beside it. One read beside a role that is not settled is not (SESSION-IDENTITY).
+    sess, withheld = A.session_to_resume(cfg, "implementer")
+    if not sess:
+        print(f"idle {int(age)}s · {', '.join(reasons)} · {withheld}; not nudging")
+        return 0
+    argv = [x.replace("{session}", sess).replace("{prompt}", prompt)
             for x in plan["argv"]]
     if not argv:
         print("adapter has no resume command")

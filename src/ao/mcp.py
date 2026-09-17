@@ -118,6 +118,10 @@ TOOLS = [
 def status_payload(cfg):
     from . import watchdog as W
     root = cfg["root"]
+    # The server loads the config once, and an agent starts it before its own session has written a
+    # transcript: a session `auto` found no session for is looked for again (SESSION-IDENTITY).
+    if not (A.session_state(cfg, "implementer") or {}).get("session"):
+        cfg = dict(A.load_config(root), root=root)
     impl = cfg.get("implementer") or {}
     adapter = A.load_adapter(impl.get("adapter", "")) if impl else {}
     state, age, desc = A.busy(cfg, adapter) if impl else ("unknown", None, "")

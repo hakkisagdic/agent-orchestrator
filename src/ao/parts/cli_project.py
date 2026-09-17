@@ -565,7 +565,8 @@ def cmd_init(cfg, args):
 
     gi = os.path.join(root, ".gitignore")
     lines = open(gi, encoding=UTF8).read().split("\n") if os.path.exists(gi) else []
-    add = [l for l in ("agent-mail/*.md", "!agent-mail/README.md", ".ao/inbox/", ".ao/hold")
+    # The sessions ao settles for this checkout's roles are this machine's, never the repository's (SESSION-IDENTITY).
+    add = [l for l in ("agent-mail/*.md", "!agent-mail/README.md", ".ao/inbox/", ".ao/hold", ".ao/sessions.json")
            if l not in lines]
     if add:
         with open(gi, "a", encoding=UTF8) as fh:

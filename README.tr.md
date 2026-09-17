@@ -33,7 +33,11 @@ watchdog da ajanları senin shell'in olmadan başlatır; ikisi de alias'ı göre
 
 Bağımlılık yok, bilerek — bu araç kontrol etmediğin makinelerdeki ajanları izler ve
 bağımlılık, tam da orada eksik olabilecek şeydir. İlk koşudan önce yapılandırma
-gerekmez: `ao` oturumu ajanın kendi deposundan keşfeder.
+gerekmez: `ao` oturumu ajanın kendi deposundan keşfeder — bugün Kiro'nun ve Claude
+Code'un deposundan — ve `ao init --profile`'ın yazdığı `session: auto` da aynı yolla
+çözülür. Uygulayıcı ve mimar aynı dizinde aynı harness'i çalıştırıyorsa `ao` hangi
+oturumun kimin olduğunu tahmin etmez: `ao doctor` bunu söyler, sabitlenen bir oturum
+kimliği belirsizliği giderir ([docs/profiles.md](docs/profiles.md#how-auto-finds-a-session)).
 
 **Windows** PowerShell ile gelir, Python ile gelmez; bu yüzden `bin/ao.ps1` hiçbir şey
 kurmadan `status`, `board` ve `doctor` verir. Bilerek sınırlı bir alt küme ve öyle

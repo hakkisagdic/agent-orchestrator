@@ -273,7 +273,12 @@ question about this project that appears nowhere in the repository.
 **`"session": "auto"`.** Pinning an id goes stale the moment the human opens a
 new conversation, and a watchdog waking a dead session fails silently — which is
 the worst shape of failure, because everything still looks configured. It is
-resolved from disk at wake time, newest transcript for that directory.
+resolved from disk each time the watchdog loads the config: the newest transcript
+for that directory. Where the implementer runs the same harness in the same
+directory, the newest was once the implementer's own session, and a wake resumed
+it as the architect; there the architect never takes the implementer's session,
+and a wake that cannot tell whose a session is refuses and says why
+([profiles.md](profiles.md#how-auto-finds-a-session)).
 
 **Scoped tools.** An unattended architect with unrestricted Bash is what goes
 wrong at 3am. It may inspect, run the `ao` commands its routine names, and edit

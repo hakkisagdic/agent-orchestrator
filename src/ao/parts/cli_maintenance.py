@@ -99,7 +99,7 @@ def _registry_names(root):
     return sorted(name for name, row in A.project_registry().items() if row.get("root") == real)
 
 
-AO_GITIGNORE = ("agent-mail/*.md", "!agent-mail/README.md", ".ao/inbox/", ".ao/hold")
+AO_GITIGNORE = ("agent-mail/*.md", "!agent-mail/README.md", ".ao/inbox/", ".ao/hold", ".ao/sessions.json")
 
 
 def _gitignore_without_ao(root):
@@ -742,12 +742,13 @@ def cmd_projects(cfg, args):
     if not ws:
         print("No local agent sessions found.")
     else:
-        print(f"{'last active':<12}{'status':<14}workspace")
+        print(f"{'last active':<12}{'agent':<14}{'status':<14}workspace")
     for r in ws:
         mins = int((time.time() - r["mtime"]) / 60)
         age = f"{mins}m" if mins < 90 else (f"{mins//60}h" if mins < 2880 else f"{mins//1440}d")
         col = C["green"] if mins < 5 else C["dim"]
-        print(f"{col}{age:<12}{C['reset']}{r['status'][:13]:<14}{r['path']}")
+        # Every store an adapter declares is listed, and a store that keeps no status says none (SESSION-IDENTITY).
+        print(f"{col}{age:<12}{C['reset']}{str(r['adapter'])[:13]:<14}{str(r['status'] or '—')[:13]:<14}{r['path']}")
     # Directories with one name used to share every file ao keeps outside them (#66).
     for base, rows in A.project_key_collisions().items():
         print(f"\n{C['yellow']}{len(rows)} projects are named {base}{C['reset']}; "
@@ -876,6 +877,29 @@ def _review_evidence_lines(cfg):
     lines += [f"{'':<16}{C['dim']}{state:<9} {name}{C['reset']}" for name, state in risky[:5]]
     if len(risky) > 5:
         lines.append(f"{'':<16}{C['dim']}and {len(risky) - 5} more{C['reset']}")
+    return lines
+
+
+def _session_lines(cfg):
+    """`ao doctor`'s line for each role's session: the id ao resolved and how, or why there is none (SESSION-IDENTITY).
+
+    It printed the implementer's `session` as written, and `auto` read as a session's id.
+    """
+    lines = []
+    for role in A.SESSION_ROLES:
+        state = A.session_state(cfg, role)
+        if state is None:
+            if role == "implementer":
+                lines.append(f"{role:<16}{C['red']}none found{C['reset']}")
+            continue
+        adapter = A.block_adapter(cfg.get(role)) or "?"
+        if state["session"]:
+            tone = C["green"] if state["trusted"] else C["yellow"]
+            head = f"{role:<16}{adapter} / {state['session'][:36]}  {tone}{state['how']}{C['reset']}"
+        else:
+            tone = C["red"] if state["how"] == "ambiguous" else C["yellow"]
+            head = f"{role:<16}{adapter} / auto  {tone}{state['how']}{C['reset']}"
+        lines.append(head + (f"  {C['dim']}{state['why']}{C['reset']}" if state.get("why") else ""))
     return lines
 
 
@@ -1188,8 +1212,8 @@ def cmd_doctor(cfg, args):
     has_cfg = os.path.exists(os.path.join(root, ".ao", "config.json"))
     print(f"config          " + (f"{C['green']}.ao/config.json{C['reset']}" if has_cfg
                                  else f"{C['dim']}none — using auto-discovery{C['reset']}"))
-    print(f"implementer     " + (f"{impl.get('adapter')} / {impl.get('session','')[:24]}"
-                                 if impl else f"{C['red']}none found{C['reset']}"))
+    for line in _session_lines(cfg):
+        print(line)
     msgs, _ = A.session_paths(cfg)
     print(f"transcript      {ok(bool(msgs and os.path.exists(msgs)))}")
     print(f"mailbox         {ok(os.path.isdir(os.path.join(root, cfg['mailbox'])))}")

@@ -421,10 +421,19 @@ def load_config(root):
     cfg.setdefault("reviews", "semantic-review")
     resolve_roles(root, cfg)
     if "implementer" not in cfg:
-        found = discover_session(root)
+        architect = cfg.get("architect") if isinstance(cfg.get("architect"), dict) else {}
+        pinned = _concrete_session(architect.get("session"))
+        found = discover_session(root, exclude={pinned} if pinned else ())
         if found:
+            # Beside an architect on the same harness, the newest session may be the architect's own.
+            beside = bool(architect) and block_adapter(architect) == found["adapter"]
+            found["_session"] = {"how": "discovered", "trusted": not beside, "count": None,
+                                 "why": "no implementer is configured: the newest session for this workspace"
+                                        + (", where the architect's are kept too: read, but not resumed until an "
+                                           "implementer is configured" if beside else "")}
             cfg["implementer"] = found
-    return cfg
+    # `auto` names no session: each role's is resolved here, once, for every reader (SESSION-IDENTITY).
+    return resolve_sessions(root, cfg)
 
 
 # ---- a split moves text, never behaviour (#44) ------------------------------------------
