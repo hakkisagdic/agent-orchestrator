@@ -4,7 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ao-orchestrator"
-version = "0.4.0"
+# The version is written once, in src/ao/__init__.py: [tool.hatch.version] below reads it.
+dynamic = ["version"]
 description = "Attach to the coding agent you are already running: watch it, restart it, verify its work, and decide what may be committed."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -38,6 +39,11 @@ Documentation = "https://github.com/hakkisagdic/agent-orchestrator/blob/main/doc
 [project.scripts]
 ao = "ao.cli:main"
 ao-watchdog = "ao.watchdog:main"
+
+[tool.hatch.version]
+# The wheel, the package and `ao --version` read this one line. Written twice, it drifted: the
+# 0.3.0 and 0.4.0 tags shipped a __version__ of 0.2.0. tests/test_cli_robust.py holds them together.
+path = "src/ao/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 # The adapters directory lives inside the package, so it ships with it — no

@@ -17,9 +17,11 @@ import textwrap
 import time
 from datetime import datetime
 
+from . import __version__
 from . import lib as A
 from . import matrix as M
 from . import settings as S
+from .storage import LedgerLockTimeout
 from .verdicts import REVIEWER_VERDICTS
 UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
@@ -59,12 +61,13 @@ def build_parser():
     """
     p = argparse.ArgumentParser(prog="ao", description="agent-orchestrator (observation layer)")
     p.add_argument("-C", "--root", help="project directory (default: nearest .ao/ or git root)")
+    p.add_argument("--version", action="version", version=f"ao {__version__}")
     sub = p.add_subparsers(dest="cmd")
 
     s = sub.add_parser("status", help="one-shot summary")
     s.add_argument("-m", "--messages", type=int, default=6)
-    s.add_argument("--window", type=float, default=24.0,
-                   help="hours of throughput to report (default 24)")
+    s.add_argument("--window", type=A.time_arg("h"), default=24.0,
+                   help="throughput window: hours (24), or 30m, 1d, today, a date (default 24)")
     s.set_defaults(fn=cmd_status)
 
     w = sub.add_parser("watch", help="live panel; leave it in a background terminal")
@@ -124,15 +127,17 @@ def build_parser():
     ak.set_defaults(fn=cmd_ask)
     an = sub.add_parser("answer", help="answer a pending decision")
     an.add_argument("id")
-    an.add_argument("value", nargs="+")
+    an.add_argument("value", nargs="+", help="an option's key; after the free-text key, your own words")
+    an.add_argument("--change", action="store_true",
+                    help="replace an answer already given; both stay in the decision's record")
     an.set_defaults(fn=cmd_answer)
     dc = sub.add_parser("decisions", help="open and answered questions")
     dc.add_argument("-n", type=int, default=10)
     dc.set_defaults(fn=cmd_decisions)
     st_ = sub.add_parser("stats", help="slice outcomes: rounds, first-pass rate, time, size, defects found later")
     st_.add_argument("--all", action="store_true", help="every project registered on this machine")
-    st_.add_argument("--since", help="landed on or after YYYY-MM-DD")
-    st_.add_argument("--until", help="landed before YYYY-MM-DD")
+    st_.add_argument("--since", type=A.time_arg(), help="landed at or after: a date (2026-09-10), 7d, yesterday")
+    st_.add_argument("--until", type=A.time_arg(), help="landed before: a date (2026-09-17), 2h, today")
     st_.add_argument("--slices", action="store_true", help="one line per slice")
     st_.set_defaults(fn=cmd_stats)
     rc = sub.add_parser("recall", help="what was decided, found or learned before, across projects")
@@ -176,7 +181,8 @@ def build_parser():
     rm_.add_argument("text", nargs="+")
     rm_.set_defaults(fn=cmd_room)
     dg = sub.add_parser("digest", help="what happened, read from the ledgers")
-    dg.add_argument("--days", type=float, default=1.0)
+    dg.add_argument("--days", type=A.time_arg("d"), default=1.0,
+                    help="how far back: days (7), or 12h, today, a date (default 1)")
     dg.add_argument("-n", type=int, default=6)
     dg.set_defaults(fn=cmd_digest)
     ini = sub.add_parser("init", help="put ao on this project (idempotent)")
@@ -214,7 +220,8 @@ def build_parser():
     de.set_defaults(fn=cmd_decide)
     si = sub.add_parser("since", help="what changed since you last looked")
     si.add_argument("ref", nargs="?",
-                    help="last | 2h | 1d | <git ref>: one ref, given to git as a single argument, never an option")
+                    help="last | 30m | 2h | 1d | today | yesterday | a date | <git ref>: a ref is given to git "
+                         "as a single argument, never an option")
     si.add_argument("--no-mark", action="store_true")
     si.set_defaults(fn=cmd_since)
     nt = sub.add_parser("note", help="write an architect message into the mailbox")
@@ -298,10 +305,11 @@ def build_parser():
     n.add_argument("--all", action="store_true", help="include rate-limited ones")
     n.set_defaults(fn=cmd_notices)
     pr = sub.add_parser("prune", help="trim accumulated records and logs")
-    pr.add_argument("--days", type=float, default=7)
+    pr.add_argument("--days", type=A.time_arg("d"), default=7,
+                    help="records older than this: days (7), or 12h, yesterday, a date (default 7)")
     pr.add_argument("--keep-kb", type=int, default=64, help="log tail to keep")
     pr.add_argument("--evidence", action="store_true", help="also prune verifications and plans")
-    pr.add_argument("--review-days", type=float, default=None,
+    pr.add_argument("--review-days", type=A.time_arg("d"), default=None,
                     help="age at which review artefacts nothing rests on move to the archive "
                          "(default: review.prune_after_days)")
     pr.add_argument("--yes", action="store_true", help="apply (default is a dry run)")
@@ -329,12 +337,14 @@ def build_parser():
     al.add_argument("action", choices=["list", "test", "snooze", "unsnooze"], nargs="?", default="list")
     al.add_argument("key", nargs="?", help="snooze/unsnooze: the alarm key as ao alarms lists it")
     al.add_argument("--level", choices=["yellow", "orange", "red"])
-    al.add_argument("--until", help="snooze: YYYY-MM-DD; the alarm rings again from that date")
+    al.add_argument("--until", type=A.time_arg(),
+                    help="snooze: a date (2026-10-01) or a span from now (3d); the alarm rings again from then")
     al.add_argument("--why", help="snooze: why nobody can act on it before then")
     al.add_argument("--by", default="human", help="snooze: who decided it")
     al.set_defaults(fn=cmd_alarms)
     co = sub.add_parser("cost", help="what the coordination spends: implementer turns by class (product/analysis/ceremony/coordination)")
-    co.add_argument("--since", help="window such as 24h or 7d (default: whole transcript)")
+    co.add_argument("--since", type=A.time_arg(),
+                    help="window: 24h, 7d, today, a date (default: whole transcript)")
     co.add_argument("--features", action="store_true", help="what each feature switch spent, measured")
     co.set_defaults(fn=cmd_cost)
     cf = sub.add_parser("config", help="what a person can set: list, get, set, unset")
@@ -449,14 +459,45 @@ def build_parser():
     return p
 
 
-def main():
-    p = build_parser()
-    args = p.parse_args()
-    if not getattr(args, "fn", None):
-        p.print_help()
-        return 0
-    cfg = A.load_config(A.find_root(args.root))
-    return args.fn(cfg, args) or 0
+def main(argv=None):
+    """Run one `ao` command and return its exit status.
+
+    Ordinary trouble ends in a line, not a traceback (CLI-ROBUST): an argument ao cannot read
+    exits 2 naming what it takes, and so does a project directory that does not exist; a
+    ledger lock another process holds names the lock and what to do; Ctrl+C exits 130, as a
+    shell's own commands do; anything unexpected prints its type and message, and AO_DEBUG=1
+    keeps its traceback for whoever has to find where it came from.
+    """
+    command, root = "ao", None
+    try:
+        p = build_parser()
+        args = p.parse_args(argv)
+        if args.root and not os.path.isdir(os.path.expanduser(args.root)):
+            # Taken at face value, a missing directory showed an empty panel and exited 0.
+            what = "not a directory" if os.path.exists(os.path.expanduser(args.root)) else "no such directory"
+            p.exit(2, f"ao: error: -C {args.root}: {what}\n")
+        if not getattr(args, "fn", None):
+            p.print_help()
+            return 0
+        command = f"ao {args.cmd}"
+        root = A.find_root(args.root)
+        return args.fn(A.load_config(root), args) or 0
+    except KeyboardInterrupt:
+        return 130
+    except LedgerLockTimeout as exc:
+        lock = exc.path or str(exc)
+        if root and lock.startswith(os.path.join(root, "")):
+            lock = os.path.relpath(lock, root)
+        waited = f" for {exc.timeout:g}s" if exc.timeout is not None else ""
+        print(f"{command}: another process held the ledger lock {lock}{waited}; "
+              "let it finish, then run this again", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        if os.environ.get("AO_DEBUG", "") not in ("", "0"):
+            raise
+        print(f"{command}: {type(exc).__name__}: {' '.join(str(exc).split())} "
+              "(run it again with AO_DEBUG=1 for the traceback)", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

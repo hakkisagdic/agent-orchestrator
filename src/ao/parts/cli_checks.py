@@ -565,7 +565,7 @@ def _cost_by_feature(cfg, since, window):
         return 0
     span = " to ".join(time.strftime("%d %b %H:%M", time.localtime(at)) for at in (measured["from"], measured["to"]))
     print(f"{C['b']}implementer spend by feature{C['reset']}  {C['dim']}({measured['unit']}; {measured['turns']} turns, "
-          f"{span}{' — last ' + window if window else ''}){C['reset']}")
+          f"{span}{' — ' + window if window else ''}){C['reset']}")
     for name, spent in measured["features"].items():
         share = 100 * spent["usage"] / measured["total"] if measured["total"] else 0
         print(f"  {name:<18}{spent['turns']:>5} turns {spent['usage']:>9.1f}  {share:>5.1f}%")
@@ -584,18 +584,19 @@ def cmd_cost(cfg, args):
     ended in a blocked report without a product change: the queue-empty loop.
     """
     root = cfg["root"]
-    since = None
-    if args.since:
-        n, unit = A.re.match(r"(\d+)([hd])", args.since).groups()
-        since = time.time() - int(n) * (3600 if unit == "h" else 86400)
+    # One time syntax for every command (CLI-ROBUST): `yesterday` or `30m` reached a pattern of
+    # hours and days here and ended in a traceback.
+    when = A.parse_time(args.since) if args.since else None
+    since = when.moment() if when else None
+    window = when.label() if when else None
     if getattr(args, "features", False):
-        return _cost_by_feature(cfg, since, args.since)
+        return _cost_by_feature(cfg, since, window)
     c = A.turn_costs(cfg, since=since)
     if not c["turns"]:
         print("no transcript"); return 0
     tot = c["total"] or 1
     print(f"{C['b']}implementer spend by turn class{C['reset']}  {C['dim']}({c['unit']}; "
-          f"{'last ' + args.since if args.since else 'whole transcript'}){C['reset']}")
+          f"{window or 'whole transcript'}){C['reset']}")
     # What the subagents a turn started spent is inside that turn's spend; a column says how much, when any did.
     delegated = any(b.get("delegated") for b in c["by_class"].values())
     column = f"{'delegated':>11}" if delegated else ""

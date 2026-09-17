@@ -105,8 +105,9 @@ watchdog or a mail command sees it; `ao mail ack` and `ao_ack` append a `handled
 handled it and how; and the unhandled queue is derived - a stored message with no handling record.
 The mailbox directory becomes a view of that queue: a file removed without a handling record is put
 back, because the actor deciding what was handled must not also be able to erase the question.
-`ao mail compact <days>` collapses older bodies to a stub with their digest and an archive pointer,
-and a stub still answers "unhandled". `ao room search` reads the stored messages of every registered
+`ao mail compact <days>` collapses bodies older than that many days - or than `12h`, `yesterday` or a
+date - to a stub with their digest and an archive pointer, and a stub still answers "unhandled".
+`ao room search` reads the stored messages of every registered
 project. The default stays `deletion` until an implementer's steering says to acknowledge rather
 than delete; switching a live project first, with the old steering, would hand its handled mail back.
 

@@ -233,7 +233,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao mail list|read|send|log|search|ack` | the mailbox and its ledger; `ack` deletes processed messages (delivery confirmation) |
 | `ao note` | architect → implementer note without raw file writes (`--urgent`) |
 | `ao decide` | record an architect decision (`--scope`, `--why`, `--answers D-…`) |
-| `ao ask` / `ao answer` / `ao decisions` | questions with options; the answers unpark slices |
+| `ao ask` / `ao answer <D-id> <key>` / `ao decisions` | questions with options; the answers unpark slices. An answer is a key the question offers, `x <text>` for your own words; anything else is refused, naming the keys. An answered question keeps its answer: `--change` replaces it, and the first stays on the record |
 | `ao lock -- <cmd>` | hold the writer lock, run a gate, record it |
 | `ao verify -p quick|full` | run the declared gates and record the measured result |
 | `ao merge-check <branch>` | gate the result of a merge before merging; the record names both parents |
@@ -257,7 +257,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao waive review --slice S --by NAME --why …` / `ao catchup` | a person's bypass on the record; catchup reviews each landed range with a model family other than the one that wrote it, against what its commit messages claim, closes a `move-only` split on the proof its grant recorded, run again, and replays deferred work. `ao catchup --plan` previews, names what closes by proof, and writes nothing; `ao catchup --limit 10` and `ao catchup --slice S` bound a run; `ao catchup --author-family F --by NAME` is a person naming the family where the grant recorded none, and `ao catchup --move-only S --by NAME` a person stating which waived slices only moved code, each closing only where the proof holds; neither is an agent's command. A run exits 3 when the reviews it started decided nothing, and 0 when it made progress or had nothing to do |
 | `ao pings setup --url …` / `ao hooks [status|install|uninstall] [--allow-shared-hooks]` / `ao push allow` | dead man's switch; static AO hook intent plus Git-executed, nonce-bound pre-commit proof; explicit authorization for shared/external/global mutation; human push window |
 | `ao cost [--since 24h]` | what the coordination spends: implementer turns by class, wasted turns, review counts |
-| `ao since last|2h|<git ref>` | what happened since; the ref reaches git as one argument, never shell text |
+| `ao since last|2h|today|<git ref>` | what happened since; the ref reaches git as one argument, never shell text |
 | `ao digest` | landed work, gates, reviews, decisions in one page |
 | `ao notices` / `ao prune` | alert history; trim records and logs |
 | `ao source list|status|import` | external queues (Linear, Jira) feeding the board |
@@ -265,6 +265,12 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao projects` / `ao adapters` | registered projects; supported agents |
 | `ao mcp serve` / `ao mcp config` | the MCP server and its client config |
 | `ao a2a serve` / `ao a2a-mcp serve` | A2A: serve the board; bridge remote agents into MCP |
+
+Every time a command takes (`--since`, `--until`, `--days`, `--window`, `ao since`,
+`ao mail compact`) is written `30m`, `2h`, `1d`, `1w`, `today`, `yesterday` or a date
+such as `2026-09-17`; a number alone keeps the unit its option always had. A command that
+cannot run says why in one line, and `AO_DEBUG=1` shows the traceback. `ao --version`
+names the installed version.
 
 ## 13. Read further
 

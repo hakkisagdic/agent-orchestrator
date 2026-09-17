@@ -1,12 +1,12 @@
 # Releasing
 
-Three channels, one source of truth: the version in `pyproject.toml`.
+Three channels, one source of truth: `__version__` in `src/ao/__init__.py`. `pyproject.toml`
+reads it (`[tool.hatch.version]`), and so does `ao --version`.
 
 ## 1. Tag
 
 ```bash
 V=0.1.0
-sed -i '' "s/^version = .*/version = \"$V\"/" pyproject.toml
 sed -i '' "s/^__version__ = .*/__version__ = \"$V\"/" src/ao/__init__.py
 git commit -am "release: v$V" && git tag "v$V" && git push --follow-tags
 ```

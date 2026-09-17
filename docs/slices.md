@@ -194,7 +194,8 @@ every slice that landed with a grant: the verdicts in the order they came (a
 re-specification keeps that history), rounds, time from ready to landed, product lines by
 kind, and whether a defect was found later in what it landed, by a retrospective review
 that asked for changes or a board item marked `fixes:` it. `--all` spans every registered
-project; `--since` and `--until` cut the window a change is compared across.
+project; `--since` and `--until` cut the window a change is compared across, each a date such
+as `2026-09-10` or a span back from now such as `7d`.
 
 ## Commands
 

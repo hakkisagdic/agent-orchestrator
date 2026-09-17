@@ -689,10 +689,14 @@ def cmd_decide(cfg, args):
     from .storage import append_chained_jsonl
     append_chained_jsonl(A.decisions_path(root), rec, A.DECISION_CHAIN, legacy_prefix=True)
     if args.answers:
-        ans = A.answer(root, args.answers, "x " + args.decision if False else args.decision,
-                       by="architect")
-        print(f"  {C['green']}answered{C['reset']} {args.answers}" if ans else
-              f"  {C['yellow']}no open question {args.answers}{C['reset']}")
+        try:
+            # The decision is the answer in its own words: the free-text option (CLI-ROBUST).
+            ans = A.answer(root, args.answers, "x " + args.decision, by="architect")
+            print(f"  {C['green']}answered{C['reset']} {args.answers}" if ans else
+                  f"  {C['yellow']}no open question {args.answers}{C['reset']}")
+        except A.AnswerRefused as exc:
+            # Recorded in the ledger all the same; an answer already given is not overwritten by it.
+            print(f"  {C['yellow']}{args.answers} not answered{C['reset']}: {exc}")
     body = f"{args.decision}\n\n**Neden:** {args.why or '—'}"
     if args.scope:
         body += f"\n\n**Kapsam:** {args.scope}"
@@ -722,17 +726,19 @@ def cmd_since(cfg, args):
             cut = json.load(open(_since_marker(root), encoding=UTF8))["at"]
         except Exception:
             cut = now - 86400
-    elif A.re.fullmatch(r"\d+(\.\d+)?[hdm]", ref):
-        n, unit = float(ref[:-1]), ref[-1]
-        cut = now - n * {"m": 60, "h": 3600, "d": 86400}[unit]
     else:
-        # One ref, handed to git as one argument. Through a shell the ref was split and expanded, and
-        # `HEAD;touch x` ran touch; an option is no ref either (`--output=<file>` had git write a file).
-        ts = "" if ref.startswith("-") else A._git_text(root, "log", "-1", "--format=%ct", ref)
-        if not ts.isdigit():
-            print(f"{C['red']}not a duration (2h, 1d), a git ref, or 'last': {ref}{C['reset']}")
-            return 1
-        cut = float(ts)
+        try:
+            # The time every command reads is tried before a ref, as a duration always was; a bare
+            # number is no time here, since digits alone name a commit (CLI-ROBUST).
+            cut = A.parse_time(ref, now=now).moment(now=now)
+        except ValueError:
+            # One ref, handed to git as one argument. Through a shell the ref was split and expanded, and
+            # `HEAD;touch x` ran touch; an option is no ref either (`--output=<file>` had git write a file).
+            ts = "" if ref.startswith("-") else A._git_text(root, "log", "-1", "--format=%ct", ref)
+            if not ts.isdigit():
+                print(f"{C['red']}not a time ({A.TIME_FORMS}), a git ref, or 'last': {ref}{C['reset']}")
+                return 1
+            cut = float(ts)
     mins = int((now - cut) / 60)
     print(f"{C['b']}since{C['reset']} {C['dim']}{mins // 60}h {mins % 60}m ago{C['reset']}")
 
@@ -1216,16 +1222,17 @@ def cmd_alarms(cfg, args):
         key = getattr(args, "key", None)
         if not key:
             print(f"usage: ao alarms {args.action} <key>"
-                  + (" --until YYYY-MM-DD --why '…'" if args.action == "snooze" else ""))
+                  + (" --until <date or span> --why '…'" if args.action == "snooze" else ""))
             return 2
         if args.action == "unsnooze":
             gone = A.alarm_unsnooze(project, key)
             print(f"{'unsnoozed' if gone else 'no snooze for'} {key}")
             return 0
         try:
-            until = time.mktime(time.strptime(getattr(args, "until", None) or "", "%Y-%m-%d"))
+            # A date, or a span counted forward: a snooze of 3d ends three days from now (CLI-ROBUST).
+            until = A.parse_time(getattr(args, "until", None) or "").moment(ahead=True)
         except ValueError:
-            print("snooze needs --until YYYY-MM-DD")
+            print("snooze needs --until: a date such as 2026-10-01, or a span from now such as 3d")
             return 2
         if until <= time.time():
             print("--until must be a date in the future")

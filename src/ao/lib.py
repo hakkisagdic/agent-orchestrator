@@ -8,6 +8,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 from datetime import datetime
 UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
@@ -45,11 +46,151 @@ def adapters_dir():
             return cand
     return os.path.join(_HERE, "adapters")
 
-C = {
+# ── what a person sees and types: colour, and time arguments (CLI-ROBUST) ─────
+
+def terminal(stream=None):
+    """Whether `stream`, stdout unless named, is a terminal that draws escape codes.
+
+    A pipe, a file or a log is none, and neither is a terminal that says it is dumb
+    (`TERM=dumb`): what ao writes there is read by a program, or scrolled back through,
+    so a code in it is noise.
+    """
+    if os.environ.get("TERM") == "dumb":
+        return False
+    try:
+        return bool((sys.stdout if stream is None else stream).isatty())
+    except (AttributeError, OSError, ValueError):       # no stdout at all, or a closed one
+        return False
+
+
+def colour_enabled(stream=None):
+    """Whether ANSI colour may be written: to a terminal, and never while NO_COLOR is set, to any value."""
+    return "NO_COLOR" not in os.environ and terminal(stream)
+
+
+class _Palette(dict):
+    """ANSI codes by name, each read as "" wherever colour is off.
+
+    Decided at every lookup rather than once at import: one process prints to a terminal,
+    to a pipe a hook reads and to the log a scheduled job keeps, and a test swaps stdout
+    under it. Every `C[...]` passes through here, so no command decides colour on its own.
+    """
+
+    def __getitem__(self, name):
+        return dict.__getitem__(self, name) if colour_enabled() else ""
+
+    def get(self, name, default=None):
+        return self[name] if name in self else default
+
+
+C = _Palette({
     "reset": "\033[0m", "dim": "\033[2m", "b": "\033[1m", "green": "\033[32m",
     "red": "\033[31m", "yellow": "\033[33m", "cyan": "\033[36m",
     "mag": "\033[35m", "blue": "\033[34m",
-}
+})
+
+TIME_UNITS = {"m": 60, "h": 3600, "d": 86400, "w": 7 * 86400}
+TIME_FORMS = "30m, 2h, 1d, 1w, today, yesterday or a date such as 2026-09-17"
+_TIME_NUMBER = re.compile(r"\d+(?:\.\d+)?|\.\d+")          # 7, 0.5 and .5, as float() read them
+_TIME_SPAN = re.compile(rf"({_TIME_NUMBER.pattern})([mhdw])")
+_TIME_DATE = re.compile(r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})?)?")
+
+
+class When:
+    """A time an `ao` command was given: a span back from now, or the moment a date names.
+
+    `text` is what was typed, so a report names its window the way it was asked for.
+    Exactly one of `seconds` (a span) and `at` (an epoch) is set.
+    """
+
+    def __init__(self, text, seconds=None, at=None):
+        self.text, self.seconds, self.at = text, seconds, at
+
+    def __str__(self):
+        return self.text
+
+    def __repr__(self):
+        return f"When({self.text!r})"
+
+    def moment(self, ahead=False, now=None):
+        """The epoch named: a date's own, or the span back from now, or forward from it with `ahead`."""
+        if self.at is not None:
+            return self.at
+        now = time.time() if now is None else now
+        return now + self.seconds if ahead else now - self.seconds
+
+    def span(self, unit, now=None):
+        """How far back from now this reaches, counted in `unit`, a key of TIME_UNITS."""
+        seconds = self.seconds if self.at is None else (time.time() if now is None else now) - self.at
+        return seconds / TIME_UNITS[unit]
+
+    def label(self):
+        """How a report names the window: `last 24h` for a span, `since today` for a date."""
+        return f"last {self.text}" if self.at is None else f"since {self.text}"
+
+
+def parse_time(text, bare=None, now=None):
+    """What a time argument names, as a When; ValueError saying which forms it takes.
+
+    Every command reads one syntax, where there were nine: `30m`, `2h`, `1d` and `1w` are
+    spans back from now; `today` and `yesterday` the local midnight that began them;
+    `2026-09-17` or `2026-09-17T14:30` a local moment unless it carries `Z` or an offset.
+    A bare number counts in `bare`, the unit its option always took (`--days 7`,
+    `--window 24`), and is refused where the option never took one: `7` alone says
+    neither minutes nor days.
+    """
+    if isinstance(text, When):
+        return text
+    word = str("" if text is None else text).strip()
+    span = _TIME_SPAN.fullmatch(word.lower())
+    if span:
+        return When(word, seconds=float(span.group(1)) * TIME_UNITS[span.group(2)])
+    if _TIME_NUMBER.fullmatch(word):
+        if bare:
+            return When(word, seconds=float(word) * TIME_UNITS[bare])
+        raise ValueError(f"{word} needs a unit: {word}m, {word}h or {word}d")
+    if word.lower() in ("today", "yesterday"):
+        # Calendar days, not 24 hours: across a clock change yesterday's midnight is 23 or 25 hours back.
+        day = datetime.fromtimestamp(time.time() if now is None else now).toordinal()
+        return When(word, at=datetime.fromordinal(day - (word.lower() == "yesterday")).timestamp())
+    if _TIME_DATE.fullmatch(word):
+        try:
+            return When(word, at=datetime.fromisoformat(word.replace("Z", "+00:00")).timestamp())
+        except ValueError:
+            pass                                      # 2026-02-30 has the shape of a date and is none
+    raise ValueError(f"{word!r} is not a time: give {TIME_FORMS}")
+
+
+def time_span(text, unit, now=None):
+    """How far back a time argument reaches, in `unit`, a bare number counting in that unit.
+
+    ValueError for what is no time, and for a moment still ahead: a window reaching into the
+    future is no window, and `ao mail compact` given one would have compacted every message.
+    """
+    when = parse_time(text, bare=unit, now=now)
+    span = when.span(unit, now=now)
+    if span < 0:
+        raise ValueError(f"{when} is in the future")
+    return span
+
+
+def time_arg(unit=None):
+    """The argparse type= of every time an `ao` option takes.
+
+    Without `unit`, a When, for an option that names a moment (`--since`, `--until`); with
+    one, the span back from now in that unit, the number `--days` and `--window` always held.
+    Anything else exits 2 naming the forms, where it used to reach a command and end in a
+    traceback.
+    """
+    import argparse
+
+    def time_value(text):
+        try:
+            return time_span(text, unit) if unit else parse_time(text)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(str(exc)) from None
+
+    return time_value
 
 
 # ── config ────────────────────────────────────────────────────────────────────

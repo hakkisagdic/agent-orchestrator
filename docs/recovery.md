@@ -21,7 +21,7 @@ is equivalent to a continuing one.
 
 ```bash
 ao since last          # everything since this orchestrator last looked
-ao since 2h            # or a window: 30m, 2h, 1d
+ao since 2h            # or a window: 30m, 2h, 1d, today, yesterday, 2026-09-17
 ao since HEAD~5        # or since a commit, named by any git ref
 ao since 1d --no-mark  # a look that does not reset "last"
 ```

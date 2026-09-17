@@ -109,7 +109,7 @@ scope is the one authority an implementer must not have.
 | `ao hold` / `ao hold release --note …` | stop every agent in the tree, and keep them stopped |
 | `ao writers` / `ao writers --clean` | live turns in the tree (one per turn, not per process), orphans set aside; `--clean` stops only the orphans |
 | `ao fanout ok --agents N` / `ao fanout record …` / `ao fanout history` | may a fan-out of N sub-agents start now (hard cap, recent limit hit, provider window); record what one cost |
-| `ao cost --since 24h` | what the coordination itself spends: implementer turns by class (product / analysis / ceremony / coordination), wasted turns, reviews |
+| `ao cost --since 24h` | what the coordination itself spends: implementer turns by class (product / analysis / ceremony / coordination), wasted turns, reviews; `--since`, like every time a command takes, is `30m`, `2h`, `1d`, `today`, `yesterday` or a date |
 | `ao features [on|off <key>]` | the switches and what each costs; all off = deterministic ao, zero model spend ([features.md](docs/features.md)) |
 | platforms | macOS and Linux native; Windows first cut ([windows.md](docs/windows.md)); tests run on all three in CI |
 | `ao waive review --slice B7 --by <name> --why …` / `ao catchup` | a person bypasses a gate on the record; catchup reviews each landed range with a model family other than the one that wrote it, against what its commit messages claim, closes a `move-only` split on the proof its grant recorded, run again, and replays deferred wakes and nudges. `ao catchup --plan` previews it, names what closes by proof, and writes nothing, `ao catchup --limit 10` and `ao catchup --slice B7` bound a run, `ao catchup --author-family <family> --by <name>` is a person naming a family ao did not record, and `ao catchup --move-only <slices> --by <name>` is a person stating which waived slices only moved code, each closing only where the proof holds; a run exits 3 when the reviews it started decided nothing, and 0 when it made progress or had nothing to do |
@@ -129,7 +129,7 @@ scope is the one authority an implementer must not have.
 | `ao mcp serve` · `ao a2a serve` | expose state to MCP clients / as A2A tasks |
 | `ao telegram setup` | alerts to your phone, decisions back from it |
 | `ao digest [--days N]` | what happened, read from the ledgers — also answers "why is nothing moving" |
-| `ao ask` · `ao answer` · `ao decisions` | questions answerable in one tap; free text always last |
+| `ao ask` · `ao answer` · `ao decisions` | questions answerable in one tap; free text always last; an answer must be an offered key, and `ao answer <D-id> <key> --change` replaces one while the first stays on the record |
 | `ao note` | an architect message into the mailbox, through the tool |
 | `ao review` | review the tree with an actor that did not write it |
 | `ao review --commits <range>` | review landed work after the fact; exit 3 means no reviewer could review (never a verdict), fallbacks in `reviewer.fallbacks` ([roles.md](docs/roles.md)) |
@@ -137,6 +137,7 @@ scope is the one authority an implementer must not have.
 | `ao a2a-mcp serve` | reach A2A agents from an MCP-only client |
 | `ao prune` | trim accumulated records and logs |
 | `ao doctor` · `ao adapters` | check the wiring; what is supported and how well |
+| `ao --version` | the installed version |
 
 Hook status separates static intent from executable enforcement. AO enforcement is
 opted in only by a root `.ao-project` whose exact `ao-project-v1\n` bytes exist in

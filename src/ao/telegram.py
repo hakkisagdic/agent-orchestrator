@@ -128,8 +128,13 @@ def poll(root, cfg_project, seconds=25):
                     text="yetkisiz")
                 continue
             did, _, keyv = (cq.get("data") or "").partition(":")
-            rec = A.answer(root, did, keyv,
-                           by=(cq.get("from") or {}).get("username") or chat)
+            try:
+                rec = A.answer(root, did, keyv,
+                               by=(cq.get("from") or {}).get("username") or chat)
+            except A.AnswerRefused as refused:
+                # A second tap, or a button of an answered question, keeps the first answer.
+                api(cfg, "answerCallbackQuery", callback_query_id=cq["id"], text=str(refused)[:200])
+                continue
             if rec:
                 api(cfg, "answerCallbackQuery", callback_query_id=cq["id"],
                     text=f"{keyv}) kaydedildi")
@@ -157,8 +162,13 @@ def poll(root, cfg_project, seconds=25):
         mm = re.match(r"^(D-\d+)\s+(\S+)\s*(.*)$", text, re.S)
         if mm:
             did, key, extra = mm.group(1), mm.group(2), mm.group(3).strip()
-            rec = A.answer(root, did, extra if (key.lower() == "x" and extra) else key,
-                           by=(m.get("from") or {}).get("username") or chat)
+            try:
+                # The key leads, as on the terminal: the free-text key takes the words after it.
+                rec = A.answer(root, did, f"{key} {extra}" if key.lower() == "x" else key,
+                               by=(m.get("from") or {}).get("username") or chat)
+            except A.AnswerRefused as refused:
+                send(f"`{did}`: {refused}", root)
+                continue
             if rec:
                 send(f"✅ *{rec['question']}*\n→ {rec['answer']}", root)
                 written.append(f"{did}={rec.get('answer_key') or 'free'}")

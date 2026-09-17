@@ -694,4 +694,5 @@ def test_digest_surfaces_broken_authority_chain_without_trusting_counts(
 
     assert code == 0
     assert "YETKİ DEFTERİ BÜTÜNLÜĞÜ BOZUK" in output
-    assert "commit-ok  \x1b[32m0 verildi" not in output
+    # Captured output is no terminal, so it carries no colour (CLI-ROBUST): the line is looked for as printed.
+    assert "commit-ok  0 verildi" not in output

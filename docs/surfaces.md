@@ -117,6 +117,11 @@ That constraint is less limiting than it sounds. With stdlib alone the panel get
 
 That is a real TUI, in about two hundred lines, that runs anywhere.
 
+Colour and screen codes go only where something draws them. Output that is not a terminal - a
+pipe, a file, a scheduled job's log - carries no ANSI codes, and no output does while `NO_COLOR` is
+set, to any value, or under `TERM=dumb`. There `ao watch` prints the panel once and exits: in a loop
+it wrote the alternate screen and a clear before every frame into whatever read it, and never ended.
+
 ## Progressive enhancement, never a requirement
 
 If `rich` or `textual` happens to be importable, the panel uses it for nicer tables and

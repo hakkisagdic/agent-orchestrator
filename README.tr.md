@@ -104,7 +104,7 @@ gereken tek yetkidir.
 | `ao hold` / `ao hold release --note …` | ağaçtaki tüm ajanları durdur ve durdurulmuş tut |
 | `ao writers` / `ao writers --clean` | ağaçtaki canlı turlar (süreç değil tur başına bir), öksüzler ayrı; `--clean` yalnız öksüzleri durdurur |
 | `ao fanout ok --agents N` / `ao fanout record …` / `ao fanout history` | N alt-ajanlık fan-out şimdi başlayabilir mi (üst sınır, yakın limit vuruşu, sağlayıcı penceresi); bir koşunun maliyetini kaydet |
-| `ao cost --since 24h` | koordinasyonun kendisi ne harcıyor: uygulayıcı turları sınıfa göre (ürün / analiz / tören / koordinasyon), boşa giden turlar, review sayısı |
+| `ao cost --since 24h` | koordinasyonun kendisi ne harcıyor: uygulayıcı turları sınıfa göre (ürün / analiz / tören / koordinasyon), boşa giden turlar, review sayısı; `--since`, her zaman argümanı gibi, `30m`, `2h`, `1d`, `today`, `yesterday` ya da bir tarih alır |
 | `ao features [on|off <anahtar>]` | anahtarlar ve her birinin maliyeti; hepsi kapalı = deterministik ao, sıfır model harcaması ([features.md](docs/features.md)) |
 | platformlar | macOS ve Linux yerel; Windows ilk sürüm ([windows.md](docs/windows.md)); testler üçünde de CI'da koşar |
 | `ao waive review --slice B7 --by <ad> --why …` / `ao catchup` | insan bir kapıyı kayıtlı biçimde atlar; catchup inen her aralığı onu yazan model ailesinden başka bir aileyle, commit mesajlarının iddia ettiklerine karşı review eder, `move-only` bir bölmeyi grant'in kaydettiği kanıtı yeniden çalıştırarak kapatır, ertelenen uyandırma/dürtmeleri yeniden oynatır. `ao catchup --plan` hiçbir şey yazmadan önizler ve hangilerinin kanıtla kapanacağını söyler, `ao catchup --limit 10` ve `ao catchup --slice B7` bir koşuyu sınırlar, `ao catchup --author-family <aile> --by <ad>` ao'nun kaydedemediği aileyi bir insanın adlandırmasıdır, `ao catchup --move-only <dilimler> --by <ad>` ise waiver'lı hangi dilimlerin yalnızca kod taşıdığını bir insanın beyan etmesidir; her biri yalnızca kanıt tutarsa kapanır; bir koşu başlattığı review'lar hiçbir karar vermediğinde 3, ilerlediğinde ya da yapacak bir şeyi olmadığında 0 ile çıkar |
@@ -124,7 +124,7 @@ gereken tek yetkidir.
 | `ao mcp serve` · `ao a2a serve` | durumu MCP istemcilerine / A2A görevi olarak sun |
 | `ao telegram setup` | telefona uyarı, telefondan karar |
 | `ao digest [--days N]` | ne oldu, defterlerden okunur — "neden ilerlemiyor"un da cevabı |
-| `ao ask` · `ao answer` · `ao decisions` | tek dokunuşla cevaplanan sorular; serbest metin hep sonda |
+| `ao ask` · `ao answer` · `ao decisions` | tek dokunuşla cevaplanan sorular; serbest metin hep sonda; cevap sorunun sunduğu bir harf olmalı, `ao answer <D-id> <harf> --change` bir cevabı değiştirir ve ilki kayıtta kalır |
 | `ao note` | kutuya mimar mesajı, araç üzerinden |
 | `ao review` | ağacı, onu yazmayan bir aktörle gözden geçir |
 | `ao review --commits <aralık>` | inmiş işi sonradan review et; çıkış 3 = reviewer erişilemedi (asla verdict değil), yedekler `reviewer.fallbacks` ([roles.md](docs/roles.md)) |
@@ -132,6 +132,7 @@ gereken tek yetkidir.
 | `ao a2a-mcp serve` | MCP-only istemciden A2A ajanlarına ulaş |
 | `ao prune` | biriken kayıt ve logları buda |
 | `ao doctor` · `ao adapters` | bağlantıları denetle; ne destekleniyor ve ne kadar |
+| `ao --version` | kurulu sürüm |
 
 Hook durumu statik niyeti çalıştırılabilir dayatmadan ayırır. AO dayatması yalnız
 HEAD'de veya etkin index'te exact `ao-project-v1\n` baytları bulunan kök

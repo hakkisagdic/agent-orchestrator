@@ -22,7 +22,15 @@ class LedgerCorruption(RuntimeError):
 
 
 class LedgerLockTimeout(TimeoutError):
-    """Another process held a ledger lock past the caller's deadline."""
+    """Another process held a ledger lock past the caller's deadline.
+
+    `path` is the lock and `timeout` the seconds waited for it, so a command can say in one
+    line which lock stood in its way (CLI-ROBUST).
+    """
+
+    def __init__(self, message, path=None, timeout=None):
+        super().__init__(message)
+        self.path, self.timeout = path, timeout
 
 
 def _call(checkpoint, step):
@@ -54,7 +62,7 @@ def _exclusive_lock(path, timeout=10.0):
                 break
             except (OSError, BlockingIOError):
                 if time.monotonic() >= deadline:
-                    raise LedgerLockTimeout(f"timed out locking {path}")
+                    raise LedgerLockTimeout(f"timed out locking {path}", path, timeout)
                 time.sleep(0.02)
         yield
     finally:

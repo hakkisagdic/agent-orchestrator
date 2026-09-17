@@ -93,6 +93,10 @@ The implementer poses its own through MCP (`ao_ask`) and reads answers with
 it. Typing `D-123 b` works too, for when the message has scrolled away, and
 `D-123 x <text>` gives the free-text answer.
 
+An answer is a key the question offers; anything else is refused, with the keys it does offer. A
+question answered once keeps its answer, so a second tap is refused too: `ao answer D-123 a --change`
+replaces it from the terminal, and the first answer stays in the decision's record beside the new one.
+
 Free text is always the last option, appended automatically. Options are a
 convenience, never a cage: the answer that matters is often the one nobody
 listed, and a form that cannot express it produces a wrong answer chosen because

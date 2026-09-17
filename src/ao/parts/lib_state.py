@@ -1320,21 +1320,50 @@ def ask(root, question, options, context=None, slice_id=None):
     return rec
 
 
-def answer(root, did, key_or_text, by="human"):
-    """Answer one question. Returns the updated record, or None if unknown."""
+class AnswerRefused(ValueError):
+    """An answer a question does not take: a key it does not offer, or a second answer given as a first."""
+
+
+def answer(root, did, key_or_text, by="human", change=False):
+    """Answer one question. Returns the updated record, or None if unknown.
+
+    The first word is the key of an option the question offers; a free-text option takes the
+    words after it as the answer. Anything else raises AnswerRefused naming the options, where
+    `z` to a question offering a, b and x was recorded as the answer (CLI-ROBUST), and so does a
+    second answer, which silently replaced the first, unless `change` says it replaces it. Each
+    answer is a row of its own under `answers` and the record's answer is the newest, so a change
+    leaves what was answered before on the record.
+    """
     p = os.path.join(root, DECISION_DIR, did + ".json")
     if not os.path.exists(p):
         return None
     rec = json.load(open(p, encoding=UTF8))
-    chosen = next((o for o in rec["options"] if o["key"] == key_or_text.strip().lower()), None)
-    rec["answer"] = chosen["label"] if chosen and not chosen.get("free_text") \
-        else key_or_text
-    rec["answer_key"] = chosen["key"] if chosen else None
-    rec["state"] = "answered"
-    rec["answered_at"] = int(time.time())
-    rec["answered_by"] = by
+    given = str(key_or_text).split(None, 1)
+    key, words = (given[0].lower() if given else ""), (given[1].strip() if len(given) > 1 else "")
+    options = [o for o in rec.get("options") or [] if isinstance(o, dict)]
+    chosen = next((o for o in options if o.get("key") == key), None)
+    free = next((o for o in options if o.get("free_text")), None)
+    if chosen is None:
+        offered = ", ".join(f"{o.get('key')}) {o.get('label')}" for o in options)
+        raise AnswerRefused(f"{did} offers {offered or 'no options'}; {key!r} is not one of them")
+    if chosen.get("free_text") and not words:
+        raise AnswerRefused(f"{key} is answered in your own words: ao answer {did} {key} <text>")
+    if words and not chosen.get("free_text"):
+        raise AnswerRefused(f"{key}) {chosen.get('label')} takes no words after it"
+                            + (f"; answer in your own words with {free.get('key')} <text>" if free else ""))
+    if rec.get("state") == "answered" and not change:
+        raise AnswerRefused(f"{did} is already answered: {rec.get('answer')}; "
+                            f"ao answer {did} <key> --change replaces it, and both stay on the record")
+    row = {"answer": words if chosen.get("free_text") else chosen.get("label"), "answer_key": chosen.get("key"),
+           "answered_at": int(time.time()), "answered_by": by}
+    rows = rec.get("answers")
+    if not isinstance(rows, list):
+        # Answered before each answer was a row: that answer becomes the first, so a change keeps it.
+        rows = [{name: rec.get(name) for name in row}] if rec.get("state") == "answered" else []
+    rec.update(row, state="answered", answers=rows + [row])
     rec = scan_record(rec)
-    json.dump(rec, open(p, "w", encoding=UTF8), ensure_ascii=False, indent=2)
+    from .storage import replace_file_durably
+    replace_file_durably(p, json.dumps(rec, ensure_ascii=False, indent=2).encode(UTF8))
     rec["id"] = did
     return rec
 

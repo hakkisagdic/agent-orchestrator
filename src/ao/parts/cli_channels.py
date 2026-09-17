@@ -349,8 +349,9 @@ def cmd_recall(cfg, args):
 def cmd_stats(cfg, args):
     """Slice outcomes across projects, so a process change is judged by what happened (#49)."""
     roots = A.recall_roots(cfg["root"]) if getattr(args, "all", False) else [(A.project_key(cfg["root"]), cfg["root"])]
-    since = datetime.strptime(args.since, "%Y-%m-%d").timestamp() if getattr(args, "since", None) else None
-    until = datetime.strptime(args.until, "%Y-%m-%d").timestamp() if getattr(args, "until", None) else None
+    # A When from the command line, or text from any other caller, read by the one time syntax (CLI-ROBUST).
+    since = A.parse_time(args.since).moment() if getattr(args, "since", None) else None
+    until = A.parse_time(args.until).moment() if getattr(args, "until", None) else None
     outcomes = []
     for project, path in roots:
         outcomes += [o for o in A.slice_outcomes(path, project)
@@ -643,12 +644,25 @@ def cmd_ask(cfg, args):
 
 
 def cmd_answer(cfg, args):
-    """Answer a pending decision from the terminal."""
-    rec = A.answer(cfg["root"], args.id, " ".join(args.value), by="terminal")
+    """Answer a pending decision from the terminal.
+
+    Only an option the question offers is taken, and a question answered once keeps its
+    answer unless --change replaces it; the replaced answer stays in the record (CLI-ROBUST).
+    """
+    try:
+        rec = A.answer(cfg["root"], args.id, " ".join(args.value), by="terminal",
+                       change=getattr(args, "change", False))
+    except A.AnswerRefused as exc:
+        print(f"{C['red']}not answered{C['reset']}: {exc}")
+        return 2
     if not rec:
         print(f"{C['red']}no such decision{C['reset']} {args.id}")
         return 1
-    print(f"{C['green']}answered{C['reset']} {rec['id']}: {rec['answer']}")
+    rows = rec.get("answers") or []
+    if len(rows) > 1:
+        print(f"{C['green']}changed{C['reset']} {rec['id']}: {rows[-2].get('answer')} → {rec['answer']}")
+    else:
+        print(f"{C['green']}answered{C['reset']} {rec['id']}: {rec['answer']}")
     return 0
 
 
@@ -666,9 +680,11 @@ def cmd_decisions(cfg, args):
             for o in r["options"]:
                 print(f"           {C['dim']}{o['key']}){C['reset']} {o['label']}")
         else:
+            rows = r.get("answers") or []
+            was = f"; was {rows[-2].get('answer')}" if len(rows) > 1 else ""
             print(f"{C['green']}answered{C['reset']} {C['b']}{r['id']}{C['reset']}  "
                   f"{r['question']}  {C['dim']}→ {r['answer']} "
-                  f"({r.get('answered_by')}){C['reset']}")
+                  f"({r.get('answered_by')}{was}){C['reset']}")
     return 0
 
 

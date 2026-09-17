@@ -292,6 +292,12 @@ def cmd_status(cfg, args):
 
 
 def cmd_watch(cfg, args):
+    if not A.terminal():
+        # A pipe, a log or a dumb terminal gets the panel once. Looping there wrote the alternate
+        # screen and a clear before every frame into whatever read it, and never ended (CLI-ROBUST).
+        width = shutil.get_terminal_size((120, 40)).columns
+        print("\n".join(render_fleet(width)) if getattr(args, "all", False) else render(cfg, args.messages, width))
+        return 0
     sys.stdout.write("\033[?1049h\033[?25l")   # alternate screen, hidden cursor
     try:
         while True:
@@ -448,7 +454,13 @@ def cmd_mail(cfg, args):
             return 1
         print(f"{C['green']}synced{C['reset']} the message store {commit[:12]} → {where}")
     elif args.action == "compact":
-        days = float(args.type) if args.type and args.type != "INFO" else 30.0
+        # The age shares its positional with send's type, so no argparse type can read it; the
+        # same parser can (CLI-ROBUST). A bare number is days, as it always was.
+        try:
+            days = A.time_span(args.type, "d") if args.type and args.type != "INFO" else 30.0
+        except ValueError as exc:
+            print(f"ao mail compact: {exc}")
+            return 2
         compacted = A.compact_messages(root, days)
         print(f"compacted {len(compacted)} stored message(s) older than {days:g} day(s) to stubs; "
               "their bodies stay in .ao/mail/archive/")
