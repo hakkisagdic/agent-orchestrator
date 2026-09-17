@@ -1691,6 +1691,8 @@ def record_notice(root, title, msg, sent, key=None, evidence=None, named=None):
             if named:
                 row["named"] = list(named)      # the conditions one resume notice told (RESUME-QUIET)
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        # Folded before the bound can trim it, so a window still counts it (NOTICE-WINDOW).
+        fold_notice_times(root)
         # Observation is held to its bound as it is written (#50).
         bound_store(os.path.join(d, "notices.jsonl"), settings.get(load_config(root), "retention.observation_kb"))
     except OSError:
@@ -1726,31 +1728,150 @@ def notices(root, limit=10, include_suppressed=False):
     return list(reversed(out))[:limit]
 
 
-def notice_recently_sent(root, key, window):
-    """Was this same alert already delivered inside the window?"""
-    p = os.path.join(root, ".ao", "ledger", "notices.jsonl")
-    if not os.path.exists(p):
-        return False
-    cutoff = time.time() - window
+# ---- a window read whole: when each notice key was last recorded and sent (NOTICE-WINDOW) --------
+
+# A key not recorded for a week is forgotten, and no more than 500 keys are kept: the longest
+# window a check asks is a day, and a week of conditions names far fewer keys.
+NOTICE_TIMES_DAYS = 7
+NOTICE_TIMES_KEYS = 500
+
+
+def notice_times_path(root):
+    """When each notice key was last recorded and last sent, beside the ledger it is folded from."""
+    return os.path.join(root, ".ao", "ledger", "notice-times.json")
+
+
+def _notice_rows_back(path, chunk=65536):
+    """(digest, row) for each line of the notices ledger, newest first, read a chunk at a time.
+
+    The digest names a line whatever its line ending; a line that is not a JSON object - a
+    write still under way, a foreign line - is skipped.
+    """
     try:
-        with open(p, errors="replace", encoding=UTF8) as fh:
-            fh.seek(max(0, os.path.getsize(p) - 100_000))
-            lines = fh.read().split("\n")
+        fh = open(path, "rb")
     except OSError:
+        return
+    with fh:
+        end, carry = fh.seek(0, os.SEEK_END), b""
+        while end > 0:
+            start = max(0, end - chunk)
+            fh.seek(start)
+            lines = (fh.read(end - start) + carry).split(b"\n")
+            carry, end = (lines.pop(0) if start else b""), start
+            for line in reversed(lines):
+                line = line.rstrip(b"\r")
+                try:
+                    row = json.loads(line) if line.strip() else None
+                except (ValueError, RecursionError):
+                    continue
+                if isinstance(row, dict):
+                    yield hashlib.sha256(line).hexdigest()[:16], row
+
+
+def _notice_times(root):
+    """The folded notice times: {"last": digest, "forgotten_through": at, "keys": {key: {"recorded", "sent"}}}."""
+    try:
+        with open(notice_times_path(root), encoding=UTF8) as fh:
+            index = json.load(fh)
+    except (OSError, ValueError, RecursionError):
+        return {"keys": {}}
+    if not isinstance(index, dict) or not isinstance(index.get("keys"), dict):
+        return {"keys": {}}
+    index["keys"] = {name: {field: entry[field] for field in ("recorded", "sent")
+                            if isinstance(entry.get(field), (int, float))}
+                     for name, entry in index["keys"].items()
+                     if isinstance(entry, dict) and isinstance(entry.get("recorded"), (int, float))}
+    return index
+
+
+def fold_notice_times(root):
+    """Fold the notices written since the last fold into when each key was last recorded and sent.
+
+    A window check read the last 100 KB of the ledger. Rebuilt after two weeks off, a day of
+    notices was more than that, and a review parked through the day rang the desktop and the
+    phone each time its last ring left those 100 KB; the ledger's own bound (#50) can keep less
+    than a window. So every notice is folded as it is written, and before anything trims the
+    ledger: a trimmed row has already been counted (NOTICE-WINDOW).
+
+    Each process folds from the newest line the file names to the end of the ledger, so a
+    fold another process overtakes, or one that could not be written, leaves only more lines
+    for the next fold and for a check to read. It is rebuilt from the ledger when it cannot be
+    read, which is why it is replaced whole and not synced. A key not recorded for
+    NOTICE_TIMES_DAYS goes, and past NOTICE_TIMES_KEYS the oldest go; `forgotten_through` says
+    when the newest of them was recorded, and a window reaching back to it reads the ledger.
+    """
+    ledger = os.path.join(root, ".ao", "ledger", "notices.jsonl")
+    index = _notice_times(root)
+    fresh = []
+    for digest, row in _notice_rows_back(ledger):
+        if digest == index.get("last"):
+            break
+        fresh.append((digest, row))
+    if not fresh:
         return False
-    for line in reversed(lines):
-        if not line.strip():
+    keys = index["keys"]
+    for _, row in reversed(fresh):
+        at, named = row.get("at"), row.get("named")
+        if not isinstance(at, (int, float)):
             continue
-        try:
-            rec = json.loads(line)
-        except Exception:
-            continue
-        if rec.get("at", 0) < cutoff:
-            return False
         # A resume notice is the ring of every condition it named (RESUME-QUIET).
-        if rec.get("sent") and (rec.get("key") == key or key in (rec.get("named") or ())):
+        for name in [row.get("key")] + (list(named) if isinstance(named, list) else []):
+            if not isinstance(name, str):
+                continue
+            entry = keys.setdefault(name, {})
+            entry["recorded"] = max(entry.get("recorded", at), at)
+            if row.get("sent"):
+                entry["sent"] = max(entry.get("sent", at), at)
+    forgotten = index.get("forgotten_through") if isinstance(index.get("forgotten_through"), (int, float)) else 0
+    old = time.time() - NOTICE_TIMES_DAYS * 86400
+    newest_first = sorted(keys, key=lambda name: keys[name]["recorded"], reverse=True)
+    for name in [name for name in newest_first if keys[name]["recorded"] < old] + newest_first[NOTICE_TIMES_KEYS:]:
+        if name in keys:
+            forgotten = max(forgotten, keys.pop(name)["recorded"])
+    path = notice_times_path(root)
+    temporary = os.path.join(os.path.dirname(path), f".{os.path.basename(path)}.{os.getpid()}.tmp")
+    try:
+        from .storage import _replace
+        with open(temporary, "w", encoding=UTF8) as fh:
+            json.dump({"last": fresh[0][0], "forgotten_through": forgotten, "keys": keys}, fh,
+                      ensure_ascii=False, sort_keys=True)
+        _replace(temporary, path)
+    except OSError:
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
+        return False
+    return True
+
+
+def _notice_within(root, key, window, sent):
+    """Whether `key` was recorded - or, with `sent`, delivered - inside the whole window (NOTICE-WINDOW).
+
+    The folded times answer for every line up to the newest one they name, whatever the ledger
+    still holds; the lines after it are read from the ledger. Where the fold has forgotten a key
+    the window may still need, the ledger is read back to the window's start. A check writes
+    nothing: a dry run and a read-only tool call it. A resume notice is the ring of every
+    condition it named (RESUME-QUIET).
+    """
+    cutoff = time.time() - window
+    index = _notice_times(root)
+    if index["keys"].get(key, {}).get("sent" if sent else "recorded", cutoff - 1) >= cutoff:
+        return True
+    forgotten = index.get("forgotten_through")
+    last = index.get("last") if not isinstance(forgotten, (int, float)) or cutoff > forgotten else None
+    for digest, row in _notice_rows_back(os.path.join(root, ".ao", "ledger", "notices.jsonl")):
+        at = row.get("at", 0)
+        if digest == last or not isinstance(at, (int, float)) or at < cutoff:
+            return False
+        if (row.get("sent") or not sent) and (row.get("key") == key or key in (row.get("named") or ())):
             return True
     return False
+
+
+def notice_recently_sent(root, key, window):
+    """Was this same alert already delivered inside the window? All of the window counts (NOTICE-WINDOW)."""
+    return _notice_within(root, key, window, sent=True)
 
 
 def _ledger_time(value):

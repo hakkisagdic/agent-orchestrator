@@ -31,6 +31,18 @@ repeated at most every six hours while the condition stands. Two hours of
 silence closes the episode, so a condition that comes back later starts fresh.
 When the watchdog itself was the one silent, see [After a silence](#after-a-silence).
 
+A key that rang does not ring the desktop and the phone again inside its window, and the
+whole window counts, however little of it the notices ledger still holds. As each notice is
+recorded, when its key was last recorded and last sent - and each key a resume notice names -
+is folded into `.ao/ledger/notice-times.json`, and nothing trims the ledger before that fold:
+not its own bound, `retention.observation_kb`, not the watchdog's cycle and not `ao prune`. A
+check reads that file and the ledger lines written after the newest one folded, and writes
+nothing. The file lets a key go a week after it was last recorded, and the oldest past 500
+keys; a window that reaches back to a key it let go is read from the ledger. The check used to
+read the last 100 KB of the ledger. Rebuilt in a temporary project with a review parked
+through the day, those 100 KB held eight and a half hours, and the review, whose window is a
+day, rang the desktop and the phone twice more; with the ledger held to 64 KB, four times more.
+
 A condition that stands and can say what it is about rings the desktop and the phone
 once for what it says: "needs you" about the request that waits, the credits alarm
 about the account that ran out. It keeps climbing - it turns red and mails, and mails

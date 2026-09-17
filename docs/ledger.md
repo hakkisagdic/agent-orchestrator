@@ -142,7 +142,9 @@ cleanup that waits to be asked is never run. Observation - notices, progress sam
 records, and the nudge, watchdog, refill and wake logs - keeps the newest
 `retention.observation_kb` and drops the oldest records at a line boundary; the notices ledger
 does this on each write and the watchdog holds the rest every cycle. `ao doctor` names a store
-that is over its bound anyway.
+that is over its bound anyway. What a trim takes from the notices still counts in an alarm's
+window: each notice is folded first into `.ao/ledger/notice-times.json`, when each key was last
+recorded and sent, which keeps a week and at most 500 keys ([alarms](alarms.md)).
 
 Evidence is never trimmed. A chained ledger past its bound is **sealed**: `ao prune --evidence
 --yes` moves all but its newest `retention.evidence_keep` rows whole into `.ao/ledger/sealed/`,

@@ -499,8 +499,12 @@ def observation_stores(root, state_dir=None):
 
 
 def bound_observation_logs(root, state_dir=None):
-    """Hold every observation store to its bound; the watchdog does this each cycle (#50)."""
+    """Hold every observation store to its bound; the watchdog does this each cycle (#50).
+
+    The notices are folded first: what the bound trims still counts in a window (NOTICE-WINDOW).
+    """
     limit = settings.get(load_config(root), "retention.observation_kb")
+    fold_notice_times(root)
     return [path for path in observation_stores(root, state_dir) if bound_store(path, limit)]
 
 

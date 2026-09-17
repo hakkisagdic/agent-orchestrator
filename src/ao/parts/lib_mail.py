@@ -499,30 +499,10 @@ def notice_recently_recorded(root, key, window):
     """Was this key recorded inside the window at all, delivered or held (#69)?
 
     An architect-audience notice is recorded unsent by design, so a check on sent
-    rows never held for one, and the same anomaly wrote a row every cycle.
+    rows never held for one, and the same anomaly wrote a row every cycle. The whole
+    window counts, whatever the ledger still holds (NOTICE-WINDOW).
     """
-    p = os.path.join(root, ".ao", "ledger", "notices.jsonl")
-    if not os.path.exists(p):
-        return False
-    cutoff = time.time() - window
-    try:
-        with open(p, errors="replace", encoding=UTF8) as fh:
-            fh.seek(max(0, os.path.getsize(p) - 100_000))
-            lines = fh.read().split("\n")
-    except OSError:
-        return False
-    for line in reversed(lines):
-        if not line.strip():
-            continue
-        try:
-            rec = json.loads(line)
-        except Exception:
-            continue
-        if rec.get("at", 0) < cutoff:
-            return False
-        if rec.get("key") == key or key in (rec.get("named") or ()):
-            return True
-    return False
+    return _notice_within(root, key, window, sent=False)
 
 
 SECRET_PATTERNS = (

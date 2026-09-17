@@ -260,6 +260,8 @@ def cmd_prune(cfg, args):
                 print(f"  {C['green']}{'would drop' if dry else 'dropped'}{C['reset']}  "
                       f"{name:<14} {gone} file(s)  {C['dim']}{desc}{C['reset']}")
             continue
+        if name == "notices" and not dry:
+            A.fold_notice_times(root)             # what the prune drops still counts in a window (NOTICE-WINDOW)
         dropped, kept, freed = _prune_jsonl(path, cutoff, dry)
         total += freed
         if dropped:
