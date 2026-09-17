@@ -431,7 +431,9 @@ def test_protected_effective_legacy_aborts_remove_with_state_intact(project, mon
         # Quoted as ao quoted it: a Windows path's backslashes are shell escapes.
         fh.write(cli.PRE_COMMIT_HOOK.format(ao="/old/ao", root=shlex.quote(root)))
     _git(root, "add", ".githooks/pre-commit")
-    _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "legacy")
+    # Git for Windows runs a hook whatever its mode, and this legacy one names an ao that is not there:
+    # the fixture's own commit runs no hook, as it runs none where the file is not executable (#71).
+    _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--no-verify", "-qm", "legacy")
 
     assert cli.cmd_remove(project, SimpleNamespace(yes=True, allow_shared_hooks=False)) == 1
     assert os.path.isdir(os.path.join(root, ".ao"))
@@ -1270,7 +1272,10 @@ def test_init_refuses_broken_symlink_state_without_replacing_it(
     output = _strip_colour(capsys.readouterr().out)
 
     assert link.is_symlink()
-    assert os.readlink(link) == str(missing)
+    target = os.readlink(link)
+    if os.name == "nt" and target.startswith("\\\\?\\"):
+        target = target[len("\\\\?\\"):]      # Windows reads an absolute target back with the prefix it stored (#71)
+    assert target == str(missing)
     assert not missing.exists()
     assert "AO project state is missing/unreadable" in output
     assert cli.PROJECT_INIT_COMMAND in output

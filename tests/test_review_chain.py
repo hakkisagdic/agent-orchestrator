@@ -725,12 +725,16 @@ def test_timeout_drain_remains_bounded_after_reviewer_kill(project, monkeypatch)
     monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: reviewer)
     monkeypatch.setattr(A, "helper_register", lambda *args, **kwargs: None)
     monkeypatch.setattr(A, "helper_release", lambda *args, **kwargs: None)
+    # The tree kill names the fake's pid: on Windows it starts taskkill, which the fake Popen answered,
+    # and elsewhere it would signal whatever process holds that pid (#71).
+    kills = []
+    monkeypatch.setattr(A, "kill_turn", lambda pid, sig: kills.append(pid))
 
     attempt = cli._run_reviewer(
         project["root"], ["reviewer", "prompt"], timeout=0.01
     )
 
-    assert reviewer.killed is True
+    assert reviewer.killed is True and kills == [reviewer.pid]
     assert reviewer.timeouts == [0.01, cli.REVIEW_KILL_DRAIN_SECONDS]
     assert attempt["kind"] == "timeout"
     assert attempt["retryable"] is True
@@ -939,12 +943,16 @@ def test_communication_error_drain_is_bounded_and_closes_pipes(
     monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: reviewer)
     monkeypatch.setattr(A, "helper_register", lambda *args, **kwargs: None)
     monkeypatch.setattr(A, "helper_release", lambda *args, **kwargs: None)
+    # The tree kill names the fake's pid: on Windows it starts taskkill, which the fake Popen answered,
+    # and elsewhere it would signal whatever process holds that pid (#71).
+    kills = []
+    monkeypatch.setattr(A, "kill_turn", lambda pid, sig: kills.append(pid))
 
     attempt = cli._run_reviewer(
         project["root"], ["reviewer", "prompt"], timeout=0.01
     )
 
-    assert reviewer.killed is True
+    assert reviewer.killed is True and kills == [reviewer.pid]
     assert reviewer.timeouts == [0.01, cli.REVIEW_KILL_DRAIN_SECONDS]
     assert reviewer.stdout.closed is True
     assert reviewer.stderr.closed is True

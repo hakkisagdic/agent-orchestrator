@@ -845,6 +845,7 @@ def _worktree_project_marker_document(root):
             value.st_mode,
             value.st_size,
             getattr(value, "st_mtime_ns", int(value.st_mtime * 1_000_000_000)),
+            # Last, so that Windows can compare a path's stat with a handle's without it (below).
             getattr(value, "st_ctime_ns", int(value.st_ctime * 1_000_000_000)),
         )
 
@@ -852,7 +853,13 @@ def _worktree_project_marker_document(root):
     opened_identity = identity(opened)
     finished_identity = identity(finished)
     fingerprint = ("regular", finished_identity, data)
-    if listed_identity != opened_identity:
+    # CPython 3.12 and later on Windows read two clocks into st_ctime: a path's stat reports when the
+    # file was created, a handle's when its metadata last changed. They agree only while nothing
+    # changed after creation, so init refused the marker it had just written and the one a clone
+    # checked out (#71). There the path and the handle are one file when every other field agrees;
+    # the handle's two readings, and so the fingerprint, still compare st_ctime.
+    across = slice(None, -1) if os.name == "nt" else slice(None)
+    if listed_identity[across] != opened_identity[across]:
         return {
             "exists": True,
             "fingerprint": fingerprint,

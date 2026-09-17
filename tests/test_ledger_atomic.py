@@ -87,7 +87,9 @@ def test_a_row_the_chain_digest_cannot_read_is_never_written(tmp_path):
         storage.append_chained_jsonl(path, {"weight": float("nan")}, CHAIN)
     assert open(path, "rb").read() == before
 
-    undecodable = os.fsdecode(b"caf\xe9.txt")
+    # A name git reports that is not UTF-8, as a POSIX file system decodes it. Windows names are Unicode and
+    # its fsdecode refuses these bytes, but the string still reaches a row there, so it is built the same way (#71).
+    undecodable = b"caf\xe9.txt".decode("utf-8", "surrogateescape")
     row = storage.append_chained_jsonl(path, {"changed_paths": [undecodable]}, CHAIN)
     assert storage.read_chained_jsonl(path, CHAIN)[-1] == row
     assert row["changed_paths"] == [undecodable]

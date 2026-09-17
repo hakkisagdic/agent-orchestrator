@@ -45,8 +45,11 @@ print(json.dumps(sorted(outside)))
 
 def test_the_core_loads_nothing_from_outside_the_standard_library(project):
     env = {key: value for key, value in os.environ.items() if key not in ("PYTHONPATH",)}
-    run = subprocess.run([sys.executable, "-I", "-c", PROBE, ROOT, project["root"]], capture_output=True,
-                         text=True, env=env, timeout=120)
+    # -I also sets aside PYTHONUTF8, and Windows then writes a pipe in its code page, which a UTF-8 read
+    # refused and left no output (#71): UTF-8 mode is asked for on the command line, and the output is
+    # read as UTF-8 whatever the commands print, since only the module list is asserted.
+    run = subprocess.run([sys.executable, "-I", "-X", "utf8", "-c", PROBE, ROOT, project["root"]],
+                         capture_output=True, encoding="utf-8", errors="replace", env=env, timeout=120)
     lines = [line for line in run.stdout.splitlines() if line.startswith("[")]
 
     assert lines, run.stdout + run.stderr

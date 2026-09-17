@@ -114,8 +114,10 @@ def test_remove_undoes_init_and_only_removes_ao_owned_hooks(project, monkeypatch
     assert os.path.exists(os.path.join(root, ".ao"))
     assert not os.path.exists(os.path.join(root, cli.PROJECT_MARKER))
     real_run(["git", "add", "-u", "--", cli.PROJECT_MARKER], cwd=root, check=True)
+    # Git for Windows runs a hook whatever its mode, and this legacy one names an ao that is not there:
+    # the fixture's own commit runs no hook, as it runs none where the file is not executable (#71).
     real_run(
-        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm",
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--no-verify", "-qm",
          "remove ao marker"],
         cwd=root,
         check=True,

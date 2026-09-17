@@ -53,12 +53,19 @@ def _enrolled_clone(tmp_path):
 
 
 def _marker_read_on(platform, monkeypatch):
-    """The working-tree marker read as it runs on `platform`, and nothing else run there."""
+    """The working-tree marker read with the bytes `platform` accepts, its file stat'ed as this machine stats it.
+
+    The stat comparison stays this machine's: a Windows stat read as if elsewhere compared the clocks
+    Windows keeps apart, and refused a marker that had not changed (#71).
+    """
     real = cli._worktree_project_marker_document
 
     def read(root):
         with monkeypatch.context() as patch:
             patch.setattr(os, "name", platform)
+            forms = cli._worktree_marker_forms()
+        with monkeypatch.context() as patch:
+            patch.setattr(cli, "_worktree_marker_forms", lambda: forms)
             return real(root)
 
     return read

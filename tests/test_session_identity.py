@@ -296,7 +296,9 @@ def test_the_recorded_ids_survive_a_new_process(project):
               "cfg = A.load_config(sys.argv[2]); "
               "print(json.dumps([cfg['architect']['session'], cfg['architect']['_session']['how']]))")
 
-    run = subprocess.run([sys.executable, "-c", script, SRC, root], env=dict(os.environ, HOME=A.HOME),
+    # The new process's home is the test's: Windows reads it from USERPROFILE and never from HOME (#71).
+    run = subprocess.run([sys.executable, "-c", script, SRC, root],
+                         env=dict(os.environ, HOME=A.HOME, USERPROFILE=A.HOME),
                          capture_output=True, text=True, timeout=120)
 
     assert json.loads(run.stdout.strip().splitlines()[-1]) == ["s-lead", "recorded"], run.stderr

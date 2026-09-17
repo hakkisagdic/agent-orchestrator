@@ -739,7 +739,9 @@ def turn_costs(cfg, since=None):
                 if name.endswith("ao_report") and "blocked" in text:      # MCP clients prefix tool names
                     cur["blocked_report"] = True
                 if tool_writes_file(name, tool):
-                    path = str(tool_path(args, tool) or "")
+                    # A harness on Windows names the file with backslashes, and a turn that wrote product or
+                    # coordination files was counted as analysis; the classes are read with slashes (#71).
+                    path = str(tool_path(args, tool) or "").replace("\\", "/")
                     if _coord_path().search(path):
                         cur["coord_writes"] += 1
                     elif _PRODUCT_PATH.search(path) or (path and "/" in path):

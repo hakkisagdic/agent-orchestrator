@@ -6,7 +6,7 @@ What works, what does not, and how hosted runners exercise it.
 |---|---|
 | files: `.ao/`, mailbox, board, backlog, ledgers | works — plain files and Python |
 | gates, `ao lock`, `ao verify`, `ao commit-ok`, reviews | work — subprocesses of the project's own tools |
-| MCP server, playbook, `ao init` registration | work (`.mcp.json`, `.kiro/settings/mcp.json`) |
+| MCP server, playbook, `ao init` registration | work (`.mcp.json`, `.kiro/settings/mcp.json`); a server reply holding a character outside the code page needs Python's UTF-8 mode (below) |
 | process introspection (`ao writers`, orphans, hung turns) | first cut: `Win32_Process` through PowerShell as JSON, tree kill via `taskkill /T`; the working directory is read from the process environment block (a 64-bit process, by a 64-bit Python), and where it cannot be read a turn is matched by the repository path on its command line |
 | scheduler (`ao watchdog install`) | first cut: Task Scheduler (`schtasks`, every 2 min; doctor every 15 min). Each task names a program that exists — the console script on PATH, a clone's script, or `python -m ao.watchdog` from an interpreter that imports an installed ao — or install refuses; install exits 1 when `schtasks` cannot create a task, and `ao remove --yes` deletes both tasks in its own process and checks they are gone |
 | desktop notifications | a toast through PowerShell behind the `toast` feature switch, off by default; Telegram and e-mail carry the orange and red levels |
@@ -33,6 +33,13 @@ Git, or a linked worktree's index — is taken for a relative one and prefixed w
 working directory. ao then reads another index than the one Git commits and refuses.
 That fails closed, but no proof passes on Windows until the hook recognises a drive
 letter, and that is a new hook version.
+
+Also not done: ao leaves the encoding of what it writes to a pipe to Python. Every lane
+runs Python in UTF-8 mode (`PYTHONUTF8=1`); a default Windows install does not, and there
+a pipe is written in the ANSI code page. A character outside that page, such as an arrow
+or a box line, then fails the write, the MCP server's replies included (#71, from the
+2026-09-08 audit), and a reader that expects UTF-8 gets the code page's bytes. Until ao
+sets its own streams, run it with `PYTHONUTF8=1` in the environment.
 
 ## Found before the lane first ran
 
@@ -66,6 +73,29 @@ holds each on every platform by doing what Windows does (#9, #71):
 - **The execution probe's cleanup.** A hook that ran past its timeout can leave children
   holding the probe's temporary index; the directory is removed without raising over the
   probe's answer.
+
+## Found by the lane's first run
+
+Seen on the hosted runner (Windows Server 2025, Python 3.12); `tests/test_windows_lane.py`
+holds each on every platform by doing what Windows does (#71):
+
+- **Two clocks in one stat.** CPython 3.12 and later on Windows put a file's creation time
+  in a path's `st_ctime` and its last metadata change in a handle's, so the two agree only
+  while nothing changed after the file was created. `ao init` compares the marker it listed
+  with the marker it opened, and refused the one it had just written, and the one a clone
+  checked out, as changed before it could be read. On Windows that comparison leaves
+  `st_ctime` out: the volume, file id, type, size and write time still tie the handle to the
+  path, and the handle's own readings, like the fingerprint init compares across the
+  reviewer probe, keep every field.
+- **A written path with backslashes.** A harness on Windows names the files it writes with
+  backslashes, and `ao cost` counted a turn that wrote product or coordination files as
+  analysis. A written path is now classified with either separator.
+
+The run's other failures were the tests' own assumptions, and those tests no longer make
+them: Git for Windows runs a hook whatever its mode, `os.readlink` returns an absolute
+target with its `\\?\` prefix, Windows file names are Unicode, the home is `USERPROFILE`
+and never `HOME`, an isolated interpreter (`-I`) sets UTF-8 mode aside, and a reviewer's
+tree kill starts `taskkill`, which a test's stand-in for the reviewer process answered.
 
 ## What the Windows lane skips, and why
 
