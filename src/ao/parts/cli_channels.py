@@ -816,8 +816,10 @@ def cmd_handoff(cfg, args):
               "", "_push, PR ve epic kapatma hiçbir devirde aktarılmaz._"]
 
     text = "\n".join(lines)
+    # Named in the project's language; a note named in either is listed and read the same (LANGUAGE-FILES).
+    kind = language.marker(cfg, "handoff-kind")
     path = os.path.join(root, cfg["mailbox"],
-                        f"{datetime.now():%Y%m%d-%H%M}-{A.mail_names(cfg)[1]}-to-anyone-DEVIR.md")
+                        f"{datetime.now():%Y%m%d-%H%M}-{A.mail_names(cfg)[1]}-to-anyone-{kind}.md")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     open(path, "w", encoding=UTF8).write(text + "\n")
     print(text)

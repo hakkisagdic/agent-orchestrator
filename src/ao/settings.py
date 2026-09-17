@@ -164,6 +164,10 @@ SETTINGS = {
     "architect.name": Setting(
         "fable", str, None, None, "project",
         "the architect's name in mail file names"),
+    "language": Setting(
+        "en", str, None, None, "project",
+        "en: the files ao init writes and the markers ao writes into mail are English; tr: Turkish. "
+        "The markers of both are read in every project"),
     "keyflip.rotation": Setting(
         "off", str, None, None, "machine",
         "on: before an actor starts on a spent window, keyflip rotates the machine's account; off: never"),
@@ -204,6 +208,7 @@ SETTINGS = {
 # hand, it is passed over for the default, and `ao doctor` names it.
 CHOICES = {
     "review.same_family": ("refused", "labeled"),
+    "language": ("en", "tr"),
 }
 
 # A setting that weakens a guarantee is a person's act, on the record, as a waiver is (REVIEW-TIERS).

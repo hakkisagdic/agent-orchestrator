@@ -142,8 +142,9 @@ we decide whether the work may land — so an unread urgent message becomes a cl
 gate rather than a missed notification. That is the same authority the tool already
 owns, pointed at a delivery problem.
 
-Only messages marked `## ACİL` / `## URGENT` travel this way. Routine coordination
-waits for the turn-start inbox check, because a channel that carries everything is
+Only messages marked `## URGENT` or `## STOP` travel this way - or `## ACİL` and `## DUR`,
+their Turkish forms, read in every project ([protocol.md](protocol.md#markers)). Routine
+coordination waits for the turn-start inbox check, because a channel that carries everything is
 one people learn to skim, and then tier 3 is the only tier left.
 
 When it truly must stop now, `ao hold` kills the turn. That is a real interrupt and

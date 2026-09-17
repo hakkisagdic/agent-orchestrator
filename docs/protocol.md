@@ -59,23 +59,25 @@ machines, which is a sync problem, not a delivery one.
 |---|---|---|
 | `DECISION` | architect → implementer | A binding architectural or contractual ruling. |
 | `COMMIT` | architect → implementer | Grants commit authority for a named, verified file set. |
-| `DEVAM` / `CONTINUE` | architect → implementer | Next slice, with its acceptance boundary. |
+| `CONTINUE` (`DEVAM`) | architect → implementer | Next slice, with its acceptance boundary. |
 | `INFO` | either | Context that changes planning but needs no reply. |
 | `BLOCKER` | either | Stop-the-line. Handled before anything else. |
 | `ESCALATION` | architect → implementer | Carries a recorded human decision that lifts a **scope** lock. Never grants a prohibited action. |
-| `RAPOR` / `REPORT` | implementer → architect | Structured result of a finished slice. |
+| `REPORT` (`RAPOR`) | implementer → architect | Structured result of a finished slice. |
+
+A name in parentheses is the same type in a project that chose Turkish ([Markers](#markers)).
 
 A message must be **self-contained**: file and line references, exact commands, exact
 expected outcomes. It cannot assume the reader shares the writer's conversation history,
 because it usually does not.
 
-## RAPOR format
+## REPORT format
 
 The implementer ends a slice with a fixed block, so the architect can parse it without
-reading the whole transcript:
+reading the whole transcript (in a Turkish project it opens with `RAPOR`):
 
 ```text
-RAPOR
+REPORT
 - Mail: <none | file → applied/rejected, acknowledgement deleted>
 - Slice: <the one closed-boundary slice this turn covered>
 - Completed: <what actually happened>
@@ -89,6 +91,27 @@ RAPOR
 `ao_report` adds the Verification line itself, from the ledger. A report whose words claim green -
 "159 passed", "all tests pass" - while the newest verification failed is marked `## INCONSISTENT`,
 and the watchdog raises it as an `inconsistent-report` anomaly: the exit code decides, never the prose.
+
+## Markers
+
+Some words in a message are read by ao as well as by its reader: a heading that makes a message
+urgent, a word in its file name. A project writes them in its `language`, English unless it set
+`tr` ([configuration.md](configuration.md)), and ao reads both languages' markers in every project,
+whatever it chose, so mail written before a project changed its language, or by an agent following
+an older playbook, is still found, surfaced and escalated. The files `ao init` writes name the
+markers in the project's language.
+
+| Marker | English | Turkish | Written by | What reading it does |
+|---|---|---|---|---|
+| urgent heading | `## URGENT` | `## ACİL` | `ao note --urgent`, `ao decide --urgent`, a phone message | printed by `ao lock` and `ao verify`, attached to every `ao_*` response; `ao commit-ok` refuses until it is acknowledged |
+| stop heading | `## STOP` | `## DUR` | a person or an agent | as the urgent heading |
+| decision heading | `## DECISION REQUIRED` | `## KARAR GEREKLİ` | `ao_report` with `kind: "blocked"` | the watchdog escalates the report on its next cycle; unseen, it climbs the alarm ladder as a message that needs a decision |
+| urgent note's kind | `-URGENT-` | `-ACIL-` | with the urgent heading | the kind in the file name |
+| handoff's kind | `-HANDOFF.md` | `-DEVIR.md` | `ao handoff` | the kind in the file name |
+| a folded report's repeats | `Repeat: N` | `Tekrar: N` | `ao_report`, when the same report is standing | the count is read back and raised |
+| kinds of message | `DECISION`, `REPORT` | `KARAR`, `RAPOR` | agents; `ao note` writes `DECISION` in both | a decision asks for one; a report only informs |
+
+A report's blockers line is read the same way: `Blockers: none` and `Engel: yok` say there are none.
 
 ## Verdicts
 

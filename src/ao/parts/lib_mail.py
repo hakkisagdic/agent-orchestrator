@@ -381,17 +381,23 @@ def _report_summary(path):
     return ""
 
 
-def bump_repeat(path):
-    """Fold a repeated report into the standing one; keep its mtime (its age is the fact)."""
+def bump_repeat(path, cfg=None):
+    """Fold a repeated report into the standing one; keep its mtime (its age is the fact).
+
+    The count is read from its line in either language and written back in the project's, so a
+    report that stood before the project changed its language keeps counting (LANGUAGE-FILES).
+    """
     try:
         st = os.stat(path)
         body = open(path, errors="replace", encoding=UTF8).read()
     except OSError:
         return 0
-    m = re.search(r"^Tekrar: (\d+)", body, re.M)
+    label = "(?:" + "|".join(re.escape(form) for form in language.forms("repeat")) + ")"
+    m = re.search(rf"^{label}: (\d+)", body, re.M)
     n = int(m.group(1)) + 1 if m else 2
-    line = f"Tekrar: {n} · son: {time.strftime('%Y-%m-%d %H:%M')}"
-    body = re.sub(r"^Tekrar: .*$", line, body, flags=re.M) if m else body.rstrip("\n") + "\n\n" + line + "\n"
+    line = language.text(cfg, "mail.repeated", repeat=language.marker(cfg, "repeat"), n=n,
+                         at=time.strftime('%Y-%m-%d %H:%M'))
+    body = re.sub(rf"^{label}: \d+.*$", line, body, flags=re.M) if m else body.rstrip("\n") + "\n\n" + line + "\n"
     try:
         open(path, "w", encoding=UTF8).write(body)
         os.utime(path, (st.st_atime, st.st_mtime))
@@ -461,8 +467,8 @@ def waiting_on_architect(root, cfg):
         low = open(p, errors="replace", encoding=UTF8).read(4000).lower()
     except OSError:
         return None
-    if not any(h in low for h in ("## karar gerekli", "## acil", "## decision required",
-                                   "## urgent", "## blocked")):
+    # In every language a project may choose, whichever this one writes (LANGUAGE-FILES).
+    if not any(h in low for h in language.lowered("decision", "urgent") + ("## blocked",)):
         return None
     # Delivery is by deletion, so any file addressed to the implementer is
     # unread — whatever its timestamp. An answer written while the implementer
@@ -643,8 +649,8 @@ def mail_meta(path):
 # ---- unread age escalates on the ladder (#30) --------------------------------------------
 
 MAIL_CLASSES = ("fyi", "needs-read", "needs-decision", "urgent")
-_DECISION_KINDS = ("decision", "decision-request", "blocked", "karar", "question", "escalation")
-_FYI_KINDS = ("done", "rapor", "report", "fyi", "info", "status", "note")
+_DECISION_KINDS = language.words("decision-kinds")        # in every language, whichever the project writes
+_FYI_KINDS = language.words("fyi-kinds")
 
 
 def mail_class(name, meta=None, body=""):
@@ -662,7 +668,7 @@ def mail_class(name, meta=None, body=""):
         found = re.match(r"^\d{8}-\d{4}-.+?-to-.+?-([a-z]+)-", name, re.I)
         kind = found.group(1).lower() if found else ""
     low = str(body or "").lower()
-    if kind in _DECISION_KINDS or any(mark in low for mark in ("## karar gerekli", "## decision required")):
+    if kind in _DECISION_KINDS or any(mark in low for mark in language.lowered("decision")):
         return "needs-decision"
     return "fyi" if kind in _FYI_KINDS else "needs-read"
 

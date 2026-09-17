@@ -8,16 +8,15 @@ where it stood; it is not importable on its own.
 
 # ---- recall: what was decided, found or learned before, in every project (#43) ----------
 
-_RECALL_STOP = frozenset(
-    "the and for with that this from into have has had was were are not but then than when what which who why how "
-    "its our your their there here been being will would could should about after before over under only also just "
-    "very more most some such each other same one two can may must does did done yet still any all bir ve ile için "
-    "bu şu da de mi ne gibi daha çok".split())
+# Records are written in every language a project may choose, so the words that relate them are read in each.
+_RECALL_STOP = frozenset(language.words("recall-stop"))
+_RECALL_LETTERS = "".join(re.escape(letter) for letter in language.words("letters"))
+_RECALL_WORD = re.compile(rf"[a-z{_RECALL_LETTERS}0-9][a-z{_RECALL_LETTERS}0-9_.-]*")
 _FINDING_LINE = re.compile(r"^\s*- \[(BLOCKER|HIGH|MEDIUM|LOW)\]\s*(.+)$")
 
 
 def _recall_words(text):
-    words = (word.strip("._-") for word in re.findall(r"[a-zçğıöşü0-9][a-zçğıöşü0-9_.-]*", str(text or "").lower()))
+    words = (word.strip("._-") for word in _RECALL_WORD.findall(str(text or "").lower()))
     return {word for word in words if len(word) >= 3 and word not in _RECALL_STOP}
 
 
@@ -326,7 +325,7 @@ def prune_worktree(root, fact, apply=False, now=None):
 
 # ---- the secondary project: the same agent, another queue (#8, #22, #92) ----------------
 
-HUMAN_WAITING = ("human", "insan", "person", "owner")
+HUMAN_WAITING = language.words("human")
 
 
 def secondary_projects(cfg):
@@ -1300,12 +1299,13 @@ def note(root, cfg, to, title, body, urgent=False):
     """
     box = os.path.join(root, cfg.get("mailbox", "agent-mail"))
     os.makedirs(box, exist_ok=True)
-    slug = safe_slug(title.lower(), "not")
-    kind = "ACIL" if urgent else "DECISION"
+    slug = safe_slug(title.lower(), language.text(cfg, "mail.untitled-note"))
+    # An urgent note is marked in the project's language; every reader knows both (LANGUAGE-FILES).
+    kind = language.marker(cfg, "urgent-kind") if urgent else "DECISION"
     impl, arch = mail_names(cfg)
     to = safe_slug(to or impl, impl)          # the implementer's role by default, whoever holds it (#31)
     name = f"{time.strftime('%Y%m%d-%H%M')}-{arch}-to-{to}-{kind}-{slug}.md"
-    text = f"# {title}\n\n" + ("## ACİL\n\n" if urgent else "") + body.rstrip() + "\n"
+    text = f"# {title}\n\n" + (language.marker(cfg, "urgent") + "\n\n" if urgent else "") + body.rstrip() + "\n"
     return write_mail(root, cfg, name, text, {"kind": kind.lower(), "from": arch, "to": to})
 
 
@@ -1332,6 +1332,9 @@ def slice_boundary(item):
 
 BOUNDARY_SECTIONS = ("invariant", "scenarios", "paths", "out of scope", "why one slice")
 _BOUNDARY_COMMIT = re.compile(r"[0-9a-fA-F]{7,40}")
+# A declared path the slice creates, marked `(new)` in any language a project may choose (LANGUAGE-FILES).
+_NEW_PATH = re.compile(r"\s*\((?:" + "|".join(re.escape(word) for word in language.words("new-path")) + r")\)$",
+                       re.I)
 _NAMED_FILE = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)+[\w.-]+\.\w+|[\w-]+\.(?:py|ts|tsx|js|jsx|mjs|cjs|go|rs|java|kt|"
                          r"rb|cs|swift|c|h|cpp|hpp|sql|sh|ps1|json|ya?ml|toml|md))(?![\w/-])")
 _NAMED_SYMBOL = re.compile(r"`([A-Za-z_][A-Za-z0-9_]{2,})(?:\(\))?`")
@@ -1424,8 +1427,8 @@ def declared_paths(item, boundary=None):
     out = []
     for entry in raw:
         entry = entry.strip().strip("`").strip()
-        new = bool(re.search(r"\((?:new|yeni)\)$", entry, re.I))
-        path = re.sub(r"\s*\((?:new|yeni)\)$", "", entry, flags=re.I).strip().strip("`").strip()
+        new = bool(_NEW_PATH.search(entry))
+        path = _NEW_PATH.sub("", entry).strip().strip("`").strip()
         if path:
             out.append((path, new))
     return out

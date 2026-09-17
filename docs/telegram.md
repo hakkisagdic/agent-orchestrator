@@ -35,12 +35,15 @@ surface open to whoever finds the bot.
 A message that is not a command becomes an urgent architect message:
 
 ```
-agent-mail/<ts>-<architect>-to-<implementer>-ACIL-<slug>.md
+agent-mail/<ts>-human-to-<implementer>-URGENT-<slug>.md
 ```
 
-Marked `## ACİL`, so it reaches the implementer through all three delivery
+Marked `## URGENT`, so it reaches the implementer through all three delivery
 surfaces — printed by `ao lock` and `ao verify`, attached to every MCP tool
 response, and blocking `ao commit-ok` until acknowledged.
+
+A project whose `language` is `tr` names it `-ACIL-` and marks it `## ACİL`; ao reads both in
+every project ([protocol.md](protocol.md#markers)).
 
 It is urgent by default on purpose. Someone who reaches for a phone to type a
 decision has already judged that it matters, and making them remember a marker is

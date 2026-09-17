@@ -18,6 +18,7 @@ import time
 from datetime import datetime
 
 from . import __version__
+from . import language
 from . import lib as A
 from . import matrix as M
 from . import settings as S

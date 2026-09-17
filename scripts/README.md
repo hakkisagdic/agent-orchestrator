@@ -85,7 +85,7 @@ human can be away. Two pieces make that safe.
 
 **A pre-authorised backlog** (`.ao/backlog.md`) lists work whose acceptance
 boundary was written in advance. When the implementer hits something needing an
-architectural decision, it parks that slice, leaves a `KARAR GEREKLİ` message and
+architectural decision, it parks that slice, leaves a `DECISION REQUIRED` message and
 takes the next backlog item — using authority that already exists rather than
 inventing any. The watchdog's default prompt carries this rule.
 

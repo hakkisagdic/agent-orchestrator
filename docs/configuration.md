@@ -70,6 +70,7 @@ machine setting written into a project.
 | `fanout.window_reserve_pct` | `30` | project | percent of the provider window a fan-out must leave unused |
 | `implementer.name` | `none` | project | the implementer's name in mail file names; none: its adapter's actor name |
 | `architect.name` | `fable` | project | the architect's name in mail file names |
+| `language` | `en` | project | en: the files ao init writes and the markers ao writes into mail are English; tr: Turkish. The markers of both are read in every project |
 | `keyflip.rotation` | `off` | machine | on: before an actor starts on a spent window, keyflip rotates the machine's account; off: never |
 | `alarms.red_repeat_hours` | `6` | machine | hours before a red alarm that still stands e-mails again |
 | `alarms.reset_after_hours` | `2` | machine | hours of quiet after which an alarm episode is over |
@@ -84,6 +85,23 @@ machine setting written into a project.
 
 The scheduled watchdog reads `watchdog.idle_minutes` when it is installed; run
 `ao watchdog install` again after changing it. Everything else is read when it is used.
+
+`language` decides the words ao writes into a repository: the files `ao init` writes - the
+authority, board and backlog under `.ao/` and `agent-mail/README.md` - and the markers ao writes
+into mail, such as `## URGENT` and `## DECISION REQUIRED` in English and `## ACİL` and
+`## KARAR GEREKLİ` in Turkish ([protocol.md](protocol.md#markers) lists them all).
+
+```
+ao config set language tr --machine          # every project on this machine that sets none
+ao config set language tr                    # one project, in the .ao/config.json ao init wrote
+```
+
+`ao init` writes its files in the language in force when it runs, and a project has no config of
+its own until then: to have a new project's files in Turkish, set the machine's choice first.
+`ao init` never rewrites a file that exists, so a project keeps the files it was given, and a
+change of language changes what ao writes from then on. The markers of both languages are read in
+every project whatever it chose: mail written before a change, or by an agent following an older
+playbook, is still found, surfaced and escalated.
 
 `review.context_bytes` is what a waived range's commit messages and a test-only candidate's
 read-only context share in a review prompt, and they never take more than the 400 KB diff budget

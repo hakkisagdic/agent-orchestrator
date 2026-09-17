@@ -15,7 +15,9 @@ ao init --profile claude-kiro        # or claude-claude
 `ao init` writes `.ao/` (config, gates, board), the mailbox, the playbook and the MCP
 registration, and the `.ao-project` marker, which you commit: it is what turns enforcement on.
 It refuses when no reviewer answers, when the reviewer is of the implementer's own model family,
-or when the quick gates exercise none of your code.
+or when the quick gates exercise none of your code. Its authority, board, backlog and mailbox
+files are in English; `ao config set language tr --machine` before it has them written in
+Turkish ([configuration](configuration.md)).
 
 With one harness for both roles, `claude-claude` is refused until you choose a
 [review tier](roles.md#review-tiers): another model of the same family, labeled as weaker

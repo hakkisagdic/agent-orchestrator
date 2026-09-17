@@ -36,7 +36,7 @@ def test_repeated_report_folds_into_one_file(project):
     assert r2["written"] == r1["written"] and r2["repeated"] == 2
     assert len(os.listdir(os.path.join(root, "agent-mail"))) == 1
     assert os.path.getmtime(first) == 1_700_000_000           # age preserved
-    assert "Tekrar: 2" in open(first, encoding="utf-8").read()
+    assert "Repeat: 2" in open(first, encoding="utf-8").read()       # English by default (LANGUAGE-FILES)
 
 
 def test_anomalies_group_reports_by_kind(project, monkeypatch):

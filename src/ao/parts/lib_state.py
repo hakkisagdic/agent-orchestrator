@@ -360,9 +360,11 @@ def verification_evidence(root):
             + ("; ".join(gates) if gates else "no gates"))
 
 
+# Read in whichever language a report is written (LANGUAGE-FILES).
 _GREEN_CLAIM = re.compile(r"\b\d+\s+passed\b|\ball\s+(?:tests|gates|checks)\s+(?:pass|passed|green)\b|"
-                          r"\bgreen\b|\byeşil\b|\bgeçti\b|\bgeçiyor\b", re.I)
-_RED_ADMISSION = re.compile(r"\b[1-9]\d*\s+(?:failed|errors?)\b|\bFAIL(?:ED)?\b|\bkırmızı\b|\bkaldı\b")
+                          + "|".join(rf"\b{re.escape(word)}\b" for word in language.words("green")), re.I)
+_RED_ADMISSION = re.compile(r"\b[1-9]\d*\s+(?:failed|errors?)\b|"
+                            + "|".join(rf"\b{re.escape(word)}\b" for word in language.words("red")))
 
 
 def report_inconsistency(root, text):
@@ -670,20 +672,18 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
         # a bare `"blocker" in body` test classified every routine status report
         # as urgent and re-raised it every ten minutes: twenty-eight false alarms
         # in one hour, produced by a line that said the opposite of what matched.
+        # In every language a project may choose, whichever this one writes (LANGUAGE-FILES).
         low = body.lower()
-        asking = any(h in low for h in ("## karar gerekli", "## acil",
-                                        "## decision required", "## urgent",
-                                        "## blocked"))
+        asking = any(h in low for h in language.lowered("decision", "urgent") + ("## blocked",))
         if not asking:
             for line in low.split("\n"):
                 t = line.strip().lstrip("-*# ").strip()
-                if not t.startswith(("blockers:", "blocker:", "engel:", "engeller:")):
+                if not t.startswith(language.words("blockers")):
                     continue
                 value = t.split(":", 1)[1].strip(" .`")
                 # An empty value, or one that opens by saying there are none, is
                 # the template reporting health — not a request for anything.
-                asking = bool(value) and not value.startswith(
-                    ("none", "no ", "yok", "-", "n/a", "hiç"))
+                asking = bool(value) and not value.startswith(language.words("no-blockers"))
                 break
         kind = "decision-requested" if asking else "report-waiting"
         contradiction = report_inconsistency(root, body)
@@ -955,7 +955,9 @@ def credit_usage(adapter_id, monthly_budget=None):
                           if monthly_budget else None)}
 
 
-URGENT_MARKERS = ("## ACİL", "## URGENT", "## DUR", "## STOP")
+# Every language's urgent and stop headings, whichever the project writes (LANGUAGE-FILES). Compared in
+# capitals, so `## ACİL` keeps its dotted İ.
+URGENT_MARKERS = language.forms("urgent", "stop")
 
 
 ROLES = ("implementer", "architect")

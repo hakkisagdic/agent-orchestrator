@@ -17,7 +17,7 @@ import os
 import sys
 import time
 
-from . import __version__, lib as A
+from . import __version__, language, lib as A
 UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 PROTOCOL = "2025-06-18"
@@ -209,8 +209,9 @@ def call(name, args, cfg, allow_verify):
         kind = args.get("kind", "status")
         # `blocked` writes the marker the watchdog escalates on within one cycle.
         # The agent saying so directly beats a detector inferring it twenty
-        # minutes later, which is what used to happen.
-        header = "## KARAR GEREKLİ" if kind == "blocked" else f"## {kind.upper()}"
+        # minutes later, which is what used to happen. It is the project's
+        # language's marker; the watchdog reads every language's (LANGUAGE-FILES).
+        header = language.marker(cfg, "decision") if kind == "blocked" else f"## {kind.upper()}"
         slug = A.safe_slug(args["summary"].lower(), "report")
         # The same request twice is one request. An implementer nudged into a
         # turn with nothing to do reports the same blocker again; eighty copies
@@ -224,7 +225,7 @@ def call(name, args, cfg, allow_verify):
             if marker in m and A._report_summary(os.path.join(root, box, m)) == args["summary"].strip():
                 dup = m
         if dup:
-            n = A.bump_repeat(os.path.join(root, box, dup))
+            n = A.bump_repeat(os.path.join(root, box, dup), cfg)
             return {"written": dup, "repeated": n, "escalates": kind == "blocked",
                     "delivered_to_phone": 0,
                     "note": (f"the same {kind} report is already standing ({n}× now); the architect "

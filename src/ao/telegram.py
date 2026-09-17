@@ -28,7 +28,7 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from ao import lib as A  # noqa: E402
+from ao import language, lib as A  # noqa: E402
 UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 CONF = os.path.join(A.HOME, ".ao", "telegram.json")
@@ -176,12 +176,15 @@ def poll(root, cfg_project, seconds=25):
             send(f"`{did}` diye bir karar yok.", root)
             continue
         # Everything a person types is urgent. They reached for a phone to say it.
-        slug = A.safe_slug(text.lower(), "mesaj")
+        # Marked in the project's language; every reader knows both (LANGUAGE-FILES).
+        project = A.load_config(root)
+        slug = A.safe_slug(text.lower(), language.text(project, "mail.untitled-message"))
         # From a person, to whoever holds the implementer role (#31).
-        name = f"{time.strftime('%Y%m%d-%H%M%S')}-human-to-{A.mail_names(A.load_config(root))[0]}-ACIL-{slug}.md"
+        name = (f"{time.strftime('%Y%m%d-%H%M%S')}-human-to-{A.mail_names(project)[0]}-"
+                f"{language.marker(project, 'urgent-kind')}-{slug}.md")
         who = (m.get("from") or {}).get("username") or chat
         with open(os.path.join(root, box, name), "w", encoding=UTF8) as fh:
-            fh.write(f"# {text.splitlines()[0][:120]}\n\n## ACİL\n\n{text}\n\n"
+            fh.write(f"# {text.splitlines()[0][:120]}\n\n{language.marker(project, 'urgent')}\n\n{text}\n\n"
                      f"---\n_Telegram, {who}, {time.strftime('%Y-%m-%d %H:%M')}_\n")
         written.append(name)
         send(f"✅ Kaydedildi: `{name}`\n\nUygulayıcıya `ao lock`, `ao verify` ve "

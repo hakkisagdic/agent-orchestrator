@@ -15,6 +15,7 @@ UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise 
 
 HOME = os.path.expanduser("~")
 from . import settings  # noqa: E402  (reads HOME through this module, lazily)
+from . import language  # noqa: E402  (what ao writes into a project, in its language; what it reads, in any)
 # Adapters ship with the package, but the documented install is still a git
 # clone plus an alias — both have to resolve. Look beside this module first, then
 # at the repository root, so neither path depends on the other existing.
