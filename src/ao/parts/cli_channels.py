@@ -484,8 +484,17 @@ def cmd_hunt(cfg, args):
         return 0
     prompt = HUNT_PROMPT.format(categories=", ".join(A.HUNT_CATEGORIES)) + "".join(
         f"\n--- {path} ---\n{text}" for path, text in files)
-    result = _run_reviewer(root, [part.replace("{prompt}", prompt) for part in argv], _review_timeout(cfg),
-                           label=S.get(cfg, "hunter.id"))
+    # A slice of files can outgrow one argument; past that the prompt goes where the hunter's
+    # adapter declares, or the hunt is refused as a configuration (PROMPT-CHANNEL).
+    plan, refused = A.prompt_plan(argv, prompt, A.block_adapter({"argv": argv}))
+    if refused:
+        A.hunter_record(root, "run", files=[path for path, _ in files], cursor=cursor, ok=False, reason=refused,
+                        leads=0, sent=0, hunter=S.get(cfg, "hunter.id"))
+        print(f"{C['red']}refused{C['reset']}: {refused}")
+        return 2
+    result = _run_reviewer(root, [part.replace("{prompt}", prompt) for part in plan["argv"]], _review_timeout(cfg),
+                           label=S.get(cfg, "hunter.id"),
+                           **({"channel": plan} if plan["channel"] != "argument" else {}))
     leads = A.parse_leads(result.get("out")) if result.get("ok") else []
     known = A.hunter_known(root)
     fresh = []

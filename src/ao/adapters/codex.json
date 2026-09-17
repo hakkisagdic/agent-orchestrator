@@ -1,8 +1,12 @@
 {
   "id": "codex", "name": "OpenAI Codex CLI", "verified": "untested",
   "disclaimer": "Written from documented interface, not verified against an install. Flags drift; correct and open a PR.",
-  "send":   { "argv": ["codex", "exec", "{prompt}"] },
-  "resume": { "argv": ["codex", "exec", "resume", "{session}", "{prompt}"], "continue_last": ["codex", "exec", "resume", "--last", "{prompt}"] },
+  "send":   { "argv": ["codex", "exec", "{prompt}"],
+              "stdin": { "replaces": ["{prompt}"], "with": ["-"],
+                         "note": "Verified from the command reference (learn.chatgpt.com/docs/developer-commands, surface cli), read 2026-09-17: codex exec takes PROMPT as `string | - (read stdin)`, and `-` pipes the prompt from stdin." } },
+  "resume": { "argv": ["codex", "exec", "resume", "{session}", "{prompt}"], "continue_last": ["codex", "exec", "resume", "--last", "{prompt}"],
+              "stdin": { "replaces": ["{prompt}"], "with": ["-"],
+                         "note": "Verified from the same reference: codex exec resume takes its PROMPT as `string | - (read stdin)` too." } },
   "quota": { "provider": "codex" },
   "options": {
     "trust_none": null,

@@ -89,7 +89,8 @@ def test_a_reviewer_that_times_out_takes_what_it_started_with_it(project, tmp_pa
 def test_a_prompt_one_argument_cannot_carry_is_refused_before_anything_runs(project, monkeypatch, capsys):
     root = project["root"]
     _repo_with_change(root)
-    monkeypatch.setattr(cli, "_reviewer_argv_limit", lambda: 100)
+    monkeypatch.setattr(A, "argument_overflow", lambda argv, env=None: "one argument on this platform carries at "
+                        "most 100 bytes" if any(len(str(part)) > 200 for part in argv) else None)
     cfg = dict(project, reviewer={"id": "r1", "family": "x", "argv": _fake(*APPROVED)})
 
     assert cli.cmd_review(cfg, _args()) == 2

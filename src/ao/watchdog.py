@@ -842,8 +842,14 @@ def escalate(root, cfg, adapter, age, args, st):
         if "{session}" in " ".join(arch["argv"]) and not sess:
             print("architect session not resolvable; reported only")
             return woke
+        # Past what one argument carries, the prompt goes on standard input where the architect's
+        # adapter declares it may; a detached turn takes no file ao would remove after it (PROMPT-CHANNEL).
+        plan, refused = A.prompt_plan(arch["argv"], prompt, A.block_adapter(arch), detached=True)
+        if refused:
+            print(f"the architect's prompt cannot be handed over: {refused}; reported only")
+            return woke
         argv = [x.replace("{prompt}", prompt) .replace("{session}", sess or "")
-                for x in arch["argv"]]
+                for x in plan["argv"]]
         search = child_path()
         resolved, ver = A.resolve_binary(argv[0], path=search)
         key = A.project_key(root)
@@ -895,7 +901,7 @@ def escalate(root, cfg, adapter, age, args, st):
                     if found and found != sess and found not in text:
                         sess = found
                         argv = [x.replace("{prompt}", prompt).replace("{session}", sess)
-                                for x in arch["argv"]]
+                                for x in plan["argv"]]
                         print(f"last wake resumed a dead session; resuming {sess[:12]} instead")
                     else:
                         print("last wake resumed a dead session and no other session was found; not waking")
@@ -918,6 +924,10 @@ def escalate(root, cfg, adapter, age, args, st):
                 resolved = None
         if resolved:
             argv[0] = resolved
+            given, refused = A.prompt_input(plan, root, argv)
+            if refused:
+                print(f"the architect's prompt cannot be handed over: {refused}; not waking")
+                return woke
             os.makedirs(STATE_DIR, exist_ok=True)
             with open(log_path, "a", encoding=UTF8) as log:
                 log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} escalate {resolved} {ver} ===\n")
@@ -927,11 +937,16 @@ def escalate(root, cfg, adapter, age, args, st):
                 # never comes: alive, silent, producing nothing. That is the exact
                 # shape of the first architect wake — over a minute, no output —
                 # and very likely of the fifteen agent processes this project
-                # found accumulated in one repository.
-                proc = subprocess.Popen(argv, cwd=root, env=dict(os.environ, PATH=search, AO_ROLE="architect"),
-                                        stdin=subprocess.DEVNULL,
-                                        stdout=log, stderr=subprocess.STDOUT,
-                                        start_new_session=True)
+                # found accumulated in one repository. A prompt handed over on
+                # standard input is a file, which ends.
+                try:
+                    proc = subprocess.Popen(given["argv"], cwd=root,
+                                            env=dict(os.environ, PATH=search, AO_ROLE="architect"),
+                                            stdin=subprocess.DEVNULL if given["stdin"] is None else given["stdin"],
+                                            stdout=log, stderr=subprocess.STDOUT,
+                                            start_new_session=True)
+                finally:
+                    A.release_prompt(given)
             st["arch_pid"] = proc.pid
             st["last_arch_wake"] = time.time()
             st["handed"] = {m: mtimes[m] for m in pending if m in mtimes}
@@ -1996,8 +2011,14 @@ def _cycle_impl(args, root):
             if "{session}" in " ".join(arch["argv"]) and not sess:
                 print("architect session not resolvable; reported only")
                 return 0
-            argv = [x.replace("{prompt}", arch.get("prompt", REFILL_PROMPT)) .replace("{session}", sess or "")
-                    for x in arch["argv"]]
+            prompt = arch.get("prompt", REFILL_PROMPT)
+            # As in escalate(): past one argument, standard input where the adapter declares it (PROMPT-CHANNEL).
+            plan, refused = A.prompt_plan(arch["argv"], prompt, A.block_adapter(arch), detached=True)
+            if refused:
+                print(f"queue low, but the architect's prompt cannot be handed over: {refused}")
+                return 0
+            argv = [x.replace("{prompt}", prompt) .replace("{session}", sess or "")
+                    for x in plan["argv"]]
             search = child_path()
             resolved, ver = A.resolve_binary(argv[0], path=search)
             if not resolved:
@@ -2033,14 +2054,22 @@ def _cycle_impl(args, root):
                 if failed.get("kind") in ("binary", "session") and failed.get("binary") == f"{resolved} {ver}":
                     print(f"the last refill with this binary failed ({failed.get('kind')}); not retrying")
                     return 0
+            given, refused = A.prompt_input(plan, root, argv)
+            if refused:
+                print(f"queue low, but the architect's prompt cannot be handed over: {refused}")
+                return 0
             os.makedirs(STATE_DIR, exist_ok=True)
             with open(log_path, "a", encoding=UTF8) as log:
                 log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} refill {resolved} {ver} ===\n")
                 log.flush()
-                proc = subprocess.Popen(argv, cwd=root, env=dict(os.environ, PATH=search, AO_ROLE="architect"),
-                                        stdin=subprocess.DEVNULL,   # see escalate()
-                                        stdout=log, stderr=subprocess.STDOUT,
-                                        start_new_session=True)
+                try:
+                    proc = subprocess.Popen(given["argv"], cwd=root,
+                                            env=dict(os.environ, PATH=search, AO_ROLE="architect"),
+                                            stdin=subprocess.DEVNULL if given["stdin"] is None else given["stdin"],
+                                            stdout=log, stderr=subprocess.STDOUT,   # stdin: see escalate()
+                                            start_new_session=True)
+                finally:
+                    A.release_prompt(given)
             st.update(arch_pid=proc.pid, last_refill=time.time())
             A.helper_register(root, proc.pid, "architect")   # a judge, not a writer
             A.acquire_architect(root, proc.pid, "watchdog refill")
@@ -2152,8 +2181,19 @@ def _cycle_impl(args, root):
 
     prompt = args.prompt + (parked_note(*passing) if passing else "") \
         + (secondary_note(elsewhere_ready) if elsewhere_ready else "")
+    if fe:
+        # A person is in these files right now. Say so in the prompt; the
+        # implementer keeps away from them for this turn.
+        prompt += " İnsan şu dosyaları düzenliyor, bu turda dokunma: " + ", ".join(fe[:8])
+    # Past what one argument carries, the prompt goes on standard input where the implementer's
+    # adapter declares it may; a detached turn takes no file ao would remove after it (PROMPT-CHANNEL).
+    plan, refused = A.prompt_plan(adapter.get("resume", {}).get("argv") or [], prompt, impl.get("adapter"),
+                                  detached=True)
+    if refused:
+        print(f"the nudge's prompt cannot be handed over: {refused}; not nudging")
+        return 1
     argv = [x.replace("{session}", impl["session"]).replace("{prompt}", prompt)
-            for x in (adapter.get("resume", {}).get("argv") or [])]
+            for x in plan["argv"]]
     if not argv:
         print("adapter has no resume command")
         return 1
@@ -2190,11 +2230,6 @@ def _cycle_impl(args, root):
     if not F.enabled(cfg, "nudge"):
         print(f"idle {int(age)}s · {', '.join(reasons)} · nudge feature off; not starting a turn")
         return 0
-    if fe:
-        # A person is in these files right now. Say so in the prompt; the
-        # implementer keeps away from them for this turn.
-        argv = [a.replace(prompt, prompt + " İnsan şu dosyaları düzenliyor, bu turda dokunma: "
-                          + ", ".join(fe[:8])) if a == prompt else a for a in argv]
     headroom = A.rotate_if_exhausted(cfg, argv, "implementer") if not args.dry_run else {"ok": True}
     if not headroom["ok"]:
         print(f"idle {int(age)}s · {', '.join(reasons)} · {headroom['text']}; not nudging")
@@ -2222,13 +2257,21 @@ def _cycle_impl(args, root):
     if held:
         print(f"held by {held.get('by')} since this cycle began; not nudging")
         return 0
+    given, refused = A.prompt_input(plan, root, argv)
+    if refused:
+        print(f"the nudge's prompt cannot be handed over: {refused}; not nudging")
+        return 1
     with open(log_path, "a", encoding=UTF8) as log:
         log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} nudge"
                   f"{' (added: ' + ' '.join(added) + ')' if added else ''} ===\n")
         log.flush()
-        proc = subprocess.Popen(argv, cwd=root, env=env, stdin=subprocess.DEVNULL,
-                                stdout=log, stderr=subprocess.STDOUT,
-                                start_new_session=True)
+        try:
+            proc = subprocess.Popen(given["argv"], cwd=root, env=env,
+                                    stdin=subprocess.DEVNULL if given["stdin"] is None else given["stdin"],
+                                    stdout=log, stderr=subprocess.STDOUT,
+                                    start_new_session=True)
+        finally:
+            A.release_prompt(given)
 
     # Give it a moment to fail. A healthy turn runs for minutes; anything that
     # exits within seconds died rather than started.

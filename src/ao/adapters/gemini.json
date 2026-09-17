@@ -2,8 +2,11 @@
   "id": "gemini", "name": "Google Gemini CLI", "verified": "untested",
   "disclaimer": "Written from documented interface, not verified against an install.",
   "detect": { "headless": ["--prompt", "-p"] },
-  "send":   { "argv": ["gemini", "--prompt", "{prompt}"] },
-  "resume": { "argv": ["gemini", "--prompt", "{prompt}"], "note": "Session resume support varies by version; verify before relying on it." },
+  "send":   { "argv": ["gemini", "--prompt", "{prompt}"],
+              "stdin": { "replaces": ["--prompt", "{prompt}"], "with": [],
+                         "note": "Verified from the CLI reference (github.com/google-gemini/gemini-cli, docs/cli/cli-reference.md), read 2026-09-17: `cat file | gemini` processes piped content, and --prompt is appended to stdin input; docs/cli/headless.md starts headless mode in a non-TTY environment." } },
+  "resume": { "argv": ["gemini", "--prompt", "{prompt}"], "note": "Session resume support varies by version; verify before relying on it.",
+              "stdin": { "replaces": ["--prompt", "{prompt}"], "with": [], "note": "As send: it is the same command." } },
   "quota": { "provider": "gemini" },
   "options": {
     "trust_none": null,

@@ -5,7 +5,9 @@
               "https://qwenlm.github.io/qwen-code-docs/en/users/configuration/settings/",
               "https://qwenlm.github.io/qwen-code-docs/en/users/features/memory/"],
   "detect": { "headless": ["-p", "--prompt"] },
-  "send":   { "argv": ["qwen", "-p", "{prompt}"], "cwd_matters": true },
+  "send":   { "argv": ["qwen", "-p", "{prompt}"], "cwd_matters": true,
+              "stdin": { "replaces": ["-p", "{prompt}"], "with": [],
+                         "note": "Verified from the headless documentation (qwenlm.github.io/qwen-code-docs/en/users/features/headless/), read 2026-09-17: its example pipes the prompt to `qwen` with no -p. Its --resume and --continue examples all pass -p, so resume declares none." } },
   "resume": { "argv": ["qwen", "--resume", "{session}", "-p", "{prompt}"], "continue_last": ["qwen", "--continue", "-p", "{prompt}"],
               "note": "--resume without an id opens an interactive picker; always pass one." },
   "options": {

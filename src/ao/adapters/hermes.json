@@ -10,7 +10,11 @@
   "detect": { "headless": ["-z", "-Q", "--oneshot"] },
   "send":   { "argv": ["hermes", "-z", "{prompt}"], "cwd_matters": true },
   "resume": { "argv": ["hermes", "chat", "--resume", "{session}", "-Q", "-q", "{prompt}"],
-              "note": "resuming under -z is not documented; chat --resume takes an id, a title or latest" },
+              "note": "resuming under -z is not documented; chat --resume takes an id, a title or latest",
+              "stdin": { "replaces": ["-q", "{prompt}"], "with": ["--query-file", "-"],
+                         "note": "Verified from the CLI command reference (hermes-agent.nousresearch.com/docs/reference/cli-commands), read 2026-09-17: hermes chat --query-file PATH reads the query from a file, - for stdin, with nothing shell-interpreted. -z takes its prompt as an argument only, so send declares none." },
+              "file": { "replaces": ["-q", "{prompt}"], "with": ["--query-file", "{prompt_file}"],
+                        "note": "Verified from the same reference, as stdin." } },
   "options": {
     "trust_none": ["--toolsets", "safe"],
     "trust_none_note": "the safe toolset has web search, vision and image generation, and no file writing, terminal or code execution",

@@ -473,7 +473,7 @@ def _tool_review_lines(evidence):
             f"`{A.review_header_value(tool.get('model'))}`  handed: `{A.review_header_value(tool.get('handed'))}`"]
 
 
-def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None):
+def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, channel=None):
     """Run one reviewer outside the repository and classify invocation status.
 
     It says it is alive (#21). On 2026-09-07 a review printed nothing for four
@@ -483,11 +483,15 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None):
 
     A tool reviewer (#86) is handed the candidate as a file in that directory and
     answers into another file there; `tool` is what `_tool_invocation` made of its route.
+    A prompt past what one argument carries comes with `channel`, the route's plan: it is
+    written to a private file for this run alone, handed over as standard input or by
+    its path, and removed when the run ends (PROMPT-CHANNEL).
     """
+    import contextlib
     import tempfile
     label = label or os.path.basename(argv[0])
     print(f"{C['dim']}reviewer: {os.path.basename(argv[0])}{' (fallback)' if fallback else ''}{C['reset']}")
-    with tempfile.TemporaryDirectory(prefix="ao-reviewer-") as fresh:
+    with tempfile.TemporaryDirectory(prefix="ao-reviewer-") as fresh, contextlib.ExitStack() as after:
         fresh = os.path.realpath(fresh)
         if _reviewer_temp_is_inside(root, fresh):
             return {
@@ -502,12 +506,20 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None):
             if not prepared["ok"]:
                 return prepared
             argv, env, handoff = prepared["argv"], prepared["env"], prepared["handoff"]
+        stdin = {}
+        if channel is not None:
+            given, refused = A.prompt_input(channel, root, argv)
+            if refused:
+                return {"ok": False, "out": "", "reason": refused, "returncode": None, "kind": "handoff-error",
+                        "retryable": False}
+            after.callback(A.release_prompt, given)
+            argv, stdin = given["argv"], ({"stdin": given["stdin"]} if given["stdin"] is not None else {})
         try:
             proc = subprocess.Popen(
                 argv, cwd=fresh, env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, encoding=UTF8, errors="replace",
-                **_reviewer_group(),
+                **stdin, **_reviewer_group(),
             )
         except OSError as exc:
             return _reviewer_os_failure(exc, "could not start")
@@ -730,10 +742,38 @@ def _reviewer_resolve_binary(root, name):
     return best
 
 
+def _reviewer_prompt_plan(route, prompt):
+    """How a prompt reaches one reviewer route: (plan, None), or (None, the attempt that refuses it) (PROMPT-CHANNEL).
+
+    The adapter is the one a capability-matrix binding's tool names, else the one the route
+    names or whose command it runs. A route that cannot be handed the prompt is a
+    configuration to change, never an unavailable reviewer: it is not started.
+    """
+    route = route if isinstance(route, dict) else {}
+    identity = route.get("identity") if isinstance(route.get("identity"), dict) else {}
+    argv = route.get("argv") if isinstance(route.get("argv"), list) else []
+    plan, refused = A.prompt_plan(argv, prompt, identity.get("adapter") or A.block_adapter(route))
+    if refused:
+        return None, {"ok": False, "out": "", "reason": refused, "returncode": None,
+                      "kind": "configuration-error", "retryable": False}
+    return plan, None
+
+
+def _reviewer_matrix_route(cand, plan):
+    """A capability-matrix route whose argv is the plan's, a channel's {prompt_file} kept for the file it names."""
+    argv = list(plan["argv"])
+    if plan["channel"] == "file":
+        start, stop = plan["run"]
+        argv[start:stop] = [part.replace("{prompt_file}", "{{prompt_file}}") for part in argv[start:stop]]
+    return dict(cand, argv=argv)
+
+
 def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, candidate=None):
     """Resolve and invoke one declared route without a shell.
 
-    A tool route (#86) is handed `candidate`, the exact bytes the review names.
+    A tool route (#86) is handed `candidate`, the exact bytes the review names. A prompt
+    past what one argument carries reaches the route as its adapter declares, or the
+    route is not started (PROMPT-CHANNEL).
     """
     tool = None
     if strict:
@@ -749,8 +789,11 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, can
                 "retryable": False,
             }
             return label, None, None, attempt
+        plan, refused = _reviewer_prompt_plan(cand, prompt)
+        if refused:
+            return label, None, None, refused
         try:
-            argv = M.expand_argv(cand, prompt)
+            argv = M.expand_argv(cand if plan["channel"] == "argument" else _reviewer_matrix_route(cand, plan), prompt)
         except M.MatrixError as exc:
             attempt = {
                 "ok": False, "out": "", "reason": str(exc),
@@ -780,8 +823,11 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, can
                 "returncode": None, "kind": "configuration-error",
                 "retryable": False,
             }
+        plan, refused = _reviewer_prompt_plan(cand, prompt)
+        if refused:
+            return label, None, None, refused
         # The prompt and the candidate's paths are filled in the reviewer's own directory.
-        argv = list(raw)
+        argv = list(raw) if plan["channel"] == "argument" else list(plan["argv"])
     else:
         raw = cand.get("argv") or []
         label = cand.get("id") or (str(raw[0]) if raw else "reviewer")
@@ -796,6 +842,11 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, can
                 "retryable": False,
             }
             return label, None, None, attempt
+        plan, refused = _reviewer_prompt_plan(cand, prompt)
+        if refused:
+            return label, None, None, refused
+        if plan["channel"] != "argument":
+            argv = [part.replace("{prompt}", prompt) for part in plan["argv"]]
     if not argv or not argv[0]:
         return label, None, None, {
             "ok": False, "out": "", "reason": "reviewer argv is empty",
@@ -833,7 +884,8 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, can
         }
     try:
         attempt = _run_reviewer(root, argv, timeout, fallback, label=label,
-                                **({"tool": tool} if tool is not None else {}))
+                                **({"tool": tool} if tool is not None else {}),
+                                **({"channel": plan} if plan["channel"] != "argument" else {}))
     except Exception as exc:
         attempt = {
             "ok": False, "out": "",
@@ -1051,7 +1103,9 @@ def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
                 "failures": failures, "labels": labels, "chain": chain,
             }
         failures[position] = attempt
-        print(f"{C['dim']}{label} unavailable: {attempt['reason']}{C['reset']}")
+        # A route refused for its configuration - a prompt it cannot be handed among them - is not unavailable.
+        state = "refused" if attempt.get("kind") == "configuration-error" else "unavailable"
+        print(f"{C['dim']}{label} {state}: {attempt['reason']}{C['reset']}")
         return None
 
     for position in range(len(chain)):
@@ -1361,24 +1415,6 @@ def _reviewer_group():
     if os.name == "nt":
         return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
     return {"start_new_session": True}
-
-
-def _reviewer_argv_limit():
-    """Bytes one reviewer prompt argument can carry on this platform, or None when unknown (#65).
-
-    Linux refuses a single argument over 128 KiB and Windows a command line over
-    32,767 characters; macOS limits all arguments and the environment together.
-    """
-    if os.name == "nt":
-        return 32_000
-    if sys.platform.startswith("linux"):
-        return 131_071
-    try:
-        arg_max = os.sysconf("SC_ARG_MAX")
-    except (ValueError, OSError, AttributeError):
-        return None
-    environment = sum(len(key) + len(value) + 2 for key, value in os.environ.items())
-    return max(0, arg_max - environment - 64_000)
 
 
 def _configured_reviewer(cfg, reviewer_id):
@@ -1896,14 +1932,6 @@ def cmd_review(cfg, args):
         context = A.review_range_context(root, str(args.commits), budget)
     if context is not None:
         prompt += f"\n\n{REVIEW_CONTEXT_MARKER}\n" + context["text"]
-    # The prompt travels as one argument. Past what one argument can carry here the
-    # reviewer cannot start, and that was filed as an unreachable reviewer (#65).
-    argv_limit = _reviewer_argv_limit()
-    prompt_bytes = len(prompt.encode(UTF8))
-    if not carried and argv_limit is not None and prompt_bytes > argv_limit:
-        print(f"{C['red']}The review prompt is {prompt_bytes} bytes; one argument on {sys.platform} "
-              f"carries at most {argv_limit}.{C['reset']} Stage a smaller candidate.")
-        return 2
     # Strict mode resolves and validates the complete declared chain before this
     # point. Ineligible routes are evidence, never subprocess candidates.
     if strict:
@@ -1929,6 +1957,19 @@ def cmd_review(cfg, args):
         evidence.update(carried["evidence"])
     else:
         sections, lenses = review_sections(cfg, running, (source or {}).get("text") or boundary, diff)
+        # Past what one argument carries here, a prompt reaches a route only as its adapter declares.
+        # When no route can be handed the largest prompt this review sends, none is started: that is
+        # a configuration to change, once filed as an unreachable reviewer (#65, PROMPT-CHANNEL).
+        largest = max([f"{prompt}\n\n{REVIEW_SECTION_MARKER}\n{section['question']}" for section in sections]
+                      or [prompt], key=lambda text: len(text.encode(UTF8, "replace")))
+        refusals = [_reviewer_prompt_plan(route, largest)[1] for route in chain]
+        if chain and all(refusals):
+            print(f"{C['red']}{C['b']}CONFIGURATION ERROR{C['reset']}  no reviewer route can be handed this "
+                  "prompt, so none was started")
+            for route, refusal in zip(chain, refusals):
+                name = (route.get("identity") or {}).get("binding") if strict else route.get("id")
+                print(f"  {C['red']}·{C['reset']} {name or 'reviewer'}: {refusal['reason']}")
+            return 2
         if lenses:
             evidence["lenses"] = lenses
         if sections:

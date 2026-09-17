@@ -70,6 +70,48 @@ ao asks keyflip about no provider for it, and never runs the architect's route.
 mode (`--diff-file`) reads the candidate with no pull request and no platform token and publishes
 nowhere, and `ask` carries ao's prompt. A capability-matrix project cannot bind a tool reviewer yet.
 
+## A prompt past one argument reaches its command another way
+
+A review prompt carries a diff of up to 400 KB and the context it is judged against, and it went to the
+reviewer as one argument. Linux refuses one argument over 131,072 bytes and Windows a command line over
+32,767 characters, and Linux and macOS bound the arguments and the environment together: past that the
+reviewer could not start, and the spawn error read as a reviewer that was unavailable. An adapter declares
+how else its CLI takes a prompt, under `send` and under `resume`:
+
+| Field | What it declares |
+|---|---|
+| `send` → `stdin`, `resume` → `stdin` | `{replaces, with, note}`: the arguments of that capability's `argv` that carry `{prompt}`, and the arguments that stand in their place when the prompt is on standard input - none, or a marker such as `-` |
+| `send` → `file`, `resume` → `file` | the same, with `with` naming the prompt's file in `{prompt_file}` exactly once |
+
+```jsonc
+"send": { "argv": ["mytool", "exec", "{prompt}"],
+          "stdin": { "replaces": ["{prompt}"], "with": ["-"],
+                     "note": "what was verified, where, and when" } }
+```
+
+While a command fits with room to spare - the prompt's argument, the other arguments, the environment and a
+margin for a launcher that starts the real program - the prompt stays in its argument and nothing changes.
+Past that ao uses what the adapter declares for the command: `resume`'s channels for one that carries
+`{session}`, `send`'s for any other, standard input before a file. The prompt's bytes are written to a file
+of mode 0600 in a directory of its own, never inside the repository, handed over as standard input or by
+its path, and removed when the process ends. Every prompt ao hands an agent's CLI goes this way: a
+reviewer's, the bug hunter's, and those of the watchdog's nudges and architect wakes. A watchdog turn runs
+detached and nothing waits to remove a file after it, so it takes standard input or nothing.
+
+With nothing declared nothing starts, and the refusal names the prompt's size, what the platform carries
+and that the adapter declares no other channel. `ao review` exits 2 with it, as a configuration error: it
+writes no review file and is neither UNAVAILABLE nor a verdict, so `ao catchup` keeps the waiver open. In
+a chain, a route that cannot take the prompt is passed over as a configuration error and the next route is
+tried; the review is refused only when none can take it. Like a review contract, channels are read from the
+package's adapters only: a layer an agent can write must not choose the arguments a reviewer runs with.
+
+A channel is declared only where the CLI's documentation or its `--help` shows it, and its `note` says
+where. `claude-code`, `codex`, `command-code`, `gemini` and `omp` take a prompt on standard input for both
+capabilities, and `amp`, `copilot` and `qwen` for `send`. `hermes` takes one for `resume`, through
+`hermes chat --query-file`. `aider` takes a file for both, and `droid` standard input or a file for `send`
+and a file for `resume`. Every other shipped adapter takes its prompt in its argument alone, and
+`ao adapters validate` checks that each channel replaces arguments its capability's `argv` carries once.
+
 ## Setting ao up for a harness is declared, not coded
 
 `ao init`, `ao skill` and `ao remove` name no harness (#76). What a harness leaves in a

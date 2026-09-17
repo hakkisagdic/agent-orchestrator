@@ -548,7 +548,7 @@ def validate_adapter(adapter):
         unknown = sorted({p for a in argv for p in re.findall(r"\{([a-z_]+)\}", a)} - set(ADAPTER_PLACEHOLDERS))
         if unknown:
             problems.append(f"`{capability}.argv` uses placeholders ao does not fill: {', '.join(unknown)}")
-    return problems + tool_review_problems(adapter)
+    return problems + prompt_channel_problems(adapter) + tool_review_problems(adapter)
 
 
 def conform_adapter(adapter, harness, workdir):
@@ -594,3 +594,196 @@ def conform_adapter(adapter, harness, workdir):
         else:
             results.append((capability, "pass", "declared"))
     return results
+
+
+# ---- a prompt too long for one argument reaches its command another way (PROMPT-CHANNEL) -----
+
+# Linux refuses one argument longer than 32 pages, its terminating NUL counted (MAX_ARG_STRLEN), however much
+# the whole command line may hold; Windows refuses a command line longer than 32,767 UTF-16 units, its NUL
+# counted. Linux and macOS both bound the arguments and the environment together (ARG_MAX).
+LINUX_ARGUMENT_BYTES = 131_072
+WINDOWS_COMMAND_UNITS = 32_767
+# Kept free beside what is measured: the program's resolved path, a launcher that starts the real program
+# with a path, a script and variables of its own, and what the kernel stores beside the strings.
+ARGUMENT_MARGIN_BYTES = 65_536
+ARGUMENT_MARGIN_UNITS = 1_024
+PROMPT_CHANNELS = ("stdin", "file")
+
+
+def argument_overflow(argv, env=None):
+    """What starting `argv` here would exceed, as a phrase; None when it fits with room to spare (PROMPT-CHANNEL).
+
+    A review prompt carries a diff of up to 400 KB and its context, and it travelled as one argument:
+    past what one argument carries the reviewer could not start, and the spawn error read as a reviewer
+    that was unavailable. Every string is counted with its NUL and its pointer, and the environment
+    (`os.environ` unless one is given) with the arguments. Where the platform's own bound cannot be
+    read, the Linux bound on one argument stands in for it.
+    """
+    import sys
+    args = [str(arg) for arg in argv]
+    if os.name == "nt":
+        units = len(subprocess.list2cmdline(args).encode("utf-16-le")) // 2 + 1
+        if units + ARGUMENT_MARGIN_UNITS <= WINDOWS_COMMAND_UNITS:
+            return None
+        return (f"a command line on {sys.platform} carries at most {WINDOWS_COMMAND_UNITS - 1} characters; this one "
+                f"takes {units - 1}, and {ARGUMENT_MARGIN_UNITS} are kept free")
+    sizes = [len(os.fsencode(arg)) + 1 for arg in args]
+    try:
+        whole = int(os.sysconf("SC_ARG_MAX"))
+    except (AttributeError, OSError, TypeError, ValueError):
+        whole = 0
+    if (sys.platform.startswith("linux") or whole <= 0) and max(sizes, default=0) > LINUX_ARGUMENT_BYTES:
+        return (f"one argument on {sys.platform} carries at most {LINUX_ARGUMENT_BYTES - 1} bytes"
+                + ("" if whole > 0 else ", as ao assumes where the platform's bound cannot be read"))
+    if whole <= 0:
+        return None
+    environment = os.environ if env is None else env
+    taken = sum(size + 8 for size in sizes) + sum(len(os.fsencode(key)) + len(os.fsencode(value)) + 2 + 8
+                                                for key, value in environment.items())
+    if taken + ARGUMENT_MARGIN_BYTES <= whole:
+        return None
+    return (f"arguments and environment on {sys.platform} carry at most {whole} bytes together; this command takes "
+            f"{taken}, and {ARGUMENT_MARGIN_BYTES} are kept free")
+
+
+def _argument_run(argv, run):
+    """Where a run of arguments starts in argv when it occurs there exactly once, else None."""
+    if not isinstance(argv, list) or not isinstance(run, list) or not run:
+        return None
+    found = [at for at in range(len(argv) - len(run) + 1) if argv[at:at + len(run)] == run]
+    return found[0] if len(found) == 1 else None
+
+
+def prompt_channel_problems(adapter):
+    """What an adapter's prompt channels get wrong; empty when it declares none, or sound ones (PROMPT-CHANNEL).
+
+    A channel is declared under `send` or `resume` and replaces, once, the run of that capability's own
+    arguments that carries {prompt}: `stdin` with arguments that leave the prompt to standard input,
+    `file` with arguments that name the prompt's file in {prompt_file}, once.
+    """
+    problems = []
+    for capability in ("send", "resume"):
+        block = (adapter or {}).get(capability)
+        if not isinstance(block, dict):
+            continue
+        for channel in PROMPT_CHANNELS:
+            if channel not in block:
+                continue
+            spec, where = block[channel], f"{capability}.{channel}"
+            replaces = spec.get("replaces") if isinstance(spec, dict) else None
+            replacement = spec.get("with") if isinstance(spec, dict) else None
+            if not isinstance(replaces, list) or not all(isinstance(part, str) for part in replaces) \
+                    or sum("{prompt}" in part for part in replaces) != 1:
+                problems.append(f"`{where}.replaces` must list the arguments that carry {{prompt}}, one of them "
+                                "holding it")
+            elif _argument_run(block.get("argv"), replaces) is None:
+                problems.append(f"`{where}.replaces` must occur exactly once in `{capability}.argv`")
+            if not isinstance(replacement, list) or not all(isinstance(part, str) for part in replacement):
+                problems.append(f"`{where}.with` must be a list of strings")
+                continue
+            used = [name for part in replacement for name in re.findall(r"\{([a-z_]+)\}", part)]
+            if set(used) - {"prompt_file"}:
+                problems.append(f"`{where}.with` fills no placeholder but {{prompt_file}}")
+            if used.count("prompt_file") != (1 if channel == "file" else 0):
+                problems.append(f"`{where}.with` must carry {{prompt_file}} "
+                                + ("exactly once" if channel == "file" else "nowhere: the prompt is on standard input"))
+    return problems
+
+
+def prompt_plan(template, prompt, adapter_id=None, detached=False, env=None):
+    """How a prompt reaches the command an argv template runs: (plan, None), or (None, why it cannot) (PROMPT-CHANNEL).
+
+    The prompt stays in its argument while the command fits (`argument_overflow`). Past that it goes where
+    the adapter declares, in place of the arguments that carried it: `resume`'s channels for a command that
+    carries {session}, `send`'s for any other, standard input before a file. A file is removed when its
+    process ends and ao does not wait on a detached turn, so a detached turn takes standard input or
+    nothing. Channels are read from the package's adapters only, as a review contract is: a layer an agent
+    can write must not choose the arguments a reviewer runs with. With no channel nothing may start, and
+    the reason says how large the prompt is, what the platform carries and what the adapter declares.
+    The plan holds the argv template, the channel ("argument", "stdin" or "file"), the run (start, stop)
+    of the arguments the channel put in, and the prompt.
+    """
+    template = list(template or [])
+    text = str(prompt)
+    plan = {"argv": template, "channel": "argument", "run": None, "prompt": text}
+    overflow = argument_overflow([str(part).replace("{prompt}", text) for part in template], env)
+    if overflow is None:
+        return plan, None
+    size = f"the prompt is {len(text.encode(UTF8, 'replace'))} bytes, and {overflow}"
+    capability = "resume" if any("{session}" in str(part) for part in template) else "send"
+    ident = str(adapter_id or "").strip()
+    adapter = package_adapters().get(ident) if ident else None
+    if not isinstance(adapter, dict):
+        return None, (f"{size}; " + (f"{ident} is no adapter ao ships" if ident else "no adapter ao ships runs this "
+                                     "command") + ", and only a shipped adapter declares another channel")
+    block = adapter.get(capability) if isinstance(adapter.get(capability), dict) else {}
+    declared = [channel for channel in PROMPT_CHANNELS if isinstance(block.get(channel), dict)]
+    for channel in declared:
+        replaces, replacement = block[channel].get("replaces"), block[channel].get("with")
+        at = _argument_run(template, replaces)
+        if (detached and channel == "file") or at is None or not isinstance(replacement, list):
+            continue
+        argv = template[:at] + [str(part) for part in replacement] + template[at + len(replaces):]
+        return dict(plan, argv=argv, channel=channel, run=(at, at + len(replacement))), None
+    if not declared:
+        return None, f"{size}; adapter {ident} declares no other channel for `{capability}` (`stdin` or `file`)"
+    if detached and declared == ["file"]:
+        return None, (f"{size}; adapter {ident} declares only a prompt file for `{capability}`, which is removed when "
+                      "its process ends, and ao does not wait on a detached turn")
+    return None, (f"{size}; this command does not carry the arguments adapter {ident} replaces for `{capability}` ("
+                  + "; ".join(" ".join(str(part) for part in block[channel].get("replaces") or [])
+                              for channel in declared) + ")")
+
+
+def prompt_input(plan, root=None, argv=None):
+    """What hands a planned prompt to its process: (given, None), or (None, why it cannot) (PROMPT-CHANNEL).
+
+    `argv` is the command rendered from the plan, the plan's template when none is given. For a channel
+    the prompt's bytes are written to a file of mode 0600 in a directory of its own, never inside
+    `root`: standard input is that file, opened for reading, or the file's path fills the {prompt_file}
+    the channel put in, and nowhere else. A file read as standard input loses its name before the
+    process starts where the platform allows it, so nothing named is left whatever becomes of ao;
+    `release_prompt` removes the rest once the process has ended. `given` holds the argv, standard input
+    (None when the prompt is not on it) and the directory.
+    """
+    given = {"argv": list(plan["argv"] if argv is None else argv), "stdin": None, "directory": None}
+    if plan.get("channel") not in PROMPT_CHANNELS:
+        return given, None
+    import tempfile
+    binary = getattr(os, "O_BINARY", 0)
+    try:
+        given["directory"] = tempfile.mkdtemp(prefix="ao-prompt-")
+        if root and _within(given["directory"], root):
+            release_prompt(given)
+            return None, "the prompt's private directory would lie inside the repository"
+        path = os.path.join(given["directory"], "prompt")
+        with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | binary, 0o600), "wb") as fh:
+            fh.write(plan["prompt"].encode(UTF8))
+        if plan["channel"] == "stdin":
+            # On Windows the file goes when the last handle on it closes, the process's included.
+            given["stdin"] = os.fdopen(os.open(path, os.O_RDONLY | binary | getattr(os, "O_TEMPORARY", 0)), "rb")
+            if os.name != "nt":
+                os.remove(path)
+                os.rmdir(given["directory"])
+                given["directory"] = None
+        else:
+            start, stop = plan["run"]
+            given["argv"][start:stop] = [str(part).replace("{prompt_file}", path) for part in given["argv"][start:stop]]
+    except (OSError, UnicodeError) as exc:
+        release_prompt(given)
+        return None, f"the prompt could not be written for its process ({type(exc).__name__}: {exc})"
+    return given, None
+
+
+def release_prompt(given):
+    """Close ao's handle on a handed prompt and remove its private directory; a second call does nothing."""
+    import shutil
+    handle, given["stdin"] = given.get("stdin"), None
+    if handle is not None:
+        try:
+            handle.close()
+        except OSError:
+            pass
+    directory, given["directory"] = given.get("directory"), None
+    if directory:
+        shutil.rmtree(directory, ignore_errors=True)

@@ -11,7 +11,9 @@
       "-p",
       "{prompt}"
     ],
-    "cwd_matters": true
+    "cwd_matters": true,
+    "stdin": { "replaces": ["{prompt}"], "with": [],
+               "note": "Verified from the headless documentation (code.claude.com/docs/en/headless), read 2026-09-17: non-interactive mode reads stdin, its review example pipes a diff to `claude -p` with no prompt argument, and piped stdin is capped at 10MB. `claude --help` (2.1.261) lists the prompt as an optional argument." }
   },
   "resume": {
     "argv": [
@@ -29,6 +31,8 @@
       "-p",
       "{prompt}"
     ],
+    "stdin": { "replaces": ["{prompt}"], "with": [],
+               "note": "Verified as for send: -p with --resume is the non-interactive mode the headless documentation says reads stdin." },
     "note": "Scoped rather than --dangerously-skip-permissions. The implementer is trusted with the tree — it must write code and run gates — but not with push, gh, or arbitrary shell; authority is withheld by ao, and the allowlist keeps the blast radius to the repo."
   },
   "options": {
