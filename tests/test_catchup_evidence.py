@@ -128,7 +128,7 @@ def test_the_review_of_a_waived_range_is_told_what_its_commits_claim_bounded_sca
 
     # A person's --boundary still replaces them.
     down = dict(project, reviewer={"id": "r", "family": "review-family", "argv": _capturing(capture, exit_code=17)})
-    assert _catchup(down, boundary="the owner's own boundary", **PERSON) == 0
+    assert _catchup(down, boundary="the owner's own boundary", **PERSON) == 3
     prompt = capture.read_text(encoding="utf-8")
     assert "Kabul sınırı: the owner's own boundary" in prompt and cli.REVIEW_CLAIMS_MARKER not in prompt
     assert [w["id"] for w in A.open_waivers(root)] == [waiver["id"]]
@@ -258,7 +258,7 @@ def test_a_range_whose_grant_recorded_no_proof_is_reviewed_even_when_it_is_a_pur
     seen = []
     monkeypatch.setattr(cli, "cmd_review", lambda cfg, ns: seen.append((ns.commits, ns.claims)) or 3)
 
-    assert _catchup(project, **PERSON) == 0
+    assert _catchup(project, **PERSON) == 3
 
     assert seen == [(first, True), (second, True)]
     assert [w["id"] for w in A.open_waivers(root)] == [plain["id"], partial["id"]]

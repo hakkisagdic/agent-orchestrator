@@ -148,7 +148,7 @@ def test_catchup_reviews_exactly_the_commit_granted_under_a_bounded_waiver(proje
     from ao import watchdog as W
     monkeypatch.setattr(W, "run", lambda ns: 0)
 
-    assert cli.cmd_catchup(project, NAMED) == 0
+    assert cli.cmd_catchup(project, NAMED) == 3
     assert seen == [f"{parent}..{landed}"]
     assert [w["id"] for w in A.open_waivers(project["root"])] == [waiver["id"]]
 
@@ -162,7 +162,7 @@ def test_catchup_does_not_close_a_waiver_when_no_review_was_recorded(project, mo
 
     for code in (1, 2):
         monkeypatch.setattr(cli, "cmd_review", lambda cfg, ns, code=code: code)
-        assert cli.cmd_catchup(project, NAMED) == 0
+        assert cli.cmd_catchup(project, NAMED) == 3
         assert [w["id"] for w in A.open_waivers(project["root"])] == [waiver["id"]]
     assert mailed == []
 

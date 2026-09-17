@@ -356,12 +356,17 @@ def build_parser():
                     help="how long it may stand in for the gate (settings waivers.default_hours "
                          "and waivers.max_hours; 24 and 168 unless changed)")
     wv.set_defaults(fn=cmd_waive)
-    cu = sub.add_parser("catchup", help="replay what could not run: waived reviews, deferred wakes and nudges")
+    cu = sub.add_parser("catchup", help="replay what could not run: waived reviews, deferred wakes and nudges",
+                        description="Replay what could not run: waived reviews, deferred wakes and nudges. A run "
+                                    "exits 3 when the reviews it started decided nothing, 1 when something could "
+                                    "not be written or read, 2 when it is refused, and otherwise 0, whether it made "
+                                    "progress or had nothing to do.")
     cu.add_argument("--boundary")
     cu.add_argument("--plan", action="store_true",
                     help="list each open review waiver, its range, commits and changed lines, whether it closes "
                          "by proof, and the totals; review nothing and write nothing")
-    cu.add_argument("--limit", type=int, help="start at most this many reviews in this run")
+    cu.add_argument("--limit", type=int, help="start at most this many reviews in this run; what needs no review is "
+                                              "still done")
     cu.add_argument("--slice", help="only the waivers for this slice")
     cu.add_argument("--author-family", dest="author_family",
                     help="a person names the model family that wrote the waived ranges, for those whose grant "

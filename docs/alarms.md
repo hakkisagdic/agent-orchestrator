@@ -88,6 +88,14 @@ and is mailed, then mails on red's schedule while nobody is shown it. Its red is
 threshold, not an hour of orange. Rebuilt, one unseen request rang 15 times on each in a day
 and was first mailed two hours before its red threshold.
 
+A request that an alarm to a person already tells - a "needs you" no architect will act on,
+`reports-no-wake` or `present-pending` - is one condition on that alarm's ladder: its own
+does not ring beside it, and a resume notice names it once. When no such alarm tells it any
+more, because an architect can act on it again, its own ladder counts from the last cycle one
+did, so a request a person has been told of for hours does not ring red at once. Rehearsing
+the catch-up planned for 2026-10-01, a request nobody had been shown and no architect could
+act on was mailed eight times in a day, four times under each key.
+
 A wake that keeps failing is one condition too. `architect-wake-failed` says the failure's
 kind, binary and words, without the time it was read at or an id that changes on every
 attempt, so the same failure rings the desktop and the phone once and mails on red's
@@ -140,7 +148,12 @@ the last one left, is a **resume**:
   episodes standing when it began, snoozes that ended in it, unseen decision requests, open
   decisions, deferred work, a hold, an implementer left with nothing to do — it is named
   once, in one notice sent when the cycle ends. A handoff note is written, not sent, and a
-  wake is told in the notice rather than on its own.
+  wake is told in the notice rather than on its own. What the silence carried is not named
+  once its own known end has passed: an episode held until an end, and the credits alarm once
+  the reset the implementer's last reading named has passed, since that reading says nothing
+  of the plan after it. What the cycle itself raises was measured now, and is named. Rehearsed
+  for 2026-10-01 with the jobs back six hours after the plan reset, the notice named the
+  credits as standing.
 - **To whom.** Each condition keeps the audience its own check gives it, and the notice
   goes to the widest: a person when anything it names is a person's (a person can act on
   the architect's business; the architect cannot lift a hold, end a snooze or buy

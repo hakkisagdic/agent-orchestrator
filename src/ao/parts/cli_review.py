@@ -1400,6 +1400,17 @@ def _author_line(author):
     return "; ".join(parts) or "not established"
 
 
+def _implementer_line(implementer, author):
+    """A review header's implementer line: the implementer configured when it ran, or that none is (CATCHUP-POLISH).
+
+    A retrospective review of a waived range is judged against whoever wrote the range, and a
+    repository may configure no implementer at all: rehearsing the catch-up planned for
+    2026-10-01, the header of every such review read `None/`, an implementer nobody named.
+    """
+    named = f"`{A.review_header_value(implementer)}`" if implementer else "none configured"
+    return f"- implementer: {named}" + ("; the range is judged against its author" if author is not None else "")
+
+
 def _reviewer_ineligible(cfg, route, sessions=None, author=None):
     """Why a reviewer route may not review this implementer where no matrix decides, or None (#65).
 
@@ -2256,10 +2267,7 @@ def cmd_review(cfg, args):
             + ("  (fallback — an earlier reviewer was unavailable or ineligible)"
                if used["index"] > 0 else "")
         )
-        implementer_line = (
-            f"- implementer: "
-            f"`{A.review_header_value(matrix_resolution['implementer_identity']['binding'])}`"
-        )
+        implementer_line = _implementer_line(matrix_resolution["implementer_identity"]["binding"], author)
     else:
         primary = cfg.get("reviewer") or {}
         evidence["reviewer"] = {
@@ -2276,10 +2284,9 @@ def cmd_review(cfg, args):
             + ("  (carried by a person from a session ao did not run)" if carried
                else "  (fallback — the primary reviewer was unavailable)" if rv is not primary else "")
         )
-        implementer_line = (
-            f"- implementer: "
-            f"`{A.review_header_value(str(impl.get('adapter')) + '/' + (impl.get('session') or '')[:20])}`"
-        )
+        implementer_line = _implementer_line(
+            f"{impl.get('adapter') or '?'}/{(impl.get('session') or '')[:20]}"
+            if impl.get("adapter") or impl.get("session") else None, author)
     # The adjudicated verdict and counts, and who reviewed, are read from here (#60).
     evidence["verdict"] = verdict
     evidence["counts"] = dict(sev)

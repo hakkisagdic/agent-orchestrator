@@ -874,6 +874,22 @@ def _catchup_undecided(root, targets):
     return {wid: newest[rng] for wid, rng in ranges.items() if newest.get(rng) in ("UNAVAILABLE", "INVALID")}
 
 
+def _catchup_exit(failed, started, decided):
+    """The exit code of a catch-up run: what failed, reviews that decided nothing, or 0 (CATCHUP-POLISH).
+
+    Rehearsing the catch-up planned for 2026-10-01, a run whose every review ended
+    UNAVAILABLE exited 0, as a run that closed ten waivers did, so a person or a script
+    repeating --limit could not tell a reviewer that decides nothing from progress. 1 stays
+    what could not be written or read. 3 is reviews started and none deciding anything,
+    whatever else closed, as `ao review` exits 3 when no reviewer could review. Anything else
+    is 0: progress, or nothing to do, since an idle catch-up is no failure and a wake turn, a
+    `set -e` script and a person all read a nonzero exit as one.
+    """
+    if failed:
+        return 1
+    return 3 if started and not decided else 0
+
+
 def cmd_catchup(cfg, args):
     """Replay what could not run: waived reviews, deferred wakes and nudges.
 
@@ -888,7 +904,13 @@ def cmd_catchup(cfg, args):
     --plan says what a run would do and changes nothing; --slice and --limit bound a run. A
     review stays synchronous: a waiver closes in the same run, on the review recorded for
     exactly its range, or stays open. A range whose last review decided nothing waits behind
-    the rest, and once a review finds the reviewer unavailable the run starts no other.
+    the rest, and once a review finds the reviewer unavailable the run starts no other. --limit
+    bounds the reviews a run starts in the same way: what needs no review is still done.
+
+    The exit code says what a run did (CATCHUP-POLISH): 3 when it started reviews and none of
+    them decided anything, whatever else it closed; 1 when a close, a ledger or a decision
+    request could not be written or read; 2 when it is refused; otherwise 0, for progress and
+    for nothing to do alike. --plan exits 0, or 1 when the waivers cannot be read.
     """
     from types import SimpleNamespace
     root = cfg["root"]
@@ -902,7 +924,7 @@ def cmd_catchup(cfg, args):
     if limit is not None and limit < 1:
         print("--limit is at least 1: the number of reviews this run may start")
         return 2
-    did = started = held = 0
+    did = started = decided = held = waiting = 0
     unavailable = None                          # the waiver whose review found the reviewer unavailable
     failed = []
     totals = {"waivers": 0, "commits": 0, "lines": 0, "unnamed": 0, "proven": 0}      # what --plan sums up
@@ -939,12 +961,9 @@ def cmd_catchup(cfg, args):
         targets = [item for item in targets if item["waiver"].get("slice") == only]
     undecided = _catchup_undecided(root, targets)
     targets = sorted(targets, key=lambda item: item["waiver"].get("id") in undecided)
-    for position, item in enumerate(targets):
+    for item in targets:
         w = item["waiver"]
         label = f"{w['id']} ({w['slice']})"
-        if limit is not None and started >= limit:
-            print(f"  --limit {limit}: {len(targets) - position} waiver(s) wait for the next run")
-            break
         totals["waivers"] += 1
         if item["problem"]:
             print(f"  {label}: {item['problem']}; keeping it open")
@@ -1015,6 +1034,12 @@ def cmd_catchup(cfg, args):
             # could spend the review's whole time budget finding that out again (OCT1-FIXES).
             held += 1
             continue
+        if limit is not None and started >= limit:
+            # --limit bounds the reviews a run starts, as an unavailable reviewer does, and nothing else. The
+            # run stopped at the limit instead, and said a waiver nothing was granted under waited for the
+            # next run, which would close it unreviewed (CATCHUP-POLISH).
+            waiting += 1
+            continue
         started += 1
         totals["commits"] += item["landed"]
         totals["lines"] += lines or 0
@@ -1049,6 +1074,8 @@ def cmd_catchup(cfg, args):
             failed.append(w["id"])
             continue
         verdict = recorded.get("verdict")
+        if verdict in ("APPROVED", "NEEDS_CHANGES") or (verdict is None and code == 0):
+            decided += 1                        # the review decided what becomes of the waiver
         if verdict == "APPROVED":
             if close(w["id"], "reviewed: APPROVED"):
                 did += 1
@@ -1078,6 +1105,8 @@ def cmd_catchup(cfg, args):
     if held:
         print(f"  the reviewer was unavailable for {unavailable}: this run started no other review, and "
               f"{held} waiver(s) wait for a run in which it answers")
+    if waiting:
+        print(f"  --limit {limit}: {waiting} waiver(s) wait for a later run to review them")
     if plan:
         print(f"totals: {totals['waivers']} waiver(s); {started} review(s) of {totals['commits']} commit(s) and "
               f"{totals['lines']} changed line(s); {totals['unnamed']} refused until a person names the author's "
@@ -1096,8 +1125,10 @@ def cmd_catchup(cfg, args):
         print(f"{C['dim']}running one watchdog cycle to act on what is now possible{C['reset']}")
         from . import watchdog as W
         W.run(SimpleNamespace(root=root, idle_minutes=S.get(cfg, "watchdog.idle_minutes"), dry_run=False, prompt=W.NUDGE_PROMPT))
-    print(f"{C['green']}catchup{C['reset']} handled {did} item(s)")
-    return 1 if failed else 0
+    code = _catchup_exit(failed, started, decided)
+    print(f"{C['green']}catchup{C['reset']} handled {did} item(s)"
+          + (f"; none of the {started} review(s) it started decided anything" if code == 3 else ""))
+    return code
 
 
 def cmd_pings(cfg, args):

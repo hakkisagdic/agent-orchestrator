@@ -117,6 +117,8 @@ test that would fail if it came back.
 | F23 | rebuilt in the same project, four conditions still repeated through a day: an open decision rang the desktop and the phone 23 times, an unseen request 15, a request an architect at the keyboard had not read was mailed under two keys on every red repeat, and a wake failing on a transport error sent the phone 95 "architect woken" lines | a window was all that limited the decision and the unseen request, and an hour of orange turned the unseen request red before its threshold; `present-pending` rang beside the anomaly; the "architect woken" line went out as each retry started, and every retry read the failure with a new time | an open decision is its own alarm, rung once for its question and not also "needs you"; `present-pending` names only the reports no anomaly stands for; an unseen request rings as it crosses a threshold and is red at its red threshold; a failed wake is named without its time or ids, and a retry is told only once it has not failed | test_noise_repeats | — |
 | F24 | rebuilt with a review parked through a day, its alarm, whose window is a day, rang the desktop and the phone again each time its last ring was eight and a half hours old; with the notices ledger held to 64 KB, four times more in the day | a window check read the last 100 KB of the notices ledger, and the ledger's own bound can keep less than a window | when each key was last recorded and sent is folded beside the ledger as each notice is written, before anything trims the ledger, and a check reads that and the ledger lines written after the newest one folded | test_notice_window | — |
 | F25 | a session quiet while its subagent worked read as idle and its turn as ended: in 179 of the 444 closed turns a subagent wrote in, across 59 stores that delegate, the runtime waiting for the subagent would have been reaped at the idle window while the subagent went on | the idle guard, the reap and the spin check read the session transcript alone, and a subagent writes to a transcript of its own | the implementer's last write and the spin check's growth include the subagent transcripts the adapter declares, and a turn has not ended while one was written after the session transcript; read by modification time and size, none opened | test_subagent_liveness | — |
+| F26 | rehearsing the catch-up planned for 2026-10-01, a decision request nobody had been shown and no architect could act on was mailed eight times in a day, four times under its anomaly's "needs you" and four under its own unseen alarm | the unseen check rang every request by its age, whatever other alarm to a person already told it | a request an alarm to a person tells is told by that alarm alone, and a resume notice names it once; its own ladder counts from the last cycle such an alarm told it | test_catchup_polish | — |
+| F27 | in the same rehearsal, with the jobs back six hours after the plan reset and the usage unreadable, the resume notice named the credits as standing | the notice named each episode the silence carried and each snooze that ended in it, whatever its own known end | what the silence carried is not named once its known end has passed: an episode's own, or the reset the implementer's last reading named | test_catchup_polish | — |
 
 ## Scenarios: testing the decision, not the measurement
 
@@ -174,7 +176,8 @@ Best practice, applied:
   architect acts. With wakes switched off, `reports-no-wake` rings only for the
   reports no anomaly stands for, and with an architect at the keyboard
   `present-pending` does the same. An open decision is told by its own alarm,
-  `decision-open:<id>`, and not as "needs you" as well.
+  `decision-open:<id>`, and not as "needs you" as well. An unseen request any of these
+  tells does not ring under its own key beside it.
 - **Resolved.** When an episode goes quiet for two hours, the same channels
   hear it end — an alert with no "over" teaches people to keep worrying.
 - **Storm-capped.** Twelve sent alerts in an hour and the rest are recorded
@@ -182,7 +185,8 @@ Best practice, applied:
 - **Resumed.** After more than `watchdog.resume_gap_hours` without a cycle, what the
   cycle would ring and what the silence carried go out as one notice, to a person when
   any of it is a person's; an unseen request, an open decision or a hold from before the
-  resume ages from the resume.
+  resume ages from the resume, and what the silence carried is not named once its own
+  known end has passed.
 - **Actionable.** Every message names the project, what stands, since when, how
   many times, and the `ao` command that shows more.
 - **Testable.** `ao alarms test --level red` rings every channel for real.

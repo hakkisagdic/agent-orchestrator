@@ -103,7 +103,10 @@ opened and retired by chained appends. `ao catchup` retires it only on a review 
 recorded for the exact commit granted under it, and that review may not come from the model
 family that wrote the commit: the grant records who landed it where ao can establish that (a
 turn ao started names its role), and where it could not, a person names the family with
-`ao catchup --author-family <family> --by <name>`, on the record. That reviewer judges the
+`ao catchup --author-family <family> --by <name>`, on the record. That commit is looked for
+after the head its grant was built on, or, when history rewritten since has left that head off
+HEAD's line, among the commits made from a day before the waiver was opened; a waiver whose
+granted tree landed nowhere there stays open as UNRESOLVED. That reviewer judges the
 commit against its own message, handed over as claims to verify rather than facts, scanned for
 credentials first. The one other way such a waiver retires is a proof: the grant for a slice the
 board marks `move-only` records the `ao split-check` proof it stood on, `ao catchup` runs that

@@ -96,7 +96,8 @@ waiver is reported, and no actor's grant admits the flag.
 `ao catchup --plan` lists each open waiver with its range, commits and changed
 lines, and which close by proof, `--move-only` included, and the totals, and
 changes nothing;
-`ao catchup --limit 10` starts at most ten reviews, and
+`ao catchup --limit 10` starts at most ten reviews, still closes what needs no review and
+says how many waivers wait for a later run to review them, and
 `ao catchup --slice B7` takes one slice's waivers. A range whose last review decided
 nothing, UNAVAILABLE or INVALID, waits behind the ranges no review has failed on, so
 repeated runs reach every range; once a review finds the reviewer unavailable, the run
@@ -105,6 +106,16 @@ rather than going through `ao review submit`, which pins a staged candidate for
 the running slice and hands back an id: a waived range is already landed, and a
 waiver closes only on the review recorded for exactly its range, or on its proof,
 in the run that asked for it. Whatever a run does not reach waits for the next one.
+
+A run exits `3` when it started reviews and none of them decided anything - each ended
+UNAVAILABLE or INVALID, was refused, or recorded no review - whatever needed no reviewer it
+closed; `1` when a waiver's close, a ledger or a decision request could not be written or
+read; `2` when it is refused before it starts; and otherwise `0`, whether it made progress or
+had nothing to do: an idle catch-up is no failure. Rehearsing the catch-up planned for
+2026-10-01, a run whose every review found the reviewer unavailable exited 0, as a run that
+closed ten waivers did. `ao catchup --plan` exits `0`, or `1` when the waivers cannot be read,
+and a sitting repeats `ao catchup --limit 10` until `ao catchup --plan` counts 0 review(s).
+
 Retrospective evidence reconciles the record; it never authorizes a candidate.
 Nothing is skipped silently, and nothing is lost when the run degrades:
 

@@ -640,7 +640,7 @@ def architect_hold_reason(root, cfg, adapter, st, found=None, now=None):
     return {"holdable": True, "code": "wakeable", "reason": "architect will be woken"}
 
 
-def escalate(root, cfg, adapter, age, args, st):
+def escalate(root, cfg, adapter, age, args, st, told=None):
     """Hand every judgement call to the architect, once per condition per hour.
 
     The watchdog is good at mechanical questions and bad at everything else. Its
@@ -652,6 +652,9 @@ def escalate(root, cfg, adapter, age, args, st):
     So it reports instead. Facts go to the mailbox where they persist; the
     architect is woken only if one is configured, because a report nobody reads is
     not an escalation.
+
+    `told`, when given, collects the reports an alarm to a person stands for this cycle, so
+    the unseen check does not ring them under a second key (CATCHUP-POLISH).
     """
     # A wake retried after a failed one is told once it is known not to have failed (NOISE-REPEATS).
     tell_retried_wake(root, cfg, st, dry_run=args.dry_run)
@@ -744,6 +747,12 @@ def escalate(root, cfg, adapter, age, args, st):
                    quiet_until=st.get("arch_quota_until") if hold["code"] == "quota-block" else None)
         print(f"anomaly {a['kind']}: {'reported as ' + name if name else 'already reported'}")
         woke = True
+    if told is not None and standing:
+        # An anomaly no architect will act on reaches a person as "needs you", and stands for the
+        # requests it groups whether or not its window let it ring this cycle (CATCHUP-POLISH).
+        hold = hold or architect_hold_reason(root, cfg, adapter, st, found)
+        if not hold["holdable"]:
+            told.update(name for anomaly in standing.values() for name in anomaly.get("reports") or [])
     arch = cfg.get("architect") or {}
 
     # Wake on durable state, not on the moment of detection. The notification
@@ -833,6 +842,8 @@ def escalate(root, cfg, adapter, age, args, st):
         hold = hold or architect_hold_reason(root, cfg, adapter, st, found)
         named = set() if hold["holdable"] else anomaly_reports(standing.values(), stale)
         rest = [m for m in stale if m not in named]
+        if told is not None:
+            told.update(rest)
         if named:
             print(f"{len(named)} report(s) named by the alarm of the anomaly they stand for; "
                   f"{len(rest)} other(s) alarmed here")
@@ -858,6 +869,8 @@ def escalate(root, cfg, adapter, age, args, st):
         hold = hold or architect_hold_reason(root, cfg, adapter, st, found)
         named = set() if hold["holdable"] else anomaly_reports(standing.values(), stale)
         rest = [m for m in stale if m not in named]
+        if told is not None:
+            told.update(rest)
         if named:
             print(f"{len(named)} report(s) named by the alarm of the anomaly they stand for; "
                   f"{len(rest)} other(s) alarmed here")
@@ -1703,7 +1716,8 @@ def resume_after(root, cfg, silence, dry_run=False, now=None):
         owner, _, key = name.partition(":")
         if owner == project and isinstance(episode, dict) and now - float(episode.get("last") or 0) > quiet:
             carried.append(dict({field: episode.get(field) for field in
-                                 ("title", "level", "ring", "first", "last", "count", "red_sent")}, key=key))
+                                 ("title", "level", "ring", "first", "last", "count", "red_sent",
+                                  "quiet_until")}, key=key))
     snoozes = []
     for name, snooze in sorted(A.load_alarm_snoozes().items()):
         owner, _, key = name.partition(":")
@@ -1717,7 +1731,34 @@ def resume_after(root, cfg, silence, dry_run=False, now=None):
     return resume
 
 
-def resume_items(root, cfg, st, resume, folded, now=None):
+def resume_ended(root, cfg, resume, now=None):
+    """The keys of what the silence carried whose own known end has passed: none of them stands (CATCHUP-POLISH).
+
+    An episode raised with a known end - credits until the reset their reading named, the
+    architect's quota until it comes back - says nothing of what holds after that end. An
+    episode raised before episodes kept their end carries none, so the credits alarm's end is
+    also read from the implementer's last reading before this cycle: a reading whose own reset
+    has passed says nothing of the plan after it, as a spent one is no credits finding
+    (OCT1-FIXES). Rehearsing the catch-up planned for 2026-10-01, with the jobs back six hours
+    after the plan reset and the usage unreadable, the resume notice named the credits as
+    standing, from the episode the silence carried and from the snooze that ended in it. What
+    this cycle raises was measured now, and it stands whatever this says.
+    """
+    now = time.time() if now is None else now
+    ended = {episode["key"] for episode in resume.get("carried") or []
+             if 0 < float(episode.get("quiet_until") or 0) <= now}
+    try:
+        readings = [row for row in A.credit_samples(root, A.implementer_adapter_id(cfg))
+                    if float(row.get("at") or 0) < int(resume.get("at") or now)]
+    except Exception:
+        readings = []
+    reset = credit_reset(readings[-1].get("reset_at"), now) if readings else None
+    if reset is not None and reset <= now:
+        ended.add("credits-exhaust")
+    return ended
+
+
+def resume_items(root, cfg, st, resume, folded, now=None, told=()):
     """What stands at a resume, one entry per condition: {"key", "audience", "lines", "red"}.
 
     From the cycle that ran - every notice it would have rung, with the audience its own
@@ -1726,11 +1767,15 @@ def resume_items(root, cfg, st, resume, folded, now=None):
     work, a hold and an implementer with nothing to do are a person's; an unseen decision
     request is first the architect's (#30). An entry without a key is something the cycle
     did; it is told, never named. A condition a person has snoozed stays off the notice as
-    it stays off every channel (#108).
+    it stays off every channel (#108). What the silence carried is not named once its own known
+    end has passed, and an unseen request another alarm to a person tells is named under that
+    alarm alone (CATCHUP-POLISH).
     """
     now = time.time() if now is None else now
     project = A.project_key(root)
     items = {}
+    # What ended in the silence is not named, nor a request an alarm to a person tells (CATCHUP-POLISH).
+    unnamed = resume_ended(root, cfg, resume, now) | {f"unseen:{name}" for name in told}
 
     def add(key, audience, line, red=False, what=None):
         if key and A.alarm_snoozed(project, key, now):
@@ -1749,17 +1794,17 @@ def resume_items(root, cfg, st, resume, folded, now=None):
         add(note.get("key") or "", note.get("audience") or "human",
             f"{subject}: {note.get('msg')}" if subject else note.get("msg"), red=note.get("ring") == "red",
             what=note.get("what"))
-    for episode in resume.get("carried") or []:
+    for episode in (episode for episode in resume.get("carried") or [] if episode["key"] not in unnamed):
         add(episode["key"], "human", f"stood when the silence began: {episode.get('ring') or episode.get('level')} "
             f"since {_when(episode.get('first'))}, last raised {_when(episode.get('last'))}"
             + (f", mailed {_when(episode['red_sent'])}" if episode.get("red_sent") else ""))
-    for snooze in resume.get("snoozes") or []:
+    for snooze in (snooze for snooze in resume.get("snoozes") or [] if snooze["key"] not in unnamed):
         add(snooze["key"], "human", f"its snooze ended {_when(snooze.get('until'))} "
                                     f"({snooze.get('by')}: {snooze.get('why')})")
     # Each record is read on its own: one that cannot be read must not cost the notice the rest.
     try:
         for message in A.unseen_messages(root, cfg):
-            if message["class"] == "needs-decision":
+            if message["class"] == "needs-decision" and f"unseen:{message['id']}" not in unnamed:
                 add(f"unseen:{message['id']}", "architect",
                     f"a decision request nobody has been shown, written {_when(message['at'])}")
     except Exception:
@@ -1808,7 +1853,7 @@ def announce_resume(root, owed, dry_run=False, now=None):
     if not dry_run:
         st["resume"] = dict(resume, announced=int(now))
         save_state(root, st)
-    items = resume_items(root, cfg, st, resume, owed["folded"], now)
+    items = resume_items(root, cfg, st, resume, owed["folded"], now, told=owed.get("told") or ())
     named = [item["key"] for item in items if item["key"]]
     audience = "human" if any(item["audience"] == "human" for item in items) else "architect"
     if audience == "architect" and named:
@@ -1853,6 +1898,59 @@ def announce_resume(root, owed, dry_run=False, now=None):
     _note_above_verdict(f"resumed after {_span(silence)}: one notice to the {audience} names "
                         f"{len(named)} condition(s)")
     return audience
+
+
+def ring_unseen_requests(root, cfg, st, restart, told=()):
+    """Ring each decision request nobody has been shown by its age, unless an alarm to a person tells it (#30).
+
+    The architect is told first, then a person's desktop and phone, then e-mail. One written
+    before a resume waits from the resume: nobody could have acted in the time nothing ran
+    (RESUME-QUIET).
+
+    A request an alarm to a person tells this cycle - a "needs you" no architect will act
+    on, `reports-no-wake` or `present-pending` - is one condition, on that alarm's ladder.
+    Rehearsing the catch-up planned for 2026-10-01, a request nobody had been shown and no
+    architect could act on was mailed eight times in a day, four under its anomaly's key and
+    four under its own. Once no such alarm tells it, as when an architect can act on it again,
+    its own ladder counts from the last cycle one did, as it counts from a resume: a request a
+    person has been told of for hours does not ring red the moment an architect may read it.
+    A resume notice names such a request under that alarm alone (CATCHUP-POLISH).
+    """
+    project = A.project_key(root)
+    now = time.time()
+    was = st.get("unseen_told") if isinstance(st.get("unseen_told"), dict) else {}
+    kept = {}
+    resuming = _RESUME.get()
+    if resuming is not None:
+        resuming["told"] = sorted(told)
+    for message in A.unseen_messages(root, cfg):
+        if message["class"] != "needs-decision":
+            continue
+        if message["id"] in told:
+            kept[message["id"]] = int(now)
+            continue
+        if message["id"] in was:
+            kept[message["id"]] = was[message["id"]]
+        since = max(restart, float(kept.get(message["id"]) or 0))
+        carried = message["at"] < since
+        minutes = (max(0.0, now - since) if carried else message["age"]) / 60
+        level = ("red" if minutes >= S.get(cfg, "mail.unseen_red_minutes")
+                 else "orange" if minutes >= S.get(cfg, "mail.unseen_orange_minutes")
+                 else "yellow" if minutes >= S.get(cfg, "mail.unseen_yellow_minutes") else None)
+        if level:
+            reason = "the watchdog resumed" if since == restart else "an alarm to a person last named it"
+            text = f"{message['id']} has waited {int(message['age'] / 60)}m and nobody has been shown it" \
+                + (f" ({int(minutes)}m since {reason})" if carried else "")
+            # It rings as it crosses a threshold, and its red is the red threshold: rung every hour between
+            # them, one unseen request reached the desktop and the phone 15 times in a day, and an hour of
+            # orange mailed it two hours before its red (NOISE-REPEATS).
+            notify(f"{project}: unread decision request", text, root, key=f"unseen:{message['id']}", window=3600,
+                   audience="architect" if level == "yellow" else "human",
+                   level=None if level == "yellow" else level, what=level,
+                   red_after=S.get(cfg, "mail.unseen_red_minutes") * 60)
+    if kept != was:
+        st["unseen_told"] = kept
+        save_state(root, st)
 
 
 def _cycle_impl(args, root):
@@ -1961,28 +2059,6 @@ def _cycle_impl(args, root):
         needs = item["notes"].get("needs") or item["title"]
         notify(f"{project}: needs you", f"{item['id']} waits on a person: {needs}", root,
                key=f"waiting-human:{item['id']}", window=6 * 3600, audience="human", what=needs)
-    # A decision request nobody has been shown climbs the ladder by its age: the
-    # architect first, then a person's desktop and phone, then e-mail (#30).
-    # One written before a resume waits from the resume: nobody could have acted in the
-    # time nothing ran (RESUME-QUIET).
-    for message in A.unseen_messages(root, cfg):
-        if message["class"] != "needs-decision":
-            continue
-        carried = message["at"] < restart
-        minutes = (max(0.0, time.time() - restart) if carried else message["age"]) / 60
-        level = ("red" if minutes >= S.get(cfg, "mail.unseen_red_minutes")
-                 else "orange" if minutes >= S.get(cfg, "mail.unseen_orange_minutes")
-                 else "yellow" if minutes >= S.get(cfg, "mail.unseen_yellow_minutes") else None)
-        if level:
-            text = f"{message['id']} has waited {int(message['age'] / 60)}m and nobody has been shown it" \
-                + (f" ({int(minutes)}m since the watchdog resumed)" if carried else "")
-            # It rings as it crosses a threshold, and its red is the red threshold: rung every hour between
-            # them, one unseen request reached the desktop and the phone 15 times in a day, and an hour of
-            # orange mailed it two hours before its red (NOISE-REPEATS).
-            notify(f"{project}: unread decision request", text, root, key=f"unseen:{message['id']}", window=3600,
-                   audience="architect" if level == "yellow" else "human",
-                   level=None if level == "yellow" else level, what=level,
-                   red_after=S.get(cfg, "mail.unseen_red_minutes") * 60)
     # An agent that is busy and producing nothing never trips the idle guard, so
     # check it before the guard chain rather than inside it. Notify only; a nudge
     # would add a turn to a loop that is already spending them.
@@ -1996,13 +2072,19 @@ def _cycle_impl(args, root):
     # -1 — a human has taken the tree. Nothing else in this chain may override it.
     held = A.hold_state(root)
     if held:
+        # Nothing below runs, so no other alarm tells a request nobody has been shown (#30).
+        ring_unseen_requests(root, cfg, st, restart)
         print(f"held by {held.get('by')} for {held['minutes']}m: {held.get('reason','')}")
         return 0
 
     # Report anything needing judgement before the guard chain stands down on it.
     # Standing down silently is how a condition persists for hours: the watchdog
     # was right to not act and wrong to be the only one who knew.
-    escalate(root, cfg, adapter, age, args, st)
+    told = set()
+    escalate(root, cfg, adapter, age, args, st, told=told)
+    # A request nobody has been shown climbs its own ladder only where no alarm to a person
+    # already tells it (#30, CATCHUP-POLISH).
+    ring_unseen_requests(root, cfg, st, restart, told)
 
     # 0 — is ANY agent already working this tree? Not just the child we started.
     #

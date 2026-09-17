@@ -926,6 +926,42 @@ def open_waiver_report(root, now=None):
 
 
 _OBJECT_ID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+# How long before a waiver was opened a commit landed under it may say it was committed: a clock
+# that disagreed, on this machine or on the one the commit was made on (CATCHUP-POLISH).
+WAIVER_CLOCK_ALLOWANCE = 86400
+
+
+def _waiver_history(root, waiver, grants):
+    """The `git log` revisions that hold the commit a bounded waiver's grant landed, or None (CATCHUP-POLISH).
+
+    The newest 500 commits were searched, and a repository that lands dozens of commits a day
+    would soon have called every older waiver UNRESOLVED. The commit that lands a granted tree
+    descends from the head the grant was built on, so the search runs from the first recorded
+    head git still has on HEAD's line, whatever came before it. A head comes from a ledger
+    anyone on the machine can edit, so it must be a full object id; a history rewritten since
+    can have left it off that line, and then the waiver's own date bounds the walk: git stops
+    walking where the commits grow older than that. With neither, nothing is searched: the
+    whole history of a long-lived repository is no bound.
+    """
+    seen = set()
+    for row in grants:
+        head = str((row.get("candidate") or {}).get("head") or "")
+        if head in seen or not _OBJECT_ID.fullmatch(head):
+            continue
+        seen.add(head)
+        try:
+            ancestor = subprocess.run(
+                [git_binary(), "merge-base", "--is-ancestor", head, "HEAD"], cwd=root,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60,
+            ).returncode
+        except (OSError, subprocess.TimeoutExpired):
+            ancestor = 2
+        if ancestor == 0:
+            return ["--ancestry-path", f"{head}..HEAD"]
+    at = waiver.get("at")
+    if isinstance(at, (int, float)) and not isinstance(at, bool) and at > WAIVER_CLOCK_ALLOWANCE:
+        return [f"--since=@{int(at) - WAIVER_CLOCK_ALLOWANCE}", "HEAD"]
+    return None
 
 
 def _bound_waiver_target(root, waiver, grants):
@@ -934,7 +970,9 @@ def _bound_waiver_target(root, waiver, grants):
     A waiver that nothing was granted under covers no commit; one whose granted tree
     never landed is UNRESOLVED rather than reviewed by guess. The newest grant of the
     tree that landed says who landed it, where it recorded that (#65), and the move
-    proof it stood on, where it recorded one (#44).
+    proof it stood on, where it recorded one (#44). The commit is looked for where it can
+    have landed, and it is the first there to carry a granted tree: a later commit of the
+    same tree landed under another grant (CATCHUP-POLISH).
     """
     trees = {(row.get("candidate") or {}).get("index_tree") for row in grants}
     item = {"waiver": waiver, "start": "", "end": "", "landed": 0,
@@ -942,16 +980,22 @@ def _bound_waiver_target(root, waiver, grants):
             "move_only": None, "expired": (waiver.get("expires") or 0) <= time.time()}
     if not trees:
         return item
+    span = _waiver_history(root, waiver, grants)
+    if span is None:
+        item["problem"] = ("UNRESOLVED: no grant under it records a head on HEAD's line, and it records no date "
+                           "to search from")
+        return item
     try:
-        log = _git_output(root, "log", "--max-count=500", "--format=%H %T", "HEAD", "--").decode("ascii")
+        log = _git_output(root, "log", "--format=%H %T", *span, "--").decode("ascii")
     except (RuntimeError, UnicodeError):
         item["problem"] = "UNRESOLVED: git cannot list the landed commits"
         return item
-    sha, tree = next(((parts[0], parts[1]) for parts in (line.split() for line in log.splitlines())
-                      if len(parts) == 2 and parts[1] in trees), (None, None))
-    if not sha:
+    carried = [(parts[0], parts[1]) for parts in (line.split() for line in log.splitlines())
+               if len(parts) == 2 and parts[1] in trees]
+    if not carried:
         item["problem"] = "UNRESOLVED: no landed commit carries the tree granted under it"
         return item
+    sha, tree = carried[-1]                      # git lists the newest first
     try:
         parent = _git_output(root, "rev-parse", "--verify", f"{sha}^").decode("ascii").strip()
     except (RuntimeError, UnicodeError):

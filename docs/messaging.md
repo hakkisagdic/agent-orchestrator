@@ -96,7 +96,8 @@ the urgent banner - `.ao/ledger/mail.jsonl` records `seen` once, apart from dele
 "nobody has been shown this" is no longer the same as "someone is working on it". An
 unseen `needs-decision` message climbs the ladder by age: past `mail.unseen_yellow_minutes`
 the architect is told, past `mail.unseen_orange_minutes` a person's desktop and phone, past
-`mail.unseen_red_minutes` e-mail. `ao status` names the oldest unseen message and its age.
+`mail.unseen_red_minutes` e-mail, unless an alarm to a person already tells it, whose ladder it
+then follows ([alarms.md](alarms.md)). `ao status` names the oldest unseen message and its age.
 
 With `mail.store` set to `append-only`, nothing is deleted to prove it was handled. Each message
 is taken into `.ao/mail/store/` and a chained `.ao/ledger/mail-store.jsonl` row the first time the

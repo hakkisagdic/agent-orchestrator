@@ -64,7 +64,7 @@ def test_a_range_whose_last_review_decided_nothing_waits_behind_the_ranges_no_re
     assert "its last review ended INVALID" in out
 
     # Every run of --limit 1 asked for B1 again and never reached B3.
-    assert _catchup(project, limit=1, **PERSON) == 0
+    assert _catchup(project, limit=1, **PERSON) == 3
     assert seen == [ranges[2]]
     assert [w["slice"] for w in A.open_waivers(root)] == ["B1", "B2", "B3"]
 
@@ -82,7 +82,7 @@ def test_a_run_starts_no_review_after_one_finds_the_reviewer_unavailable(project
                         lambda *args, **kwargs: spawned.append(args[1]) or run_reviewer(*args, **kwargs))
     down = dict(project, reviewer={"id": "r1", "family": "review-family", "argv": _answering(unavailable=("B1",))})
 
-    assert _catchup(down, **PERSON) == 0
+    assert _catchup(down, **PERSON) == 3
 
     out = capsys.readouterr().out
     assert len(spawned) == 1 and "reviewer still unavailable; W-legacy-B1 stays open" in out

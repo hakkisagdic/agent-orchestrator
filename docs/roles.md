@@ -144,8 +144,10 @@ another implementer, or none. So the grant under the waiver records who landed i
 of a turn ao started, the actor holding that role, its adapter and the family declared for
 it - and `ao catchup` judges the retrospective review's independence against that author, not
 against whoever implements now: a reviewer that declares the author's family, or no family, is
-refused, and the implementer's own engine may review what another family wrote. A family ao
-could not record is named by a person, with `--author-family` and `--by`; ao never reads a
+refused, and the implementer's own engine may review what another family wrote. The review's
+header names the implementer configured when it runs, or says that none is, and that the range
+is judged against its author. A family ao could not record is named by a person, with
+`--author-family` and `--by`; ao never reads a
 family from a model name. A split whose grant recorded its move proof, or that a person states
 only moved code, has no reviewer to hold apart from its author: its waiver closes on the proof,
 run on the commit that landed. A catch-up review is recorded as the waived slice's, whatever

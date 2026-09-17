@@ -105,7 +105,7 @@ def test_a_reviewer_of_the_architects_family_is_refused_for_the_range_it_landed_
     # Compared with the configured implementer alone, there is nobody to be independent of.
     assert cli._reviewer_ineligible(cfg, same) is None
     capsys.readouterr()
-    assert _catchup(dict(cfg, reviewer=same)) == 0
+    assert _catchup(dict(cfg, reviewer=same)) == 3           # a review started, and decided nothing
     assert "it declares the author's model family (writer-family)" in capsys.readouterr().out
     assert not marker.exists() and _reviews(root) == []
     assert [w["id"] for w in A.open_waivers(root)] == [waiver["id"]]
@@ -113,7 +113,7 @@ def test_a_reviewer_of_the_architects_family_is_refused_for_the_range_it_landed_
     # A fallback of that family is not run either when the independent primary cannot answer.
     other_down = {"id": "other", "family": "review-family", "argv": _fake("unavailable", exit_code=17),
                   "fallbacks": [same]}
-    assert _catchup(dict(cfg, reviewer=other_down)) == 0
+    assert _catchup(dict(cfg, reviewer=other_down)) == 3
     assert "fallback same not run: it declares the author's model family (writer-family)" in capsys.readouterr().out
     assert not marker.exists()
     assert [w["id"] for w in A.open_waivers(root)] == [waiver["id"]]
@@ -148,7 +148,7 @@ def test_an_unknown_author_family_is_refused_until_a_person_names_one_and_the_na
     assert _catchup(cfg, author_family="writer-family", by="architect") == 2
     assert "a person's statement" in capsys.readouterr().out
     assert _catchup(cfg, by="A. Person") == 2
-    assert _catchup(cfg, author_family="review-family", by="A. Person") == 0
+    assert _catchup(cfg, author_family="review-family", by="A. Person") == 3
     assert "it declares the author's model family (review-family)" in capsys.readouterr().out
     assert _reviews(root) == [] and [w["id"] for w in A.open_waivers(root)] == [waiver["id"]]
 
@@ -224,7 +224,7 @@ def test_limit_starts_at_most_that_many_reviews_and_slice_takes_one_slices_waive
     assert _catchup(project, plan=True, limit=2, **PERSON) == 0
     out = capsys.readouterr().out
     assert all(w["id"] in out for w in (empty, *waivers[:2])) and waivers[2]["id"] not in out
-    assert "--limit 2: 1 waiver(s) wait for the next run" in out and seen == []
+    assert "--limit 2: 1 waiver(s) wait for a later run to review them" in out and seen == []
 
     assert _catchup(project, limit=2, **PERSON) == 0
     assert seen == ranges[:2]

@@ -207,7 +207,7 @@ def test_catch_up_keeps_a_waiver_open_when_no_reviewer_can_be_handed_its_range(p
                                   "argv": [sys.executable, "-c", APPROVED, "{prompt}"]})
 
     assert cli.cmd_catchup(cfg, SimpleNamespace(boundary=None, plan=False, limit=None, slice=None,
-                                                author_family="writer-family", by="A. Person")) == 0
+                                                author_family="writer-family", by="A. Person")) == 3
 
     out = capsys.readouterr().out
     assert "adapter bare declares no other channel" in out
