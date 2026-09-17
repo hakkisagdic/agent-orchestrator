@@ -83,7 +83,7 @@ repository and where ao's files for it go are fields of its adapter, and core re
 | `directives.rule_files` | the owner's rule files this harness reads (AGENTS.md is shared and needs no entry) | `--rules`, `ao doctor` |
 | `directives.steering_dir`, `directives.skills_dir` | directories the harness reads by itself | `ao doctor`, `ao content add` |
 | `directives.ao_files` | every path ao may have written for this harness | `ao remove` |
-| `mcp` | `{file, key, extra, register, remove_when_empty}` or `{manual, snippet}` | `ao init`, `ao remove` |
+| `mcp` | `{file, key, extra, register, remove_when_empty}` or `{manual, snippet}`; a snippet's `{exe}` and `{root}` are written escaped for a double-quoted TOML string | `ao init`, `ao remove` |
 
 A harness with no such fields is simply not set up: ao writes `.ao/PLAYBOOK.md` and prints the
 pointer, and `--agent` refuses a name no adapter answers to. A project can declare a harness ao

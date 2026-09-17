@@ -35,6 +35,39 @@ working directory. ao then reads another index than the one Git commits and refu
 That fails closed, but no proof passes on Windows until the hook recognises a drive
 letter, and that is a new hook version.
 
+## Found before the lane first ran
+
+Read from the code, not seen on a Windows machine; `tests/test_windows_followups.py`
+holds each on every platform by doing what Windows does (#9, #71):
+
+- **A CRLF checkout of `.ao-project`.** Git for Windows checks text out with CRLF, so a
+  clone of an enrolled repository holds the marker with CRLF and `ao init` refused it.
+  Enrollment is measured from the blobs in HEAD and the active index, which that Git
+  stores with the exact bytes, and stays exact. Only init's read of the working tree
+  accepts the marker with CRLF, whole, and only on Windows; where Git does not convert
+  it back, the staged marker is refused as before. ao does not pin `.ao-project -text`
+  in `.gitattributes` instead: an attribute changes a checkout only once it is
+  committed, so a repository enrolled without it would still be refused on its first
+  Windows clone, and `.gitattributes` is the owner's file.
+- **Ids minted in one clock tick.** Windows advanced the clock about every 15.6 ms before
+  Python 3.13, and notices, submitted reviews, merge checks and commit grants minted
+  within one tick shared an id. A process never mints one value twice: a repeat takes
+  the next one up, and the id keeps its shape. A submitted review also creates its state
+  file exclusively, so a second process in the same tick takes the next millisecond. Two
+  processes can still give one notice, merge check or grant id to two ledger rows, which
+  stay two rows.
+- **A rename over an open file.** Windows does not replace a file another handle holds
+  open: reading one ledger made an append to another fail and take its row back. Every
+  replace in `storage.py` retries that refusal for about a second, then fails as before.
+- **Sibling agent binaries.** `C:\...\<agent>-chat.exe` is an agent process: a path takes
+  either separator, and a program is a file ending in `.exe`, `.cmd`, `.bat` or `.com`.
+- **The manual MCP snippet** writes the executable and the root escaped for a TOML string.
+- **Quoting for a shell.** A scoped review diff runs git, and the credit check reads its
+  token store with sqlite3, without a shell: pathspecs, path and query are arguments.
+- **The execution probe's cleanup.** A hook that ran past its timeout can leave children
+  holding the probe's temporary index; the directory is removed without raising over the
+  probe's answer.
+
 ## What the Windows lane skips, and why
 
 A test that cannot pass on Windows is skipped there with its reason, never left out (#71):

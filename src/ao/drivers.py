@@ -39,8 +39,14 @@ def usage_limits(api, timeout=20):
     db = A._home_path(token.get("sqlite"))
     if not db or not os.path.exists(db):
         return None
-    raw = A.sh(f"sqlite3 {json.dumps(db)} "
-               f"\"SELECT value FROM {token['table']} WHERE key='{token['key']}';\"")
+    # The store's path and the query are arguments, never shell text: through cmd.exe the
+    # JSON-quoted path reached sqlite3 with every backslash doubled (#71).
+    query = f"SELECT value FROM {token['table']} WHERE key='{token['key']}';"
+    try:
+        raw = subprocess.run(["sqlite3", db, query], capture_output=True, text=True, encoding=UTF8,
+                             errors="replace", timeout=timeout).stdout.strip()
+    except (OSError, ValueError, subprocess.SubprocessError):
+        raw = ""
     if not raw:
         return None
     try:

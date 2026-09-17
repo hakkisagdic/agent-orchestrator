@@ -123,7 +123,7 @@ def cmd_merge_check(cfg, args):
     except RuntimeError as exc:
         print(f"{C['red']}{exc}{C['reset']}")
         return 2
-    row = {"id": f"MC-{int(time.time() * 1000)}", "at": int(time.time()), "into": into, "branch": branch,
+    row = {"id": f"MC-{A.unique_ms()}", "at": int(time.time()), "into": into, "branch": branch,
            "tree": tree, "profile": profile, "gates_digest": A.gate_definitions_digest_of(spec, profile),
            "measured_by": A.measured_by()}
     if conflict:
@@ -556,7 +556,7 @@ def cmd_commit_ok(cfg, args):
             print(f"  {C['dim']}authority refusal could not be recorded: {exc}{C['reset']}")
         return 1
 
-    token = f"C-{time.time_ns()}"
+    token = f"C-{A.unique_ns()}"
     try:
         A.record_authority(
             root, True, [], now, ver["id"], token,
@@ -711,6 +711,21 @@ def _project_config_problem(root):
     return A.project_config_document(root)["problem"]
 
 
+def _worktree_marker_forms():
+    """The working-tree bytes that are the marker: exactly its bytes, and on Windows their CRLF checkout.
+
+    Git for Windows checks text out with CRLF (core.autocrlf=true is its default), so a
+    Windows clone of an enrolled repository holds ao-project-v1 and CRLF, and `ao init`
+    refused the marker Git had just checked out (#71). Enrollment is measured from the
+    blobs in HEAD and the active index alone, which that same Git stores as the exact
+    bytes, and stays exact; only this working-tree read accepts the one translation,
+    of the whole marker, and only where the platform makes it.
+    """
+    if os.name == "nt":
+        return (PROJECT_MARKER_BYTES, PROJECT_MARKER_BYTES.replace(b"\n", b"\r\n"))
+    return (PROJECT_MARKER_BYTES,)
+
+
 def _worktree_project_marker_document(root):
     """Read one bounded marker snapshot whose fingerprint detects replacement."""
     import stat
@@ -738,10 +753,12 @@ def _worktree_project_marker_document(root):
             ),
             "problem": f"{PROJECT_MARKER} is not a regular file",
         }
+    forms = _worktree_marker_forms()
     try:
         with open(path, "rb") as fh:
             opened = os.fstat(fh.fileno())
-            data = fh.read(len(PROJECT_MARKER_BYTES) + 1)
+            # One byte past the longest accepted form, so a longer file never reads as one.
+            data = fh.read(max(len(form) for form in forms) + 1)
             finished = os.fstat(fh.fileno())
     except OSError as exc:
         return {
@@ -776,7 +793,7 @@ def _worktree_project_marker_document(root):
             "fingerprint": fingerprint,
             "problem": f"{PROJECT_MARKER} changed while it was being read",
         }
-    if data != PROJECT_MARKER_BYTES:
+    if data not in forms:
         return {
             "exists": True,
             "fingerprint": fingerprint,

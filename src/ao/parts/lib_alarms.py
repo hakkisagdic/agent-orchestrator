@@ -332,13 +332,15 @@ def review_diff(root, cfg, paths=None, budget=1_500_000):
     included newest first within a byte budget. `paths` narrows both sides.
     """
     skip = _coordination_dirs(cfg)
-    spec = " -- " + " ".join(f"'{p}'" for p in paths) if paths else ""
-    diff = sh(f"git diff HEAD{spec}", cwd=root, timeout=60) or ""
+    # Git without a shell: the pathspecs were single-quoted for sh, cmd.exe hands the quotes
+    # to git as part of each path, and a scoped diff held none of the changes it named (#71).
+    spec = ["--", *paths] if paths else []
+    diff = _git_text(root, "diff", "HEAD", *spec, timeout=60) or ""
     if not paths:
         parts = re.split(r"(?m)^(?=diff --git )", diff)
         diff = "".join(pt for pt in parts if not any(
             f" b/{d}" in pt.split("\n", 1)[0] for d in skip))
-    untracked = [l[3:].strip().strip('"') for l in (sh("git status --porcelain", cwd=root) or "").split("\n")
+    untracked = [l[3:].strip().strip('"') for l in (_git_text(root, "status", "--porcelain") or "").split("\n")
                  if l.startswith("?? ")]
     untracked = [f for f in untracked if not _is_coordination_path(f, cfg)]
     if paths:
@@ -628,6 +630,38 @@ def turn_costs(cfg, since=None):
             b["wasted_usage"] += tn["usage"]
         out["total"] += tn["usage"]
     return out
+
+
+# ---- ids: a clock reading names one record, even where the clock is coarse (#71) --------
+
+_ID_CLOCK = {}
+
+
+def _unique_clock(unit):
+    """Nanoseconds since the epoch in whole `unit`s, never the same value twice in this process (#71).
+
+    Windows advanced the clock about every 15.6 ms before Python 3.13, so every id
+    minted within one tick - two notices in one watchdog cycle, two merge checks, two
+    grants - was one id. A repeat takes the next value up: an id keeps its shape and
+    still sorts by the time it was minted. Two processes can still read one tick; where
+    a shared id would overwrite a record, the store claims it (a review's state file is
+    created exclusively), and two ledger rows that share one stay two rows.
+    """
+    import threading
+    with _ID_CLOCK.setdefault("lock", threading.Lock()):     # the first lock stored is the one used
+        value = max(time.time_ns() // unit, _ID_CLOCK.get(unit, 0) + 1)
+        _ID_CLOCK[unit] = value
+    return value
+
+
+def unique_ms():
+    """Milliseconds since the epoch for an id: a notice, a submitted review, a merge check."""
+    return _unique_clock(1_000_000)
+
+
+def unique_ns():
+    """Nanoseconds since the epoch for an id: a commit grant's token."""
+    return _unique_clock(1)
 
 
 # ---- deferred work: what could not run, so it can run later ----------------------

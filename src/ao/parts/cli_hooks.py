@@ -786,44 +786,50 @@ def _hook_execution_probe(inv):
     if len(head) not in (40, 64) or any(ch not in "0123456789abcdef" for ch in head):
         return failed("HEAD returned an invalid object id")
 
+    import shutil
     import tempfile
     nonce = os.urandom(16).hex()
     path = ".ao-hook-probe-" + nonce
     marker = f"AO-HOOK-PROBE-REFUSED {nonce} {head} {path}".encode("ascii")
+    # Removed without raising: a hook that runs past its timeout leaves children holding
+    # the probe index, Windows cannot delete an open file, and the cleanup error replaced
+    # the probe's own answer (#71). TemporaryDirectory can ignore that only from Python 3.10.
+    temporary = tempfile.mkdtemp(prefix="ao-hook-probe-")
     try:
-        with tempfile.TemporaryDirectory(prefix="ao-hook-probe-") as temporary:
-            index = os.path.abspath(os.path.join(temporary, "index"))
-            extra = {"GIT_INDEX_FILE": index}
-            prepared = _hook_git(inv["top"], "read-tree", "HEAD", extra_env=extra)
-            if prepared.returncode:
-                return failed("cannot initialize the temporary probe index")
-            if enrollment["source"] == "index":
-                project_marker = enrollment["marker"]
-                carried = _hook_git(
-                    inv["top"], "update-index", "--add", "--cacheinfo",
-                    f"{project_marker['mode']},{project_marker['oid']},{PROJECT_MARKER}",
-                    extra_env=extra,
-                )
-                if carried.returncode:
-                    return failed("cannot carry the staged .ao-project into the probe index")
-            staged = _hook_git(
+        index = os.path.abspath(os.path.join(temporary, "index"))
+        extra = {"GIT_INDEX_FILE": index}
+        prepared = _hook_git(inv["top"], "read-tree", "HEAD", extra_env=extra)
+        if prepared.returncode:
+            return failed("cannot initialize the temporary probe index")
+        if enrollment["source"] == "index":
+            project_marker = enrollment["marker"]
+            carried = _hook_git(
                 inv["top"], "update-index", "--add", "--cacheinfo",
-                f"160000,{head},{path}", extra_env=extra,
+                f"{project_marker['mode']},{project_marker['oid']},{PROJECT_MARKER}",
+                extra_env=extra,
             )
-            if staged.returncode:
-                return failed("cannot stage the synthetic probe candidate")
-            extra.update({
-                "AO_HOOK_PROBE_NONCE": nonce,
-                "AO_HOOK_PROBE_PATH": path,
-                "AO_HOOK_PROBE_HEAD": head,
-                "AO_HOOK_PROBE_INDEX": index,
-            })
-            result = _hook_git(
-                inv["top"], "hook", "run", "pre-commit",
-                timeout=15, extra_env=extra,
-            )
+            if carried.returncode:
+                return failed("cannot carry the staged .ao-project into the probe index")
+        staged = _hook_git(
+            inv["top"], "update-index", "--add", "--cacheinfo",
+            f"160000,{head},{path}", extra_env=extra,
+        )
+        if staged.returncode:
+            return failed("cannot stage the synthetic probe candidate")
+        extra.update({
+            "AO_HOOK_PROBE_NONCE": nonce,
+            "AO_HOOK_PROBE_PATH": path,
+            "AO_HOOK_PROBE_HEAD": head,
+            "AO_HOOK_PROBE_INDEX": index,
+        })
+        result = _hook_git(
+            inv["top"], "hook", "run", "pre-commit",
+            timeout=15, extra_env=extra,
+        )
     except _HookResolutionError as exc:
         return failed(f"Git could not execute the pre-commit probe: {exc}")
+    finally:
+        shutil.rmtree(temporary, ignore_errors=True)
 
     channels = result.stdout.splitlines() + result.stderr.splitlines()
     if result.returncode and marker in channels:

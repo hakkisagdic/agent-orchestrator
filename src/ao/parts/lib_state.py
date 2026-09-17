@@ -141,7 +141,8 @@ def repair_consistency(root, findings):
     A repair is itself evidence. It never touches the authority, verification,
     review or waiver ledgers.
     """
-    from .storage import _exclusive_lock, _load_committed_lengths, append_chained_jsonl, checkpoint_path
+    from .storage import (_exclusive_lock, _load_committed_lengths, _write_committed_lengths, append_chained_jsonl,
+                          checkpoint_path)
     done = []
     for finding in findings:
         repair = finding.get("repair")
@@ -155,12 +156,8 @@ def repair_consistency(root, findings):
                 if repair[1] not in data:
                     continue
                 del data[repair[1]]
-                temporary = f"{store}.{os.getpid()}.tmp"
-                with open(temporary, "w", encoding=UTF8) as fh:
-                    json.dump(data, fh, indent=1, sort_keys=True)
-                    fh.flush()
-                    os.fsync(fh.fileno())
-                os.replace(temporary, store)
+                # The same replace every ledger append makes, retried where Windows holds the store (#71).
+                _write_committed_lengths(data)
         elif kind == "architect-lock":
             try:
                 os.remove(repair[1])

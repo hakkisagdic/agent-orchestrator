@@ -158,6 +158,25 @@ def install_playbook(root, agents, rules=False):
     return out
 
 
+def _toml_string_body(value):
+    """`value` escaped as the inside of a double-quoted TOML string (#71).
+
+    A manual snippet quotes `{exe}` and `{root}`, and a TOML basic string reads a
+    backslash as an escape: a Windows root, C:\\Users\\..., began with a \\U the parser
+    refused. Backslashes and quotes are escaped, and control characters written as
+    \\uXXXX, which JSON and YAML double-quoted strings read the same way.
+    """
+    out = []
+    for char in str(value):
+        if char in "\\\"":
+            out.append("\\" + char)
+        elif char < " " or char == "\x7f":
+            out.append(f"\\u{ord(char):04X}")
+        else:
+            out.append(char)
+    return "".join(out)
+
+
 def register_mcp(root, agents, exe=None):
     """Register the ao MCP server for each agent, in the file its adapter declares.
 
@@ -189,7 +208,8 @@ def register_mcp(root, agents, exe=None):
     for ident, adapter in setup_adapters(root, agents):
         mcp = adapter.get("mcp") or {}
         if mcp.get("manual"):
-            snippet = str(mcp.get("snippet") or "").replace("{exe}", exe).replace("{root}", root)
+            snippet = str(mcp.get("snippet") or "").replace("{exe}", _toml_string_body(exe)) \
+                .replace("{root}", _toml_string_body(root))
             out[ident] = f"manual: add to {mcp['manual']}\n{snippet}"
             continue
         if not mcp.get("file"):

@@ -77,4 +77,4 @@ def test_the_shipped_harnesses_declare_what_init_used_to_hardcode(project, monke
     assert (".mcp.json", "ao", True) in mcp_files
     manual = skillkit.register_mcp(root, {"codex"}, exe="/x/ao")["codex"]
     assert manual.splitlines()[0] == "manual: add to ~/.codex/config.toml"
-    assert f'args = ["-C", "{root}", "mcp", "serve"]' in manual
+    assert 'args = ["-C", "%s", "mcp", "serve"]' % root.replace("\\", "\\\\") in manual    # a TOML string (#71)

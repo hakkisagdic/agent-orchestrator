@@ -922,15 +922,27 @@ def agent_process_names():
             for name in (adapter.get("detect") or {}).get("processes") or [] if name}
 
 
+_WINDOWS_PROGRAM_SUFFIXES = (".exe", ".cmd", ".bat", ".com")
+
+
 def _executable(t):
-    """A real executable file at this path (a hook, so scenarios can fabricate a world)."""
+    """A real executable file at this path (a hook, so scenarios can fabricate a world).
+
+    Windows names the path with backslashes and has no execute bit - os.access(X_OK)
+    holds for any file there - so a sibling agent binary such as C:\\...\\agent-chat.exe
+    was never one, and its process was not taken for the agent's (#71). There a path
+    takes either separator and a program is a file with a suffix Windows runs.
+    """
+    t = str(t)
+    if os.name == "nt":
+        return ("\\" in t or "/" in t) and t.lower().endswith(_WINDOWS_PROGRAM_SUFFIXES) and os.path.isfile(t)
     return "/" in t and os.path.isfile(t) and os.access(t, os.X_OK)
 
 
 def _program_name(token):
     """Case-folded command basename without a Windows PATHEXT suffix."""
     base = os.path.basename(str(token).replace("\\", "/")).lower()
-    for suffix in (".exe", ".cmd", ".bat", ".com"):
+    for suffix in _WINDOWS_PROGRAM_SUFFIXES:
         if base.endswith(suffix):
             return base[:-len(suffix)]
     return base
@@ -1181,7 +1193,7 @@ def record_notice(root, title, msg, sent, key=None, evidence=None):
     try:
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "notices.jsonl"), "a", encoding=UTF8) as fh:
-            row = {"id": f"N-{int(time.time() * 1000)}", "at": int(time.time()), "title": title,
+            row = {"id": f"N-{unique_ms()}", "at": int(time.time()), "title": title,
                    "msg": msg, "sent": bool(sent), "key": key or title}
             if evidence:
                 row["evidence"] = evidence

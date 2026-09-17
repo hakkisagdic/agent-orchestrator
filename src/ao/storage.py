@@ -159,6 +159,51 @@ def _load_committed_lengths():
     return data if isinstance(data, dict) else {}
 
 
+# What Windows answers, for a moment, when a rename would replace a file another handle
+# holds open: ERROR_ACCESS_DENIED and ERROR_SHARING_VIOLATION.
+_WINDOWS_IN_USE = (5, 32)
+_REPLACE_ATTEMPTS = 8
+_REPLACE_FIRST_WAIT = 0.01
+
+
+def _replace(source, target):
+    """``os.replace``, retried with backoff for about a second while Windows reports the target in use (#71).
+
+    A chained read opens the checkpoint store under its own ledger's lock, not the
+    store's, and Windows does not rename over a file another handle holds open: an
+    append to one ledger failed while another ledger was being read, and the row it had
+    written was taken back. A virus scanner holds a new file open the same way. Every
+    replace in this module comes here. Only those two Windows errors are retried, a
+    bounded number of times, and the last one still reaches the caller; POSIX renames
+    over an open file, and a PermissionError there is raised at once, as before.
+    """
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            return os.replace(source, target)
+        except PermissionError as exc:
+            if getattr(exc, "winerror", None) not in _WINDOWS_IN_USE or attempt + 1 == _REPLACE_ATTEMPTS:
+                raise
+            time.sleep(_REPLACE_FIRST_WAIT * 2 ** attempt)
+
+
+def _write_committed_lengths(data):
+    """Replace the checkpoint store whole; the caller holds its lock."""
+    store = checkpoint_path()
+    temporary = f"{store}.{os.getpid()}.tmp"
+    try:
+        with open(temporary, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=1, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        _replace(temporary, store)
+    except BaseException:
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
+        raise
+
+
 def _record_committed_length(path, count, digest, sealed=None):
     store = checkpoint_path()
     os.makedirs(os.path.dirname(store) or ".", exist_ok=True)
@@ -172,12 +217,7 @@ def _record_committed_length(path, count, digest, sealed=None):
         if sealed is not None or previous.get("sealed"):
             mark["sealed"] = sealed if sealed is not None else previous["sealed"]
         data[key] = mark
-        temporary = f"{store}.{os.getpid()}.tmp"
-        with open(temporary, "w", encoding="utf-8") as handle:
-            json.dump(data, handle, indent=1, sort_keys=True)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, store)
+        _write_committed_lengths(data)
 
 
 def _check_committed_length(path, rows, chain, seal=None):
@@ -247,7 +287,7 @@ def _settle_seal(path, chain, previous_field):
         last = rows[-1]
         _record_committed_length(path, intent["retired"] + len(rows), chained_row_digest(last, chain),
                                  sealed={"retired": intent["retired"], "digest": intent["digest"]})
-        os.replace(pending, seal_path(path))
+        _replace(pending, seal_path(path))
         _sync_directory(os.path.dirname(path) or ".", os.fsync)
     else:
         os.remove(pending)
@@ -424,7 +464,7 @@ def replace_file_durably(path, data, *, _checkpoint=None, _fsync=None):
             _call(_checkpoint, "temporary-fsynced")
         finally:
             os.close(fd)
-        os.replace(temporary, path)
+        _replace(temporary, path)
     except BaseException:
         try:
             os.remove(temporary)

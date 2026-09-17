@@ -1439,6 +1439,25 @@ def _write_review_state(root, state):
                          (json.dumps(state, indent=2, ensure_ascii=False) + "\n").encode(UTF8))
 
 
+def _claim_review_id(root):
+    """A new review id whose state file this submit created, so no other submit holds it (#71).
+
+    The id is the millisecond of submission, never repeated within one process; two
+    submitting processes can still read one tick - about 15.6 ms on Windows - and the
+    later one overwrote the earlier's state and pinned index. The state file is created
+    exclusively and an id already held is passed over for the next millisecond. Until
+    the state is written over it, the empty claim reads as no review.
+    """
+    os.makedirs(_reviews_dir(root), exist_ok=True)
+    while True:
+        rid = f"R-{A.unique_ms()}"
+        try:
+            os.close(os.open(_review_state_path(root, rid), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+        except FileExistsError:
+            continue
+        return rid
+
+
 def _review_in_flight(state, now=None):
     """A submitted review still running: its runner is alive, or it has just been started."""
     if state.get("state") != "running":
@@ -1482,12 +1501,15 @@ def cmd_review_submit(cfg, args):
         print(f"{C['red']}refused{C['reset']}: {elsewhere[0]['id']} is in flight in this worktree for slice "
               f"{elsewhere[0].get('slice')}; one slice per worktree")
         return 2
-    rid = f"R-{int(time.time() * 1000)}"
+    rid = _claim_review_id(root)
     index = os.path.join(_reviews_dir(root), f"{rid}.index")
-    os.makedirs(_reviews_dir(root), exist_ok=True)
     pinned = subprocess.run([A.git_binary(), "read-tree", candidate["index_tree"]], cwd=root, capture_output=True,
                             env=dict(os.environ, GIT_INDEX_FILE=index))
     if pinned.returncode:
+        try:
+            os.remove(_review_state_path(root, rid))     # the claim; no state was written into it
+        except OSError:
+            pass
         print(f"{C['red']}could not pin the candidate{C['reset']}: {pinned.stderr.decode(UTF8, 'replace').strip()}")
         return 2
     state = {"id": rid, "state": "running", "tree": candidate["index_tree"], "head": candidate["head"],
