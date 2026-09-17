@@ -31,11 +31,29 @@ repeated at most every six hours while the condition stands. Two hours of
 silence closes the episode, so a condition that comes back later starts fresh.
 When the watchdog itself was the one silent, see [After a silence](#after-a-silence).
 
+A condition that stands and can say what it is about rings the desktop and the phone
+once for what it says: "needs you" about the request that waits, the credits alarm
+about the account that ran out. It keeps climbing - it turns red and mails, and mails
+again while it stands - but it does not ring the desktop and the phone again until it
+says something else: another request waits, a projected run-out comes true, another
+account runs out. Something new is told again, on the desktop and the phone once their
+window allows, and by mail at once when the alarm is already red. Rebuilt in a
+temporary project, a "needs you" about one request no architect could be woken for
+rang every ten minutes: 143 times in a day on the desktop, and as many on the phone.
+
 Some conditions ring red at once, because waiting cannot help:
 
 - the implementer's credits are exhausted for the billing period
 - the architect's wake keeps failing on the same binary
 - a hold has stood for four hours
+
+A red with a known end is mailed once and then held until that end, instead of every
+`alarms.red_repeat_hours`: the architect's usage window until its reset, "needs you"
+while the architect is at quota until that quota comes back, and credits that ran out,
+or are projected to run out before their reset, until the reset the reading names. A
+reset is a known end only in the seconds the provider gives; one that cannot be read
+that way holds nothing, and the alarm repeats as any red does. Without it an exhausted
+plan whose reset was ten days away was mailed every six hours.
 
 `ao alarms` lists the live episodes with their level and age. `ao alarms test
 --level red` sends a real test through every channel.
@@ -68,7 +86,8 @@ the last one left, is a **resume**:
   credits), or when no architect is going to read it; otherwise the architect, through
   its mailbox.
 - **Never louder.** The notice uses the orange channels and never e-mail. It counts as
-  the ring of every condition it names for that condition's own window, and a red it names
+  the ring of every condition it names for that condition's own window, or, for one that
+  says what it is about, until it says something else, and a red it names
   counts as told, as a mailed red does: it mails again only if it still stands
   `alarms.red_repeat_hours` later, or not before its known end.
 - **Clocks restart.** An episode the silence carried closes without an announcement: it
@@ -103,3 +122,20 @@ Every channel above runs on the machine that is failing. `ao pings setup --url
 check (healthchecks.io) every cycle, and that service e-mails you when the pings
 stop. The credit burn rate (`ao doctor`) turns "the plan runs out before it
 resets" into a red alarm days ahead rather than a silent stop on the day.
+
+The doctor job, `ao doctor --check --notify` every fifteen minutes, is the watchdog's
+backstop, and it pages nothing twice:
+
+- **One alarm whoever sees it.** What the watchdog raises itself - credits that ran out, an
+  architect wake that failed - the doctor raises under the watchdog's own alarm, at its
+  level and known end. One snooze keeps both off the channels and one mail tells it. It
+  used to ring a second alarm whenever the watchdog's had gone quiet, which it also did
+  after a silence, under a snooze and while a reading could not be taken.
+- **Not dead on arrival.** Both jobs run when they are loaded, and the doctor can run first.
+  It records each of its runs in `~/.ao/doctor-<project>.json`, and a run that finds its
+  last one more than twenty minutes ago was stopped too: the jobs were switched off, or
+  the machine was off or asleep. Then the watchdog has one of its cycles, the
+  StartInterval of its launchd job, before the doctor pages it dead or pages what that
+  first cycle raises or names. A watchdog whose heartbeat had already stopped when the
+  doctor last ran is paged at once, one that does not come back is paged at the
+  doctor's next run, and a doctor that cannot write its record gives no cycle.

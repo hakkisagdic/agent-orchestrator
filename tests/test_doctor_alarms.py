@@ -24,7 +24,7 @@ def test_the_doctor_does_not_ring_a_second_alarm_for_what_the_watchdog_rings(pro
 
     out = capsys.readouterr().out
     assert "PROBLEM credits-exhaust" in out and "PROBLEM no-channel" in out
-    assert raised == ["doctor:wake-failed", "doctor:no-channel"]
+    assert raised == ["credits-exhaust", "architect-wake-failed", "doctor:no-channel"]
 
 
 def test_the_doctor_rings_once_the_watchdogs_alarm_has_gone_quiet(project, monkeypatch):
@@ -34,7 +34,7 @@ def test_the_doctor_rings_once_the_watchdogs_alarm_has_gone_quiet(project, monke
 
     assert cli._doctor_check(project, page=True) == 1
 
-    assert raised == ["doctor:wake-failed"]
+    assert raised == ["architect-wake-failed"]
 
 
 def test_a_reading_over_the_limit_is_exhausted_not_a_date_ahead():

@@ -91,13 +91,19 @@ def alarm_snoozed(project, key, now=None):
 
 
 def alarm_touch(project, key, level, now=None, red_after=ALARM_RED_AFTER, title=None,
-                persist=True, quiet_until=None, evidence=None):
+                persist=True, quiet_until=None, evidence=None, what=None):
     """Calculate a raise of `key` at `level`; return (level to ring at, episode).
 
     An orange raised repeatedly for `red_after` seconds rings red. `red_due` on
     the episode says whether a mail should go now (once per ALARM_RED_REPEAT).
     ``persist=False`` runs the identical calculation against the current ledger
     without writing it, so watchdog explain can preview the live verdict safely.
+
+    `what` names what the raise says, when its caller can. The episode keeps what it
+    last told (`told_what`); a raise that says something else is `news` on the returned
+    episode, and news is mailed at once when the episode is red, past the repeat and
+    past a known end: a projection told on Monday does not hold back the day the credits
+    actually run out (NOTICE-NOISE).
     """
     now = now or time.time()
     d = load_alarms()
@@ -115,29 +121,51 @@ def alarm_touch(project, key, level, now=None, red_after=ALARM_RED_AFTER, title=
         e["quiet_until"] = float(quiet_until)
     if evidence:
         e["evidence"] = evidence      # the ladder shows what the notice was raised on (#37)
+    news = what is not None and e.get("told_what") is not None and e["told_what"] != what
+    if what is not None and e.get("told_what") is None \
+            and any(e.get(field) is not None for field in ("rang_at", "red_sent", "named_at")):
+        e["told_what"] = what         # told by a raise that named nothing, a resume notice's: this is what it told
     ring = level
     e["red_due"] = False
     if level == "red" or (level == "orange" and now - e["first"] >= red_after):
         ring = "red"
         # A red a resume notice named is told from then, as a mailed one is from its mail (RESUME-QUIET).
         told = e.get("red_sent") if e.get("red_sent") is not None else e.get("named_at")
-        e["red_due"] = told is None or now - told >= settings.get(None, "alarms.red_repeat_hours") * 3600
+        e["red_due"] = told is None or news or now - told >= settings.get(None, "alarms.red_repeat_hours") * 3600
         # A standing red with a known end is mailed once, then held until that end (#40).
-        if told is not None and now < float(e.get("quiet_until") or 0):
+        if told is not None and not news and now < float(e.get("quiet_until") or 0):
             e["red_due"] = False
     e["ring"] = ring
     d[k] = e
     if persist:
         save_alarms(d)
-    return ring, e
+    return ring, dict(e, news=news)
 
 
-def alarm_mailed(project, key, now=None):
+def alarm_mailed(project, key, now=None, what=None):
     d = load_alarms()
     k = f"{project}:{key}"
     if k in d:
         d[k]["red_sent"] = now or time.time()
         d[k]["red_due"] = False
+        if what is not None:
+            d[k]["told_what"] = what
+        save_alarms(d)
+
+
+def alarm_rang(project, key, now=None, what=None):
+    """Record that the orange channels told this episode, and what they told (NOTICE-NOISE).
+
+    A condition raised with a `what` rings those channels once for what it says: the
+    raises after this record and do not ring again until they say something else, and
+    red's mail keeps its own schedule. A resume notice that named an episode rang it too.
+    """
+    d = load_alarms()
+    k = f"{project}:{key}"
+    if k in d:
+        d[k]["rang_at"] = now or time.time()
+        if what is not None:
+            d[k]["told_what"] = what
         save_alarms(d)
 
 

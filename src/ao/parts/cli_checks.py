@@ -67,7 +67,7 @@ def doctor_problems(cfg):
                     "capability matrix reviewer chain has no binding outside the implementer binding and model family",
                 ))
     hb = A.heartbeat_age(root)
-    if hb is not None and hb > 360:
+    if hb is not None and hb > WATCHDOG_SILENT_AFTER:
         out.append(("watchdog-dead", f"watchdog silent for {hb // 60}m — launchctl / ao watchdog status"))
     we = wake_error(os.path.join(STATE_DIR, f"escalate-{key}.log"))
     if we and we["kind"] in ("binary", "session"):
@@ -296,13 +296,81 @@ def doctor_problems(cfg):
     return out
 
 
-# Conditions the watchdog raises itself, by the key it raises them under. Two
-# alarms for one condition double the ladder - two ids, two levels, two mails -
-# and they cannot share an id, because every touch rewrites the level. So the
-# doctor rings these only while the watchdog's own alarm is quiet: a stopped
-# watchdog, which is what the doctor check is for, lets it go quiet.
-DOCTOR_WATCHDOG_ALARMS = {"credits-exhaust": "credits-exhaust",
-                          "wake-failed": "architect-wake-failed"}
+# Conditions the watchdog raises itself, by the doctor's finding: the key, level and
+# window the watchdog raises them with. Two alarms for one condition double the
+# ladder - two ids, two levels, two mails - and ringing the doctor's copy only while
+# the watchdog's was quiet still rang both: the watchdog's alarm is quiet after a
+# silence, under a snooze and between readings it could not take. So the doctor
+# raises the watchdog's own alarm at the watchdog's level and known end: one
+# condition is one alarm whoever sees it, with one snooze and one mail (#106).
+DOCTOR_WATCHDOG_ALARMS = {"credits-exhaust": {"key": "credits-exhaust", "level": "red", "window": 6 * 3600},
+                          "wake-failed": {"key": "architect-wake-failed", "level": None, "window": 6 * 3600}}
+
+# A heartbeat older than this is a watchdog that stopped.
+WATCHDOG_SILENT_AFTER = 360
+# The scheduled check runs every fifteen minutes, from its launchd job or its Windows task:
+# a run this long after its last one follows a silence of its own.
+DOCTOR_SILENT_AFTER = 20 * 60
+
+
+def _watchdog_interval(root):
+    """Seconds between the watchdog's cycles: its launchd job's StartInterval, else two minutes.
+
+    Two minutes is what `ao watchdog install` schedules without --interval, and what
+    the Windows task runs.
+    """
+    import plistlib
+    label = f"com.agentorchestrator.watchdog.{A.project_key(root).lower()}"
+    try:
+        with open(os.path.join(A.HOME, "Library", "LaunchAgents", f"{label}.plist"), "rb") as fh:
+            interval = int(plistlib.load(fh).get("StartInterval") or 120)
+    except (OSError, ValueError, TypeError, AttributeError, plistlib.InvalidFileException):
+        interval = 120
+    return max(60, interval)
+
+
+def _watchdog_first_cycle_due(root, now=None):
+    """When the watchdog's first cycle after its job came back is due, while it still is; else None.
+
+    Both scheduled jobs run at load, and the doctor could run before the watchdog's
+    first cycle: on re-enabling a project after two weeks it rang a dead watchdog and
+    exhausted credits on the desktop and the phone, two notices each about a watchdog
+    that was starting and credits its first cycle was about to name (NOTICE-NOISE).
+
+    Nothing the job loader keeps says when a job was loaded, and a marker written by
+    `ao watchdog install` is not written when the jobs are enabled again with launchctl,
+    after a reboot or after sleep. What every one of those leaves is this check's own
+    silence: the scheduled check records each run, and a run that finds its last one
+    more than twenty minutes ago was stopped too, by whatever stopped the watchdog. The
+    watchdog then has one of its own cycles from that run before it counts as dead,
+    unless its heartbeat had already stopped when this check last ran - a watchdog that
+    died while the check was watching is not given another cycle. A check with no
+    record counts as back: at worst a dead watchdog is paged one run later.
+    """
+    from .storage import replace_file_durably
+    now = time.time() if now is None else now
+    path = os.path.join(A.HOME, ".ao", f"doctor-{A.project_key(root)}.json")
+    try:
+        with open(path, encoding=UTF8) as fh:
+            record = json.load(fh)
+    except (OSError, ValueError):
+        record = {}
+    record = record if isinstance(record, dict) else {}
+    last = record.get("at") if isinstance(record.get("at"), (int, float)) else None
+    back = record.get("back") if isinstance(record.get("back"), (int, float)) else None
+    age = A.heartbeat_age(root)
+    beat = None if age is None else now - age
+    if last is None or now - last > DOCTOR_SILENT_AFTER:
+        stopped_first = last is not None and beat is not None and last - beat > WATCHDOG_SILENT_AFTER
+        back = None if stopped_first else now
+    try:
+        replace_file_durably(path, json.dumps({"at": int(now), "back": back}).encode("utf-8"))
+    except OSError:
+        return None                 # a check that cannot keep its record gives no cycle: it pages as it did
+    if back is None or beat is None or beat >= back:
+        return None
+    due = back + _watchdog_interval(root)
+    return due if now < due else None
 
 
 def _credits_problem(br, last):
@@ -345,28 +413,43 @@ def _doctor_check(cfg, page=False):
     architect. On 2026-09-08 two wake turns ran --check by hand and mailed a
     standing advisory; on 2026-09-15 the scheduled job mailed exhausted credits
     every six hours although nothing could change before their reset.
+
+    A condition the watchdog raises itself is raised under the watchdog's own alarm
+    (#106). While the watchdog's first cycle after its job came back is due, neither
+    that cycle's conditions nor its silence are paged: that cycle names them (NOTICE-NOISE).
     """
-    from .watchdog import notify
+    from .watchdog import credit_reset, credits_told, notify
     root = cfg["root"]
     project = A.project_key(root)
+    due = _watchdog_first_cycle_due(root) if page else None
     problems = doctor_problems(cfg)
     if not problems:
         print(f"ok {time.strftime('%H:%M')} — no problems")
         return 0
-    ringing = {alarm["key"] for alarm in A.active_alarms(project)} if page else set()
     samples = A.credit_samples(root) if page else []
-    reset_at = (samples[-1] if samples else {}).get("reset_at")
+    last = samples[-1] if samples else {}
     for key, text in problems:
         print(f"PROBLEM {key}: {text}")
-        if not page or DOCTOR_WATCHDOG_ALARMS.get(key) in ringing:
+        if not page:
             continue
-        if _doctor_severity(key, text) == "red":
-            held = {"quiet_until": reset_at} if key == "credits-exhaust" and reset_at else {}
-            notify(f"{project}: {key}", text, root, key=f"doctor:{key}", window=3600,
-                   audience="human", **held)
-        else:
+        if _doctor_severity(key, text) != "red":
             notify(f"{project}: {key}", text, root, key=f"doctor:{key}", window=3600,
                    audience="architect")
+            continue
+        shared = DOCTOR_WATCHDOG_ALARMS.get(key)
+        if due and (shared or key == "watchdog-dead"):
+            print(f"  not paged: the watchdog's job came back with this check; its first cycle is due by "
+                  f"{time.strftime('%H:%M', time.localtime(due))}")
+        elif key == "credits-exhaust":
+            notify(f"{project}: {key}", text, root, key=shared["key"], window=shared["window"],
+                   audience="human", level=shared["level"], quiet_until=credit_reset(last.get("reset_at")),
+                   what=credits_told("exhausted", last.get("account")))
+        elif shared:
+            notify(f"{project}: {key}", text, root, key=shared["key"], window=shared["window"],
+                   audience="human", level=shared["level"])
+        else:
+            notify(f"{project}: {key}", text, root, key=f"doctor:{key}", window=3600,
+                   audience="human")
     return 1
 
 

@@ -15,7 +15,7 @@ PROBLEMS = [
 def _record_notify(monkeypatch):
     calls = []
     monkeypatch.setattr(W, "notify", lambda title, msg, root=None, key=None, window=1800, audience=None,
-                        level=None, quiet_until=None: calls.append((key, audience, quiet_until)) or True)
+                        level=None, quiet_until=None, **kw: calls.append((key, audience, quiet_until)) or True)
     return calls
 
 
@@ -47,7 +47,7 @@ def test_the_scheduled_check_pages_only_red_and_records_advisories_for_the_archi
 
     assert calls == [("doctor:watchdog-dead", "human", None),
                      ("doctor:no-channel", "architect", None),
-                     ("doctor:credits-exhaust", "human", 1790812800),
+                     ("credits-exhaust", "human", 1790812800),
                      ("doctor:shared-pool", "architect", None)]
 
 

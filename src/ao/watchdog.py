@@ -276,7 +276,7 @@ def desktop_notify(title, msg, cfg=None):
 
 
 def notify(title, msg, root=None, key=None, window=1800, audience=None, level=None,
-           quiet_until=None, evidence=None):
+           quiet_until=None, evidence=None, what=None):
     """Raise an alert at most once per window, and always record that we did.
 
     An explicit audience is a routing decision and is never inferred again from
@@ -286,6 +286,12 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
     a single ongoing condition into thirty alerts an hour, and a human who learns
     to swipe those away has effectively turned the alerting off — which is worse
     than not alerting, because everyone still believes it works.
+
+    A condition that stands and can say what it is about passes `what`: it rings
+    the desktop and the phone once for what it says, then climbs the ladder
+    without ringing them again - red mails on its schedule - until it says
+    something else. A window alone repeats: on 2026-09-17 "needs you" rang every
+    ten minutes about one request nobody could answer (NOTICE-NOISE).
 
     Recording happens either way. A suppressed alert is evidence too: a long run
     of them says the condition has held for a long time.
@@ -328,12 +334,13 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
         return False
     ring, episode = A.alarm_touch(
         project, key, level or "orange", red_after=red_after, title=title,
-        persist=not dry_run, quiet_until=quiet_until, evidence=evidence,
+        persist=not dry_run, quiet_until=quiet_until, evidence=evidence, what=what,
     )
     # After a silence the ladder still moves, so one condition keeps one alarm (#106), but
     # nothing rings on its own: the cycle's one resume notice names it (RESUME-QUIET).
     if resuming is not None:
-        resuming["folded"].append({"key": key, "title": title, "msg": msg, "audience": audience, "ring": ring})
+        resuming["folded"].append({"key": key, "title": title, "msg": msg, "audience": audience, "ring": ring,
+                                   "what": what})
         if dry_run:
             print(f"DRY RUN: would name in the resume notice: {title}")
         elif root:
@@ -351,7 +358,7 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
                               f"Proje: {root or '?'}\n`ao alarms` merdiveni, `ao status` durumu gösterir."
                               + ("\n\nKanıt:\n" + "\n".join(A.evidence_lines(evidence))
                                  if evidence else ""), root):
-                    A.alarm_mailed(project, key)
+                    A.alarm_mailed(project, key, what=what)
                     if root:
                         A.record_notice(root, title, msg, sent=True, key="mail:" + key)
             except Exception:
@@ -359,12 +366,20 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
     # Told once, with a known end and nothing new to say before it: record, do not ring.
     # A resume notice that named a red told it as a mail does (RESUME-QUIET).
     told = episode.get("red_sent") if episode.get("red_sent") is not None else episode.get("named_at")
-    if told is not None and time.time() < float(episode.get("quiet_until") or 0):
+    if told is not None and not episode.get("news") and time.time() < float(episode.get("quiet_until") or 0):
         until = time.strftime("%d %b %H:%M", time.localtime(float(episode["quiet_until"])))
         if dry_run:
             print(f"DRY RUN: would hold {title}: told once, quiet until {until}")
         elif root:
             A.record_notice(root, title, f"{msg} [told once; quiet until {until}]", sent=False, key=key, evidence=evidence)
+        return False
+    # Rung once for what it says, and saying nothing new: the ladder climbs, the channels stay quiet.
+    if what is not None and episode.get("rang_at") is not None and not episode.get("news"):
+        if dry_run:
+            print(f"DRY RUN: would hold {title}: rung once and nothing new since")
+        elif root:
+            A.record_notice(root, title, f"{msg} [rung once; nothing new since]", sent=False, key=key,
+                            evidence=evidence)
         return False
     if root and A.notice_recently_sent(root, key, window):
         if dry_run:
@@ -399,6 +414,7 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
         telegram.send(f"*{title}*\n{msg}", root)
     except Exception:
         pass                                # a phone being unreachable is not a failure
+    A.alarm_rang(project, key, what=what)
     if root:
         A.record_notice(root, title, msg, sent=True, key=key, evidence=evidence)
     return True
@@ -693,9 +709,12 @@ def escalate(root, cfg, adapter, age, args, st):
             notify(f"{project}: anomaly", f"{a['kind']} — {hold['reason']}", root,
                    key=key, window=window, audience="architect")
         else:
+            # What stands is what waits: rung once, it climbs to red without ringing again
+            # until another request waits. A quota block names its own end (NOTICE-NOISE).
             notify(f"{project}: needs you",
                    f"{a['kind']} — no architect will act on it: {hold['reason']}", root,
-                   key=key, window=window, audience="human")
+                   key=key, window=window, audience="human", what=anomaly_subject(a),
+                   quiet_until=st.get("arch_quota_until") if hold["code"] == "quota-block" else None)
         print(f"anomaly {a['kind']}: {'reported as ' + name if name else 'already reported'}")
         woke = True
     arch = cfg.get("architect") or {}
@@ -749,6 +768,9 @@ def escalate(root, cfg, adapter, age, args, st):
         st["handed"] = {m: t for m, t in handed.items() if m in mtimes}
         save_state(root, st)
     woke = bool(stale)
+    # What waits, as the notices below name it: the newest report that asks, not the watchdog's
+    # echo of it. A person is told again when it changes (NOTICE-NOISE).
+    waiting = max(stale, key=lambda m: (not A.from_watchdog(m), mtimes.get(m, 0), m)) if stale else None
     if woke and time.time() - last_wake < 900:
         print(f"{len(stale)} unhandled report(s), but the architect was woken "
               f"{int((time.time() - last_wake) / 60)}m ago")
@@ -758,14 +780,16 @@ def escalate(root, cfg, adapter, age, args, st):
     # that could have waited must not burn the window the implementer needs.
     if woke and arch.get("argv") and not quota_ok(adapter):
         print("reports pending, but no quota headroom to wake the architect")
-        if not args.dry_run and time.time() - st.get("last_handoff", 0) > 3600:
+        # One handoff for what waits: the same note went to the phone again every hour the
+        # architect could not be woken, with nothing new in it (NOTICE-NOISE).
+        if not args.dry_run and st.get("handoff_for") != waiting and time.time() - st.get("last_handoff", 0) > 3600:
             try:
                 exe = shutil.which("ao", path=child_path())
                 if exe:
                     subprocess.run([exe, "-C", root, "handoff", "--reason",
                                     "mimar uyandırılamadı — kota yok"] + _handoff_quiet(),
                                    capture_output=True, timeout=120)
-                    st["last_handoff"] = time.time()
+                    st.update(last_handoff=time.time(), handoff_for=waiting)
                     save_state(root, st)
             except Exception:
                 pass
@@ -791,7 +815,7 @@ def escalate(root, cfg, adapter, age, args, st):
     if woke and not F.enabled(cfg, "architect_wake"):
         print("reports pending; architect_wake feature is off — recorded and alarmed, not woken")
         notify(f"{A.project_key(root)}: needs you", f"{len(stale)} report(s) waiting and architect wakes are off",
-               root, key="reports-no-wake", window=3600, audience="human")
+               root, key="reports-no-wake", window=3600, audience="human", what=waiting)
         woke = False
     if woke:
         provider = A.provider_of(arch.get("argv"))
@@ -918,6 +942,19 @@ def escalate(root, cfg, adapter, age, args, st):
             _tell_phone(root, f"🤖 *Mimar uyandırıldı* — {len(stale)} rapor işleniyor (pid {proc.pid})")
             print(f"woke the architect (pid {proc.pid}) to judge it")
     return woke
+
+
+def anomaly_subject(anomaly):
+    """What an anomaly is about, for the ladder: the report, decision or review it names, never an age (NOTICE-NOISE).
+
+    A fact such as "returned 34m ago" changes every cycle; what waits changes only when
+    something new waits, and that is when a person is told again.
+    """
+    for fact in anomaly.get("facts") or []:
+        wrote = re.search(r"wrote\s+(\S+\.md)", str(fact))
+        if wrote:
+            return f"{anomaly.get('kind')}:{wrote.group(1)}"
+    return f"{anomaly.get('kind')}:{anomaly.get('key') or ''}"
 
 
 def queue_past_a_question(root):
@@ -1243,6 +1280,11 @@ def _sample_credits(root, st, adapter, project, now=None):
     be taken is recorded as a broken check, which `ao doctor` shows, instead of
     being skipped: a silent check and a passing check must never look the same. A
     failed attempt waits the same half hour before the next one.
+
+    Either alarm has a known end, the reset the reading names, so it is mailed once
+    and held until then (#40). Raised without it, an exhausted plan whose reset was
+    ten days away mailed every six hours. What it says - run out, or will - is named
+    per account, so the day a projection comes true is still told (NOTICE-NOISE).
     """
     now = now or time.time()
     if now - max(st.get("last_credit_sample", 0), st.get("last_credit_attempt", 0)) <= 1800:
@@ -1275,7 +1317,8 @@ def _sample_credits(root, st, adapter, project, now=None):
         notify(f"{project}: credits exhausted",
                f"{used:.0f}/{limit:.0f} used; the plan is spent and only overage, if enabled, runs "
                f"until the reset. New account (keyflip) or `ao features off …`", root,
-               key="credits-exhaust", window=6 * 3600, audience="human", level="red", evidence=reading)
+               key="credits-exhaust", window=6 * 3600, audience="human", level="red", evidence=reading,
+               quiet_until=credit_reset(acct.get("reset_at"), now), what=credits_told("exhausted", acct.get("account")))
         return
     br = A.burn_rate(root)
     if br and br["before_reset"]:
@@ -1285,7 +1328,28 @@ def _sample_credits(root, st, adapter, project, now=None):
         notify(f"{project}: credits run out {time.strftime('%d %b', time.localtime(br['exhausts_at']))}",
                f"{br['used']:.0f}/{br['limit']:.0f} at {br['per_day']:.0f}/day; the reset is later. "
                f"New account (keyflip) or `ao features off …`", root, key="credits-exhaust",
-               window=6 * 3600, audience="human", level="red", evidence=evidence)
+               window=6 * 3600, audience="human", level="red", evidence=evidence,
+               quiet_until=credit_reset(br.get("reset_at"), now), what=credits_told("projected", br.get("account")))
+
+
+def credit_reset(value, now=None):
+    """The reset a credit reading names, in epoch seconds; None when it names none it can mean (NOTICE-NOISE).
+
+    The provider gives seconds. A date string or milliseconds is no known end: an alarm
+    held on a misread date would stay silent long past the day it should have spoken,
+    while one without a known end only repeats. A reset already past holds nothing.
+    """
+    now = time.time() if now is None else now
+    try:
+        reset = float(value)
+    except (TypeError, ValueError):
+        return None
+    return reset if 0 < reset <= now + 400 * 86400 else None
+
+
+def credits_told(kind, account):
+    """What a credits alarm says, for the ladder: run out or projected, and whose (NOTICE-NOISE)."""
+    return f"{kind}:{account or 'unnamed'}"
 
 
 DECISION_HUMAN_AFTER = S.default("decisions.human_after_minutes") * 60
@@ -1457,12 +1521,14 @@ def resume_items(root, cfg, st, resume, folded, now=None):
     project = A.project_key(root)
     items = {}
 
-    def add(key, audience, line, red=False):
+    def add(key, audience, line, red=False, what=None):
         if key and A.alarm_snoozed(project, key, now):
             return
         item = items.setdefault(key, {"key": key, "audience": audience, "lines": [], "red": False})
         item["audience"] = "human" if "human" in (item["audience"], audience) else audience
         item["red"] = item["red"] or red
+        if what is not None:
+            item["what"] = what                  # what the notice tells of it, for the ladder (NOTICE-NOISE)
         line = " ".join(str(line).split())[:240]
         if line and line not in item["lines"]:
             item["lines"].append(line)
@@ -1470,7 +1536,8 @@ def resume_items(root, cfg, st, resume, folded, now=None):
     for note in folded:
         subject = str(note.get("title") or "").split(": ", 1)[-1]
         add(note.get("key") or "", note.get("audience") or "human",
-            f"{subject}: {note.get('msg')}" if subject else note.get("msg"), red=note.get("ring") == "red")
+            f"{subject}: {note.get('msg')}" if subject else note.get("msg"), red=note.get("ring") == "red",
+            what=note.get("what"))
     for episode in resume.get("carried") or []:
         add(episode["key"], "human", f"stood when the silence began: {episode.get('ring') or episode.get('level')} "
             f"since {_when(episode.get('first'))}, last raised {_when(episode.get('last'))}"
@@ -1564,6 +1631,8 @@ def announce_resume(root, owed, dry_run=False, now=None):
             pass
         A.record_notice(root, title, msg, sent=True, key="resume", named=named)
         for item in items:
+            if item["key"]:
+                A.alarm_rang(project, item["key"], now, what=item.get("what"))   # it rang once, for what it said
             if item["key"] and item["red"]:
                 A.alarm_named(project, item["key"], now)
     else:
@@ -1676,9 +1745,9 @@ def _cycle_impl(args, root):
 
     # What the implementer declares needs a person reaches a person, never held for an agent (#92).
     for item in A.human_waits(root):
-        notify(f"{project}: needs you", f"{item['id']} waits on a person: "
-               f"{item['notes'].get('needs') or item['title']}", root, key=f"waiting-human:{item['id']}",
-               window=6 * 3600, audience="human")
+        needs = item["notes"].get("needs") or item["title"]
+        notify(f"{project}: needs you", f"{item['id']} waits on a person: {needs}", root,
+               key=f"waiting-human:{item['id']}", window=6 * 3600, audience="human", what=needs)
     # A decision request nobody has been shown climbs the ladder by its age: the
     # architect first, then a person's desktop and phone, then e-mail (#30).
     # One written before a resume waits from the resume: nobody could have acted in the
@@ -1885,7 +1954,7 @@ def _cycle_impl(args, root):
         if arch.get("argv") and depth < threshold and not F.enabled(cfg, "refill"):
             print(f"queue low ({depth}); refill feature is off — alarming instead")
             notify(f"{A.project_key(root)}: needs you", f"queue has {depth} item(s) and refill wakes are off — add slices to .ao/backlog.md",
-                   root, key="queue-empty-no-refill", window=3600, audience="human")
+                   root, key="queue-empty-no-refill", window=3600, audience="human", what="refill-off")
             return 0
         if arch.get("argv") and depth < threshold and A.architect_present(root, arch):
             print("queue low, but the architect is already at the keyboard")

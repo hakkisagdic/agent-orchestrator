@@ -114,7 +114,7 @@ class World:
         )
         mp.setattr(W, "quota_ok", lambda adapter: w.quota)
         mp.setattr(W, "notify", lambda title, msg, root=None, key=None, window=1800, audience="human", level=None,
-                   quiet_until=None:
+                   quiet_until=None, what=None:
                    w.notices.append((title, msg, audience, level)) or True)
         mp.setattr(W, "wake_error", lambda log_path: None)
         # reaping in a scenario removes the processes it targets
