@@ -1806,6 +1806,10 @@ def cmd_review(cfg, args):
                 print(f"  {C['red']}·{C['reset']} {problem}")
             return 2
     else:
+        if not rv.get("argv") and not carried and _waiting_reviewer(cfg):
+            # A reviewer named while a slice ran holds the role once that slice leaves (OCT1-FIXES).
+            print(f"{C['yellow']}No reviewer holds the role yet{C['reset']}{_waiting_reviewer(cfg)}.")
+            return 1
         if not rv.get("argv") and not carried:
             print(f"{C['yellow']}No reviewer configured.{C['reset']} Add to .ao/config.json, or "
                   f"`ao role set reviewer <adapter> --model <model>`:")

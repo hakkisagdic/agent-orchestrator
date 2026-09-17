@@ -87,7 +87,10 @@ and the presets below are the shape it grows into; each new role must name the f
 catches that no existing role catches.
 
 A reassignment takes effect on the next slice. Work already in flight keeps its actor, so
-you never orphan a half-finished lane.
+you never orphan a half-finished lane. Until the running slice leaves, `ao role` shows the
+assignment in force and the one that waits; another reassignment joins the one that waits
+and is checked against it; and where a reviewer waits, `ao review` and `ao catchup` name it
+rather than report that none is configured.
 
 ## Address roles, never names
 

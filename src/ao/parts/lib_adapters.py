@@ -22,6 +22,21 @@ def effective_roles(root, cfg):
     return roles
 
 
+def pending_roles(root, cfg):
+    """(the roles `roles_next` assigns that still wait for their slice to leave running, that slice), or ({}, None).
+
+    Until the slice leaves, every reader sees each role as it was, and a role nobody held
+    reads as unconfigured: rehearsing the catch-up planned for 2026-10-01, a reviewer named
+    while a slice ran left catch-up saying that no reviewer was configured (OCT1-FIXES).
+    """
+    pending = cfg.get("roles_next")
+    if not isinstance(pending, dict) or not isinstance(pending.get("roles"), dict) or not root:
+        return {}, None
+    if pending.get("after") not in {item["id"] for item in board(root)["running"]}:
+        return {}, None
+    return dict(pending["roles"]), pending.get("after")
+
+
 def resolve_roles(root, cfg):
     """Fill each role's block from the actor table, when the project keeps one (#79).
 

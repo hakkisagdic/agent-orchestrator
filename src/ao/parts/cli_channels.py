@@ -389,18 +389,24 @@ def cmd_role(cfg, args):
             stored = json.load(fh)
     except (OSError, ValueError):
         stored = {}
-    actors, roles, pending = A.role_table(stored or cfg)
+    actors, roles, _ = A.role_table(stored or cfg)
+    # An assignment made while a slice ran holds once that slice has left running, and waits until
+    # then. The table shows what holds, a new assignment is checked against what will hold, and it
+    # joins the one that waits: replacing it dropped a reviewer nobody had reassigned (OCT1-FIXES).
+    held = A.effective_roles(root, dict(stored or cfg, roles=roles))
+    waiting, after = A.pending_roles(root, stored or cfg)
     action = getattr(args, "action", None) or "show"
     if action == "show":
         for role in A.ROLE_BLOCKS:
-            actor = roles.get(role)
+            actor = held.get(role)
             block = actors.get(actor) or {}
             detail = " · ".join(str(block[key]) for key in ("adapter", "model", "family") if block.get(key))
             print(f"  {role:<12} {C['b']}{actor or '—'}{C['reset']}  {C['dim']}{detail}{C['reset']}")
-        if isinstance(pending, dict):
-            print(f"  {C['yellow']}next{C['reset']}  {pending.get('roles')} once {pending.get('after')} leaves running")
+        if waiting:
+            print(f"  {C['yellow']}next{C['reset']}  {waiting} once {after} leaves running")
         return 0
-    new = dict(roles)
+    eventual = dict(held, **waiting)
+    new = dict(eventual)
     if action == "set" and args.role == "reviewer" and args.actor not in actors \
             and A.load_adapter(args.actor, root):
         # Name an adapter and a model: the reviewer's invocation is composed from it (#88).
@@ -425,17 +431,17 @@ def cmd_role(cfg, args):
             return 2
         new[args.role] = args.actor
     else:
-        new[args.role], new[args.actor] = roles.get(args.actor), roles.get(args.role)
+        new[args.role], new[args.actor] = eventual.get(args.actor), eventual.get(args.role)
     problem = A.assignment_problem(actors, new, S.get(cfg, "repository.kind"), getattr(args, "hotfix", False))
     if problem:
         print(f"{C['red']}refused{C['reset']}: {problem}")
         return 2
     stored = dict(stored, actors=actors)
     running = A.running_slice(root)
-    changed = {role: actor for role, actor in new.items() if roles.get(role) != actor}
+    changed = {role: actor for role, actor in new.items() if held.get(role) != actor}
     if running:
         # Work in flight keeps its actor; the next slice gets the new one.
-        stored.update(roles=roles, roles_next={"after": running["id"], "roles": changed})
+        stored.update(roles=held, roles_next={"after": running["id"], "roles": changed})
         print(f"takes effect once {running['id']} leaves running: {changed}")
     else:
         stored.update(roles=new)

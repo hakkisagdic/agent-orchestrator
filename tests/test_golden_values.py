@@ -148,6 +148,14 @@ CREDITS_PROBLEM = [
      "credits run out 20 Sep, before the reset (2400/day, account acct-a)"),
     ("lasts past the reset", {"before_reset": False, "account": "acct-a"},
      {"used": 500.0, "limit": 10_000.0, "account": "acct-a"}, None),
+    ("exhausted, the reset it names still ahead", None,
+     {"used": 12_503.0, "limit": 10_000.0, "account": "acct-a", "reset_at": time.time() + 10 * DAY},
+     "credits exhausted at the last reading: 12503/10000 (account acct-a)"),
+    ("exhausted, read before a reset that has passed", None,
+     {"used": 12_503.0, "limit": 10_000.0, "account": "acct-a", "reset_at": _at("2026-09-01 03:00")}, None),
+    ("exhausted, a reset that is no known end", None,
+     {"used": 12_503.0, "limit": 10_000.0, "account": "acct-a", "reset_at": "2026-10-01"},
+     "credits exhausted at the last reading: 12503/10000 (account acct-a)"),
 ]
 
 
@@ -185,7 +193,7 @@ GOLDEN = {
     W._reset_clock: (PARSE_RESET, 6),
     W.quota_block_until: (QUOTA_BLOCK, 6),
     A.burn_rate: (BURN_RATE, 11),
-    cli._credits_problem: (CREDITS_PROBLEM, 8),
+    cli._credits_problem: (CREDITS_PROBLEM, 12),
     A.rounds: (ROUNDS, 35),
 }
 

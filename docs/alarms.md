@@ -111,7 +111,10 @@ while the architect is at quota until that quota comes back, and credits that ra
 or are projected to run out before their reset, until the reset the reading names. A
 reset is a known end only in the seconds the provider gives; one that cannot be read
 that way holds nothing, and the alarm repeats as any red does. Without it an exhausted
-plan whose reset was ten days away was mailed every six hours.
+plan whose reset was ten days away was mailed every six hours. A spent reading whose own
+reset has passed says nothing of the plan after it, and the scheduled check pages nothing
+on it: until a fresh reading is taken the credits are unknown, and a usage check that
+cannot read them is reported as such.
 
 `ao alarms` lists the live episodes with their level and age. `ao alarms test
 --level red` sends a real test through every channel.

@@ -393,17 +393,24 @@ def _implementer_credits(cfg):
             "rate": A.burn_rate(cfg["root"], ident) if readable else None}
 
 
-def _credits_problem(br, last):
+def _credits_problem(br, last, now=None):
     """The one credits problem the readings show: exhausted outranks a projection.
 
     At 12503/10000 the doctor still said "credits run out 15 Sep, before the
     reset", because the projection was checked first and a date that had already
-    passed read like one still ahead.
+    passed read like one still ahead. A spent reading whose own reset has passed says
+    nothing of the plan after it: rehearsing 2026-10-01, the scheduled check paged
+    credits exhausted from a reading taken before the plan reset, on the desktop, the
+    phone and in four mails in a day while the usage could not be read again (OCT1-FIXES).
     """
+    from .watchdog import credit_reset
+    now = time.time() if now is None else now
     # Which account, since a switch leaves another account's figures behind (#36).
     whose = (f"account {last['account']}" if last and last.get("account")
              else "account not named by the reading")
-    if last and last.get("limit") and float(last.get("used") or 0) >= float(last["limit"]):
+    reset = credit_reset(last.get("reset_at"), now) if last else None
+    if last and last.get("limit") and float(last.get("used") or 0) >= float(last["limit"]) \
+            and not (reset is not None and reset <= now):
         return ("credits-exhaust", f"credits exhausted at the last reading: "
                                    f"{float(last['used']):.0f}/{float(last['limit']):.0f} ({whose})")
     if br and br.get("before_reset"):
@@ -815,9 +822,16 @@ def _catchup_reviewer_note(cfg, author):
         return None
     reviewer = cfg.get("reviewer") or {}
     if not reviewer.get("argv"):
-        return "no reviewer is configured"
+        return "no reviewer is configured" + _waiting_reviewer(cfg)
     refused = _reviewer_ineligible(cfg, reviewer, author=author)
     return f"the reviewer may not review it: {refused}" if refused else None
+
+
+def _waiting_reviewer(cfg):
+    """'; <actor> is assigned the reviewer role and holds it once <slice> leaves running', or '' (OCT1-FIXES)."""
+    waiting, after = A.pending_roles(cfg.get("root"), cfg)
+    return (f"; {waiting['reviewer']} is assigned the reviewer role and holds it once {after} leaves running"
+            if waiting.get("reviewer") else "")
 
 
 def _catchup_mail(root, cfg, waiver, rng, artefact):
@@ -841,6 +855,25 @@ def _catchup_mail(root, cfg, waiver, rng, artefact):
                                                  "to": architect, "slice": slice_id})
 
 
+def _catchup_undecided(root, targets):
+    """{waiver id: verdict} for each waived range whose newest review of exactly that range decided nothing.
+
+    A review that ends UNAVAILABLE or INVALID keeps its waiver open, and the next run met
+    that waiver first again: runs of --limit N whose first N reviews kept failing reviewed
+    nothing else, however often they were repeated (OCT1-FIXES). A ledger that cannot be
+    read orders nothing; the review that needs it says so.
+    """
+    from .storage import read_chained_jsonl
+    try:
+        rows = read_chained_jsonl(A.review_ledger_path(root), A.REVIEW_CHAIN)
+    except Exception:
+        return {}
+    newest = {row.get("commits"): row.get("verdict") for row in rows
+              if isinstance(row, dict) and row.get("kind") == "commit-range"}
+    ranges = {item["waiver"].get("id"): f"{item['start']}..{item['end']}" for item in targets if item.get("landed")}
+    return {wid: newest[rng] for wid, rng in ranges.items() if newest.get(rng) in ("UNAVAILABLE", "INVALID")}
+
+
 def cmd_catchup(cfg, args):
     """Replay what could not run: waived reviews, deferred wakes and nudges.
 
@@ -854,7 +887,8 @@ def cmd_catchup(cfg, args):
     with the reason (#44). A range with neither is reviewed, whatever its diff looks like.
     --plan says what a run would do and changes nothing; --slice and --limit bound a run. A
     review stays synchronous: a waiver closes in the same run, on the review recorded for
-    exactly its range, or stays open.
+    exactly its range, or stays open. A range whose last review decided nothing waits behind
+    the rest, and once a review finds the reviewer unavailable the run starts no other.
     """
     from types import SimpleNamespace
     root = cfg["root"]
@@ -868,7 +902,8 @@ def cmd_catchup(cfg, args):
     if limit is not None and limit < 1:
         print("--limit is at least 1: the number of reviews this run may start")
         return 2
-    did = started = 0
+    did = started = held = 0
+    unavailable = None                          # the waiver whose review found the reviewer unavailable
     failed = []
     totals = {"waivers": 0, "commits": 0, "lines": 0, "unnamed": 0, "proven": 0}      # what --plan sums up
 
@@ -893,7 +928,8 @@ def cmd_catchup(cfg, args):
         failed.append("ledger")
     moves = (statement or {}).get("move_only") or []
     open_slices = {item["waiver"].get("slice") for item in targets}
-    for name in moves:
+    # A ledger that cannot be read says nothing about which slices it names (OCT1-FIXES).
+    for name in [] if "ledger" in failed else moves:
         # A statement about a slice with nothing to prove is reported, never dropped quietly.
         if name not in open_slices:
             print(f"  --move-only {name}: no open review waiver names it; nothing is proven or closed")
@@ -901,6 +937,8 @@ def cmd_catchup(cfg, args):
             print(f"  --move-only {name}: --slice {only} bounds this run; it waits for another")
     if only:
         targets = [item for item in targets if item["waiver"].get("slice") == only]
+    undecided = _catchup_undecided(root, targets)
+    targets = sorted(targets, key=lambda item: item["waiver"].get("id") in undecided)
     for position, item in enumerate(targets):
         w = item["waiver"]
         label = f"{w['id']} ({w['slice']})"
@@ -972,15 +1010,23 @@ def cmd_catchup(cfg, args):
                   + (f" (landed by the {landed_by})" if landed_by else "")
                   + "; a person names it with --author-family <family> --by <name>; keeping it open")
             continue
+        if unavailable:
+            # Every review after one that found the reviewer unavailable waits on it too; each
+            # could spend the review's whole time budget finding that out again (OCT1-FIXES).
+            held += 1
+            continue
         started += 1
         totals["commits"] += item["landed"]
         totals["lines"] += lines or 0
+        last = (f"; its last review ended {undecided[w['id']]}, so it comes after the ranges no review has "
+                "failed on") if w["id"] in undecided else ""
         if plan:
             note = _catchup_reviewer_note(cfg, author)
             print(f"  {label}: {rng}, {size}: review by a family other than {', '.join(families)}"
-                  + (f"; {note}" if note else ""))
+                  + (f"; {note}" if note else "") + last)
             continue
-        print(f"  {label}: reviewing its own landed range {rng}, {size}, by a family other than {', '.join(families)}")
+        print(f"  {label}: reviewing its own landed range {rng}, {size}, by a family other than {', '.join(families)}"
+              + last)
         # No deadline is passed: a reviewer's time is review_timeout per call, and a silent
         # one is killed after review.stall_minutes (#63, #25). The range's commit messages
         # are the statement it is judged against; a person's --boundary replaces them.
@@ -1018,14 +1064,20 @@ def cmd_catchup(cfg, args):
             if close(w["id"], "nothing to review: the landed range has no net change"):
                 print(f"  {label}: the landed range has no net change; closed")
                 did += 1
+        elif verdict == "INVALID":
+            # An INVALID review exits 3 as an unavailable one does: the verdict tells them apart (OCT1-FIXES).
+            print(f"  the reviewer returned no valid verdict; {w['id']} stays open")
         elif code == 3 or verdict == "UNAVAILABLE":
             print(f"  reviewer still unavailable; {w['id']} stays open")
-        elif verdict == "INVALID":
-            print(f"  the reviewer returned no valid verdict; {w['id']} stays open")
+            if verdict == "UNAVAILABLE":
+                unavailable = w["id"]
         elif code == 2:
             print(f"  reviewer configuration invalid, or the range cannot be reviewed; {w['id']} stays open")
         else:
             print(f"  no review was recorded (exit {code}); {w['id']} stays open")
+    if held:
+        print(f"  the reviewer was unavailable for {unavailable}: this run started no other review, and "
+              f"{held} waiver(s) wait for a run in which it answers")
     if plan:
         print(f"totals: {totals['waivers']} waiver(s); {started} review(s) of {totals['commits']} commit(s) and "
               f"{totals['lines']} changed line(s); {totals['unnamed']} refused until a person names the author's "

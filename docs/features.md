@@ -97,7 +97,10 @@ waiver is reported, and no actor's grant admits the flag.
 lines, and which close by proof, `--move-only` included, and the totals, and
 changes nothing;
 `ao catchup --limit 10` starts at most ten reviews, and
-`ao catchup --slice B7` takes one slice's waivers. The reviews stay synchronous
+`ao catchup --slice B7` takes one slice's waivers. A range whose last review decided
+nothing, UNAVAILABLE or INVALID, waits behind the ranges no review has failed on, so
+repeated runs reach every range; once a review finds the reviewer unavailable, the run
+starts no other review; and an INVALID review is reported as one. The reviews stay synchronous
 rather than going through `ao review submit`, which pins a staged candidate for
 the running slice and hands back an id: a waived range is already landed, and a
 waiver closes only on the review recorded for exactly its range, or on its proof,
