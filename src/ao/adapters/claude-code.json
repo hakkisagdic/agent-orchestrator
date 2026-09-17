@@ -67,14 +67,52 @@
       ]
     },
     "messages": { "prompt": ["user"], "reply": ["assistant"] },
-    "turn": { "end": ["result"] },
-    "note": "No record starts a turn, so a prompt opens one. `result` closes a turn in --output-format stream-json output; the session store writes no closing record. A tool call is a tool_use block inside an assistant record's message.content (name, input, a written file at input.file_path), not a record of its own, so no tool_call is declared and ao reads none from this store.",
+    "turn": { "end": ["result"],
+              "end_when": { "type": "assistant", "field": "message.stop_reason", "values": ["end_turn", "stop_sequence"] },
+              "conversation": ["user", "assistant"] },
+    "tool_call": { "type": "assistant", "blocks": "message.content[]", "match": { "type": "tool_use" },
+                   "name": "name", "args": "input", "path_keys": ["file_path", "notebook_path"],
+                   "write_words": ["write", "edit"] },
+    "note": "No record starts a turn, so a prompt opens one. The session store writes no closing record (`result` closes a turn only in --output-format stream-json output): the response that ends a turn says so in message.stop_reason, which every record of that response carries. end_turn ends one, and so does stop_sequence, which marks a reply the harness writes itself (an API error, for one) and after which the store holds the next prompt or nothing; tool_use means the harness runs the calls and asks again. A tool call is a tool_use block in an assistant record's message.content, and its result a tool_result block in the user record that follows. Every kind but user and assistant - titles, prompt queues, hook summaries, attachments, file history, and whatever kind a release adds - may follow a turn's end. Verified on 2.1 session stores.",
     "tail_bytes": 900000
   },
   "telemetry": {
-    "cost": {
+    "context": {
       "from": "none",
-      "note": "Assistant records carry message.usage (input_tokens, output_tokens), repeated on every record of one response. Not read yet: adding the records up counts a response once per record."
+      "note": "No record carries a context percentage or the model's window: a response's usage says how many tokens it sent, not of how many, and a compaction record carries token counts only. A percentage would rest on a guessed window, so none is read."
+    },
+    "cost": {
+      "from": "transcript",
+      "type": "assistant",
+      "response": "message.id",
+      "fields": [
+        "message.usage.input_tokens",
+        "message.usage.cache_creation_input_tokens",
+        "message.usage.cache_read_input_tokens",
+        "message.usage.output_tokens"
+      ],
+      "unit": "token",
+      "counted": "Every token a response read or wrote, once per response: input_tokens (input after the last cache breakpoint), cache_creation_input_tokens (input written to the prompt cache), cache_read_input_tokens (input read from it) and output_tokens (thinking included).",
+      "not_counted": "server_tool_use (web search and fetch requests: counts of requests, not tokens); output_tokens_details and cache_creation (breakdowns already inside output_tokens and cache_creation_input_tokens); iterations (a per-iteration breakdown that repeats the total). Tokens are not priced: a cache read is priced far below an input token and is most of a long session's tokens, so a turn's count follows its context size times its responses more closely than its price.",
+      "note": "One response is written as one record per content block, each repeating the response's usage, so a response is read once, by message.id, under the per-response reading (billing.fallback.reading); adding the records up counted about twice its tokens.",
+      "verified": true
+    },
+    "failure": {
+      "from": "transcript",
+      "type": "user",
+      "blocks": "message.content[]",
+      "match": { "type": "tool_result" },
+      "field": "is_error",
+      "failed_when": true,
+      "text": "content",
+      "verified": true,
+      "note": "The harness's own verdict, one tool result per user record: is_error is true on a failed result of any tool, and a result that succeeded carries false or no is_error at all."
+    }
+  },
+  "billing": {
+    "fallback": {
+      "reading": "per-response",
+      "note": "How the panel and ao cost add this harness's usage records up. No transcripts are declared, so the offline credit estimate reads none of them: the harness bills no credit account that estimate stands in for, and a token is not a credit."
     }
   },
   "sessions": {

@@ -578,7 +578,7 @@ def turn_costs(cfg, since=None):
     for d in recs:
         pl = record_body(d, shape) or {}
         t = record_kind(d, shape)
-        cur, opened = next_turn(cur, t, shape)
+        cur, opened = next_turn(cur, d, shape)
         if opened:
             cur.update({"start": ts(d), "usage": 0.0, "product_writes": 0, "coord_writes": 0, "tool_calls": 0,
                         "reviews": 0, "commits": 0, "blocked_report": False, "ao": collections.Counter()})
@@ -588,27 +588,28 @@ def turn_costs(cfg, since=None):
             continue
         if usage and t == usage["type"]:
             add_usage(cur, pl, usage)
-        elif tool and t == tool["type"]:
-            cur["tool_calls"] += 1
-            name = str(_path_value(pl, tool["name"]) or "")
-            args = _path_value(pl, tool["args"]) or {}
-            text = json.dumps(args, ensure_ascii=False) if not isinstance(args, str) else args
-            if name.endswith("ao_report") and "blocked" in text:      # MCP clients prefix tool names
-                cur["blocked_report"] = True
-            if tool_writes_file(name, tool):
-                path = str(tool_path(args, tool) or "")
-                if _coord_path().search(path):
-                    cur["coord_writes"] += 1
-                elif _PRODUCT_PATH.search(path) or (path and "/" in path):
-                    cur["product_writes"] += 1
-            m = re.search(r"\bao\s+(?:-C\s+\S+\s+)?([a-z][a-z-]+)", text)
-            if m:
-                cur["ao"][m.group(1)] += 1
-                out["ao_commands"][m.group(1)] += 1
-            if re.search(r"\bao\s+(?:-C\s+\S+\s+)?review\b", text):
-                cur["reviews"] += 1
-            if re.search(r"git\s+commit\b", text):
-                cur["commits"] += 1
+        # Not an elif: one record of a store that nests its calls carries a response's usage and its tool calls.
+        if tool and t == tool["type"]:
+            for name, args in tool_calls(pl, tool):
+                cur["tool_calls"] += 1
+                args = args or {}
+                text = json.dumps(args, ensure_ascii=False) if not isinstance(args, str) else args
+                if name.endswith("ao_report") and "blocked" in text:      # MCP clients prefix tool names
+                    cur["blocked_report"] = True
+                if tool_writes_file(name, tool):
+                    path = str(tool_path(args, tool) or "")
+                    if _coord_path().search(path):
+                        cur["coord_writes"] += 1
+                    elif _PRODUCT_PATH.search(path) or (path and "/" in path):
+                        cur["product_writes"] += 1
+                m = re.search(r"\bao\s+(?:-C\s+\S+\s+)?([a-z][a-z-]+)", text)
+                if m:
+                    cur["ao"][m.group(1)] += 1
+                    out["ao_commands"][m.group(1)] += 1
+                if re.search(r"\bao\s+(?:-C\s+\S+\s+)?review\b", text):
+                    cur["reviews"] += 1
+                if re.search(r"git\s+commit\b", text):
+                    cur["commits"] += 1
     for tn in out["turns"]:
         if since and (not tn["start"] or tn["start"] < since):
             tn["cls"] = None
@@ -1145,9 +1146,10 @@ def implementer_recent_writes(cfg, minutes=15):
             continue
         if at < cut:
             continue
-        path = tool_path(_path_value(record_body(d, shape), tool["args"]), tool)
-        if path:
-            out.add(os.path.realpath(str(path)))
+        for _, args in tool_calls(record_body(d, shape), tool):
+            path = tool_path(args, tool)
+            if path:
+                out.add(os.path.realpath(str(path)))
     return out
 
 
@@ -1208,7 +1210,7 @@ def turn_ended(cfg):
     tail = read_tail(msgs, 200_000)
     for d in reversed(tail):
         t = record_kind(d, shape)
-        if t in shape["bookkeeping"]:
+        if is_bookkeeping(t, shape):
             continue                                        # bookkeeping after the turn
-        return t in shape["end"]
+        return closes_turn(d, shape)
     return False

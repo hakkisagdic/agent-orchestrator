@@ -865,7 +865,8 @@ def credit_usage(monthly_budget=None):
         if fallback.get("transcripts") and fallback.get("reading") in USAGE_READINGS and shape["usage"]:
             # A line naming neither the usage field nor a kind that opens or ends a turn is never parsed.
             marks = sorted({'"' + field.split(".")[0].split("[")[0] + '"' for field in shape["usage"]["fields"]}
-                           | {'"' + kind + '"' for kind in shape["start"] + shape["prompt"] + shape["end"]})
+                           | {'"' + kind + '"' for kind in shape["start"] + shape["prompt"] + shape["end"]
+                              + [when["type"] for when in shape["end_when"]]})
             sources += [(path, shape, marks) for path in glob.glob(_home_path(fallback["transcripts"]))]
     for f, shape, marks in sources:
         usage, turn, turns, credits, day, month = shape["usage"], None, 0, 0.0, "", ""
@@ -879,7 +880,7 @@ def credit_usage(monthly_budget=None):
                     except Exception:
                         continue
                     kind = record_kind(rec, shape)
-                    turn, _ = next_turn(turn, kind, shape)
+                    turn, _ = next_turn(turn, rec, shape)
                     pl = record_body(rec, shape)
                     if pl is None or kind != usage["type"]:
                         continue
@@ -1330,8 +1331,11 @@ def recent_errors(recs, limit=3, adapter=None):
         pl = record_body(r, shape)
         if pl is None or record_kind(r, shape) != failure["type"]:
             continue
-        if not _declared_value(_path_value(pl, failure["field"]), failure["failed_when"]):
+        failed = [item for item in declared_items(pl, failure)
+                  if _declared_value(_path_value(item, failure["field"]), failure["failed_when"])]
+        if not failed:
             continue
+        pl = failed[-1]                    # a result nested in a message: its verdict and output are the block's
         # Failed tool output is usually a wall of passing lines with the real
         # cause buried in it. Lead with the line that actually failed.
         raw = str(_path_value(pl, failure["text"]) or "") if failure["text"] else ""

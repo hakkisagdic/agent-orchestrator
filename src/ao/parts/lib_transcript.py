@@ -253,6 +253,35 @@ def transcript_shape(adapter):
             and "failed_when" in failure:
         shape["failure"] = {"type": failure["type"], "field": failure["field"],
                             "failed_when": failure["failed_when"], "text": _name(failure.get("text"))}
+    return nested_shape(shape, transcript, signals)
+
+
+def nested_shape(shape, transcript, signals):
+    """A transcript shape with what a store that nests its records declares beside it.
+
+    One harness writes each tool call, tool result and turn end as a record of its own.
+    Another holds calls and results as blocks of a message, ends a turn in a field of
+    the response that ends it, and writes one response as several records that repeat
+    its usage. That store declares `blocks`, the path to the blocks a record holds, and
+    the `match` a block holds, in `transcript.tool_call` and `telemetry.failure`;
+    `turn.end_when`, the kind, field and values that close a turn; `turn.conversation`,
+    the kinds a turn is made of, every other kind being bookkeeping; and, for the
+    `per-response` reading, `telemetry.cost.response`, the path to a response's id.
+    Usage read per response without that path is not read, rather than counted once
+    per record. A shape that declares none of these reads as it did.
+    """
+    turn = _block(transcript, "turn")
+    conditions = turn.get("end_when") if isinstance(turn.get("end_when"), list) else [turn.get("end_when")]
+    shape["end_when"] = [{"type": when["type"], "field": when["field"], "values": when["values"]}
+                         for when in conditions if isinstance(when, dict) and _name(when.get("type"))
+                         and _name(when.get("field")) and isinstance(when.get("values"), list)]
+    shape["conversation"] = _names(turn.get("conversation"))
+    for part, declared in (("tool", _block(transcript, "tool_call")), ("failure", _block(signals, "failure"))):
+        if shape[part] is not None:
+            shape[part].update(blocks=_name(declared.get("blocks")), match=_block(declared, "match"))
+    if shape["usage"] is not None and shape["usage"]["reading"] == "per-response":
+        response = _name(_block(signals, "cost").get("response"))
+        shape["usage"] = dict(shape["usage"], response=response) if response else None
     return shape
 
 
@@ -291,9 +320,10 @@ def usage_entries(body, usage):
 
 # How usage records add up to spend is the adapter's to declare too (`billing.fallback.reading`):
 # `sum` when every record is the whole usage of the turn it reports, `peak-per-turn` when a
-# record is the running total of the turn in progress. The panel, `ao cost` and the credit
+# record is the running total of the turn in progress, `per-response` when a response is
+# written as several records that each repeat its usage. The panel, `ao cost` and the credit
 # estimate apply the same reading over the same turns, so no two of them tell a different spend.
-USAGE_READINGS = ("sum", "peak-per-turn")
+USAGE_READINGS = ("sum", "peak-per-turn", "per-response")
 
 
 def record_usage(body, usage):
@@ -306,26 +336,48 @@ def add_usage(turn, body, usage):
     """Charge a usage record to its turn under the declared reading, and return how much the turn's usage grew.
 
     Under `sum` the record adds on; under `peak-per-turn` the turn costs the highest total its
-    records reached. What grew is what a reader adds to a total, or to the day the record was
-    written, so a total is always the sum of its turns.
+    records reached; under `per-response` a record adds on unless a record of the same response
+    already did in this turn. What grew is what a reader adds to a total, or to the day the
+    record was written, so a total is always the sum of its turns.
     """
     value, before = record_usage(body, usage), turn.get("usage") or 0.0
-    if usage["reading"] == "sum":
+    if usage["reading"] == "per-response" and not _first_of_response(turn, body, usage):
+        turn["usage"] = before
+        return 0.0
+    if usage["reading"] in ("sum", "per-response"):
         turn["usage"] = before + value
         return value
     turn["usage"] = max(before, value)
     return turn["usage"] - before
 
 
-def next_turn(turn, kind, shape):
-    """(the turn a record of this kind falls in, whether the record opened it); None until a turn opens.
+def _first_of_response(turn, body, usage):
+    """Is this the first record of its response the turn meets, by the id at `response`?
+
+    Every record of one response repeats the response's usage, so only the first is charged,
+    whichever record a tail begins at. A record that names no response is its own.
+    """
+    ident = _path_value(body, usage["response"])
+    if not isinstance(ident, (str, int)) or isinstance(ident, bool):
+        return True
+    counted = turn.setdefault("responses", set())
+    if ident in counted:
+        return False
+    counted.add(ident)
+    return True
+
+
+def next_turn(turn, rec, shape):
+    """(the turn a record falls in, whether the record opened it); None until a turn opens.
 
     A start marker opens a turn, and a prompt opens one when none is open or the open one
     ended. A harness may write its prompt before the start marker of the same turn, so a
     start marker opens no second turn while the open one holds only its prompt: opened by a
     prompt, not started and not ended. A call the harness makes of its own between the two
-    does not split them. An end marker ends the turn it falls in.
+    does not split them. An end marker ends the turn it falls in, and so does a record whose
+    field holds a value the adapter declares to end one (`closes_turn`).
     """
+    kind = record_kind(rec, shape)
     waiting = turn is not None and turn.get("prompted") and not turn.get("started") and not turn.get("closed")
     ended = turn is None or turn.get("closed")
     opened = (kind in shape["start"] and not waiting) or (kind in shape["prompt"] and ended)
@@ -333,7 +385,7 @@ def next_turn(turn, kind, shape):
         turn = {"prompted": kind in shape["prompt"]}
     if turn is not None:
         turn["started"] = bool(turn.get("started")) or kind in shape["start"]
-        turn["closed"] = bool(turn.get("closed")) or kind in shape["end"]
+        turn["closed"] = bool(turn.get("closed")) or closes_turn(rec, shape)
     return turn, bool(opened)
 
 
@@ -352,6 +404,49 @@ def tool_path(args, tool):
 def _declared_value(value, expected):
     """A field holds the declared value: by identity for true, false and null, by equality otherwise."""
     return value is expected if expected is None or isinstance(expected, bool) else value == expected
+
+
+def declared_items(body, declared):
+    """The objects a tool call's or a tool result's fields are read from, in one record's body.
+
+    The body itself, or each block its `blocks` path reaches when the store nests them
+    in a message; either counts only when it holds every value its `match` declares.
+    """
+    items = _path_values(body, declared["blocks"]) if declared.get("blocks") else [body]
+    match = declared.get("match") or {}
+    return [item for item in items if isinstance(item, dict)
+            and all(_declared_value(_path_value(item, path), value) for path, value in match.items())]
+
+
+def tool_calls(body, tool):
+    """[(name, arguments)] for each tool call a record of the declared tool-call kind holds."""
+    return [(str(_path_value(item, tool["name"]) or ""), _path_value(item, tool["args"]))
+            for item in declared_items(body, tool)]
+
+
+def closes_turn(rec, shape):
+    """Does a record close a turn: a kind `turn.end` names, or one whose field holds a value `turn.end_when` declares?
+
+    A store that writes no closing record ends a turn in a field of the response that
+    ends it; the response's kind cannot say so, since every response has that kind.
+    """
+    kind = record_kind(rec, shape)
+    if kind in shape["end"]:
+        return True
+    body = record_body(rec, shape)
+    return any(kind == when["type"] and any(_declared_value(_path_value(body, when["field"]), value)
+                                            for value in when["values"]) for when in shape.get("end_when") or [])
+
+
+def is_bookkeeping(kind, shape):
+    """May a record of this kind follow a turn's end without meaning a turn is running?
+
+    `turn.bookkeeping` names such kinds; `turn.conversation` names the kinds a turn is
+    made of instead, and every other kind is bookkeeping, so a store that adds kinds of
+    its own from release to release still reads as ended when its turn has ended.
+    """
+    conversation = shape.get("conversation") or []
+    return kind in shape["bookkeeping"] or (bool(conversation) and kind not in conversation)
 
 
 def _strings(o, out, keys, depth=0):
@@ -423,7 +518,8 @@ def telemetry(recs, adapter):
     Usage adds up under the adapter's reading, as `ao cost` and the credit estimate add it:
     under `sum` every usage entry is one turn's cost, as written; under `peak-per-turn` a turn
     - the one already under way where the records begin included - costs the highest total
-    its records reached.
+    its records reached; under `per-response` a turn costs each of its responses once. A
+    turn whose usage names no tools beside it has the tool calls its records hold.
     """
     shape = transcript_shape(implementer_adapter() if adapter is None else adapter)
     ctx_spec, cost_spec = shape["context"], shape["usage"]
@@ -441,8 +537,13 @@ def telemetry(recs, adapter):
                     out["ctx"] = val
         if not cost_spec:
             continue
-        turn, _ = next_turn(turn, t, shape)
+        turn, _ = next_turn(turn, r, shape)
+        # A turn read from its records, not from a summary, has the tool calls those records hold.
+        calls = len(tool_calls(pl, shape["tool"])) if cost_spec["reading"] != "sum" and shape["tool"] \
+            and t == shape["tool"]["type"] else 0
         if t != cost_spec["type"]:
+            if calls and turn is not None:
+                turn["calls"] = turn.get("calls", 0) + calls
             continue
         if cost_spec["reading"] == "sum":
             for values, tools in usage_entries(pl, cost_spec):
@@ -457,10 +558,12 @@ def telemetry(recs, adapter):
         if not entries:
             continue
         turn = {} if turn is None else turn
+        turn["calls"] = turn.get("calls", 0) + calls
         if "usage" not in turn:
             out["turns"] += 1
         out["total"] += add_usage(turn, pl, cost_spec)
-        out["last"] = (turn["usage"], sum(len(tools or []) for _, tools in entries))
+        out["last"] = (turn["usage"], sum(len(tools or []) for _, tools in entries) if cost_spec["tools"]
+                       else turn["calls"])
     return out
 
 

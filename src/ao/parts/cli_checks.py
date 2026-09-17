@@ -389,7 +389,10 @@ def _account_beside_share(cfg, since=None):
         mine = A.turn_costs(cfg, since=since)
     except Exception:
         mine = None
-    if mine and mine.get("turns") and float(acct["used"] or 0) > 0:
+    # A share of the account only when the implementer bills it: a harness that declares no account
+    # spends another pool in another unit, and its tokens as a percentage of these credits mean nothing.
+    bills_it = ((A.implementer_adapter(cfg).get("billing") or {}).get("api") or {}).get("driver")
+    if mine and mine.get("turns") and float(acct["used"] or 0) > 0 and bills_it:
         lines.append(f"ao's own share, from its transcript: {mine['total']:,.0f} {mine['unit']} "
                      f"({100 * mine['total'] / float(acct['used']):.0f}% of the account's used)")
     lines.append(f"{C['dim']}{SHARED_POOL_NOTE}{C['reset']}")

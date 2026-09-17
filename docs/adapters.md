@@ -279,7 +279,7 @@ adapter does not declare is read as nothing, never as another harness's field.
 | `telemetry.context` | `{from: "transcript", type, match, field}`: the record and the path of the context percentage | the panel, `ao_status` |
 | `telemetry.cost` | `{from: "transcript", type, field, tools, unit}`: the usage record, the path to its value - or `fields`, several paths that add up - and the path to the tools each entry used | the panel, `ao cost`, the credit estimate |
 | `telemetry.failure` | `{from: "transcript", type, field, failed_when, text}`: the verdict on a tool result, the value that means it failed, and the path to its output | the panel's problems |
-| `billing.fallback.reading` | how usage records add up to spend: `sum` when every record is the whole cost of the turn it reports, `peak-per-turn` when a record is the running total of the turn in progress and a turn costs the highest total it reached. The panel and `ao cost` add usage up by it too, and add records up when none is declared; the estimate reads only a declared reading, and under a reading ao does not implement no reader reads usage | the panel, `ao cost`, `ao credits --offline`, `ao digest` |
+| `billing.fallback.reading` | how usage records add up to spend: `sum` when every record is the whole cost of the turn it reports, `peak-per-turn` when a record is the running total of the turn in progress and a turn costs the highest total it reached, `per-response` when a response is written as several records that each repeat its usage and each response counts once, by the path to its id (`telemetry.cost.response`). The panel and `ao cost` add usage up by it too, and add records up when none is declared; the estimate reads only a declared reading, and under a reading ao does not implement no reader reads usage | the panel, `ao cost`, `ao credits --offline`, `ao digest` |
 
 A path steps into objects with dots (`value.usagePercentage`), and `[]` steps into each element
 of a list (`promptTurnSummaries[].usage`), one entry per element. A turn opens at a `start` kind,
@@ -296,6 +296,63 @@ between two records for a new turn and read 79% of what the records add up to. I
 replace text in, append to, delete or move a file are writes, and a `session_start` or a
 `tombstone` may follow the end of its last turn. `tests/test_transcript_readings.py` holds each of
 these readings.
+
+### A store that nests its records
+
+Kiro writes each tool call, tool result and turn end as a record of its own. Claude Code's session
+store writes none of them: a response is one `assistant` record per content block, each repeating
+the response's `message.id`, `message.stop_reason` and `message.usage`; a tool call is a `tool_use`
+block of the response, its result a `tool_result` block of a `user` record, and no record closes a
+turn. Beside the fields above, a store like it declares:
+
+| Field | What it declares | Used by |
+|---|---|---|
+| `transcript.tool_call.blocks`, `match` | the path to the blocks a record of the tool-call kind holds (`message.content[]`), and the values a block holds to be a call; `name` and `args` are then read from each such block | `ao cost`, foreign edits, the panel's tool calls |
+| `telemetry.failure.blocks`, `match` | the same for tool results; `field`, `failed_when` and `text` are read from each such block | the panel's problems |
+| `transcript.turn.end_when` | `{type, field, values}`, or a list of them: a record of that kind whose field holds one of the values ends the turn it falls in, as an `end` kind does, under the one turn rule every reader applies | `ao cost`, the panel, the credit estimate, the watchdog's reap and idle answer |
+| `transcript.turn.conversation` | the kinds a turn is made of; every other kind is bookkeeping that may follow a turn's end, so a kind a later release adds does not read as a running turn | the watchdog's reap and idle answer |
+| `telemetry.cost.response` | the path to a response's id, which the `per-response` reading counts each response once by; under that reading without it, no usage is read | the panel, `ao cost`, `ao_status` |
+
+```jsonc
+// transcript
+"turn": { "end": ["result"], "conversation": ["user", "assistant"],
+          "end_when": { "type": "assistant", "field": "message.stop_reason",
+                        "values": ["end_turn", "stop_sequence"] } },
+"tool_call": { "type": "assistant", "blocks": "message.content[]", "match": { "type": "tool_use" },
+               "name": "name", "args": "input", "path_keys": ["file_path", "notebook_path"],
+               "write_words": ["write", "edit"] },
+// telemetry
+"context": { "from": "none" },
+"cost": { "from": "transcript", "type": "assistant", "response": "message.id", "unit": "token",
+          "fields": ["message.usage.input_tokens", "message.usage.cache_creation_input_tokens",
+                     "message.usage.cache_read_input_tokens", "message.usage.output_tokens"] },
+"failure": { "from": "transcript", "type": "user", "blocks": "message.content[]",
+             "match": { "type": "tool_result" }, "field": "is_error", "failed_when": true, "text": "content" },
+// billing: no transcripts, so the credit estimate reads none of it
+"fallback": { "reading": "per-response" }
+```
+
+It was measured before it was declared, over 421 local session stores of release 2.1. Every record
+of one response carried the same usage and the same stop reason (83,779 responses, 51,865 of them
+written as several records), so adding the records up counted about twice the tokens. A parallel
+call's result may sit between two records of its response (4,799 responses); none of the 183 stores
+of print-mode runs (`-p`, the way ao starts an implementer) had a response whose records spanned two
+turns, or a record written twice, so a response is counted once in its turn. No response that ended
+a turn held a tool call. A store at rest ended with an `end_turn` response, or with a
+`stop_sequence` one - a reply the harness writes itself, an API error among them - in 375 of them,
+followed only by kinds such as titles, prompt queues, hook summaries and attachments. The stores
+hold twenty kinds besides `user` and `assistant`, which is why the turn names its conversation
+rather than its bookkeeping. Every failed tool result carried `is_error: true`, and every `user`
+record held one result.
+
+The unit is the token, and every token a response read or wrote counts once: uncached input, input
+written to and read from the prompt cache, and output. Server tool requests are counts of requests,
+not tokens, and the usage breakdowns - by cache lifetime, thinking and iteration - are already
+inside the totals, so neither is added. A token count is not a price: cache reads are most of a long
+session's tokens (91-98% measured) and are priced far below the rest. No record carries a context
+percentage or the model's window, so no context is read. `tests/test_second_harness_cost.py` reads
+the nesting from synthetic records, and fails when a core module names a field or a value it
+declares.
 
 ## Busy detection
 
