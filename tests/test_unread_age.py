@@ -46,8 +46,9 @@ def test_an_unseen_decision_request_climbs_to_red_and_stops_once_its_reader_is_s
     assert [row["by"] for row in A.mail_log(world.root) if row.get("event") == "seen"] == ["architect"]
 
 
-def test_classes_come_from_the_envelope_or_the_kind_and_status_names_the_oldest_unseen(project):
+def test_classes_come_from_the_envelope_or_the_kind_and_status_names_the_oldest_unseen(project, monkeypatch):
     root = project["root"]
+    monkeypatch.setattr(A, "quota", lambda adapter, ttl=300: [])   # no real keyflip: status asks it for the quota
     assert A.mail_class("20260916-0900-kiro-to-fable-DONE-b6.md") == "fyi"
     assert A.mail_class("20260916-0900-kiro-to-fable-BLOCKED-b6.md") == "needs-decision"
     assert A.mail_class("20260916-0900-fable-to-kiro-DIRECTIVE-b6.md") == "needs-read"

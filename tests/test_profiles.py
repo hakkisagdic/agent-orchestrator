@@ -150,6 +150,9 @@ def test_manual_doctor_probes_reviewer_but_scheduled_check_does_not(
 
     monkeypatch.setattr(cli, "_reviewer_probe", failed_probe)
     monkeypatch.setattr(cli, "_doctor_check", lambda probe_cfg: 0)
+    # Nothing installed, as on CI: with an `ao` on PATH the doctor runs every copy of the
+    # architect's harness it finds with --version, on whichever machine runs this.
+    monkeypatch.setattr(cli.shutil, "which", lambda *args, **kwargs: None)
 
     assert cli.cmd_doctor(cfg, SimpleNamespace(check=True)) == 0
     assert calls == []

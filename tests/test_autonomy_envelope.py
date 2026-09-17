@@ -43,10 +43,17 @@ def test_with_nothing_ready_an_open_question_still_stands_the_implementer_down(w
     assert f"decision {decision} is open" in world.verdict and "not nudging" in world.verdict
 
 
+def _next_second():
+    """Return once the clock is into a later second: a question's id is the second it was asked in."""
+    later = int(time.time()) + 1
+    while time.time() < later:
+        time.sleep(0.01)
+
+
 def test_the_doctor_says_how_long_the_architect_is_away_and_how_many_questions_wait(project):
     root = project["root"]
     first = A.ask(root, "first question?", ["a", "b"])["id"]
-    time.sleep(1.1)
+    _next_second()
     A.ask(root, "second question?", ["a", "b"])
     append_chained_jsonl(A.decisions_path(root), {"id": "AD-1", "at": int(time.time()) - 7200, "decision": "d"},
                          A.DECISION_CHAIN, legacy_prefix=True)

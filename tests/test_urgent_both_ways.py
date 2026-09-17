@@ -15,6 +15,7 @@ def test_a_marked_message_to_the_architect_reaches_the_architect_in_ao_status(pr
     _mail(project, "20260916-1200-kiro-to-fable-BLOCKED-queue.md", MARKED)
     _mail(project, "20260916-1100-fable-to-kiro-INFO-next.md", "# next\n")
     monkeypatch.setenv("AO_ROLE", "architect")
+    monkeypatch.setattr(A, "quota", lambda adapter, ttl=300: [])   # no real keyflip: status asks it for the quota
 
     assert cli.cmd_status(project, SimpleNamespace(messages=4, window=24.0)) in (None, 0)
 

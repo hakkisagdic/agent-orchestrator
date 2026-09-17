@@ -87,15 +87,22 @@ def _decide(project, scope):
     return cli.cmd_decide(project, args)
 
 
+def _next_second():
+    """Return once the clock is into a later second: reviews and decisions are ordered by whole seconds."""
+    later = int(time.time()) + 1
+    while time.time() < later:
+        time.sleep(0.01)
+
+
 def test_a_recorded_respecification_restarts_the_budget_and_a_hand_added_one_does_not(project):
     root = project["root"]
     _running(root)
     _review(root, "NEEDS_CHANGES")
-    time.sleep(1.1)
+    _next_second()
     assert _decide(project, "R1") == 0
     assert A.rounds(root, REVIEWS) == 0
 
-    time.sleep(1.1)
+    _next_second()
     _review(root, "NEEDS_CHANGES")
     _review(root, "NEEDS_CHANGES")
     assert A.rounds(root, REVIEWS) == 2

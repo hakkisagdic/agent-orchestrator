@@ -28,12 +28,19 @@ def _architect_wakes(world):
     return [argv for argv in world.spawned if isinstance(argv, list) and argv and argv[0].endswith("/claude")]
 
 
+def _next_second():
+    """Return once the clock is into a later second: a decision's id is the second it was asked in."""
+    later = int(time.time()) + 1
+    while time.time() < later:
+        time.sleep(0.01)
+
+
 def test_a_decision_open_fifteen_minutes_rings_a_person(project, monkeypatch):
     root = project["root"]
     rung = []
     monkeypatch.setattr(W, "notify", lambda title, msg, root=None, **kw: rung.append((title, msg, kw)))
     old = _asked(root, 20)
-    time.sleep(1.1)
+    _next_second()
     _asked(root, 5, "a fresh one")
 
     assert W.escalate_open_decisions(root, "proj") == [old]

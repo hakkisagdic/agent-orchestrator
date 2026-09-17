@@ -31,8 +31,9 @@ def test_every_shipped_adapter_passes_conformance_through_the_fixture_harness(tm
     assert kiro["send"] == "pass" and kiro["resume"] == "pass"
 
 
-def test_a_project_adapter_overrides_by_id_and_a_foreign_contract_is_refused(project, capsys):
+def test_a_project_adapter_overrides_by_id_and_a_foreign_contract_is_refused(project, monkeypatch, capsys):
     root = project["root"]
+    monkeypatch.setattr(A, "tool_availability", lambda ttl=600: {})   # no real keyflip: the listing asks it for accounts
     directory = os.path.join(root, ".ao", "adapters")
     os.makedirs(directory)
     kiro = json.load(open(os.path.join(A.adapters_dir(), "kiro.json"), encoding="utf-8"))

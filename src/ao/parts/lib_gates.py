@@ -26,6 +26,35 @@ def _native_executable(path):
     return any(head.startswith(magic) for magic in _NATIVE_MAGIC)
 
 
+def _xcrun_git(candidate):
+    """The git an xcrun stub runs, or None when `candidate` is not such a stub.
+
+    /usr/bin/git on macOS is a compiled stub: on every call it asks xcrun for the
+    selected developer directory and runs the git there, which costs more than
+    git's own start, and a hook or a gate makes hundreds of git calls. The stub is
+    told from a real git by the xcrun beside it, and `xcrun --find git` names the
+    binary it would run. That answer is taken only when it is itself a compiled
+    git, so it can never put a script in front of git.
+    """
+    if os.name == "nt":
+        return None
+    stub = os.path.realpath(candidate)
+    xcrun = os.path.join(os.path.dirname(stub), "xcrun")
+    if not (_native_executable(stub) and os.path.isfile(xcrun) and os.access(xcrun, os.X_OK)):
+        return None
+    try:
+        result = subprocess.run([xcrun, "--find", "git"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    found = result.stdout.decode(UTF8, "replace").strip()
+    if result.returncode == 0 and os.path.isabs(found) and os.path.basename(found) == "git" \
+            and os.path.isfile(found) and os.access(found, os.X_OK) \
+            and os.path.realpath(found) != stub and _native_executable(os.path.realpath(found)):
+        return found
+    return None
+
+
 def _find_git_binary():
     explicit = os.environ.get("AO_GIT")
     if explicit and os.path.isfile(explicit) and os.access(explicit, os.X_OK):
@@ -41,7 +70,7 @@ def _find_git_binary():
             candidate = os.path.join(directory, name)
             if os.path.isfile(candidate) and os.access(candidate, os.X_OK) \
                     and _native_executable(os.path.realpath(candidate)):
-                return candidate
+                return _xcrun_git(candidate) or candidate
     return "git"
 
 
@@ -53,9 +82,10 @@ def git_binary():
     itself, never from an agent's terminal, and it does not take a wrapper for git
     either: AO_GIT when that names an executable, otherwise the first git on PATH,
     then in the system directories, that is a compiled program rather than a
-    script in front of one; plain "git" only when there is none.
+    script in front of one; plain "git" only when there is none. When that git is
+    macOS's xcrun stub, the git xcrun names instead, asked once per process.
     """
-    key = (os.environ.get("AO_GIT"), os.environ.get("PATH", ""), os.name)
+    key = (os.environ.get("AO_GIT"), os.environ.get("PATH", ""), os.name, os.environ.get("DEVELOPER_DIR"))
     found = _GIT_BINARIES.get(key)
     if found is None or (found != "git" and not os.path.isfile(found)):
         found = _GIT_BINARIES[key] = _find_git_binary()
