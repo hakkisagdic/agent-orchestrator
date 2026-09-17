@@ -777,7 +777,7 @@ def waive(root, gate, slice_id, why, by, hours=WAIVER_HOURS_DEFAULT):
     record = {"event": "waived", "id": wid, "gate": gate, "slice": slice_id, "why": why,
               "by": by, "at": now, "expires": now + int(float(hours) * 3600),
               "user": user, "interactive": interactive,
-              "head": sh("git rev-parse HEAD", cwd=root), "tree": tree_digest(root)}
+              "head": _git_text(root, "rev-parse", "HEAD"), "tree": tree_digest(root)}
     return append_chained_jsonl(waivers_path(root), record, WAIVER_CHAIN, legacy_prefix=True)
 
 

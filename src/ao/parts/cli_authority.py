@@ -337,12 +337,12 @@ def cmd_verify(cfg, args):
            "tree": A.tree_digest(root, cfg),
            "review": revs[0][0] if revs else None,
            "review_verdict": revs[0][1] if revs else None,
-           "head": A.sh("git rev-parse --short HEAD", cwd=root),
+           "head": A._git_text(root, "rev-parse", "--short", "HEAD"),
            # Size by kind, never one number (#34).
            "candidate_size": _candidate_size_or_none(root, candidate_before),
            # Which git measured the candidate, and that no shell or agent stood between (#51).
            "measured_by": A.measured_by(),
-           "dirty": len([l for l in A.sh("git status --short", cwd=root).split("\n") if l.strip()])}
+           "dirty": len([l for l in A._git_text(root, "status", "--short").split("\n") if l.strip()])}
     try:
         A.record_verification(root, rec)
     except Exception as exc:

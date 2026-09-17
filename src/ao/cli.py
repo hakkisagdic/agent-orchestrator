@@ -210,7 +210,8 @@ def main():
     de.add_argument("-n", type=int, default=10)
     de.set_defaults(fn=cmd_decide)
     si = sub.add_parser("since", help="what changed since you last looked")
-    si.add_argument("ref", nargs="?", help="last | 2h | 1d | <git ref>")
+    si.add_argument("ref", nargs="?",
+                    help="last | 2h | 1d | <git ref>: one ref, given to git as a single argument, never an option")
     si.add_argument("--no-mark", action="store_true")
     si.set_defaults(fn=cmd_since)
     nt = sub.add_parser("note", help="write an architect message into the mailbox")

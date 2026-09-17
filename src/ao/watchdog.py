@@ -995,7 +995,7 @@ def open_work(cfg, root):
     if revs and revs[0][1] == "NEEDS_CHANGES":
         try:
             rev_at = os.path.getmtime(os.path.join(root, cfg["reviews"], revs[0][0]))
-            head_at = int(A.sh("git log -1 --format=%ct", cwd=root) or 0)
+            head_at = int(A._git_text(root, "log", "-1", "--format=%ct") or 0)
         except (OSError, ValueError):
             rev_at, head_at = 1, 0
         if rev_at > head_at:

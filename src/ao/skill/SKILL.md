@@ -253,7 +253,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao waive <gate> --slice S --why …` / `ao catchup` | a person's bypass on the record; catchup reviews the landed range and replays deferred work |
 | `ao pings setup --url …` / `ao hooks [status|install|uninstall] [--allow-shared-hooks]` / `ao push allow` | dead man's switch; static AO hook intent plus Git-executed, nonce-bound pre-commit proof; explicit authorization for shared/external/global mutation; human push window |
 | `ao cost [--since 24h]` | what the coordination spends: implementer turns by class, wasted turns, review counts |
-| `ao since last|2h|<ref>` | what happened since |
+| `ao since last|2h|<git ref>` | what happened since; the ref reaches git as one argument, never shell text |
 | `ao digest` | landed work, gates, reviews, decisions in one page |
 | `ao notices` / `ao prune` | alert history; trim records and logs |
 | `ao source list|status|import` | external queues (Linear, Jira) feeding the board |

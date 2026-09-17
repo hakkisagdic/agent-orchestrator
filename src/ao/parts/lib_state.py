@@ -723,8 +723,8 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
     # cwd and would otherwise read as a second turn. The watchdog knows its pid;
     # the detector should not have to guess.
     pids = [p for p in agent_pids(root, adapter) if p not in set(exclude_pids)]
-    dirty = len([l for l in sh("git status --porcelain", cwd=root).split("\n") if l.strip()])
-    head = sh("git rev-parse --short HEAD", cwd=root)
+    dirty = len([l for l in _git_text(root, "status", "--porcelain").split("\n") if l.strip()])
+    head = _git_text(root, "rev-parse", "--short", "HEAD")
 
     # What a finished turn left behind is not a turn. Orphans are cleared by the
     # watchdog before it counts; here they are simply not counted.

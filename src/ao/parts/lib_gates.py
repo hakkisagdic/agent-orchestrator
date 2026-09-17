@@ -503,10 +503,10 @@ def _git_output(root, *args, timeout=60):
 def _git_text(cwd, *args, timeout=20):
     """What `sh("git …", cwd=cwd)` returned, from the same git without a shell started in front of it.
 
-    A status read asked the shell for two of its git queries, and each paid for a shell
-    before git ran. The answer is unchanged: standard output decoded as UTF-8 with
-    replacement, newlines normalised and stripped, whatever a failing git printed there,
-    and "" when git cannot be started or runs past the timeout.
+    A status read and every watchdog cycle asked the shell for their git queries, and each
+    paid for a shell before git ran. The answer is unchanged: standard output decoded as
+    UTF-8 with replacement, newlines normalised and stripped, whatever a failing git
+    printed there, and "" when git cannot be started or runs past the timeout.
     """
     argv = [git_binary(), *args]
     try:

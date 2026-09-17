@@ -395,6 +395,16 @@ def _shell_word(word):
 
 
 def sh(cmd, cwd=None, timeout=20):
+    return _sh_run(cmd, cwd=cwd, timeout=timeout)[0]
+
+
+def _sh_run(cmd, cwd=None, timeout=20):
+    """sh()'s command and how it ended: (stripped standard output, exit status), or ("", None).
+
+    None when no shell could be started for it or it ran past its timeout. sh() returns the
+    output alone, and a caller that keeps what a command printed has to tell a command that
+    answered from one that failed.
+    """
     # cmd.exe has no /dev/null; it calls it NUL, and the command failed instead (#71).
     if os.name == "nt":
         cmd = cmd.replace("2>/dev/null", "2>NUL")
@@ -404,9 +414,9 @@ def sh(cmd, cwd=None, timeout=20):
     try:
         r = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True,
                            text=True, encoding=UTF8, errors="replace", timeout=timeout)
-        return r.stdout.strip()
+        return r.stdout.strip(), r.returncode
     except Exception:
-        return ""
+        return "", None
 
 
 _part("lib_transcript", globals())

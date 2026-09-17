@@ -55,6 +55,11 @@ $ keyflip usage --providers
 
 Never call this on every dashboard refresh. Cache for five minutes; quota windows move in
 hours, not seconds, and a slow subprocess in the render loop makes the panel feel broken.
+`ao` keeps a reading in `~/.ao/quota.json` under the command that took it, for the adapter's
+`cache_seconds`, so `ao status`, the live panel and every watchdog cycle inside that window read
+one answer instead of each starting the command again. A command that fails is not kept: the
+next read asks again. The command runs without a shell when its program is on ao's binary
+search path: PATH, then the directories tools are usually installed in.
 
 **3. Remaining balance — we do not guess it.**
 Plan balance is fetched by vendor UIs at render time and is not written to disk. Scraping

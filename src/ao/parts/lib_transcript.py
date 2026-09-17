@@ -567,21 +567,101 @@ def telemetry(recs, adapter):
     return out
 
 
-_QUOTA = {"at": 0.0, "lines": []}
+_QUOTA = {}                     # command -> {"at", "lines"}: the readings this process holds
+QUOTA_READINGS = 16             # how many commands ~/.ao/quota.json keeps a reading for, newest first
+# A word a POSIX shell passes on as it is written: nothing it would split, quote, expand or glob.
+_PLAIN_WORD = re.compile(r"[\w./:@%+,=-]+")
+
+
+def quota_readings_path():
+    return os.path.join(HOME, ".ao", "quota.json")
+
+
+def _quota_readings():
+    """{command: {"at", "lines"}} as ao's processes kept them; a file that cannot be read keeps none."""
+    try:
+        with open(quota_readings_path(), encoding=UTF8) as fh:
+            document = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(document, dict):
+        return {}
+    return {command: reading for command, reading in document.items()
+            if isinstance(reading, dict) and isinstance(reading.get("at"), (int, float))
+            and isinstance(reading.get("lines"), list) and all(isinstance(line, str) for line in reading["lines"])}
+
+
+def _quota_output(argv):
+    """(what `sh(" ".join(argv) + " 2>/dev/null", cwd=HOME)` returned, whether the command exited 0).
+
+    Without a shell when the program is on the binary search path and no word is one a
+    shell would change: run as the shell ran it, from the home directory, its standard
+    error discarded, the program named as written. Anything else - a word the shell would
+    split, quote or expand, a program found nowhere, and every command on Windows, whose
+    cmd.exe has rules of its own - goes through sh()'s shell as before.
+    """
+    program = argv[0]
+    plain = os.name != "nt" and all(_PLAIN_WORD.fullmatch(word) for word in argv) \
+        and "=" not in program and (os.path.isabs(program) or "/" not in program)
+    found = binary_candidates(program) if plain else []
+    if found:
+        try:
+            done = subprocess.run(list(argv), executable=found[0], cwd=HOME, stdout=subprocess.PIPE,
+                                  stderr=subprocess.DEVNULL, text=True, encoding=UTF8, errors="replace", timeout=20)
+            return done.stdout.strip(), done.returncode == 0
+        except OSError:
+            pass                # not started - a script with no #! line only a shell runs - so the shell runs it
+        except Exception:
+            return "", False
+    out, status = _sh_run(" ".join(argv) + " 2>/dev/null", cwd=HOME)
+    return out, status == 0
+
+
+def _quota_keep(command, lines):
+    """Keep one reading for this process and, the file replaced whole, for every other ao process."""
+    from .storage import replace_file_durably
+    reading = _QUOTA[command] = {"at": time.time(), "lines": lines}
+    readings = _quota_readings()
+    readings[command] = reading
+    newest = sorted(readings.items(), key=lambda item: item[1]["at"], reverse=True)[:QUOTA_READINGS]
+    try:
+        replace_file_durably(quota_readings_path(), (json.dumps(dict(newest), indent=1) + "\n").encode(UTF8))
+    except OSError:
+        pass                    # a reading that cannot be kept is still this call's answer
 
 
 def quota(adapter, ttl=300):
-    """Provider quota via the adapter's command, cached. Silent if absent."""
+    """Provider quota via the adapter's command, kept for its window across ao's processes. Silent if absent.
+
+    `ao status` and every watchdog cycle are processes of their own, so a reading held in
+    memory was taken again by each of them, through a shell, although the adapter declares
+    how long one lasts (`cache_seconds`). A reading is kept under its command in
+    ~/.ao/quota.json and read back while it is younger than that. Only a command that
+    exited 0 is kept: a failure is asked again next time, not served as no lines for the
+    whole window.
+    """
     spec = (adapter.get("telemetry") or {}).get("quota") or {}
     argv = spec.get("argv")
     if not argv:
         return []
-    if time.time() - _QUOTA["at"] < spec.get("cache_seconds", ttl):
-        return _QUOTA["lines"]
-    out = sh(" ".join(argv) + " 2>/dev/null", cwd=HOME)
+    command = " ".join(argv)
+    window = spec.get("cache_seconds", ttl)
+    now = time.time()
+
+    def fresh(reading):
+        return reading is not None and 0 <= now - reading["at"] < window
+
+    reading = _QUOTA.get(command)
+    if not fresh(reading):
+        reading = _quota_readings().get(command)
+    if fresh(reading):
+        _QUOTA[command] = reading
+        return reading["lines"]
+    out, ok = _quota_output(argv)
     lines = [l.strip() for l in out.split("\n")[1:]
              if l.strip() and "unknown" not in l]
-    _QUOTA.update(at=time.time(), lines=lines)
+    if ok:
+        _quota_keep(command, lines)
     return lines
 
 
@@ -862,7 +942,7 @@ def record_progress(root, cfg):
     # tells editing apart from a genuine stall. A long gate run writes nothing, so
     # it correctly stays frozen, and the minute threshold covers that case.
     rec = {"at": int(time.time()),
-           "head": sh("git rev-parse --short HEAD", cwd=root),
+           "head": _git_text(root, "rev-parse", "--short", "HEAD"),
            "dirty": len(porcelain), "churn": churn,
            "size": os.path.getsize(msgs) if msgs and os.path.exists(msgs) else 0}
     d = os.path.join(root, ".ao", "ledger")
@@ -1483,9 +1563,9 @@ def digest(root, cfg, since_days=1.0):
     log = git_text(root, "log", f"--since={int(since_days * 24)} hours ago", "--pretty=%h|%ct|%s")
     out["commits"] = [dict(zip(("sha", "at", "subject"), l.split("|", 2)))
                       for l in log.split("\n") if l.count("|") >= 2]
-    out["unpushed"] = int(sh("git rev-list --count @{u}..HEAD 2>/dev/null", cwd=root) or 0) \
-        if sh("git rev-parse --abbrev-ref @{u} 2>/dev/null", cwd=root) else \
-        len([l for l in (sh("git log --branches --not --remotes --pretty=%h", cwd=root) or "").split("\n") if l])
+    out["unpushed"] = int(_git_text(root, "rev-list", "--count", "@{u}..HEAD") or 0) \
+        if _git_text(root, "rev-parse", "--abbrev-ref", "@{u}") else \
+        len([l for l in _git_text(root, "log", "--branches", "--not", "--remotes", "--pretty=%h").split("\n") if l])
 
     def _window(rows):
         fresh = []
@@ -1623,7 +1703,7 @@ def work_fingerprint(root, cfg=None):
     """
     cfg = cfg if cfg is not None else load_config(root)
     lines, churn = _product_changes(root, cfg)
-    parts = [sh("git rev-parse --short HEAD", cwd=root) or "", "\n".join(lines), str(churn)]
+    parts = [_git_text(root, "rev-parse", "--short", "HEAD"), "\n".join(lines), str(churn)]
     # A review that did not take place is a file, not progress: an unavailable
     # reviewer written every turn reset the nudge backoff every turn (audit).
     not_reviews = set()

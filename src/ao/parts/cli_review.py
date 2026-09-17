@@ -1863,7 +1863,7 @@ def cmd_review(cfg, args):
             or "no reviewer"
         d = os.path.join(root, cfg["reviews"])
         os.makedirs(d, exist_ok=True)
-        head = A.sh("git rev-parse --short HEAD", cwd=root)
+        head = A._git_text(root, "rev-parse", "--short", "HEAD")
         name = A.review_artefact_name(root, cfg["reviews"], head)
         if strict:
             evidence["authorizable"] = False
@@ -1960,7 +1960,7 @@ def cmd_review(cfg, args):
         evidence["verdict"] = "INVALID"
         d = os.path.join(root, cfg["reviews"])
         os.makedirs(d, exist_ok=True)
-        head = A.sh("git rev-parse --short HEAD", cwd=root)
+        head = A._git_text(root, "rev-parse", "--short", "HEAD")
         name = A.review_artefact_name(root, cfg["reviews"], head)
         header = [
             f"# Review {name}",
@@ -2055,7 +2055,7 @@ def cmd_review(cfg, args):
 
     d = os.path.join(root, cfg["reviews"])
     os.makedirs(d, exist_ok=True)
-    head = A.sh("git rev-parse --short HEAD", cwd=root)
+    head = A._git_text(root, "rev-parse", "--short", "HEAD")
     name = A.review_artefact_name(root, cfg["reviews"], head)
     if strict:
         reviewer_identity = used["identity"]

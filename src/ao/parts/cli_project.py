@@ -721,7 +721,9 @@ def cmd_since(cfg, args):
         n, unit = float(ref[:-1]), ref[-1]
         cut = now - n * {"m": 60, "h": 3600, "d": 86400}[unit]
     else:
-        ts = A.sh(f"git log -1 --format=%ct {ref}", cwd=root)
+        # One ref, handed to git as one argument. Through a shell the ref was split and expanded, and
+        # `HEAD;touch x` ran touch; an option is no ref either (`--output=<file>` had git write a file).
+        ts = "" if ref.startswith("-") else A._git_text(root, "log", "-1", "--format=%ct", ref)
         if not ts.isdigit():
             print(f"{C['red']}not a duration (2h, 1d), a git ref, or 'last': {ref}{C['reset']}")
             return 1
