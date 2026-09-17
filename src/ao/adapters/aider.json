@@ -17,6 +17,12 @@
     "effort_values": ["low", "medium", "high"],
     "thinking_tokens": ["--thinking-tokens", "{tokens}"],
     "trust_all": ["--yes-always"],
+    "unattended": [],
+    "unattended_note": "Nothing is appended: resume already carries --yes-always.",
+    "bypass": {
+      "--yes-always": { "roles": ["implementer", "architect"],
+        "why": "Kept in every command because it is narrower than leaving it out. aider has no permission rules: --yes-always answers yes to its edit and file confirmations and no to running a shell command the model suggests (aider/io.py answers n to a question that needs an explicit yes), while a run without it takes each question's default from a closed stdin, yes to shell commands included. Read on 2026-09-17 from aider.chat/docs/config/options.html and github.com/Aider-AI/aider (aider/io.py)." }
+    },
     "no_auto_commit": ["--no-auto-commits"]
   },
   "transcript": { "kind": "markdown", "path": "{cwd}/.aider.chat.history.md", "record": "markdown sections per exchange" },

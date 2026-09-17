@@ -34,7 +34,53 @@ ao role set reviewer kiro --model <model> --effort high
 `trust_none` - so a pair of harnesses is chosen by naming two adapters and a model each, not by
 writing argv by hand. A hand-written reviewer argv still works and stays the exception.
 `ao adapters` shows which adapters may review, and `ao doctor` reports a configured reviewer
-whose adapter cannot deny tools.
+whose adapter cannot deny tools. Whatever composed a route, it runs with the flags its adapter pins
+for a reviewer (below): `claude-code`'s `trust_none` carries `--tools Read,Grep,Glob` and
+`--permission-mode dontAsk`, so no setting of the person's widens it.
+
+## A turn's grant is declared, and so is every flag that turns approvals off
+
+A turn nobody attends cannot answer a permission prompt, so what it may do is settled when ao starts
+it, and an adapter declares it in `options`:
+
+| Field | What it declares | Used by |
+|---|---|---|
+| `pin` | `{implementer, architect, reviewer: [flags]}`: what every turn ao starts in that role carries, the bug hunter's as a reviewer's, whatever a person's settings default to; appended when a configured command names none of it | the watchdog's nudges, wakes and refills, `ao review`, `ao hunt`, `ao doctor` |
+| `implementer_tools`, `architect_tools` | each role's allowlist in the harness's own rule syntax, spelled through `allowed_tools`; `ao init` composes the architect's wake from `resume` with its grant in place of the implementer's | `ao init`, `ao doctor` |
+| `unattended` | the narrower grant a harness documents for a turn nobody can approve, appended to an implementer's nudge whose `resume` carries no allowlist, in place of `trust_all` | the watchdog, `ao doctor` |
+| `bypass` | `{argument: {roles, why, sandbox}}`: each flag in a command ao starts that approves everything, sandboxes nothing or checks no permission, the roles whose command carries it, why it stays, and whether it also turns off a sandbox the harness runs in by default | `ao adapters validate`, the watchdog, `ao doctor` |
+
+`ao adapters validate` refuses an adapter whose implementer nudge, architect wake or reviewer route
+carries such a flag - a yolo or `--dangerously-` flag, a trust or allow of every tool, a standing yes,
+a forced or automatic run, a mode of full access - with no reason for that role, or keeps a reason no
+command needs. A flag declared `sandbox` starts a turn only for an adapter a person names in
+`watchdog.bypass_adapters` on the machine ([safety.md](safety.md#5-trust-flags-are-a-decision-not-a-default)).
+`tests/test_grants_pinned.py` holds every shipped adapter to this, and holds each grant to the `ao`
+commands and ao MCP tools its role's playbook sections and prompts name.
+
+`claude-code` pins `--permission-mode dontAsk` for every role and `--tools Read,Grep,Glob` for a
+reviewer. The flags the other shipped adapters' commands carry, from each harness's documentation read
+on 2026-09-17, and the reason in full in each adapter:
+
+| Adapter | Role | Flag | Decision |
+|---|---|---|---|
+| `aider` | implementer, architect | `--yes-always` | kept: narrower than none, since it answers no to a shell command the model suggests and a closed stdin answers yes |
+| `amazon-q` | implementer | `--trust-all-tools` | kept: a command allowlist lives only in an agent file ao does not write |
+| `amp` | implementer | `--dangerously-allow-all` | kept: Amp asks nothing by default, so leaving it out narrows nothing |
+| `antigravity` | implementer | `--dangerously-skip-permissions` | kept: allowing a command takes the person's own settings file |
+| `codex` | implementer | `--dangerously-bypass-approvals-and-sandbox` | refused until a person allows it: the sandbox that replaces it keeps `.git` read-only and the network off |
+| `command-code` | implementer | `--yolo` | kept: allow rules live only in settings files |
+| `copilot` | implementer | `--allow-all-tools` | kept: the narrowest grant documented for ao admits `ao lock -- <command>` |
+| `cursor-agent` | implementer, architect | `-f` | kept: print mode applies no change without it, and its allow rules live in files |
+| `droid` | implementer | `--auto medium` | in place of `--skip-permissions-unsafe`: edits, builds, tests and local commits, and a stop at anything riskier |
+| `gemini` | implementer | `--yolo` | kept: a shell allowlist takes a policy file or a deprecated flag |
+| `hermes` | implementer | none | in place of `--yolo`: a resumed single-query turn refuses a dangerous command by itself |
+| `kilocode` | implementer | `--auto` | kept: narrowing takes a permission block in a configuration file |
+| `kiro` | implementer | `--trust-all-tools` | kept: `--trust-tools` narrows by tool, not by command, and a command allowlist takes an agent file |
+| `omp` | implementer | `--approval-mode yolo` | kept: yolo is omp's default |
+| `qoder` | implementer | `--permission-mode accept_edits`, `--allowed-tools` | in place of `--yolo`: each command of the implementer's loop, named |
+| `qwen` | implementer | `--approval-mode auto-edit`, `--allowed-tools` | in place of `--yolo`: each command of the implementer's loop, named |
+| `reasonix` | implementer | `--permission-mode=workspace-write` | in place of `danger-full-access`: its own sandbox stays on |
 
 ## A reviewer can be a tool ao runs
 
@@ -202,8 +248,8 @@ was read through ([telemetry.md](telemetry.md), "Whose account").
 `ao init --profile` offers the presets in [`adapters/profiles.json`](../src/ao/adapters/profiles.json):
 which adapter holds each role. The blocks are composed from those adapters (#76) — the implementer's
 name from `actor_name`, the reviewer's argv from `send`, `models.review` and `options.trust_none`
-with its `family`, the architect's from `resume` with `options.allowed_tools` narrowed to what an
-architect runs. An implementer with no `implementer.name` is named by its adapter's `actor_name`,
+with its `family`, the architect's from `resume` with the grant `options.allowed_tools` spells
+replaced by `options.architect_tools`. An implementer with no `implementer.name` is named by its adapter's `actor_name`,
 and a project with no implementer block by the default profile's, so its mail keeps the names it
 was written under.
 

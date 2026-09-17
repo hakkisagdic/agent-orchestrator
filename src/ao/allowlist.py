@@ -7,6 +7,7 @@ command can be written as a script. So each rule is asked what it would admit,
 command by command, instead of being read for its intent.
 """
 import os
+import re
 
 # (why no actor ao runs may be granted it, the command)
 FORBIDDEN = (
@@ -44,24 +45,45 @@ IMPLEMENTER_FORBIDDEN = (
     ("changes the settings that govern its own review", "ao config set review_timeout 1"),
 )
 
+# The architect decides and edits ao's coordination files; a wake writes no product code
+# (GRANTS-PINNED). A rule admitting one of these hands it a write its playbook never asks for.
+ARCHITECT_FORBIDDEN = (
+    ("removes a product file", "rm agent-mail/x src/app.py"),
+    ("writes a product file", "git diff --output=src/app.py"),
+    ("writes a product file", "git log --output=src/app.py"),
+    ("writes a product file", "git show --output=src/app.py"),
+    ("writes a product file", "cp agent-mail/x src/app.py"),
+    ("writes a product file", "mv agent-mail/x src/app.py"),
+    ("writes a product file", "tee src/app.py"),
+)
+
 # Flags with which a harness grants every tool at once.
 GRANT_ALL = ("--dangerously-skip-permissions", "--trust-all-tools", "--yolo", "--full-auto",
              "--dangerously-bypass-approvals-and-sandbox")
-SCOPE_FLAGS = ("--allowedTools", "--allowed-tools", "--trust-tools")
 
 
 def admits(rule, command):
-    """Would this one Claude Code permission rule let `command` run?"""
+    """Would this one Claude Code permission rule let `command` run?
+
+    A `*` stands for any text, spaces included, wherever it is in the rule, and a trailing
+    `:*` is written the same as a trailing ` *`, which also admits the bare command
+    (code.claude.com/docs/en/permissions, "Wildcard patterns", read 2026-09-17). Read as a
+    prefix only, `Bash(rm agent-mail/*)` looked like one directory's files and admits
+    `rm agent-mail/x src/app.py`.
+    """
     rule = str(rule).strip()
-    if rule == "Bash":
+    if rule in ("Bash", "Bash(*)"):
         return True
     if not (rule.startswith("Bash(") and rule.endswith(")")):
         return False
     body = rule[len("Bash("):-1]
     if body.endswith(":*"):
-        prefix = body[:-2]
-        return command == prefix or command.startswith(prefix + " ")
-    return command == body
+        body = body[:-2] + " *"
+    if "*" not in body:
+        return command == body
+    if body.endswith(" *") and body.count("*") == 1 and command == body[:-2]:
+        return True
+    return re.fullmatch(".*".join(re.escape(part) for part in body.split("*")), command, re.S) is not None
 
 
 def rules(argv):
@@ -79,27 +101,36 @@ def rules(argv):
 def grants_everything(argv, options=None):
     """Does this argv, as ao would run it, grant every tool?
 
-    The watchdog appends an adapter's trust_all when the argv carries no scope of
-    its own, so an unscoped argv from such an adapter grants everything too.
+    The watchdog starts an argv that carries no scope of its own with what its adapter
+    declares for a turn nobody attends (`options.unattended`) or, where it declares none,
+    its trust_all: such a harness has no allowlist, and grants every tool either way unless
+    what is appended scopes it.
     """
+    from . import lib as A
     args = [str(arg) for arg in argv]
     if any(arg in GRANT_ALL for arg in args):
         return True
-    scoped = any(arg in SCOPE_FLAGS or arg.startswith(tuple(flag + "=" for flag in SCOPE_FLAGS))
-                 for arg in args)
-    return not scoped and "trust_all" in (options or {})
+    if A.carries_scope(args):
+        return False
+    options = options or {}
+    if isinstance(options.get("unattended"), list):
+        return not A.carries_scope(options["unattended"])
+    return "trust_all" in options
 
 
 def problems(argv, options=None, role=None):
     """(reason, command, rule) for everything this grant admits that it must not.
 
-    A grant of every tool is one finding with command and rule '*'.
+    A grant of every tool is one finding with command and rule '*'. The rules are the
+    argv's own and those its adapter's `options.unattended` appends.
     """
+    from . import lib as A
     if grants_everything(argv, options):
         return [("grants every tool", "*", "*")]
-    granted = rules(argv)
+    granted = rules(list(argv) + A.unattended_flags({"options": options or {}}, argv)[0])
     found = []
-    for reason, command in FORBIDDEN + (IMPLEMENTER_FORBIDDEN if role == "implementer" else ()):
+    for reason, command in FORBIDDEN + (IMPLEMENTER_FORBIDDEN if role == "implementer" else ()) \
+            + (ARCHITECT_FORBIDDEN if role == "architect" else ()):
         rule = next((r for r in granted if admits(r, command)), None)
         if rule:
             found.append((reason, command, rule))
@@ -130,8 +161,9 @@ def reviewer_problems(argv):
     if extra:
         found.append("its allowed tools go beyond reading: " + ", ".join(extra))
     # Which harness starts MCP servers unless told not to, and with which flags, is its
-    # adapter's to declare (`options.mcp_isolation`, #76).
+    # adapter's to declare (`options.mcp_isolation`, #76); so is the mode it runs in (GRANTS-PINNED).
     from . import lib as A
+    found.extend(A.pin_conflicts(args, "reviewer"))
     program = os.path.basename(args[0]).lower().split(".")[0]
     for adapter in A.package_adapters().values():
         if program not in A.adapter_binaries(adapter):

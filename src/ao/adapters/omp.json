@@ -20,7 +20,11 @@
     "effort": ["--thinking", "{effort}"],
     "effort_values": ["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto"],
     "output_json": ["--mode", "json"],
-    "trust_all": ["--approval-mode", "yolo"]
+    "trust_all": ["--approval-mode", "yolo"],
+    "bypass": {
+      "--approval-mode yolo": { "roles": ["implementer"],
+        "why": "Kept, and leaving it out narrows nothing: yolo is omp's default approval mode. --approval-mode write approves reads and edits and fails every shell command no one can approve, so an implementer could run none of its gates without bash.patterns allow rules in a configuration overlay ao does not write. Read on 2026-09-17 from github.com/can1357/oh-my-pi (docs/approval-mode.md, docs/cli-reference.md, src/extensibility/extensions/wrapper.ts)." }
+    }
   },
   "transcript": { "kind": "jsonl", "path": "~/.omp/agent/sessions/{encoded_cwd}/*_{session}.jsonl", "todo": "confirm the cwd encoding and the record shape against an install" },
   "busy": { "mtime_glob": "~/.omp/agent/sessions/*/*.jsonl", "idle_seconds": 240 },

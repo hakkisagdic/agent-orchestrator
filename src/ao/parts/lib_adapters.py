@@ -463,6 +463,233 @@ def compose_reviewer(adapter_id, model=None, effort=None, root=None, family=None
     return route
 
 
+# ---- a turn holds the grant ao composes, never a person's default or an unnamed bypass (GRANTS-PINNED) ----
+
+# An argv that carries one of these carries a tool scope of its own, and ao appends no grant to it (#58, #69).
+SCOPE_FLAGS = ("--allowedTools", "--allowed-tools", "--trust-tools", "--trust-all-tools")
+# Spellings with which a harness approves everything, sandboxes nothing or checks no permission: a yolo or a
+# "dangerously" flag, a trust or an allow of every tool, a standing yes, a forced or automatic run, a mode of
+# full access. Each one a command ao starts carries is declared, with why, in its adapter's `options.bypass`.
+BYPASS_FLAG = re.compile(r"--?(yolo|dangerously(-[a-z]+)+|(trust|allow)-all(-[a-z]+)*|yes(-always)?|y|full-auto|"
+                         r"skip-permissions(-[a-z]+)*|auto(-approve)?|force|f|no-sandbox|not-so-yolo|approve-for-me)",
+                         re.I)
+BYPASS_VALUE = re.compile(r"yolo|bypass[-_]?permissions|danger-full-access|full-access|always-proceed|unrestricted",
+                          re.I)
+
+
+def carries_scope(argv):
+    """Whether an argv grants its tools through an allowlist or a trust flag of its own."""
+    return any(str(arg) in SCOPE_FLAGS or str(arg).startswith(tuple(flag + "=" for flag in SCOPE_FLAGS))
+               for arg in argv or [])
+
+
+def _holds(argv, run):
+    """Whether a run of arguments occurs in argv."""
+    args, run = [str(arg) for arg in argv or []], [str(part) for part in run or []]
+    return bool(run) and any(args[at:at + len(run)] == run for at in range(len(args) - len(run) + 1))
+
+
+def unattended_flags(adapter, argv):
+    """(flags, why) ao appends to an implementer turn nobody attends, started from `argv`; ([], None) for none (#69).
+
+    An argv that carries a tool scope of its own is left as it is: a grant of every tool on
+    top of an allowlist silently overrides the narrower grant. Otherwise the adapter's
+    `options.unattended`, the narrower grant its documentation gives a turn nobody can
+    approve, and where it declares none its `trust_all`.
+    """
+    options = (adapter or {}).get("options") or {}
+    if carries_scope(argv):
+        return [], None
+    if isinstance(options.get("unattended"), list):
+        flags = [str(flag) for flag in options["unattended"]]
+        return flags, ("the adapter declares the grant of a turn nobody attends (options.unattended)" if flags else None)
+    if options.get("trust_all"):
+        return ([str(flag) for flag in options["trust_all"]],
+                "the adapter's resume argv carries no tool scope, so ao appends its trust_all")
+    return [], None
+
+
+def _flag_pairs(parts):
+    """[(flag, value or None)] of an argv fragment: each flag, with the word after it when that is no flag."""
+    parts = [str(part) for part in parts or []]
+    return [(part, parts[at + 1] if at + 1 < len(parts) and not parts[at + 1].startswith("-") else None)
+            for at, part in enumerate(parts) if part.startswith("-")]
+
+
+def _named(argv, flag):
+    """(named, value): whether an argv carries `flag` - alone, before its value, or as flag=value - and the value."""
+    args = [str(arg) for arg in argv or []]
+    for at, arg in enumerate(args):
+        if arg == flag:
+            return True, args[at + 1] if at + 1 < len(args) and not args[at + 1].startswith("-") else None
+        if arg.startswith(flag + "="):
+            return True, arg.split("=", 1)[1]
+    return False, None
+
+
+def command_adapter(argv):
+    """The adapter ao ships whose command an argv runs, when exactly one runs it; else None.
+
+    Read from the package's adapters alone: a layer an agent can write must not choose the
+    arguments its own turn, or its reviewer's, starts with.
+    """
+    if not argv or not isinstance(argv[0], str):
+        return None
+    program = _program_name(argv[0])
+    found = [adapter for ident, adapter in sorted(package_adapters().items())
+             if program in {_program_name(name) for name in [ident, *adapter_binaries(adapter)] if name}]
+    return found[0] if len(found) == 1 else None
+
+
+def role_pin(argv, role, adapter=None):
+    """[(flag, value)] an adapter pins on every turn ao starts in `role` (`options.pin`); a hunter holds the reviewer's."""
+    adapter = command_adapter(argv) if adapter is None else adapter
+    declared = ((adapter or {}).get("options") or {}).get("pin")
+    pin = declared.get(role) if isinstance(declared, dict) else None
+    return _flag_pairs(pin) if isinstance(pin, list) else []
+
+
+def pinned_argv(argv, role, adapter=None):
+    """(argv, added): `argv` with each flag its adapter pins for `role` that it does not name, appended (GRANTS-PINNED).
+
+    A harness that takes its permission mode from a person's settings when a command names
+    none lets a default there widen every turn ao starts. A command composed before the pin,
+    or written by hand, gets it when its turn starts. One that names the flag keeps its own
+    value, which `pin_conflicts` reports; one that grants every tool is reported as that and
+    left as it is.
+    """
+    argv = list(argv or [])
+    adapter = command_adapter(argv) if adapter is None else adapter
+    trust_all = ((adapter or {}).get("options") or {}).get("trust_all") or []
+    if not adapter or _holds(argv, trust_all):
+        return argv, []
+    added = []
+    for flag, value in role_pin(argv, role, adapter):
+        if not _named(argv + added, flag)[0]:
+            added += [flag] + ([value] if value is not None else [])
+    return argv + added, added
+
+
+def pin_conflicts(argv, role, adapter=None):
+    """What an argv sets otherwise than its adapter pins for `role`, as phrases; empty when it holds the pin (GRANTS-PINNED).
+
+    A comma-separated list that names no more than the pinned list is narrower, and no conflict.
+    """
+    out = []
+    for flag, value in role_pin(argv, role, adapter):
+        named, given = _named(argv, flag)
+        if not named or value is None or given == value:
+            continue
+        if given is not None and "," in value and set(filter(None, given.split(","))) <= set(value.split(",")):
+            continue
+        out.append(f"it runs with {flag} {given if given is not None else '(no value)'}, where ao pins {value}")
+    return out
+
+
+def bypass_arguments(argv):
+    """The arguments of an argv that approve everything, sandbox nothing or check no permission, as
+    `options.bypass` names them: the argument itself, or a flag and the value after it."""
+    args = [str(arg) for arg in argv or []]
+    found = []
+    for at, arg in enumerate(args):
+        flag, equals, value = arg.partition("=")
+        if not flag.startswith("-"):
+            continue
+        if BYPASS_FLAG.fullmatch(flag) or (equals and BYPASS_VALUE.fullmatch(value)):
+            found.append(arg)
+        elif not equals and at + 1 < len(args) and BYPASS_VALUE.fullmatch(args[at + 1]):
+            found.append(f"{arg} {args[at + 1]}")
+    return found
+
+
+def role_commands(adapter):
+    """{role: argv} for each role ao starts from an adapter's own declarations, as it starts them (GRANTS-PINNED).
+
+    The implementer's nudge is its resume with what ao appends to a turn nobody attends; the
+    architect's wake is its resume, whose tool grant ao replaces with the architect's own; a
+    reviewer route is its send with trust_none, where the adapter may review. Each carries its pin.
+    """
+    adapter = adapter or {}
+    options = adapter.get("options") or {}
+    commands = {}
+    resume = (adapter.get("resume") or {}).get("argv") if isinstance(adapter.get("resume"), dict) else None
+    if isinstance(resume, list) and resume:
+        commands["implementer"] = pinned_argv(list(resume) + unattended_flags(adapter, resume)[0], "implementer",
+                                              adapter)[0]
+        commands["architect"] = pinned_argv(list(resume), "architect", adapter)[0]
+    send = (adapter.get("send") or {}).get("argv") if isinstance(adapter.get("send"), dict) else None
+    if isinstance(send, list) and send and reviewer_eligibility(adapter)[0]:
+        denied = [] if tool_review_contract(adapter) is not None else list(options.get("trust_none") or [])
+        commands["reviewer"] = pinned_argv(list(send) + denied, "reviewer", adapter)[0]
+    return commands
+
+
+def declared_bypass(adapter):
+    """{argument: {roles, why, sandbox}} an adapter declares in `options.bypass`, the well-formed entries only."""
+    declared = ((adapter or {}).get("options") or {}).get("bypass")
+    return {str(argument): entry for argument, entry in declared.items() if isinstance(entry, dict)} \
+        if isinstance(declared, dict) else {}
+
+
+def bypass_problems(adapter):
+    """Each argument that approves everything, sandboxes nothing or checks no permission in a command ao starts
+    from an adapter with no reason in `options.bypass` for that role, and each reason no command needs (GRANTS-PINNED).
+
+    A new flag of that kind is refused until someone writes down why it is there, and a reason
+    outlives no flag.
+    """
+    options = (adapter or {}).get("options") or {}
+    if options.get("bypass") is not None and not isinstance(options["bypass"], dict):
+        return ["`options.bypass` must be an object: each argument, the roles whose command carries it, and why"]
+    declared = declared_bypass(adapter)
+    carried = {}
+    for role, argv in role_commands(adapter).items():
+        for argument in bypass_arguments(argv):
+            carried.setdefault(argument, set()).add(role)
+
+    def commands(roles):
+        return f"the {' and the '.join(roles)} command" + ("s" if len(roles) > 1 else "")
+
+    problems = []
+    for argument, roles in sorted(carried.items()):
+        entry = declared.get(argument) or {}
+        unexplained = sorted(roles if not str(entry.get("why") or "").strip()
+                             else roles - set(entry.get("roles") or []))
+        if unexplained:
+            problems.append(f"{commands(unexplained)} {'carry' if len(unexplained) > 1 else 'carries'} `{argument}`, "
+                            "and `options.bypass` gives no reason for it there")
+    for argument, entry in sorted(declared.items()):
+        stale = sorted(set(entry.get("roles") or []) - carried.get(argument, set()))
+        if stale:
+            problems.append(f"`options.bypass` gives a reason for `{argument}` in {commands(stale)}, which "
+                            f"{'do' if len(stale) > 1 else 'does'} not carry it")
+    return problems
+
+
+def sandbox_bypass(adapter, flags):
+    """The arguments among `flags` that turn off the sandbox a harness runs in by default (`options.bypass` →
+    `sandbox`), as a shipped adapter or this one declares them: a layer an agent can write cannot take one away."""
+    sandboxed = {argument for source in [*package_adapters().values(), adapter]
+                 for argument, entry in declared_bypass(source).items() if entry.get("sandbox")}
+    return [argument for argument in bypass_arguments(flags) if argument in sandboxed]
+
+
+def bypass_refusal(adapter, flags, cfg=None):
+    """Why an unattended turn may not start with these flags, or None (GRANTS-PINNED).
+
+    A flag that turns off the sandbox its harness runs in by default starts a turn only for
+    an adapter a person named in `watchdog.bypass_adapters`. That is a machine setting: a
+    project's own files are writable by the agents it governs.
+    """
+    ident = str((adapter or {}).get("id") or "")
+    found = sandbox_bypass(adapter, flags)
+    if not found or ident in settings.get(cfg, "watchdog.bypass_adapters"):
+        return None
+    return (f"its unattended turn would run with {found[0]}, which turns off {ident}'s sandbox and its approvals, "
+            f"and no person has allowed that on this machine (ao config set watchdog.bypass_adapters {ident} "
+            "--machine)")
+
+
 # ---- a reviewer can be a tool ao runs over the candidate, on its own provider (#86) -------
 
 TOOL_REVIEW_PLACEHOLDERS = ("prompt", "diff_file", "output", "model", "timeout")
@@ -573,7 +800,8 @@ def validate_adapter(adapter):
         unknown = sorted({p for a in argv for p in re.findall(r"\{([a-z_]+)\}", a)} - set(ADAPTER_PLACEHOLDERS))
         if unknown:
             problems.append(f"`{capability}.argv` uses placeholders ao does not fill: {', '.join(unknown)}")
-    return problems + prompt_channel_problems(adapter) + tool_review_problems(adapter) + subagent_problems(adapter)
+    return (problems + prompt_channel_problems(adapter) + tool_review_problems(adapter) + subagent_problems(adapter)
+            + bypass_problems(adapter))
 
 
 def conform_adapter(adapter, harness, workdir):

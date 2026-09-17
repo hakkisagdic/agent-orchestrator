@@ -22,21 +22,32 @@
       "{session}",
       "-p",
       "{prompt}",
+      "--permission-mode",
+      "dontAsk",
       "--allowedTools",
-      "Read,Grep,Glob,Write,Edit,Bash(ao status:*),Bash(ao board:*),Bash(ao verify:*),Bash(ao review:*),Bash(ao commit-ok:*),Bash(ao commit -m:*),Bash(ao commit -F:*),Bash(ao mail:*),Bash(ao ask:*),Bash(ao tail:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(ls:*),Bash(cat:*),Bash(grep:*)"
+      "Read,Grep,Glob,Write,Edit,mcp__ao__ao_inbox,mcp__ao__ao_ack,mcp__ao__ao_report,mcp__ao__ao_ask,mcp__ao__ao_decisions,mcp__ao__ao_status,mcp__ao__ao_board,mcp__ao__ao_notices,mcp__ao__ao_fanout,mcp__ao__ao_watchdog,Bash(ao status:*),Bash(ao board:*),Bash(ao writers),Bash(ao verify:*),Bash(ao review:*),Bash(ao commit-ok:*),Bash(ao commit -m:*),Bash(ao commit -F:*),Bash(ao mail:*),Bash(ao ask:*),Bash(ao decisions:*),Bash(ao doctor),Bash(ao watchdog explain:*),Bash(ao since:*),Bash(ao digest:*),Bash(ao fanout ok:*),Bash(ao fanout record:*),Bash(ao tail:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(ls:*),Bash(cat:*),Bash(grep:*)"
     ],
     "continue_last": [
       "claude",
       "--continue",
       "-p",
-      "{prompt}"
+      "{prompt}",
+      "--permission-mode",
+      "dontAsk"
     ],
     "stdin": { "replaces": ["{prompt}"], "with": [],
                "note": "Verified as for send: -p with --resume is the non-interactive mode the headless documentation says reads stdin." },
-    "note": "Scoped rather than --dangerously-skip-permissions. The implementer is trusted with the tree — it must write code and run gates — but not with push, gh, or arbitrary shell; authority is withheld by ao, and the allowlist keeps the blast radius to the repo."
+    "note": "Scoped rather than --dangerously-skip-permissions. The implementer is trusted with the tree — it must write code and run gates — but not with push, gh, or arbitrary shell; authority is withheld by ao, and the allowlist keeps the blast radius to the repo. The grant names every ao command and ao MCP tool the playbook's loop and the nudge tell the implementer to use (tests/test_grants_pinned.py), except `ao lock`, which runs any command: declared gates take the same lock through `ao verify`. The mode is pinned, as options.pin says: a -p run given no --permission-mode starts in permissions.defaultMode from the person's settings, and `claude -p --resume` in the mode a new -p run would, so an acceptEdits, auto or bypassPermissions default widened every nudge (code.claude.com/docs/en/permission-modes, 'Which mode a session starts in', and /docs/en/sessions, 'Permission mode on resume', read 2026-09-17)."
   },
   "options": {
-    "trust_none": ["--allowedTools", "Read,Grep,Glob", "--strict-mcp-config"],
+    "trust_none": ["--tools", "Read,Grep,Glob", "--permission-mode", "dontAsk", "--allowedTools", "Read,Grep,Glob", "--strict-mcp-config"],
+    "trust_none_note": "Only reading, whatever the person's settings hold: --tools leaves Read, Grep and Glob the only tools there are, so no allow rule in a settings file can hand a reviewer Edit or Bash; --allowedTools lets them read outside the reviewer's own directory; dontAsk denies anything else rather than asking; --strict-mcp-config starts no MCP server (#24).",
+    "pin": {
+      "implementer": ["--permission-mode", "dontAsk"],
+      "architect": ["--permission-mode", "dontAsk"],
+      "reviewer": ["--permission-mode", "dontAsk", "--tools", "Read,Grep,Glob"],
+      "note": "What a turn ao starts in each role carries, the bug hunter's as a reviewer's; a configured command that names none of it (a block composed before it was pinned) has it appended when the turn starts. Verified from code.claude.com/docs/en/cli-reference, read 2026-09-17: --permission-mode overrides defaultMode from settings files and takes default, acceptEdits, plan, auto, dontAsk or bypassPermissions (manual for default from 2.1.200); --tools restricts which tools are available at all, from 2.1.247. From /docs/en/permission-modes and /docs/en/headless: dontAsk, the mode given for locked-down scripts, denies every call that would otherwise prompt and still runs reads, the read-only command set and allow rules, including a person's own in their settings; deny rules hold in every mode; plan is no reviewer's mode, since where auto mode is available the classifier approves shell commands during planning. The Agent SDK passes --tools comma-joined, as --allowedTools (github.com/anthropics/claude-agent-sdk-python, _internal/transport/subprocess_cli.py)."
+    },
     "mcp_isolation": { "required": ["--strict-mcp-config"], "forbidden": ["--mcp-config"],
                        "why": "an allow list gates permissions, not which MCP servers start (#24)" },
     "model": [
@@ -54,7 +65,9 @@
     "trust_all": [
       "--dangerously-skip-permissions"
     ],
-    "implementer_tools": "Read,Grep,Glob,Write,Edit,Bash(ao status:*),Bash(ao board:*),Bash(ao verify:*),Bash(ao review:*),Bash(ao commit-ok:*),Bash(ao commit -m:*),Bash(ao commit -F:*),Bash(ao mail:*),Bash(ao ask:*),Bash(ao tail:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(ls:*),Bash(cat:*),Bash(grep:*)"
+    "implementer_tools": "Read,Grep,Glob,Write,Edit,mcp__ao__ao_inbox,mcp__ao__ao_ack,mcp__ao__ao_report,mcp__ao__ao_ask,mcp__ao__ao_decisions,mcp__ao__ao_status,mcp__ao__ao_board,mcp__ao__ao_notices,mcp__ao__ao_fanout,mcp__ao__ao_watchdog,Bash(ao status:*),Bash(ao board:*),Bash(ao writers),Bash(ao verify:*),Bash(ao review:*),Bash(ao commit-ok:*),Bash(ao commit -m:*),Bash(ao commit -F:*),Bash(ao mail:*),Bash(ao ask:*),Bash(ao decisions:*),Bash(ao doctor),Bash(ao watchdog explain:*),Bash(ao since:*),Bash(ao digest:*),Bash(ao fanout ok:*),Bash(ao fanout record:*),Bash(ao tail:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(ls:*),Bash(cat:*),Bash(grep:*)",
+    "architect_tools": "Read,Grep,Glob,Edit(/.ao/backlog.md),Edit(/.ao/board.md),Edit(/.ao/inbox/**),Bash(ao status:*),Bash(ao board:*),Bash(ao mail:*),Bash(ao decide:*),Bash(ao decisions:*),Bash(ao note:*),Bash(ao answer:*),Bash(ao source import),Bash(ao review:*),Bash(ao catchup),Bash(ao catchup --plan),Bash(ao doctor),Bash(ao doctor --check),Bash(ao writers),Bash(ao since:*),Bash(ao digest:*),Bash(ao notices:*),Bash(ao alarms),Bash(ao alarms list:*),Bash(ao cost:*),Bash(ao credits:*),Bash(ao tail:*),Bash(ao watchdog status:*),Bash(ao watchdog explain:*),Bash(ao watchdog trace:*),Bash(git status:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(grep:*),Bash(ps:*),Bash(lsof:*)",
+    "architect_tools_note": "The architect's wake: `ao init` composes it from resume with this grant in place of the implementer's. It reads, edits the three coordination files a wake writes and nothing else, and runs the ao commands the playbook's routine and the wake and refill prompts name, with the read-only instruments. A rule given on the command line as Edit(/path) is anchored at the working directory, and an Edit rule covers every built-in tool that edits, Write included (code.claude.com/docs/en/permissions, 'Read and Edit', read 2026-09-17). No rule admits a write elsewhere: a * stands for any text, spaces included, so `Bash(rm agent-mail/*)` admitted `rm agent-mail/x src/app.py`, and git log, diff and show take --output=<file>; `ao mail ack` removes handled mail, and the read-only forms of git run with no rule in every mode."
   },
   "transcript": {
     "kind": "jsonl",

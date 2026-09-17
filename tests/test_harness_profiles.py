@@ -18,8 +18,9 @@ def test_a_profile_composes_its_blocks_from_the_adapters_it_names(project):
     review_model = A.load_adapter(roles["reviewer"])["models"]["review"]
     assert cfg["reviewer"]["argv"] == A.compose_reviewer(roles["reviewer"], model=review_model)["argv"]
     assert cfg["reviewer"]["id"].endswith(f"-reviewer-{review_model}") and cfg["reviewer"]["family"]
-    tools = A.load_adapter(roles["architect"])["options"]["allowed_tools"][0]
-    assert cfg["architect"]["argv"].count(tools) == 1 and cfg["architect"]["argv"][-1] == cli.ARCHITECT_TOOLS
+    options = A.load_adapter(roles["architect"])["options"]
+    tools = options["allowed_tools"][0]
+    assert cfg["architect"]["argv"].count(tools) == 1 and cfg["architect"]["argv"][-1] == options["architect_tools"]
     assert cli.PROJECT_INIT_COMMAND == f"ao init --profile {A.default_profile()}"
 
 

@@ -184,6 +184,10 @@ SETTINGS = {
     "binaries.extra_dirs": Setting(
         [], list, None, None, "machine",
         "directories searched for agent binaries after PATH, before the usual install locations"),
+    "watchdog.bypass_adapters": Setting(
+        [], list, None, None, "machine",
+        "adapters whose implementer the watchdog may nudge with the flag that turns off their own sandbox; "
+        "none: such a nudge is refused"),
     "filters.probe_programs": Setting(
         ["rtk"], list, None, None, "machine",
         "programs ao doctor may run as a user-level shell-command filter hook, to prove it leaves measurements alone"),

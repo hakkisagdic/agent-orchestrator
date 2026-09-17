@@ -34,6 +34,10 @@
     "add_dir": ["--add-dir={dir}"],
     "sandbox": ["--sandbox"],
     "trust_all": ["--dangerously-skip-permissions"],
+    "bypass": {
+      "--dangerously-skip-permissions": { "roles": ["implementer"],
+        "why": "Kept: without it a print run writes files in the workspace and soft-denies every shell command, and the rules that allow a command (permissions.allow) live only in the person's own settings file, which ao does not write; --sandbox isolates commands but runs them unprompted only under a setting too. Read on 2026-09-17 from antigravity.google/docs/cli/headless, antigravity.google/docs/cli/permissions and antigravity.google/docs/cli/sandbox." }
+    },
     "timeout": ["--print-timeout={timeout}"]
   },
 

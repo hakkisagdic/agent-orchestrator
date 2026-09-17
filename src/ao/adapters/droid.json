@@ -20,7 +20,12 @@
     "effort_note": "under exec -r is --reasoning-effort; interactively -r is resume",
     "output_json": ["-o", "stream-json"],
     "trust_some": ["--auto", "{mode}"], "mode_values": ["low", "medium", "high"],
-    "trust_all": ["--skip-permissions-unsafe"]
+    "trust_all": ["--skip-permissions-unsafe"],
+    "unattended": ["--auto", "medium"],
+    "bypass": {
+      "--auto": { "roles": ["implementer"],
+        "why": "An autonomy level, in place of --skip-permissions-unsafe, which skips every permission check: --auto medium lets a droid exec turn edit files, install dependencies, build, test and commit locally, and a run that needs more stops with an error instead of asking. Read on 2026-09-17 from docs.factory.ai/cli/droid-exec/overview and docs.factory.ai/reference/cli-reference." }
+    }
   },
   "transcript": { "kind": "jsonl", "path": "~/.factory/projects/**/session.jsonl", "todo": "the path is the hooks documentation's example; confirm it against an install" },
   "busy": { "mtime_glob": "~/.factory/projects/**/*.jsonl", "idle_seconds": 240 },

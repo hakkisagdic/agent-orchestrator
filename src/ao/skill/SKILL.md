@@ -52,10 +52,11 @@ Anything not forbidden there and inside the slice's scope is allowed.
    the **surface inventory first** (`evidence/…-surface-v1.md`: every path, its
    entry point, its binding, its proof), get it `ao review`ed as APPROVED, then
    close every path in one pass. Ten review rounds once became one this way.
-5. Work, then stage exactly the candidate you intend to land. Gates through the
-   lock: `ao lock -- <gate command>` (holds the writer lock, runs the gate,
-   records it). `ao verify -p quick|full` records a verification bound to that
-   isolated index candidate.
+5. Work, then stage exactly the candidate you intend to land. Gates run through
+   `ao verify -p quick|full`: it takes the machine lock, runs the declared gates
+   and records a verification bound to that isolated index candidate. A command
+   outside the declared gates takes the lock as `ao lock -- <command>`, in a
+   session a person runs: it runs any command, and no grant ao composes names it.
 6. `ao review --boundary "…"` — independent, on the same staged candidate and
    boundary, never your own. Fix findings, restage, reverify and re-review. Over
    the round budget? The architect re-specifies; do not grind. Exit 3 means no
@@ -153,16 +154,19 @@ episodes; `ao alarms test --level red` rings every channel for real.
 ## 7. The architect's routine
 
 When woken by the watchdog, resumed after a quota pause (the desktop app's
-auto-continue is a second resume path), or simply returning: **first** `ao
-status`, `ao board`, `ao doctor`, then the mailbox — `*-to-<architect>-*` and
-`watchdog-to-*-ANOMALY-*`. Watchdog files are facts, not verdicts. Decide,
-write decisions with `ao decide "…" --scope <slice> --why "…"` (`--urgent` for
-`## ACİL`), answer questions with `ao answer`, delete what you processed with
-`ao mail ack <file-or-glob>`. Empty
-queue: refill from the specification with invariant boundaries — never leave
-an implementer waiting for lack of a slice. Over-budget slice: re-specify
-(inventory first); the budget restarts at your decision. Never edit ao's own
-source from a wake; `ao note` is the only door to the mailbox you need.
+auto-continue is a second resume path), or simply returning: **first**
+`ao status`, `ao board`, `ao doctor`, then the mailbox — `*-to-<architect>-*` and
+`watchdog-to-*-ANOMALY-*` — and the questions parked for you, `ao decisions`.
+Watchdog files are facts, not verdicts. Decide, write decisions with
+`ao decide "…" --scope <slice> --why "…"` (`--urgent` for `## ACİL`), answer
+questions with `ao answer`, delete what you processed with
+`ao mail ack <file-or-glob>`. Empty queue: refill from the specification with
+invariant boundaries, or from a bound source by writing `.ao/inbox/` and running
+`ao source import` — never leave an implementer waiting for lack of a slice.
+Over-budget slice: re-specify (inventory first); the budget restarts at your
+decision. A wake edits `.ao/backlog.md`, `.ao/board.md` and `.ao/inbox/` and no
+other file — never product code, never ao's own source; `ao note` is the only
+door to the mailbox you need.
 
 ## 8. Parallel agents
 

@@ -43,7 +43,8 @@ def test_every_shipped_adapter_is_audited_and_none_admits_a_bypass_through_a_pat
 
 
 def test_the_architect_grant_admits_no_bypass():
-    assert AL.problems(["claude", "-p", "{prompt}", "--allowedTools", cli.ARCHITECT_TOOLS]) == []
+    tools = A.load_adapter("claude-code")["options"]["architect_tools"]
+    assert AL.problems(["claude", "-p", "{prompt}", "--allowedTools", tools], role="architect") == []
 
 
 def test_doctor_names_an_actor_whose_grant_admits_a_bypass(project):

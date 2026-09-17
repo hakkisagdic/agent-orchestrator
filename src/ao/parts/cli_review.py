@@ -887,6 +887,13 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, can
             "returncode": None, "kind": "configuration-error",
             "retryable": False,
         }
+    if tool is None:
+        # A reviewer runs in the mode, and with the tools, its adapter pins: a route composed before
+        # they were pinned, or written by hand, has them appended here, and says so (GRANTS-PINNED).
+        argv, pinned = A.pinned_argv(argv, "reviewer")
+        if pinned:
+            print(f"{C['dim']}{label} names no {' or '.join(part for part in pinned if part.startswith('-'))}; "
+                  f"ao appends {' '.join(pinned)}, as its adapter pins for a reviewer{C['reset']}")
     declared_binary = str(argv[0])
     try:
         exe, version = _reviewer_resolve_binary(root, argv[0])

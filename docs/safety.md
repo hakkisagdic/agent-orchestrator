@@ -203,7 +203,73 @@ shell access on your machine.
 - Never combine trust-all with a prompt assembled from untrusted content.
 
 The orchestrator records which trust level each turn ran at, so "what could that turn have
-done?" has an answer after the fact.
+done?" has an answer after the fact: a flag ao adds to a turn's command is written, with why, to
+`.ao/ledger/actor-flags.jsonl`.
+
+### A turn runs in the mode ao pins, not in a person's default
+
+A harness that takes its permission mode from a person's settings when a command names none lets
+that setting widen every turn ao starts. Claude Code does: a `-p` run given no `--permission-mode`
+starts in `permissions.defaultMode` from the settings files, and `claude -p --resume` in the mode a
+new `-p` run would, so an `acceptEdits`, `auto` or `bypassPermissions` default reached every nudge,
+every architect wake and the reviewer ao treats as read-only (code.claude.com/docs/en/permission-modes
+and /docs/en/sessions, read 2026-09-17).
+
+An adapter declares, per role, the flags every turn in that role carries (`options.pin`,
+[adapters.md](adapters.md#a-turns-grant-is-declared-and-so-is-every-flag-that-turns-approvals-off)).
+The implementer's nudge, the architect's wake and refill, every reviewer route and the bug hunter
+carry them. A command composed before they were pinned, or written by hand, has them appended when
+its turn starts - recorded for a wake, printed for a review or a hunt - and one that names the flag
+with another value keeps it, and `ao doctor` names it. Claude Code pins `dontAsk` for every role:
+whatever would prompt is denied instead, so the grant ao composes is the whole grant, except the
+allow rules a person writes into their own settings, which apply in every mode. A reviewer and the
+bug hunter also get `--tools Read,Grep,Glob`: no other tool exists in their session, so no allow rule
+anywhere can hand them Edit or Bash. `plan` is no reviewer's mode, since where auto mode is available
+the classifier approves shell commands while planning.
+
+A stand-in session is a person's own: ao starts none, and its answer reaches a review only through
+`ao collect-review`, which checks the candidate, not the session ([standin.md](standin.md)).
+
+### Each role is granted what its playbook asks of it, and nothing more
+
+The implementer's grant names every `ao` command and ao MCP tool that the playbook's loop, the
+mailbox and measurement sections and the nudge tell it to use; the architect's names what its routine
+and the wake and refill prompts ask for, and it edits `.ao/backlog.md`, `.ao/board.md` and
+`.ao/inbox/` and no other file. `tests/test_grants_pinned.py` reads those playbook sections and the
+prompts and fails when either names a command or a tool outside that role's grant. `ao lock -- <command>`
+is in no unattended grant: it runs any command, and the declared gates take the same machine lock
+through `ao verify`. A rule is read the way the harness reads it - a `*` stands for any text, spaces
+included - so `Bash(rm agent-mail/*)` admits `rm agent-mail/x src/app.py`, and `ao doctor` names a
+rule in an architect's grant that writes outside ao's coordination files, and an architect grant
+composed before its adapter's current one (`architect-grant`).
+
+### A flag that turns approvals off is declared with its reason
+
+A test fails when a command ao starts from a shipped adapter carries a flag that approves everything,
+sandboxes nothing or checks no permission - `--yolo`, a `--dangerously-` flag, `--trust-all-tools`,
+`-y`, `-f`, `--auto`, a mode of full access - without a reason for that role in the adapter's
+`options.bypass`, and `ao adapters validate` reports the same of any adapter. Where a harness documents
+a narrower grant that an unattended implementer can run its gates under from the command line, the
+adapter uses it instead (`options.unattended`); [adapters.md](adapters.md#a-turns-grant-is-declared-and-so-is-every-flag-that-turns-approvals-off)
+lists each flag that stays and why.
+
+### A turn that would turn a harness's own sandbox off waits for a person
+
+`codex exec` runs every command in a sandbox of its own and asks nobody. Its workspace-write sandbox
+keeps `.git` read-only and the network off, so an unattended implementer in it could edit and test but
+never stage, commit or run its reviewer, and the only flag that lets it is
+`--dangerously-bypass-approvals-and-sandbox`, which turns the sandbox and the approvals off together.
+The watchdog therefore starts no such turn: it tells a person once and stands down until someone names
+the adapter in `watchdog.bypass_adapters`, a machine setting, because a project's own files are
+writable by the agents it governs:
+
+```bash
+ao config set watchdog.bypass_adapters codex --machine
+```
+
+Until then `ao doctor` names the refusal and what allowing it costs; after it, the implementer's grant
+finding says its turns run outside the sandbox, with the network, where the commit hook and `ao commit`
+hold commits and nothing holds anything else.
 
 ## 6. Capability gating on MCP
 

@@ -5,7 +5,9 @@
   "detect": { "headless": ["--no-interactive"] },
   "send":   { "argv": ["q", "chat", "--no-interactive", "{prompt}"] },
   "resume": { "argv": ["q", "chat", "--resume", "--no-interactive", "{prompt}"] },
-  "options": { "trust_none": null, "trust_none_why": "no flag verified to deny every tool; --trust-tools narrows the set but was not run tool-less", "model": ["--model", "{model}"], "effort": null, "trust_all": ["--trust-all-tools"], "trust_some": ["--trust-tools={tools}"] },
+  "options": { "trust_none": null, "trust_none_why": "no flag verified to deny every tool; --trust-tools narrows the set but was not run tool-less", "model": ["--model", "{model}"], "effort": null, "trust_all": ["--trust-all-tools"], "trust_some": ["--trust-tools={tools}"],
+               "bypass": { "--trust-all-tools": { "roles": ["implementer"],
+                 "why": "Kept: --trust-tools only adds tools to the agent's trusted set, a command allowlist (toolsSettings execute_bash allowedCommands with denyByDefault) lives only in an agent file ao does not write, and without a trust a --no-interactive run ends at its first approval (Tool approval required but --no-interactive was specified). The CLI is no longer developed and continues as Kiro CLI. Read on 2026-09-17 from github.com/aws/amazon-q-developer-cli (docs/agent-format.md, docs/built-in-tools.md, crates/chat-cli/src/cli/chat/mod.rs)." } } },
   "transcript": { "kind": "unknown", "candidates": ["~/.aws/amazonq"] },
   "busy": { "kind": "unknown" },
   "directives": { "steering_files": [".amazonq/rules", "AmazonQ.md"] }

@@ -16,7 +16,11 @@
     "effort": ["--variant", "{effort}"], "effort_note": "a provider-specific reasoning effort",
     "output_json": ["--format", "json"],
     "trust_all": ["--auto"],
-    "trust_all_note": "without --auto a non-interactive run refuses every permission request"
+    "trust_all_note": "without --auto a non-interactive run refuses every permission request",
+    "bypass": {
+      "--auto": { "roles": ["implementer"],
+        "why": "Kept: without it a non-interactive run rejects every permission request, and by default every shell command that is not read-only asks, so an implementer could edit but run none of its gates; narrowing it takes a permission block in kilo.json or the global configuration, which ao does not write. Read on 2026-09-17 from kilo.ai/docs/code-with-ai/platforms/cli-reference and kilo.ai/docs/customize/agent-permissions." }
+    }
   },
   "transcript": { "kind": "sqlite", "path": "~/.local/share/kilo/kilo.db", "locate": ["kilo", "db", "path"],
                   "access": "READ-ONLY. A second writer corrupts the agent's own state.", "todo": "map the schema against an install" },

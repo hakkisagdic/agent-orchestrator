@@ -7,7 +7,9 @@
                          "note": "Verified from the execute mode documentation (ampcode.com/docs/cli/execute-mode), read 2026-09-17: its example pipes the whole prompt to `amp -x` with no message. Continuing a thread with piped input is not documented, so resume declares none." } },
   "resume": { "argv": ["amp", "threads", "continue", "{session}", "-x", "{prompt}"] },
   "list_sessions": { "argv": ["amp", "threads", "list"] },
-  "options": { "trust_none": null, "trust_none_why": "no documented flag denies tools", "model": null, "model_note": "Amp selects models internally; no user-facing model flag.", "effort": null, "trust_all": ["--dangerously-allow-all"] },
+  "options": { "trust_none": null, "trust_none_why": "no documented flag denies tools", "model": null, "model_note": "Amp selects models internally; no user-facing model flag.", "effort": null, "trust_all": ["--dangerously-allow-all"],
+               "bypass": { "--dangerously-allow-all": { "roles": ["implementer"],
+                 "why": "Kept, and leaving it out narrows nothing: since May 2026 Amp asks no permission before a tool runs unless permissions are configured, and narrowing it takes a tool.call plugin or permission settings, neither of which ao writes. Read on 2026-09-17 from ampcode.com/news/neo, ampcode.com/docs/tools and ampcode.com/docs/cli/execute-mode." } } },
   "transcript": { "kind": "unknown", "candidates": ["~/.amp/threads"] },
   "busy": { "kind": "unknown" },
   "directives": { "steering_files": ["AGENT.md", "AGENTS.md"] }

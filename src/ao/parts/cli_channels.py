@@ -492,6 +492,11 @@ def cmd_hunt(cfg, args):
         print(f"{C['yellow']}no hunter configured{C['reset']}: `hunter.argv` in .ao/config.json, read-only, "
               "a different family from the implementer where one is available")
         return 2
+    # The hunter is held to a reviewer's pin: the mode and the tools its adapter pins for one (GRANTS-PINNED).
+    argv, pinned = A.pinned_argv(argv, "reviewer")
+    if pinned:
+        print(f"{C['dim']}the hunter's command names no {' or '.join(part for part in pinned if part.startswith('-'))}; "
+              f"ao appends {' '.join(pinned)}, as its adapter pins for a reviewer{C['reset']}")
     problems = allowlist.reviewer_problems(argv)
     if problems:
         print(f"{C['red']}refused{C['reset']}: the hunter must not be able to write — {'; '.join(problems)}")

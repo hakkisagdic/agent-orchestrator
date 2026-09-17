@@ -6,12 +6,13 @@ where it stood; it is not importable on its own.
 
 
 def _actor_grant_problems(cfg):
-    """Doctor findings for each configured actor whose tool grant admits a bypass (#58)."""
+    """Doctor findings for each configured actor whose tool grant admits a bypass (#58), whose permission mode is
+    not the one its adapter pins, or whose wake grant lacks what its playbook asks of it (GRANTS-PINNED)."""
     from . import allowlist as AL
     grants = []
     impl = cfg.get("implementer") or {}
+    adapter = A.load_adapter(impl["adapter"]) if impl.get("adapter") else {}
     if impl.get("adapter"):
-        adapter = A.load_adapter(impl["adapter"])
         grants.append(("implementer", impl["adapter"],
                        (adapter.get("resume") or {}).get("argv") or [], adapter.get("options") or {}))
     for role in ("architect", "reviewer"):
@@ -23,7 +24,20 @@ def _actor_grant_problems(cfg):
             grants.append(("reviewer fallback", fallback.get("id") or "fallback", fallback["argv"], {}))
     out = []
     for role, name, argv, options in grants:
+        if role == "implementer":
+            # A turn that would turn off its harness's own sandbox is not started until a person allows it,
+            # and the doctor says what allowing it costs (GRANTS-PINNED).
+            flags = A.unattended_flags(adapter, argv)[0]
+            refused = A.bypass_refusal(adapter, flags, cfg)
+            if refused:
+                out.append((f"nudge-refused:{name}", f"the watchdog nudges no {name} implementer: {refused}; allowed, "
+                                                     "each unattended turn runs every command outside that sandbox, "
+                                                     "with the network, and writes wherever this user can"))
+                continue
         text = AL.describe(role, name, AL.problems(argv, options, role=role))
+        if text and role == "implementer" and A.sandbox_bypass(adapter, A.unattended_flags(adapter, argv)[0]):
+            text += (f"; and a person allowed {A.sandbox_bypass(adapter, A.unattended_flags(adapter, argv)[0])[0]} "
+                     "on this machine (watchdog.bypass_adapters), so its turns run outside its sandbox, with the network")
         if text:
             out.append((f"actor-grant:{role.replace(' ', '-')}", text))
         # A reviewer reads, and starts no MCP server it was not given (#24).
@@ -31,7 +45,32 @@ def _actor_grant_problems(cfg):
             reach = AL.reviewer_problems(argv)
             if reach:
                 out.append((f"reviewer-tools:{name}", f"{role} ({name}): " + "; ".join(reach)))
+        elif A.pin_conflicts(argv, role):
+            out.append((f"actor-mode:{role}", f"{role} ({name}): " + "; ".join(A.pin_conflicts(argv, role))))
+    out.extend(_architect_grant_gaps(cfg))
     return out
+
+
+def _architect_grant_gaps(cfg):
+    """The rules the architect's configured grant lacks of the one its adapter declares now (GRANTS-PINNED).
+
+    `ao init` writes the architect's argv into .ao/config.json, so a grant composed before the
+    adapter's changed stays as it was: a refill wake told to write .ao/inbox/ could not.
+    """
+    from . import allowlist as AL
+    architect = cfg.get("architect") or {}
+    declared = A.load_adapter(architect["adapter"]) if architect.get("adapter") and architect.get("argv") else {}
+    options = declared.get("options") or {}
+    wanted = [rule for rule in str(options.get("architect_tools") or "").split(",") if rule]
+    have = set(AL.rules(architect.get("argv") or []))
+    missing = [rule for rule in wanted if rule not in have]
+    if not wanted or not missing:
+        return []
+    flag = (options.get("allowed_tools") or ["the tool grant"])[0]
+    return [("architect-grant", f"the architect's grant lacks {len(missing)} rule(s) its playbook and prompts need "
+                                f"({', '.join(missing[:5])}{', …' if len(missing) > 5 else ''}): replace the value "
+                                f"after {flag} in the architect's argv in .ao/config.json with "
+                                f"{architect['adapter']}'s options.architect_tools")]
 
 
 def _implementer_commit_guard(cfg):

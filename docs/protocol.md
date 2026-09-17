@@ -259,8 +259,8 @@ So `.ao/config.json` names an architect the watchdog can start:
   "adapter": "claude-code",
   "cwd": "/path/to/the/architect's/working/directory",
   "session": "auto",
-  "argv": ["claude", "--resume", "{session}", "-p", "{prompt}",
-           "--allowedTools", "Read,Grep,Glob,Write,Edit,Bash(ao:*),…"]}}
+  "argv": ["claude", "--resume", "{session}", "-p", "{prompt}", "--permission-mode", "dontAsk",
+           "--allowedTools", "Read,Grep,Glob,Edit(/.ao/board.md),Bash(ao status:*),…"]}}
 ```
 
 Three decisions in that block are load-bearing.
@@ -276,8 +276,10 @@ the worst shape of failure, because everything still looks configured. It is
 resolved from disk at wake time, newest transcript for that directory.
 
 **Scoped tools.** An unattended architect with unrestricted Bash is what goes
-wrong at 3am. It may inspect, run `ao`, and write coordination files. It may not
-run arbitrary commands, and nothing anywhere grants push.
+wrong at 3am. It may inspect, run the `ao` commands its routine names, and edit
+the coordination files; it may not run arbitrary commands or write product code,
+it runs in the permission mode ao pins rather than one a person's settings
+default to, and nothing anywhere grants push ([safety.md](safety.md#5-trust-flags-are-a-decision-not-a-default)).
 
 The two-writer hazard that cost this project a night does not apply: Claude Code
 forks a copy rather than double-writing when the session is already running. That

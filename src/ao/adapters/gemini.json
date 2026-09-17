@@ -16,6 +16,10 @@
     "effort_note": "No reasoning-effort flag; model choice carries the tradeoff.",
     "output_json": ["--output-format", "json"],
     "trust_all": ["--yolo"],
+    "bypass": {
+      "--yolo": { "roles": ["implementer"],
+        "why": "Kept: --approval-mode auto_edit approves edits and refuses every shell command when nobody attends, and allowing the few an implementer's gates need takes a policy file (policyPaths, or --policy) ao does not write, or --allowed-tools, which is deprecated; --yolo is deprecated too, for --approval-mode=yolo. Read on 2026-09-17 from github.com/google-gemini/gemini-cli (docs/cli/cli-reference.md, docs/reference/policy-engine.md, packages/core/src/policy/policies/write.toml)." }
+    },
     "all_files": ["--all-files"]
   },
   "transcript": { "kind": "unknown", "candidates": ["~/.gemini/tmp", "~/.gemini/sessions"] },

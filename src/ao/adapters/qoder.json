@@ -4,7 +4,9 @@
   "detect": { "headless": ["-p"] },
   "send":   { "argv": ["qoder", "-p", "{prompt}"] },
   "resume": { "argv": ["qoder", "--resume", "{session}", "-p", "{prompt}"] },
-  "options": { "trust_none": null, "trust_none_why": "no documented flag denies tools", "model": ["--model", "{model}"], "effort": null, "trust_all": ["--yolo"] },
+  "options": { "trust_none": null, "trust_none_why": "no documented flag denies tools", "model": ["--model", "{model}"], "effort": null, "trust_all": ["--yolo"],
+               "unattended": ["--permission-mode", "accept_edits", "--allowed-tools", "Bash(ao status:*),Bash(ao board:*),Bash(ao writers),Bash(ao verify:*),Bash(ao review:*),Bash(ao commit-ok:*),Bash(ao commit -m:*),Bash(ao commit -F:*),Bash(ao mail:*),Bash(ao ask:*),Bash(ao decisions:*),Bash(ao doctor),Bash(ao watchdog explain:*),Bash(ao since:*),Bash(ao digest:*),Bash(ao fanout ok:*),Bash(ao fanout record:*),Bash(ao tail:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(ls:*),Bash(cat:*),Bash(grep:*)"],
+               "unattended_note": "In place of --yolo: accept_edits approves edits inside the working directories, --allowed-tools names each command the playbook's loop runs, and a -p run denies whatever would ask; ao's MCP tools are not named, and the loop reaches the mailbox through the CLI. A person's general.defaultPermissionMode and allow rules in ~/.qoder/settings.json still apply. Read on 2026-09-17 from docs.qoder.com/en/cli/permissions and docs.qoder.com/en/cli/cli-reference." },
   "transcript": { "kind": "unknown", "candidates": ["~/.qoder","~/Library/Application Support/Qoder"] },
   "busy": { "kind": "unknown" },
   "directives": { "steering_files": ["AGENTS.md",".qoder/rules"] }

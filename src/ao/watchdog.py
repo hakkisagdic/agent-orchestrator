@@ -907,9 +907,12 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
         if "{session}" in " ".join(arch["argv"]) and not sess:
             print("architect session not resolvable; reported only")
             return woke
-        # Past what one argument carries, the prompt goes on standard input where the architect's
-        # adapter declares it may; a detached turn takes no file ao would remove after it (PROMPT-CHANNEL).
-        plan, refused = A.prompt_plan(arch["argv"], prompt, A.block_adapter(arch), detached=True)
+        # The permission mode is the one the architect's adapter pins, appended to a block composed
+        # before it was pinned (GRANTS-PINNED). Past what one argument carries, the prompt goes on
+        # standard input where the adapter declares it may; a detached turn takes no file ao would
+        # remove after it (PROMPT-CHANNEL).
+        template, pinned = A.pinned_argv(arch["argv"], "architect")
+        plan, refused = A.prompt_plan(template, prompt, A.block_adapter(arch), detached=True)
         if refused:
             print(f"the architect's prompt cannot be handed over: {refused}; reported only")
             return woke
@@ -991,6 +994,7 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
                 resolved = None
         if resolved:
             argv[0] = resolved
+            record_pinned(root, pinned)
             given, refused = A.prompt_input(plan, root, argv)
             if refused:
                 print(f"the architect's prompt cannot be handed over: {refused}; not waking")
@@ -1130,6 +1134,17 @@ def secondary_note(found):
     """What a nudge adds when nothing is READY here and a secondary project has work (#8)."""
     return (f" Bu projede READY iş yok: ikincil proje {found['name']} ({found['root']}) READY {found['item']}. "
             "Orada devam et; buradaki engeller insanı ya da mimarı bekliyor, bekleme.")
+
+
+def record_pinned(root, pinned):
+    """Record the flags a wake's argv gained from its adapter's pin, with why; never appended silently (#69)."""
+    if not pinned:
+        return
+    try:
+        A.record_actor_flags(root, "architect", pinned,
+                             "the architect's command names no permission mode, so ao appends the one its adapter pins")
+    except Exception as exc:
+        print(f"could not record the flags added to the architect: {exc}")
 
 
 def _schedule_hunt(root, cfg, st):
@@ -2297,8 +2312,10 @@ def _cycle_impl(args, root):
                 print("architect session not resolvable; reported only")
                 return 0
             prompt = arch.get("prompt", REFILL_PROMPT)
-            # As in escalate(): past one argument, standard input where the adapter declares it (PROMPT-CHANNEL).
-            plan, refused = A.prompt_plan(arch["argv"], prompt, A.block_adapter(arch), detached=True)
+            # As in escalate(): the pinned mode (GRANTS-PINNED), and past one argument, standard input
+            # where the adapter declares it (PROMPT-CHANNEL).
+            template, pinned = A.pinned_argv(arch["argv"], "architect")
+            plan, refused = A.prompt_plan(template, prompt, A.block_adapter(arch), detached=True)
             if refused:
                 print(f"queue low, but the architect's prompt cannot be handed over: {refused}")
                 return 0
@@ -2339,6 +2356,7 @@ def _cycle_impl(args, root):
                 if failed.get("kind") in ("binary", "session") and failed.get("binary") == f"{resolved} {ver}":
                     print(f"the last refill with this binary failed ({failed.get('kind')}); not retrying")
                     return 0
+            record_pinned(root, pinned)
             given, refused = A.prompt_input(plan, root, argv)
             if refused:
                 print(f"queue low, but the architect's prompt cannot be handed over: {refused}")
@@ -2491,14 +2509,24 @@ def _cycle_impl(args, root):
         print(f"{argv[0]} not found on PATH ({search})")
         return 1
     argv[0] = resolved
-    # Only widen to trust-all when the adapter's resume carries no allowlist of
-    # its own. Appending --dangerously-skip-permissions on top of --allowedTools
-    # would silently override the narrower grant.
-    scoped = any(a in ("--allowedTools", "--allowed-tools", "--trust-all-tools") for a in argv)
-    added = []
-    if not scoped and "trust_all" in (adapter.get("options") or {}):
-        added = list(adapter["options"]["trust_all"])
-        argv += added
+    # What a turn nobody attends starts with: the grant its adapter declares for one, or its
+    # trust_all, and only when the resume carries no allowlist of its own - appending
+    # --dangerously-skip-permissions on top of --allowedTools would silently override the
+    # narrower grant. A flag that turns off the harness's own sandbox waits for a person, and the
+    # permission mode is the one the adapter pins, whatever a person's settings default to (GRANTS-PINNED).
+    added, added_why = A.unattended_flags(adapter, argv)
+    bypass = A.bypass_refusal(adapter, added, cfg)
+    if bypass:
+        notify(f"{project}: nudge refused", bypass, root, key="nudge-bypass-refused", window=12 * 3600,
+               audience="human", what=bypass)
+        print(f"idle {int(age)}s · {', '.join(reasons)} · {bypass}; not nudging")
+        return 0
+    argv += added
+    argv, pinned = A.pinned_argv(argv, "implementer")
+    if pinned:
+        added = added + pinned
+        added_why = "; ".join(filter(None, [added_why, "the implementer's command names no permission mode, "
+                                                       "so ao appends the one its adapter pins"]))
     # The project chooses the implementer's model and effort in its config; the
     # adapter says how to spell them. Nothing is appended for an adapter that
     # has no such option.
@@ -2534,8 +2562,7 @@ def _cycle_impl(args, root):
     if added:
         # Recorded with its reason whenever it changes, never appended silently (#69).
         try:
-            A.record_actor_flags(root, "implementer", added,
-                                 "the adapter's resume argv carries no tool scope, so ao appends its trust_all")
+            A.record_actor_flags(root, "implementer", added, added_why)
         except Exception as exc:
             print(f"could not record the flags added to the implementer: {exc}")
     held = A.hold_state(root)

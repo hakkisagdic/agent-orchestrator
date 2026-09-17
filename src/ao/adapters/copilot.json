@@ -7,7 +7,9 @@
                          "note": "Verified from Running GitHub Copilot CLI programmatically (docs.github.com/en/copilot/how-tos/copilot-cli/automate-copilot-cli/run-cli-programmatically), read 2026-09-17: a prompt is piped to `copilot`, and piped input is ignored when -p or --prompt is given as well, so -p goes. Resuming with piped input is not documented, so resume declares none." } },
   "resume": { "argv": ["copilot", "--resume", "{session}", "-p", "{prompt}"], "continue_last": ["copilot", "--continue", "-p", "{prompt}"] },
   "quota": { "provider": "copilot" },
-  "options": { "trust_none": null, "trust_none_why": "no flag verified to deny every tool", "model": ["--model", "{model}"], "effort": null, "trust_all": ["--allow-all-tools"] },
+  "options": { "trust_none": null, "trust_none_why": "no flag verified to deny every tool", "model": ["--model", "{model}"], "effort": null, "trust_all": ["--allow-all-tools"],
+               "bypass": { "--allow-all-tools": { "roles": ["implementer"],
+                 "why": "Kept, as --allow-tool narrows nothing that matters here: the documentation tells subcommands apart only for git and gh, so the narrowest grant it documents for ao is shell(ao:*), which admits ao lock -- <command> and so any command, and COPILOT_ALLOW_ALL in the environment approves everything regardless. Read on 2026-09-17 from docs.github.com/en/copilot/how-tos/copilot-cli/use-copilot-cli/allowing-tools and docs.github.com/en/copilot/how-tos/copilot-cli/automate-copilot-cli/run-cli-programmatically." } } },
   "transcript": { "kind": "unknown", "candidates": ["~/.copilot/history-session-state"] },
   "busy": { "kind": "unknown" },
   "directives": { "steering_files": [".github/copilot-instructions.md", "AGENTS.md"] }

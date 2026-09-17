@@ -77,7 +77,11 @@
     ],
     "trust_all": [
       "--trust-all-tools"
-    ]
+    ],
+    "bypass": {
+      "--trust-all-tools": { "roles": ["implementer"],
+        "why": "Kept, as nothing narrower lets an unattended implementer run its gates from the command line: --trust-tools narrows by tool and not by command, so trusting the shell tool trusts every command, and a command allowlist (toolsSettings allowedCommands with denyByDefault) lives only in a custom agent file ao does not write. A 2.x turn left waiting for an approval hangs (kirodotdev/Kiro issue 7483); the 3.0 early release's permissions.yaml denies an ask when nobody attends, but its sessions do not resume 2.x's. ao commit and the commit hook hold commits (ao doctor: actor-grant:implementer). Read on 2026-09-17 from kiro.dev/docs/cli/headless, kiro.dev/docs/custom-agents/configuration-reference and kiro.dev/docs/cli/v3/permissions." }
+    }
   },
   "transcript": {
     "kind": "jsonl",

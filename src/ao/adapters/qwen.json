@@ -16,7 +16,9 @@
     "model": ["--model", "{model}"],
     "effort": null, "effort_why": "no documented flag; reasoning effort is the model.reasoningEffort setting",
     "output_json": ["--output-format", "stream-json"],
-    "trust_all": ["--yolo"]
+    "trust_all": ["--yolo"],
+    "unattended": ["--approval-mode", "auto-edit", "--allowed-tools", "Edit,Bash(ao status *),Bash(ao board *),Bash(ao writers),Bash(ao verify *),Bash(ao review *),Bash(ao commit-ok *),Bash(ao commit -m *),Bash(ao commit -F *),Bash(ao mail *),Bash(ao ask *),Bash(ao decisions *),Bash(ao doctor),Bash(ao watchdog explain *),Bash(ao since *),Bash(ao digest *),Bash(ao fanout ok *),Bash(ao fanout record *),Bash(ao tail *),Bash(git status *),Bash(git log *),Bash(git diff *),Bash(git add *),Bash(ls *),Bash(cat *),Bash(grep *)"],
+    "unattended_note": "In place of --yolo: auto-edit approves edits, a shell command runs only where --allowed-tools names it, and a -p run turns what would ask into an error the model reads; Edit is named for a folder Qwen Code does not trust, where the mode falls back to default; ao's MCP tools are not named, and the loop reaches the mailbox through the CLI. A person's tools.approvalMode yolo is overridden by the flag, and allow rules in settings still apply. Read on 2026-09-17 from qwenlm.github.io/qwen-code-docs/en/users/features/approval-mode/ and /features/headless/, and github.com/QwenLM/qwen-code (packages/cli/src/config/config.ts)."
   },
   "transcript": { "kind": "jsonl", "path": "~/.qwen/projects/{sanitized_cwd}/chats", "todo": "confirm how the cwd is sanitised and the record shape against an install" },
   "busy": { "mtime_glob": "~/.qwen/projects/*/chats/*", "idle_seconds": 240 },

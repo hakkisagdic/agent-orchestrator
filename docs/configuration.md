@@ -77,6 +77,7 @@ machine setting written into a project.
 | `heartbeat.retired_days` | `7` | machine | days of watchdog silence after which a project counts as retired, not dead |
 | `fleet.window_reserve_pct` | `20` | machine | percent of the machine's provider window kept free before a report wake |
 | `binaries.extra_dirs` | `none` | machine | directories searched for agent binaries after PATH, before the usual install locations |
+| `watchdog.bypass_adapters` | `none` | machine | adapters whose implementer the watchdog may nudge with the flag that turns off their own sandbox; none: such a nudge is refused |
 | `filters.probe_programs` | `['rtk']` | machine | programs ao doctor may run as a user-level shell-command filter hook, to prove it leaves measurements alone |
 | `filters.probe_timeout_seconds` | `5` | machine | seconds a probed filter hook may take to answer for one measurement command before ao stops asking it |
 

@@ -14,7 +14,11 @@
     "output_text": ["--output-format", "text"],
     "output_json": ["--output-format", "json"],
     "output_stream": ["--output-format", "stream-json"],
-    "auto_approve": ["-f"]
+    "auto_approve": ["-f"],
+    "bypass": {
+      "-f": { "roles": ["implementer", "architect"],
+        "why": "Kept in every command: the headless page says print mode applies no change without --force, and the narrower approvals (permissions.allow in .cursor/cli.json or ~/.cursor/cli-config.json) live only in files ao does not write, cannot be given on the command line, and match a shell command by its first word, so Shell(git) admits a push. Read on 2026-09-17 from cursor.com/docs/cli/headless, cursor.com/docs/cli/reference/parameters and cursor.com/docs/cli/reference/permissions." }
+    }
   },
   "transcript": { "kind": "call-return", "note": "--output-format json returns a structured final result; also `agent ls` lists prior chats.",
                   "candidates_for_store": ["~/.cursor/cli","~/.config/cursor"] },

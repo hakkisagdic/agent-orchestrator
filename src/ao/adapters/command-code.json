@@ -21,7 +21,11 @@
     "output_json": ["--output-format=json"], "max_turns": ["--max-turns={n}"],
     "worktree": ["--worktree={name}"], "add_dir": ["--add-dir={dir}"],
     "trust_all": ["--yolo"], "permission_mode": ["--permission-mode={mode}"],
-    "tools_all": ["--tools-all"], "local_only": ["--local-only"]
+    "tools_all": ["--tools-all"], "local_only": ["--local-only"],
+    "bypass": {
+      "--yolo": { "roles": ["implementer"],
+        "why": "Kept: --permission-mode auto-accept approves edits and safe filesystem commands and no other shell command, and dont-ask runs only what allow rules name, which are written only in settings files (.commandcode/settings.json, ~/.commandcode/settings.json) ao does not write; a headless run with neither denies every write and shell command. Read on 2026-09-17 from commandcode.ai/docs/permissions and commandcode.ai/docs/headless." }
+    }
   },
   "transcript": {
     "kind": "jsonl",

@@ -14,7 +14,9 @@
     "model": ["--model", "{model}"],
     "effort": ["--effort", "{effort}"],
     "output_json": ["--output-format", "stream-json"],
-    "trust_all": ["--permission-mode=danger-full-access"]
+    "trust_all": ["--permission-mode=danger-full-access"],
+    "unattended": ["--permission-mode=workspace-write"],
+    "unattended_note": "In place of danger-full-access, which runs without Reasonix's filesystem and network sandbox: workspace-write, its default, named so a configured default cannot move it, writes inside the workspace and runs builds and tests in the OS sandbox, and a -p run denies whatever would ask. The network is off unless [sandbox] network allows it, which ao review may need. Read on 2026-09-17 from github.com/esengine/DeepSeek-Reasonix (main-v2 docs/CLI.md and docs/GUIDE.md)."
   },
   "transcript": { "kind": "unknown", "path": "~/.reasonix/sessions/", "todo": "find the record format against an install" },
   "busy": { "mtime_glob": "~/.reasonix/sessions/**", "idle_seconds": 240 },

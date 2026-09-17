@@ -299,20 +299,6 @@ def _models(adapter_id):
         return {}
 
 
-# The architect's grant names each ao command it runs (#58): `ao:*` would admit
-# `ao push allow` and `ao waive`, which are a person's, and `find` runs anything
-# through -exec.
-ARCHITECT_TOOLS = ("Read,Grep,Glob,"
-                   "Bash(ao status:*),Bash(ao board:*),Bash(ao mail:*),Bash(ao decide:*),Bash(ao note:*),"
-                   "Bash(ao answer:*),Bash(ao review:*),Bash(ao catchup),Bash(ao catchup --plan),Bash(ao doctor),"
-                   "Bash(ao doctor --check),Bash(ao digest:*),Bash(ao notices:*),Bash(ao alarms),"
-                   "Bash(ao alarms list:*),Bash(ao cost:*),Bash(ao credits:*),Bash(ao tail:*),"
-                   "Bash(ao watchdog status:*),Bash(ao watchdog explain:*),Bash(ao watchdog trace:*),"
-                   "Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(ls:*),"
-                   "Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(grep:*),Bash(ps:*),Bash(lsof:*),"
-                   "Bash(rm agent-mail/*)")
-
-
 def _reviewer_block(adapter_id, model=None):
     """A reviewer block composed from its adapter: its actor's name, family, and argv (#88, #76)."""
     declared = A.load_adapter(adapter_id)
@@ -326,15 +312,23 @@ def _reviewer_block(adapter_id, model=None):
 
 
 def _architect_argv(adapter_id):
-    """The architect's argv: its adapter's resume, with the allowed tools narrowed to ARCHITECT_TOOLS."""
+    """The architect's argv: its adapter's resume, with the implementer's grant replaced by `options.architect_tools`.
+
+    The grant is the adapter's to spell (#58, GRANTS-PINNED): every ao command the playbook's
+    routine and the wake and refill prompts name, and writes to ao's coordination files only.
+    An adapter that declares how to grant tools but no architect grant leaves the architect
+    none: a wake then only reads, rather than holding the implementer's grant.
+    """
     declared = A.load_adapter(adapter_id)
     argv = list((declared.get("resume") or {}).get("argv") or [])
-    grant = (declared.get("options") or {}).get("allowed_tools") or []
+    options = declared.get("options") or {}
+    grant = options.get("allowed_tools") or []
     if grant:
         while grant[0] in argv:
             at = argv.index(grant[0])
             del argv[at:at + 2]
-        argv += [part.replace("{tools}", ARCHITECT_TOOLS) for part in grant]
+        if options.get("architect_tools"):
+            argv += [part.replace("{tools}", options["architect_tools"]) for part in grant]
     return argv
 
 

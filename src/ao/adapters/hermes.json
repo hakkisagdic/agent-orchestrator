@@ -22,7 +22,9 @@
     "provider": ["--provider", "{provider}"],
     "effort": null, "effort_why": "chat has no flag; agent.reasoning_effort in the configuration",
     "output_json": ["--format", "stream-json"],
-    "trust_all": ["--yolo"]
+    "trust_all": ["--yolo"],
+    "unattended": [],
+    "unattended_note": "No --yolo: a resumed chat -Q -q turn makes edits and runs ordinary commands without asking and refuses a dangerous command outright, as approvals.single_query_mode deny, the default, says; a person's configuration can widen that (approvals.mode off). Read on 2026-09-17 from hermes-agent.nousresearch.com/docs/user-guide/security and github.com/NousResearch/hermes-agent (tools/approval.py)."
   },
   "transcript": { "kind": "sqlite", "path": "~/.hermes/state.db", "access": "READ-ONLY. A second writer corrupts the agent's own state.", "todo": "map the schema against an install" },
   "busy": { "mtime_file": "~/.hermes/state.db-wal", "idle_seconds": 240 },
