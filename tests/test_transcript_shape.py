@@ -139,12 +139,12 @@ def test_the_credit_fallback_reads_a_declared_harness_through_its_shape_and_read
     adapter = dict(FIXTURE, billing={"fallback": {"transcripts": str(transcript), "reading": "peak-per-turn"}})
     monkeypatch.setattr(A, "package_adapters", lambda: {"shape-fixture": adapter})
 
-    usage = A.credit_usage()
+    usage = A.credit_usage(adapter_id="shape-fixture")
 
     assert sum(usage["days"].values()) == 3000 and usage["sessions"][0]["turns"] == 3
     other = dict(adapter, billing={"fallback": {"transcripts": str(transcript), "reading": "every-record"}})
     monkeypatch.setattr(A, "package_adapters", lambda: {"shape-fixture": other})
-    assert A.credit_usage()["days"] == {}
+    assert A.credit_usage(adapter_id="shape-fixture")["days"] == {}
 
 
 def test_an_adapter_that_declares_no_shape_has_nothing_read_from_another_harness_records(project, monkeypatch,

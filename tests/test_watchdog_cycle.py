@@ -317,7 +317,8 @@ def test_dry_cycle_escalation_has_no_alarm_or_channel_side_effects(
 
 
 def _billing_adapter():
-    return {"billing": {"api": {"target": "GetUsageLimits"}}}
+    """The implementer's adapter as the sampler is handed it: the id of the shipped adapter that declares a lookup."""
+    return "kiro"
 
 
 def test_kiro_usage_names_a_missing_cli_instead_of_returning_nothing(tmp_path, monkeypatch):
@@ -336,7 +337,7 @@ def test_kiro_usage_names_a_missing_cli_instead_of_returning_nothing(tmp_path, m
     monkeypatch.setattr(A, "HOME", str(tmp_path / "home"))
     monkeypatch.setattr(A, "binary_candidates", lambda name, path=None: [])
 
-    result = A.account_usage()
+    result = A.account_usage(adapter_id="kiro")
 
     assert result and "kiro-cli" in result.get("error", "")
 
@@ -344,7 +345,7 @@ def test_kiro_usage_names_a_missing_cli_instead_of_returning_nothing(tmp_path, m
 def test_credit_sampler_records_a_broken_check_and_waits_before_retrying(project, monkeypatch):
     root = project["root"]
     calls, alerts = [], []
-    def usage(timeout=20):
+    def usage(timeout=20, adapter_id=None):
         calls.append(1)
         return {"error": "kiro-cli is not on PATH or in the usual install directories"}
     monkeypatch.setattr(A, "account_usage", usage)
@@ -355,7 +356,7 @@ def test_credit_sampler_records_a_broken_check_and_waits_before_retrying(project
 
     assert st["credit_check_problem"]["reason"].startswith("kiro-cli is not on PATH")
     assert W.load_state(root).get("credit_check_problem") == st["credit_check_problem"]
-    assert A.credit_samples(root) == [] and alerts == []
+    assert A.credit_samples(root, _billing_adapter()) == [] and alerts == []
     W._sample_credits(root, st, _billing_adapter(), "proj", now=10_060)
     assert len(calls) == 1
 
@@ -364,7 +365,7 @@ def test_credit_sampler_raises_exhaustion_on_the_first_reading(project, monkeypa
     root = project["root"]
     alerts = []
     monkeypatch.setattr(A, "account_usage",
-                        lambda timeout=20: {"used": 10200.0, "limit": 10000.0, "reset_at": None})
+                        lambda timeout=20, adapter_id=None: {"used": 10200.0, "limit": 10000.0, "reset_at": None})
     monkeypatch.setattr(W, "notify", lambda title, msg, root=None, **k: alerts.append((title, k)))
     st = {"credit_check_problem": {"at": 1, "reason": "an earlier failure"}}
 
@@ -374,13 +375,13 @@ def test_credit_sampler_raises_exhaustion_on_the_first_reading(project, monkeypa
     title, kwargs = alerts[0]
     assert "exhausted" in title and kwargs["level"] == "red" and kwargs["key"] == "credits-exhaust"
     assert "credit_check_problem" not in st
-    assert len(A.credit_samples(root)) == 1
+    assert len(A.credit_samples(root, _billing_adapter())) == 1
 
 
 def test_doctor_pages_a_blind_credit_check_only_while_the_implementer_is_driven(project):
     from ao import cli, features as F
     root = project["root"]
-    W.save_state(root, {"credit_check_problem": {"at": 1, "reason": "kiro-cli is not on PATH"}})
+    W.save_state(root, {"credit_check_problem": {"at": 1, "reason": "kiro-cli is not on PATH", "adapter": "kiro"}})
 
     assert "credits-check" in dict(cli.doctor_problems(A.load_config(root)))
     F.set_switch(root, "nudge", False)

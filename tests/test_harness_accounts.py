@@ -33,13 +33,14 @@ def test_a_harness_declaring_the_usage_protocol_is_read_through_the_driver(proje
     db.close()
     monkeypatch.setattr(A, "binary_candidates", lambda name, path=None: [])
 
-    assert A.usage_api()["login"] == ["newcomer", "login"]
-    assert A.account_usage() == {"error": "newcomer is not on PATH or in the usual install directories"}
+    assert A.usage_api("newcomer")["login"] == ["newcomer", "login"]
+    assert A.account_usage(adapter_id="newcomer") == {
+        "error": "newcomer is not on PATH or in the usual install directories"}
     assert set(drivers.USAGE) == {"usage-limits"}
 
 
 def test_the_shipped_account_lookup_and_install_dirs_come_from_the_adapters():
-    api = A.usage_api()
+    api = A.usage_api("kiro")
     assert api["driver"] == "usage-limits" and api["profile"]["argv"][1:] == ["whoami"]
     assert "~/.claude/local" in A._BIN_DIRS and A._BIN_DIRS[:4] == ("~/.local/bin", "~/bin", "/usr/local/bin",
                                                                    "/opt/homebrew/bin")

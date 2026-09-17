@@ -138,10 +138,17 @@ def cmd_credits(cfg, args):
     was once measured at came from reading usage records as running totals, a
     reading that comes to 79% of what this machine's records add up to; the sum
     they are read as now has not been measured against the account.
+
+    The account and the estimate are the implementer's own: the ones its adapter declares
+    (ACCOUNT-READERS). The first shipped adapter's were read whatever the implementer ran,
+    so an implementer on a harness that bills no account ao can read was shown one it never
+    spends. It is told it has none, and shown no other harness's figure.
     """
     from datetime import date, datetime
 
-    acct = None if args.offline else A.account_usage()
+    ident = A.implementer_adapter_id(cfg)
+    api = A.usage_api(ident)
+    acct = None if args.offline or not api else A.account_usage(adapter_id=ident)
     if acct and not acct.get("error") and not acct.get("expired"):
         used, limit = acct["used"], acct["limit"]
         pct = used / limit * 100 if limit else 0
@@ -165,7 +172,7 @@ def cmd_credits(cfg, args):
                   f"{acct['overage_cap']:,.0f} at {acct.get('overage_rate')}/credit{C['reset']}")
 
         if args.local:
-            u = A.credit_usage()
+            u = A.credit_usage(adapter_id=ident)
             here = sum(v for d, v in u["days"].items()
                        if d >= date.today().replace(day=1).isoformat())
             share = here / used * 100 if used else 0
@@ -173,8 +180,10 @@ def cmd_credits(cfg, args):
                   f"({share:.0f}%) of it{C['reset']}")
         return 0
 
-    if acct and acct.get("expired"):
-        login = " ".join(A.usage_api().get("login") or []) or "the CLI's login"
+    if not api:
+        print(f"{C['dim']}the account: {_no_account(ident)}{C['reset']}")
+    elif acct and acct.get("expired"):
+        login = " ".join(api.get("login") or []) or "the CLI's login"
         print(f"{C['yellow']}The CLI's token has expired.{C['reset']} "
               f"Run {C['b']}{login}{C['reset']} and try again.")
     elif acct and acct.get("error"):
@@ -182,8 +191,10 @@ def cmd_credits(cfg, args):
     elif not args.offline:
         print(f"{C['dim']}No account token available; falling back to transcripts.{C['reset']}")
 
-    u = A.credit_usage()
+    u = A.credit_usage(adapter_id=ident)
     if not u["days"]:
+        if not api:
+            return 0                # nothing to read, and the line above says so
         print(f"{C['dim']}No local sessions with usage records either.{C['reset']}")
         return 1
     impl = cfg.get("implementer") or {}
@@ -676,7 +687,12 @@ def cmd_handoff(cfg, args):
     g = A.git_state(root)
     opens = A.decisions(root, "open")
     revs = A.reviews(root, cfg["reviews"], limit=1)
-    acct = A.account_usage() if ((adapter.get("billing") or {}).get("api") or {}).get("driver") else None
+    # The implementer's own account, asked of the package's lookup for its adapter: whether to
+    # read one was decided by a layer the implementer can write, and the first shipped
+    # adapter's account was read whatever it ran (ACCOUNT-READERS).
+    ident = A.implementer_adapter_id(cfg) if impl else ""
+    readable = bool(A.usage_api(ident))
+    acct = A.account_usage(adapter_id=ident) if readable else None
     state, age, doing = A.busy(cfg, adapter) if impl else ("unknown", None, "")
 
     lines = [f"# Devir — {cfg.get('project') or os.path.basename(root)}",
@@ -693,7 +709,9 @@ def cmd_handoff(cfg, args):
         lines.append(f"- son review: {revs[0][1]} ({revs[0][0]})")
     if doing:
         lines.append(f"- diyor ki: _{doing[:200]}_")
-    if acct and not acct.get("error"):
+    if impl and not readable:
+        lines.append(f"- kredi: {_no_account(ident)}")
+    elif acct and not acct.get("error") and not acct.get("expired") and acct.get("limit"):
         lines.append(f"- kredi: {acct['used']:,.0f} / {acct['limit']:,.0f}"
                      f" ({acct['limit'] - acct['used']:,.0f} kaldı)")
 

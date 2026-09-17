@@ -77,6 +77,7 @@ def cmd_digest(cfg, args):
         print(f"\n  karar      {dec['answered']}/{dec['asked']} cevaplandı"
               f"{C['dim']}, ortanca {med}{C['reset']}")
 
+    account = d.get("account") or {}
     if d.get("credits"):
         c = d["credits"]
         pct = c["used"] / c["limit"] * 100 if c["limit"] else 0
@@ -84,6 +85,10 @@ def cmd_digest(cfg, args):
         print(f"\n{C['b']}{C['mag']}── KREDİ {'─' * 48}{C['reset']}")
         print(f"  {cc}{c['used']:,.0f}{C['reset']} / {c['limit']:,.0f}"
               f"{C['dim']}  ({c['remaining']:,.0f} kaldı){C['reset']}")
+    elif account and not account.get("readable"):
+        # Where the figure stood, the implementer's adapter declares no account (ACCOUNT-READERS).
+        print(f"\n{C['b']}{C['mag']}── KREDİ {'─' * 48}{C['reset']}")
+        print(f"  {C['dim']}{_no_account(account.get('adapter'))}{C['reset']}")
     for day, val in d["credit_days"][-args.n:]:
         print(f"    {C['dim']}{day}{C['reset']}  {val:>8,.0f}")
 

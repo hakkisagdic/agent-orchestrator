@@ -102,7 +102,7 @@ class World:
         mp.setattr(A, "turn_ended", lambda cfg: w.turn_ended)
         mp.setattr(A, "discover_architect", lambda cwd: {"session": "sess-1", "age": 9999})
         mp.setattr(A, "provider_window", lambda name="claude": None)
-        mp.setattr(A, "account_usage", lambda timeout=20: None)
+        mp.setattr(A, "account_usage", lambda timeout=20, adapter_id=None: None)
         mp.setattr(A, "ping", lambda root, opener=None: None)
         mp.setattr(A, "quota", lambda adapter, ttl=300: [])
         mp.setattr(

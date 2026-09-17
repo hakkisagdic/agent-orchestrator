@@ -81,9 +81,13 @@ def test_quota_block_until_golden_values(case, err, expected):
 
 
 # ── lib.burn_rate: credit readings to a projection ──
+ADAPTER = "kiro"         # the adapter whose readings are asked for; a fourth element is the one a reading came through
+
+
 def _samples(root, rows):
-    for at, used, account in rows:
-        A.record_credit_sample(root, used, 10_000, reset_at=NOW + 30 * DAY, account=account, at=at)
+    for at, used, account, *through in rows:
+        A.record_credit_sample(root, used, 10_000, reset_at=NOW + 30 * DAY, account=account, at=at,
+                               adapter=through[0] if through else ADAPTER)
 
 
 BURN_RATE = [
@@ -107,13 +111,21 @@ BURN_RATE = [
     ("a reading that does not name its account", [(NOW - 5 * HOUR, 100, "acct-a"), (NOW - HOUR, 500, None)], None),
     ("readings older than the window", [(NOW - 80 * HOUR, 100, "acct-a"), (NOW - 75 * HOUR, 9_000, "acct-a")],
      None),
+    # the defect: another harness's readings in the same ledger are not this implementer's account
+    ("another adapter's readings", [(NOW - 5 * HOUR, 100, "acct-a", "other"), (NOW - HOUR, 500, "acct-a", "other")],
+     None),
+    ("another adapter's newer reading ends no series of this one's",
+     [(NOW - 5 * HOUR, 100, "acct-a"), (NOW - HOUR, 500, "acct-a"), (NOW - HOUR / 2, 9_000, "acct-b", "other")],
+     {"per_day": 2400.0, "remaining": 9500.0, "account": "acct-a"}),
+    ("a reading that does not name its adapter",
+     [(NOW - 5 * HOUR, 100, "acct-a", None), (NOW - HOUR, 500, "acct-a", None)], None),
 ]
 
 
 @pytest.mark.parametrize("case,rows,expected", BURN_RATE)
 def test_burn_rate_golden_values(case, rows, expected, project):
     _samples(project["root"], rows)
-    got = A.burn_rate(project["root"], now=NOW)
+    got = A.burn_rate(project["root"], ADAPTER, now=NOW)
     if expected is None:
         assert got is None, case
     else:

@@ -1147,28 +1147,9 @@ def cmd_doctor(cfg, args):
                       + (f"  {C['red']}fresh file, nothing parsed — the CLI's format changed; update the adapter{C['reset']}" if bad else ""))
         except Exception:
             pass
-        br = A.burn_rate(root)
-        _last = (A.credit_samples(root) or [None])[-1]
-        # A reading already over the limit is exhausted; a date ahead would say otherwise.
-        _over = bool(_last and _last.get("limit")
-                     and float(_last.get("used") or 0) >= float(_last["limit"]))
-        if br and not _over:
-            when = time.strftime('%d %b', time.localtime(br['exhausts_at'])) if br['exhausts_at'] else '—'
-            tone = C['red'] if br['before_reset'] else C['green']
-            print(f"credits         {br['used']:.0f}/{br['limit']:.0f} · {br['per_day']:.0f}/day · runs out {tone}{when}{C['reset']}"
-                  + (f"  {C['red']}before the reset — new account / ao features off{C['reset']}" if br['before_reset'] else ""))
-        if (_over or not br) and _last and _last.get("limit"):
-            _used, _limit = float(_last.get("used") or 0), float(_last["limit"])
-            print(f"credits         {C['red'] if _used >= _limit else C['green']}{_used:.0f}/{_limit:.0f}{C['reset']} at the last reading"
-                  + (f"  {C['red']}exhausted{C['reset']}" if _used >= _limit else ""))
-        try:
-            from .watchdog import load_state as _load_state
-            _blind = (_load_state(root) or {}).get("credit_check_problem")
-        except Exception:
-            _blind = None
-        if _blind:
-            print(f"credits check   {C['red']}cannot read usage{C['reset']} — {_blind.get('reason')}  "
-                  f"{C['dim']}the exhaustion alarm is blind until it reads again{C['reset']}")
+        # The implementer's own account only, or that its adapter declares none (ACCOUNT-READERS).
+        for line in _doctor_credit_lines(cfg):
+            print(line)
         print(f"ping            {C['green'] + 'configured' + C['reset'] if A.ping_url(root) else C['yellow'] + 'off' + C['reset'] + '  ao pings setup'}")
         from . import features as _F
         print(f"features        {sum(_F.switches(cfg).values())}/{len(_F.ORDER)} on  {C['dim']}ao cost --features for what "

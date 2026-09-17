@@ -178,14 +178,19 @@ no MCP server it was not given (#24); `ao doctor` and the reviewer check read it
 
 | Field | What it declares | Used by |
 |---|---|---|
-| `billing.api.driver` | a protocol in `src/ao/drivers.py` (`usage-limits`) with its `token`, `profile`, `body`, `resource` and `login` | `ao credits`, the credit sampler, `ao digest`, handoff |
-| `billing.fallback.transcripts` | a glob of transcripts whose usage records are read when the account cannot be | `ao credits --offline` |
+| `billing.api.driver` | a protocol in `src/ao/drivers.py` (`usage-limits`) with its `token`, `profile`, `body`, `resource` and `login` | `ao credits`, `ao cost`, the credit sampler and the samples `ao doctor` reads, `ao digest`, handoff: each for the implementer's own adapter |
+| `billing.fallback.transcripts` | a glob of transcripts whose usage records are read when the account cannot be | `ao credits --offline`, `ao digest`, for the implementer's own adapter |
 | `quota` → `provider` | the keyflip provider an actor running this harness spends | window reserve, rotation (#32), `ao fanout` |
 | `detect.install_dirs` | where the harness installs itself outside the usual directories | the newest-binary search |
 | `detect.update` | the command that updates the harness | `ao doctor` on a stale binary |
 
 A driver is chosen by name and reads every path, key, command and endpoint from the adapter, so
-adding a harness whose account answers the same protocol is a data change (#76).
+adding a harness whose account answers the same protocol is a data change (#76). A lookup is asked
+only for the adapter the reading is about, the implementer's, and only as the package declares it:
+a lookup runs the command its adapter names, so what a layer an agent can write declares is never
+asked, and there is no first adapter to fall back on. An implementer whose adapter declares none has
+no account ao can read, no credit samples and no credits alarm; every sample names the adapter it
+was read through ([telemetry.md](telemetry.md), "Whose account").
 
 ## Profiles and actor names are declared, not coded
 

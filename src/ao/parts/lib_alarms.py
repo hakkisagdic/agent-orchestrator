@@ -1076,36 +1076,47 @@ def credit_account(profile):
     return "acct-" + hashlib.sha256(str(profile).encode("utf-8")).hexdigest()[:12]
 
 
-def record_credit_sample(root, used, limit, reset_at=None, account=None, at=None):
+def record_credit_sample(root, used, limit, reset_at=None, account=None, at=None, adapter=None):
+    """One credit reading, with the account it is of (#36) and the adapter whose lookup took it (ACCOUNT-READERS)."""
     d = os.path.join(root, ".ao", "ledger")
     try:
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "credits.jsonl"), "a", encoding=UTF8) as fh:
             fh.write(json.dumps({"at": int(at if at is not None else time.time()), "used": float(used),
                                  "limit": float(limit), "reset_at": reset_at,
-                                 "account": account}) + "\n")
+                                 "account": account, "adapter": adapter}) + "\n")
     except OSError:
         pass
 
 
-def credit_samples(root, limit=500):
+def credit_samples(root, adapter, limit=500):
+    """The newest credit readings taken through this adapter's lookup; none for a call that names no adapter.
+
+    A reading is the account of the adapter that read it (ACCOUNT-READERS). One ledger can
+    hold another harness's readings - an implementer that moved to another harness leaves
+    its old one's behind - and an implementer does not bill that account, so no reader
+    takes them for its own. A reading written before readings named their adapter is
+    nobody's, as one that does not name its account projects nothing (#36).
+    """
     p = os.path.join(root, ".ao", "ledger", "credits.jsonl")
-    if not os.path.exists(p):
+    if not adapter or not os.path.exists(p):
         return []
     rows = []
     for line in open(p, errors="replace", encoding=UTF8):
         try:
-            rows.append(json.loads(line))
+            row = json.loads(line)
         except ValueError:
-            pass
+            continue
+        if isinstance(row, dict) and row.get("adapter") == adapter:
+            rows.append(row)
     return rows[-limit:]
 
 
-def burn_rate(root, window=72 * 3600, now=None):
-    """From the samples: credits per day, days left, and whether the plan runs out
-    before it resets. None when there are not two samples a few hours apart."""
+def burn_rate(root, adapter, window=72 * 3600, now=None):
+    """From the samples this adapter's lookup took: credits per day, days left, and whether
+    the plan runs out before it resets. None when there are not two samples a few hours apart."""
     now = now or time.time()
-    rows = [r for r in credit_samples(root) if r["at"] >= now - window]
+    rows = [r for r in credit_samples(root, adapter) if r["at"] >= now - window]
     # One account's series only (#36). An owner who switched accounts left the old
     # account's cumulative `used` in the ledger, and the projection ran across both:
     # exhaustion declared against an account that was 4% used. A reading that does

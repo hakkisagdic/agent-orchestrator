@@ -1364,8 +1364,8 @@ def _cycle(args, root):
             _DRY_RUN.reset(token)
 
 
-def _sample_credits(root, st, adapter, project, now=None):
-    """Read the provider's credit figure at most once per half hour and act on it.
+def _sample_credits(root, st, adapter_id, project, now=None):
+    """Read the implementer's own credit account at most once per half hour and act on it.
 
     Exhaustion is reported from the reading itself, on the first observation: a
     projection has nothing to say once the plan has already run out, which is the
@@ -1378,14 +1378,22 @@ def _sample_credits(root, st, adapter, project, now=None):
     and held until then (#40). Raised without it, an exhausted plan whose reset was
     ten days away mailed every six hours. What it says - run out, or will - is named
     per account, so the day a projection comes true is still told (NOTICE-NOISE).
+
+    The account is the one the package's adapter of `adapter_id`, the implementer's,
+    declares a lookup for (ACCOUNT-READERS). The first shipped adapter's was read whatever
+    the implementer ran, once a layer the implementer can write said its adapter bills
+    through an API: an implementer on a harness that bills no account ao can read was
+    sampled, and alarmed, on another harness's. It has no samples and no credits alarm
+    now. A sample and a broken check name the adapter they were read through, and only
+    that adapter's samples project its burn rate.
     """
     now = now or time.time()
     if now - max(st.get("last_credit_sample", 0), st.get("last_credit_attempt", 0)) <= 1800:
         return
-    if not (adapter.get("billing") or {}).get("api"):
+    if not A.usage_api(adapter_id):
         return
     try:
-        acct = A.account_usage()
+        acct = A.account_usage(adapter_id=adapter_id)
     except Exception as exc:
         acct = {"error": f"the usage check raised {type(exc).__name__}"}
     if acct is None:
@@ -1394,12 +1402,12 @@ def _sample_credits(root, st, adapter, project, now=None):
     if not acct.get("limit"):
         reason = acct.get("error") or ("the CLI's token has expired" if acct.get("expired")
                                        else "the provider returned no credit limit")
-        st["credit_check_problem"] = {"at": int(now), "reason": reason}
+        st["credit_check_problem"] = {"at": int(now), "reason": reason, "adapter": adapter_id}
         save_state(root, st)
         return
     st.pop("credit_check_problem", None)
     A.record_credit_sample(root, acct.get("used", 0), acct["limit"], acct.get("reset_at"),
-                           account=acct.get("account"))
+                           account=acct.get("account"), adapter=adapter_id)
     st["last_credit_sample"] = now
     save_state(root, st)
     used, limit = float(acct.get("used") or 0), float(acct["limit"])
@@ -1413,7 +1421,7 @@ def _sample_credits(root, st, adapter, project, now=None):
                key="credits-exhaust", window=6 * 3600, audience="human", level="red", evidence=reading,
                quiet_until=credit_reset(acct.get("reset_at"), now), what=credits_told("exhausted", acct.get("account")))
         return
-    br = A.burn_rate(root)
+    br = A.burn_rate(root, adapter_id)
     if br and br["before_reset"]:
         evidence = A.notice_evidence("burn_rate", [
             {"value": f"{sample['used']:.0f}/{sample['limit']:.0f}", "at": sample.get("at"),
@@ -1806,7 +1814,7 @@ def _cycle_impl(args, root):
     else:
         _FACTS["ping"] = "dry-run"
     if not args.dry_run:
-        _sample_credits(root, st, adapter, project)
+        _sample_credits(root, st, A.implementer_adapter_id(cfg), project)
         _schedule_hunt(root, cfg, st)
     # Only meaningful when no implementer turn is running: a sub-agent's writes
     # do not appear as the parent's tool calls and would read as a stranger's.

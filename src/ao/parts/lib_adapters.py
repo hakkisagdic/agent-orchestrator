@@ -265,15 +265,25 @@ def implementer_actor_name(cfg):
     return str(package_adapters().get(ident, {}).get("actor_name") or ident or "implementer")
 
 
+def implementer_adapter_id(cfg=None):
+    """The id of the implementer's adapter: the one its block names, else the default profile's implementer; "".
+
+    The id is the configuration's, not a field of whichever layer's adapter answers to it:
+    what an account reader asks the package for must not change with a copy of the adapter
+    that declares no id (ACCOUNT-READERS).
+    """
+    return str(((cfg or {}).get("implementer") or {}).get("adapter")
+               or (profiles().get(default_profile()) or {}).get("implementer") or "")
+
+
 def implementer_adapter(cfg=None):
     """The implementer's adapter: the one its block names, else the default profile's implementer (#76).
 
     A transcript reader asked without an adapter reads what the implementer's adapter
     declares, never one harness's record shape written into the reader.
     """
-    ident = ((cfg or {}).get("implementer") or {}).get("adapter") \
-        or (profiles().get(default_profile()) or {}).get("implementer") or ""
-    return load_adapter(str(ident), (cfg or {}).get("root")) if ident else {}
+    ident = implementer_adapter_id(cfg)
+    return load_adapter(ident, (cfg or {}).get("root")) if ident else {}
 
 
 def vendor_list():

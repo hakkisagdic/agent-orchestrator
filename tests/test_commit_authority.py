@@ -677,8 +677,8 @@ def test_digest_surfaces_broken_authority_chain_without_trusting_counts(
         lambda root: {state: [] for state in A.BOARD_STATES},
     )
     monkeypatch.setattr(A, "reviews", lambda *args, **kwargs: [])
-    monkeypatch.setattr(A, "account_usage", lambda: None)
-    monkeypatch.setattr(A, "credit_usage", lambda: {"days": {}})
+    monkeypatch.setattr(A, "account_usage", lambda timeout=20, adapter_id=None: None)
+    monkeypatch.setattr(A, "credit_usage", lambda adapter_id, monthly_budget=None: {"days": {}})
 
     result = A.digest(root, project)
     assert result["authority"]["integrity"] == "broken"

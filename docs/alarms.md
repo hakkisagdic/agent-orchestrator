@@ -56,7 +56,8 @@ channel; a snooze on `reports-no-wake` holds the reports it still names.
 
 Some conditions ring red at once, because waiting cannot help:
 
-- the implementer's credits are exhausted for the billing period
+- the implementer's credits are exhausted for the billing period, on the account its own
+  adapter declares; an implementer whose adapter declares none ao can read has no credits alarm
 - the architect's wake keeps failing on the same binary
 - a hold has stood for four hours
 
@@ -136,7 +137,10 @@ Every channel above runs on the machine that is failing. `ao pings setup --url
 …` adds the one that does not: the watchdog and the doctor job ping an external
 check (healthchecks.io) every cycle, and that service e-mails you when the pings
 stop. The credit burn rate (`ao doctor`) turns "the plan runs out before it
-resets" into a red alarm days ahead rather than a silent stop on the day.
+resets" into a red alarm days ahead rather than a silent stop on the day. It projects only
+the samples the implementer's own adapter took: another harness's readings in the same
+ledger are not its account, and neither is a sample that names no adapter
+([telemetry.md](telemetry.md), "Whose account").
 
 The doctor job, `ao doctor --check --notify` every fifteen minutes, is the watchdog's
 backstop, and it pages nothing twice:

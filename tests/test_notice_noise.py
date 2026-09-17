@@ -11,7 +11,7 @@ from ao import watchdog as W
 from tests.scenarios import World
 
 NOTIFY = W.notify                  # the scenario world replaces it; these are about the real ladder
-BILLING = {"billing": {"api": {"target": "GetUsageLimits"}}}
+IMPLEMENTER = "kiro"               # the project's implementer: the shipped adapter whose account the sampler reads
 DAY, HOUR = 86400, 3600
 REQUEST = "20260902-0900-kiro-to-fable-BLOCKED-credits.md"
 BLOCKED = "# credits are exhausted until the reset\n\n## KARAR GEREKLİ\n\nnew account or wait?\n"
@@ -39,8 +39,8 @@ def _on(sent, channel):
 
 
 def _exhausted(monkeypatch, reset, account="acct-1"):
-    monkeypatch.setattr(A, "account_usage", lambda timeout=20: {"used": 10240.0, "limit": 10000.0,
-                                                                "reset_at": reset, "account": account})
+    monkeypatch.setattr(A, "account_usage", lambda timeout=20, adapter_id=None: {
+        "used": 10240.0, "limit": 10000.0, "reset_at": reset, "account": account})
 
 
 def _heartbeat(root, at):
@@ -76,8 +76,8 @@ def _doctor_findings(cfg):
     age = A.heartbeat_age(root)
     if age is not None and age > cli.WATCHDOG_SILENT_AFTER:
         found.append(("watchdog-dead", f"watchdog silent for {age // 60}m — launchctl / ao watchdog status"))
-    samples = A.credit_samples(root)
-    credits = cli._credits_problem(A.burn_rate(root), samples[-1] if samples else None)
+    own = cli._implementer_credits(cfg)
+    credits = cli._credits_problem(own["rate"], own["samples"][-1] if own["samples"] else None)
     return found + ([credits] if credits else []) + [
         ("no-channel", "no human channel beyond desktop notifications — ao email setup")]
 
@@ -105,14 +105,14 @@ def test_exhausted_credits_are_mailed_once_and_held_until_the_reset_the_reading_
     st = {}
 
     for _ in range(50):                                   # a reading every half hour, all of the day before the reset
-        W._sample_credits(root, st, BILLING, "proj", now=clock[0])
+        W._sample_credits(root, st, IMPLEMENTER, "proj", now=clock[0])
         clock[0] += 1801
 
     assert [kind for kind, _, _ in sent] == ["email", "desktop", "telegram"]
     (alarm,) = A.active_alarms("proj")
     assert alarm["key"] == "credits-exhaust" and alarm["quiet_until"] == reset and alarm["count"] == 50
 
-    W._sample_credits(root, st, BILLING, "proj", now=clock[0])     # past the reset, and still spent
+    W._sample_credits(root, st, IMPLEMENTER, "proj", now=clock[0])     # past the reset, and still spent
 
     assert _on(sent, "email") == ["proj: credits exhausted"] * 2
 
@@ -122,14 +122,15 @@ def test_the_day_a_projected_run_out_comes_true_is_told_though_the_projection_is
     clock = _clock(monkeypatch)
     root = project["root"]
     reset = clock[0] + 30 * DAY
-    A.record_credit_sample(root, 1000, 10_000, reset_at=reset, account="acct-1", at=clock[0] - 5 * HOUR)
+    A.record_credit_sample(root, 1000, 10_000, reset_at=reset, account="acct-1", at=clock[0] - 5 * HOUR,
+                           adapter=IMPLEMENTER)
     reading = {"used": 5000.0, "limit": 10000.0, "reset_at": reset, "account": "acct-1"}
-    monkeypatch.setattr(A, "account_usage", lambda timeout=20: dict(reading))
+    monkeypatch.setattr(A, "account_usage", lambda timeout=20, adapter_id=None: dict(reading))
     st = {}
 
     for used in (5000.0, 5000.0, 10240.0, 10240.0):
         reading["used"] = used
-        W._sample_credits(root, st, BILLING, "proj", now=clock[0])
+        W._sample_credits(root, st, IMPLEMENTER, "proj", now=clock[0])
         clock[0] += 1801
 
     mailed = _on(sent, "email")
@@ -157,7 +158,8 @@ def test_the_doctor_leaves_a_watchdog_whose_job_just_came_back_to_its_first_cycl
     _heartbeat(root, stopped)                             # both jobs were switched off together
     _doctor_ran(root, stopped)
     _watchdog_job(root, 300)
-    A.record_credit_sample(root, 10240, 10000, reset_at=clock[0] + 10 * DAY, account="acct-1", at=stopped - 600)
+    A.record_credit_sample(root, 10240, 10000, reset_at=clock[0] + 10 * DAY, account="acct-1", at=stopped - 600,
+                           adapter=IMPLEMENTER)
 
     assert cli._doctor_check(project, page=True) == 1
 
@@ -220,7 +222,7 @@ def test_the_doctor_raises_the_watchdogs_own_credits_alarm(project, monkeypatch)
     monkeypatch.setattr(cli, "doctor_problems", _doctor_findings)
     root = project["root"]
     _exhausted(monkeypatch, time.time() + 10 * DAY)
-    W._sample_credits(root, {}, BILLING, "proj")
+    W._sample_credits(root, {}, IMPLEMENTER, "proj")
     _heartbeat(root, time.time())
 
     for _ in range(3):
@@ -234,7 +236,7 @@ def test_a_snooze_on_the_credits_alarm_keeps_the_doctor_off_the_channels_too(pro
     sent = _channels(monkeypatch)
     monkeypatch.setattr(cli, "doctor_problems", _doctor_findings)
     root = project["root"]
-    A.record_credit_sample(root, 10240, 10000, reset_at=time.time() + 10 * DAY, account="acct-1")
+    A.record_credit_sample(root, 10240, 10000, reset_at=time.time() + 10 * DAY, account="acct-1", adapter=IMPLEMENTER)
     A.alarm_snooze("proj", "credits-exhaust", time.time() + 10 * DAY, by="owner", why="the plan resets on the 1st")
     _heartbeat(root, time.time())
 
@@ -359,7 +361,8 @@ def test_a_day_after_two_weeks_off_tells_each_condition_once_on_each_channel_its
     A.mail_seen(root, [REQUEST], by="architect")
     world.transcript_age(14 * DAY + 2 * HOUR)
     for before in (6 * HOUR, 600):
-        A.record_credit_sample(root, 10200, 10000, reset_at=reset, account="acct-1", at=stopped - before)
+        A.record_credit_sample(root, 10200, 10000, reset_at=reset, account="acct-1", at=stopped - before,
+                               adapter=IMPLEMENTER)
     W.save_state(root, {"last_credit_sample": stopped, "last_credit_attempt": stopped})
     A.save_alarms({
         "proj:credits-exhaust": {"first": stopped - DAY, "last": stopped, "level": "red", "ring": "red", "count": 48,

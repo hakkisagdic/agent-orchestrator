@@ -115,8 +115,10 @@ def test_an_adapter_is_asked_for_its_own_account_lookup_not_the_first_one_shippe
         "first": {"billing": {"api": lookup}}, "second": {"billing": {"api": dict(lookup, login=["second", "login"])}},
         "third": {"billing": {"fallback": {"reading": "sum"}}}})
 
-    assert A.usage_api()["login"] == ["first", "login"] and A.usage_api("second")["login"] == ["second", "login"]
+    assert A.usage_api("first")["login"] == ["first", "login"] and A.usage_api("second")["login"] == ["second", "login"]
     assert A.usage_api("third") == {} and A.usage_api("absent") == {} and A.account_usage(adapter_id="third") is None
+    # There is no first one to fall back on: a lookup that names no adapter reads none (ACCOUNT-READERS).
+    assert A.usage_api(None) == {} and A.account_usage() is None
 
 
 # ── a file the implementer only read is not its write ──
@@ -210,7 +212,7 @@ def test_a_resumed_sessions_copy_of_another_is_counted_once_across_the_transcrip
     declared = dict(shipped, billing={"fallback": {"transcripts": str(store / "*.jsonl"), "reading": "per-response"}})
     monkeypatch.setattr(A, "package_adapters", lambda: {HARNESS: declared})
 
-    estimate = A.credit_usage()
+    estimate = A.credit_usage(adapter_id=HARNESS)
 
     per_transcript = sum(A.telemetry(A.read_tail(str(path)), declared)["total"] for path in store.iterdir())
     assert per_transcript == _spent(R1, R2, R1, R2, R3)

@@ -99,13 +99,13 @@ def test_burn_rate_projects_exhaustion(project):
     root = project["root"]
     now = 1_800_000_000
     reset = now + 20 * 86400
-    A.record_credit_sample(root, 6000, 10000, reset, account="acct-a")
+    A.record_credit_sample(root, 6000, 10000, reset, account="acct-a", adapter="kiro")
     p = os.path.join(root, ".ao", "ledger", "credits.jsonl")
     rows = [json.loads(l) for l in open(p, encoding="utf-8")]
     rows[0]["at"] = now - 2 * 86400
-    rows.append({"at": now, "used": 7000, "limit": 10000, "reset_at": reset, "account": "acct-a"})
+    rows.append({"at": now, "used": 7000, "limit": 10000, "reset_at": reset, "account": "acct-a", "adapter": "kiro"})
     open(p, "w", encoding="utf-8").write("\n".join(json.dumps(r) for r in rows) + "\n")
-    br = A.burn_rate(root, now=now)
+    br = A.burn_rate(root, "kiro", now=now)
     assert round(br["per_day"]) == 500 and round(br["days_left"]) == 6 and br["before_reset"] is True
 
 

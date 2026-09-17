@@ -17,13 +17,14 @@ def test_a_projection_notice_cannot_be_written_without_its_samples():
 def test_the_credit_projection_rings_with_the_readings_it_projected_from(project, monkeypatch):
     root = project["root"]
     now = time.time()
-    A.record_credit_sample(root, 1000, 10_000, reset_at=now + 30 * 86400, account="acct-a", at=now - 5 * 3600)
-    monkeypatch.setattr(A, "account_usage", lambda timeout=20: {
+    A.record_credit_sample(root, 1000, 10_000, reset_at=now + 30 * 86400, account="acct-a", at=now - 5 * 3600,
+                           adapter="kiro")
+    monkeypatch.setattr(A, "account_usage", lambda timeout=20, adapter_id=None: {
         "used": 5000, "limit": 10_000, "reset_at": now + 30 * 86400, "account": "acct-a"})
     rung = []
     monkeypatch.setattr(W, "notify", lambda title, msg, root=None, **kw: rung.append((title, kw)))
 
-    W._sample_credits(root, {}, {"billing": {"api": {"target": "GetUsageLimits"}}}, "proj", now=now)
+    W._sample_credits(root, {}, "kiro", "proj", now=now)
 
     (title, kw), = rung
     evidence = kw["evidence"]

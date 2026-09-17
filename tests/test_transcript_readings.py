@@ -112,7 +112,7 @@ def test_every_usage_record_is_a_whole_turn_and_the_credit_estimate_ao_cost_and_
     store = A.load_adapter("kiro")["billing"]["fallback"]["transcripts"]
     path = _transcript(A._home_path(store.replace("*", "s1")), monkeypatch, records)
 
-    estimate, costs = A.credit_usage(), A.turn_costs(project)
+    estimate, costs = A.credit_usage(adapter_id="kiro"), A.turn_costs(project)
     panel = A.telemetry(A.read_tail(path), A.load_adapter("kiro"))
 
     # Read as running totals, a drop taken for a new turn, the same records came to 13, all of it in September.
@@ -149,7 +149,7 @@ def test_the_declared_reading_adds_usage_up_for_ao_cost_the_panel_and_the_credit
 
     costs = A.turn_costs(cfg)
     panel = A.telemetry(A.read_tail(str(transcript)), adapter)
-    estimate = A.credit_usage()
+    estimate = A.credit_usage(adapter_id=adapter["id"])
 
     assert costs["total"] == panel["total"] == sum(estimate["days"].values()) == spent
     assert len(costs["turns"]) == panel["turns"] == estimate["sessions"][0]["turns"] == 3
@@ -165,7 +165,7 @@ def test_the_estimate_needs_a_reading_ao_implements_and_nothing_reads_usage_unde
         cfg, transcript = _world(project, monkeypatch, tmp_path, adapter=adapter, records=_rounds([[400], [80]]))
         monkeypatch.setattr(A, "package_adapters", lambda: {adapter["id"]: adapter})
 
-        assert A.credit_usage()["days"] == {}
+        assert A.credit_usage(adapter_id=adapter["id"])["days"] == {}
         assert A.turn_costs(cfg)["total"] == A.telemetry(A.read_tail(str(transcript)), adapter)["total"] == spent
 
 

@@ -814,44 +814,47 @@ def write_report(root, cfg, kind, facts, key=None):
         return None
 
 
-def usage_api(adapter_id=None):
-    """An account lookup ao has a driver for: the shipped adapter's of this id, else the first shipped one's; {} (#76).
+def usage_api(adapter_id):
+    """The account lookup the shipped adapter of this id declares, when ao has its driver; {} (#76).
 
-    Asked for an adapter, only that adapter's own lookup answers: an implementer whose
-    harness bills no account ao can read has none, not the first harness's that does.
-    Read from the package's adapters only, since a lookup runs the command its adapter
-    names, and a layer an agent can write must not name that command.
+    Only that adapter's own lookup answers: an implementer whose harness bills no account
+    ao can read has none, not the first harness's that does. There is no first harness to
+    fall back on: a reader that names no adapter reads no account (ACCOUNT-READERS). Read
+    from the package's adapters only, since a lookup runs the command its adapter names,
+    and a layer an agent can write must not name that command.
     """
     from . import drivers
-    for ident, adapter in sorted(package_adapters().items()):
-        if adapter_id is not None and ident != adapter_id:
-            continue
-        api = (adapter.get("billing") or {}).get("api") or {}
-        if api.get("driver") in drivers.USAGE:
-            return api
-    return {}
+    adapter = package_adapters().get(adapter_id) if isinstance(adapter_id, str) else None
+    api = ((adapter or {}).get("billing") or {}).get("api") or {}
+    return api if api.get("driver") in drivers.USAGE else {}
 
 
 def account_usage(timeout=20, adapter_id=None):
     """Real usage from the provider, through the driver an adapter's billing names; None when none can.
 
     The protocol lives in drivers.py and every path, key, command and endpoint in
-    the adapter, so this core function names no harness (#76). `adapter_id` asks for
-    that adapter's own account (`usage_api`).
+    the adapter, so this core function names no harness (#76). The account is the one
+    `adapter_id`'s own lookup reads (`usage_api`): a call that names no adapter, or an
+    adapter that declares no lookup, reads none (ACCOUNT-READERS).
     """
     from . import drivers
     api = usage_api(adapter_id)
     return drivers.USAGE[api["driver"]](api, timeout=timeout) if api else None
 
 
-def credit_usage(monthly_budget=None):
+def credit_usage(adapter_id, monthly_budget=None):
     """Credit spend read from local transcripts, by billing month.
 
     There is no endpoint for this. A Kiro API key authenticates the CLI
     (`KIRO_API_KEY`); it is not a REST credential, and the published docs
     describe no usage or quota route. The dashboard in the app is the authority.
 
-    Locally, a session's usage records are read through what each shipped adapter
+    The estimate stands in for one account: the one `adapter_id`'s shipped adapter bills.
+    Another harness's transcripts are not that account's spend, nor in its unit, and they
+    were added in whatever the implementer ran (ACCOUNT-READERS); a call that names no
+    adapter reads nothing.
+
+    Locally, a session's usage records are read through what that shipped adapter
     declares (#76): which transcripts (`billing.fallback.transcripts`), which records
     carry usage and where its values are (`telemetry.cost`, `transcript.record`), and
     the reading that adds them up (`billing.fallback.reading`) - `sum` when a record is
@@ -877,7 +880,9 @@ def credit_usage(monthly_budget=None):
     from collections import defaultdict
     months, days, sessions = defaultdict(float), defaultdict(float), []
     sources = []
-    for _, adapter in sorted(package_adapters().items()):
+    for ident, adapter in sorted(package_adapters().items()):
+        if ident != adapter_id:
+            continue
         fallback = (adapter.get("billing") or {}).get("fallback") or {}
         shape = transcript_shape(adapter)
         if fallback.get("transcripts") and fallback.get("reading") in USAGE_READINGS and shape["usage"]:

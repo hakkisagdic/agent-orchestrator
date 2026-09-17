@@ -41,7 +41,7 @@ def test_a_check_run_by_a_person_or_an_agent_pages_nobody(project, monkeypatch, 
 def test_the_scheduled_check_pages_only_red_and_records_advisories_for_the_architect(project, monkeypatch):
     calls = _record_notify(monkeypatch)
     monkeypatch.setattr(cli, "doctor_problems", lambda cfg: PROBLEMS)
-    A.record_credit_sample(project["root"], 12503, 10000, reset_at=1790812800)
+    A.record_credit_sample(project["root"], 12503, 10000, reset_at=1790812800, adapter="kiro")
 
     assert cli.cmd_doctor(project, SimpleNamespace(check=True, notify=True)) == 1
 

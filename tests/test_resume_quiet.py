@@ -65,7 +65,7 @@ def test_after_two_weeks_one_notice_names_everything_and_nothing_rings_on_the_si
         fh.write(json.dumps({"event": "deferred", "id": f"DF-{int(began - DAY)}-wake", "kind": "wake",
                              "at": int(began - DAY), "reason": "architect quota"}) + "\n")
     W.save_state(world.root, {"last_credit_sample": began, "last_credit_attempt": began})
-    monkeypatch.setattr(A, "account_usage", lambda timeout=20: dict(EXHAUSTED))
+    monkeypatch.setattr(A, "account_usage", lambda timeout=20, adapter_id=None: dict(EXHAUSTED))
     world.transcript_age(14 * DAY + 3600)
 
     trace = world.cycle()
@@ -133,7 +133,7 @@ def test_a_snooze_that_ended_in_the_silence_is_named_once_and_a_standing_one_sta
     A.save_alarms({"proj:waiting-human:S1": {"first": time.time() - 4 * DAY, "last": time.time() - 3 * DAY,
                                              "level": "orange", "ring": "orange", "count": 9}})
     world.transcript_age(3 * DAY)
-    monkeypatch.setattr(A, "account_usage", lambda timeout=20: dict(EXHAUSTED))
+    monkeypatch.setattr(A, "account_usage", lambda timeout=20, adapter_id=None: dict(EXHAUSTED))
 
     world.cycle(dry_run=False)
 
@@ -145,7 +145,7 @@ def test_a_snooze_that_ended_in_the_silence_is_named_once_and_a_standing_one_sta
 
     world.sent.clear()
     st = W.load_state(world.root)
-    W._sample_credits(world.root, st, A.load_adapter("kiro", world.root), "proj", now=time.time() + 3600)
+    W._sample_credits(world.root, st, "kiro", "proj", now=time.time() + 3600)
 
     assert world.sent == []
 

@@ -78,6 +78,25 @@ So there are exactly two supported answers, and the tool says which one is activ
 
 `ao` never displays an estimated remaining balance.
 
+## Whose account
+
+A credit account belongs to a harness, and every reading of one is the implementer's own.
+`ao credits`, the credits section of `ao digest`, `ao handoff`, the account line of `ao cost`
+and the watchdog's credit sampler each ask the lookup the implementer's adapter declares
+(`billing.api.driver`), and the offline estimate reads only that adapter's transcripts
+(`billing.fallback.transcripts`). Both are read from the adapters ao ships, never from a layer
+an agent can write, since a lookup runs the command its adapter names. Until 2026-09-17 every
+reader but `ao cost` read the first shipped adapter's account whatever the implementer ran, so
+an implementer on a harness billed in tokens could be shown, sampled and alarmed on a credit
+account it never spends.
+
+An implementer whose adapter declares no lookup is told so where the figure would stand
+("… declares none ao can read"), and gets no credit samples and no credits alarm. Every sample
+in `.ao/ledger/credits.jsonl` names the account it is of and the adapter whose lookup took it.
+Only that adapter's samples give the implementer its burn rate, its exhaustion projection and
+the credits finding, page and line of `ao doctor`. A sample that names no adapter is nobody's,
+and so is every sample written before samples named one.
+
 ## Adapter block
 
 ```jsonc

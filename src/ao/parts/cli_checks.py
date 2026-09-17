@@ -82,10 +82,8 @@ def doctor_problems(cfg):
         out.append(("no-channel", "no human channel beyond desktop notifications — ao email setup"))
     for sib, age in A.stale_siblings(root).items():
         out.append((f"sibling-dead:{sib}", f"{sib}: watchdog silent for {age // 60}m"))
-    br = A.burn_rate(root)
-    samples = A.credit_samples(root)
-    last = samples[-1] if samples else None
-    credits = _credits_problem(br, last)
+    own = _implementer_credits(cfg)
+    credits = _credits_problem(own["rate"], own["samples"][-1] if own["samples"] else None)
     if credits:
         out.append(credits)
     from . import features as _features
@@ -97,8 +95,9 @@ def doctor_problems(cfg):
     # Paged only while the implementer is being driven: a check that cannot read
     # usage matters because exhaustion stops the work, and an owner who stopped the
     # work on purpose does not need an hourly page saying so. Plain doctor always
-    # prints it.
-    if blind and _features.enabled(cfg, "nudge"):
+    # prints it. Only a check of the implementer's own account is its blind check
+    # (ACCOUNT-READERS): one another harness's lookup failed is not.
+    if blind and own["readable"] and blind.get("adapter") == own["adapter"] and _features.enabled(cfg, "nudge"):
         out.append(("credits-check", f"credit usage cannot be read ({blind.get('reason')}) — "
                                      f"the exhaustion alarm is blind until it reads again"))
     try:
@@ -373,6 +372,27 @@ def _watchdog_first_cycle_due(root, now=None):
     return due if now < due else None
 
 
+def _no_account(ident):
+    """What stands where a credit figure would, for an implementer whose adapter declares no account ao can read."""
+    return f"{ident or 'the implementer'} declares none ao can read"
+
+
+def _implementer_credits(cfg):
+    """The implementer's own credit readings: {adapter, readable, samples, rate} (ACCOUNT-READERS).
+
+    The account is the one the implementer's adapter declares a lookup for, and its
+    readings are the samples that lookup took. A ledger can hold another harness's
+    readings, and every credits finding, page and line was computed from all of them:
+    an implementer whose adapter declares no account ao can read is not readable, and has
+    no samples and no rate whatever the ledger holds.
+    """
+    ident = A.implementer_adapter_id(cfg)
+    readable = bool(A.usage_api(ident))
+    return {"adapter": ident, "readable": readable,
+            "samples": A.credit_samples(cfg["root"], ident) if readable else [],
+            "rate": A.burn_rate(cfg["root"], ident) if readable else None}
+
+
 def _credits_problem(br, last):
     """The one credits problem the readings show: exhausted outranks a projection.
 
@@ -391,6 +411,42 @@ def _credits_problem(br, last):
                                    f"before the reset ({br['per_day']:.0f}/day, account {br.get('account')}) "
                                    "— new account or fewer features")
     return None
+
+
+def _doctor_credit_lines(cfg):
+    """`ao doctor`'s credits lines, read from the implementer's own readings (ACCOUNT-READERS).
+
+    Where the figure stood, an implementer whose adapter declares no account ao can read is
+    told so: no credit alarm can ring for it, and a check that cannot exist must not look
+    like one that passes. A blind check is shown only for the implementer's own account.
+    """
+    own = _implementer_credits(cfg)
+    if not own["readable"]:
+        return [f"credits         {C['dim']}{_no_account(own['adapter'])}{C['reset']}"]
+    lines, br = [], own["rate"]
+    last = (own["samples"] or [None])[-1]
+    # A reading already over the limit is exhausted; a date ahead would say otherwise.
+    over = bool(last and last.get("limit") and float(last.get("used") or 0) >= float(last["limit"]))
+    if br and not over:
+        when = time.strftime('%d %b', time.localtime(br['exhausts_at'])) if br['exhausts_at'] else '—'
+        tone = C['red'] if br['before_reset'] else C['green']
+        lines.append(f"credits         {br['used']:.0f}/{br['limit']:.0f} · {br['per_day']:.0f}/day · runs out "
+                     f"{tone}{when}{C['reset']}"
+                     + (f"  {C['red']}before the reset — new account / ao features off{C['reset']}"
+                        if br['before_reset'] else ""))
+    if (over or not br) and last and last.get("limit"):
+        used, limit = float(last.get("used") or 0), float(last["limit"])
+        lines.append(f"credits         {C['red'] if used >= limit else C['green']}{used:.0f}/{limit:.0f}{C['reset']} "
+                     "at the last reading" + (f"  {C['red']}exhausted{C['reset']}" if used >= limit else ""))
+    try:
+        from .watchdog import load_state as _load_state
+        blind = (_load_state(cfg["root"]) or {}).get("credit_check_problem")
+    except Exception:
+        blind = None
+    if blind and blind.get("adapter") == own["adapter"]:
+        lines.append(f"credits check   {C['red']}cannot read usage{C['reset']} — {blind.get('reason')}  "
+                     f"{C['dim']}the exhaustion alarm is blind until it reads again{C['reset']}")
+    return lines
 
 
 # Findings that mean work has stopped and only a person can restart it. Everything
@@ -426,7 +482,7 @@ def _doctor_check(cfg, page=False):
     if not problems:
         print(f"ok {time.strftime('%H:%M')} — no problems")
         return 0
-    samples = A.credit_samples(root) if page else []
+    samples = A.credit_samples(root, A.implementer_adapter_id(cfg)) if page else []
     last = samples[-1] if samples else {}
     for key, text in problems:
         print(f"PROBLEM {key}: {text}")
@@ -466,10 +522,9 @@ def _account_beside_share(cfg, since=None):
     another pool in another unit was shown a credit account it never spends; it has none ao
     can read, and the line says so.
     """
-    ident = str(A.implementer_adapter(cfg).get("id") or "")
+    ident = A.implementer_adapter_id(cfg)
     if not A.usage_api(ident):
-        return [f"{C['dim']}the account: {ident or 'the implementer'} declares none ao can read; what follows "
-                f"is ao's transcript only{C['reset']}"]
+        return [f"{C['dim']}the account: {_no_account(ident)}; what follows is ao's transcript only{C['reset']}"]
     try:
         acct = A.account_usage(adapter_id=ident)
     except Exception:

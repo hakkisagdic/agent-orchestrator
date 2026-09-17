@@ -191,7 +191,8 @@ tell them to restart the app in this directory and run `ao doctor`. Add `--watch
 A reviewer out of quota is exit 3, not a verdict; the architect out of quota
 means wakes wait for the reset and the queue must already hold work; the
 implementer out of credits is a red alarm days ahead (`ao doctor` shows the
-burn rate). A person may bypass a gate with `ao waive` — on the record — and
+burn rate of its own account; an implementer whose adapter declares no account ao can
+read has no credits alarm). A person may bypass a gate with `ao waive` — on the record — and
 `ao catchup` reconciles it when the way is clear, with a reviewer of a model family
 other than the one that wrote the work, who judges it against what its commit messages
 claim; a split closes on the move proof, run on what landed, with no reviewer, when its grant
@@ -249,7 +250,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao email setup|test|status` | the red channel |
 | `ao telegram setup|test|install` | the orange channel and phone decisions |
 | `ao fanout ok|record|history` | budget gate for sub-agent fan-outs; `--roots R --per-root K` for pipelines |
-| `ao credits` | provider credits and windows |
+| `ao credits` | the implementer's own credit account and offline estimate, or that its adapter declares none ao can read |
 | `ao features [on|off <key>]` | the switches and what each costs; all off = deterministic ao |
 | `ao config [list|get|set|unset] [<setting> <value>] [--machine]` | what a person can set: every threshold with its value, default and source (docs/configuration.md); a person's command, not an implementer's |
 | `ao collect-review <nonce> --response F --model M --by NAME` | a person records a stand-in session's answer to the review request ao wrote when no reviewer could be reached; never an agent's command |

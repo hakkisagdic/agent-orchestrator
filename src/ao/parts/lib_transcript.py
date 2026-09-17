@@ -1778,11 +1778,16 @@ def digest(root, cfg, since_days=1.0):
                       "changes": sum(1 for v in fresh if v == "NEEDS_CHANGES"),
                       "not_reviewed": sum(1 for v in fresh if v not in ("APPROVED", "NEEDS_CHANGES"))}
 
-    acct = account_usage()
-    if acct and not acct.get("error"):
+    # The implementer's own account and estimate, never the first shipped adapter's: an
+    # implementer whose adapter declares no account ao can read is said to have none
+    # (ACCOUNT-READERS). An expired token or a reading without a limit is no figure.
+    ident = implementer_adapter_id(cfg)
+    out["account"] = {"adapter": ident, "readable": bool(usage_api(ident))}
+    acct = account_usage(adapter_id=ident) if out["account"]["readable"] else None
+    if acct and not acct.get("error") and not acct.get("expired") and acct.get("limit"):
         out["credits"] = {"used": acct["used"], "limit": acct["limit"],
                           "remaining": acct["limit"] - acct["used"]}
-    local = credit_usage()
+    local = credit_usage(adapter_id=ident)
     days = sorted(local.get("days", {}).items())
     out["credit_days"] = [(d, v) for d, v in days
                           if d >= time.strftime("%Y-%m-%d", time.localtime(cut))]
