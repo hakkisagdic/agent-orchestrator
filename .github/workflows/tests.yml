@@ -25,8 +25,9 @@ on:
 permissions:
   contents: read
 concurrency:
-  # A newer push to the same branch makes an older run's answer moot.
-  group: tests-${{ github.workflow }}-${{ github.ref }}
+  # A newer push to the same branch makes an older run's answer moot; a run someone dispatched
+  # or the weekly one answers a different question and must not cancel it, or be cancelled by it.
+  group: tests-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
