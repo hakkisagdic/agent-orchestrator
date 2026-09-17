@@ -18,8 +18,8 @@ The ledger is the fix: an append-only record that outlives the messages.
 ├── verifications.jsonl  # what was actually measured, and by whom (hash-chained)
 ├── authority.jsonl      # hash-chained commit grants and refusals
 ├── reviews.jsonl        # hash-chained: each review artefact, its bytes and verdict
-├── slices.jsonl         # slice lifecycle transitions
-└── INDEX.md             # rendered, human-readable, regenerated on write
+├── waivers.jsonl        # hash-chained: a person's waiver of a gate for a slice, and its closing
+└── merges.jsonl         # hash-chained: each merge-check run and the merge it vouches for
 ```
 
 ## Decisions
@@ -97,8 +97,9 @@ match, because AO has no external trusted head or signing key. See the exact sec
 
 ## Slices
 
-One line per lifecycle transition — see [`slices.md`](slices.md). This is what lets a
-restarted session know what it was doing without asking anybody.
+Not built yet: one line per lifecycle transition — see [`slices.md`](slices.md). A slice's
+state is the section of `.ao/board.md` its row sits in, and that is what a restarted session
+reads to know what it was doing without asking anybody.
 
 ## Commands
 
@@ -156,7 +157,7 @@ and review artefacts are kept by reference ([telemetry](telemetry.md)).
 
 - **Append-only.** Corrections are new entries. A ledger you can rewrite is a ledger you
   cannot trust.
-- **Machine-readable first**, rendered second. `INDEX.md` is a view, never the source.
+- **Machine-readable first**, rendered second. A rendered view is never the source.
 - **Committed to the repository.** Unlike `agent-mail/`, the ledger is history and belongs
   in version control.
 - **No secrets, ever** — same rule as everywhere else.

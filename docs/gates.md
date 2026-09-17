@@ -5,22 +5,28 @@ run — that distinction is the whole point, and everything else here follows fr
 
 ## Declaring them
 
-```yaml
-# .ao/gates.yml
-gates:
-  typecheck:      { run: "npm run typecheck", expect: exit_zero }
-  focused:        { run: "node --test test/{slice_tests}", expect: all_pass }
-  full:           { run: "npm test", expect: all_pass, timeout: 30m, serialise: true }
-  diff-check:     { run: "git diff --check", expect: exit_zero }
-  artifact-sweep: { run: "ls -d .tmp-* scratch-* 2>/dev/null", expect: empty }
-
-profiles:
-  quick: [typecheck, focused, diff-check]      # during iteration
-  full:  [typecheck, focused, full, diff-check, artifact-sweep]   # before commit authority
+```jsonc
+// .ao/gates.json
+{
+  "gates": {
+    "typecheck":      {"run": "npm run typecheck", "expect": "exit_zero", "timeout": 600},
+    "focused":        {"run": "node --test test/claims", "expect": "exit_zero", "timeout": 600},
+    "full":           {"run": "npm test", "expect": "exit_zero", "timeout": 1800, "min_tests": 300},
+    "diff-check":     {"run": "git diff --check", "expect": "exit_zero", "timeout": 60},
+    "artifact-sweep": {"run": "ls -d .tmp-* scratch-* 2>/dev/null", "expect": "empty"}
+  },
+  "profiles": {
+    "quick": ["typecheck", "focused", "diff-check"],
+    "full":  ["typecheck", "focused", "full", "diff-check", "artifact-sweep"]
+  },
+  "default_profile": "quick"
+}
 ```
 
 Declared once, in the repository, so a gate is not something the orchestrator improvises
-differently each time it asks.
+differently each time it asks. `ao init` writes this file from the toolchains it finds and
+leaves one that exists alone. A gate passes on exit code zero, or with `"expect": "empty"` on
+printing nothing; `timeout` is in seconds, and `gates.default_timeout` when a gate names none.
 
 A gate may declare the paths it reads as `inputs`, a list of globs (`"inputs": ["src/**", "tests/**"]`).
 An unstaged or untracked path refuses verification and commit authority only when it is part of
@@ -161,11 +167,12 @@ Push is not a gate outcome and never becomes one. It stays a direct human act.
 
 ## Serialisation and machine pressure
 
-Lanes think in parallel; gates do not run in parallel. `serialise: true` marks the
-expensive ones, and `ao` holds a machine-wide lock across them.
+Lanes think in parallel; gates do not run in parallel. `ao verify` and `ao merge-check` hold
+one machine-wide lock while a project's gates run; another project's run waits up to `--wait`
+seconds for it, then refuses rather than start a second suite.
 
-Before starting any gate run it also checks memory pressure and swap-in rate, and **refuses
-rather than thrashes**. Five simultaneous test suites will make a laptop unusable while
+Not built yet: checking memory pressure and the swap-in rate before a gate run, and refusing
+rather than thrashing. Five simultaneous test suites will make a laptop unusable while
 each one individually looks reasonable — and the failure mode is a machine that appears
 hung, which is the most expensive kind of confusion to debug.
 

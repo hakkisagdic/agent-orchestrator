@@ -25,7 +25,9 @@ placeholder where the command takes no further argument stands for the rest of t
 A passage that describes a design not yet built says so on the line directly above it with
 `<!-- not built: <why> -->`. The marker covers the fenced block, or the paragraph, list or
 table, that starts on the next line; it excuses only the invocations there that the parser
-refuses, and it fails when it excuses none, so it cannot outlive the design it describes.
+refuses, and it fails when it excuses none, so it cannot outlive the design it describes. The
+same marker excuses a tool, a path or a setting ao does not have, and tests/test_docs_names.py
+holds that rule for both readings.
 """
 import argparse
 import collections
@@ -307,8 +309,12 @@ def _refused(root, parser):
             for name, inv, problems in seen if problems and inv.marker is None]
 
 
-def _marker_problems(root, parser):
-    """Each `not built` marker that gives no reason, covers no block, or excuses nothing."""
+def _marker_problems(root, parser, excused=()):
+    """Each `not built` marker that gives no reason, covers no block, or excuses nothing.
+
+    `excused` holds the (document, line) of each marker that excuses a name another reading of
+    the same documents finds ao does not have.
+    """
     seen, markers = _scan(root, parser)
     out = []
     for name, marker in markers:
@@ -316,8 +322,10 @@ def _marker_problems(root, parser):
             out.append(f"{name}:{marker.line}: a not-built marker gives no reason")
         elif not marker.covers:
             out.append(f"{name}:{marker.line}: a not-built marker sits directly above no block")
-        elif not any(problems for doc, inv, problems in seen if doc == name and inv.marker is marker):
-            out.append(f"{name}:{marker.line}: a not-built marker excuses nothing the parser refuses")
+        elif (name, marker.line) not in excused \
+                and not any(problems for doc, inv, problems in seen if doc == name and inv.marker is marker):
+            out.append(f"{name}:{marker.line}: a not-built marker excuses nothing: no command the parser refuses, "
+                       "no name ao lacks")
     return out
 
 
@@ -331,12 +339,6 @@ def _command(words):
 
 def test_every_ao_invocation_in_the_documents_is_one_the_parser_accepts():
     problems = _refused(ROOT, cli.build_parser())
-
-    assert problems == [], "\n".join(problems)
-
-
-def test_a_not_built_marker_gives_a_reason_and_excuses_only_what_the_parser_refuses():
-    problems = _marker_problems(ROOT, cli.build_parser())
 
     assert problems == [], "\n".join(problems)
 

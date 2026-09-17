@@ -26,35 +26,40 @@ without knowing about each other.
 
 ## Tools
 
-| Tool | Capability | What it does |
+Each tool has an access class, which says what calling it does to the project: **read**
+changes nothing, **write** records something in its mailbox, decisions or ledgers, and
+**run** runs its gates.
+
+| Tool | Access | What it does |
 |---|---|---|
-| `ao_mail_list` | read | List pending messages addressed to me. |
-| `ao_mail_read` | read | Read one message in full. |
-| `ao_mail_ack` | read | Delete a message — the delivery acknowledgement. |
-| `ao_mail_send` | write | Write a reply or report. |
-| `ao_status` | read | Repo, gates, mailbox and session state in one object. |
-| `ao_transcript_tail` | read | Last N messages of another agent's session, read-only. |
-| `ao_verify` | run | Re-run the project's gates and return the raw results. |
-| `ao_resume` | **drive** | Inject a prompt into another agent's session. Idle-guarded. |
-| `ao_commit_request` | **authority** | Ask the architect for commit authority for a file set. |
+| `ao_status` | read | The implementer's state, context and cost telemetry, git state, the mailbox and the latest reviews. |
+| `ao_board` | read | Where each pre-authorised work item is, what may start now, and what the board cannot resolve. |
+| `ao_notices` | read | Alerts this project raised, and on request the ones the rate limit held back. |
+| `ao_fleet` | read | One row per project with a local agent session. |
+| `ao_inbox` | write | Messages to the implementer that it has not acknowledged; it records that each was shown. |
+| `ao_ack` | write | Acknowledges one message once it is applied or rejected: removes it, or records it handled when `mail.store` is append-only. |
+| `ao_report` | write | Writes a report to the architect; `blocked` wakes it on the next watchdog cycle, and a repeat folds into the report already standing. |
+| `ao_ask` | write | Records a question with options for the architect or a person, and sends it to a phone when one is set up. |
+| `ao_decisions` | read | The questions asked, open or answered. |
+| `ao_fanout` | write | Whether a fan-out of N agents may start now; with `action: record`, what one cost ([fanout.md](fanout.md)). |
+| `ao_watchdog` | read | Why the watchdog acted or did not: one dry cycle, or the cycles it recorded. |
+| `ao_verify` | run | Runs the project's gates as `ao verify` does, and records the verification. |
 
 ## Capability gating
 
-Grouping the tools and enabling each group explicitly is the design, and it is not built yet.
-The server has one switch today, for the one tool that spends the machine:
+The server has one switch, for the one tool that runs something:
 
 ```bash
 ao mcp serve                  # every tool but ao_verify
 ao mcp serve --allow-verify   # ao_verify too: it runs the project's real gates
 ```
 
-`drive` and `authority` are never on by default. An agent that can inject prompts into
-other agents' sessions is a different security proposition from one that can read a
-mailbox, and that step should be a decision someone made on purpose.
+Not built yet: grouping the tools by access and switching each group on by itself. No tool
+injects a prompt into another agent's session or grants authority: nudging stays with the
+watchdog, and commit authority with `ao commit-ok` (below).
 
 The invariants from [`safety.md`](safety.md) hold identically over MCP: no tool grants
-push, PR, force-push, hook bypass or foreign-repository mutation, and `ao_resume` refuses
-a target that is currently writing.
+push, PR, force-push, hook bypass or foreign-repository mutation.
 
 ## Files or MCP?
 
@@ -70,16 +75,11 @@ MCP is an interface to it, not a replacement for it.
 
 ## Coordination over MCP, backed by the same files
 
-`ao mcp serve` exposes three coordination tools alongside the read-only ones:
+The coordination tools, `ao_inbox`, `ao_ack`, `ao_report`, `ao_ask` and `ao_fanout`, are the
+ones that write.
 
-| tool | for |
-|---|---|
-| `ao_inbox` | messages addressed to the implementer, not yet acknowledged |
-| `ao_ack` | confirm delivery by removing one, after applying or rejecting it |
-| `ao_report` | tell the architect something at any point in a turn |
-| `ao_fanout` | may a fan-out of N sub-agents start now; record what one cost ([fanout.md](fanout.md)) |
-
-**They read and write the mailbox files directly.** There is no MCP-side database,
+**They read and write the project's files directly**: the mailbox, the decisions and the
+ledgers. There is no MCP-side database,
 and that is the whole design: a second store for the same fact is a second thing
 to drift, and every expensive failure in this project's history has been two
 records of one truth disagreeing. So a project without MCP loses nothing — the

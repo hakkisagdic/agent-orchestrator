@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
-"""ao — agent-orchestrator, observation layer.
+"""ao — agent-orchestrator's command line.
 
-Implemented today: status, watch, tail, mail, verify, board, adapters, doctor.
-Also: watchdog install/uninstall/status — a launchd job that restarts a stalled
-implementer, with guards so it spends nothing when spending would not help.
-Not yet: decide, since, init — see the
-roadmap in README.md. Commands that do not exist say so rather than pretending.
+Every command is in build_parser(), with its code in a part under src/ao/parts/ that runs in
+this module's namespace; the playbook, src/ao/skill/SKILL.md, lists each one.
 
-Standard library only. Observation is strictly read-only.
+Standard library only. Observation of an agent's session is strictly read-only.
 """
 import argparse
 import json

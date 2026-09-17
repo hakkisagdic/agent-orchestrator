@@ -196,10 +196,10 @@ done?" has an answer after the fact.
 
 ## 6. Capability gating on MCP
 
-The MCP surface is grouped: `read`, `write`, `run`, `drive`, `authority`. Only `read` and
-`write` are on by default. `drive` lets one agent inject prompts into another's session;
-`authority` lets it request commit rights. Turning those on is a deliberate act, and they
-are the two groups an attacker would want most.
+Every MCP tool has an access class ([mcp.md](mcp.md)): `read`, `write` or `run`. The one `run`
+tool, `ao_verify`, is off unless the server is started with `--allow-verify`. No tool injects a
+prompt into another agent's session or requests commit rights, the two things an attacker
+would want most. Not built yet: switching each class on by itself.
 
 ## 6b. Escalation lifts scope, never authority
 

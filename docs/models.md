@@ -33,9 +33,11 @@ for a CLI with five levels still works against one that has three.
 
 ## Per-slice policy
 
-A policy file maps slice kinds to a model and effort, so routine work stops burning the
-expensive configuration:
+Not built yet: a policy file mapping slice kinds to a model and effort, so routine work stops
+burning the expensive configuration. ao reads no such file; a model and an effort are chosen
+per role.
 
+<!-- not built: ao reads no policy file; a model and an effort are chosen per role -->
 ```yaml
 # .ao/policy.yml
 default:        { model: gpt-5.6-sol,  effort: high }
@@ -72,5 +74,5 @@ lever is unavailable rather than silently ignoring your setting.
 
 agent-orchestrator does not do cost accounting — that is
 [keyflip's](keyflip.md) job. What it does is make the *decision* explicit and reviewable:
-the policy file is committed, so "why is this slice running at max effort" has an answer
-in version control.
+each role's model and effort are written into `.ao/config.json`, in the repository, so "why
+is this slice running at max effort" has an answer in version control.

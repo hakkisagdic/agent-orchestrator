@@ -7,6 +7,10 @@ The fix is not a new app. It is **one event log with many cheap readers**.
 
 ## The event log
 
+Not built yet: the event log. Today every surface reads the project's own files, the mailbox,
+the board and the ledgers, as `ao status` does.
+
+<!-- not built: nothing writes an event log; a surface reads the project's files -->
 ```
 ~/.ao/events.jsonl        # append-only, one line per event, never rewritten
 ```
@@ -33,8 +37,8 @@ Why this matters: without the log, every surface has to parse *N* vendor transcr
 
 ## Surface 1 — terminal dashboard
 
-The default. Reads the log, renders a panel, leaves it on a second monitor. See the TUI
-section below.
+The default. `ao watch` renders a panel from the project's files; leave it on a second
+monitor. See the TUI section below.
 
 ## Surface 2 — MCP, i.e. any chat app becomes the cockpit
 
@@ -48,17 +52,20 @@ server once in Claude Desktop, Cursor, Zed, VS Code — anything that speaks MCP
 Then the orchestration is reachable in ordinary conversation:
 
 > *"What is Kiro doing?"* → `ao_status`
-> *"Show me its last five messages."* → `ao_transcript_tail`
-> *"Tell it to use a WeakSet brand, not instanceof."* → `ao_mail_send`
-> *"Did the gates pass?"* → `ao_verify`
-> *"It has been quiet for twenty minutes — nudge it."* → `ao_resume` (idle-guarded)
+> *"What is blocked, and on what?"* → `ao_board`
+> *"Has anyone answered its question?"* → `ao_decisions`
+> *"Did the gates pass?"* → `ao_verify`, on a server started with `--allow-verify`
+> *"Why has nobody nudged it in twenty minutes?"* → `ao_watchdog`
+
+Not built yet: reading another agent's messages, writing to it and nudging it from the chat
+app. Today they are `ao tail`, `ao note` and the watchdog.
 
 No terminal, no context switch, no new UI to learn. The chat app you already have becomes
-the control room, and the same capability gating from [`mcp.md`](mcp.md) applies — `drive`
-stays off until you turn it on.
+the control room, and the one switch from [`mcp.md`](mcp.md) applies: `ao_verify` stays off
+until you turn it on.
 
-This is also why the event log matters more than any single renderer: the MCP tools are
-thin readers over it.
+The MCP tools read the same files the CLI does, which is why a surface needs no store of its
+own.
 
 ## Surface 3 — notifications
 

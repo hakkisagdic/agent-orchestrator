@@ -86,8 +86,9 @@ specified → in-progress → in-review → changes-requested ─┐
                               └──────────────────────────┘
 ```
 
-Every transition is one line in `.ao/ledger/slices.jsonl`. That file is why a restarted
-session knows what it was doing.
+Not built yet: these states, and a ledger line for each transition. Today a slice's state is
+the section of `.ao/board.md` its row sits in - inbox, queued, running, blocked, verified,
+done or rejected - and that is what a restarted session reads back.
 
 Two states people forget to model: **blocked** (waiting on a human decision or supplied
 input — see escalation in [`protocol.md`](protocol.md)) and **abandoned**, which is a

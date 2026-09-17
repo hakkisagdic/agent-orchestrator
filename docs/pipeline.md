@@ -76,7 +76,7 @@ unanswered, and the verdict is computed from the sections' counts.*
 A review of eight scenarios is eight questions, not one. ao splits the prompt into
 **sections** — from the numbered scenarios in the boundary, or failing that from the
 candidate's file groups — and runs them as separate bounded calls, appending each result
-to `.ao/reviews/R-<id>.jsonl` as it lands.
+to `.ao/reviews/sections/<key>.jsonl` as it lands.
 
 **Invariant P1.** Every finished section is durable before the next one starts. Kill the
 process, reboot the machine, hit the ceiling: what was answered stays answered.

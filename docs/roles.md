@@ -12,6 +12,30 @@ comes back to me"* by editing one line, instead of rewriting a workflow.
 
 ## Actors
 
+What ao reads is a table in `.ao/config.json`: `actors`, each the block a role runs with, and
+`roles`, the actor that holds each of the three roles ao runs.
+
+```jsonc
+// .ao/config.json
+{
+  "actors": {
+    "kiro": {"adapter": "kiro", "session": "auto", "model": "<model>", "effort": "max"},
+    "lead": {"adapter": "claude-code", "session": "auto",
+             "argv": ["claude", "--resume", "{session}", "-p", "{prompt}"]},
+    "claude-code-reviewer-<model>": {"id": "claude-code-reviewer-<model>", "adapter": "claude-code",
+                                     "argv": ["…"], "composed": true, "model": "<model>"}
+  },
+  "roles": {"implementer": "kiro", "architect": "lead", "reviewer": "claude-code-reviewer-<model>"}
+}
+```
+
+`ao role set reviewer claude-code --model <model>` composed that reviewer from its adapter; a
+reviewer's argv is never written by hand.
+
+Not built yet: actors and roles in a file of their own, the orchestrator itself as an actor,
+and the roles beyond implementer, architect and reviewer.
+
+<!-- not built: ao reads actors and roles from .ao/config.json and runs three roles -->
 ```yaml
 # .ao/roles.yml
 actors:
@@ -21,8 +45,9 @@ actors:
   scribe: { adapter: antigravity, model: gemini-3-pro, effort: low }
 ```
 
-`self` is a first-class actor. The orchestrator is not a supervisor that only delegates —
-it takes roles like anything else, and which roles it takes is a configuration choice.
+In the design `self` is a first-class actor: the orchestrator is not a supervisor that only
+delegates — it takes roles like anything else, and which roles it takes is a configuration
+choice.
 
 ## Roles
 
@@ -55,13 +80,11 @@ ao role set implementer self         # take development yourself
 ao role swap implementer reviewer    # exchange two roles' actors
 ```
 
-What the code resolves today is the table in `.ao/config.json`, `actors` and `roles`, for
-the three roles it runs - implementer, architect and reviewer. A project without a table
-gets one from its role blocks the first time a role is set. `ao role set` refuses an
-assignment that breaks separation of duties (the reviewer the same actor, or the same
-declared family, as the implementer). The YAML above, the other roles and presets are
-the shape it grows into; each new role must name the failure it catches that no existing
-role catches.
+A project without a table gets one from its role blocks the first time a role is set.
+`ao role set` refuses an assignment that breaks separation of duties (the reviewer the same
+actor, or the same declared family, as the implementer). The other roles in the table above
+and the presets below are the shape it grows into; each new role must name the failure it
+catches that no existing role catches.
 
 A reassignment takes effect on the next slice. Work already in flight keeps its actor, so
 you never orphan a half-finished lane.
