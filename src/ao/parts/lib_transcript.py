@@ -641,17 +641,47 @@ def _quota_output(argv):
     return out, status == 0
 
 
-def _quota_keep(command, lines):
-    """Keep one reading for this process and, the file replaced whole, for every other ao process."""
+def _quota_write(readings):
+    """Replace ~/.ao/quota.json with the newest of these readings, for every other ao process."""
     from .storage import replace_file_durably
-    reading = _QUOTA[command] = {"at": time.time(), "lines": lines}
-    readings = _quota_readings()
-    readings[command] = reading
     newest = sorted(readings.items(), key=lambda item: item[1]["at"], reverse=True)[:QUOTA_READINGS]
     try:
         replace_file_durably(quota_readings_path(), (json.dumps(dict(newest), indent=1) + "\n").encode(UTF8))
     except OSError:
         pass                    # a reading that cannot be kept is still this call's answer
+
+
+def _quota_keep(command, facts):
+    """Keep one reading for this process and, the file replaced whole, for every other ao process."""
+    reading = _QUOTA[command] = dict(facts, at=time.time())
+    readings = _quota_readings()
+    readings[command] = reading
+    _quota_write(readings)
+    return reading
+
+
+def _kept_reading(argv, window, take):
+    """A command's reading: the one kept under the command while it is younger than `window` seconds, else a new one.
+
+    `take()` runs the command and returns (reading, whether it may be kept): a dict whose
+    "lines" hold what was read, beside any other facts its reader keeps. Only a command
+    that answered is kept: a failure is asked again next time, not served for the whole
+    window.
+    """
+    command = " ".join(argv)
+    now = time.time()
+
+    def fresh(reading):
+        return reading is not None and 0 <= now - reading["at"] < window
+
+    reading = _QUOTA.get(command)
+    if not fresh(reading):
+        reading = _quota_readings().get(command)
+    if fresh(reading):
+        _QUOTA[command] = reading
+        return reading
+    reading, keep = take()
+    return _quota_keep(command, reading) if keep else reading
 
 
 def quota(adapter, ttl=300):
@@ -668,25 +698,67 @@ def quota(adapter, ttl=300):
     argv = spec.get("argv")
     if not argv:
         return []
+
+    def take():
+        out, ok = _quota_output(argv)
+        return {"lines": [l.strip() for l in out.split("\n")[1:] if l.strip() and "unknown" not in l]}, ok
+
+    return _kept_reading(argv, spec.get("cache_seconds", ttl), take)["lines"]
+
+
+def forget_quota(adapter):
+    """Drop the reading kept for this adapter's quota command, here and for every other ao process.
+
+    For when what it read has moved - an account rotation - so the next read asks again.
+    """
+    argv = ((adapter.get("telemetry") or {}).get("quota") or {}).get("argv")
+    if not argv:
+        return
     command = " ".join(argv)
-    window = spec.get("cache_seconds", ttl)
-    now = time.time()
+    _QUOTA.pop(command, None)
+    readings = _quota_readings()
+    if readings.pop(command, None) is not None:
+        _quota_write(readings)
 
-    def fresh(reading):
-        return reading is not None and 0 <= now - reading["at"] < window
 
-    reading = _QUOTA.get(command)
-    if not fresh(reading):
-        reading = _quota_readings().get(command)
-    if fresh(reading):
-        _QUOTA[command] = reading
-        return reading["lines"]
-    out, ok = _quota_output(argv)
-    lines = [l.strip() for l in out.split("\n")[1:]
-             if l.strip() and "unknown" not in l]
-    if ok:
-        _quota_keep(command, lines)
-    return lines
+# keyflip's budget status as one JSON document: {"budget": {"defaults", "accounts", "alerts", "breached"}}.
+QUOTA_BUDGET_ARGV = ("keyflip", "budget", "status", "--json")
+
+
+def quota_budget(adapter, ttl=300):
+    """keyflip's budgets, kept like the quota reading: {"accounts": [name], "breached": [{name, metric, pct, limit}]}.
+
+    The watchdog asked `keyflip budget status` through a shell on every call and looked in
+    its prose for words keyflip does not print, so a budget a person set never stopped a
+    turn. With `--json` keyflip writes the status as one document: every account with a
+    budget, and on each an alert per window at or near its limit, `"breached": true` once
+    usage has reached the limit. The account names and each breach are kept under that
+    command in ~/.ao/quota.json for the adapter's `cache_seconds`, when keyflip exited 0
+    and wrote the document.
+
+    Which breach counts: the document names no active account and no provider, so a
+    breach on any account counts for every adapter asked about. keyflip runs without a
+    shell from the home directory, found on the binary search path; absent, failing or
+    unreadable, it reports no account, and the quota window decides.
+    """
+    spec = (adapter.get("telemetry") or {}).get("quota") or {}
+
+    def take():
+        out, status = _run_program(QUOTA_BUDGET_ARGV, cwd=HOME)
+        try:
+            accounts = json.loads(out)["budget"]["accounts"]
+            names = [str(account["name"]) for account in accounts]
+            breached = [{"name": str(account["name"]), "metric": alert.get("metric"), "pct": alert.get("pct"),
+                         "limit": alert.get("limit")}
+                        for account in accounts for alert in account.get("alerts") or [] if alert.get("breached") is True]
+        except (ValueError, TypeError, KeyError, AttributeError):
+            return {"lines": [], "breached": []}, False
+        return {"lines": names, "breached": breached}, status == 0
+
+    reading = _kept_reading(QUOTA_BUDGET_ARGV, spec.get("cache_seconds", ttl), take)
+    breached = reading.get("breached")
+    return {"accounts": list(reading["lines"]),
+            "breached": [fact for fact in breached if isinstance(fact, dict)] if isinstance(breached, list) else []}
 
 
 def busy(cfg, adapter):
@@ -743,7 +815,7 @@ def tool_availability(ttl=600):
     if time.time() - _SURFACES["at"] < ttl and _SURFACES["rows"]:
         return _SURFACES["rows"]
     rows = {}
-    out = sh("keyflip surfaces 2>/dev/null", cwd=HOME)
+    out = _run_program(["keyflip", "surfaces"], cwd=HOME)[0]
     for line in out.split("\n"):
         line = line.strip()
         if not (line.startswith("●") or line.startswith("○")):

@@ -22,24 +22,25 @@ def fanout_config(cfg):
             for name in ("max_agents", "per_agent_tokens", "window_reserve_pct")}
 
 
+def _window_adapter():
+    """The adapter whose quota command provider_window reads: the first, by id, that declares one."""
+    return next((adapter for _, adapter in sorted(package_adapters().items())
+                 if ((adapter.get("telemetry") or {}).get("quota") or {}).get("argv")), None)
+
+
 def provider_window(name):
     """The machine-wide usage window keyflip reports for a provider, parsed.
 
-    Read through the same adapter command the status panel uses, so the panel and
-    the verdict never disagree. Returns {pct, window, resets_in, resets_s, raw} or
-    None when no readable line exists — and None is reported as "unreadable", not
-    as headroom.
+    Read from the quota reading the status panel shows, kept for the adapter's window
+    across ao's processes, so the panel and the verdict never disagree; this started the
+    command again, through a shell, on every call. Returns {pct, window, resets_in,
+    resets_s, raw} or None when no readable line exists — and None is reported as
+    "unreadable", not as headroom.
     """
-    argv = None
-    for _, adapter in sorted(package_adapters().items()):
-        spec = (adapter.get("telemetry") or {}).get("quota") or {}
-        if spec.get("argv"):
-            argv = spec["argv"]
-            break
-    if not argv:
+    adapter = _window_adapter()
+    if adapter is None:
         return None
-    out = sh(" ".join(argv) + " 2>/dev/null", cwd=HOME) or ""
-    for line in out.split("\n"):
+    for line in quota(adapter):
         if name.lower() not in line.lower():
             continue
         m = re.search(r"(\d+)\s*%", line)
@@ -102,6 +103,11 @@ def rotate_if_exhausted(cfg, argv, who):
         except Exception as exc:                      # a rotation that cannot run is not a headroom
             return {"ok": False, "provider": provider, "rotated": False,
                     "text": f"{provider} window {window['pct']}% used and keyflip could not rotate: {exc}"}
+        # The kept reading is the window before the rotation: ask again, and an actor waiting on
+        # this lock reads the rotated window, not the spent one it would rotate a second time.
+        adapter = _window_adapter()
+        if adapter is not None:
+            forget_quota(adapter)
         after = provider_window(provider)
     if after and after["pct"] < ceiling:
         return {"ok": True, "provider": provider, "rotated": True,
@@ -276,6 +282,36 @@ def binary_candidates(name, path=None):
             seen.add(real)
             out.append(cand)
     return out
+
+
+def runnable_binary(name):
+    """The file ao starts for `name` without a shell: the first binary_candidates match this platform runs, or None.
+
+    Windows starts a program by its extension, and an npm install puts an extensionless
+    POSIX script beside the .cmd that cmd.exe found; there only a match with an extension
+    is a program.
+    """
+    return next((path for path in binary_candidates(name) if os.name != "nt" or os.path.splitext(path)[1]), None)
+
+
+def _run_program(argv, cwd=None, timeout=20, stderr=subprocess.DEVNULL):
+    """What sh() returned for these words, and the exit status, from the program started without a shell.
+
+    ("", None) when the program is found nowhere, cannot be started or runs past the
+    timeout: there the shell printed nothing. The program is looked for on the binary
+    search path, so a launchd job whose PATH is minimal finds what a terminal finds; it
+    reads nothing from standard input, and its standard error is discarded, as sh()
+    discarded it, unless the caller keeps it in the answer (`subprocess.STDOUT`, `2>&1`).
+    """
+    program = runnable_binary(argv[0])
+    if program is None:
+        return "", None
+    try:
+        done = subprocess.run([program, *argv[1:]], cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=stderr, text=True, encoding=UTF8, errors="replace", timeout=timeout)
+    except Exception:
+        return "", None
+    return done.stdout.strip(), done.returncode
 
 
 def binary_version(path):

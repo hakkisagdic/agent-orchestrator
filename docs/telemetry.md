@@ -59,7 +59,10 @@ hours, not seconds, and a slow subprocess in the render loop makes the panel fee
 `cache_seconds`, so `ao status`, the live panel and every watchdog cycle inside that window read
 one answer instead of each starting the command again. A command that fails is not kept: the
 next read asks again. The command runs without a shell when its program is on ao's binary
-search path: PATH, then the directories tools are usually installed in.
+search path: PATH, then the directories tools are usually installed in. The provider window a
+fan-out verdict or an account rotation checks is read from the same reading, and a rotation
+drops it so the next read asks again. keyflip's budget status (`keyflip budget status --json`)
+is kept in the same file for the same window.
 
 **3. Remaining balance — we do not guess it.**
 Plan balance is fetched by vendor UIs at render time and is not written to disk. Scraping

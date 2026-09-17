@@ -86,7 +86,7 @@ def test_what_is_set_is_what_ao_uses(project, machine, monkeypatch):
     assert A.mail_names(cfg) == ("dev", "fable")
 
     machine.write_text(json.dumps({"quota": {"block_percent": 50}, "fleet": {"window_reserve_pct": 10}}))
-    monkeypatch.setattr(A, "sh", lambda *args, **kwargs: "")
+    monkeypatch.setattr(A, "quota_budget", lambda adapter, ttl=300: {"accounts": [], "breached": []})
     monkeypatch.setattr(A, "quota", lambda adapter, ttl=300: ["claude 60% of the window"])
     assert W.quota_ok({}) is False
     assert A.fleet_reserve() == 10

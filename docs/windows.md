@@ -78,4 +78,5 @@ A test that cannot pass on Windows is skipped there with its reason, never left 
 - fixtures that run through a shebang or are POSIX shell scripts: a reviewer, a
   conformance harness, a filter named `git`, a fake `keyflip`;
 - what Windows does not have: process groups and the CPU they spend, zombie
-  processes, a directory fsync.
+  processes, a directory fsync, launchd, and the `ps` and `lsof` a process table falls
+  back to.

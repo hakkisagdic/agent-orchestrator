@@ -391,6 +391,29 @@ def _watchdog_windows(cfg, args):
     return 0
 
 
+def _log_tail(path, count=5):
+    """A log's last `count` lines as `tail -<count>` printed them, stripped; "" when it cannot be read.
+
+    Read back from the end in blocks: a job's log grows for as long as the job runs.
+    """
+    try:
+        with open(path, "rb") as fh:
+            position, data = fh.seek(0, os.SEEK_END), b""
+            while position and data.count(b"\n") <= count:
+                step = min(position, 65536)
+                position -= step
+                fh.seek(position)
+                data = fh.read(step) + data
+    except OSError:
+        return ""
+    lines = data.split(b"\n")
+    if data.endswith(b"\n"):
+        lines.pop()
+    # Decoded as sh() decoded tail's output: text mode also reads a carriage return as a newline.
+    text = b"\n".join(lines[-count:]).decode(UTF8, "replace")
+    return text.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
 def cmd_watchdog(cfg, args):
     if getattr(args, "idle_minutes", None) is None:
         args.idle_minutes = S.get(cfg, "watchdog.idle_minutes")
@@ -423,8 +446,8 @@ def _cmd_watchdog(cfg, args):
     log = os.path.expanduser(f"~/.ao/watchdog-{key}.log")
 
     if args.action == "status":
-        loaded = A.sh(f"launchctl list | grep {label}")
-        dloaded = A.sh(f"launchctl list | grep com.agentorchestrator.doctor.{key}")
+        loaded = _launchd_listed(label)
+        dloaded = _launchd_listed(f"com.agentorchestrator.doctor.{key}")
         print(f"label   {label}")
         print(f"doctor  {'loaded' if dloaded else 'not installed'}  (ao doctor --check every 15m)")
         print(f"plist   {'present' if os.path.exists(plist_path) else 'absent'}")
@@ -439,17 +462,18 @@ def _cmd_watchdog(cfg, args):
             print(f"cycles  {health['count']} recorded · {took} · {gap}")
         if os.path.exists(log):
             print(f"\nlast lines of {log}:")
-            print(A.sh(f"tail -5 {log}"))
+            print(_log_tail(log))
         return
 
     if args.action == "uninstall":
-        A.sh(f"launchctl bootout gui/$(id -u)/{label} 2>/dev/null || launchctl unload {plist_path} 2>/dev/null")
+        if _launchctl("bootout", _launchd_domain(label))[1] != 0:
+            _launchctl("unload", plist_path)
         if os.path.exists(plist_path):
             os.remove(plist_path)
         print(f"removed {label}")
         dlabel = f"com.agentorchestrator.doctor.{key}"
         dplist = os.path.expanduser(f"~/Library/LaunchAgents/{dlabel}.plist")
-        A.sh(f"launchctl bootout gui/$(id -u)/{dlabel} 2>/dev/null")
+        _launchctl("bootout", _launchd_domain(dlabel))
         if os.path.exists(dplist):
             os.remove(dplist)
             print(f"removed {dlabel}")
@@ -466,19 +490,20 @@ def _cmd_watchdog(cfg, args):
         path=_launchd_path(), label=label, python_arg=(f"<string>{python}</string>" if python else ""),
         script=script, root=root,
         idle=args.idle_minutes, interval=args.interval, log=log))
-    A.sh(f"launchctl bootout gui/$(id -u)/{label} 2>/dev/null")
+    _launchctl("bootout", _launchd_domain(label))
     # bootout is asynchronous: a bootstrap issued before the old job is fully
     # gone fails with "5: Input/output error" and leaves nothing loaded — a
     # reinstall that silently uninstalled. Wait for the label to clear, retry.
     out = ""
     for attempt in range(5):
-        if A.sh(f"launchctl list | grep {label}"):
+        if _launchd_listed(label):
             time.sleep(1)
-        out = A.sh(f"launchctl bootstrap gui/$(id -u) {plist_path} 2>&1") or "loaded"
-        if "error" not in out.lower() or A.sh(f"launchctl list | grep {label}"):
+        out, status = _launchctl("bootstrap", _launchd_domain(), plist_path, merge=True)
+        out = out or ("launchctl could not be run" if status is None else "loaded")
+        if "error" not in out.lower() or _launchd_listed(label):
             break
         time.sleep(1 + attempt)
-    if not A.sh(f"launchctl list | grep {label}"):
+    if not _launchd_listed(label):
         print(f"{C['red']}NOT LOADED{C['reset']} {label}: {out.strip()[:120]} — run: launchctl bootstrap gui/$(id -u) {plist_path}")
         return 1
     print(f"installed {label}")
@@ -493,8 +518,8 @@ def _cmd_watchdog(cfg, args):
     open(dplist, "w", encoding=UTF8).write(PLIST_CMD.format(
         path=_launchd_path(), label=dlabel, args="".join(f"<string>{a}</string>" for a in dargs),
         interval=900, log=os.path.expanduser(f"~/.ao/doctor-{key}.log")))
-    A.sh(f"launchctl bootout gui/$(id -u)/{dlabel} 2>/dev/null")
-    A.sh(f"launchctl bootstrap gui/$(id -u) {dplist} 2>&1")
+    _launchctl("bootout", _launchd_domain(dlabel))
+    _launchctl("bootstrap", _launchd_domain(), dplist, merge=True)
     print(f"installed {dlabel}  (ao doctor --check --notify every 15m — the second, independent check)")
     print(f"  checks every {args.interval}s · nudges after {args.idle_minutes}m idle")
     print(f"  log: {log}")
@@ -986,7 +1011,7 @@ def cmd_doctor(cfg, args):
         print(line)
     for line in _backup_lines(cfg):
         print(line)
-    print(f"quota source    {'keyflip' if A.sh('command -v keyflip') else '—'}")
+    print(f"quota source    {'keyflip' if A.runnable_binary('keyflip') else '—'}")
     # Optional capabilities announce themselves; the core never needs them (#82).
     for name, state, hint in _optional_features(cfg):
         print(f"optional        {name:<9} {state}" + (f"  {C['dim']}{hint}{C['reset']}" if state == "absent" else ""))
@@ -996,7 +1021,7 @@ def cmd_doctor(cfg, args):
         wd = subprocess.run(["schtasks", "/Query", "/TN", f"ao-watchdog-{key}"], capture_output=True,
                             text=True, encoding=UTF8, errors="replace").returncode == 0
     else:
-        wd = A.sh(f"launchctl list | grep com.agentorchestrator.watchdog.{key}")
+        wd = _launchd_listed(f"com.agentorchestrator.watchdog.{key}")
     print(f"watchdog        {C['green']}running{C['reset']}" if wd else
           f"watchdog        {C['dim']}not installed — ao watchdog install{C['reset']}")
     err = A.last_nudge_error(root)

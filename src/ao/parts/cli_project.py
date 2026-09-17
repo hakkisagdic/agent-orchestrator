@@ -1024,6 +1024,33 @@ def _hold_unplaced(root, adapter):
     return 1
 
 
+def _etime(seconds):
+    """Seconds as `ps -o etime` writes them: [[dd-]hh:]mm:ss, the days two digits wide where macOS's ps pads them."""
+    days, rest = divmod(int(seconds), 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes, secs = divmod(rest, 60)
+    clock = f"{hours:02d}:{minutes:02d}:{secs:02d}" if days or hours else f"{minutes:02d}:{secs:02d}"
+    return (f"{days:02d}-" if sys.platform == "darwin" else f"{days}-") + clock if days else clock
+
+
+def _ps_args(argv):
+    """An argument vector as `ps -o args=` writes it: joined by spaces, each control character escaped as ps does.
+
+    A prompt handed to a turn as an argument holds newlines, and ps kept each turn on one
+    line: macOS writes a tab and a newline in octal and the other controls as ^X, procps
+    a question mark.
+    """
+    def shown(ch):
+        code = ord(ch)
+        if code >= 32 and code != 127:
+            return ch
+        if sys.platform != "darwin":
+            return "?"
+        return f"\\{code:03o}" if ch in "\t\n" else "^" + chr(code ^ 64)
+
+    return " ".join("".join(shown(ch) for ch in arg) for arg in argv)
+
+
 def cmd_writers(cfg, args):
     """Who is writing in this tree — turns, not processes, with orphans set aside.
 
@@ -1045,11 +1072,13 @@ def cmd_writers(cfg, args):
         print(f"{C['red']}writers unknown{C['reset']} — {len(unplaced)} agent process(es) cannot be placed "
               f"in a tree: Windows exposes no process working directory ({unplaced})")
         return 1
+    from . import procs
     table = A._proc_table()
     rows = []
     for pid in roots:
-        args_ = (A.sh(f"ps -o etime=,args= -p {pid}") or "").strip()
-        et, _, cmd = args_.partition(" ")
+        # From the process table, as `ps -o etime=,args=` printed them; Windows has no ps at all.
+        seconds = procs.elapsed(pid)
+        et, cmd = ("" if seconds is None else _etime(seconds)), _ps_args(procs.argv(pid) or [])
         rows.append({"pid": pid, "elapsed": et, "headless": A._is_headless(pid),
                      "tty": table.get(pid, (0, 0, "?"))[2], "cmd": cmd.strip()[:90]})
     if args.clean and dead:

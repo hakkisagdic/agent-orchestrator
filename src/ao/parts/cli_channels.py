@@ -258,7 +258,7 @@ def cmd_telegram(cfg, args):
         return 1
 
     if args.action == "uninstall":
-        A.sh(f"launchctl bootout gui/$(id -u)/{label} 2>/dev/null")
+        _launchctl("bootout", _launchd_domain(label))
         p = os.path.join(A.HOME, "Library", "LaunchAgents", label + ".plist")
         if os.path.exists(p):
             os.remove(p)
@@ -288,8 +288,8 @@ def cmd_telegram(cfg, args):
             f'  <key>StandardOutPath</key><string>{log}</string>\n'
             f'  <key>StandardErrorPath</key><string>{log}</string>\n'
             '</dict></plist>\n')
-        A.sh(f"launchctl bootout gui/$(id -u)/{label} 2>/dev/null")
-        A.sh(f"launchctl bootstrap gui/$(id -u) {plist} 2>&1")
+        _launchctl("bootout", _launchd_domain(label))
+        _launchctl("bootstrap", _launchd_domain(), plist, merge=True)
         print(f"{C['green']}installed{C['reset']} {label}")
         return 0
 
@@ -298,7 +298,7 @@ def cmd_telegram(cfg, args):
     if c:
         print(f"chats allowed   {len(c['chats'])}")
     print("poller          " + (f"{C['green']}running{C['reset']}"
-                                if A.sh(f"launchctl list | grep {label}") else
+                                if _launchd_listed(label) else
                                 f"{C['dim']}not installed — ao telegram install{C['reset']}"))
     return 0
 

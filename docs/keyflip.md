@@ -101,6 +101,12 @@ When a budget exists, `ao` defers to it and stops inventing thresholds. When non
 exists, it falls back to reading the raw window. A policy someone chose beats a
 constant a script made up.
 
+`ao` reads `keyflip budget status --json`, without a shell, and keeps the answer for the
+quota reading's window. A breached budget stops the turn: keyflip marks the alert of a window
+at or over its limit `breached`, and since the document does not say which account is active,
+a breach on any account counts. A budget with no breach is headroom, whatever the raw window
+says. When keyflip is absent, fails or writes no document, the window decides.
+
 ## Integration point 5 — quota notifications at the source
 
 keyflip already emits `quota`, `switch` and `fleet-reply` events to desktop or a

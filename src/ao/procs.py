@@ -11,8 +11,9 @@ the /proc files. Both give the argv as a vector, so a path with a space in it
 class that whitespace-splitting `ps` output produced. Both answer in
 milliseconds where `pgrep -f` plus one `lsof` per pid took seconds.
 
-Every function falls back to the old shell commands when the native path is
-unavailable or fails its self-check, so nothing here can make ao blind.
+Every function falls back to the platform's `ps` and `lsof` when the native path is
+unavailable or fails its self-check, so nothing here can make ao blind. No tool here
+is started through a shell.
 """
 import ctypes
 import ctypes.util
@@ -20,16 +21,59 @@ import os
 import struct
 import subprocess
 import sys
+import time
 UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
-_NATIVE = None          # decided on first use: "darwin" | "linux" | None (shell fallbacks)
+_NATIVE = None          # decided on first use: "darwin" | "linux" | None (ps and lsof fallbacks)
 
 
-def _sh(cmd):
+def _run(argv):
+    """A platform tool's standard output, "" when it cannot be run.
+
+    Started without a shell and found where ao finds every program (lib.binary_candidates),
+    so a launchd job whose PATH is minimal still finds it; it reads nothing from standard
+    input and its standard error is discarded, as the shell helper this replaced did.
+    """
+    from . import lib
+    program = lib.runnable_binary(argv[0])
+    if program is None:
+        return ""
     try:
-        return subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding=UTF8, errors="replace", timeout=30).stdout
+        return subprocess.run([program, *argv[1:]], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL, text=True, encoding=UTF8, errors="replace", timeout=30).stdout
     except Exception:
         return ""
+
+
+def _clock_seconds(text):
+    """Seconds in a `ps -o etime` reading, [[dd-]hh:]mm:ss, or None."""
+    days, _, clock = text.strip().rpartition("-")
+    try:
+        seconds = 0
+        for part in clock.split(":"):
+            seconds = seconds * 60 + int(part)
+        return seconds + int(days or 0) * 86400
+    except ValueError:
+        return None
+
+
+def _cim_epoch(value):
+    """Epoch seconds of a Win32_Process CreationDate as it reaches ao, or None.
+
+    Windows PowerShell's ConvertTo-Json writes a date as /Date(<milliseconds>)/; WMI's own
+    form is DMTF, yyyymmddHHMMSS.ffffff followed by the offset from UTC in minutes.
+    """
+    import calendar
+    import re as _re
+    text = str(value or "")
+    m = _re.fullmatch(r"/Date\((-?\d+)[^)]*\)/", text)
+    if m:
+        return int(m.group(1)) / 1000
+    m = _re.fullmatch(r"(\d{14})\.\d+([+-])(\d{3})", text)
+    if m:
+        local = calendar.timegm(time.strptime(m.group(1), "%Y%m%d%H%M%S"))
+        return local - int(m.group(2) + m.group(3)) * 60
+    return None
 
 
 def group_cpu_seconds(pgid):
@@ -55,7 +99,7 @@ def group_cpu_seconds(pgid):
                 total += (int(fields[11]) + int(fields[12])) / tick
                 found = True
         return total if found else None
-    for line in _sh("ps -A -o pgid=,time=").splitlines():
+    for line in _run(["ps", "-A", "-o", "pgid=,time="]).splitlines():
         parts = line.split()
         if len(parts) != 2 or not parts[0].isdigit() or int(parts[0]) != pgid:
             continue
@@ -135,6 +179,11 @@ class _Darwin:
         return {"ppid": ppid, "pgid": pgid, "tty": None if tdev == self.NODEV else tdev,
                 "start": start, "comm": comm}
 
+    def elapsed(self, pid):
+        # `start` is the start time's whole seconds; ps subtracts them from its own clock's.
+        info = self.info(pid)
+        return None if info is None else max(0, int(time.time()) - info["start"])
+
     SZOMB = 5
 
     def zombie(self, pid):
@@ -183,6 +232,16 @@ class _Linux:
                 "start": int(rest[19]) if len(rest) > 19 else 0,
                 "comm": stat[stat.index("(") + 1:stat.rindex(")")]}
 
+    def elapsed(self, pid):
+        # `start` counts clock ticks since boot; ps takes whole seconds of both, as here.
+        info = self.info(pid)
+        try:
+            with open("/proc/uptime", encoding=UTF8) as fh:
+                since_boot = int(float(fh.read().split()[0]))
+        except (OSError, ValueError, IndexError):
+            return None
+        return None if info is None else max(0, since_boot - info["start"] // os.sysconf("SC_CLK_TCK"))
+
 
 # ---------------------------------------------------------------- Windows (CIM via PowerShell, JSON)
 class _Windows:
@@ -207,7 +266,7 @@ class _Windows:
             return self._cache
         cmd = ("Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine,"
                "ExecutablePath,Name,SessionId,CreationDate | ConvertTo-Json -Compress")
-        out = _sh(f'powershell -NoProfile -NonInteractive -Command "{cmd}"')
+        out = _run(["powershell", "-NoProfile", "-NonInteractive", "-Command", cmd])
         rows = []
         try:
             data = _json.loads(out) if out.strip() else []
@@ -315,28 +374,35 @@ class _Windows:
         return {"ppid": ppid, "pgid": pid, "tty": None if int(r.get("SessionId") or 0) == 0 else int(r["SessionId"]),
                 "start": r.get("CreationDate") or 0, "comm": r.get("Name") or ""}
 
+    def elapsed(self, pid):
+        started = _cim_epoch((self._snapshot().get(pid) or {}).get("CreationDate"))
+        return None if started is None else max(0, int(time.time() - started))
 
-# ---------------------------------------------------------------- shell fallbacks
+
+# ---------------------------------------------------------------- tool fallbacks (ps, lsof)
 class _Shell:
     def all_pids(self):
-        return [int(x) for x in _sh("ps -eo pid=").split() if x.isdigit()]
+        return [int(x) for x in _run(["ps", "-eo", "pid="]).split() if x.isdigit()]
 
     def argv(self, pid):
-        out = _sh(f"ps -o args= -p {pid}").strip()
+        out = _run(["ps", "-o", "args=", "-p", str(pid)]).strip()
         return out.split() if out else None            # lossy: spaces in paths split
 
     def cwd(self, pid):
-        for line in _sh(f"lsof -w -n -P -a -d cwd -Fn -p {pid}").split("\n"):
+        for line in _run(["lsof", "-w", "-n", "-P", "-a", "-d", "cwd", "-Fn", "-p", str(pid)]).split("\n"):
             if line.startswith("n"):
                 return line[1:]
         return None
 
     def info(self, pid):
-        out = _sh(f"ps -o ppid=,pgid=,tty=,lstart=,comm= -p {pid}").strip().split(None, 3)
+        out = _run(["ps", "-o", "ppid=,pgid=,tty=,lstart=,comm=", "-p", str(pid)]).strip().split(None, 3)
         if len(out) < 3:
             return None
         return {"ppid": int(out[0]), "pgid": int(out[1]), "tty": None if out[2] in ("??", "?", "-") else out[2],
                 "start": 0, "comm": out[3] if len(out) > 3 else ""}
+
+    def elapsed(self, pid):
+        return _clock_seconds(_run(["ps", "-o", "etime=", "-p", str(pid)]))
 
 
 def _backend():
@@ -375,7 +441,7 @@ def refresh():
 
 
 def native():
-    """True when the platform API answers (not the shell fallback)."""
+    """True when the platform API answers (not the ps and lsof fallback)."""
     return not isinstance(_backend(), _Shell)
 
 
@@ -405,12 +471,20 @@ def zombie(pid):
     except Exception:
         answer = None
     if answer is None:
-        answer = _sh(f"ps -o stat= -p {int(pid)}").strip().startswith("Z")
+        answer = _run(["ps", "-o", "stat=", "-p", str(int(pid))]).strip().startswith("Z")
     return answer
 
 
 def info(pid):
     return _backend().info(pid)
+
+
+def elapsed(pid):
+    """Whole seconds since the process started, as `ps -o etime` counts them; None when that cannot be read."""
+    try:
+        return _backend().elapsed(pid)
+    except Exception:
+        return None
 
 
 def table():

@@ -24,6 +24,31 @@ def _launchd_path():
         keep.append(d)
     return escape(os.pathsep.join(keep))
 
+
+def _launchctl(*args, merge=False):
+    """(what `launchctl <args>` printed, its exit status), asked without a shell.
+
+    Through a shell the user's id came from `$(id -u)`, and the label and the plist path
+    were shell text: a project directory named with a space, a `*` or a `;` reached
+    launchctl as other words, or ran as a command. Its standard error is discarded, as the
+    shell discarded it, unless `merge` keeps it in the answer as `2>&1` did.
+    """
+    return A._run_program(["launchctl", *args], stderr=subprocess.STDOUT if merge else subprocess.DEVNULL)
+
+
+def _launchd_domain(label=None):
+    """The user's launchd domain, `gui/<uid>`, or one job's target in it."""
+    return f"gui/{os.getuid()}" + (f"/{label}" if label else "")
+
+
+def _launchd_listed(label):
+    """The lines of `launchctl list` that name `label`, as `launchctl list | grep <label>` printed them.
+
+    Matched as text rather than as grep's pattern, which a `.` in every label already
+    widened and a `*` or `[` in a project's name turned into one that matched nothing.
+    """
+    return "\n".join(line for line in _launchctl("list")[0].split("\n") if label in line).strip()
+
 PLIST_CMD = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>

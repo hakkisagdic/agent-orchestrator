@@ -601,11 +601,9 @@ def process_trees(pids, parent=None):
     if not pids:
         return []
     if parent is None:
-        parent = {}
-        for line in (sh("ps -eo pid,ppid") or "").split("\n")[1:]:
-            f = line.split()
-            if len(f) >= 2 and f[0].isdigit() and f[1].isdigit():
-                parent[int(f[0])] = int(f[1])
+        # The platform's process table (procs.py), as writers() reads it: `ps` through a shell
+        # answered the same parents and does not exist on Windows.
+        parent = {pid: row[0] for pid, row in _proc_table().items()}
     known = set(pids)
     return sorted(p for p in pids if parent.get(p) not in known)
 

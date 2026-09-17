@@ -1126,13 +1126,14 @@ def quota_ok(adapter):
     Prefer an explicit budget over a guessed threshold. keyflip enforces
     per-account 5h/7d budgets when the user has set them, and a policy someone
     chose beats a number this script invented — so ask it first and only fall
-    back to reading the raw window when no budget exists.
+    back to reading the raw window when no budget exists. A breached budget stops
+    the turn, whatever the window says; a budget not breached is headroom. Which
+    account's breach counts is quota_budget's to say.
     """
-    budget = A.sh("keyflip budget status 2>/dev/null", cwd=A.HOME)
-    if budget and "No account budgets set" not in budget:
-        low = budget.lower()
-        if "exceeded" in low or "over budget" in low or "blocked" in low:
-            return False
+    budget = A.quota_budget(adapter)
+    if budget["breached"]:
+        return False
+    if budget["accounts"]:
         return True
     ceiling = S.get(None, "quota.block_percent")
     for line in A.quota(adapter):
