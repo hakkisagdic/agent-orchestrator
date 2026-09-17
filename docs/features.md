@@ -63,14 +63,42 @@ is every waiver from before this and any grant from a caller ao did not start,
 the review is refused until a person names one with
 `ao catchup --author-family <family> --by <name>`; the family, the person, the
 login and whether a terminal was attached are recorded with each review it
-decides, and no actor's grant admits the flag. `ao catchup --plan` lists each
-open waiver with its range, commits and changed lines, and the totals, and
-changes nothing; `ao catchup --limit 10` starts at most ten reviews, and
+decides, and no actor's grant admits the flag.
+
+The reviewer is given the range's commit messages as the statement it judges the
+diff against - what each says was wrong, what changed and what the tests prove -
+and is told they are claims to verify, not facts. Each message is scanned for
+credentials first; its subject stays on one line and its body is indented, so no
+line of it can pass for a line of the prompt; and one the prompt has no room for
+is named by its commit and subject, never cut. A person's `--boundary` replaces
+them. The review is recorded as the waived slice's, not as whichever slice runs
+during the sitting, so a defect it finds counts against the slice that landed it
+in `ao stats`.
+
+A split closes by proof instead: the grant for a slice the board marks
+`move-only` records its `ao split-check` proof, and `ao catchup` runs that proof
+again on the commit that landed and closes the waiver on it, with the proof as
+the closing record's evidence and no reviewer started. When what landed is not a
+pure move, or also changes a file the proof does not read, the waiver stays open
+and the reason is printed. A grant that recorded no proof, which is every grant
+from before this, is reviewed like any other, however much its diff looks like a
+move - unless a person states that its slice only moved code, with
+`ao catchup --move-only <slices> --by <name>`. The same proof then runs on each
+named slice's landed range, and the waiver closes on it, its closing record
+holding the statement - the slices, the person, the login and whether a terminal
+was attached - beside the proof. The statement closes nothing by itself: where the
+proof fails the waiver stays open with the reason, a named slice with no open
+waiver is reported, and no actor's grant admits the flag.
+
+`ao catchup --plan` lists each open waiver with its range, commits and changed
+lines, and which close by proof, `--move-only` included, and the totals, and
+changes nothing;
+`ao catchup --limit 10` starts at most ten reviews, and
 `ao catchup --slice B7` takes one slice's waivers. The reviews stay synchronous
 rather than going through `ao review submit`, which pins a staged candidate for
 the running slice and hands back an id: a waived range is already landed, and a
-waiver closes only on the review recorded for exactly its range, in the run that
-asked for it. Whatever a run does not reach waits for the next one.
+waiver closes only on the review recorded for exactly its range, or on its proof,
+in the run that asked for it. Whatever a run does not reach waits for the next one.
 Retrospective evidence reconciles the record; it never authorizes a candidate.
 Nothing is skipped silently, and nothing is lost when the run degrades:
 

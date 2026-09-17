@@ -802,14 +802,16 @@ def waive(root, gate, slice_id, why, by, hours=WAIVER_HOURS_DEFAULT):
     return append_chained_jsonl(waivers_path(root), record, WAIVER_CHAIN, legacy_prefix=True)
 
 
-def close_waiver(root, wid, outcome):
-    """Retire a waiver with a durable chained append; a failure raises rather than leaving it open unseen (#67)."""
+def close_waiver(root, wid, outcome, evidence=None):
+    """Retire a waiver with a durable chained append; a failure raises rather than leaving it open unseen (#67).
+
+    `evidence` is what a close stood on when no review decided it: a move proof, and what it read (#44).
+    """
     from .storage import append_chained_jsonl
-    return append_chained_jsonl(
-        waivers_path(root),
-        {"event": "closed", "id": wid, "at": int(time.time()), "outcome": outcome},
-        WAIVER_CHAIN, legacy_prefix=True,
-    )
+    row = {"event": "closed", "id": wid, "at": int(time.time()), "outcome": outcome}
+    if evidence is not None:
+        row["evidence"] = evidence
+    return append_chained_jsonl(waivers_path(root), row, WAIVER_CHAIN, legacy_prefix=True)
 
 
 def open_waivers(root, gate=None, slice_id=None):
@@ -893,12 +895,13 @@ def _bound_waiver_target(root, waiver, grants):
 
     A waiver that nothing was granted under covers no commit; one whose granted tree
     never landed is UNRESOLVED rather than reviewed by guess. The newest grant of the
-    tree that landed says who landed it, where it recorded that (#65).
+    tree that landed says who landed it, where it recorded that (#65), and the move
+    proof it stood on, where it recorded one (#44).
     """
     trees = {(row.get("candidate") or {}).get("index_tree") for row in grants}
     item = {"waiver": waiver, "start": "", "end": "", "landed": 0,
             "newest": False, "problem": None, "unused": not trees, "author": None, "grant": None,
-            "expired": (waiver.get("expires") or 0) <= time.time()}
+            "move_only": None, "expired": (waiver.get("expires") or 0) <= time.time()}
     if not trees:
         return item
     try:
@@ -918,7 +921,8 @@ def _bound_waiver_target(root, waiver, grants):
         return item
     grant = next((row for row in reversed(grants) if (row.get("candidate") or {}).get("index_tree") == tree), {})
     item.update(start=parent, end=sha, landed=1, grant=grant.get("token"),
-                author=grant.get("author") if isinstance(grant.get("author"), dict) else None)
+                author=grant.get("author") if isinstance(grant.get("author"), dict) else None,
+                move_only=grant.get("move_only") if isinstance(grant.get("move_only"), dict) else None)
     return item
 
 
@@ -936,8 +940,8 @@ def review_waiver_ranges(root):
     required to be a full object id and git runs without a shell.
 
     Returns dicts: waiver, start, end, landed (commit count), newest, problem, and
-    for a bounded waiver's landed commit the grant that landed it and the author that
-    grant recorded; a waiver from before waivers were bounded has neither.
+    for a bounded waiver's landed commit the grant that landed it and the author and
+    move proof that grant recorded; a waiver from before waivers were bounded has none.
     """
     waived, closed = [], set()
     for r in waiver_rows(root):
@@ -968,7 +972,7 @@ def review_waiver_ranges(root):
         start = str(w.get("head") or "")
         end = str(later.get("head") or "") if later else (current or "")
         item = {"waiver": w, "start": start, "end": end, "landed": 0,
-                "newest": later is None, "problem": None, "author": None, "grant": None}
+                "newest": later is None, "problem": None, "author": None, "grant": None, "move_only": None}
         if not _OBJECT_ID.fullmatch(start):
             item["problem"] = "its recorded head is not a full object id"
         elif not _OBJECT_ID.fullmatch(end):
@@ -1012,6 +1016,27 @@ def range_changed_lines(root, start, end):
         if added.isdigit() and removed.isdigit():
             total += int(added) + int(removed)
     return total
+
+
+def range_move_proof(root, start, end):
+    """(moved, problems): `ao split-check`'s proof, taken on a landed range rather than a candidate (#44).
+
+    A move-only grant recorded that proof for the tree it granted. What landed is proven
+    again, from the commit it landed on: a proof taken against another parent says nothing
+    about this diff. The proof reads Python definitions only, so every other changed path is
+    a problem too - a closure on the proof must cover the whole range. The commits come from
+    ledgers anyone on the machine can edit, so each must be a full object id.
+    """
+    if not (_OBJECT_ID.fullmatch(str(start)) and _OBJECT_ID.fullmatch(str(end))):
+        return [], ["the range is not two full object ids"]
+    try:
+        names = _git_output(root, "diff", "--name-only", "--no-renames", "-z", start, end, "--")
+        result = split_moves(root, start, end)
+    except (RuntimeError, ValueError) as exc:
+        return [], [f"the landed range cannot be read: {exc}"]
+    unread = sorted({os.fsdecode(raw) for raw in names.split(b"\0") if raw and not raw.endswith(b".py")})
+    return result["moved"], result["problems"] + [f"{path} changed, and the proof reads Python definitions only"
+                                                  for path in unread]
 
 
 # ---- credits: burn rate and the day the work stops -------------------------------

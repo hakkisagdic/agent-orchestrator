@@ -488,12 +488,18 @@ def cmd_commit_ok(cfg, args):
         reasons.append(f"plan baselines cannot be read: {exc}")
     # A slice the board declares move-only moves text and changes nothing (#44).
     move_only = [it["id"] for it in A.board(root)["running"] if "move-only" in (it.get("notes") or {})]
+    move_proof, unproven = None, []
     if move_only:
         try:
-            problems = A.split_moves(root)["problems"]
+            split = A.split_moves(root)
         except RuntimeError as exc:
-            problems = [f"the candidate cannot be read: {exc}"]
-        reasons.extend(f"{move_only[0]} is move-only: {problem}" for problem in problems)
+            split = {"moved": [], "problems": [f"the candidate cannot be read: {exc}"]}
+        reasons.extend(f"{move_only[0]} is move-only: {problem}" for problem in split["problems"])
+        # The proof reads Python definitions. A grant keeps it only when it covers every staged
+        # path, and a waived review of what lands then closes on it, run again (#44).
+        unproven = [path for path in candidate["changed_paths"] if not path.endswith(".py")]
+        if not split["problems"] and not unproven:
+            move_proof = {"slice": move_only[0], "moved": len(split["moved"])}
     if drift:
         reasons.append(f"plan edited after admission: {', '.join(drift)}")
 
@@ -590,7 +596,7 @@ def cmd_commit_ok(cfg, args):
         A.record_authority(
             root, True, [], now, ver["id"], token,
             review=review_name, reviewer=rwho, candidate=candidate, scope=scope,
-            waiver=waiver["id"] if waived else None, author=author,
+            waiver=waiver["id"] if waived else None, author=author, move_only=move_proof,
             **strict_authority,
         )
     except Exception as exc:
@@ -606,6 +612,12 @@ def cmd_commit_ok(cfg, args):
     print(f"  {C['dim']}verified{C['reset']} {ver['id']} · "
           f"{C['dim']}review{C['reset']} {review_name or 'waived/off'}")
     print(f"  {C['dim']}index tree{C['reset']} {candidate['index_tree']}")
+    if move_proof:
+        print(f"  {C['dim']}move proof{C['reset']} {move_proof['moved']} definition(s) moved byte for byte, "
+              "recorded with the grant")
+    elif unproven:
+        print(f"  {C['dim']}no move proof recorded: it reads Python definitions, and the candidate also "
+              f"changes {', '.join(unproven)}{C['reset']}")
     print(f"\n  {C['dim']}This grant names only the staged index above; push is never covered.{C['reset']}")
     return 0
 

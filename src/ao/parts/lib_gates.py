@@ -935,6 +935,97 @@ def review_context_line(context):
     return line
 
 
+REVIEW_CLAIMS_MAX_COMMITS = 500
+REVIEW_CLAIMS_INDENT = "    "
+
+
+def review_range_claims(root, commits, budget=REVIEW_CONTEXT_BUDGET):
+    """What the commits of a landed range say they did, for its retrospective review to verify.
+
+    A waived range's boundary is the owner's reason for waiving it, the same for every
+    slice, while each commit message states what was wrong, what changed and what the
+    tests prove. Oldest first, a message goes in whole while the budget lasts; one that
+    does not fit is named by its commit and subject, never cut. Each is scanned for
+    credentials as evidence is (#48). A subject is written as a review header value is
+    (#55) and every body line is indented, so no line of a message starts at the margin,
+    where the prompt's markers stand. The newest REVIEW_CLAIMS_MAX_COMMITS are read.
+
+    Returns None when `commits` is not a two-dot range git can list, otherwise commits
+    (how many the range holds), inlined, subjects, redacted (the rules that hit), text and
+    its digest.
+    """
+    commits = str(commits)
+    if commits.startswith("-") or "..." in commits or ".." not in commits:
+        return None
+    try:
+        total = int(_git_output(root, "rev-list", "--count", commits, "--").strip() or 0)
+        raw = _git_output(root, "log", f"--max-count={REVIEW_CLAIMS_MAX_COMMITS}", "-z",
+                          "--format=%H%n%B", commits, "--")
+    except (RuntimeError, ValueError):
+        return None
+    blocks, hits = [], set()               # (commit, how a list names it, the message as the prompt holds it)
+    for record in reversed(raw.split(b"\0")):
+        ident, _, message = record.decode(UTF8, "replace").lstrip("\n").partition("\n")
+        if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", ident):
+            continue
+        message, found = scan_evidence(message)
+        hits.update(found)
+        lines = message.splitlines() or [""]
+        body = lines[1:]
+        while body and not body[0].strip():
+            body.pop(0)
+        while body and not body[-1].strip():
+            body.pop()
+        block = "\n".join([f"commit {ident[:12]}  {review_header_value(lines[0])}"]
+                          + [REVIEW_CLAIMS_INDENT + line if line.strip() else "" for line in body])
+        blocks.append((ident, f"{ident[:12]} {review_header_value(lines[0][:120])}", block))
+
+    def render(kept, room=2_000):
+        named = [name for ident, name, _ in blocks if ident not in kept]
+        missing = len(named) + max(0, total - len(blocks))
+        parts = [block for ident, _, block in blocks if ident in kept]
+        shown = []
+        for name in named:
+            if sum(len(item) + 2 for item in shown) + len(name) > room:
+                break
+            shown.append(name)
+        if shown:
+            parts.append("not inlined for size: " + "; ".join(shown)
+                         + (f" and {missing - len(shown)} more commit(s)" if missing > len(shown) else ""))
+        elif missing:
+            parts.append(f"not inlined for size: {missing} commit(s)")
+        return "\n\n".join(parts)
+
+    def fits(text):
+        return len(text.encode(UTF8)) <= budget
+
+    kept = {ident for ident, _, _ in blocks}
+    if not fits(render(kept)):
+        kept = set()
+        for ident, _, _ in blocks:
+            if fits(render(kept | {ident})):
+                kept.add(ident)
+    text = render(kept)
+    if not fits(text):
+        text = render(kept, room=0)              # where even the names do not fit, their count stands for them
+    return {"commits": total, "inlined": len(kept), "subjects": [name for _, name, _ in blocks],
+            "redacted": sorted(hits), "text": text, "digest": "sha256:" + hashlib.sha256(text.encode(UTF8)).hexdigest()}
+
+
+def review_claims_line(claims):
+    """The header line of a review told what its range's commits claim: which, and what was left out."""
+    shown = claims["subjects"][:3]
+    line = (f"- claims: {claims['commits']} commit message(s), given to the reviewer as claims to verify: "
+            + "; ".join(shown))
+    if claims["commits"] > len(shown):
+        line += f" and {claims['commits'] - len(shown)} more"
+    if claims["inlined"] < claims["commits"]:
+        line += f"; {claims['commits'] - claims['inlined']} not inlined for size"
+    if claims["redacted"]:
+        line += "; redacted: " + ", ".join(claims["redacted"])
+    return line
+
+
 # ---- gate coverage: a source tree no gate exercises (#5) ------------------------------
 
 TOOLCHAINS = {

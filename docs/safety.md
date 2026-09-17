@@ -103,7 +103,15 @@ opened and retired by chained appends. `ao catchup` retires it only on a review 
 recorded for the exact commit granted under it, and that review may not come from the model
 family that wrote the commit: the grant records who landed it where ao can establish that (a
 turn ao started names its role), and where it could not, a person names the family with
-`ao catchup --author-family <family> --by <name>`, on the record. A retrospective
+`ao catchup --author-family <family> --by <name>`, on the record. That reviewer judges the
+commit against its own message, handed over as claims to verify rather than facts, scanned for
+credentials first. The one other way such a waiver retires is a proof: the grant for a slice the
+board marks `move-only` records the `ao split-check` proof it stood on, `ao catchup` runs that
+proof again on the commit that landed, and the waiver closes on it, with the proof as the
+closing record's evidence, or stays open with the reason. A grant that recorded no proof is
+closed by one only when a person states that its slice only moved code, with
+`ao catchup --move-only <slices> --by <name>`, and then only when the proof holds; the statement
+is recorded beside the proof, and no actor's grant admits it. A retrospective
 `ao review --commits` artifact can reconcile landed work but can never authorize a candidate.
 
 Hook ownership is content- and topology-sensitive, not marker-based. Project

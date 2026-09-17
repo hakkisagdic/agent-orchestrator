@@ -323,7 +323,7 @@ def top_level_statements(source, filename="<source>"):
     return definitions, others
 
 
-def split_moves(root):
+def split_moves(root, start=None, end=None):
     """What the staged candidate moves between Python files, and everything that is not a pure move (#44).
 
     A definition moves when it leaves one file and arrives in another; it must arrive
@@ -331,8 +331,15 @@ def split_moves(root):
     edited in place, lost or added, no other top-level statement changed, and every
     part the candidate adds is loaded by a `_part(name, globals())` call. Returns
     {"moved": [(name, from, to)], "problems": [text]}.
+
+    Given two commits, the same proof reads a range that landed: `end` against `start`.
+    A waived review of a move closes on it once the move has landed.
     """
-    raw = _git_output(root, "diff", "--cached", "--name-only", "--no-renames", "-z").decode(UTF8, "replace").split("\0")
+    if start is None:
+        listing, before, after = ("diff", "--cached", "--name-only", "--no-renames", "-z"), "HEAD", ""
+    else:
+        listing, before, after = ("diff", "--name-only", "--no-renames", "-z", start, end, "--"), start, end
+    raw = _git_output(root, *listing).decode(UTF8, "replace").split("\0")
     paths = sorted({path for path in raw if path.endswith(".py")})
 
     def read(spec):
@@ -342,7 +349,8 @@ def split_moves(root):
     old, new = {}, {}
     old_other, new_other, loaded, parts = [], [], set(), []
     for path in paths:
-        for side, spec, defs, other in (("old", f"HEAD:{path}", old, old_other), ("new", f":{path}", new, new_other)):
+        for side, spec, defs, other in (("old", f"{before}:{path}", old, old_other),
+                                        ("new", f"{after}:{path}", new, new_other)):
             text = read(spec)
             if text is None:
                 continue
@@ -355,7 +363,7 @@ def split_moves(root):
             other.extend(others)
             if side == "new":
                 loaded |= {m.group(1) for m in re.finditer(r"""_part\(\s*["']([\w-]+)["']""", text)}
-                if "/parts/" in f"/{path}" and read(f"HEAD:{path}") is None:
+                if "/parts/" in f"/{path}" and read(f"{before}:{path}") is None:
                     parts.append(path)
     moved, problems = [], []
     for name in sorted(set(old) | set(new)):

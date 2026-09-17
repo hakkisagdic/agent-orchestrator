@@ -359,14 +359,18 @@ def build_parser():
     cu = sub.add_parser("catchup", help="replay what could not run: waived reviews, deferred wakes and nudges")
     cu.add_argument("--boundary")
     cu.add_argument("--plan", action="store_true",
-                    help="list each open review waiver, its range, commits and changed lines, and the totals; "
-                         "review nothing and write nothing")
+                    help="list each open review waiver, its range, commits and changed lines, whether it closes "
+                         "by proof, and the totals; review nothing and write nothing")
     cu.add_argument("--limit", type=int, help="start at most this many reviews in this run")
     cu.add_argument("--slice", help="only the waivers for this slice")
     cu.add_argument("--author-family", dest="author_family",
                     help="a person names the model family that wrote the waived ranges, for those whose grant "
                          "recorded none; a reviewer of a family named either way is refused. Needs --by")
-    cu.add_argument("--by", help="with --author-family: the person who names it, recorded with each review")
+    cu.add_argument("--move-only", dest="move_only",
+                    help="a person states that these waived slices, separated by commas, only moved code; each "
+                         "closes only if the move proof holds on what it landed, never on the statement. Needs --by")
+    cu.add_argument("--by", help="with --author-family or --move-only: the person who states it, recorded with "
+                                 "what it decides")
     cu.set_defaults(fn=cmd_catchup)
     pg = sub.add_parser("pings", help="dead man's switch: external pings that alarm when they stop")
     pg.add_argument("action", choices=["status", "setup", "test"], nargs="?", default="status")

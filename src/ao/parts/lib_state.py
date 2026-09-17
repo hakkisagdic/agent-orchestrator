@@ -499,7 +499,7 @@ def commits_without_grant(root, limit=50):
 def record_authority(root, granted, reasons, tree, verification, token=None,
                      review=None, reviewer=None, candidate=None, scope=None,
                      matrix=None, role_bindings=None, implementer_identity=None,
-                     reviewer_identity=None, waiver=None, author=None):
+                     reviewer_identity=None, waiver=None, author=None, move_only=None):
     """Persist one hash-chained authority decision, raising on any broken prefix."""
     from .storage import append_chained_jsonl
     record = {"at": int(time.time()), "granted": bool(granted),
@@ -524,6 +524,9 @@ def record_authority(root, granted, reasons, tree, verification, token=None,
     if author is not None:
         # Who landed work a waiver stood in for; its later review is held to that family (#65).
         record["author"] = author
+    if move_only is not None:
+        # The move proof a move-only grant stood on; catch-up runs it again on what landed (#44).
+        record["move_only"] = move_only
     path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
     # Keep the reviewer's identity here, not only in the review file. A grant is
     # not real until the chain prefix validates and the locked append, file

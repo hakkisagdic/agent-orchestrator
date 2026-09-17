@@ -615,32 +615,44 @@ def cmd_waive(cfg, args):
 
 
 def _catchup_statement(cfg, args):
-    """(the family a person names as the author's for this run, or None; why the command is refused, or None).
+    """(what a person states for this run, or None; why the command is refused, or None).
 
-    Naming the family that wrote a waived range is a person's statement. It is recorded
-    with every review it decides, beside what ao can check about who made it - the login
-    and whether a terminal was attached - as a waiver is.
+    A person may name the family that wrote the waived ranges (--author-family) and the
+    waived slices that were pure moves (--move-only). Either is a person's statement. It is
+    recorded with what it decides, beside what ao can check about who made it - the login
+    and whether a terminal was attached - as a waiver is. A statement of moves closes
+    nothing by itself: a waiver closes only on the move proof, run on what landed (#44).
     """
     family = str(getattr(args, "author_family", None) or "").strip().lower()
+    named = getattr(args, "move_only", None)
+    moves = list(dict.fromkeys(part.strip() for part in str(named or "").split(",") if part.strip()))
     by = str(getattr(args, "by", None) or "").strip()
-    if not family:
-        return None, ("--by names the person who states --author-family; give both" if by else None)
-    if not A.re.fullmatch(r"[a-z0-9][a-z0-9._:-]{0,63}", family):
+    if named is not None and (not moves or not all(move.isprintable() and len(move) <= 200 for move in moves)):
+        return None, "--move-only names waived slices as the board writes them, separated by commas"
+    if not family and not moves:
+        return None, ("--by names the person who states --author-family or --move-only; give one with it"
+                      if by else None)
+    if family and not A.re.fullmatch(r"[a-z0-9][a-z0-9._:-]{0,63}", family):
         return None, "--author-family is one family name, such as the lowercase id its model family goes by"
     if not by:
-        return None, "--by is required with --author-family: name the person who says which family wrote the ranges"
+        return None, ("--by is required with --author-family: name the person who says which family wrote the ranges"
+                      if family else "--by is required with --move-only: name the person who says those slices "
+                                     "only moved code")
     if by.lower() in _agent_names(cfg):
-        return None, f"--by names an agent or a role ({by}); naming the author's family is a person's statement"
+        what = "naming the author's family" if family else "saying which slices only moved code"
+        return None, f"--by names an agent or a role ({by}); {what} is a person's statement"
     user, interactive = A._login_and_terminal()
-    return {"family": family, "by": by, "user": user, "interactive": interactive}, None
+    return {"family": family or None, "move_only": moves, "by": by, "user": user, "interactive": interactive}, None
 
 
 def _catchup_author(item, statement):
     """What a waived range's review is told about who wrote it: its grant's record, and a person's statement."""
     recorded = item.get("author") if isinstance(item.get("author"), dict) else {}
     author = {key: recorded.get(key) for key in ("role", "actor", "adapter")}
+    stated = {key: statement[key] for key in ("family", "by", "user", "interactive")} \
+        if statement and statement.get("family") else None
     author.update(family=str(recorded.get("family") or "").strip().lower() or None,
-                  grant=item.get("grant"), stated=statement)
+                  grant=item.get("grant"), stated=stated)
     return author
 
 
@@ -686,9 +698,14 @@ def cmd_catchup(cfg, args):
     A waived range is reviewed by a model family other than the one that wrote it (#65):
     the family the grant under the waiver recorded, and any a person names with
     --author-family and --by. With neither, its review is refused and the waiver stays
-    open. --plan says what a run would do and changes nothing; --slice and --limit bound
-    a run. A review stays synchronous: a waiver closes in the same run, on the review
-    recorded for exactly its range, or stays open.
+    open. The reviewer judges the range against what its commit messages claim, unless a
+    person gives --boundary, and the review is recorded as the waived slice's. A range whose
+    grant recorded a move proof, or whose slice a person names with --move-only and --by, is
+    not reviewed: the proof runs on what landed, and the waiver closes on it or stays open
+    with the reason (#44). A range with neither is reviewed, whatever its diff looks like.
+    --plan says what a run would do and changes nothing; --slice and --limit bound a run. A
+    review stays synchronous: a waiver closes in the same run, on the review recorded for
+    exactly its range, or stays open.
     """
     from types import SimpleNamespace
     root = cfg["root"]
@@ -704,13 +721,13 @@ def cmd_catchup(cfg, args):
         return 2
     did = started = 0
     failed = []
-    totals = {"waivers": 0, "commits": 0, "lines": 0, "unnamed": 0}      # what --plan sums up
+    totals = {"waivers": 0, "commits": 0, "lines": 0, "unnamed": 0, "proven": 0}      # what --plan sums up
 
-    def close(wid, outcome):
+    def close(wid, outcome, evidence=None):
         # A waiver retires on a durable append or not at all; a failure is reported
         # and fails the command, never counted as handled (#67).
         try:
-            A.close_waiver(root, wid, outcome)
+            A.close_waiver(root, wid, outcome, evidence=evidence)
             return True
         except Exception as exc:
             print(f"  {C['red']}could not close {wid}{C['reset']}: {exc}")
@@ -725,6 +742,14 @@ def cmd_catchup(cfg, args):
         print(f"  {C['red']}waivers cannot be read{C['reset']}: {exc}")
         targets = []
         failed.append("ledger")
+    moves = (statement or {}).get("move_only") or []
+    open_slices = {item["waiver"].get("slice") for item in targets}
+    for name in moves:
+        # A statement about a slice with nothing to prove is reported, never dropped quietly.
+        if name not in open_slices:
+            print(f"  --move-only {name}: no open review waiver names it; nothing is proven or closed")
+        elif only and name != only:
+            print(f"  --move-only {name}: --slice {only} bounds this run; it waits for another")
     if only:
         targets = [item for item in targets if item["waiver"].get("slice") == only]
     for position, item in enumerate(targets):
@@ -758,6 +783,36 @@ def cmd_catchup(cfg, args):
         rng = f"{item['start'][:12]}..{item['end'][:12]}"
         lines = A.range_changed_lines(root, item["start"], item["end"])
         size = f"{item['landed']} commit(s), {'unknown' if lines is None else lines} changed line(s)"
+        granted_proof = item.get("move_only")
+        stated = w.get("slice") in moves
+        if granted_proof or stated:
+            # A semantic review of a proven pure move reads nothing the proof did not. Its grant
+            # recorded the proof for the tree it granted, or a person states the slice only moved
+            # code; either way what landed is proven here, and the waiver closes on that proof
+            # alone, with no reviewer, or stays open. A statement never closes one by itself (#44).
+            claimed = " and ".join(part for part in ("its grant recorded a pure move" if granted_proof else "",
+                                                     f"{statement['by']} states it is a pure move" if stated else "")
+                                   if part)
+            moved, problems = A.range_move_proof(root, item["start"], item["end"])
+            if problems:
+                print(f"  {label}: {rng}, {size}: {claimed}, and the landed range is not one: "
+                      f"{'; '.join(problems[:3])}" + (f" and {len(problems) - 3} more" if len(problems) > 3 else "")
+                      + "; keeping it open")
+                continue
+            totals["proven"] += 1
+            proof = {"proof": "split-moves", "commits": f"{item['start']}..{item['end']}", "grant": item.get("grant"),
+                     "moved": len(moved), "paths": sorted({f"{source} -> {target}" for _, source, target in moved})}
+            if granted_proof:
+                proof["recorded"] = granted_proof
+            if stated:
+                proof["stated"] = {key: statement[key] for key in ("move_only", "by", "user", "interactive")}
+            proven = f"{len(moved)} definition(s) moved byte for byte on the landed range"
+            if plan:
+                print(f"  {label}: {rng}, {size}: {claimed}; closes by proof, {proven}; no reviewer")
+            elif close(w["id"], f"closed by proof: {proven}; {claimed}", proof):
+                print(f"  {label}: {rng}, {size}: {claimed}; {proven}; closed by proof, with no reviewer")
+                did += 1
+            continue
         author = _catchup_author(item, statement)
         families = _author_families(author)
         if not families:
@@ -778,9 +833,11 @@ def cmd_catchup(cfg, args):
             continue
         print(f"  {label}: reviewing its own landed range {rng}, {size}, by a family other than {', '.join(families)}")
         # No deadline is passed: a reviewer's time is review_timeout per call, and a silent
-        # one is killed after review.stall_minutes (#63, #25).
+        # one is killed after review.stall_minutes (#63, #25). The range's commit messages
+        # are the statement it is judged against; a person's --boundary replaces them.
         ns = SimpleNamespace(boundary=args.boundary or f"waived review for {w['slice']}: {w['why']}",
-                             paths=None, commits=f"{item['start']}..{item['end']}", author=author)
+                             paths=None, commits=f"{item['start']}..{item['end']}", author=author,
+                             claims=not args.boundary, range_slice=w["slice"])
         try:
             before = A.review_row_count(root)
         except Exception as exc:
@@ -823,7 +880,8 @@ def cmd_catchup(cfg, args):
     if plan:
         print(f"totals: {totals['waivers']} waiver(s); {started} review(s) of {totals['commits']} commit(s) and "
               f"{totals['lines']} changed line(s); {totals['unnamed']} refused until a person names the author's "
-              f"family; {len(A.deferred_open(root))} deferred wake(s) and nudge(s) a run replays")
+              f"family; {totals['proven']} closed by proof, with no reviewer; "
+              f"{len(A.deferred_open(root))} deferred wake(s) and nudge(s) a run replays")
         return 1 if failed else 0
     for r in A.deferred_open(root):
         print(f"  deferred {r['kind']} ({r.get('reason', '')}) since {time.strftime('%d %b %H:%M', time.localtime(r['at']))}")

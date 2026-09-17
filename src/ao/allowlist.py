@@ -18,6 +18,7 @@ FORBIDDEN = (
     ("waives a gate", "ao waive review --slice s --by b --why w"),
     ("records a review ao did not run", "ao collect-review n --response r --model m --by b"),
     ("names the family that wrote a waived range", "ao catchup --author-family f --by b"),
+    ("states which waived slices only moved code", "ao catchup --move-only s --by b"),
     ("removes the hooks", "ao hooks uninstall"),
     ("runs any command", "ao lock -- sh -c x"),
     ("runs arbitrary code", "python3 -c x"),

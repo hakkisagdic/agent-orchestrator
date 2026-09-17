@@ -193,8 +193,10 @@ means wakes wait for the reset and the queue must already hold work; the
 implementer out of credits is a red alarm days ahead (`ao doctor` shows the
 burn rate). A person may bypass a gate with `ao waive` — on the record — and
 `ao catchup` reconciles it when the way is clear, with a reviewer of a model family
-other than the one that wrote the work. Nothing is skipped silently and nothing is
-lost.
+other than the one that wrote the work, who judges it against what its commit messages
+claim; a split closes on the move proof, run on what landed, with no reviewer, when its grant
+recorded the proof or a person states it only moved code (`ao catchup --move-only S --by NAME`).
+Nothing is skipped silently and nothing is lost.
 
 ## 11. Never
 
@@ -216,7 +218,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao content add <source>@<commit> --skills a,b` / `verify` | borrow skills pinned and text-only; check they have not drifted |
 | `ao backup --to <dir|ref|remote:name>` / `ao restore <dir>` | the governance off this disk, and back, verified |
 | `ao hunt [run|discard <id>|status]` | a bounded read-only bug hunt; leads to the architect, never a verdict |
-| `ao split-check` | is the staged candidate a pure move? a `move-only` slice cannot land otherwise |
+| `ao split-check` | is the staged candidate a pure move? a `move-only` slice cannot land otherwise, and its grant records the proof its waived review later closes on |
 | `ao adapters [list|validate|conform]` | every adapter and its source; check a candidate before relying on it |
 | `ao role [set|swap]` | the role table; a reassignment takes effect on the next slice. `set reviewer <adapter> --model M` composes the reviewer from its adapter; a tool reviewer, which ao runs over the staged candidate on its own provider, also needs `--family F` |
 | `ao stats [--all] [--since D] [--until D]` | slice outcomes from the ledgers: rounds, first-pass rate, time, size, defects found later |
@@ -251,7 +253,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao features [on|off <key>]` | the switches and what each costs; all off = deterministic ao |
 | `ao config [list|get|set|unset] [<setting> <value>] [--machine]` | what a person can set: every threshold with its value, default and source (docs/configuration.md); a person's command, not an implementer's |
 | `ao collect-review <nonce> --response F --model M --by NAME` | a person records a stand-in session's answer to the review request ao wrote when no reviewer could be reached; never an agent's command |
-| `ao waive review --slice S --by NAME --why …` / `ao catchup` | a person's bypass on the record; catchup reviews each landed range with a model family other than the one that wrote it, and replays deferred work. `ao catchup --plan` previews and writes nothing; `ao catchup --limit 10` and `ao catchup --slice S` bound a run; `ao catchup --author-family F --by NAME` is a person naming the family where the grant recorded none, never an agent's command |
+| `ao waive review --slice S --by NAME --why …` / `ao catchup` | a person's bypass on the record; catchup reviews each landed range with a model family other than the one that wrote it, against what its commit messages claim, closes a `move-only` split on the proof its grant recorded, run again, and replays deferred work. `ao catchup --plan` previews, names what closes by proof, and writes nothing; `ao catchup --limit 10` and `ao catchup --slice S` bound a run; `ao catchup --author-family F --by NAME` is a person naming the family where the grant recorded none, and `ao catchup --move-only S --by NAME` a person stating which waived slices only moved code, each closing only where the proof holds; neither is an agent's command |
 | `ao pings setup --url …` / `ao hooks [status|install|uninstall] [--allow-shared-hooks]` / `ao push allow` | dead man's switch; static AO hook intent plus Git-executed, nonce-bound pre-commit proof; explicit authorization for shared/external/global mutation; human push window |
 | `ao cost [--since 24h]` | what the coordination spends: implementer turns by class, wasted turns, review counts |
 | `ao since last|2h|<git ref>` | what happened since; the ref reaches git as one argument, never shell text |

@@ -143,7 +143,10 @@ it - and `ao catchup` judges the retrospective review's independence against tha
 against whoever implements now: a reviewer that declares the author's family, or no family, is
 refused, and the implementer's own engine may review what another family wrote. A family ao
 could not record is named by a person, with `--author-family` and `--by`; ao never reads a
-family from a model name.
+family from a model name. A split whose grant recorded its move proof, or that a person states
+only moved code, has no reviewer to hold apart from its author: its waiver closes on the proof,
+run on the commit that landed. A catch-up review is recorded as the waived slice's, whatever
+slice runs while it is asked.
 
 ## The bug-hunter lane
 
