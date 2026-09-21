@@ -53,6 +53,12 @@ def _home_path(template):
     return text
 
 
+# The kinds of session store this ao knows how to reach. An adapter that names none of them has no
+# transcript ao can resolve, whatever its records look like once they are in hand, which is why a
+# conformance report says "declared" for one rather than "read".
+SESSION_STORE_KINDS = ("escaped-cwd", "workspace-meta", "sqlite-sessions")
+
+
 def session_stores(kind):
     """[(adapter id, store)] for each adapter whose `sessions` store is of this kind (#76)."""
     return [(ident, adapter["sessions"]) for ident, adapter in sorted(package_adapters().items())
@@ -325,6 +331,8 @@ def role_session_paths(cfg, role):
         return None, None
     adapter = load_adapter(block_adapter(block) or "")
     store = adapter.get("sessions") or {}
+    if store.get("kind") not in SESSION_STORE_KINDS:
+        return None, None                                        # a shape ao has no way to load
     if store.get("kind") == "escaped-cwd":
         cwd = block.get("cwd") or cfg.get("root", "")
         return os.path.join(escaped_cwd_dir(store, cwd), store["transcript"].replace("{session}", sess)), None
@@ -333,8 +341,6 @@ def role_session_paths(cfg, role):
         db = _home_path(declared.get("path")) if _name(declared.get("kind")) == "sqlite" else ""
         return (DatabaseTail(db, sess, _block(declared, "record"), _block(declared, "freshness")) if db
                 else None), None
-    if store.get("kind") != "workspace-meta":
-        return None, None
     ws = block.get("workspace_hash") or _session_workspace(store, sess)
     if not ws:
         return None, None

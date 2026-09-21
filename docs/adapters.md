@@ -285,7 +285,10 @@ another contract is listed as refused, with both versions named, and never loade
 `{session}` and uses only placeholders ao fills. `conform` runs `send` and `resume` with the
 harness binary replaced by a fixture that records what it was given, and passes only when the
 prompt, with spaces, quotes, `=` signs and a line break, arrives whole in one argument and,
-where `resume` takes a session id, the session arrives too; `transcript`, `busy` and `directives` are reported as declared or absent.
+where `resume` takes a session id, the session arrives too. `transcript`, `busy` and `directives`
+are reported as declared or absent, and a declared transcript that names no store ao can reach is
+reported as **declared, not reached** (dim, not green: `ao adapters conform` exits 0 for it),
+because a shape nobody can load is not a capability - see "What ao can reach" below.
 ao's own tests run every shipped adapter through the same conformance, so a change in ao that
 would break a third party's adapter breaks ours first.
 
@@ -377,6 +380,22 @@ Three shapes cover everything seen so far:
   orchestrator owns persistence. Prefer this when available.
 - **Opaque / none** — observation unavailable. `send` and `resume` still work; the
   dashboard degrades to repo and mailbox signals only.
+
+### What ao can reach
+
+A shape is read from somewhere, and ao resolves a session's records from one store kind only:
+`escaped-cwd`, `workspace-meta` or `sqlite-sessions` (`sessions.kind`, `SESSION_STORE_KINDS`).
+An adapter that names a transcript and none of those three describes its records accurately and is
+read by nothing: every reader of it returns empty, `busy` says `unknown`, and a check that looked
+only for a `transcript` block would have called it declared. Twelve of the shipped adapters are in
+that state, including one on this machine, and `ao adapters` now marks the column
+`<kind>, not reached` for them. The fix for each is one store declaration measured on that harness's
+own files, which is a per-vendor job, not a core one.
+
+A declaration can also be read by no core module at all, which is the same dishonesty in the other
+direction: `busy.mtime_file` is declared by nine adapters and consulted by none - the age ao reports
+comes from the transcript's own last write, or from a row store's `transcript.freshness` query - so
+adding that key to an adapter changes nothing until a reader for it exists.
 
 ### What a record looks like is declared, not coded
 

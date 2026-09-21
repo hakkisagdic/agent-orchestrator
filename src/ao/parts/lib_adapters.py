@@ -844,9 +844,24 @@ def conform_adapter(adapter, harness, workdir):
         elif capability == "transcript" and block.get("kind") not in ("jsonl", "sqlite", "json", "markdown",
                                                                         "call-return", "unknown", None):
             results.append((capability, "fail", f"unknown transcript kind {block.get('kind')!r}"))
+        elif capability == "transcript" and not session_store_reachable(adapter):
+            results.append((capability, "declared", "no store ao can resolve, so nothing is read from it"))
         else:
             results.append((capability, "pass", "declared"))
     return results
+
+
+def session_store_reachable(adapter):
+    """Can ao reach this adapter's records at all, from what it declares?
+
+    A record is read from a place ao resolves: a role's session id names it in one of the stores
+    this ao dispatches on. An adapter may describe its transcript precisely - its shape, its kinds,
+    where a tool call keeps its name - and still name no place ao can find it, and then every
+    reader of it returns nothing while a check that only looked for a declaration said it was
+    sound. So a declaration is reported as one, and a resolution as the other.
+    """
+    return isinstance((adapter or {}).get("sessions"), dict) \
+        and (adapter["sessions"].get("kind") in SESSION_STORE_KINDS)
 
 
 # ---- a prompt too long for one argument reaches its command another way (PROMPT-CHANNEL) -----

@@ -807,9 +807,11 @@ def cmd_adapters(cfg, args):
                 if have.get("installed") else "account, no CLI" if have.get("account") else "—")
         observation = "call-return" if a.get("observation_mode") == "call-return" \
             else (a.get("transcript", {}) or {}).get("kind", "—")
+        if observation in ("jsonl", "sqlite", "json", "markdown") and not A.session_store_reachable(a):
+            observation = f"{observation}, not reached"
         eligible, _ = A.reviewer_eligibility(a)
         print(f"{ident:<16}{entry['source']:<9}{str(a.get('contract', A.ADAPTER_CONTRACT)):<10}{col}{verified:<12}"
-              f"{C['reset']}{here:<22}{observation:<14}"
+              f"{C['reset']}{here:<22}{observation:<22}"
               f"{'reviewer: eligible' if eligible else C['dim'] + 'reviewer: ineligible' + C['reset']}")
     for vendor in A.vendor_list():
         if not vendor.get("adapter"):
