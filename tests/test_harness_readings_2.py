@@ -294,6 +294,27 @@ def test_the_declaration_decides_and_a_layer_an_agent_can_write_does_not(project
 
 # ── the core names nothing these readings declare ──
 
+def _own_vocabulary(tree):
+    """Node ids of strings that spell ao's own protocol rather than decide anything about a harness.
+
+    `stop` is the key of the heading ao writes into an urgent message (language.MARKERS) and, by
+    coincidence of English, the value opencode's finish column holds when a model stopped cleanly.
+    This pin guards the second: the core must not hardcode a harness's reason where it reads one.
+    A MARKERS key and the keys handed to language.forms are ao naming its own heading, so they are
+    not that. A harness that ever spells a stop reason as one of ao's headings is the case this
+    lets through, and it is the narrower risk of the two.
+    """
+    ids = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict) \
+                and any(getattr(target, "id", "") == "MARKERS" for target in node.targets):
+            ids |= {id(key) for key in node.value.keys if key is not None}
+        elif isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", "")) in ("forms",
+                                                                                                        "marker"):
+            ids |= {id(argument) for argument in node.args}
+    return ids
+
+
 def test_the_core_holds_no_declared_stop_reason_and_no_unattended_argument_where_it_decides_one():
     reasons, arguments = set(), set()
     for adapter in A.package_adapters().values():
@@ -306,7 +327,7 @@ def test_the_core_holds_no_declared_stop_reason_and_no_unattended_argument_where
     found = []
     for path in sorted((ROOT / "src" / "ao").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        docs = _docstrings(tree)
+        docs = _docstrings(tree) | _own_vocabulary(tree)
         found += [f"{path.name}:{node.lineno} {node.value!r}" for node in ast.walk(tree)
                   if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs
                   and node.value in reasons]

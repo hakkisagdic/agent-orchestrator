@@ -1,13 +1,139 @@
 {
-  "id": "qoder", "name": "Qoder CLI", "verified": "untested",
-  "disclaimer": "Written from documented behaviour of Qoder's agentic CLI; verify against an install. Qoder is primarily an IDE (see docs/ide-extensions.md) with a companion CLI.",
-  "detect": { "headless": ["-p"] },
-  "send":   { "argv": ["qoder", "-p", "{prompt}"] },
-  "resume": { "argv": ["qoder", "--resume", "{session}", "-p", "{prompt}"] },
-  "options": { "trust_none": null, "trust_none_why": "no documented flag denies tools", "model": ["--model", "{model}"], "effort": null, "trust_all": ["--yolo"],
-               "unattended": ["--permission-mode", "accept_edits", "--allowed-tools", "Bash(ao status:*),Bash(ao board:*),Bash(ao writers),Bash(ao verify:*),Bash(ao review:*),Bash(ao commit-ok:*),Bash(ao commit -m:*),Bash(ao commit -F:*),Bash(ao mail:*),Bash(ao ask:*),Bash(ao decisions:*),Bash(ao doctor),Bash(ao watchdog explain:*),Bash(ao since:*),Bash(ao digest:*),Bash(ao fanout ok:*),Bash(ao fanout record:*),Bash(ao tail:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(ls:*),Bash(cat:*),Bash(grep:*)"],
-               "unattended_note": "In place of --yolo: accept_edits approves edits inside the working directories, --allowed-tools names each command the playbook's loop runs, and a -p run denies whatever would ask; ao's MCP tools are not named, and the loop reaches the mailbox through the CLI. A person's general.defaultPermissionMode and allow rules in ~/.qoder/settings.json still apply. Read on 2026-09-17 from docs.qoder.com/en/cli/permissions and docs.qoder.com/en/cli/cli-reference." },
-  "transcript": { "kind": "unknown", "candidates": ["~/.qoder","~/Library/Application Support/Qoder"] },
-  "busy": { "kind": "unknown" },
-  "directives": { "steering_files": ["AGENTS.md",".qoder/rules"] }
+  "id": "qoder",
+  "name": "Qoder",
+  "verified": "partial",
+  "disclaimer": "transcript, sessions, busy and telemetry are read from a running Qoder 1.1.57 store on 2026-09-21: two session transcripts (985 records) and three subagent transcripts beside them. send, resume and options are from docs.qoder.com and have never been run here: no Qoder CLI is installed on the machine the store was read from, so ao can watch a Qoder agent and cannot wake one. Qoder is primarily an IDE (see docs/ide-extensions.md) with a companion CLI.",
+  "detect": {
+    "dirs": [".qoder"],
+    "files": ["AGENTS.md"],
+    "headless": ["-p"],
+    "install_dirs": ["~/.qoder"],
+    "note": "No `processes`: the process that writes this store is the Qoder IDE itself, one long-lived process shared by every session on the machine and still alive after an agent's turn dies, so naming it would let busy() read a dead agent as working - which is the one thing that check exists to prevent. The runtime is @qoder-ai/qoder-agent-sdk inside /Applications/Qoder.app. ~/.qoder/entry/qoder is a bootstrap that answers 'Qoder CLI is not installed' when no CLI is there, so its presence is not proof the CLI exists; adapter_binaries falls back to `qoder` from send, and `which qoder` is the test."
+  },
+  "send": {
+    "argv": ["qoder", "-p", "{prompt}"],
+    "unverified": "no CLI on the machine the store was read from; the flag is documented, not run"
+  },
+  "resume": {
+    "argv": ["qoder", "--resume", "{session}", "-p", "{prompt}"],
+    "unverified": "as send: --resume and the session id it takes are documented behaviour, unrun here"
+  },
+  "options": {
+    "trust_none": null,
+    "trust_none_why": "no documented flag denies tools",
+    "model": ["--model", "{model}"],
+    "effort": null,
+    "trust_all": ["--yolo"],
+    "unattended": ["--permission-mode", "accept_edits", "--allowed-tools", "Bash(ao status:*),Bash(ao board:*),Bash(ao writers),Bash(ao verify:*),Bash(ao review:*),Bash(ao commit-ok:*),Bash(ao commit -m:*),Bash(ao commit -F:*),Bash(ao mail:*),Bash(ao ask:*),Bash(ao decisions:*),Bash(ao doctor),Bash(ao watchdog explain:*),Bash(ao since:*),Bash(ao digest:*),Bash(ao fanout ok:*),Bash(ao fanout record:*),Bash(ao tail:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(ls:*),Bash(cat:*),Bash(grep:*)"],
+    "unattended_note": "In place of --yolo: accept_edits approves edits inside the working directories, --allowed-tools names each command the playbook's loop runs, and a -p run denies whatever would ask; ao's MCP tools are not named, and the loop reaches the mailbox through the CLI. A person's general.defaultPermissionMode and allow rules in ~/.qoder/settings.json still apply. Read on 2026-09-17 from docs.qoder.com/en/cli/permissions and docs.qoder.com/en/cli/cli-reference. None of it run: a wake of a Qoder agent has never been attempted, and permissionMode values observed in the store are 'acceptEdits' and 'yolo', which is what a person's own session chose."
+  },
+  "transcript": {
+    "kind": "jsonl",
+    "path": "~/.qoder/projects/{escaped_cwd}/{session}.jsonl",
+    "escaped_cwd": "absolute cwd with '/' replaced by '-', so a leading '/' gives a leading '-'",
+    "record": {
+      "time": "timestamp",
+      "kind": "type",
+      "text_keys": ["message.content", "humanInput.text", "lastPrompt"]
+    },
+    "messages": {
+      "prompt": ["user"],
+      "reply": ["assistant"],
+      "blocks": "message.content[]",
+      "match": { "type": "text" },
+      "not_words": [{ "isMeta": true }],
+      "harness_replies": []
+    },
+    "turn": {
+      "end": [],
+      "end_when": {
+        "type": "assistant",
+        "field": "message.stop_reason",
+        "values": ["end_turn"],
+        "when": "the record carries message.usage; an assistant record with stop_reason null and no usage is a streaming partial, not an answer"
+      },
+      "conversation": ["user", "assistant"]
+    },
+    "tool_call": {
+      "type": "assistant",
+      "blocks": "message.content[]",
+      "match": { "type": "tool_use" },
+      "name": "name",
+      "args": "input",
+      "id": "id",
+      "path_keys": ["file_path"],
+      "write_words": ["write", "edit"],
+      "note": "Call ids are 'call_...'. The result is a tool_result block in the user record that follows, carrying tool_use_id and, on a failure only, is_error (3 of 132). The top-level toolUseResult repeats it per tool: Bash gives {exitCode, signal, stdout, stderr, kind, telemetryExecutionId}, Edit and Write give {file_path, success, additions, deletions, diff}, Read gives {file, type}, and an Agent call gives {kind: 'agent-result', agentId, agentType, state, terminateReason, outputPath, transcriptPath} - the last is how a subagent is named, see subagents."
+    },
+    "subagents": {
+      "dir": "{session}/subagents",
+      "transcripts": [{ "path": "agent-{id}.jsonl", "named_by": "toolUseResult.agentId" }],
+      "sidecar": { "path": "agent-{id}.meta.json", "call": "toolUseId", "fields": ["agentType", "description", "invocationName", "color"] },
+      "status": { "path": "~/.qoder/tasks/{session}/task-{taskId}.json", "fields": ["status", "agentId", "parentToolUseId", "transcriptPath", "completedAt", "result", "summary"], "running_values": ["running"] },
+      "note": "An agent a call starts writes its own transcript under the session's subagents directory, named by the agentId the call's toolUseResult carries; its meta sidecar names the starting call at toolUseId, which is the link when a call's result carries no agentId. Its records share the session's schema with isSidechain true (every record of the 3 transcripts checked) against false in the session's own, and promptId holding the parent session's uuid rather than a turn's. A task sidecar ticks per subagent update and says 'running' or 'completed': 1 completed and 2 running were live while this was read, one written seconds before the read. So a Qoder subagent at work is its implementer at work while the session transcript is quiet, and ao must read the subagents and the sidecars, not the session file alone."
+    },
+    "note": "No record closes a turn: the store holds no 'result' and no 'system' record of any kind, so a turn ends at the last assistant record that carries usage, whose stop_reason says why the model stopped. Observed stop_reason across 985 records: tool_use 130, end_turn 5, null 234 (partials). A store at rest ended every one of its 6 human prompts at an end_turn, and meta records follow the end rather than mark it. max_tokens, stop_sequence and refusal were never observed, so how Qoder records a truncated or refused answer is unknown; treat an absent end_turn as 'not cleanly ended'. A user record is a prompt only when it carries no tool result: 131 of its 134 user records return a call (toolUseResult plus sourceToolAssistantUUID), and 7 carry origin.kind 'human' with humanInput.text, which are the prompts a person typed; isMeta true marks a note the harness writes (2 of 985). No isCompactSummary, no '<synthetic>' model and no isApiErrorMessage was observed, so a reply Qoder writes itself is not distinguishable from the model's - unlike Claude Code, whose store holds 515. Kinds present across the two stores, with counts from the larger: user 134, assistant 264, attachment 20, active-leaf 251, runtime-config 4, workspace-directories 3, worktree-state 1, last-prompt 2, file-history-snapshot 25. Every kind but user and assistant is bookkeeping. version 1.1.57, entrypoint 'cli', userType 'external', gitBranch and cwd sit on every user, assistant and attachment record. A session's records are also echoed as structured events under ~/.qoder/logs/sessions/{escaped_cwd}/{session}/segments/*.jsonl (3,243 events: model.request.started, model.response.completed, loop.iteration.*, tool.requested, tool.execution.finished, hook.*), one file per process, which is a second reader's option when the transcript's own cadence is too coarse.",
+    "tail_bytes": 900000
+  },
+  "sessions": {
+    "kind": "escaped-cwd",
+    "dir": "~/.qoder/projects",
+    "transcript": "{session}.jsonl",
+    "cwd": "cwd",
+    "note": "A directory's name is its working directory with '/' made '-', so it cannot be read back into a path: `cwd` names the record field holding it, and every user, assistant and attachment record carries it (420 of 420 in the larger store). A type 'workspace-directories' record lists the full paths of every directory the session may work in, which is where a moved or multi-root session must be read from. ~/.qoder/logs/sessions holds a directory for a session whose transcript is elsewhere or gone: one of the four observed log directories has no transcript, so a session is placed from the transcripts, not the log tree."
+  },
+  "busy": {
+    "idle_seconds": 120,
+    "note": "No status file, so the age of the last write decides it, and the write to age is the newest of the session transcript, its subagents' transcripts and the session's newest segment log: all three advance together while a turn runs, and the transcript alone lagged 135 s in the middle of one, which is why the window is 120 s rather than Claude Code's 240. Qoder streams partial assistant records with no usage while it thinks, so the transcript does move during a long response. busy() takes the max over the transcript and its subagents already; the segment log is the remaining reason to widen it."
+  },
+  "telemetry": {
+    "context": {
+      "from": "transcript",
+      "type": "assistant",
+      "field": "message.usage.context_usage_ratio",
+      "fallback": { "type": "runtime-config", "field": "contextWindow" },
+      "unit": "ratio",
+      "verified": true,
+      "note": "The store states the percentage outright: context_usage_ratio is nonzero on 143 of 143 records carrying usage, and a type 'runtime-config' record names the window beside it (contextWindow 200000, model 'qfmodel'). No other harness ao reads gives context this directly."
+    },
+    "cost": {
+      "from": "transcript",
+      "type": "assistant",
+      "response": "message.id",
+      "fields": ["message.usage.credits"],
+      "unit": "credit",
+      "counted": "credits, once per response read by message.id: the same response is written as several streaming partials and each repeats the usage, so summing records would count it again.",
+      "not_counted": "message.usage.input_tokens, output_tokens, cache_creation_input_tokens and cache_read_input_tokens, which are all zero on every record of this store's model, and the Claude-family keys beside them (server_tool_use, iterations) that Qoder writes without filling.",
+      "verified": true,
+      "note": "This is the one harness whose spend ao can read in the unit it is billed: credits, with original_credits beside it and billable false on 143 of 143. Token counts are present as fields and empty of values, so a token-priced estimate would read zero spend for a session that spent credits - the failure mode billing.fallback exists to avoid."
+    },
+    "failure": {
+      "from": "transcript",
+      "type": "user",
+      "blocks": "message.content[]",
+      "match": { "type": "tool_result" },
+      "field": "is_error",
+      "failed_when": true,
+      "text": "content",
+      "verified": true,
+      "note": "is_error is present only where a call failed (3 of 132 observed), so its absence is a success rather than an unread value. A subagent's own end is not a tool result: read task-{id}.json's status, and the terminateReason an Agent call's toolUseResult carries."
+    }
+  },
+  "billing": {
+    "fallback": {
+      "reading": "per-response",
+      "note": "How the panel and ao cost add this harness's records up. The offline credit estimate reads no transcript: Qoder bills its own credit account and says so in message.usage.credits, which is the reading, not an estimate to stand in for one."
+    }
+  },
+  "directives": {
+    "steering_files": ["AGENTS.md", ".qoder/rules"],
+    "steering_format": "unverified: neither file existed in any of the three working directories the store holds",
+    "skills_dir": "~/.qoder/plugins",
+    "settings": "~/.qoder/settings.json",
+    "note": "Observed on disk: ~/.qoder/settings.json holds only {enabledPlugins}, and plugins are installed under ~/.qoder/plugins/{cache,data,installed_plugins_v2.json}. The steering files above are what the documentation names; AGENTS.md is the one ao writes for every harness, and .qoder/rules was not present to confirm."
+  },
+  "mcp": {
+    "file": null,
+    "note": "No user-editable MCP registration file was found. ~/.qoder/mcp-router.json is runtime state - {schemaVersion, pid, baseUrl, apiKey, startedAt} of a bridge process, and it holds a key, so ao must never write or read it as configuration. An attachment record names connected servers at serverNames, which is a reading of what the person configured, not a place to register. Until a registration file is verified, ao's playbook for a Qoder agent reaches ao through the CLI, and the grant in options.unattended names the commands it may run."
+  }
 }

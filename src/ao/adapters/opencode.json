@@ -1,11 +1,135 @@
 {
-  "id": "opencode", "name": "opencode", "verified": "partial",
-  "disclaimer": "Storage location verified on a real install; command flags from documentation.",
-  "detect": { "headless": ["run"] },
-  "send":   { "argv": ["opencode", "run", "{prompt}"] },
-  "resume": { "argv": ["opencode", "run", "--session", "{session}", "{prompt}"], "continue_last": ["opencode", "run", "--continue", "{prompt}"] },
-  "options": { "trust_none": null, "trust_none_why": "no flag verified to deny every tool", "model": ["--model", "{model}"], "model_format": "provider/model", "effort": null, "agent_profile": ["--agent", "{agent}"] },
-  "transcript": { "kind": "sqlite", "path": "~/.local/share/opencode/opencode.db", "access": "READ-ONLY. A second writer corrupts the agent's own state.", "todo": "map the message table schema" },
-  "busy": { "mtime_file": "~/.local/share/opencode/opencode.db-wal", "idle_seconds": 240, "note": "WAL file mtime is a good activity proxy for SQLite-backed agents." },
-  "directives": { "steering_files": ["AGENTS.md"], "config": "opencode.json" }
+  "id": "opencode",
+  "name": "opencode",
+  "verified": "partial",
+  "disclaimer": "The store is mapped on a real install (2026-09-21): one database shared by three opencode versions, 17 sessions, 220 messages, 726 parts. Flags are read from `opencode run --help` on 1.18.27 and 1.17.3, which agree. What ao does with the store is the gap: see reader below.",
+  "detect": {
+    "dirs": [".opencode"],
+    "files": ["opencode.json", "opencode.jsonc", "AGENTS.md"],
+    "binaries": ["opencode"],
+    "headless": ["run"],
+    "install_dirs": ["~/.local/share/opencode"],
+    "config": ["~/.config/opencode/opencode.jsonc"],
+    "note": "One install is not one install here: a person's own ~/.opencode/bin/opencode and a Traycer-managed one under ~/.traycer/host/providers/opencode/darwin-arm64/<version>/opencode coexist on this machine and share the same store, so a version is read from session.version per session rather than from the binary ao happens to find on PATH. No `processes`: a Traycer-managed opencode runs as one long-lived server holding several sessions at once (its host registers `opencode-managed-server:<pid>`), so a process match would say every idle session in that server is working."
+  },
+  "send": { "argv": ["opencode", "run", "{prompt}"] },
+  "resume": {
+    "argv": ["opencode", "run", "--session", "{session}", "{prompt}"],
+    "continue_last": ["opencode", "run", "--continue", "{prompt}"],
+    "note": "Verified against `opencode run --help` on 1.18.27: -s/--session names the session, -c/--continue takes the most recent, --fork branches it instead of resuming it in place, and --agent <name> and --variant <reasoning effort> are separate flags. A run started by ao should pin its permission mode: --auto approves tool calls, and it is the only such flag opencode offers, so it is a widening rather than the scoped grant a claude-code wake carries."
+  },
+  "options": {
+    "trust_none": null,
+    "trust_none_why": "no flag denies tools: --auto is the only permission flag `run` takes, and it approves rather than withholds, so a read-only reviewer cannot be composed from the command line",
+    "model": ["--model", "{model}"],
+    "model_format": "provider/model",
+    "effort": ["--variant", "{effort}"],
+    "output_json": ["--format", "json"],
+    "agent_profile": ["--agent", "{agent}"]
+  },
+  "transcript": {
+    "kind": "sqlite",
+    "path": "~/.local/share/opencode/opencode.db",
+    "access": "READ-ONLY. A second writer corrupts the agent's own state: ao opens the store as file:<path>?mode=ro, and the newest rows may still be in the -wal beside it.",
+    "record": {
+      "table": "message",
+      "kind": "role",
+      "body": "data",
+      "session_key": "session_id",
+      "order": "time_created",
+      "time": "time_created",
+      "time_unit": "milliseconds",
+      "text_keys": ["text"],
+      "children": {
+        "table": "part",
+        "key": "message_id",
+        "parent_key": "id",
+        "session_key": "session_id",
+        "body": "data",
+        "as": "parts",
+        "order": "time_created",
+        "time": "time_created",
+        "time_unit": "milliseconds"
+      }
+    },
+    "messages": {
+      "prompt": ["user"],
+      "reply": ["assistant"],
+      "blocks": "parts[]",
+      "match": { "type": "text" }
+    },
+    "turn": {
+      "end": [],
+      "end_when": { "type": "assistant", "field": "finish", "values": ["stop"] },
+      "conversation": ["user", "assistant"]
+    },
+    "tool_call": {
+      "type": "assistant",
+      "blocks": "parts[]",
+      "match": { "type": "tool" },
+      "name": "tool",
+      "id": "callID",
+      "args": "state.input",
+      "result": "state.output",
+      "path_keys": ["state.input.filePath"],
+      "write_words": ["write", "edit"],
+      "note": "Unlike a jsonl store, a call and its result are ONE row updated in place: 185 tool parts, 185 distinct callIDs, and state carries status (completed 183, error 2), input, output, metadata, title and time.start/time.end. Reading a tool part twice across a poll sees it change, so an artifact comparison must key on callID and status rather than on row counts. Parts by type: tool 185, step-start 173, step-finish 173, reasoning 69, text 64, patch 62."
+    },
+    "freshness": {
+      "query": "SELECT MAX(time_updated) FROM part WHERE session_id = ?",
+      "time_unit": "milliseconds"
+    },
+    "subagent_sessions": {
+      "link": "session.parent_id, and the task tool part's data.state.metadata {parentSessionId, sessionId}",
+      "note": "A subagent is a session of its own in the same tables, not a file beside the parent's, so this is no `subagents` layer for the file reader: 1 of 17 sessions is a child, titled '(@general subagent)' with agent 'general'. What ao reads is one session's rows: a parent's tail holds no child's parts, so a delegating implementer that waits on a subagent ages as if it were silent until that child ends its turn. Reading children with their parent needs a session-tree query the store does not offer per row, and `transcript.subagents` is the jsonl store's key and is deliberately absent."
+    },
+    "artifacts": "a patch part names what changed: data.hash and data.files, 62 of them, which is the store's own record of an artifact appearing",
+    "note": "message holds 25 user and 195 assistant rows; the role and everything else about a message is in its JSON data column, while time_created and session_id are typed columns. ao reads a message row and hangs its parts under the name `record.children.as` gives, which is what makes this store readable by the same readers as a store that nests its blocks: `data.role` becomes a kind, a text part's `data.text` a block's words, a tool part a call. A user row names the agent, the model as {providerID, modelID, variant} and a system prompt; an assistant row names parentID, mode, path, cost, tokens, time.completed and finish. The words of a message are never in its row, so a read that does not join parts finds a conversation of silent turns. A turn is open when the newest assistant message carries finish 'tool-calls' (170 of 195) - opencode runs the calls and asks the model again itself, with no process ao started and no closing record coming. time.completed is set on all 195 assistant messages, so it says a message was written, not that the model stopped cleanly; finish does, and only finish distinguishes them. A turn that ends at the provider instead of at an answer has finish null and an error beside it: 22 of 195, of which 20 are APIError and 2 MessageAbortedError, and a watchdog must not read one as a finished slice. A user part is no one speaking: a tool result is a part of the assistant message that asked for it.",
+    "tail_bytes": null
+  },
+  "sessions": {
+    "kind": "sqlite-sessions",
+    "query": "SELECT id, title, time_updated FROM session WHERE directory = ? AND parent_id IS NULL ORDER BY time_updated DESC",
+    "session": "id",
+    "title": "title",
+    "mtime": "time_updated",
+    "mtime_unit": "milliseconds",
+    "note": "No escaping, unlike Claude Code and Qoder: session.directory is the absolute cwd as it stands (5 directories over 17 sessions, 16 roots and 1 child). The working directory is bound as a parameter, so a checkout whose path holds a quote names its sessions rather than ending the query. project_id joins project.worktree and project_directory for a session inside a git worktree, and parent_id IS NULL keeps a subagent from being read as an implementer's own session. The v2 event-projection tables session_message, session_input and session_context_epoch exist and hold 0 rows: the transcript is message and part, and reading the newer tables would find nothing."
+  },
+  "telemetry": {
+    "context": {
+      "from": "none",
+      "note": "Tokens are stored per message, per step-finish part and aggregated per session, but no model window is, so a context percentage would rest on a guessed window. opencode's own context is a session_context_epoch row, and that table is empty in this store."
+    },
+    "cost": {
+      "from": "session",
+      "fields": ["cost", "tokens_input", "tokens_output", "tokens_reasoning", "tokens_cache_read", "tokens_cache_write"],
+      "unit": "usd+token",
+      "counted": "the session's aggregate columns, one row per session; the same numbers appear per message in data.cost and data.tokens, and per step in the step-finish part, so read one level and not all three.",
+      "verified": true,
+      "note": "Aggregates are real and large where cost is not: one session reads tokens_output 23,564, tokens_cache_read 1,729,222, tokens_cache_write 87,649 with cost 0.0, because every message's cost is 0.0 in a store whose provider bills elsewhere. A panel that priced opencode by cost would show a working agent spending nothing."
+    },
+    "failure": {
+      "from": "transcript",
+      "table": "part",
+      "kind": "tool",
+      "field": "data.state.status",
+      "failed_when": "error",
+      "text": "data.state.error",
+      "note": "The harness's own verdict per call, beside an assistant message's data.error for a turn that died at the provider."
+    }
+  },
+  "busy": {
+    "mtime_file": ["~/.local/share/opencode/opencode.db-wal", "~/.local/share/opencode/opencode.db"],
+    "idle_seconds": 240,
+    "query": "SELECT MAX(time_updated) FROM part WHERE session_id = ?",
+    "note": "Take the newer of the two files: the -wal mtime follows commits, but a checkpoint writes the database and can remove the -wal, and at rest both stood at 02:00:13 while the -shm and log/opencode.log sat 6 minutes older. Both files are machine-global, so a second opencode session anywhere on the box reads as this one working - the per-session query is what makes the answer true, and it is the reason this adapter cannot be watched by the file-age reader alone."
+  },
+  "directives": {
+    "steering_files": ["AGENTS.md"],
+    "config": "opencode.json",
+    "skills_dir": ".opencode/skill",
+    "note": "Global config is ~/.config/opencode/opencode.jsonc; a Traycer-managed run reads ~/.traycer/.opencode/opencode.json, which is where Traycer injects its own plugin and skills paths. Both binaries read the same credential store at ~/.local/share/opencode/auth.json, verified with `opencode auth list` from each, so a provider configured once is configured for both."
+  },
+  "mcp": { "file": "~/.config/opencode/opencode.jsonc", "key": "mcp", "note": "opencode mcp add writes the `mcp` key of the config; only the empty object was observed on this machine, so the entry shape is unverified here." }
 }

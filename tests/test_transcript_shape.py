@@ -173,8 +173,22 @@ def test_an_adapter_that_declares_no_shape_has_nothing_read_from_another_harness
 # ── the core names no shipped harness's shape ──
 
 # Words a shipped shape declares that are plain words, or ao's own field names.
+# Words a shape declares that are English first and a store's field second, so the core says them
+# about other things and is not held to a harness's vocabulary for it. `data`, `state`, `status`,
+# `error` and `tool` are opencode's own column and JSON keys (its transcript is a database, so a
+# field path reads data.state.status), and `credits` is what `ao credits` is named: Qoder bills in
+# credits, and the pin would otherwise forbid the core from naming its own command. `finish` and
+# `stop` join them for opencode, whose column is named finish and whose clean end is the value stop.
+# `data`, `state`, `status` and `error` are how a JSON store names its own columns, `tool` and
+# `finish` what a row of it is called, and `credits` is what `ao credits` is named: all ordinary
+# English a reader cannot avoid saying, and none of them a harness's field reached through a
+# declared path. `role` and `parts` join them for the same reason: every chat protocol ao speaks
+# - A2A above all, whose messages are literally made of parts and roles - names them, so a core
+# module that never reads a transcript still has to. A store's record is still reached only where
+# its adapter says, which is what this list is not allowed to stop protecting.
 ORDINARY = {"type", "timestamp", "text", "content", "message", "user", "assistant", "args", "path", "key", "value",
-            "success", "result", "name", "usage", "tool_call", "input", "refusal"}
+            "success", "result", "name", "usage", "tool_call", "input", "refusal",
+            "data", "state", "status", "error", "tool", "credits", "finish", "stop", "role", "parts"}
 
 
 def _steps(value):

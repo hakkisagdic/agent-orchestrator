@@ -328,7 +328,7 @@ the adapter says so in its `disclaimer`. **Reviewer** is whether the adapter can
 | `deepseek` | `deepseek` | untested | ineligible | DeepSeek harness / CLI |
 | `gemini` | `gemini` | untested | ineligible | Google Gemini CLI |
 | `ollama` | `ollama` | untested | ineligible | Ollama (local models) |
-| `qoder` | `qoder` | untested | ineligible | Qoder CLI |
+| `qoder` | `qoder` | partial | ineligible | Qoder CLI |
 | `trae` | `trae` | untested | ineligible | Trae Agent (ByteDance) |
 | `cloud` | `cloud-generic` | partial | ineligible | Generic cloud agent (pull-request delivered) |
 | `pr-agent` | `pr-agent` | untested | eligible | PR-Agent, a tool reviewer ao runs over the candidate (#86) |
@@ -380,8 +380,9 @@ Three shapes cover everything seen so far:
 
 ### What a record looks like is declared, not coded
 
-A JSONL transcript's records are read through what the implementer's adapter declares about
-them (#76): the status panel's context, cost, messages and failed tool calls, `ao cost`, the
+A transcript's records are read through what the implementer's adapter declares about
+them (#76), whether they arrive as lines of a file or as rows of a database: the status panel's
+context, cost, messages and failed tool calls, `ao cost`, the
 watchdog's "has the turn ended" and foreign-edit checks, and the offline credit estimate. A
 reader asked without an adapter reads what the implementer's adapter declares, and a part an
 adapter does not declare is read as nothing, never as another harness's field.
@@ -495,6 +496,34 @@ percentage or the model's window, so no context is read. `tests/test_second_harn
 the nesting from synthetic records, and fails when a core module names a field or a value it
 declares; `tests/test_harness_readings_2.py` holds each reading measured since, and the
 declarations of `detect.headless`.
+
+### A store that holds its records in rows
+
+A store may keep a session's records in a database rather than in a file appended to. The reading
+is then the same and only the fetch differs: rows are fetched, the JSON a row keeps its contents in
+is promoted into the record beside the row's own columns, a record's children are hung on it under
+the key the adapter names, and every reader above runs on the result unchanged. A store like that
+declares, in place of `transcript.path`:
+
+| Field | What it declares | Used by |
+|---|---|---|
+| `transcript.kind` | `sqlite`: that the path below is a database, not a file to tail | the readers, and a part is opened read-only always |
+| `transcript.record.table`, `session_key`, `order` | the table holding a session's records, the column naming the session, and the column ordering them oldest first | every reader |
+| `transcript.record.body` | the column holding a record's own JSON, whose keys become record fields where the row does not already carry them - so `record.kind` and every path above are read from inside it | every reader |
+| `transcript.record.children` | `{table, key, parent_key, as}`, and the same `session_key`, `order`, `body`, `time` and `time_unit` for them: the child table, the column of the child naming the parent record, the column of the parent it names, and the key the children are attached under. A child naming a parent outside the tail read is dropped, not guessed a home for | the nesting readers above |
+| `transcript.record.time`, `time_unit` | the column holding a record's time, and `seconds` or `milliseconds` since the epoch; it becomes an ISO time like a JSONL record's | `ao tail`, the watchdog, every reader that orders records |
+| `transcript.freshness` | `{query, time_unit}`: one SELECT, `?` bound to the session id, returning when the store last wrote this session | whether the implementer is working |
+| `sessions.kind` | `sqlite-sessions`, with `{query, session, title, mtime, mtime_unit}`: one SELECT, `?` bound to the working directory, listing a directory's sessions | `ao doctor`, and a role's session resolution |
+
+Two of these exist because a row store is written to rather than appended. A row's time may be
+updated in place, so the newest row is not the newest work: a session whose rows the store rewrites
+has no row written lately and is still answering, which is why the freshness is a query the adapter
+declares rather than a row count or a file's age. And a database holds every session of the machine,
+so a modification time says a box is busy rather than that this agent is - the per-session query is
+the only reading that tells them apart. A query is only ever run when it starts with `SELECT` and
+holds no semicolon, a column or table name only when it is one word, and a session or directory
+arrives as a bound parameter, so a working directory holding a quote lists its sessions rather than
+ending the query. `tests/test_store_readings.py` holds these readings.
 
 ### Subagents, and records that are no one's words
 

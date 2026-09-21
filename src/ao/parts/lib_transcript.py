@@ -88,6 +88,54 @@ def _declared_store(ident):
     return store if isinstance(store, dict) else {}
 
 
+def _sqlite_tail(ident):
+    """The `DatabaseTail` that reads one session of the package adapter `ident`, or None.
+
+    The store is named by `transcript.path` and how to query it by `transcript.record`, so a
+    session found here and a session named in a role's block resolve the same way.
+    """
+    declared = _block((package_adapters().get(str(ident or "")) or {}), "transcript")
+    db = _home_path(declared.get("path")) if _name(declared.get("kind")) == "sqlite" else ""
+    return (db, _block(declared, "record"), _block(declared, "freshness")) if db else None
+
+
+def _sqlite_sessions(ident, store, cwd):
+    """[{session, workspace_hash, title, status, mtime, transcript}]: each session a database store keeps for `cwd`.
+
+    A database names a session's working directory in a column rather than in the name of the
+    directory holding it, so the store declares the query and the columns to read from its rows.
+    The working directory is bound as a parameter, never written into the query: it comes from a
+    checkout on disk, and a path with a quote in it is a path a person can name.
+    """
+    sql, tail = _read_query(store.get("query")), _sqlite_tail(ident)
+    if not sql or not tail or not cwd or not os.path.exists(tail[0]):
+        return []
+    try:
+        import sqlite3
+        connection = sqlite3.connect(f"file:{tail[0]}?mode=ro", uri=True, timeout=2.0)
+    except Exception:
+        return []
+    connection.row_factory = sqlite3.Row
+    try:
+        rows = [dict(row) for row in connection.execute(sql, (cwd,))]
+    except Exception:
+        rows = []
+    finally:
+        connection.close()
+    milliseconds = str(store.get("mtime_unit")) in ("ms", "milliseconds")
+    found = []
+    for row in rows:
+        session, stamp = row.get(_store_name(store.get("session"))), row.get(_store_name(store.get("mtime")))
+        number = stamp if isinstance(stamp, (int, float)) and not isinstance(stamp, bool) else None
+        if not isinstance(session, str) or not session:
+            continue
+        found.append({"session": session, "workspace_hash": None,
+                      "title": _name(row.get(_store_name(store.get("title")))), "status": "",
+                      "mtime": (number / 1000.0 if milliseconds else float(number)) if number is not None else 0.0,
+                      "transcript": DatabaseTail(tail[0], session, tail[1], tail[2]), "meta": None})
+    return found
+
+
 def store_sessions(ident, cwd):
     """[{adapter, session, workspace_hash, transcript, meta, mtime}], newest first: each session that the store
     the package adapter `ident` declares keeps for the working directory `cwd` (SESSION-IDENTITY).
@@ -110,6 +158,8 @@ def store_sessions(ident, cwd):
     elif store.get("kind") == "escaped-cwd" and cwd:
         rows = [{"adapter": ident, "session": session, "workspace_hash": None, "transcript": path, "meta": None,
                  "mtime": mtime} for session, path, mtime in _escaped_transcripts(store, escaped_cwd_dir(store, cwd))]
+    elif store.get("kind") == "sqlite-sessions" and cwd:
+        rows = [dict(row, adapter=ident) for row in _sqlite_sessions(ident, store, cwd)]
     return sorted(rows, key=lambda row: row["mtime"], reverse=True)
 
 
@@ -265,16 +315,24 @@ def role_session_paths(cfg, role):
     """(transcript, metadata) of the session a role's block names, or (None, None) (SESSION-IDENTITY).
 
     A session pinned by its id alone in a workspace-meta store is found in the workspace
-    directory that keeps it.
+    directory that keeps it. A store that keeps every session in one database has no transcript
+    path to name, so what comes back is a `DatabaseTail`: it is the database to a reader that asks
+    only whether the transcript exists, and the session to a reader that asks what it says.
     """
     block = cfg.get(role) if isinstance(cfg.get(role), dict) else {}
     sess = _concrete_session(block.get("session"))
     if not sess:
         return None, None
-    store = load_adapter(block_adapter(block) or "").get("sessions") or {}
+    adapter = load_adapter(block_adapter(block) or "")
+    store = adapter.get("sessions") or {}
     if store.get("kind") == "escaped-cwd":
         cwd = block.get("cwd") or cfg.get("root", "")
         return os.path.join(escaped_cwd_dir(store, cwd), store["transcript"].replace("{session}", sess)), None
+    if store.get("kind") == "sqlite-sessions":
+        declared = _block(adapter, "transcript")
+        db = _home_path(declared.get("path")) if _name(declared.get("kind")) == "sqlite" else ""
+        return (DatabaseTail(db, sess, _block(declared, "record"), _block(declared, "freshness")) if db
+                else None), None
     if store.get("kind") != "workspace-meta":
         return None, None
     ws = block.get("workspace_hash") or _session_workspace(store, sess)
@@ -529,7 +587,15 @@ def session_to_resume(cfg, role):
 # ── transcript ────────────────────────────────────────────────────────────────
 
 def read_tail(path, nbytes=900_000):
-    """Last nbytes of a JSONL transcript, first (partial) line dropped."""
+    """Last nbytes of a JSONL transcript, first (partial) line dropped; a database's rows when it keeps them there.
+
+    A store that holds every session of every project in one database has no file whose tail can
+    be read: its transcript is a query bound to one session id. Such a read asks a `DatabaseTail`
+    and gets the same kind of answer - a list of record objects - so every reader below sees one
+    transcript and names no store's schema (#76).
+    """
+    if isinstance(path, DatabaseTail):
+        return path.read(nbytes)
     recs = []
     try:
         size = os.path.getsize(path)
@@ -550,6 +616,239 @@ def read_tail(path, nbytes=900_000):
         except Exception:
             pass
     return recs
+
+
+# ── a transcript kept as rows ─────────────────────────────────────────────────
+#
+# A JSONL store gives a transcript as a file, so `session_paths` can hand back a path and every
+# reader can ask it for a tail. A database store gives no such thing: one file holds every
+# session, and which records belong to one is a fact inside a column. What makes the two readable
+# by the same readers is that the difference is only how a record is *fetched*: once a row's JSON
+# column is promoted onto the record and its child rows nested beside it, a store that writes a
+# message and its parts as rows of two tables holds exactly what a store that nests blocks in a
+# record holds, and `transcript.messages.blocks` and `transcript.tool_call.blocks` read both.
+#
+# So the reader below is a fetcher and nothing else. It promotes, nests and converts; it renames
+# nothing, because every name it uses - table, session column, order column, JSON column, child
+# table and the key its records are held under - comes from `transcript.record`. A store whose
+# column is called something else says so in its adapter, and a store that declares nothing is
+# read as holding nothing.
+
+_STORE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+
+# How many rows one query of a store is asked for. A session's records are bounded by what an
+# agent writes in a sitting, so this bounds only a store that has outgrown itself: a panel asks
+# these questions every second, and reading a million rows to show eight messages is not a cheap
+# answer but a slow one.
+_STORE_ROW_CAP = 20_000
+
+
+def _store_name(value):
+    """A declared table or column name, when it is one word a query may hold.
+
+    These names are written into SQL rather than bound as values, because SQLite binds no name.
+    An adapter is package-controlled where authority is decided, but a project's own layer is
+    writable by the agent it describes, so a name is taken only in the shape one identifier has
+    and anything else reads as no declaration at all.
+    """
+    text = _name(value)
+    return text if _STORE_NAME.match(text) else ""
+
+
+def _read_query(text):
+    """A declared SELECT, when it reads nothing but one statement.
+
+    A store's path and session are bound as parameters, never written into the text; the query
+    itself has to come from the adapter, since only it knows the schema. That makes it the one
+    piece of a declaration that is executed rather than read, so it is taken only when it starts
+    as a SELECT and holds no second statement.
+    """
+    text = str(text or "").strip()
+    return text if text.upper().startswith("SELECT") and ";" not in text else ""
+
+
+def _epoch_iso(value, unit):
+    """A number of seconds or milliseconds since the epoch, as the ISO text every time reader expects."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return ""
+    millis = int(round(value * (1 if str(unit) in ("ms", "milliseconds") else 1000)))
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(millis // 1000)) + ".%03dZ" % (millis % 1000)
+
+
+class DatabaseTail:
+    """A session's transcript where a database holds it: a path to the store, an id, and how to query it.
+
+    It stands for the database file to a reader that only wants to know whether the transcript is
+    there - `os.path.exists` and `os.path.getmtime` reach the file through `__fspath__` - while
+    carrying the session the records are read for, which a path alone cannot say.
+    """
+
+    __slots__ = ("db", "session", "record", "freshness")
+
+    def __init__(self, db, session, record, freshness=None):
+        self.db, self.session = _name(db), _name(session)
+        self.record = record if isinstance(record, dict) else {}
+        self.freshness = freshness if isinstance(freshness, dict) else {}
+
+    def __fspath__(self):
+        return self.db
+
+    def __str__(self):
+        return f"{self.db}#{self.session}"
+
+    def __repr__(self):
+        return f"<DatabaseTail {self.db}#{self.session}>"
+
+    def __eq__(self, other):
+        return isinstance(other, DatabaseTail) and (other.db, other.session) == (self.db, self.session)
+
+    def __hash__(self):
+        return hash((self.db, self.session))
+
+    def _connect(self):
+        """A read-only connection, or None when the store cannot be opened.
+
+        Read-only because the agent owns this database and a second writer corrupts its state.
+        A short timeout because a panel and a watchdog ask this question repeatedly, and a store
+        mid-commit is a store that answers later, not one that answers never.
+        """
+        try:
+            import sqlite3
+        except ImportError:
+            return None
+        try:
+            connection = sqlite3.connect(f"file:{self.db}?mode=ro", uri=True, timeout=2.0)
+        except Exception:
+            return None
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    def _fetch(self, connection, sql, arguments, limit):
+        """[dict] for each row a declared query reaches, its columns named, capped at `limit`."""
+        try:
+            cursor = connection.execute(sql, (*arguments, limit) if limit is not None else arguments)
+            return [dict(row) for row in cursor]
+        except Exception:
+            return []
+
+    def read(self, nbytes=900_000):
+        """This session's records, oldest first: its newest rows, and no more of them than `nbytes` of stored text.
+
+        A record is its row's columns with one declared column's JSON promoted onto it, so a path
+        the adapter writes reaches either kind of field the same way. A JSON column that does not
+        parse promotes nothing, and the record still holds that column as the text it is.
+        """
+        declared = self.record
+        table, session_key = _store_name(declared.get("table")), _store_name(declared.get("session_key"))
+        order = _store_name(declared.get("order")) or _store_name(declared.get("time"))
+        if not (self.session and table and session_key and order and os.path.exists(self.db)):
+            return []
+        connection = self._connect()
+        if connection is None:
+            return []
+        try:
+            rows = self._fetch(connection,
+                               f"SELECT * FROM {table} WHERE {session_key} = ? ORDER BY {order} DESC LIMIT ?",
+                               (self.session,), min(max(int(nbytes) // 256, 1), _STORE_ROW_CAP))
+        finally:
+            connection.close()
+        rows.reverse()
+        return self._nest(self._promote(rows, declared, nbytes))
+
+    def _promote(self, rows, declared, nbytes=None):
+        """[record] for each row, oldest first: its columns with its declared JSON column promoted onto it.
+
+        A column that holds no object promotes nothing rather than dropping the row, and a number
+        in the declared time column becomes the ISO text every reader of `record.time` expects,
+        because a store that counts in milliseconds is the store's own fact to say. With no
+        `nbytes` every row is kept; a child table is read whole, since a record's blocks are
+        asked for complete and a tail of them is not a tail but a message with parts missing.
+        """
+        body, time_column = _store_name(declared.get("body")), _store_name(declared.get("time"))
+        kept, spent = [], 0
+        for row in reversed(rows) if nbytes else rows:
+            record = dict(row)
+            blob = _name(row.get(body)) if body else ""
+            for key, value in (_json_object(blob) or {}).items():
+                record.setdefault(key, value)
+            stamp = _epoch_iso(row.get(time_column), declared.get("time_unit")) if time_column else ""
+            if stamp:
+                record[time_column] = stamp
+            kept.append(record)
+            if nbytes:
+                spent += len(blob) or len(json.dumps(record, default=str))
+                if spent >= nbytes:
+                    break
+        kept.reverse()
+        return kept
+
+    def _nest(self, records):
+        """Attach each record's child records under the key its adapter names, when it declares them.
+
+        A store that writes a message's parts beside it rather than inside it declares the child
+        table, the column of the child that names its parent, the column of the parent the child
+        names, and the key to hold them under. Children are read for the whole session in one
+        query and hung on by that name, because a store's rows are one session's either way, and
+        a child naming a parent outside this tail is dropped rather than guessed a home for.
+        """
+        declared = _block(self.record, "children")
+        table, as_key = _store_name(declared.get("table")), _name(declared.get("as"))
+        key, parent_key = _store_name(declared.get("key")), _store_name(declared.get("parent_key"))
+        session_key = _store_name(declared.get("session_key")) or key
+        order = _store_name(declared.get("order")) or _store_name(declared.get("time"))
+        if not (table and as_key and key and parent_key and order and records):
+            return records
+        connection = self._connect()
+        if connection is None:
+            return records
+        try:
+            rows = self._fetch(connection,
+                               f"SELECT * FROM {table} WHERE {session_key} = ? ORDER BY {order} ASC LIMIT ?",
+                               (self.session,), _STORE_ROW_CAP)
+        finally:
+            connection.close()
+        grouped = {}
+        for child in self._promote(rows, declared):
+            grouped.setdefault(child.get(key), []).append(child)
+        return [dict(record, **{as_key: grouped.get(record.get(parent_key), [])}) for record in records]
+
+    def last_activity(self):
+        """Epoch seconds the store says this session last wrote, or None when it declares no reading.
+
+        A database file is written by every session in it, so its modification time says a machine
+        is busy rather than that this agent is. A store that keeps a per-session clock can say
+        more, and `transcript.freshness` declares the query that reads it. A session whose rows
+        the store updates in place has no row written lately and still working, so this is the
+        only reading that sees it.
+        """
+        sql = _read_query(self.freshness.get("query"))
+        if not sql or not os.path.exists(self.db):
+            return None
+        connection = self._connect()
+        if connection is None:
+            return None
+        try:
+            rows = self._fetch(connection, sql, (self.session,), None)
+        finally:
+            connection.close()
+        value = next(iter(rows[0].values()), None) if rows else None
+        if isinstance(value, str) and value:
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                return None
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return value / 1000.0 if _name(self.freshness.get("time_unit")) in ("ms", "milliseconds") else float(value)
+
+
+def _json_object(text):
+    """The object a stored JSON column holds, or None when it holds nothing readable."""
+    try:
+        document = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    return document if isinstance(document, dict) else None
 
 
 # What a record looks like is its adapter's to declare (#76): where the kind and the time
@@ -1173,8 +1472,15 @@ def last_write(transcript, shape):
     subagent works on in the background, and the session transcript alone then reads as an
     implementer silent for as long as the subagent works: over an hour, measured. A subagent
     that has finished writes no more, so its last write only ages.
+
+    A database store is asked differently. Its file is written by every session in it, so its
+    modification time says another agent is working somewhere on the machine; where the store
+    declares a per-session clock (`transcript.freshness`) that is the answer, and the file's age
+    is the fallback that says only that nothing newer is known.
     """
-    return max([os.path.getmtime(transcript)] + [mtime for mtime, _ in subagent_writes(transcript, shape)])
+    base = [transcript.last_activity() or os.path.getmtime(transcript)] if isinstance(transcript, DatabaseTail) \
+        else [os.path.getmtime(transcript)]
+    return max(base + [mtime for mtime, _ in subagent_writes(transcript, shape)])
 
 
 def _strings(o, out, keys, depth=0):
