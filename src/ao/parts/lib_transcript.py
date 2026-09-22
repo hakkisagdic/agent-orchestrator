@@ -95,14 +95,15 @@ def _declared_store(ident):
 
 
 def _sqlite_tail(ident):
-    """The `DatabaseTail` that reads one session of the package adapter `ident`, or None.
+    """How one session of the package adapter `ident` is read: the store and the queries, or None.
 
     The store is named by `transcript.path` and how to query it by `transcript.record`, so a
     session found here and a session named in a role's block resolve the same way.
     """
     declared = _block((package_adapters().get(str(ident or "")) or {}), "transcript")
     db = _home_path(declared.get("path")) if _name(declared.get("kind")) == "sqlite" else ""
-    return (db, _block(declared, "record"), _block(declared, "freshness")) if db else None
+    return (db, _block(declared, "record"), _block(declared, "freshness"),
+            _block(declared, "subagent_sessions")) if db else None
 
 
 def _sqlite_sessions(ident, store, cwd):
@@ -138,7 +139,7 @@ def _sqlite_sessions(ident, store, cwd):
         found.append({"session": session, "workspace_hash": None,
                       "title": _name(row.get(_store_name(store.get("title")))), "status": "",
                       "mtime": (number / 1000.0 if milliseconds else float(number)) if number is not None else 0.0,
-                      "transcript": DatabaseTail(tail[0], session, tail[1], tail[2]), "meta": None})
+                      "transcript": DatabaseTail(tail[0], session, tail[1], tail[2], tail[3]), "meta": None})
     return found
 
 
@@ -339,7 +340,8 @@ def role_session_paths(cfg, role):
     if store.get("kind") == "sqlite-sessions":
         declared = _block(adapter, "transcript")
         db = _home_path(declared.get("path")) if _name(declared.get("kind")) == "sqlite" else ""
-        return (DatabaseTail(db, sess, _block(declared, "record"), _block(declared, "freshness")) if db
+        return (DatabaseTail(db, sess, _block(declared, "record"), _block(declared, "freshness"),
+                             _block(declared, "subagent_sessions")) if db
                 else None), None
     ws = block.get("workspace_hash") or _session_workspace(store, sess)
     if not ws:
@@ -689,12 +691,13 @@ class DatabaseTail:
     carrying the session the records are read for, which a path alone cannot say.
     """
 
-    __slots__ = ("db", "session", "record", "freshness")
+    __slots__ = ("db", "session", "record", "freshness", "descendants")
 
-    def __init__(self, db, session, record, freshness=None):
+    def __init__(self, db, session, record, freshness=None, descendants=None):
         self.db, self.session = _name(db), _name(session)
         self.record = record if isinstance(record, dict) else {}
         self.freshness = freshness if isinstance(freshness, dict) else {}
+        self.descendants = descendants if isinstance(descendants, dict) else {}
 
     def __fspath__(self):
         return self.db
@@ -846,6 +849,37 @@ class DatabaseTail:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             return None
         return value / 1000.0 if _name(self.freshness.get("time_unit")) in ("ms", "milliseconds") else float(value)
+
+    def descendant_tails(self):
+        """[DatabaseTail] for each session the store says descends from this one, nearest first.
+
+        A store that holds a subagent as a session of its own has no file beside the parent for ao
+        to list: the link is a value in a row, so the store declares the query that names one
+        session's children and which column of its rows holds a session id. The query is asked
+        again of every session it finds, so a subagent's own subagent is reached by the same one
+        declaration, and each id is asked of once - which is what stops a store whose parent links
+        closed a loop from being walked for as long as it is read. A tail that declares no query
+        has no descendants, and says so without opening the store.
+        """
+        sql, column = _read_query(self.descendants.get("query")), _store_name(self.descendants.get("session"))
+        if not (sql and column and self.session and os.path.exists(self.db)):
+            return []
+        connection = self._connect()
+        if connection is None:
+            return []
+        found, seen, queued = [], {self.session}, [self.session]
+        try:
+            while queued:
+                for row in self._fetch(connection, sql, (queued.pop(0),), None):
+                    child = _name(row.get(column))
+                    if child and child not in seen:
+                        seen.add(child)
+                        queued.append(child)
+                        found.append(DatabaseTail(self.db, child, self.record, self.freshness,
+                                                  self.descendants))
+        finally:
+            connection.close()
+        return found
 
 
 def _json_object(text):
@@ -1451,16 +1485,25 @@ def subagent_tails(transcript, shape, since, nbytes):
     return out
 
 
-# A subagent at work is its implementer at work (`transcript.subagents`): whether the implementer is
-# working, idle or done is read from the subagent transcripts too. Those readers run every watchdog
-# cycle, so they stat the subagent transcripts and open none of them.
+# A subagent at work is its implementer at work (`transcript.subagents`, or `transcript.subagent_sessions`
+# where a store keeps one session per subagent): whether the implementer is working, idle or done is read
+# from the subagents too. Those readers run every watchdog cycle, so they look up what a subagent wrote and
+# open none of its records.
 
 def subagent_writes(transcript, shape):
-    """[(modification time, size)] of each subagent transcript beside a session transcript; [] if undeclared.
+    """[(modification time, size)] of each subagent transcript of a session; [] if it declares none.
 
     Read from one listing and a stat of each transcript: no subagent transcript and no
     sidecar is opened, however many a session holds or however long they grew.
+
+    A database store joins differently, because a subagent there is a session of its own in the
+    same tables rather than a file beside the parent's: `transcript.subagent_sessions` names the
+    query that finds one session's children, and each child is asked its own clock. No size comes
+    of it, because the parent's size is the whole store and already holds a child's rows: what the
+    join adds is when a child wrote, not how much more of the store there is.
     """
+    if isinstance(transcript, DatabaseTail):
+        return [(tail.last_activity() or 0, 0) for tail in transcript.descendant_tails()]
     out = []
     for path in (subagents(transcript, shape, sidecars=False) or {}).get("files") or []:
         try:
@@ -1471,22 +1514,29 @@ def subagent_writes(transcript, shape):
     return out
 
 
+def session_write(transcript):
+    """When a session wrote to its own transcript last, in epoch seconds - and to nothing else.
+
+    A database file is written by every session held in it, so its modification time says a machine
+    is busy rather than that this agent is. A store that keeps a per-session clock can say more, and
+    `transcript.freshness` declares the query that reads it. A session whose rows the store updates
+    in place has no row written lately and is still working, so this is the only reading that sees
+    it. A reader that compares what a session wrote with what its subagent wrote has to take both
+    from one clock, or the machine's answer swamps the agent's.
+    """
+    return (transcript.last_activity() or os.path.getmtime(transcript)) if isinstance(transcript, DatabaseTail) \
+        else os.path.getmtime(transcript)
+
+
 def last_write(transcript, shape):
-    """When the implementer last wrote, in epoch seconds: to its session transcript or to a subagent's beside it.
+    """When the implementer last wrote, in epoch seconds: to its session transcript or to a subagent's.
 
     A session waits for a subagent with its own transcript quiet, or ends its turn while the
     subagent works on in the background, and the session transcript alone then reads as an
     implementer silent for as long as the subagent works: over an hour, measured. A subagent
     that has finished writes no more, so its last write only ages.
-
-    A database store is asked differently. Its file is written by every session in it, so its
-    modification time says another agent is working somewhere on the machine; where the store
-    declares a per-session clock (`transcript.freshness`) that is the answer, and the file's age
-    is the fallback that says only that nothing newer is known.
     """
-    base = [transcript.last_activity() or os.path.getmtime(transcript)] if isinstance(transcript, DatabaseTail) \
-        else [os.path.getmtime(transcript)]
-    return max(base + [mtime for mtime, _ in subagent_writes(transcript, shape)])
+    return max([session_write(transcript)] + [mtime for mtime, _ in subagent_writes(transcript, shape)])
 
 
 def _strings(o, out, keys, depth=0):

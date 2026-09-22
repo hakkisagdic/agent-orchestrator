@@ -395,7 +395,13 @@ own files, which is a per-vendor job, not a core one.
 A declaration can also be read by no core module at all, which is the same dishonesty in the other
 direction: `busy.mtime_file` is declared by nine adapters and consulted by none - the age ao reports
 comes from the transcript's own last write, or from a row store's `transcript.freshness` query - so
-adding that key to an adapter changes nothing until a reader for it exists.
+adding that key to an adapter changes nothing until a reader for it exists. Two reads that predate
+that key do ask a file how old it is where a row store answers: `throughput` says whether a
+transcript moved, and `architect_absence` when an architect was last seen. Where a role's adapter is
+a row store, both take the whole machine's database, whose age moves whenever any session of it
+writes - one session's work read as another's, which is the question each of the two is asking.
+`session_write` is the reading that answers both truly; switching them moves a guard a person reads,
+so they wait for their own measurement.
 
 ### What a record looks like is declared, not coded
 
@@ -532,6 +538,7 @@ declares, in place of `transcript.path`:
 | `transcript.record.children` | `{table, key, parent_key, as}`, and the same `session_key`, `order`, `body`, `time` and `time_unit` for them: the child table, the column of the child naming the parent record, the column of the parent it names, and the key the children are attached under. A child naming a parent outside the tail read is dropped, not guessed a home for | the nesting readers above |
 | `transcript.record.time`, `time_unit` | the column holding a record's time, and `seconds` or `milliseconds` since the epoch; it becomes an ISO time like a JSONL record's | `ao tail`, the watchdog, every reader that orders records |
 | `transcript.freshness` | `{query, time_unit}`: one SELECT, `?` bound to the session id, returning when the store last wrote this session | whether the implementer is working |
+| `transcript.subagent_sessions` | `{query, session}`: one SELECT, `?` bound to a session id, returning the sessions the store says descend from it. ao asks it of every session it finds, so a subagent's own subagent is reached by one declaration, and each id is asked of once | whether the implementer is working, whether its turn ended |
 | `sessions.kind` | `sqlite-sessions`, with `{query, session, title, mtime, mtime_unit}`: one SELECT, `?` bound to the working directory, listing a directory's sessions | `ao doctor`, and a role's session resolution |
 
 Two of these exist because a row store is written to rather than appended. A row's time may be
@@ -543,6 +550,15 @@ the only reading that tells them apart. A query is only ever run when it starts 
 holds no semicolon, a column or table name only when it is one word, and a session or directory
 arrives as a bound parameter, so a working directory holding a quote lists its sessions rather than
 ending the query. `tests/test_store_readings.py` holds these readings.
+
+A row store has no file beside a session's for `transcript.subagents` to name, because a subagent there
+is another session of the same tables and the link is a value in a row. `transcript.subagent_sessions`
+declares the query that finds one session's children, and each child is then asked the freshness question
+it would answer for itself, so a session waiting on a subagent reads as working and its turn is not taken
+for ended while one writes. The walk is over ids and not records: what a child wrote stays in the child's
+own tail, so `ao tail`, a turn's cost and what a reviewer reads are still the parent session's rows, and
+the join carries no size, since a parent's size is the whole store's file and counts a child's rows once
+already.
 
 ### Subagents, and records that are no one's words
 
@@ -778,7 +794,10 @@ Two signals, both cheap, used together:
 
 1. Session metadata status field, where the CLI exposes one.
 2. Age of the last write to the transcript file, or to a subagent transcript beside it
-   (`transcript.subagents`).
+   (`transcript.subagents`). Where a store keeps its records in rows, the write is the session's own
+   clock (`transcript.freshness`) and its subagents are the sessions it names
+   (`transcript.subagent_sessions`): the file's age is every session of the machine's, and says
+   nothing about this one.
 
 A session counts as safe to inject into only when the status is not running **and** the
 last write is older than the idle threshold (default 240s). This conservative AND is

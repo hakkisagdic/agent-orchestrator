@@ -33,6 +33,7 @@ RECORD = {
                  "time_unit": "milliseconds"},
 }
 FRESHNESS = {"query": "SELECT MAX(time_updated) FROM part WHERE session_id = ?", "time_unit": "milliseconds"}
+SUBAGENTS = {"query": "SELECT id FROM session WHERE parent_id = ?", "session": "id"}
 STORE = {"kind": "sqlite-sessions",
          "query": "SELECT id, title, time_updated FROM session WHERE directory = ? AND parent_id IS NULL "
                   "ORDER BY time_updated DESC",
@@ -59,7 +60,8 @@ def make_store(tmp_path, record=None, sessions=None):
     connection.commit()
     connection.close()
     adapter = {"id": "somestore", "transcript": {"kind": "sqlite", "path": str(db), "record": record if record is not None
-                                                  else RECORD, "freshness": FRESHNESS, "messages": {
+                                                  else RECORD, "freshness": FRESHNESS,
+                                                  "subagent_sessions": SUBAGENTS, "messages": {
                                                        "prompt": ["user"], "reply": ["assistant"], "blocks": "parts[]",
                                                        "match": {"type": "text"}},
                                                    "turn": {"end_when": {"type": "assistant", "field": "finish",
@@ -72,6 +74,23 @@ def make_store(tmp_path, record=None, sessions=None):
                                                                  "path_keys": ["state.input.filePath"]}},
                "sessions": sessions if sessions is not None else STORE}
     return str(db), adapter
+
+
+def add_session(db, session, parent, at, text):
+    """One more session of the store's own, with one assistant message and one part written at `at` ms.
+
+    A store that delegates keeps a subagent as a session rather than as a file beside the parent,
+    so this is what a delegating implementer waits for: the parent's rows are quiet through it.
+    """
+    import sqlite3
+    connection = sqlite3.connect(db)
+    connection.execute("INSERT INTO session VALUES (?, ?, ?, ?, ?)", (session, "/work/alpha", "subagent", parent, at))
+    connection.execute("INSERT INTO message VALUES (?, ?, ?, ?, ?)",
+                       (f"msg_{session}", session, at, at, json.dumps({"role": "assistant", "finish": None})))
+    connection.execute("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)",
+                       (f"prt_{session}", f"msg_{session}", session, at, at, json.dumps({"type": "text", "text": text})))
+    connection.commit()
+    connection.close()
 
 
 def read_adapter(tmp_path, monkeypatch):
@@ -252,3 +271,96 @@ def test_a_time_in_milliseconds_is_rendered_in_the_readers_own_timezone(tmp_path
     stamp = A.record_time(record, shape)
     assert stamp.endswith("Z") and len(stamp) == 24
     assert A.local_hhmm(stamp) == datetime.fromtimestamp(3.0).strftime("%H:%M")
+
+
+# ── a subagent that is a session of its own ───────────────────────────────────
+
+def tail_of(db, adapter, session="ses_one", descendants="subagent_sessions"):
+    return A.DatabaseTail(db, session, adapter["transcript"]["record"], adapter["transcript"]["freshness"],
+                          adapter["transcript"].get(descendants) or {})
+
+
+def test_a_subagents_write_is_its_parents_being_at_work(tmp_path, monkeypatch):
+    """A store keeps a subagent as rows of another session, not as a file beside the parent's.
+
+    The parent's own clock is quiet for the whole of it, which is the reading a watchdog would
+    otherwise take for an implementer that stopped.
+    """
+    import sqlite3
+    db, adapter = read_adapter(tmp_path, monkeypatch)
+    add_session(db, "ses_sub", "ses_one", 90_000_000, "still reading the files it was asked about")
+    tail, shape = tail_of(db, adapter), A.transcript_shape(adapter)
+
+    assert [child.session for child in tail.descendant_tails()] == ["ses_sub"]
+    assert A.subagent_writes(tail, shape) == [(90_000.0, 0)]
+    assert A.session_write(tail) == 2.1 and tail.last_activity() == 2.1
+    assert A.last_write(tail, shape) == 90_000.0
+    # The size is the store's whole file, which already holds a child's rows: it is not counted twice.
+    assert A.session_write(tail_of(db, adapter, "ses_two")) == 0.8 and A.subagent_writes(
+        tail_of(db, adapter, "ses_two"), shape) == []
+    connection = sqlite3.connect(db)
+    connection.execute("UPDATE part SET time_updated = 1000 WHERE session_id = 'ses_sub'")
+    connection.commit()
+    connection.close()
+    assert A.last_write(tail, shape) == 2.1
+
+
+def test_a_delegating_session_lists_only_itself_and_walks_every_child_once(tmp_path, monkeypatch):
+    """The same column answers both questions, and only one of them says what a session is."""
+    import sqlite3
+    db, adapter = read_adapter(tmp_path, monkeypatch)
+    add_session(db, "ses_sub", "ses_one", 3_000, "the first hand")
+    add_session(db, "ses_grand", "ses_sub", 4_000, "a hand that one borrowed")
+    tail, shape = tail_of(db, adapter), A.transcript_shape(adapter)
+
+    assert [row["session"] for row in A.store_sessions(adapter["id"], "/work/alpha")] == ["ses_one"]
+    assert [child.session for child in tail.descendant_tails()] == ["ses_sub", "ses_grand"]
+    assert A.last_write(tail, shape) == 4.0 and A.session_write(tail) == 2.1
+
+    # A store whose parent links close a loop is walked once, not for as long as it is read.
+    connection = sqlite3.connect(db)
+    connection.execute("UPDATE session SET parent_id = 'ses_grand' WHERE id = 'ses_one'")
+    connection.commit()
+    connection.close()
+    assert [child.session for child in tail.descendant_tails()] == ["ses_sub", "ses_grand"]
+
+
+def test_a_store_that_declares_no_children_is_read_as_having_none(tmp_path, monkeypatch):
+    """A child ao was never told how to find is no child, and the store is not asked anyway."""
+    db, adapter = read_adapter(tmp_path, monkeypatch)
+    add_session(db, "ses_sub", "ses_one", 90_000_000, "undeclared, so unseen")
+    shape = A.transcript_shape(adapter)
+    for declared in ({}, {"query": "SELECT id FROM session WHERE parent_id = ?"},
+                     {"query": "DELETE FROM session WHERE parent_id = ?", "session": "id"},
+                     {"query": "SELECT id FROM session WHERE parent_id = ?", "session": "no_such_column"},
+                     {"query": "SELECT id FROM sessions WHERE parent_id = ?", "session": "id"}):
+        quiet = tail_of(db, adapter, descendants=None)
+        tail = A.DatabaseTail(db, "ses_one", adapter["transcript"]["record"], adapter["transcript"]["freshness"],
+                              declared)
+
+        assert tail.descendant_tails() == [] and A.subagent_writes(tail, shape) == []
+        assert A.last_write(tail, shape) == A.last_write(quiet, shape) == 2.1
+
+
+def test_a_turn_is_not_ended_while_a_subagent_writes_after_it(tmp_path, monkeypatch):
+    """The parent's word that its turn closed, against a child's clock that says otherwise.
+
+    The store's file stands for neither: it is written by every session in the database, so its
+    age is newer than both and would end a turn a subagent is still holding open.
+    """
+    import sqlite3
+    db, adapter = read_adapter(tmp_path, monkeypatch)
+    monkeypatch.setattr(A, "load_adapter", lambda ident: adapter)
+    monkeypatch.setattr(A, "implementer_adapter", lambda _cfg=None: adapter)
+    cfg = {"root": "/work/alpha", "implementer": {"session": "ses_one", "adapter": adapter["id"]}}
+    add_session(db, "ses_sub", "ses_one", 90_000_000, "working on what the parent delegated")
+    connection = sqlite3.connect(db)
+
+    assert A.turn_ended(cfg) is False
+    assert int(time.time() - os.path.getmtime(db)) < 120            # the file's age says the store is busy
+    assert int(time.time() - A.session_write(tail_of(db, adapter))) > 10_000    # and the parent's clock says it is quiet
+
+    connection.execute("UPDATE part SET time_updated = 1000 WHERE session_id = 'ses_sub'")
+    connection.commit()
+    connection.close()
+    assert A.turn_ended(cfg) is True
