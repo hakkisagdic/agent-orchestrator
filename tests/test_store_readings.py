@@ -364,3 +364,30 @@ def test_a_turn_is_not_ended_while_a_subagent_writes_after_it(tmp_path, monkeypa
     connection.commit()
     connection.close()
     assert A.turn_ended(cfg) is True
+
+# ── a store whose path holds characters a URI reads as its own syntax ─────────
+
+def test_a_store_in_a_directory_named_with_uri_syntax_is_still_read(tmp_path, monkeypatch):
+    """A `?`, `#`, `%` or a space in the path once broke the read-only URI built by string interpolation."""
+    weird = tmp_path / ("#odd dir% name" if os.name == "nt" else "#odd ?dir% name")   # Windows: no `?` in a name
+    weird.mkdir()
+    db, adapter = make_store(weird)
+    monkeypatch.setattr(A, "package_adapters", lambda: {adapter["id"]: adapter})
+    shape = A.transcript_shape(adapter)
+    tail = A.DatabaseTail(db, "ses_one", adapter["transcript"]["record"], adapter["transcript"]["freshness"])
+
+    assert [A.record_kind(rec, shape) for rec in tail.read()] == ["user", "assistant", "assistant"]
+    assert [row["session"] for row in A._sqlite_sessions(adapter["id"], STORE, "/work/alpha")] == ["ses_one"]
+
+
+def test_the_read_only_uri_percent_encodes_a_path_and_leaves_one_query_separator(tmp_path):
+    """One `?` separates the path from `mode=ro`; every other URI-syntax character is encoded, and reversibly."""
+    import pathlib
+    import urllib.request
+    db = tmp_path / ("#ab%c name.db" if os.name == "nt" else "#a?b%c name.db")          # Windows: no `?` in a name
+    uri = A._read_only_uri(str(db))
+
+    assert uri.startswith("file:") and uri.endswith("?mode=ro")
+    assert uri.count("?") == 1
+    # url2pathname unquotes on POSIX and maps a URI's /C:/x back to C:\x on Windows, where a raw strip would not.
+    assert urllib.request.url2pathname(uri[len("file://"):-len("?mode=ro")]) == str(pathlib.Path(str(db)).resolve())

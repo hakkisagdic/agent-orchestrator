@@ -59,6 +59,19 @@ def _home_path(template):
 SESSION_STORE_KINDS = ("escaped-cwd", "workspace-meta", "sqlite-sessions")
 
 
+def _read_only_uri(path):
+    """A `file:` URI for a SQLite store opened read-only, built in one place because a raw path breaks it.
+
+    Interpolating a path into `file:{path}?mode=ro` reads a `?`, `#` or `%` in a directory name as URI
+    syntax and a Windows `C:\\...` as an unknown scheme, and the store then opens as something other than
+    the file it names. `as_uri()` percent-encodes every character a URI would otherwise read as its own,
+    so the query that follows is the only `?` in the string; resolving first makes a relative path the
+    absolute one a file URI must be, and names a symlinked store by the file it stands for.
+    """
+    import pathlib
+    return pathlib.Path(str(path)).resolve().as_uri() + "?mode=ro"
+
+
 def session_stores(kind):
     """[(adapter id, store)] for each adapter whose `sessions` store is of this kind (#76)."""
     return [(ident, adapter["sessions"]) for ident, adapter in sorted(package_adapters().items())
@@ -119,7 +132,7 @@ def _sqlite_sessions(ident, store, cwd):
         return []
     try:
         import sqlite3
-        connection = sqlite3.connect(f"file:{tail[0]}?mode=ro", uri=True, timeout=2.0)
+        connection = sqlite3.connect(_read_only_uri(tail[0]), uri=True, timeout=2.0)
     except Exception:
         return []
     connection.row_factory = sqlite3.Row
@@ -726,7 +739,7 @@ class DatabaseTail:
         except ImportError:
             return None
         try:
-            connection = sqlite3.connect(f"file:{self.db}?mode=ro", uri=True, timeout=2.0)
+            connection = sqlite3.connect(_read_only_uri(self.db), uri=True, timeout=2.0)
         except Exception:
             return None
         connection.row_factory = sqlite3.Row
