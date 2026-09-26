@@ -83,6 +83,15 @@ project is handed the prompt it always was, byte for byte, so a review cut off t
 written in English resumes as well, unless its prompt leaves room beside the diff for a different set
 of a waived range's commit messages, and then its sections are asked again.*
 
+*In ao since slice REVIEW-TREE: the reviewer's working directory is not empty any more. The tree the
+review pinned is unpacked into it with `git archive`, so a reviewer's `Read`, `Grep` and `Glob` have
+the code under review to read while the isolation stays what it was - a copy of the candidate, outside
+the repository, with no history and no index. ao says so in a note of its own after the context,
+`--- TREE: … ---` in English and `--- AĞAÇ: … ---` in Turkish, rather than in a line of the prompt
+above it, so a Turkish project's prompt is still the bytes a sectioned review resumes on. Reviews said what the empty directory cost them
+("the repository could not be searched, so any other site of the same fault is unchecked"), and a
+reviewer holding file tools could spend a whole run hunting for a repository that was not there.*
+
 A review of eight scenarios is eight questions, not one. ao splits the prompt into
 **sections** — from the numbered scenarios in the boundary, or failing that from the
 candidate's file groups — and runs them as separate bounded calls, appending each result

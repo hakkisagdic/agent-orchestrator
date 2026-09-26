@@ -1320,6 +1320,9 @@ def write_review_request(root, cfg, candidate, scope, diff_digest, boundary, sli
     """
     import secrets
     from .storage import replace_file_durably
+    # The tree note describes the reviewer ao starts in a directory it filled; a session a person
+    # carries this request to holds no such tree, so there the note would say something false.
+    prompt = prompt.replace(f"\n\n{language.text(cfg, 'prompt.review-tree')}\n", "")
     nonce = secrets.token_hex(16)
     directory = review_requests_dir(root)
     meta = {"nonce": nonce, "at": int(time.time()), "candidate": candidate["digest"],

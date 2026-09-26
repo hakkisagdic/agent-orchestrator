@@ -353,6 +353,10 @@ LOW: <n>
     "prompt.review-context": {"en": "--- CONTEXT (read-only; not under review) ---",
                               "tr": "--- BAĞLAM (salt okunur; incelemenin konusu değil) ---"},
     "prompt.review-section": {"en": "--- THIS SECTION'S QUESTION ---", "tr": "--- BU BÖLÜMÜN SORUSU ---"},
+    # the note ao appends when the candidate's own tree is unpacked where the reviewer runs (REVIEW-TREE); a
+    # marker rather than a line of the prompt above, so a Turkish project's prompt stays the bytes it always was
+    "prompt.review-tree": {"en": "--- TREE: ao unpacks this candidate's whole tree into your working directory, outside the repository. Read it with your file tools to see what the change touches and whether the same fault sits elsewhere; if the directory is empty, the unpacking failed and the diff is all you have. Only the diff is under review. ---",
+                           "tr": "--- AĞAÇ: ao bu adayın bütün ağacını çalışma dizinine, deponun dışına açar. Değişikliğin neye dokunduğunu ve aynı hatanın başka yerde olup olmadığını görmek için dosya araçlarınla oku; dizin boşsa açma başarısız olmuştur ve elindeki yalnız diff'tir. İncelemenin konusu yalnız diff. ---"},
     # the line above the prompt in a stand-in review request (#75); {nonce}: the request's, which the answer leads with
     "prompt.review-request": {"en": "The FIRST line of your answer must be exactly: NONCE: {nonce}",
                               "tr": "Cevabının İLK satırı tam olarak şu olsun: NONCE: {nonce}"},

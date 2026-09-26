@@ -18,6 +18,9 @@ import pytest
 from ao import cli, language, lib as A, watchdog as W
 from tests.test_prompt_channel import _declare, _git, _linux, _route
 
+# What the tree note adds to a prompt held to one argument (REVIEW-TREE): the bound leaves room for it.
+NOTE = len(f"\n\n{language.text(None, 'prompt.review-tree')}\n".encode("utf-8"))
+
 PIPED = {"argv": ["piped", "{prompt}"], "stdin": {"replaces": ["{prompt}"], "with": ["--from-stdin"]}}
 BARE = {"argv": ["bare", "{prompt}"]}
 BOUNDARY = "waived review for L1: the implementer is out of credits"
@@ -118,10 +121,10 @@ def test_windows_keeps_one_arguments_bound_for_a_route_that_takes_its_prompt_the
     monkeypatch.setattr(cli, "REVIEW_PROMPT_ARG_BYTES", 30_000)
 
     # Even a command line that would fit with everything the claims could add keeps the bound there.
-    assert cli._review_prompt_bound([bare], 5_000, 0, 1_000, 4_000) == (30_000, "bare-route")
+    assert cli._review_prompt_bound([bare], 5_000, 0, 1_000, 4_000) == (30_000 - NOTE, "bare-route")
     # A route that takes its prompt on standard input is not held on Windows either.
     assert cli._review_prompt_bound([piped], 20_000, 0, 100_000, 18_000) == (20_000 + 400_000 - 18_000, None)
-    assert cli._review_prompt_bound([piped, bare], 20_000, 0, 100_000, 18_000) == (30_000, "bare-route")
+    assert cli._review_prompt_bound([piped, bare], 20_000, 0, 100_000, 18_000) == (30_000 - NOTE, "bare-route")
 
 
 @linux_sized
@@ -158,10 +161,10 @@ def test_each_section_is_measured_with_its_question(monkeypatch):
     bare = {"id": "bare-route", "adapter": "bare", "argv": ["bare", "{prompt}"]}
 
     # Held to one argument, the prompt leaves room for the longest question.
-    assert cli._review_prompt_bound([bare], 100_000, 600, 100_000, 97_000) == (120_000 - 600, "bare-route")
+    assert cli._review_prompt_bound([bare], 100_000, 600, 100_000, 97_000) == (120_000 - 600 - NOTE, "bare-route")
     # A route that carries the smallest prompt but not with a question cannot run, and holds nobody down.
     assert cli._review_prompt_bound([bare], A.LINUX_ARGUMENT_BYTES - 300, 600, 100_000, 97_000) \
-        == (120_000 - 600, None)
+        == (120_000 - 600 - NOTE, None)
 
 
 def test_claims_and_context_share_the_setting_and_the_room_the_diff_budget_leaves(project):

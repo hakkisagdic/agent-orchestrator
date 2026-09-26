@@ -38,6 +38,7 @@ TURKISH = {
     "prompt.review": "7a6c3729fefefa5754896c3b350501c6447f2ed4f1dba9f4fbabfb72e96bf2b5",
     "prompt.review-candidate": "7bf44715ae9eb215bd3b32103c60c71fa279428f260f58022c0f3cf18615f3ea",
     "prompt.review-context": "9bfb71d0c42537524d6beab52e7c014721d8e9261e56cad906c29ac581b6cfb1",
+    "prompt.review-tree": "e00656a778372851b57f26b47e6bd73412b92659488576f55314d36ca8857790",
     "prompt.review-section": "8063a940247fdbf8be4db5d8445f9945c817b3a0970c601e8bfb39155dc6ce60",
     "prompt.review-request": "1ab6ef78285dbd1b7ed1dd26dfeeb46c167013bde8bdb16d8702007f6c792072",
     "prompt.hunt": "6dfafb32102cade4747e8ff833ee05d5591e5409948142a3bc64331b50042553",
@@ -48,7 +49,7 @@ TURKISH = {
     "prompt.wake": "f64e9e18ae0e753f4048a3de7f3bb60679d32ac32ae1dd9e32101c3b10e09ad6",
     "prompt.refill": "049bdca4daf5e861c68d46f45663e87fd722f2ad7d665896e8cb00d0dcfef71e",
 }
-REVIEW_MARKERS = ("prompt.review-candidate", "prompt.review-context", "prompt.review-section")
+REVIEW_MARKERS = ("prompt.review-candidate", "prompt.review-context", "prompt.review-section", "prompt.review-tree")
 HEADINGS = ("urgent", "stop", "decision")           # the markers a prompt tells an agent to write
 # The words a reader acts on, spelled the same in both languages: the answer schema, the board's and the
 # protocol's words, and what an agent may not do.
