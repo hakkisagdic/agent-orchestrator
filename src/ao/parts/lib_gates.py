@@ -1313,16 +1313,14 @@ STANDIN_LIMITS = (
 def write_review_request(root, cfg, candidate, scope, diff_digest, boundary, slice_id, paths, prompt):
     """A review request a person can carry to a session ao cannot reach (#75).
 
-    Written when no reviewer could be reached for a staged candidate: the exact
-    prompt the reviewer would have received, and a nonce the answer must lead with,
-    asked for in the project's language (LANGUAGE-PROMPTS). The metadata beside it
-    binds the request to that candidate.
+    Written when no reviewer could be reached for a staged candidate: the prompt the
+    reviewer would have received - as `ao review` hands it here, without the note about
+    a tree the session a person carries it to does not hold (REVIEW-TREE-2) - and a
+    nonce the answer must lead with, asked for in the project's language
+    (LANGUAGE-PROMPTS). The metadata beside it binds the request to that candidate.
     """
     import secrets
     from .storage import replace_file_durably
-    # The tree note describes the reviewer ao starts in a directory it filled; a session a person
-    # carries this request to holds no such tree, so there the note would say something false.
-    prompt = prompt.replace(f"\n\n{language.text(cfg, 'prompt.review-tree')}\n", "")
     nonce = secrets.token_hex(16)
     directory = review_requests_dir(root)
     meta = {"nonce": nonce, "at": int(time.time()), "candidate": candidate["digest"],

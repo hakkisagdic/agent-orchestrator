@@ -92,6 +92,15 @@ above it, so a Turkish project's prompt is still the bytes a sectioned review re
 ("the repository could not be searched, so any other site of the same fault is unchecked"), and a
 reviewer holding file tools could spend a whole run hunting for a repository that was not there.*
 
+*In ao since slice REVIEW-TREE-2: a [tool reviewer](adapters.md#a-reviewer-can-be-a-tool-ao-runs)
+is given neither the tree nor the note. It reads the diff ao writes into a file of its own in that
+directory and answers into another there; a tree holding a file of the first name at its root stopped
+the handoff, and one holding the second's could be read as an answer the tool never wrote. A stand-in
+request is written without the note too. Both are handed the prompt as it stood before the note was
+added, never one with the note taken back out. An unpacking that fails partway, on a name longer than
+the file system takes or one Windows reserves, leaves the directory empty again, which is what the note
+tells the reviewer an empty one means, and the terminal says the tree could not be unpacked.*
+
 A review of eight scenarios is eight questions, not one. ao splits the prompt into
 **sections** — from the numbered scenarios in the boundary, or failing that from the
 candidate's file groups — and runs them as separate bounded calls, appending each result

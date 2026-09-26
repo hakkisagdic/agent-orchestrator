@@ -45,7 +45,10 @@ kalacak — geri kalan her şey ya karar verir, ya makineyi harcar, ya süreç �
 protokol konuşur; ve bunların herhangi birinin ikinci bir implementasyonu, yanlış
 olabilecek ikinci bir şeydir. Gerisi için:
 `winget install Python.Python.3.12 && pip install ao-orchestrator`.
-Script yazıldı ve gözden geçirildi ama **henüz Windows'ta koşulmadı**.
+Testler barındırılan bir Windows runner'ında her hafta ve istendiğinde koşar ve geçer;
+orada bu script'i henüz hiçbir şey koşmuyor. Windows'ta hâlâ açık olanlar
+([windows.md](docs/windows.md)): `ao hold` orada kanıtlanmadı, commit hook'unun
+çalıştırma kanıtı geçmiyor ve ao ortamında `PYTHONUTF8=1` ister.
 
 > **Nereden çıktı.** Haftalarca tam olarak bu döngüyle geliştirilen 30 epic'lik
 > dayanıklı-iş-akışı ürününden çıkarıldı. Buradaki her koruma önce bir şey ters

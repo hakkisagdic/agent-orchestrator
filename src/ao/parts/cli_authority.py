@@ -131,6 +131,43 @@ def _judge_gate(g, out, code):
     return passed, detail, counts
 
 
+def _take_gate_lock(root, wait):
+    """Take the machine gate lock for one run of the gates: the call that lets it go, or None if it stayed busy.
+
+    The lock is taken first and looked at only when the take fails. A look and then a take were
+    two steps, and two runs that looked at the same moment both found it free; the one whose take
+    failed ran its suite beside the other's all the same. A holder is waited for whatever project
+    it runs for: an `ao lock -- <suite>` in this checkout is as much a second suite as another
+    project's gates, and only another project's used to be waited for (GATE-LOCK-SAME-ROOT).
+
+    The one holder not waited for is the run's own: this process, or a process that started it,
+    as `ao lock -- ao verify` starts its verify. That holder is waiting for this run to finish, so
+    waiting for it could end only in a refusal; the run goes ahead inside its lock and leaves the
+    letting go to it. Nothing in ao holds the lock while it starts a verify - the review runner and
+    the MCP server take none, and `ao commit-ok --verify` and `ao prove` hold none when they call
+    one - so each of those runs takes the lock like any other.
+    """
+    if A.acquire_gate_lock(root, 0):
+        return A.release_gate_lock
+    holder = A.gate_lock_holder()
+    if holder and A.self_or_ancestor(holder.get("pid")):
+        return lambda: None                      # its holder lets it go, after this run has finished
+    if not holder:                               # a lock ao cannot read, or one let go since the take
+        who, detail = "the machine lock is taken", A.GATE_LOCK
+    elif holder.get("root") == root:
+        who, detail = "another run in this project holds the machine lock", \
+            f"pid {holder.get('pid')}, {holder['minutes']}m"
+    else:
+        who, detail = f"{os.path.basename(holder.get('root') or 'another project')} is running its gates", \
+            f"{holder['minutes']}m"
+    print(f"{C['yellow']}{who}{C['reset']} {C['dim']}({detail}){C['reset']} — waiting up to {wait}s so two "
+          f"suites do not fight for one machine", flush=True)
+    if A.acquire_gate_lock(root, wait):
+        return A.release_gate_lock
+    print(f"{C['red']}still busy; not starting a second suite{C['reset']}")
+    return None
+
+
 def cmd_merge_check(cfg, args):
     """Run a profile's gates on the result of a merge before it is made, and record the run (#39).
 
@@ -174,14 +211,9 @@ def cmd_merge_check(cfg, args):
         A.record_merge_check(root, row)
         print(f"{C['red']}{C['b']}CONFLICT{C['reset']}  {conflict}  {C['dim']}recorded as {row['id']}{C['reset']}")
         return 1
-    holder = A.gate_lock_holder()
-    if holder and holder.get("root") != root:
-        if not A.acquire_gate_lock(root, args.wait):
-            print(f"{C['red']}{os.path.basename(holder['root'])} is running its gates; not starting a second "
-                  f"suite{C['reset']}")
-            return 2
-    else:
-        A.acquire_gate_lock(root, 0)
+    release = _take_gate_lock(root, args.wait)
+    if release is None:
+        return 2
     scratch = tempfile.mkdtemp(prefix="ao-merge-check-")
     result_dir = os.path.join(scratch, "result")
     links, results, ok = [], [], True
@@ -233,7 +265,7 @@ def cmd_merge_check(cfg, args):
         subprocess.run([A.git_binary(), "worktree", "remove", "--force", result_dir], cwd=root, capture_output=True)
         shutil.rmtree(scratch, ignore_errors=True)
         subprocess.run([A.git_binary(), "worktree", "prune"], cwd=root, capture_output=True)
-        A.release_gate_lock()
+        release()
     row.update(passed=ok, gates=results, conflict=None)
     A.record_merge_check(root, row)
     print(f"\n{C['b']}{'PASS' if ok else 'FAIL'}{C['reset']}  recorded as {row['id']}; it vouches for a merge of "
@@ -253,27 +285,20 @@ def cmd_verify(cfg, args):
     root = cfg["root"]
     _urgent_banner(cfg)
     gates_file = os.path.join(root, ".ao", "gates.json")
-    holder = A.gate_lock_holder()
-    if holder and holder.get("root") != root:
-        print(f"{C['yellow']}{os.path.basename(holder['root'])} is running its gates"
-              f"{C['reset']} {C['dim']}({holder['minutes']}m){C['reset']} — waiting up to "
-              f"{args.wait}s so two suites do not fight for one machine")
-        if not A.acquire_gate_lock(root, args.wait):
-            print(f"{C['red']}still busy; not starting a second suite{C['reset']}")
-            return 2
-    else:
-        A.acquire_gate_lock(root, 0)
+    release = _take_gate_lock(root, args.wait)
+    if release is None:
+        return 2
     if not os.path.exists(gates_file):
         print(f"{C['yellow']}No .ao/gates.json — nothing declared to verify.{C['reset']}")
         print(f"{C['dim']}See docs/gates.md for the shape.{C['reset']}")
-        A.release_gate_lock()
+        release()
         return 1
     spec = _json.load(open(gates_file, encoding=UTF8))
     profile = args.profile or spec.get("default_profile", "quick")
     names = spec.get("profiles", {}).get(profile)
     if not names:
         print(f"unknown profile {profile}; have: {', '.join(spec.get('profiles', {}))}")
-        A.release_gate_lock()
+        release()
         return 1
     # The record names what ran, so a later edit to gates.json cannot inherit
     # this result (#61).
@@ -283,7 +308,7 @@ def cmd_verify(cfg, args):
         candidate_before = A.index_candidate(root)
         candidate_issues_before = A.candidate_worktree_issues(root, cfg, candidate_before)
     except RuntimeError as exc:
-        A.release_gate_lock()
+        release()
         print(f"{C['red']}{exc}{C['reset']}")
         return 2
     candidate_messages = A.candidate_issue_messages(candidate_issues_before)
@@ -392,7 +417,7 @@ def cmd_verify(cfg, args):
         print(f"{C['red']}{C['b']}NOT RECORDED{C['reset']}  verification ledger: {exc}")
         return 2
     finally:
-        A.release_gate_lock()
+        release()
 
     print(f"\n{C['b']}{'PASS' if ok else 'FAIL'}{C['reset']}  recorded as {rec['id']}")
     if revs:

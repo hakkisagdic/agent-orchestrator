@@ -486,8 +486,21 @@ def _unpack_candidate(root, tree, into):
     lands in `into` is a copy of it: no history, no index, nothing a reviewer does there reaches the
     repository. A member naming an absolute path or a parent is dropped rather than trusted, since
     what is unpacked comes from a tree an agent wrote.
+
+    Returns `into` once the tree is written whole, else None with `into` left as it was found
+    (REVIEW-TREE-2), since the reviewer is told that an empty directory means the unpacking failed.
+    A member the platform cannot write - a name longer than its file system takes, a name Windows
+    reserves - can stop the extraction after the members before it were written, and those are
+    removed again. So that everything in the directory after a failure is what this call wrote, only
+    an empty one is written into: the one ao just made for the reviewer.
     """
     if not tree:
+        return None
+    home = os.path.realpath(into)
+    try:
+        if os.listdir(home):
+            return None
+    except OSError:
         return None
     try:
         archive = subprocess.run([A.git_binary(), "archive", "--format=tar", str(tree)], cwd=root,
@@ -496,15 +509,32 @@ def _unpack_candidate(root, tree, into):
             return None
         import io
         import tarfile
-        home = os.path.realpath(into)
         with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
             safe = [member for member in tar.getmembers()
                     if (member.isfile() or member.isdir()) and _lands_inside(home, member.name)]
             extra = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
             tar.extractall(home, members=safe, **extra)
     except Exception:
+        _remove_everything_in(home)
         return None
     return into
+
+
+def _remove_everything_in(home):
+    """Empty a directory ao made, best effort: what cannot be removed is left rather than raised over."""
+    try:
+        names = os.listdir(home)
+    except OSError:
+        return
+    for name in names:
+        path = os.path.join(home, name)
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path, ignore_errors=True)
+            continue
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, channel=None, tree=None):
@@ -517,10 +547,14 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
 
     `tree` is the candidate's own tree, unpacked into that directory so the reviewer's file tools
     have the code under review to read; without it the directory is empty and a reviewer reads only
-    what the prompt carries.
+    what the prompt carries. A tree that cannot be unpacked is said on the terminal, and the
+    reviewer still runs, in an empty directory, on what the prompt carries.
 
     A tool reviewer (#86) is handed the candidate as a file in that directory and
     answers into another file there; `tool` is what `_tool_invocation` made of its route.
+    It is given no tree (REVIEW-TREE-2): it reads the diff it is handed, ao writes that file
+    only where no file of its name is, so a tree holding one at its root stopped the handoff,
+    and one holding a file named like the answer could be read as an answer the tool never wrote.
     A prompt past what one argument carries comes with `channel`, the route's plan: it is
     written to a private file for this run alone, handed over as standard input or by
     its path, and removed when the run ends (PROMPT-CHANNEL).
@@ -538,7 +572,10 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
                 "returncode": None, "kind": "isolation-error",
                 "retryable": False,
             }
-        _unpack_candidate(root, tree, fresh)
+        # A tool is handed files of its own here, and no tree (REVIEW-TREE-2).
+        if tree and tool is None and _unpack_candidate(root, tree, fresh) is None:
+            print(f"{C['dim']}{label} reads what the prompt carries: the candidate's tree could not be "
+                  f"unpacked{C['reset']}")
         env, handoff = _reviewer_environment(fresh), None
         if tool is not None:
             prepared = _tool_prepare(fresh, argv, env, timeout, tool)
@@ -1019,7 +1056,7 @@ def _section_journal(root, evidence, boundary, sections, chain):
 
 
 def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, strict, primary=None,
-                              candidate=None, cfg=None, tree=None):
+                              candidate=None, cfg=None, tree=None, treeless=None):
     """Ask each section as its own call, each answer durable before the next (#26, P1-P4).
 
     A section answered before, for the same candidate, boundary, sections and
@@ -1028,7 +1065,8 @@ def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, s
     the review with no verdict, which is not a round. A tool reviewer's handoff is
     kept with each answer, and stands for the review when every section agrees (#86).
     Each question follows the section marker of `cfg`, the project, in its language
-    (LANGUAGE-PROMPTS).
+    (LANGUAGE-PROMPTS), in `prompt` and in `treeless`, the same prompt without the
+    note about the candidate's tree, which a tool route is handed (REVIEW-TREE-2).
     """
     from .storage import append_jsonl, read_jsonl
     answered = {row["section"]: row for row in read_jsonl(journal)
@@ -1039,8 +1077,10 @@ def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, s
         row = answered.get(section["name"])
         if row is None:
             print(f"{C['dim']}section {index}/{len(sections)} {section['name']}: asking{C['reset']}")
-            invocation = _invoke_reviewer_chain(root, chain, f"{prompt}\n\n{marker}\n{section['question']}",
-                                                timeout, strict, primary=primary, candidate=candidate, tree=tree)
+            asked = f"\n\n{marker}\n{section['question']}"
+            invocation = _invoke_reviewer_chain(root, chain, prompt + asked, timeout, strict, primary=primary,
+                                                candidate=candidate, tree=tree,
+                                                treeless=None if treeless is None else treeless + asked)
             if invocation["used"] is None:
                 partial = [f.get("partial") for f in invocation["failures"].values() if f.get("kind") == "stalled"]
                 if partial:
@@ -1091,7 +1131,7 @@ def _section_summary(row):
 
 
 def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
-                           validate=None, candidate=None, tree=None):
+                           validate=None, candidate=None, tree=None, treeless=None):
     """Walk fallbacks now; retry only structurally transient route positions.
 
     The whole walk shares one deadline (#100). A route starts only while the
@@ -1099,7 +1139,9 @@ def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
     no more time than remains; a route the budget never reached, and a transient
     one it cannot retry, is recorded as such, so an exhausted budget closes as
     UNAVAILABLE naming the budget rather than running on. `candidate` is the diff
-    a tool route is handed (#86); every other route reads it in the prompt.
+    a tool route is handed (#86); every other route reads it in the prompt. A tool
+    route is handed `treeless` where one is given: the prompt without the note about
+    the candidate's tree, which `_run_reviewer` unpacks for no tool (REVIEW-TREE-2).
     """
     failures, transient, labels = {}, [], {}
     budget = _review_chain_budget(timeout)
@@ -1133,9 +1175,10 @@ def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
                                   "retryable": False, "reason": headroom["text"]}
             print(f"{C['dim']}{labels[position]} unavailable: {headroom['text']}{C['reset']}")
             return None
+        tool_route = not strict and _tool_route(cand)
         label, binary, version, attempt = _reviewer_route_invocation(
-            root, cand, prompt, route_timeout, strict, primary, tree=tree,
-            **({"candidate": candidate} if not strict and _tool_route(cand) else {})
+            root, cand, treeless if tool_route and treeless is not None else prompt, route_timeout, strict,
+            primary, tree=tree, **({"candidate": candidate} if tool_route else {})
         )
         labels[position] = label
         if attempt["ok"] and validate is not None:
@@ -2376,6 +2419,11 @@ def cmd_review(cfg, args):
         context = A.review_range_context(root, str(args.commits), budget)
     if context is not None:
         prompt += f"\n\n{language.text(cfg, 'prompt.review-context')}\n" + context["text"]
+    # The note that the candidate's tree is unpacked where the reviewer runs is only for a reviewer ao starts
+    # on it. A tool (#86) is handed the diff and no tree, and a session a person carries a stand-in request
+    # to holds none: both are handed the prompt as it stands before the note, which is never read back out
+    # of one that holds it (REVIEW-TREE-2).
+    treeless = prompt
     if (candidate or {}).get("index_tree"):
         prompt += f"\n\n{language.text(cfg, 'prompt.review-tree')}\n"
     if held and ((claims or {}).get("inlined", 0) < (claims or {}).get("commits", 0) or (context or {}).get("omitted")):
@@ -2415,12 +2463,12 @@ def cmd_review(cfg, args):
             invocation = _invoke_reviewer_sections(
                 root, chain, prompt, sections, _section_journal(root, evidence, boundary, sections, chain),
                 _review_timeout(cfg), strict, primary=rv if not strict else None, candidate=diff_bytes, cfg=cfg,
-                tree=(candidate or {}).get("index_tree"))
+                tree=(candidate or {}).get("index_tree"), treeless=treeless)
             evidence["sections"] = invocation.get("sections")
         else:
             invocation = _invoke_reviewer_chain(
                 root, chain, prompt, _review_timeout(cfg), strict, primary=rv if not strict else None,
-                candidate=diff_bytes, tree=(candidate or {}).get("index_tree"),
+                candidate=diff_bytes, tree=(candidate or {}).get("index_tree"), treeless=treeless,
             )
     used = invocation["used"]
     if strict:
@@ -2472,7 +2520,7 @@ def cmd_review(cfg, args):
             try:
                 request = A.write_review_request(
                     root, cfg, candidate, scope, evidence.get("diff_digest"), boundary,
-                    evidence.get("slice"), args.paths, prompt)
+                    evidence.get("slice"), args.paths, treeless)
             except OSError as exc:
                 request = None
                 print(f"{C['dim']}no stand-in request was written: {exc}{C['reset']}")

@@ -18,9 +18,10 @@ clearest case: the `agent` command runs the same agent headlessly with `-p` and
 Since mid-2026, VS Code Copilot agent mode, Cursor and others load MCP servers. That does
 not let you *drive* the agent, but it lets the agent drive **agent-orchestrator**: register
 `ao mcp serve` in the editor and the in-editor agent can read the mailbox, report status and
-request commit authority through the same tools any other agent uses. The human dispatches
-in the editor; coordination flows through MCP. This is the realistic bridge for
-Copilot-in-VS-Code today.
+ask a question through the same tools any other agent uses. Commit authority is not on that
+surface: `ao commit-ok`, which decides it, is deliberately kept off MCP ([mcp.md](mcp.md)).
+The human dispatches in the editor; coordination flows through MCP. This is the realistic
+bridge for Copilot-in-VS-Code today.
 
 **3. It only has an extension. Bridge through the workspace and git.**
 No CLI, no MCP. The agent still edits files and runs in a real workspace, so treat it like a

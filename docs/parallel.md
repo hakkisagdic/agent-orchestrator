@@ -60,18 +60,25 @@ is repository-global, so a `git stash pop` in one lane can restore another lane'
 `ao` forbids bare stash in lane instructions and uses temporary WIP commits instead.
 
 **4. Machine exhaustion.** Five parallel test suites will swap a laptop into uselessness,
-and each lane individually looks reasonable. Before starting a lane or a gate run, `ao`
-checks memory pressure and swap-in rate and refuses rather than thrashing:
-
-```yaml
-limits:
-  max_write_lanes: 2
-  max_concurrent_gates: 1          # test suites are serialised even when lanes are not
-  refuse_above_swapins_per_sec: 1500
-```
+and each lane individually looks reasonable. `ao verify` and `ao merge-check` hold one
+machine-wide lock while a project's gates run, and a run that finds it held waits up to
+`--wait` seconds, then refuses rather than start a second suite - whether the holder runs for
+another project or for the same one ([gates.md](gates.md#serialisation-and-machine-pressure)).
+`ao lock -- <command>` puts any other heavy command under the same lock, so an implementer's
+`ao lock -- npm test` and the architect's `ao verify` in one checkout no longer run two suites
+together. Not built yet: checking memory pressure and the swap-in rate before
+a lane or a gate run, and a cap on write lanes.
 
 Gate serialisation is the important one. Lanes can *think* in parallel; they should not
-all *run the test suite* in parallel.
+all *run the test suite* in parallel. The machine gate lock does it ([gates.md](gates.md)):
+`ao verify`, `ao merge-check` and `ao lock -- <command>` hold one lock for the whole machine,
+and a run waits for whoever holds it - another project, a lane in another worktree, or
+another run in the same checkout.
+
+*In ao since slice GATE-LOCK-SAME-ROOT: `ao verify` and `ao merge-check` wait for a run in the
+same checkout too. They waited only for a holder in another checkout, so two actors sharing one -
+an implementer running `ao lock -- <suite>` while the architect ran `ao verify` - ran their
+suites at once.*
 
 ## Integration: a merge queue, not a free-for-all
 

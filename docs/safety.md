@@ -247,10 +247,15 @@ and the wake and refill prompts ask for, and it edits `.ao/backlog.md`, `.ao/boa
 `.ao/inbox/` and no other file. `tests/test_grants_pinned.py` reads those playbook sections and the
 prompts and fails when either names a command or a tool outside that role's grant. `ao lock -- <command>`
 is in no unattended grant: it runs any command, and the declared gates take the same machine lock
-through `ao verify`. A rule is read the way the harness reads it - a `*` stands for any text, spaces
+through `ao verify`, which waits for an `ao lock` run in its own checkout as it waits for another
+project's gates. A rule is read the way the harness reads it - a `*` stands for any text, spaces
 included - so `Bash(rm agent-mail/*)` admits `rm agent-mail/x src/app.py`, and `ao doctor` names a
 rule in an architect's grant that writes outside ao's coordination files, and an architect grant
 composed before its adapter's current one (`architect-grant`).
+
+*In ao since slice GATE-LOCK-SAME-ROOT: `ao verify` and `ao merge-check` wait for a holder of the
+machine lock that runs for their own project. They used to wait only for another project's, and ran
+their suite beside an `ao lock -- <command>` in the same checkout.*
 
 ### A flag that turns approvals off is declared with its reason
 
@@ -335,9 +340,11 @@ hold a token-shaped string builds it at run time.
 ## 8. Blast radius of the machine itself
 
 Parallel lanes are cheap to start and expensive to run. Five simultaneous test suites will
-swap a laptop into uselessness, and each lane individually looks reasonable. Gate runs are
-serialised, memory pressure is checked before starting work, and lanes are refused rather
-than queued into a thrash.
+swap a laptop into uselessness, and each lane individually looks reasonable. `ao verify` and
+`ao merge-check` hold one machine-wide lock while a project's gates run; another project's run
+waits up to `--wait` seconds for it, then refuses rather than start a second suite - and so does a
+run of the same project ([gates.md](gates.md#serialisation-and-machine-pressure)). Not built yet: checking memory pressure before starting work, and refusing a lane rather than
+queueing it into a thrash.
 
 ## 9. What this model does not cover
 

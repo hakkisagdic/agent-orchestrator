@@ -3,7 +3,8 @@
 The tool here is a fake written by the test, standard library only, that behaves the
 way the shipped pr-agent adapter says pr-agent does in plain-diff mode: it reads the
 diff file it is given, and writes the Ask heading, the question as given, the answer
-marker and its answer to the output file. It also records what it was handed.
+marker and its answer to the output file. It also records what it was handed, and what its
+directory held before it wrote an answer there.
 """
 import hashlib
 import json
@@ -37,7 +38,8 @@ while True:
     here = os.path.dirname(here)
 with open(RECORD, "a", encoding="utf-8") as fh:
     fh.write(json.dumps({"argv": args, "cwd": os.getcwd(), "seen": seen, "command": command, "question": question,
-                         "repository_above": above, "env": {name: os.environ.get(name) for name in WATCHED}}) + "\n")
+                         "repository_above": above, "env": {name: os.environ.get(name) for name in WATCHED},
+                         "listing": sorted(os.listdir(os.getcwd()))}) + "\n")
 with open(RECORD + ".diff", "wb") as fh:
     fh.write(data)
 if MODE == "silent":

@@ -166,13 +166,16 @@ def test_no_code_reads_a_review_marker_back():
     """A marker is written into a prompt for a reviewer to read. A reader in ao would have to read every language's
     form, so none may hold one: the texts live in the catalogue, and only the prompt's builder names their keys."""
     forms = [form for key in REVIEW_MARKERS for form in language.TEXTS[key].values()]
+    # Every marker's key, the tree's among them (REVIEW-TREE-2), taken from the list so a marker added there is
+    # guarded here too.
+    keys = re.compile("|".join(re.escape(key) for key in REVIEW_MARKERS))
     for path in sorted((ROOT / "src" / "ao").rglob("*.py")):
         if path.name == "language.py":
             continue
         source = path.read_text(encoding="utf-8")
         assert [form for form in forms if form in source] == [], path
         if path.name != "cli_review.py":
-            assert not re.search(r"prompt\.review-(candidate|context|section)", source), path
+            assert not keys.search(source), path
 
 
 # ---- the reviewer ------------------------------------------------------------------------------

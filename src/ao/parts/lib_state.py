@@ -599,6 +599,32 @@ def release_gate_lock():
             pass
 
 
+def self_or_ancestor(pid):
+    """Whether `pid` is this process or one of the processes that started it, parent after parent.
+
+    A process that holds the gate lock holds it for what it starts: `ao lock -- ao verify` runs
+    its verify as a child, and a child that waited for the lock its own parent holds would wait
+    until it gave up. Pid 1 is never counted, since every process descends from it; a walk that
+    meets a pid twice, or a parent the platform cannot read, stops there and answers no.
+    """
+    try:
+        wanted = int(pid)
+    except (TypeError, ValueError):
+        return False
+    from . import procs
+    current, seen = os.getpid(), set()
+    while current > 1 and current not in seen:
+        if current == wanted:
+            return True
+        seen.add(current)
+        try:
+            parent = os.getppid() if current == os.getpid() else (procs.info(current) or {}).get("ppid")
+            current = int(parent or 0)
+        except Exception:
+            return False
+    return False
+
+
 def process_trees(pids, parent=None):
     """Group pids into independent trees — how many *turns*, not how many processes.
 

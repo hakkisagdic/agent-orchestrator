@@ -95,7 +95,7 @@ def build_parser():
     v = sub.add_parser("verify", help="run the declared gates and record the result")
     v.add_argument("-p", "--profile")
     v.add_argument("--wait", type=int, default=900,
-                   help="seconds to wait if another project holds the machine gate lock")
+                   help="seconds to wait if another run, of any project, holds the machine gate lock")
     v.set_defaults(fn=cmd_verify)
 
     mc = sub.add_parser("merge-check", help="run the gates on a merge's result before merging, and record it")
@@ -103,7 +103,7 @@ def build_parser():
     mc.add_argument("--into", default="HEAD", help="what it is merged into (default HEAD)")
     mc.add_argument("-p", "--profile", help="gate profile (default full, when declared)")
     mc.add_argument("--wait", type=int, default=900,
-                    help="seconds to wait if another project holds the machine gate lock")
+                    help="seconds to wait if another run, of any project, holds the machine gate lock")
     mc.set_defaults(fn=cmd_merge_check)
 
     wd = sub.add_parser("watchdog", help="launchd job that restarts a stalled agent")

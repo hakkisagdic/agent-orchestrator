@@ -170,8 +170,18 @@ Push is not a gate outcome and never becomes one. It stays a direct human act.
 ## Serialisation and machine pressure
 
 Lanes think in parallel; gates do not run in parallel. `ao verify` and `ao merge-check` hold
-one machine-wide lock while a project's gates run; another project's run waits up to `--wait`
-seconds for it, then refuses rather than start a second suite.
+one machine-wide lock while a project's gates run, and `ao lock -- <command>` holds the same
+lock for a heavy command outside the declared gates. A run that finds the lock held waits up
+to `--wait` seconds for its holder, then refuses rather than start a second suite - whether
+the holder runs for another project or for the same one.
+
+*In ao since slice GATE-LOCK-SAME-ROOT: `ao verify` and `ao merge-check` wait for a holder
+running for the same project. They waited only for another project's, so an implementer's
+`ao lock -- <suite>` and the architect's `ao verify` in one checkout ran two suites at once.
+They also take the lock before reading anything of it, so two runs that find it free at the
+same moment no longer both start. The one holder they do not wait for is their own run's -
+the process they run in, or one that started it, as `ao lock -- ao verify` starts its verify:
+that holder is waiting for them to end, so they go ahead inside its lock.*
 
 Not built yet: checking memory pressure and the swap-in rate before a gate run, and refusing
 rather than thrashing. Five simultaneous test suites will make a laptop unusable while

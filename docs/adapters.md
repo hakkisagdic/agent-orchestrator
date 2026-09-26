@@ -106,7 +106,9 @@ ao role set reviewer pr-agent --model <provider/model> --family <family>
 A tool reaches many models and families, so its route names both: the model, which the contract
 pins, and the family, which a person names because ao never infers one from a model name. A tool
 route with no family may not review. The question is ao's own review prompt, candidate included,
-so the verdict rule and the count schema are every other reviewer's. The evidence adds `adapter`
+so the verdict rule and the count schema are every other reviewer's; a tool is given neither the
+candidate's tree, which ao unpacks where every other reviewer runs, nor the note about it
+([pipeline.md](pipeline.md), REVIEW-TREE-2). The evidence adds `adapter`
 and `model` to `reviewer`, and a `tool` block with the tool's version, the digest and size of the
 bytes handed and the adapter's limits; a review whose handed bytes are not the candidate diff is
 INVALID. A tool that is not installed makes the review UNAVAILABLE, naming what would install it,
