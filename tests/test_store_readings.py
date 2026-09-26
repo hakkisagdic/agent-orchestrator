@@ -380,6 +380,20 @@ def test_a_store_in_a_directory_named_with_uri_syntax_is_still_read(tmp_path, mo
     assert [row["session"] for row in A._sqlite_sessions(adapter["id"], STORE, "/work/alpha")] == ["ses_one"]
 
 
+def test_a_unc_store_keeps_an_empty_authority_where_a_server_name_would_be_refused(monkeypatch):
+    """A UNC path converts to `//server/share/...`; put that in a URI's authority and SQLite refuses it."""
+    monkeypatch.setattr("urllib.request.pathname2url", lambda path: "//server/share/store.db")
+
+    assert A._read_only_uri("whatever") == "file:////server/share/store.db?mode=ro"
+
+
+def test_a_windows_drive_store_is_named_the_way_a_file_uri_takes_it(monkeypatch):
+    """A drive path converts to `///C:/...`, which is the whole URI already once `file:` is in front."""
+    monkeypatch.setattr("urllib.request.pathname2url", lambda path: "///C:/agents/store.db")
+
+    assert A._read_only_uri("whatever") == "file:///C:/agents/store.db?mode=ro"
+
+
 def test_the_read_only_uri_percent_encodes_a_path_and_leaves_one_query_separator(tmp_path):
     """One `?` separates the path from `mode=ro`; every other URI-syntax character is encoded, and reversibly."""
     import pathlib

@@ -578,6 +578,24 @@ def _sh_run(cmd, cwd=None, timeout=20):
         return "", None
 
 
+def self_child_env(env=None):
+    """The environment a child that re-enters ao as `-m ao` needs, so a clone stays findable.
+
+    ao's documented quickstart is a clone plus a symlink on PATH: `bin/ao` puts `src` on this
+    process's `sys.path`, and nothing tells a child of it. Three places start such a child - the
+    review runner, the watchdog's hunt and the MCP server's verify - and each died on "No module
+    named ao" when ao was not installed. The review died silently: the process was gone before its
+    log held anything a person would read, and the review stood at "running" until it was lost.
+    The package's own parent goes first on PYTHONPATH, which is the directory this ao was imported
+    from, whether that is a clone or an installation.
+    """
+    child = dict(os.environ if env is None else env)
+    parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    rest = [part for part in (child.get("PYTHONPATH") or "").split(os.pathsep) if part and part != parent]
+    child["PYTHONPATH"] = os.pathsep.join([parent] + rest)
+    return child
+
+
 _part("lib_transcript", globals())
 
 

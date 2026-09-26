@@ -1145,7 +1145,7 @@ def _schedule_hunt(root, cfg, st):
         fh.flush()
         subprocess.Popen([sys.executable, "-m", "ao", "-C", root, "hunt", "run"], cwd=root,
                          stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.STDOUT, start_new_session=True,
-                         env=dict(os.environ, AO_ROLE="hunter"))
+                         env=A.self_child_env(dict(os.environ, AO_ROLE="hunter")))
     st["last_hunt"] = time.time()
     save_state(root, st)
     print("started a bounded bug hunt")

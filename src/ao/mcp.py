@@ -305,7 +305,8 @@ def call(name, args, cfg, allow_verify):
         import subprocess
         r = subprocess.run([sys.executable, "-m", "ao", "-C", root, "verify"]
                            + (["-p", args["profile"]] if args.get("profile") else []),
-                           capture_output=True, text=True, encoding=UTF8, errors="replace", timeout=3600)
+                           capture_output=True, text=True, encoding=UTF8, errors="replace", timeout=3600,
+                           env=A.self_child_env())
         return {"exit": r.returncode, "output": (r.stdout or r.stderr)[-4000:],
                 "record": A.latest_verification(root)}
     return {"error": f"unknown tool {name}"}

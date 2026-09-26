@@ -333,13 +333,20 @@ def test_elapsed_time_is_written_as_the_platforms_ps_writes_it(monkeypatch, seco
 
 
 def test_a_process_is_known_by_how_long_it_has_run():
-    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    """What is under test is the reading, not the speed of the machine taking it.
+
+    The first shape gave the child sixty seconds to live and the loop thirty to see two of them. On a
+    loaded machine - many agents and a suite of its own - `ps` answered too slowly to get there, and
+    the suite failed on a reading that was true and had not been waited for.
+    """
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(240)"])
     try:
-        deadline = time.time() + 30
-        while time.time() < deadline and (procs.elapsed(child.pid) or 0) < 2:
+        deadline, elapsed = time.time() + 120, None
+        while time.time() < deadline and (elapsed or 0) < 2:
             time.sleep(0.25)
             procs.refresh()
-        assert 2 <= procs.elapsed(child.pid) <= 60
+            elapsed = procs.elapsed(child.pid)
+        assert elapsed is not None and 2 <= elapsed <= 240
     finally:
         child.kill()
         child.wait()

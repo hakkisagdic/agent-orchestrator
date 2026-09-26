@@ -63,13 +63,18 @@ def _read_only_uri(path):
     """A `file:` URI for a SQLite store opened read-only, built in one place because a raw path breaks it.
 
     Interpolating a path into `file:{path}?mode=ro` reads a `?`, `#` or `%` in a directory name as URI
-    syntax and a Windows `C:\\...` as an unknown scheme, and the store then opens as something other than
-    the file it names. `as_uri()` percent-encodes every character a URI would otherwise read as its own,
-    so the query that follows is the only `?` in the string; resolving first makes a relative path the
-    absolute one a file URI must be, and names a symlinked store by the file it stands for.
+    syntax of its own, and the store then opens as something other than the file the adapter named, or
+    not at all. `pathname2url` percent-encodes each of those and writes a Windows drive path as the
+    `///C:/...` a file URI takes, so the query that follows is the only `?` in the string.
+
+    A UNC store keeps an empty authority: it converts to `//server/share/...`, and a URI that made the
+    server its authority is one SQLite refuses, so the prefix is chosen to leave the authority empty
+    and the path whole in both shapes. The adapter's own path is what is opened; a symlink is not
+    resolved away, because what a store is named is the store's to say.
     """
-    import pathlib
-    return pathlib.Path(str(path)).resolve().as_uri() + "?mode=ro"
+    import urllib.request
+    url = urllib.request.pathname2url(os.path.abspath(str(path)))
+    return ("file:" if url.startswith("///") else "file://") + url + "?mode=ro"
 
 
 def session_stores(kind):
