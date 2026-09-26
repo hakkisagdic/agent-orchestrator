@@ -330,7 +330,7 @@ def test_every_channel_a_shipped_adapter_declares_replaces_arguments_its_own_com
             if A.prompt_channel_problems(adapter)} == {}
     # Each was verified from the CLI's documentation or its --help; every other adapter takes its prompt in argv.
     assert declaring == {"aider", "amp", "claude-code", "codex", "command-code", "copilot", "droid", "gemini",
-                         "hermes", "omp", "qwen"}
+                         "hermes", "omp", "qoder", "qwen"}
     assert all(str((adapter.get(capability) or {}).get(channel, {}).get("note") or "").strip()
                for adapter in shipped.values() for capability in ("send", "resume") for channel in A.PROMPT_CHANNELS
                if isinstance((adapter.get(capability) or {}).get(channel), dict))

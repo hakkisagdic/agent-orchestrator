@@ -2,35 +2,55 @@
   "id": "qoder",
   "name": "Qoder",
   "verified": "partial",
-  "disclaimer": "transcript, sessions, busy and telemetry are read from a running Qoder 1.1.57 store on 2026-09-21: two session transcripts (985 records) and three subagent transcripts beside them. send, resume and options are from docs.qoder.com and have never been run here: no Qoder CLI is installed on the machine the store was read from, so ao can watch a Qoder agent and cannot wake one. Qoder is primarily an IDE (see docs/ide-extensions.md) with a companion CLI.",
+  "verified_version": "qodercli 1.1.59",
+  "disclaimer": "The command surface (send, resume, options, output formats, models, permissions) and the read-only tool set were measured by running qodercli 1.1.59 on 2026-09-21; ao can now both watch a Qoder agent and wake one. What was not run stays marked: trust_all (--dangerously-skip-permissions), --list-sessions and --reasoning-effort and the model names they take, and the names of MCP tools inside the agent, `--strict-mcp-config` beside them, and the `mcp add` that registers ao: each is declared from the CLI's own help, not from a run. The standard-input prompt channel was measured on 2026-09-26, as was what one argument carries. The transcript, sessions, busy and telemetry readings are from a running Qoder 1.1.57 store, unchanged: two session transcripts (985 records) and three subagent transcripts beside them. Qoder is primarily an IDE (see docs/ide-extensions.md) with a companion CLI.",
   "detect": {
     "dirs": [".qoder"],
     "files": ["AGENTS.md"],
+    "binaries": ["qodercli"],
     "headless": ["-p"],
     "install_dirs": ["~/.qoder"],
-    "note": "No `processes`: the process that writes this store is the Qoder IDE itself, one long-lived process shared by every session on the machine and still alive after an agent's turn dies, so naming it would let busy() read a dead agent as working - which is the one thing that check exists to prevent. The runtime is @qoder-ai/qoder-agent-sdk inside /Applications/Qoder.app. ~/.qoder/entry/qoder is a bootstrap that answers 'Qoder CLI is not installed' when no CLI is there, so its presence is not proof the CLI exists; adapter_binaries falls back to `qoder` from send, and `which qoder` is the test."
+    "note": "No `processes`: the process that writes this store is the Qoder IDE itself, one long-lived process shared by every session on the machine and still alive after an agent's turn dies, so naming it would let busy() read a dead agent as working - which is the one thing that check exists to prevent. The runtime is @qoder-ai/qoder-agent-sdk inside /Applications/Qoder.app. The CLI's binary on PATH is `qodercli`, and `which qodercli` is the test that it is installed; `qoder` is a dispatcher in ~/.qoder/entry that is not on PATH and must never be put in an argv. The same ~/.qoder/entry/qoder answers 'Qoder CLI is not installed' when no CLI is there, so its presence is not proof the CLI exists."
   },
   "send": {
-    "argv": ["qoder", "-p", "{prompt}"],
-    "unverified": "no CLI on the machine the store was read from; the flag is documented, not run"
+    "argv": ["qodercli", "-p", "{prompt}"],
+    "stdin": {"replaces": ["{prompt}"], "with": [], "note": "Measured on qodercli 1.1.59, 2026-09-26: `-p` with no prompt argument reads the prompt from standard input, so a prompt past what one argument carries has a route. What an argument does carry was measured too, and it is not small: 4, 8, 16, 24 and 32 KB each ran as one argument. No documented cap was found for either route."},
+    "note": "One non-interactive turn: `qodercli -p \"<prompt>\"` runs it and exits 0. Measured on qodercli 1.1.59, 2026-09-21."
   },
   "resume": {
-    "argv": ["qoder", "--resume", "{session}", "-p", "{prompt}"],
-    "unverified": "as send: --resume and the session id it takes are documented behaviour, unrun here"
+    "argv": ["qodercli", "-r", "{session}", "-p", "{prompt}"],
+    "stdin": {"replaces": ["{prompt}"], "with": [], "note": "As send: the prompt of a resumed turn is read from standard input when no prompt argument is given."},
+    "note": "`-r <id>` (or `--resume <id>`) continues that session: it writes to the same transcript file and remembers the previous turn. Measured on qodercli 1.1.59. The grant claude-code pins in its resume is mapped onto Qoder's flags in options.unattended, which ao appends to this argv when it starts a turn nobody attends (resume names no tool scope of its own)."
   },
   "options": {
-    "trust_none": null,
-    "trust_none_why": "no documented flag denies tools",
     "model": ["--model", "{model}"],
-    "effort": null,
-    "trust_all": ["--yolo"],
+    "output_json": ["-o", "stream-json"],
+    "trust_none": ["--tools", "Read,Grep,Glob", "--permission-mode", "dont_ask", "--strict-mcp-config"],
+    "trust_none_note": "Fact 8, measured on qodercli 1.1.59: `--tools Read,Grep,Glob --permission-mode dont_ask` leaves only those three tools - asked to create a file, the agent answered it had no tool to write with and no file appeared. --strict-mcp-config starts no MCP server; it exists but was not run.",
+    "trust_all": ["--dangerously-skip-permissions"],
+    "trust_all_note": "--dangerously-skip-permissions bypasses every permission check; the flag exists but was not run. There is no --yolo. ao never starts a turn with this: the grant of a turn nobody attends is options.unattended.",
     "unattended": ["--permission-mode", "accept_edits", "--allowed-tools", "Bash(ao status:*),Bash(ao board:*),Bash(ao writers),Bash(ao verify:*),Bash(ao review:*),Bash(ao commit-ok:*),Bash(ao commit -m:*),Bash(ao commit -F:*),Bash(ao mail:*),Bash(ao ask:*),Bash(ao decisions:*),Bash(ao doctor),Bash(ao watchdog explain:*),Bash(ao since:*),Bash(ao digest:*),Bash(ao fanout ok:*),Bash(ao fanout record:*),Bash(ao tail:*),Bash(git status:*),Bash(git log:*),Bash(git diff:*),Bash(git add:*),Bash(ls:*),Bash(cat:*),Bash(grep:*)"],
-    "unattended_note": "In place of --yolo: accept_edits approves edits inside the working directories, --allowed-tools names each command the playbook's loop runs, and a -p run denies whatever would ask; ao's MCP tools are not named, and the loop reaches the mailbox through the CLI. A person's general.defaultPermissionMode and allow rules in ~/.qoder/settings.json still apply. Read on 2026-09-17 from docs.qoder.com/en/cli/permissions and docs.qoder.com/en/cli/cli-reference. None of it run: a wake of a Qoder agent has never been attempted, and permissionMode values observed in the store are 'acceptEdits' and 'yolo', which is what a person's own session chose."
+    "unattended_note": "accept_edits, mapping the dontAsk mode claude-code pins: a -p turn nobody attends cannot answer a prompt, and claude-code pins dontAsk so an unlisted call is denied rather than left waiting. Measured on qodercli 1.1.59, the mode that achieves the same for Qoder is accept_edits, not dont_ask: dont_ask denies Write and Edit whatever the allowlist says (tried --allowed-tools Write, \"Read Write\", a repeated flag and \"Write(**)\", all denied with \"This action needs approval, and the Don't ask permission mode does not prompt\"), so an implementer under dont_ask cannot write the tree it is trusted with. accept_edits instead approves edits inside the workspace on its own - a write there lands, a write outside it is refused - so the allowlist names no Read, Grep, Glob, Write or Edit: reads need no entry (ls and echo ran unlisted; the allowlist bounds what changes things, not what reads), and edits are approved by the mode. It names only the Bash commands of the loop, comma-separated (measured: a comma list runs every name in it, and a repeated --allowed-tools flag works too). An unlisted command is blocked without hanging - the turn ends normally at exit 0, unlike a waiting prompt - but its denial is not recorded in the result's permission_denials; only dont_ask fills that field, so a blocked call is visible in the transcript's own tool_result, not there. ao's MCP tools are not named: a Qoder agent reaches the mailbox through the CLI, so this grant scopes no MCP tool. The read-only set beside it and each of these Bash forms were measured; this composed grant has never been run as one turn. A person's own allow rules in ~/.qoder/settings.json still apply.",
+    "effort": ["--reasoning-effort", "{effort}"],
+    "effort_note": "--reasoning-effort <level> exists but was not run: the level names it accepts are unverified, so no effort_values are declared and ao passes any level through unchecked."
+  },
+  "list_models": {
+    "argv": ["qodercli", "--list-models"],
+    "note": "Prints a header line 'MODEL', then one model name per line: read it by dropping the header. Measured on qodercli 1.1.59."
+  },
+  "list_sessions": {
+    "argv": ["qodercli", "--list-sessions"],
+    "unverified": "--list-sessions exists but was not run, and its output shape is unmeasured. Nothing in ao reads it: a session is resolved from the store, not asked of the harness."
+  },
+  "models": {
+    "default": "Qwen3.8-Flash",
+    "review": "Qwen3.8-Flash",
+    "_note": "ao init --profile and the reviewer default read these. --list-models offers router tiers - Auto, Ultimate, Performance, Efficient - and nothing states which vendor serves a tier, so any vendor may stand behind one: a role that must differ in family from its reviewer names a pinned model (Qwen3.8-Max, Qwen3.8-Flash, Kimi-K3, GLM-5.3, DeepSeek-V4-Pro, MiniMax-M3), never a tier. Qwen models are the alibaba family. Qwen3.8-Flash was measured billing total_cost_usd and total_credits both 0."
   },
   "transcript": {
     "kind": "jsonl",
     "path": "~/.qoder/projects/{escaped_cwd}/{session}.jsonl",
-    "escaped_cwd": "absolute cwd with '/' replaced by '-', so a leading '/' gives a leading '-'",
+    "escaped_cwd": "every character of the absolute cwd that is not a letter or a digit becomes '-', so /private/tmp/a_b.c becomes -private-tmp-a-b-c",
     "record": {
       "time": "timestamp",
       "kind": "type",
@@ -133,7 +153,9 @@
     "note": "Observed on disk: ~/.qoder/settings.json holds only {enabledPlugins}, and plugins are installed under ~/.qoder/plugins/{cache,data,installed_plugins_v2.json}. The steering files above are what the documentation names; AGENTS.md is the one ao writes for every harness, and .qoder/rules was not present to confirm."
   },
   "mcp": {
-    "file": null,
-    "note": "No user-editable MCP registration file was found. ~/.qoder/mcp-router.json is runtime state - {schemaVersion, pid, baseUrl, apiKey, startedAt} of a bridge process, and it holds a key, so ao must never write or read it as configuration. An attachment record names connected servers at serverNames, which is a reading of what the person configured, not a place to register. Until a registration file is verified, ao's playbook for a Qoder agent reaches ao through the CLI, and the grant in options.unattended names the commands it may run."
+    "file": ".mcp.json",
+    "register": ["qodercli", "mcp", "add", "-s", "local", "ao", "{exe}", "{args}"],
+    "note": "Project-scope MCP servers are registered in .mcp.json (`qodercli mcp add -s project <name> <command> [args...]`; also add-json, list and remove). A project-scope server needs a per-project approval, which `qodercli mcp reset-project-choices` resets; the local scope this register uses needs no approval, so ao registers itself there. The names of MCP tools inside the agent are not yet verified, which is why the unattended grant reaches ao through the CLI rather than through named MCP tools.",
+    "warning": "~/.qoder/mcp-router.json is runtime state - {schemaVersion, pid, baseUrl, apiKey, startedAt} of a bridge process, and it holds a key, so ao must never write or read it as configuration."
   }
 }

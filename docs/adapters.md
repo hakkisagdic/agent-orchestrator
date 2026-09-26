@@ -20,9 +20,10 @@ not the protocol.
 
 A reviewer must not be able to write, so every adapter declares `options.trust_none`: the
 flags that leave the harness only reading, or `null` with `trust_none_why`, which makes it
-**ineligible for the reviewer role** rather than silently unsafe. Today `kiro` and
-`claude-code` declare how to deny tools; every other adapter says why it cannot, or why
-nobody has verified that it can.
+**ineligible for the reviewer role** rather than silently unsafe. Nine adapters -
+`claude-code`, `hermes`, `kilocode`, `kiro`, `omp`, `pi`, `qoder`, `qwen` and `reasonix` -
+declare how to deny tools with a non-empty `options.trust_none`; every other adapter says why
+it cannot, or why nobody has verified that it can.
 
 ```bash
 ao role set reviewer claude-code --model claude-opus-5
@@ -78,7 +79,7 @@ on 2026-09-17, and the reason in full in each adapter:
 | `kilocode` | implementer | `--auto` | kept: narrowing takes a permission block in a configuration file |
 | `kiro` | implementer | `--trust-all-tools` | kept: `--trust-tools` narrows by tool, not by command, and a command allowlist takes an agent file |
 | `omp` | implementer | `--approval-mode yolo` | kept: yolo is omp's default |
-| `qoder` | implementer | `--permission-mode accept_edits`, `--allowed-tools` | in place of `--yolo`: each command of the implementer's loop, named |
+| `qoder` | implementer | `--permission-mode accept_edits`, `--allowed-tools` | in place of `--dangerously-skip-permissions`: each command of the loop is named, and `dont_ask` would deny the implementer's own writes (measured) |
 | `qwen` | implementer | `--approval-mode auto-edit`, `--allowed-tools` | in place of `--yolo`: each command of the implementer's loop, named |
 | `reasonix` | implementer | `--permission-mode=workspace-write` | in place of `danger-full-access`: its own sandbox stays on |
 
@@ -331,7 +332,7 @@ the adapter says so in its `disclaimer`. **Reviewer** is whether the adapter can
 | `deepseek` | `deepseek` | untested | ineligible | DeepSeek harness / CLI |
 | `gemini` | `gemini` | untested | ineligible | Google Gemini CLI |
 | `ollama` | `ollama` | untested | ineligible | Ollama (local models) |
-| `qoder` | `qoder` | partial | ineligible | Qoder CLI |
+| `qoder` | `qoder` | partial | eligible | Qoder CLI |
 | `trae` | `trae` | untested | ineligible | Trae Agent (ByteDance) |
 | `cloud` | `cloud-generic` | partial | ineligible | Generic cloud agent (pull-request delivered) |
 | `pr-agent` | `pr-agent` | untested | eligible | PR-Agent, a tool reviewer ao runs over the candidate (#86) |
