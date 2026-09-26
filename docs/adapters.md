@@ -83,6 +83,46 @@ on 2026-09-17, and the reason in full in each adapter:
 | `qwen` | implementer | `--approval-mode auto-edit`, `--allowed-tools` | in place of `--yolo`: each command of the implementer's loop, named |
 | `reasonix` | implementer | `--permission-mode=workspace-write` | in place of `danger-full-access`: its own sandbox stays on |
 
+### A grant admits what a command rewriter makes of the commands it names
+
+*In ao since slice GRANTS-RTK: every nudge and wake ao starts admits rtk's form of each command its
+grant names that rtk rewrites. Some machines run every shell command an agent issues through rtk, a
+proxy that shortens a command's output before a model reads it: a hook the harness runs before each
+shell call hands the command to `rtk rewrite` and runs the answer in its place - `git diff --stat` as
+`rtk git diff --stat`, `cat -n x` as `rtk read -n x` - and leaves the permission decision to the
+harness unless the person's own settings allow the original. The grant ao gives a turn is on its
+command line, where the hook never looks, and `Bash(git diff:*)` does not admit `rtk git diff`, so an
+unattended turn was denied the very commands its grant named (measured on qodercli).*
+
+Right after each rule its grant names for a command rtk rewrites, a turn's grant holds the same rule
+for rtk's form of that command: `Bash(git diff:*)` gains `Bash(rtk git diff:*)`, Qwen's
+`Bash(git diff *)` gains `Bash(rtk git diff *)`, and `Bash(cat:*)`, `Bash(head:*)` and `Bash(tail:*)`
+gain one `Bash(rtk read:*)` between them, since rtk reads a file for all three. That holds for the
+implementer's nudge, whether its grant is the one `resume` carries or the one `unattended` appends, and
+for the architect's wake and refill, whenever `ao init` wrote their block. Nothing else is added, and
+no form reaches further than its command. A rule naming arguments of its own gains nothing, since rtk
+need not keep them in place (`head -n 5 x` becomes `rtk read x --head-lines 5`), and neither does an
+exact rule, a command rtk leaves as it is (`ao`, `lsof`) or any other tool. `rtk git` hands the words
+after a subcommand to that git subcommand, `rtk read` prints a file's lines as `cat` does, and
+`rtk grep` runs grep, not ripgrep, whose `--pre` runs a program. A machine whose harness runs no such
+hook gains nothing it could not do before: each form admits the commands its rule already named, run
+through rtk.
+
+What a rewriter rewrites, and into what, is data: `src/ao/adapters/rewriters/rtk.json`, measured on
+rtk 0.50.0, holds `forms` for the commands the shipped grants name, `unchanged` for the programs rtk
+leaves alone and `runs_any_command` for its subcommands that run whatever follows them. It is not part
+of any adapter, because which harness runs the hook is the machine's business, and it is read from the
+package alone, because a layer an agent can write must not choose what its own grant admits. A form
+that is not rtk's own command followed by plain words is never admitted. `tests/test_grants_rtk.py`
+fails when a shipped grant names a command in neither list, so a new one is measured before it ships.
+
+`ao doctor` asks each grant about every forbidden command in the form rtk would be handed it, and about
+each rtk subcommand that runs any command, so a rule a person writes to get past the hook -
+`Bash(rtk:*)`, `Bash(rtk git:*)`, `Bash(rtk proxy:*)` - is named as the command's own rule would be:
+rtk runs a program it has no filter for as it is. The rules a turn gains are not flags. The block in
+`.ao/config.json` keeps the grant `ao init` wrote, and `.ao/ledger/actor-flags.jsonl` holds the forms
+only inside a grant ao appends, `unattended`, as that grant ran.
+
 ## A reviewer can be a tool ao runs
 
 A reviewer that runs the architect's binary on the architect's quota window stops when that window

@@ -465,8 +465,10 @@ def compose_reviewer(adapter_id, model=None, effort=None, root=None, family=None
 
 # ---- a turn holds the grant ao composes, never a person's default or an unnamed bypass (GRANTS-PINNED) ----
 
+# The flags a harness takes its allowlist after, as comma-separated rules in its own syntax (#58).
+GRANT_FLAGS = ("--allowedTools", "--allowed-tools")
 # An argv that carries one of these carries a tool scope of its own, and ao appends no grant to it (#58, #69).
-SCOPE_FLAGS = ("--allowedTools", "--allowed-tools", "--trust-tools", "--trust-all-tools")
+SCOPE_FLAGS = GRANT_FLAGS + ("--trust-tools", "--trust-all-tools")
 # Spellings with which a harness approves everything, sandboxes nothing or checks no permission: a yolo or a
 # "dangerously" flag, a trust or an allow of every tool, a standing yes, a forced or automatic run, a mode of
 # full access. Each one a command ao starts carries is declared, with why, in its adapter's `options.bypass`.
@@ -495,14 +497,19 @@ def unattended_flags(adapter, argv):
     An argv that carries a tool scope of its own is left as it is: a grant of every tool on
     top of an allowlist silently overrides the narrower grant. Otherwise the adapter's
     `options.unattended`, the narrower grant its documentation gives a turn nobody can
-    approve, and where it declares none its `trust_all`.
+    approve, with what a command rewriter makes of each command it names (GRANTS-RTK), and
+    where it declares none its `trust_all`.
     """
     options = (adapter or {}).get("options") or {}
     if carries_scope(argv):
         return [], None
     if isinstance(options.get("unattended"), list):
-        flags = [str(flag) for flag in options["unattended"]]
-        return flags, ("the adapter declares the grant of a turn nobody attends (options.unattended)" if flags else None)
+        flags, rewritten = admit_rewrites([str(flag) for flag in options["unattended"]])
+        why = "the adapter declares the grant of a turn nobody attends (options.unattended)"
+        if rewritten:
+            why += ("; it also admits each command it names in the form a command rewriter runs it as "
+                    "(adapters/rewriters)")
+        return flags, (why if flags else None)
     if options.get("trust_all"):
         return ([str(flag) for flag in options["trust_all"]],
                 "the adapter's resume argv carries no tool scope, so ao appends its trust_all")
@@ -607,16 +614,18 @@ def role_commands(adapter):
 
     The implementer's nudge is its resume with what ao appends to a turn nobody attends; the
     architect's wake is its resume, whose tool grant ao replaces with the architect's own; a
-    reviewer route is its send with trust_none, where the adapter may review. Each carries its pin.
+    reviewer route is its send with trust_none, where the adapter may review. Each carries its pin,
+    and the grant of a nudge or a wake admits what a command rewriter makes of each command it
+    names, as the watchdog starts them (GRANTS-RTK).
     """
     adapter = adapter or {}
     options = adapter.get("options") or {}
     commands = {}
     resume = (adapter.get("resume") or {}).get("argv") if isinstance(adapter.get("resume"), dict) else None
     if isinstance(resume, list) and resume:
-        commands["implementer"] = pinned_argv(list(resume) + unattended_flags(adapter, resume)[0], "implementer",
-                                              adapter)[0]
-        commands["architect"] = pinned_argv(list(resume), "architect", adapter)[0]
+        own = admit_rewrites(resume)[0]
+        commands["implementer"] = pinned_argv(own + unattended_flags(adapter, resume)[0], "implementer", adapter)[0]
+        commands["architect"] = pinned_argv(own, "architect", adapter)[0]
     send = (adapter.get("send") or {}).get("argv") if isinstance(adapter.get("send"), dict) else None
     if isinstance(send, list) and send and reviewer_eligibility(adapter)[0]:
         denied = [] if tool_review_contract(adapter) is not None else list(options.get("trust_none") or [])
@@ -688,6 +697,121 @@ def bypass_refusal(adapter, flags, cfg=None):
     return (f"its unattended turn would run with {found[0]}, which turns off {ident}'s sandbox and its approvals, "
             f"and no person has allowed that on this machine (ao config set watchdog.bypass_adapters {ident} "
             "--machine)")
+
+
+# ---- a grant admits what a command rewriter makes of the commands it names (GRANTS-RTK) ----------
+
+# Where the package declares its command rewriters, one file each: beside the adapters, not among them.
+REWRITERS_DIR = "rewriters"
+# How a rule names a command with any arguments after it, in the syntaxes the shipped grants are written in.
+RULE_WILDCARDS = (":*", " *")
+# A form is its rewriter's command and at least one more word, each of letters, digits, `_` and `-` only: a
+# wildcard would widen the rule the form becomes, a comma or a bracket would write another rule into the
+# grant, and a path would name a program the agent may have written.
+REWRITE_FORM = re.compile(r"[\w-]+(?: [\w-]+)+")
+
+
+def command_rewriters():
+    """The command rewriters the package declares in adapters/rewriters/, one JSON file each (GRANTS-RTK).
+
+    A rewriter is a program a harness's hook hands an agent's shell commands to, and runs them
+    rewritten: rtk turns `git diff` into `rtk git diff`. What it rewrites, and into what, is measured
+    on one of its releases and written there rather than in any harness's adapter, since which
+    harness runs the hook is the machine's business. Read from the package alone, as a review
+    contract is: a layer an agent can write must not choose what its own grant admits. A file that
+    cannot be read, or names no command, declares nothing: a grant then gains no rule for it, so
+    what that rewriter rewrites stays blocked, as it was, rather than admitted wider. A file that is
+    there and cannot be read is not the same as no file, though: the allowlist check reads the same
+    declarations to know which grants admit a forbidden command in a rewriter's form, and a check
+    that quietly lost them would pass a grant it exists to refuse. So a package file that does not
+    parse raises, naming itself; only a package with no rewriters directory declares none.
+    tests/test_grants_rtk.py reads the package's own files, so a broken one fails there first.
+    """
+    directory = os.path.join(adapters_dir(), REWRITERS_DIR)
+    try:
+        names = sorted(name for name in os.listdir(directory) if name.endswith(".json"))
+    except OSError:
+        return []
+    found = []
+    for name in names:
+        try:
+            with open(os.path.join(directory, name), encoding=UTF8) as fh:
+                rewriter = json.load(fh)
+        except (OSError, ValueError) as exc:
+            raise ValueError(f"the package's command rewriter {name} cannot be read ({exc}); "
+                             "reinstall ao, or restore that file from the release") from exc
+        if isinstance(rewriter, dict) and isinstance(rewriter.get("command"), str) and rewriter["command"].strip():
+            found.append(rewriter)
+    return found
+
+
+def rewriter_forms(rewriter):
+    """{command: form} a rewriter declares, keeping each form that is its own command and plain words after it."""
+    command = str(rewriter.get("command") or "").strip()
+    forms = rewriter.get("forms") if isinstance(rewriter.get("forms"), dict) else {}
+    return {str(words): form for words, form in forms.items()
+            if isinstance(form, str) and REWRITE_FORM.fullmatch(form) and form.split(" ", 1)[0] == command}
+
+
+def rewritten_rules(rule, rewriters=None):
+    """The rules admitting what each rewriter makes of the commands `rule` admits; [] for most rules (GRANTS-RTK).
+
+    Only a rule naming a command a rewriter declares, with any arguments after it - `Bash(git diff:*)`,
+    or `Bash(git diff *)` as another harness spells it - has one: the same rule for the form every
+    rewrite of that command begins with, `Bash(rtk git diff:*)`. An exact rule, a rule that names
+    arguments of its own and every other tool have none: a rewriter need not keep a command's
+    arguments in place (`head -n 5 x` becomes `rtk read x --head-lines 5`), so no narrower rule can be
+    read off them, and none is guessed.
+    """
+    rule = str(rule).strip()
+    if not (rule.startswith("Bash(") and rule.endswith(")")):
+        return []
+    body = rule[len("Bash("):-1]
+    wildcard = next((end for end in RULE_WILDCARDS if body.endswith(end)), None)
+    if wildcard is None:
+        return []
+    words = body[:-len(wildcard)]
+    found = []
+    for rewriter in command_rewriters() if rewriters is None else rewriters:
+        form = rewriter_forms(rewriter).get(words)
+        if form and f"Bash({form}{wildcard})" not in found:
+            found.append(f"Bash({form}{wildcard})")
+    return found
+
+
+def admit_rewrites(argv, rewriters=None):
+    """(argv, added): `argv` with each rule of its tool grant followed by those of its `rewritten_rules` the
+    grant does not hold yet, and the rules added (GRANTS-RTK).
+
+    A harness's hook rewrote `git diff` to `rtk git diff` before the harness checked its rules, and a
+    grant naming `Bash(git diff:*)` does not admit `rtk git diff`: an unattended turn was denied the
+    commands its grant named (measured on qodercli). A rule added follows the rule it comes from and
+    admits that rule's commands only, as the rewriter runs them. The grant is the value after each of
+    GRANT_FLAGS, as allowlist.rules reads it, and admitting twice adds nothing the second time.
+    """
+    rewriters = command_rewriters() if rewriters is None else rewriters
+    args, added = list(argv or []), []
+
+    def admitted(value):
+        parts = value.split(",")
+        held = {part.strip() for part in parts}
+        out = []
+        for part in parts:
+            out.append(part)
+            for rule in rewritten_rules(part, rewriters):
+                if rule not in held:
+                    held.add(rule)
+                    out.append(rule)
+                    added.append(rule)
+        return ",".join(out)
+
+    for at, arg in enumerate(args):
+        flag, equals, value = str(arg).partition("=")
+        if at and str(args[at - 1]) in GRANT_FLAGS:
+            args[at] = admitted(str(arg))
+        elif equals and flag in GRANT_FLAGS:
+            args[at] = f"{flag}={admitted(value)}"
+    return args, added
 
 
 # ---- a reviewer can be a tool ao runs over the candidate, on its own provider (#86) -------

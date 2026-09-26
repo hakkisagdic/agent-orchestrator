@@ -45,7 +45,10 @@ def test_qoders_implementer_grant_is_the_resume_with_the_unattended_scope_append
     resume = adapter["resume"]["argv"]
 
     flags, _ = A.unattended_flags(adapter, resume)
-    assert flags == adapter["options"]["unattended"]
+    declared = adapter["options"]["unattended"]
+    assert flags[:-1] == declared[:-1]
+    # Besides rtk's form of each command it names (tests/test_grants_rtk.py), the scope is the declared one.
+    assert [rule for rule in flags[-1].split(",") if not rule.startswith("Bash(rtk ")] == declared[-1].split(",")
     assert A.role_commands(adapter)["implementer"] == resume + flags
     assert AL.problems(resume, adapter["options"]) == []
 

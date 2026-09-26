@@ -1,0 +1,24 @@
+{
+  "id": "rtk",
+  "command": "rtk",
+  "verified_version": "rtk 0.50.0",
+  "measured": "2026-09-26",
+  "hook": "A harness's pre-tool hook hands each shell command to `rtk rewrite` and runs what it answers in the command's place. Measured with `rtk hook claude`: the hook allows a rewritten command itself only where the person's own settings allow the original, answers nothing for one they deny, and for every other hands the decision back to the harness, which checks the rewritten command against its own rules. The grant ao gives a turn is on its command line and never reaches the hook, so `git diff` under `Bash(git diff:*)` ran as `rtk git diff`, which no rule admitted, and an unattended turn was denied it (measured on qodercli).",
+  "forms": {
+    "git status": "rtk git status",
+    "git log": "rtk git log",
+    "git diff": "rtk git diff",
+    "git add": "rtk git add",
+    "ls": "rtk ls",
+    "cat": "rtk read",
+    "head": "rtk read",
+    "tail": "rtk read",
+    "grep": "rtk grep",
+    "ps": "rtk ps"
+  },
+  "forms_note": "Each command a shipped grant names with any arguments after it, and the words every rewrite `rtk rewrite` makes of it begins with. git's subcommands, ls, cat, grep and ps keep their arguments in place (`git diff --stat` becomes `rtk git diff --stat`, `cat -n x` becomes `rtk read -n x`); head and tail do not (`head -n 5 x` becomes `rtk read x --head-lines 5`, `tail -n 5 x` becomes `rtk read x --tail-lines 5`, and `tail x` and `tail -f x` are left as they are), which is why a form is read only off a rule that names a command with any arguments. No form reaches further than its command: rtk git hands the words after a subcommand to that git subcommand (`rtk git status -c core.fsmonitor=<command>` was refused by git status, as `git status -c` is, while `rtk git -c core.fsmonitor=<command> status` ran it, as `git -c` does); rtk read prints a file's lines, as cat does, and as `head -n <count>` does whole; rtk grep ran grep with the words it was given, not ripgrep (a ripgrep put first on PATH was not run, and `--pre`, the ripgrep flag that runs a program, was refused by grep); rtk ls runs ls, and rtk ps, a command rtk has no filter for, runs ps as it is.",
+  "unchanged": ["ao", "lsof"],
+  "unchanged_note": "Programs `rtk rewrite` leaves as they are, measured for every ao command and every lsof form the shipped grants name, so a rule for them needs no form. tests/test_grants_rtk.py fails when a shipped grant names a command that is neither here nor in forms: a new one is measured before it ships.",
+  "runs_any_command": ["rtk proxy", "rtk run", "rtk err", "rtk summary", "rtk test", "rtk env"],
+  "runs_any_command_note": "Subcommands that run the command after them (measured: each ran the `touch` it was given), as rtk runs any program it has no filter for (`rtk sh -c` ran sh). A rule that admits one of them, or rtk's form of a command ao forbids, is named by the doctor as the command itself is (allowlist.through_rewriters); the grants ao composes admit neither."
+}

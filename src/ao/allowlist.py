@@ -125,19 +125,50 @@ def problems(argv, options=None, role=None):
     """(reason, command, rule) for everything this grant admits that it must not.
 
     A grant of every tool is one finding with command and rule '*'. The rules are the
-    argv's own and those its adapter's `options.unattended` appends.
+    argv's own and those its adapter's `options.unattended` appends, each with what a
+    command rewriter makes of it, as a turn ao starts holds them (GRANTS-RTK); and each
+    forbidden command is asked in the forms a rewriter would run it as, too.
     """
     from . import lib as A
     if grants_everything(argv, options):
         return [("grants every tool", "*", "*")]
-    granted = rules(list(argv) + A.unattended_flags({"options": options or {}}, argv)[0])
+    granted = rules(A.admit_rewrites(list(argv))[0] + A.unattended_flags({"options": options or {}}, argv)[0])
+    forbidden = FORBIDDEN + (IMPLEMENTER_FORBIDDEN if role == "implementer" else ()) \
+        + (ARCHITECT_FORBIDDEN if role == "architect" else ())
     found = []
-    for reason, command in FORBIDDEN + (IMPLEMENTER_FORBIDDEN if role == "implementer" else ()) \
-            + (ARCHITECT_FORBIDDEN if role == "architect" else ()):
+    for reason, command in forbidden + through_rewriters(forbidden):
         rule = next((r for r in granted if admits(r, command)), None)
         if rule:
             found.append((reason, command, rule))
     return found
+
+
+def through_rewriters(forbidden):
+    """Each forbidden (reason, command) as a command rewriter would be handed it, and each of the rewriter's
+    wrappers that runs whatever follows it, as forbidden as the command itself (GRANTS-RTK).
+
+    A rewriter runs a command it has no filter for as it is, and passes the words after one it
+    filters to the program it stands for (measured on rtk: `rtk sh -c x` ran sh, and
+    `rtk git -c core.fsmonitor=<command> status` ran the command, as `git -c` does), so a rule
+    admitting `rtk git commit -n -m x` skips the commit hook as `Bash(git commit:*)` does. A grant
+    ao composes gains only the rewritten form of a rule it already holds, which admits none of
+    these; asking them is what names a wider rule a person writes, `Bash(rtk:*)` or
+    `Bash(rtk git:*)`, the way the command's own rule is named.
+    """
+    from . import lib as A
+    found, asked = [], set()
+    for rewriter in A.command_rewriters():
+        name = rewriter["command"].strip()
+        declared = rewriter.get("runs_any_command")
+        wrappers = [wrapper.strip() for wrapper in declared if isinstance(wrapper, str) and wrapper.strip()] \
+            if isinstance(declared, list) else []
+        for reason, command in [(reason, f"{name} {command}") for reason, command in forbidden] \
+                + [("runs any command", f"{wrapper} sh -c x") for wrapper in wrappers]:
+            # `rtk env sh -c x` is both rtk's form of `env sh -c x` and its env wrapper; it is asked once.
+            if command not in asked:
+                asked.add(command)
+                found.append((reason, command))
+    return tuple(found)
 
 
 # A reviewer reads. Tools a reviewer may use, and the Claude Code flags that keep

@@ -18,6 +18,12 @@ interface, the two observation modes and the support matrix.
 against a live install. Flags drift between releases. Treat those adapters as a starting
 point, not a promise.
 
+`rewriters/` holds no adapter. Each file there says how a command rewriter - a program a
+harness's hook runs an agent's shell commands through, such as rtk - rewrites the commands a
+grant names, measured on one of its releases, so every grant ao composes also admits the
+rewritten form (docs/adapters.md, "A grant admits what a command rewriter makes of the
+commands it names").
+
 ## Contributing one
 
 The most valuable contribution to this project is moving a row from `untested` to `full`.

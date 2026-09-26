@@ -59,6 +59,19 @@ def test_doctor_names_an_actor_whose_grant_admits_a_bypass(project):
     assert "every tool" in problems["actor-grant:implementer"]
 
 
+def test_doctor_names_a_rule_written_for_a_command_rewriter_that_admits_what_the_command_would_not(project):
+    # A person whose turns a hook runs through rtk might widen a grant to get past it (GRANTS-RTK).
+    cfg = dict(project, architect={"name": "architect", "argv": [
+        "claude", "-p", "{prompt}", "--allowedTools", "Read,Bash(rtk git:*),Bash(rtk:*)"]})
+
+    text = dict(cli._actor_grant_problems(cfg))["actor-grant:architect"]
+
+    assert "Bash(rtk git:*) admits `rtk git commit --no-verify -m x` (skips the commit hook)" in text
+    assert ("runs arbitrary code", "rtk python3 -c x", "Bash(rtk:*)") in AL.problems(cfg["architect"]["argv"])
+    assert AL.problems(["claude", "--allowedTools", "Bash(rtk run:*)"]) == [
+        ("runs any command", "rtk run sh -c x", "Bash(rtk run:*)")]
+
+
 def test_ao_commit_checks_authority_first_and_passes_nothing_but_the_message(project, monkeypatch):
     calls = []
     monkeypatch.setattr(subprocess, "run", lambda argv, **kw: calls.append(argv) or SimpleNamespace(returncode=0))

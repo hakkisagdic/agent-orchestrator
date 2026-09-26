@@ -223,7 +223,9 @@ def test_a_claude_implementer_is_nudged_in_the_pinned_mode_with_no_grant_appende
     assert argv[1:3] == ["--resume", "s1"]
     assert argv.count("--permission-mode") == 1 and _after(argv, "--permission-mode") == "dontAsk"
     assert "--dangerously-skip-permissions" not in argv
-    assert AL.rules(argv) == A.load_adapter("claude-code")["options"]["implementer_tools"].split(",")
+    # Besides rtk's form of each command it names (tests/test_grants_rtk.py), the grant is its adapter's.
+    assert [rule for rule in AL.rules(argv) if not rule.startswith("Bash(rtk ")] == \
+        A.load_adapter("claude-code")["options"]["implementer_tools"].split(",")
 
 
 @pytest.mark.parametrize("ident,role", [("claude-code", "implementer"), ("claude-code", "architect"),

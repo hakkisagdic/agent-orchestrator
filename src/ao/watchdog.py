@@ -890,10 +890,11 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
             print(f"architect session not resolvable ({withheld}); reported only")
             return woke
         # The permission mode is the one the architect's adapter pins, appended to a block composed
-        # before it was pinned (GRANTS-PINNED). Past what one argument carries, the prompt goes on
-        # standard input where the adapter declares it may; a detached turn takes no file ao would
-        # remove after it (PROMPT-CHANNEL).
-        template, pinned = A.pinned_argv(arch["argv"], "architect")
+        # before it was pinned (GRANTS-PINNED), and its grant admits what a command rewriter makes of
+        # each command it names, whenever the block was composed (GRANTS-RTK). Past what one argument
+        # carries, the prompt goes on standard input where the adapter declares it may; a detached
+        # turn takes no file ao would remove after it (PROMPT-CHANNEL).
+        template, pinned = A.pinned_argv(A.admit_rewrites(arch["argv"])[0], "architect")
         plan, refused = A.prompt_plan(template, prompt, A.block_adapter(arch), detached=True)
         if refused:
             print(f"the architect's prompt cannot be handed over: {refused}; reported only")
@@ -2298,9 +2299,10 @@ def _cycle_impl(args, root):
                 print(f"architect session not resolvable ({withheld}); reported only")
                 return 0
             prompt = arch.get("prompt", language.text(cfg, "prompt.refill"))
-            # As in escalate(): the pinned mode (GRANTS-PINNED), and past one argument, standard input
-            # where the adapter declares it (PROMPT-CHANNEL).
-            template, pinned = A.pinned_argv(arch["argv"], "architect")
+            # As in escalate(): the pinned mode (GRANTS-PINNED), a grant that admits what a command
+            # rewriter makes of its commands (GRANTS-RTK), and past one argument, standard input where
+            # the adapter declares it (PROMPT-CHANNEL).
+            template, pinned = A.pinned_argv(A.admit_rewrites(arch["argv"])[0], "architect")
             plan, refused = A.prompt_plan(template, prompt, A.block_adapter(arch), detached=True)
             if refused:
                 print(f"queue low, but the architect's prompt cannot be handed over: {refused}")
@@ -2479,8 +2481,10 @@ def _cycle_impl(args, root):
         prompt += language.text(cfg, "prompt.nudge-editing", paths=", ".join(fe[:8]))
     # Past what one argument carries, the prompt goes on standard input where the implementer's
     # adapter declares it may; a detached turn takes no file ao would remove after it (PROMPT-CHANNEL).
-    plan, refused = A.prompt_plan(adapter.get("resume", {}).get("argv") or [], prompt, impl.get("adapter"),
-                                  detached=True)
+    # A grant the resume carries of its own admits what a command rewriter makes of each command it
+    # names, as the one options.unattended appends does (GRANTS-RTK).
+    plan, refused = A.prompt_plan(A.admit_rewrites(adapter.get("resume", {}).get("argv") or [])[0], prompt,
+                                  impl.get("adapter"), detached=True)
     if refused:
         print(f"the nudge's prompt cannot be handed over: {refused}; not nudging")
         return 1
