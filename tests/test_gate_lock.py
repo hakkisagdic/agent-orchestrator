@@ -190,3 +190,42 @@ def test_only_this_process_and_those_that_started_it_count_as_the_run_a_lock_is_
     assert not A.self_or_ancestor(other_process)     # a process this one started did not start this one
     assert not A.self_or_ancestor(1)                 # every process descends from it, so it never counts
     assert not A.self_or_ancestor(None) and not A.self_or_ancestor("not a pid")
+
+
+# ---- VERIFY-LOCK-LATE ---------------------------------------------------------------------------
+
+def test_a_verify_with_no_gates_declared_says_so_without_waiting_for_the_lock(project, lock, clock,
+                                                                            other_process, capsys):
+    root = project["root"]
+    _held(lock, root, other_process)                 # another suite holds the machine
+
+    assert cli.cmd_verify(project, SimpleNamespace(profile=None, wait=60)) == 1
+
+    out = capsys.readouterr().out
+    assert "No .ao/gates.json" in out and "waiting up to" not in out
+    assert clock.slept == 0                          # told at once, not after the wait
+    assert json.loads(lock.read_text(encoding="utf-8"))["pid"] == other_process
+
+
+def test_a_verify_of_a_profile_the_project_lacks_says_so_without_waiting_for_the_lock(project, lock, clock,
+                                                                                     other_process, capsys):
+    root = project["root"]
+    _gates(root)
+    _held(lock, root, other_process)
+
+    assert cli.cmd_verify(project, SimpleNamespace(profile="nightly", wait=60)) == 1
+
+    out = capsys.readouterr().out
+    assert "unknown profile nightly; have: quick, full" in out and "waiting up to" not in out
+    assert clock.slept == 0
+    assert A.latest_verification(root) is None
+
+
+def test_a_verify_with_gates_to_run_still_waits_for_the_lock(project, lock, clock, other_process, capsys):
+    root = project["root"]
+    _gates(root)
+    _held(lock, root, other_process)
+
+    assert cli.cmd_verify(project, SimpleNamespace(profile="quick", wait=30)) == 2
+
+    assert clock.slept >= 30 and "still busy; not starting a second suite" in capsys.readouterr().out

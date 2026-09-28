@@ -289,30 +289,33 @@ def cmd_verify(cfg, args):
     The whole point of a second agent is not needing to trust the first one's
     report, so this executes the commands and writes the numbers to the ledger.
     Commit authority is later granted against this record, not against a claim.
+
+    The machine lock is taken once the gates to run are known (VERIFY-LOCK-LATE): a project that
+    declares none, or a profile it does not have, is told so at once instead of after a wait for
+    another project's suite, as `ao merge-check` already did. The candidate is read inside the lock,
+    so a change to the index during the wait is not read as one made while the gates ran.
     """
     import json as _json
     import subprocess
     root = cfg["root"]
     _urgent_banner(cfg)
     gates_file = os.path.join(root, ".ao", "gates.json")
-    release = _take_gate_lock(root, args.wait)
-    if release is None:
-        return 2
     if not os.path.exists(gates_file):
         print(f"{C['yellow']}No .ao/gates.json — nothing declared to verify.{C['reset']}")
         print(f"{C['dim']}See docs/gates.md for the shape.{C['reset']}")
-        release()
         return 1
     spec = _json.load(open(gates_file, encoding=UTF8))
     profile = args.profile or spec.get("default_profile", "quick")
     names = spec.get("profiles", {}).get(profile)
     if not names:
         print(f"unknown profile {profile}; have: {', '.join(spec.get('profiles', {}))}")
-        release()
         return 1
     # The record names what ran, so a later edit to gates.json cannot inherit
     # this result (#61).
     gates_digest = A.gate_definitions_digest_of(spec, profile)
+    release = _take_gate_lock(root, args.wait)
+    if release is None:
+        return 2
 
     try:
         candidate_before = A.index_candidate(root)

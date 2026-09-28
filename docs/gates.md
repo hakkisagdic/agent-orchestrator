@@ -190,6 +190,12 @@ same moment no longer both start. The one holder they do not wait for is their o
 the process they run in, or one that started it, as `ao lock -- ao verify` starts its verify:
 that holder is waiting for them to end, so they go ahead inside its lock.*
 
+*In ao since slice VERIFY-LOCK-LATE: `ao verify` takes the lock once it knows the gates it will
+run, as `ao merge-check` did. A project with no `.ao/gates.json`, or a profile it does not
+declare, is told so at once, where it waited out another suite first. The candidate is read
+inside the lock, so an index changed during the wait is not taken for one changed while the
+gates ran.*
+
 Not built yet: checking memory pressure and the swap-in rate before a gate run, and refusing
 rather than thrashing. Five simultaneous test suites will make a laptop unusable while
 each one individually looks reasonable — and the failure mode is a machine that appears
