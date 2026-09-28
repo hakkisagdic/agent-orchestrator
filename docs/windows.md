@@ -32,6 +32,15 @@ read as a dead run's, was cleared, and `ao verify` and `ao merge-check` ran thei
 holder's; the Windows lane's weekly run found it. Where Windows does not answer, a fresh snapshot
 does. `tests/test_windows_pid_alive.py` holds it.*
 
+*In ao since slice WINDOWS-LANE-4: the Windows lane's run dispatched after WINDOWS-PID-ALIVE failed
+twelve tests. Nine read processes through `ps` and `lsof`, which Windows does not have: the backend is
+chosen once, by a PowerShell reading of this process, and the suite's first reading came in a test
+that stood in for subprocess, so it failed and the fallback was kept. Windows now keeps its own
+backend whatever that reading gave, and a reading that lists no process is not kept for the next two
+seconds. A file in the home is named `~/…` with slashes there too, and a lane another checkout
+started is known for one, where its path, compared case-folded, hid the case its branch keeps.
+`tests/test_windows_lane_4.py` holds them.*
+
 The hosted `tests` workflow runs Windows and macOS every week on Python 3.12, and any
 environment on demand (`gh workflow run tests -f os=windows-latest -f python=3.12`);
 Ubuntu runs on every push and pull request with the Python 3.9 support floor and 3.12.

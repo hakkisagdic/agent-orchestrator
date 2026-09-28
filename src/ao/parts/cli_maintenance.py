@@ -55,9 +55,15 @@ def _remove_hook_preflight(inv, allow):
 
 
 def _home_relative(path):
-    """A path under the home directory as ~/…, the way a person reads it."""
+    """A path under the home directory as ~/…, the way a person reads it.
+
+    With forward slashes on Windows too, where the rest of the path came with backslashes, so a file
+    in the home is named one way on every platform (WINDOWS-LANE-4).
+    """
     home = A.HOME.rstrip("/\\")
-    return "~" + path[len(home):] if path == home or path.startswith(home + os.sep) else path
+    if path == home or path.startswith(home + os.sep):
+        return "~" + path[len(home):].replace(os.sep, "/")
+    return path
 
 
 def _remove_key(root):

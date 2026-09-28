@@ -190,6 +190,9 @@ def test_gate_lock_liveness_probe_does_not_signal_windows_process(tmp_path, monk
     lock.write_text(json.dumps({"root": "project", "pid": 4242, "at": 1}), encoding="utf-8")
     monkeypatch.setattr(A, "GATE_LOCK", str(lock))
     monkeypatch.setattr(A.os, "name", "nt")
+    # Where Windows does not answer for the process itself, the snapshot is read (WINDOWS-PID-ALIVE); on
+    # Windows it would answer, for a pid 4242 that is not this test's.
+    monkeypatch.setattr(procs, "alive", lambda pid: None)
     monkeypatch.setattr(procs, "all_pids", lambda: [4242])
 
     def unexpected_signal(*args):

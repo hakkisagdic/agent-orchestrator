@@ -286,7 +286,10 @@ class _Windows:
             except (TypeError, ValueError):
                 continue
             snap[pid] = r
-        self._cache, self._cache_at = snap, _time.time()
+        # A snapshot that lists no process is no reading - this one runs - so it is not kept for the next
+        # two seconds' readers; the next one asks again (WINDOWS-LANE-4).
+        if snap:
+            self._cache, self._cache_at = snap, _time.time()
         return snap
 
     @staticmethod
@@ -483,14 +486,19 @@ def _backend():
     global _NATIVE
     if _NATIVE is not None:
         return _NATIVE
+    if sys.platform == "win32":
+        # Windows has no ps or lsof to fall back on, and the ps of Git for Windows numbers its own
+        # processes: its backend stays, whatever its first reading gave. That reading is a PowerShell
+        # run, and one taken while a test stood in for subprocess failed, so every process read after it
+        # in that suite went unread (WINDOWS-LANE-4).
+        _NATIVE = _Windows()
+        return _NATIVE
     cand = None
     try:
         if sys.platform == "darwin":
             cand = _Darwin()
         elif sys.platform.startswith("linux") and os.path.isdir("/proc"):
             cand = _Linux()
-        elif sys.platform == "win32":
-            cand = _Windows()
         # Self-check against the one process we know everything about: this one.
         if cand is not None:
             me = os.getpid()

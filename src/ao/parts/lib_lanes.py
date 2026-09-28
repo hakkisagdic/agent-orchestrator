@@ -671,8 +671,11 @@ def lane_keeps(root, trees):
         home = _real_path(_lanes_beside(trees)[1])
         for tree in trees[1:]:
             real = _real_path(tree["path"])
+            # The name as git gives the path: the compared path is case-folded on Windows, and a lane's
+            # branch keeps the case of its item, so lane/B was no lane there (WINDOWS-LANE-4).
+            name = os.path.basename(os.path.normpath(tree["path"]))
             if (real not in out and os.path.dirname(real) == home
-                    and tree["branch"] == LANE_BRANCH + os.path.basename(real)):
+                    and tree["branch"] == LANE_BRANCH + name):
                 out[real] = "a lane another checkout started: `ao lane remove` there retires it"
     return out
 
