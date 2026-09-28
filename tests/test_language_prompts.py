@@ -41,6 +41,8 @@ TURKISH = {
     "prompt.review-tree": "e00656a778372851b57f26b47e6bd73412b92659488576f55314d36ca8857790",
     # Added by CRITERIA-VERDICTS, after the tree's note: a boundary that lists criteria is asked about each.
     "prompt.review-criteria": "6c45e0b98838460856ce9c6054e9686cb6f8c4427e454486d15610b2149beb8a",
+    # Added by REVIEW-REASK: the note a reviewer is asked again with when ao could not read its answer.
+    "prompt.review-reask": "efe205b3487739b4e973da8223710cc762a1daa0db032c14c4fe0d00bb3d331d",
     "prompt.review-section": "8063a940247fdbf8be4db5d8445f9945c817b3a0970c601e8bfb39155dc6ce60",
     "prompt.review-request": "1ab6ef78285dbd1b7ed1dd26dfeeb46c167013bde8bdb16d8702007f6c792072",
     "prompt.hunt": "6dfafb32102cade4747e8ff833ee05d5591e5409948142a3bc64331b50042553",
@@ -52,7 +54,7 @@ TURKISH = {
     "prompt.refill": "049bdca4daf5e861c68d46f45663e87fd722f2ad7d665896e8cb00d0dcfef71e",
 }
 REVIEW_MARKERS = ("prompt.review-candidate", "prompt.review-context", "prompt.review-section", "prompt.review-tree",
-                  "prompt.review-criteria")
+                  "prompt.review-criteria", "prompt.review-reask")
 HEADINGS = ("urgent", "stop", "decision")           # the markers a prompt tells an agent to write
 # The words a reader acts on, spelled the same in both languages: the answer schema, the board's and the
 # protocol's words, and what an agent may not do.

@@ -358,6 +358,18 @@ LOW: <n>
     # marker rather than a line of the prompt above, so a Turkish project's prompt stays the bytes it always was
     "prompt.review-tree": {"en": "--- TREE: ao unpacks this candidate's whole tree into your working directory, outside the repository. Read it with your file tools to see what the change touches and whether the same fault sits elsewhere; if the directory is empty, the unpacking failed and the diff is all you have. Only the diff is under review. ---",
                            "tr": "--- AĞAÇ: ao bu adayın bütün ağacını çalışma dizinine, deponun dışına açar. Değişikliğin neye dokunduğunu ve aynı hatanın başka yerde olup olmadığını görmek için dosya araçlarınla oku; dizin boşsa açma başarısız olmuştur ve elindeki yalnız diff'tir. İncelemenin konusu yalnız diff. ---"},
+    # the note ao appends when it asks a reviewer once more because it could not read the answer (REVIEW-REASK);
+    # {lines}: the answer lines that did not stand once each, spelled as ao reads them in either language
+    "prompt.review-reask": {
+        "en": ("--- ao COULD NOT READ YOUR ANSWER: {lines} did not stand once each at the start of a line. Answer the "
+               "same question again, in exactly the format asked for above: `VERDICT: APPROVED` or "
+               "`VERDICT: NEEDS_CHANGES`, then `BLOCKER: <n>`, `HIGH: <n>`, `MEDIUM: <n>` and `LOW: <n>`, one line "
+               "each, then your findings and notes. Nothing else about the review has changed. ---"),
+        "tr": ("--- ao CEVABINI OKUYAMADI: {lines} satır başında birer kez yer almadı. Aynı soruyu, yukarıda istenen "
+               "biçimde yeniden cevapla: `VERDICT: APPROVED` ya da `VERDICT: NEEDS_CHANGES`, sonra her biri bir "
+               "satırda `BLOCKER: <n>`, `HIGH: <n>`, `MEDIUM: <n>` ve `LOW: <n>`, sonra bulguların ve notların. "
+               "İncelemeyle ilgili başka hiçbir şey değişmedi. ---"),
+    },
     # the note ao appends when the boundary lists criteria (CRITERIA-VERDICTS), after the tree's note and for the same
     # reason; {criteria}: one numbered line for each. The lines it asks for are spelled the same in both languages,
     # because ao reads them back

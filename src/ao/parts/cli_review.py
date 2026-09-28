@@ -1097,6 +1097,10 @@ def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, s
                     append_jsonl(journal, {"at": int(time.time()), "section": section["name"], "stalled": True,
                                            "partial": partial[-1] or ""})
                 return dict(invocation, sections=[_section_summary(r) for r in rows])
+            invocation = _reask_once(cfg, root, invocation, prompt + asked, timeout, strict, primary=primary,
+                                     candidate=candidate, tree=tree,
+                                     treeless=None if treeless is None else treeless + asked)
+            reasked = invocation.get("reasked")
             out = invocation["attempt"]["out"]
             counts = {key: A.re.findall(rf"^{key}:[ \t]*([0-9]{{1,9}})[ \t]*\r?$", out, A.re.M)
                       for key in ("BLOCKER", "HIGH", "MEDIUM", "LOW")}
@@ -1110,6 +1114,9 @@ def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, s
                    "counts": decided, "out": A.scan_evidence(out)[0]}
             if raised:
                 row["raised"] = raised
+            if reasked:
+                row["reasked"] = [f"- re-asked: the first answer did not hold {', '.join(reasked)} once each; "
+                                  "this is the second"]
             row["verdict"] = "NEEDS_CHANGES" if row["counts"]["BLOCKER"] or row["counts"]["HIGH"] else "APPROVED"
             if invocation["attempt"].get("tool"):
                 row["tool"] = invocation["attempt"]["tool"]
@@ -1126,7 +1133,8 @@ def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, s
     verdict = "NEEDS_CHANGES" if totals["BLOCKER"] or totals["HIGH"] else "APPROVED"
     body = [f"VERDICT: {verdict}"] + [f"{key}: {value}" for key, value in totals.items()]
     for index, row in enumerate(rows, 1):
-        body += ["", f"## Section {index}/{len(rows)}: {row['section']} — {row['verdict']}"] + row.get("raised", [])
+        body += ["", f"## Section {index}/{len(rows)}: {row['section']} — {row['verdict']}"] \
+            + row.get("reasked", []) + row.get("raised", [])
         body += ["    " + line for line in row["out"].splitlines()]
     position = max(row["position"] for row in rows)
     attempt = dict((last or {}).get("attempt") or {"ok": True, "binary": "section journal"}, out="\n".join(body))
@@ -1816,6 +1824,44 @@ def _listed_findings(out):
         if found:
             listed[found.group(1)] += 1
     return listed
+
+
+def _unread_lines(out):
+    """The answer lines ao reads that do not stand once each at the start of a line, as the note names them."""
+    unread = [] if A._review_verdict(out) in REVIEWER_VERDICTS else ["`VERDICT: …`"]
+    return unread + [f"`{key}: <n>`" for key in REVIEW_SEVERITIES
+                     if len(A.re.findall(rf"^{key}:[ \t]*([0-9]{{1,9}})[ \t]*\r?$", out, A.re.M)) != 1]
+
+
+def _reask_once(cfg, root, invocation, prompt, timeout, strict, primary=None, candidate=None, tree=None,
+                treeless=None):
+    """Ask the reviewer that answered once more when ao cannot read its answer (REVIEW-REASK).
+
+    An answer without a verdict line ao reads, or without the four counts once each, was INVALID at
+    once, and a person submitted the review again by hand. The same reviewer is now told which lines
+    it missed and asked the same question once more, on a chain of that route alone and with a
+    timeout of its own; the parser reads the second answer no more loosely than the first. Returns the
+    invocation to read, which names under "reasked" the lines the first answer lacked when it was asked
+    again. A tool route answers into a file ao reads apart from this, and a second answer that does not
+    come leaves the first, which is then INVALID as before.
+    """
+    attempt = invocation.get("attempt") or {}
+    if invocation.get("used") is None or attempt.get("tool"):
+        return invocation
+    unread = _unread_lines(attempt.get("out") or "")
+    if not unread:
+        return invocation
+    lines = ", ".join(unread)
+    label = invocation.get("labels", {}).get(invocation.get("used_position"), "reviewer")
+    print(f"{C['yellow']}{label}'s answer could not be read{C['reset']}: {lines} did not stand once each; "
+          f"asking it once more")
+    note = "\n\n" + language.text(cfg, "prompt.review-reask", lines=lines) + "\n"
+    again = _invoke_reviewer_chain(root, [invocation["used"]], prompt + note, timeout, strict, primary=primary,
+                                   candidate=candidate, tree=tree,
+                                   treeless=None if treeless is None else treeless + note)
+    if again.get("used") is None:
+        return dict(invocation, reasked=unread)
+    return dict(invocation, attempt=again["attempt"], reasked=unread)
 
 
 def _decided_counts(declared, listed):
@@ -2888,6 +2934,12 @@ def cmd_review(cfg, args):
                 root, chain, prompt, _review_timeout(cfg), strict, primary=rv if not strict else None,
                 candidate=diff_bytes, tree=(candidate or {}).get("index_tree"), treeless=treeless,
             )
+            invocation = _reask_once(
+                cfg, root, invocation, prompt, _review_timeout(cfg), strict, primary=rv if not strict else None,
+                candidate=diff_bytes, tree=(candidate or {}).get("index_tree"), treeless=treeless)
+    # The lines a first answer lacked, when it was asked for again: of this answer, or of the section a
+    # sectioned review stopped on (REVIEW-REASK).
+    reasked = invocation.get("reasked")
     used = invocation["used"]
     if strict:
         strict_attempts = _strict_attempt_snapshot(matrix_resolution, invocation)
@@ -3023,7 +3075,8 @@ def cmd_review(cfg, args):
             f"- reviewer: `{A.review_header_value(reviewer_label)}`",
         ] + _tool_review_lines(evidence) + [
             f"- boundary: {A.review_header_value(boundary)}",
-        ]
+        ] + ([f"- re-asked: the first answer did not hold {', '.join(reasked)} once each; "
+              "the second could not be read either"] if reasked else [])
         if context is not None:
             header.append(A.review_context_line(context))
         if candidate is not None:
@@ -3070,7 +3123,8 @@ def cmd_review(cfg, args):
     # differs from the reviewer's, and the reviewer's own words unchanged (#54).
     said = verdict
     verdict = "NEEDS_CHANGES" if (sev["BLOCKER"] or sev["HIGH"]) else "APPROVED"
-    adjudication = list(raised)
+    adjudication = ([f"- re-asked: the first answer did not hold {', '.join(reasked)} once each; this is the second"]
+                    if reasked else []) + list(raised)
     if verdict != said:
         adjudication.append(
             f"- adjudicated: the reviewer wrote {said}; BLOCKER {sev['BLOCKER']} "

@@ -129,6 +129,7 @@ publishes the release.
 - An architect wake stopped on its usage limit waits for that limit's reset, a weekly one included, and one notice says when wakes start again (ARCHITECT-WAKE-QUOTA).
 - `ao verify` takes the machine gate lock once it knows the gates it will run, so a project with none, or an unknown profile, is told so at once (VERIFY-LOCK-LATE).
 - A review's counts are never below the findings the reviewer listed outside its notes: an answer that counted HIGH 0 above a listed HIGH finding is NEEDS_CHANGES, and the artefact says which count its list raised (REVIEW-FINDINGS-COUNT).
+- An answer whose verdict line or counts ao cannot read is asked for once more, naming the lines it missed, before the review is INVALID; the artefact says when a reviewer was asked twice (REVIEW-REASK).
 
 ### Fixes
 
