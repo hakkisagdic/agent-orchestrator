@@ -615,5 +615,6 @@ _part("lib_alarms", globals())
 
 
 _part("lib_lanes", globals())
+_part("lib_pr", globals())
 
 

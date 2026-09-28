@@ -54,6 +54,7 @@ A._part("cli_maintenance", globals())
 
 
 A._part("cli_lanes", globals())
+A._part("cli_pr", globals())
 
 
 def build_parser():
@@ -178,6 +179,11 @@ def build_parser():
     ht.add_argument("action", nargs="?", choices=["run", "discard", "status"], default="run")
     ht.add_argument("fingerprint", nargs="?", help="discard: the lead's id")
     ht.set_defaults(fn=cmd_hunt)
+    pw = sub.add_parser("pr", help="read this checkout's pull requests through gh and mail the implementer what "
+                                   "needs it; never writes to GitHub")
+    pw.add_argument("action", choices=["watch"])
+    pw.add_argument("--once", action="store_true", help="one pass, then exit; the watchdog does not run it yet")
+    pw.set_defaults(fn=cmd_pr)
     bk = sub.add_parser("backup", help="write the governance to a directory, a ref or a private remote")
     bk.add_argument("--to", help="a directory, `ref`, or `remote:<name>`; default backup.to in the config")
     bk.set_defaults(fn=cmd_backup)

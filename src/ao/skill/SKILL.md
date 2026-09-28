@@ -238,6 +238,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao content add <source>@<commit> [--skills a,b] [--steering c,d] [--agents e,f] [--from <dir>] [--dry-run]` / `verify` | borrow skills, steering and agent definitions pinned and text-only, hooks never; check they have not drifted |
 | `ao backup --to <dir|ref|remote:name>` / `ao restore <dir>` | the governance off this disk, and back, verified |
 | `ao hunt [run|discard <id>|status]` | a bounded read-only bug hunt; leads to the architect, never a verdict |
+| `ao pr watch --once` | opt-in with `pr.watch`: read this checkout's pull requests through gh, never write to GitHub, and mail the implementer a failed check, a conflict or requested changes, once per head |
 | `ao split-check` | is the staged candidate a pure move? a `move-only` slice cannot land otherwise, and its grant records the proof its waived review later closes on |
 | `ao adapters [list|validate|conform]` | every adapter and its source; check a candidate before relying on it |
 | `ao role [set|swap]` | the role table; a reassignment takes effect on the next slice. `set reviewer <adapter> --model M` composes the reviewer from its adapter; a tool reviewer, which ao runs over the staged candidate on its own provider, also needs `--family F` |

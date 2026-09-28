@@ -46,6 +46,11 @@ What each switch changes when off:
 - `toast` on — on Windows, what reaches a person's desktop is also shown as a toast through
   PowerShell; it spends nothing, and is off until someone on Windows turns it on (#9).
 
+Watching pull requests is a setting, not a switch, because it spends no model's quota: with
+`pr.watch` on, `ao pr watch --once` reads the pull requests of this checkout's branches through gh,
+never writes to GitHub, and mails the implementer a failed check, a merge conflict or requested
+changes, once each ([pr.md](pr.md)).
+
 ## Bypass, on the record
 
 Sometimes the switch is not the answer: the reviewer is out of quota for two

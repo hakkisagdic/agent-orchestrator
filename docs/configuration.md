@@ -54,6 +54,7 @@ machine setting written into a project.
 | `hunter.max_leads` | `5` | project | new leads one hunt may send |
 | `hunter.argv` | `none` | project | the hunter's command with {prompt}, unable to write; none: no hunt runs |
 | `hunter.id` | `hunter` | project | the name a hunt's runs and leads are recorded under |
+| `pr.watch` | `off` | project | on: ao pr watch --once reads this checkout's pull requests through gh and mails the implementer what needs it; off: it reads nothing |
 | `mail.store` | `deletion` | project | deletion: handled mail is deleted; append-only: messages are kept and handling is a record |
 | `mail.sync_repo` | `none` | project | the one private repository the message store is pushed to as refs/mail/<project>; none: not synced |
 | `gates.default_timeout` | `600` | project | seconds a gate may run when its own definition names no timeout |

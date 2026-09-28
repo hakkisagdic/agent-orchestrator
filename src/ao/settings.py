@@ -115,6 +115,10 @@ SETTINGS = {
     "hunter.id": Setting(
         "hunter", str, None, None, "project",
         "the name a hunt's runs and leads are recorded under"),
+    "pr.watch": Setting(
+        "off", str, None, None, "project",
+        "on: ao pr watch --once reads this checkout's pull requests through gh and mails the implementer what "
+        "needs it; off: it reads nothing"),
     "mail.store": Setting(
         "deletion", str, None, None, "project",
         "deletion: handled mail is deleted; append-only: messages are kept and handling is a record"),
@@ -227,6 +231,7 @@ SETTINGS = {
 CHOICES = {
     "review.same_family": ("refused", "labeled"),
     "language": ("en", "tr"),
+    "pr.watch": ("off", "on"),
 }
 
 # A setting that weakens a guarantee is a person's act, on the record, as a waiver is (REVIEW-TIERS).
