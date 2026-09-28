@@ -372,6 +372,45 @@ class _Windows:
         finally:
             kernel32.CloseHandle(handle)
 
+    def ppid(self, pid):
+        """The parent pid from a Toolhelp snapshot of the process list (ANCESTOR-WINDOWS).
+
+        The CIM snapshot the rest of this backend reads is a PowerShell run, a second or more, and it
+        answers nothing where PowerShell does not run; a parent read from it for `ao lock -- ao verify`
+        was then unknown, and the verify waited out the lock its own parent held. Toolhelp is the
+        process list the kernel keeps, read in-process. None when it cannot be read or holds no `pid`.
+        """
+        from ctypes import wintypes
+
+        class Entry(ctypes.Structure):                # PROCESSENTRY32W
+            _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
+                        ("th32ProcessID", wintypes.DWORD), ("th32DefaultHeapID", ctypes.c_size_t),
+                        ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
+                        ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", wintypes.LONG),
+                        ("dwFlags", wintypes.DWORD), ("szExeFile", wintypes.WCHAR * 260)]
+
+        kernel32 = ctypes.WinDLL("kernel32")
+        kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+        kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+        for name in ("Process32FirstW", "Process32NextW"):
+            getattr(kernel32, name).restype = wintypes.BOOL
+            getattr(kernel32, name).argtypes = [wintypes.HANDLE, ctypes.POINTER(Entry)]
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        snapshot = kernel32.CreateToolhelp32Snapshot(0x2, 0)          # TH32CS_SNAPPROCESS
+        if snapshot is None or snapshot == ctypes.c_void_p(-1).value:  # INVALID_HANDLE_VALUE
+            return None
+        try:
+            entry = Entry()
+            entry.dwSize = ctypes.sizeof(Entry)
+            found = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
+            while found:
+                if entry.th32ProcessID == pid:
+                    return int(entry.th32ParentProcessID)
+                found = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
+            return None
+        finally:
+            kernel32.CloseHandle(snapshot)
+
     def info(self, pid):
         r = self._snapshot().get(pid)
         if not r:
@@ -483,6 +522,18 @@ def zombie(pid):
 
 def info(pid):
     return _backend().info(pid)
+
+
+def ppid(pid):
+    """The pid of the process that started `pid`, or None where the platform does not say (ANCESTOR-WINDOWS)."""
+    reader = getattr(_backend(), "ppid", None)
+    try:
+        parent = reader(int(pid)) if reader else None
+        if parent is None:
+            parent = (info(int(pid)) or {}).get("ppid")
+    except Exception:
+        return None
+    return None if parent is None else int(parent)
 
 
 def elapsed(pid):

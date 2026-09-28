@@ -229,3 +229,34 @@ def test_a_verify_with_gates_to_run_still_waits_for_the_lock(project, lock, cloc
     assert cli.cmd_verify(project, SimpleNamespace(profile="quick", wait=30)) == 2
 
     assert clock.slept >= 30 and "still busy; not starting a second suite" in capsys.readouterr().out
+
+
+# ---- ANCESTOR-WINDOWS ---------------------------------------------------------------------------
+
+def test_the_platform_names_the_process_that_started_this_one():
+    from ao import procs
+    assert procs.ppid(os.getpid()) == os.getppid()
+    assert A.ancestry(os.getpid()) == (True, None)
+    assert A.ancestry("not a pid") == (False, None)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Toolhelp is Windows' process list")
+def test_windows_reads_a_parent_from_toolhelp_without_powershell():
+    from ao import procs
+    assert procs._backend().ppid(os.getpid()) == os.getppid()
+
+
+def test_a_parent_the_platform_does_not_give_is_said_before_the_holder_is_waited_for(
+        project, lock, clock, other_process, capsys, monkeypatch):
+    from ao import procs
+    root = project["root"]
+    _gates(root)
+    _held(lock, root, other_process)
+    monkeypatch.setattr(procs, "ppid", lambda pid: None)       # as where PowerShell answered nothing
+
+    assert cli.cmd_verify(project, SimpleNamespace(profile="quick", wait=30)) == 2
+
+    out = capsys.readouterr().out
+    assert f"cannot tell whether pid {other_process} started this run" in out
+    assert f"this platform did not say which process started pid {os.getppid()}" in out
+    assert clock.slept >= 30 and "still busy; not starting a second suite" in out

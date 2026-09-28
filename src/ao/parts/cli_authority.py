@@ -160,8 +160,14 @@ def _take_gate_lock(root, wait):
     if A.acquire_gate_lock(root, 0):
         return A.release_gate_lock
     holder = A.gate_lock_holder()
-    if holder and A.self_or_ancestor(holder.get("pid")):
+    ours, unread = A.ancestry(holder.get("pid")) if holder else (False, None)
+    if ours:
         return lambda: None                      # its holder lets it go, after this run has finished
+    if ours is None:
+        # A walk that could not read a parent cannot tell its own holder from another run's; it says so
+        # before it waits, as for any holder, where it used to wait without a word (ANCESTOR-WINDOWS).
+        print(f"{C['yellow']}cannot tell whether pid {holder.get('pid')} started this run{C['reset']}: "
+              f"this platform did not say which process started pid {unread}", flush=True)
     if not holder:                               # a lock ao cannot read, or one let go since the take
         who, detail = "the machine lock is taken", A.GATE_LOCK
     elif holder.get("root") == root:

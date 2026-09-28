@@ -16,6 +16,15 @@ What works, what does not, and how hosted runners exercise it.
 | commit hook (`ao hooks install`) | installed inside the repository; a shared, external or globally configured hooks directory is refused (#71); its execution proof does not pass yet (below) |
 | pre-push hook | works under Git's own shell |
 
+*In ao since slice ANCESTOR-WINDOWS: the process that started a process is read from Toolhelp, the
+process list Windows keeps, in-process, and no longer from the PowerShell snapshot alone. It is how
+`ao lock -- ao verify` finds that the lock it meets is its own parent's and runs inside it; when
+PowerShell answered nothing, the verify waited out that lock and gave up. Where neither says which
+process started one on the way, `ao verify` and `ao merge-check` say they cannot tell whether the
+holder started them, then wait for it as for any other. A parent pid on Windows can outlive its
+process and be given to another; a walk through one still ends. `tests/test_gate_lock.py` holds the
+Toolhelp read on the Windows lane, which has not run it yet.*
+
 The hosted `tests` workflow runs Windows and macOS every week on Python 3.12, and any
 environment on demand (`gh workflow run tests -f os=windows-latest -f python=3.12`);
 Ubuntu runs on every push and pull request with the Python 3.9 support floor and 3.12.

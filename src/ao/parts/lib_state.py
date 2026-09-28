@@ -617,23 +617,35 @@ def self_or_ancestor(pid):
     its verify as a child, and a child that waited for the lock its own parent holds would wait
     until it gave up. Pid 1 is never counted, since every process descends from it; a walk that
     meets a pid twice, or a parent the platform cannot read, stops there and answers no.
+    `ancestry` says which of the two it was.
+    """
+    return ancestry(pid)[0] is True
+
+
+def ancestry(pid):
+    """(True, None) when `pid` is this process or started it; (False, None) when the walk reached the
+    top without meeting it; (None, pid) naming the process whose parent the platform would not give,
+    where the answer is not known (ANCESTOR-WINDOWS).
+
+    On Windows a parent pid can outlive its process and be given to another one, so a walk there
+    can go on through a process that started nothing of this one; it still ends, at a pid met twice
+    or at the top.
     """
     try:
         wanted = int(pid)
     except (TypeError, ValueError):
-        return False
+        return False, None
     from . import procs
     current, seen = os.getpid(), set()
     while current > 1 and current not in seen:
         if current == wanted:
-            return True
+            return True, None
         seen.add(current)
-        try:
-            parent = os.getppid() if current == os.getpid() else (procs.info(current) or {}).get("ppid")
-            current = int(parent or 0)
-        except Exception:
-            return False
-    return False
+        parent = os.getppid() if current == os.getpid() else procs.ppid(current)
+        if parent is None:
+            return None, current
+        current = parent
+    return False, None
 
 
 def process_trees(pids, parent=None):
