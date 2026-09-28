@@ -367,8 +367,15 @@ def cmd_init(cfg, args):
     This is the answer to "how do I apply this to another project". Everything
     it writes is a file the agent already knows how to read, so a project without
     MCP or a watchdog gets the whole protocol from the files alone; the optional
-    flags add the automation on top.
+    flags add the automation on top. `--adopt` is the other answer, for a project
+    that has AO state and no tracked marker: `_adopt_project`.
     """
+    if getattr(args, "adopt", False):
+        return _adopt_project(cfg, args)
+    if getattr(args, "allow_shared_hooks", False):
+        print(f"{C['red']}init refused{C['reset']}: --allow-shared-hooks authorizes the hooks --adopt installs; "
+              "init without --adopt installs none")
+        return 1
     root = cfg["root"]
     name = args.name or os.path.basename(root)
     config_path = os.path.join(root, ".ao", "config.json")
@@ -628,6 +635,144 @@ def cmd_init(cfg, args):
         print(f"  · {line}")
     return 0
 
+
+# What a new setup chooses, or asks init to write. Adoption takes a project as it was set up and
+# writes only the marker and the hooks, so each of these is refused beside --adopt rather than
+# ignored (INIT-ADOPTION); --agent counts only when it names an agent, and --no-mcp asks for
+# nothing adoption does.
+ADOPT_REFUSES = ("name", "profile", "implementer", "model", "effort", "reviewer_model", "review_tier", "by",
+                 "language", "mcp", "rules", "watchdog", "allow_uncovered_gates", "prove", "no_review")
+
+
+def _git_on_active_index(root, *args):
+    """Run one git command against the index enrollment is measured in; None when it succeeded, else why not."""
+    extra_env, problem = _project_index_env(root)
+    if problem:
+        return problem
+    try:
+        result = _hook_git(root, *args, extra_env=extra_env)
+    except _HookResolutionError as exc:
+        return str(exc)
+    if result.returncode:
+        return result.stderr.decode(UTF8, "replace").strip()[:160] or f"git exit {result.returncode}"
+    return None
+
+
+def _adopt_project(cfg, args):
+    """`ao init --adopt`: enroll AO state no tracked .ao-project covers, keeping all of it (INIT-ADOPTION).
+
+    A project an older ao set up has a config that governs its commits, a hook that runs
+    commit-check, and no marker anywhere in its history; one whose marker `ao init` wrote and
+    nobody staged measures the same. The current hooks stand aside while no marker is
+    tracked, so `ao hooks install` refuses such a project, and each message about it spelled
+    out a recipe of its own. This is the one step. The exact marker is written where the
+    working tree has none, then staged: enrollment is measured in the index, so the hooks
+    installed next enforce from the moment they are written, as the old one did, and go on
+    enforcing while the marker stays staged - the output asks for that until it lands. They
+    are installed as `ao hooks install` installs them, Git is made to run the commit hook to
+    prove it, and the commit that finishes the adoption is named.
+
+    Adoption writes nothing under .ao/: the config, the board, every ledger and decision stay
+    as they are. A marker file that is not the exact marker is refused, never replaced, and a
+    staged marker that does not read back as one is unstaged again, which leaves the project
+    governed as it was. Run again, it finds the marker staged or committed, leaves it, and
+    only makes sure of the hooks. Exits 0 only when Git was seen to run the commit hook.
+    """
+    root = cfg["root"]
+    given = ["--" + option.replace("_", "-") for option in ADOPT_REFUSES if getattr(args, option, None)]
+    if getattr(args, "agent", None) not in (None, "auto"):
+        given.append("--agent")
+    if given:
+        print(f"{C['red']}init refused{C['reset']}: --adopt keeps the project as it was set up, and "
+              f"{', '.join(given)} belong{'s' if len(given) == 1 else ''} to a new setup: ao init without --adopt")
+        return 1
+    enrollment = _project_enrollment(root)
+    if enrollment["state"] == "broken":
+        print(f"{C['red']}init --adopt refused{C['reset']}: {enrollment['detail']}")
+        return 1
+    if enrollment["state"] == "uninitialized":
+        if os.path.lexists(os.path.join(root, ".ao", "config.json")):
+            why = (f"{PROJECT_MARKER} was tracked here and its removal is committed, so this AO state is inert "
+                   f"on purpose; enrolling it again is a new setup: {PROJECT_INIT_COMMAND}")
+        else:
+            why = f"no .ao/config.json here, so no AO state to adopt; a new project starts with {PROJECT_INIT_COMMAND}"
+        print(f"{C['red']}init --adopt refused{C['reset']}: {why}")
+        return 1
+
+    if enrollment["state"] == "legacy":
+        document = _worktree_project_marker_document(root)
+        if document["exists"] and document["problem"]:
+            print(f"{C['red']}init --adopt refused{C['reset']}: {document['problem']}, and ao never replaces it: "
+                  f"make it exactly ao-project-v1 or move it aside, then {PROJECT_ADOPT_COMMAND}")
+            return 1
+        if document["exists"]:
+            print(f"  {C['dim']}kept   {PROJECT_MARKER} (ao-project-v1 already){C['reset']}")
+        else:
+            try:
+                # Created, never replaced: a file that appeared since the read above is left as it is.
+                with open(os.path.join(root, PROJECT_MARKER), "x", encoding=UTF8, newline="\n") as fh:
+                    fh.write(PROJECT_MARKER_BYTES.decode("ascii"))
+            except OSError as exc:
+                print(f"{C['red']}init --adopt refused{C['reset']}: cannot create {PROJECT_MARKER}: {exc}")
+                return 1
+            print(f"  {C['green']}wrote{C['reset']}  {PROJECT_MARKER} (ao-project-v1)")
+        problem = _worktree_project_marker_problem(root)
+        if problem:
+            print(f"{C['red']}init --adopt stopped{C['reset']}: {problem}; nothing was staged")
+            return 1
+        failure = _git_on_active_index(root, "add", "--", PROJECT_MARKER)
+        if failure:
+            print(f"{C['red']}init --adopt stopped{C['reset']}: git could not stage {PROJECT_MARKER}: {failure}")
+            return 1
+        enrollment = _project_enrollment(root)
+        if enrollment["state"] != "enrolled":
+            # A clean filter or an attribute can store other bytes than the file's. Such a marker
+            # would read as broken and refuse every commit with another repair; the project is
+            # left governed as it was instead.
+            undone = _git_on_active_index(root, "rm", "--cached", "--ignore-unmatch", "--quiet", "--",
+                                          PROJECT_MARKER)
+            print(f"{C['red']}init --adopt stopped{C['reset']}: the staged {PROJECT_MARKER} does not enroll the "
+                  f"project ({enrollment['detail']}); "
+                  + (f"it could not be unstaged ({undone}): git rm --cached -- {PROJECT_MARKER}" if undone
+                     else "it was unstaged again, and the project is governed as it was"))
+            return 1
+        print(f"  {C['green']}staged{C['reset']} {PROJECT_MARKER}")
+    else:
+        where = "committed" if enrollment["head"]["status"] == "canonical" else "staged"
+        print(f"  {C['dim']}kept   {PROJECT_MARKER} ({where} already){C['reset']}")
+    try:
+        ledgers = sorted(name for name in os.listdir(os.path.join(root, ".ao", "ledger")) if name.endswith(".jsonl"))
+    except OSError:
+        ledgers = []
+    held = f" with its {len(ledgers)} ledger(s) ({', '.join(ledgers)})" if ledgers else ""
+    print(f"  {C['dim']}kept   .ao/{held}: adoption writes nothing there{C['reset']}")
+
+    allow = bool(getattr(args, "allow_shared_hooks", False))
+    # Its exit status is not the answer: a foreign pre-push it preserves fails it and leaves commit
+    # authority whole. What it says is printed; whether the commit hook runs is proven below.
+    cmd_hooks(cfg, argparse.Namespace(action="install", allow_shared_hooks=allow))
+    inventory = _ao_hook_inventory(root)
+    proof = _hook_execution_probe(inventory)
+    print(f"  {C['green'] if proof['installed'] else C['yellow']}commit hook{C['reset']} {_hook_probe_text(proof)}")
+
+    print(f"\n{C['b']}Next, for a person:{C['reset']}")
+    if not proof["installed"]:
+        target = {} if inventory["error"] else _active_hook_targets(inventory)["pre-commit"]
+        if HOOK_AO_NOT_FOUND in proof["detail"]:
+            fix = _ao_link_fix()           # an alias is invisible to the hook's /bin/sh (SAFE-REMOVE)
+        elif target.get("needs_authorization") and not allow and os.name != "nt":
+            fix = f"{PROJECT_ADOPT_COMMAND} --allow-shared-hooks, since Git runs these hooks from a shared place"
+        else:
+            fix = f"ao hooks status names what runs in its place; once that is resolved, {PROJECT_ADOPT_COMMAND}"
+        print(f"  · the commit hook is not proven: {fix}")
+    if enrollment["head"]["status"] == "canonical":
+        print(f"  · nothing to commit: {PROJECT_MARKER} is in HEAD")
+    else:
+        print(f"  · land the staged {PROJECT_MARKER} through the loop - ao verify, ao review, ao commit-ok, then "
+              "ao commit -m \"…\" - and the project is adopted for good")
+        print(f"  · keep it staged until then: the current hooks enforce while {PROJECT_MARKER} is in the index "
+              "or in HEAD")
+    return 0 if proof["installed"] else 1
 
 
 def cmd_decide(cfg, args):

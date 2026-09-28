@@ -1121,9 +1121,11 @@ def cmd_hooks(cfg, args):
     if enrollment["state"] == "legacy":
         # The current hooks exit in their shell guard when no marker is tracked, so
         # installing them over a legacy project's enforcing hook would turn commit
-        # authority off at exactly the moment someone meant to repair it.
-        print(f"{C['red']}hooks install refused{C['reset']}: this project was {enrollment['detail']}")
-        print("  then run: ao hooks install")
+        # authority off at exactly the moment someone meant to repair it. Adoption
+        # stages the marker first and installs them after it (INIT-ADOPTION).
+        print(f"{C['red']}hooks install refused{C['reset']}: {enrollment['detail']}")
+        print(f"  {C['dim']}the current hooks stand aside while no {PROJECT_MARKER} is tracked, so installing "
+              f"them before it would switch commit authority off{C['reset']}")
         return 1
 
     active = _active_hook_targets(inv)

@@ -32,13 +32,48 @@ ao init --profile claude-claude --review-tier person
 ## 2. Wire what makes the guarantees hold
 
 ```bash
-ao hooks install                     # the pre-commit hook that refuses unauthorised commits
 git add .ao-project && git commit -m "adopt ao"
+ao hooks install                     # the pre-commit hook that refuses unauthorised commits
 ```
+
+The marker goes first. Until `.ao-project` is tracked the current hook stands aside, so
+`ao hooks install` refuses a project whose `.ao/config.json` already governs its commits: put in
+place before the marker, the hook would switch that authority off.
 
 The reviewer is another model family than the implementer's, another model of its family where
 a person opted in, or a person with `ao person-review --by <name>`; a reviewer that is the same
 actor, or of no [review tier](roles.md#review-tiers), is refused.
+
+### A project an older ao set up
+
+A project set up before `.ao-project` existed has everything but the marker: `.ao/` with its
+config, board, ledgers and decisions, a commit hook that runs `ao commit-check`, and no
+`.ao-project` anywhere in its history. Its config governs its commits, `ao hooks install`
+refuses it for the reason above, and `ao doctor` names the one command that adopts it:
+
+```bash
+ao init --adopt
+```
+
+It writes the exact marker if the working tree has none and stages it, so the project is
+enrolled from that moment. It then installs the current hooks the way `ao hooks install` does,
+has Git run the commit hook to prove that it refuses, and says what it wrote, what it kept and
+what is left to commit: the staged `.ao-project`, landed through `ao verify`, `ao review`,
+`ao commit-ok` and `ao commit`. Keep it staged until then; the current hook enforces while the
+marker is in the index or in HEAD. Where Git runs this repository's hooks from a shared or
+external place, as it does for linked worktrees, `ao init --adopt --allow-shared-hooks`
+authorizes the install.
+
+*In ao since slice INIT-ADOPTION: `ao init --adopt` enrolls AO state that no tracked
+`.ao-project` covers - a project an older ao set up, or one whose marker `ao init` wrote and
+nobody staged - in one step, where the commit hook's refusal, `ao hooks install` and `ao doctor`
+each spelled out a recipe of their own. Adoption writes nothing under `.ao/`, so every ledger and
+decision stays as it was; a `.ao-project` that is not exactly `ao-project-v1` is refused, never
+replaced, and a staged marker that does not read back as one is unstaged again, which leaves the
+project governed as it was. Run again, it leaves the marker where it is and only makes sure of the
+hooks. It exits 0 only when Git was seen to run the commit hook. The options of a new setup, such
+as `--profile`, are refused beside it; `ao doctor`, `ao doctor --check`, `ao prove`, the commit
+hook's refusal and `ao hooks install` name it wherever they meet such a project.*
 
 ## 3. Prove it
 

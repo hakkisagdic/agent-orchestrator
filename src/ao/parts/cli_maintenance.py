@@ -1495,10 +1495,19 @@ def cmd_prove(cfg, args):
     root = cfg["root"]
     results = []
     probe = _hook_execution_probe(_ao_hook_inventory(root))
-    # A hook whose /bin/sh finds no ao is not fixed by installing it again (SAFE-REMOVE).
-    hook_fix = _ao_link_fix() if HOOK_AO_NOT_FOUND in probe["detail"] else "ao hooks install"
+    enrollment = _project_enrollment(root)
+    # A hook whose /bin/sh finds no ao is not fixed by installing it again (SAFE-REMOVE), and a project no
+    # tracked marker covers refuses `ao hooks install` until it is adopted; a current hook there failed its
+    # proof with the adoption's own text, which is said once (INIT-ADOPTION).
+    if HOOK_AO_NOT_FOUND in probe["detail"]:
+        hook_fix = _ao_link_fix()
+    elif enrollment["state"] == "legacy":
+        hook_fix = None if probe["detail"] == enrollment["detail"] else enrollment["detail"]
+    else:
+        hook_fix = "ao hooks install"
     results.append(("hook refuses an unauthorised commit", probe["installed"],
-                    None if probe["installed"] else f"{_hook_probe_text(probe)} — {hook_fix}"))
+                    None if probe["installed"]
+                    else _hook_probe_text(probe) + (f" — {hook_fix}" if hook_fix else "")))
     reviewer = _reviewer_probe(cfg)
     reviewer_ok = reviewer["ok"] and reviewer["configured"]
     # What would fix it names the review tiers; a reviewer of a weaker tier is proven, and labeled (REVIEW-TIERS).
@@ -1728,8 +1737,9 @@ def cmd_doctor(cfg, args):
             tone = C["green"] if current else C["yellow"]
             notes = []
             if role == "pre-commit" and not current:
+                # `ao hooks install` refuses a project no tracked marker covers; one command adopts it (INIT-ADOPTION).
                 notes.append(
-                    "adopt .ao-project first, then ao hooks install"
+                    f"no {PROJECT_MARKER} tracked yet — {PROJECT_ADOPT_COMMAND}"
                     if legacy_project else "ao hooks install"
                 )
             if role == "pre-push" and not current:

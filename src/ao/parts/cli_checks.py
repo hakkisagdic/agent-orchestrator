@@ -363,6 +363,7 @@ def doctor_problems(cfg):
                 + ", ".join(target["path"] for target in misplaced[:3])
             )
         if reasons:
+            enrollment = _project_enrollment(root)
             if commit["repository_source"] and commit["track_state"] == "tracked" \
                     and commit["crlf_only"]:
                 repair = "git restore -- .githooks/pre-commit"
@@ -374,8 +375,10 @@ def doctor_problems(cfg):
                 )
                 flag = " --allow-shared-hooks" if needs_allow else ""
                 repair = f"ao hooks uninstall{flag}, then ao hooks install{flag}"
-            elif _project_enrollment(root)["state"] == "legacy":
-                repair = PROJECT_ADOPT_HINT + ", then ao hooks install"
+            elif enrollment["state"] == "legacy":
+                # One command adopts the project whatever its hook is (INIT-ADOPTION). A current
+                # hook stands aside there, and its proof failed with this very text: said once.
+                repair = None if proof["detail"] == enrollment["detail"] else enrollment["detail"]
             elif _state_base(commit["static_state"]) not in (
                 "current-local", "current-scoped"
             ):
@@ -384,7 +387,7 @@ def doctor_problems(cfg):
                 repair = _ao_link_fix()           # an alias is invisible to the hook's /bin/sh (SAFE-REMOVE)
             else:
                 repair = "ensure the hook can resolve this AO executable, then ao hooks status"
-            out.append(("commit-hook", "; ".join(reasons) + f" — {repair}"))
+            out.append(("commit-hook", "; ".join(reasons) + (f" — {repair}" if repair else "")))
     out.extend(_actor_grant_problems(cfg))
     if _project_enrollment(root)["state"] in ("enrolled", "legacy"):
         try:

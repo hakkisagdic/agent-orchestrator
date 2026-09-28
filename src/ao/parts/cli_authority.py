@@ -691,9 +691,13 @@ def cmd_commit_ok(cfg, args):
 
 PROJECT_MARKER = ".ao-project"
 PROJECT_MARKER_BYTES = b"ao-project-v1\n"
+# One command adopts AO state no tracked marker covers (INIT-ADOPTION). Every message about such a
+# project spelled out a recipe instead - write the marker, stage it, land it - with `ao hooks install`
+# still to follow, and that command refused the project until the marker was staged.
+PROJECT_ADOPT_COMMAND = "ao init --adopt"
 PROJECT_ADOPT_HINT = (
-    "adopt the marker: printf 'ao-project-v1\\n' > .ao-project && git add .ao-project, "
-    "then land that commit through ao commit-ok"
+    f"{PROJECT_ADOPT_COMMAND} stages {PROJECT_MARKER} and installs the current hooks; "
+    "then land it through ao commit-ok"
 )
 PROJECT_INIT_COMMAND = f"ao init --profile {A.default_profile()}"
 
@@ -936,6 +940,10 @@ def _legacy_enrollment(root):
     history that touched the marker. A shallow clone that lost the removal commit
     reads as legacy, which errs on the enforcing side. Returns None when the
     project is not legacy.
+
+    A project whose marker `ao init` wrote and nobody has staged yet measures the
+    same, so the detail states what is measured rather than how the project came
+    to be, and names the one command that adopts either (INIT-ADOPTION).
     """
     if not os.path.lexists(os.path.join(root, ".ao", "config.json")):
         return None
@@ -966,8 +974,8 @@ def _legacy_enrollment(root):
     return {
         "state": "legacy",
         "detail": (
-            f"set up before {PROJECT_MARKER} existed: .ao/config.json governs commits "
-            f"and no {PROJECT_MARKER} has ever been tracked — {PROJECT_ADOPT_HINT}"
+            f"no {PROJECT_MARKER} has ever been tracked here, so .ao/config.json governs "
+            f"commits — {PROJECT_ADOPT_HINT}"
         ),
         "source": None,
         "marker": None,

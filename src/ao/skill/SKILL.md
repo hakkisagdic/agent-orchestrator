@@ -207,7 +207,10 @@ blocks: who implements, reviews, judges; board, backlog, authority, gates), the 
 root `.ao-project` marker, the mailbox, this playbook, and the MCP registration. It
 never stages `.ao-project`: a person includes that marker in the first authorized
 candidate. Enforcement begins when its exact `ao-project-v1\n` bytes reach HEAD or
-the active index. Removal is two-phase: commit the marker deletion while state still
+the active index. A project an older ao set up has AO state and no tracked marker:
+`ao init --adopt` keeps all of that state, stages the marker, installs the current
+hooks, and names the commit left to land.
+Removal is two-phase: commit the marker deletion while state still
 enforces, then run `ao remove --yes` again to remove the remaining state. A single-harness
 profile reviews with another model of the implementer's family only when a person chooses it
 (`--review-tier same-family --by NAME`), or with no model reviewer at all (`--review-tier
@@ -247,6 +250,7 @@ start. Run anything in a repository whose owner has not approved it.
 | command | one line |
 |---|---|
 | `ao init` | write AO state plus an exact unstaged `.ao-project` enrollment marker; idempotent |
+| `ao init --adopt` | adopt AO state no tracked `.ao-project` covers: keep it all, stage the marker, install the current hooks; idempotent |
 | `ao skill install` | (re)write this playbook for the detected agents (ao-owned files only; `--rules` for the owner's rule files) |
 | `ao remove --yes` | two phases: commit `.ao-project` deletion under enforcement, then remove AO-owned state |
 | `ao update [--dry-run\|--yes]` / `ao uninstall [--yes] [--purge]` | a person's commands, never an agent's: update ao the way it was installed, the command shown first; take ao's jobs, hooks and MCP entries off the machine, a dry run unless `--yes` |

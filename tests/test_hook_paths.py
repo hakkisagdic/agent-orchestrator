@@ -1428,7 +1428,7 @@ def test_project_set_up_before_the_marker_is_governed_by_its_config(tmp_path, mo
 
     state = cli._project_enrollment(str(root))
     assert state["state"] == "legacy"
-    assert cli.PROJECT_MARKER in state["detail"] and "ao-project-v1" in state["detail"]
+    assert cli.PROJECT_MARKER in state["detail"] and cli.PROJECT_ADOPT_COMMAND in state["detail"]
 
     (root / "product.txt").write_text("change\n", encoding="utf-8")
     _git(root, "add", "product.txt")
@@ -1437,7 +1437,7 @@ def test_project_set_up_before_the_marker_is_governed_by_its_config(tmp_path, mo
     out = _strip_colour(capsys.readouterr().out)
     assert "COMMIT REFUSED" in out
     assert "no recorded authority decision" in out
-    assert "ao-project-v1" in out
+    assert cli.PROJECT_ADOPT_COMMAND in out
 
 
 def test_adopting_the_marker_enrolls_a_legacy_project(tmp_path, monkeypatch):
@@ -1484,15 +1484,16 @@ def test_hooks_install_refuses_to_replace_a_legacy_projects_hook(tmp_path, monke
 
     assert hook.read_bytes() == before
     assert "hooks install refused" in out
-    assert "ao-project-v1" in out
+    assert cli.PROJECT_ADOPT_COMMAND in out
 
 
-def test_doctor_advises_adopting_the_marker_before_reinstalling_hooks(tmp_path, monkeypatch):
+def test_doctor_advises_adopting_the_project_in_one_command(tmp_path, monkeypatch):
     root, cfg = _legacy_project(tmp_path, monkeypatch)
     _legacy_absolute_hook(root)
 
     problems = dict(cli.doctor_problems(cfg))
 
     assert "commit-hook" in problems
-    assert "ao-project-v1" in problems["commit-hook"]
+    assert cli.PROJECT_ADOPT_COMMAND in problems["commit-hook"]
     assert "restore tracked hooks with Git" not in problems["commit-hook"]
+    assert "ao hooks install" not in problems["commit-hook"]

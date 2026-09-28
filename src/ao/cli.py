@@ -266,6 +266,12 @@ def build_parser():
     ini.add_argument("--language", choices=list(S.CHOICES["language"]),
                      help="the project's language, set in its config before init writes a file: en (the default) "
                           "or tr; what ao writes into the project and for its people follows it")
+    ini.add_argument("--adopt", action="store_true",
+                     help="adopt AO state no tracked .ao-project covers, such as a project an older ao set up: keep "
+                          "all of it, write and stage the marker, install the current hooks, and name the commit left")
+    ini.add_argument("--allow-shared-hooks", action="store_true",
+                     help="with --adopt: authorize the hook install where Git routes hooks through shared, external, "
+                          "or global/system configuration")
     ini.set_defaults(fn=_init_then_prove)
     pv = sub.add_parser("prove", help="run the guarantees: the hook refuses, the reviewer answers, a slice lands")
     pv.add_argument("--no-review", action="store_true",
