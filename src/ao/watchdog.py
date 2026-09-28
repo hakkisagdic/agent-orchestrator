@@ -415,22 +415,36 @@ def touch_architect_quota(root, st, cfg=None):
     so calling this on every watchdog cycle rings orange once, advances to red
     after the configured interval, and does not create a notification storm.
     Its words are in the project's language, and its key is not (LANGUAGE-OUTPUT).
+
+    The one notice says when the wakes start again, and says it again only when that
+    time moves (ARCHITECT-WAKE-QUOTA). Held quiet until the end it had named once it was
+    mailed, the notice about a five-hour stop left a week's limit read after it untold.
     """
     until = st.get("arch_quota_until", 0)
     if until <= time.time():
         return False
     written = _written_in(root) if cfg is None else cfg
     text = (st.get("wake_error") or {}).get("text") or "architect quota exhausted"
-    reset = time.strftime("%H:%M", time.localtime(until))
     return notify(
         language.text(written, "alarm.architect-quota-title", project=A.project_key(root)),
-        language.text(written, "alarm.architect-quota", error=text[:100], reset=reset),
+        language.text(written, "alarm.architect-quota", error=text[:100], reset=reset_when(until)),
         root,
         key="architect-quota",
         window=6 * 3600,
         audience="human",
         quiet_until=until,
+        what=f"until:{int(until)}",
     )
+
+
+def reset_when(at, now=None):
+    """When held wakes start again, as a person reads it: the clock time within a day, the date too beyond one.
+
+    A weekly limit's end told as "04:00" reads as the coming night, days before the
+    week is over (ARCHITECT-WAKE-QUOTA).
+    """
+    now = time.time() if now is None else now
+    return time.strftime("%H:%M", time.localtime(float(at))) if float(at) - now < 86400 else _when(at)
 
 
 def _announce_resolved(root, e):
@@ -595,8 +609,7 @@ def architect_hold_reason(root, cfg, adapter, st, found=None, now=None):
     if not quota_ok(adapter):
         return no("no-quota", "there is no quota headroom to wake the architect")
     if st.get("arch_quota_until", 0) > now:
-        return no("quota-block", "the architect is at quota until "
-                  + time.strftime("%H:%M", time.localtime(st["arch_quota_until"])))
+        return no("quota-block", "the architect is at quota until " + reset_when(st["arch_quota_until"], now))
     if arch_alive(root, arch):
         return {"holdable": True, "code": "wake-running", "reason": "an architect wake is already running"}
     provider = A.provider_of(argv)
@@ -922,8 +935,9 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
                 if kind == "quota":
                     # The architect is paused, not broken. Wait for the window, tell
                     # the human once (orange), and remember that the desktop app may
-                    # resume the session itself when its auto-continue is on.
-                    until = quota_block_until(err)
+                    # resume the session itself when its auto-continue is on. The window's
+                    # end is read as the implementer's quota handling reads it (ARCHITECT-WAKE-QUOTA).
+                    until = architect_quota_until(err, argv)
                     if until:
                         st["arch_quota_until"] = until
                         A.deferred_append(root, "wake", reason="architect quota", until=until)
@@ -944,8 +958,7 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
                 print(f"architect wake failed with this same binary ({used}); not retrying: {text[:90]}")
                 resolved = None
             elif kind == "quota" and st.get("arch_quota_until", 0) > time.time():
-                print(f"architect at quota until "
-                      f"{time.strftime('%H:%M', time.localtime(st['arch_quota_until']))}; not waking")
+                print(f"architect at quota until {reset_when(st['arch_quota_until'])}; not waking")
                 resolved = None
             elif kind == "session":
                 # A dead session id: resume a different one or none. Setting the config
@@ -965,8 +978,7 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
                         print("last wake resumed a dead session and no other session was found; not waking")
                         resolved = None
         if resolved and st.get("arch_quota_until", 0) > time.time():
-            print(f"architect at quota until "
-                  f"{time.strftime('%H:%M', time.localtime(st['arch_quota_until']))}; not waking")
+            print(f"architect at quota until {reset_when(st['arch_quota_until'])}; not waking")
             resolved = None
         held = A.hold_state(root)
         if resolved and held:
@@ -1207,8 +1219,25 @@ WAKE_SIGNATURES = (
 
 
 # The architect's usage limit comes back within five hours of being hit; a reset
-# a message names further away than that cannot be the one it meant (#40).
+# a message names further away than that cannot be the one it meant (#40). That is
+# the short window: a limit that names its period is as long as that period.
 ARCHITECT_QUOTA_WINDOW = S.default("architect.quota_window_hours") * 3600
+
+# The periods a usage-limit message may name, and their lengths (ARCHITECT-WAKE-QUOTA).
+LIMIT_PERIODS = {"weekly": 7 * 86400, "monthly": 31 * 86400}
+
+
+def limit_window(text):
+    """How long the limit a usage-limit message names lasts: its period when it names one, else the short window.
+
+    The length bounds how far ahead a clock-only reset may roll (parse_reset). A weekly
+    limit that named only a clock time already past when it was written was read against
+    the five-hour window, as the time that had gone, so its block ended at once and the
+    next cycle could wake the architect again, days before its week was over
+    (ARCHITECT-WAKE-QUOTA).
+    """
+    named = re.search(r"\b(weekly|monthly)\b", str(text or ""), re.I)
+    return LIMIT_PERIODS[named.group(1).lower()] if named else S.get(None, "architect.quota_window_hours") * 3600
 
 
 RESET_MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
@@ -1233,13 +1262,16 @@ def parse_reset(text, now=None, window=None):
     otherwise the message meant the time that has gone. On 2026-09-07 a 17:48
     "resets 9:20pm" was re-read after 21:20 on every cycle and pushed a day ahead
     each time, so the block it raised never ended (#40).
+
+    A relative reset may count days as well: keyflip states a weekly window's as
+    "resets in 3d 4h", and read without them it said nothing (ARCHITECT-WAKE-QUOTA).
     """
     now = now or time.time()
-    m = re.search(r"resets?\s+in\s+((?:\d+\s*[hms]\s*)+)", text, re.I)
+    m = re.search(r"resets?\s+in\s+((?:\d+\s*[dhms]\s*)+)", text, re.I)
     if m:
         secs = 0
-        for n, u in re.findall(r"(\d+)\s*([hms])", m.group(1), re.I):
-            secs += int(n) * {"h": 3600, "m": 60, "s": 1}[u.lower()]
+        for n, u in re.findall(r"(\d+)\s*([dhms])", m.group(1), re.I):
+            secs += int(n) * {"d": 86400, "h": 3600, "m": 60, "s": 1}[u.lower()]
         return now + secs
     # A weekly limit names its day: "resets Sep 14 at 4am". It was read as no reset
     # at all, so a week-long block was retried every few hours (#41).
@@ -1290,9 +1322,9 @@ def wake_error(log_path):
         m = re.search(pat, body)
         if m:
             text = m.group(1).strip()[:300]
-            # A reset is read against when the wake wrote it, not against this cycle.
-            resets_at = (parse_reset(body, now=at, window=S.get(None, "architect.quota_window_hours") * 3600)
-                         if kind == "quota" else None)
+            # A reset is read against when the wake wrote it, not against this cycle, and
+            # within the limit the stop names: its period, or the short window.
+            resets_at = parse_reset(body, now=at, window=limit_window(text)) if kind == "quota" else None
             return {"text": text, "binary": binary, "when": when, "at": at, "kind": kind,
                     "resets_at": resets_at}
     return None
@@ -1350,18 +1382,45 @@ def tell_retried_wake(root, cfg, st, dry_run=False):
     return worked
 
 
-def quota_block_until(err, now=None):
+def quota_block_until(err, now=None, stated=None):
     """Until when a quota error read from the wake log blocks a wake; None once it no longer does.
 
     The block ends at the reset the message named or, when it named none, one
     limit window after the message was written. An older error describes a
     window that is over, however many times the log is read again (#40).
+
+    `stated` is the reset the provider's own reading states for a spent window
+    (architect_quota_until). It only moves the end later: a wake started before it
+    stops on that window again, and without it the end is what it always was
+    (ARCHITECT-WAKE-QUOTA).
     """
     now = now or time.time()
     if not err or err.get("kind") != "quota":
         return None
-    until = err.get("resets_at") or ((err.get("at") or now) + S.get(None, "architect.quota_window_hours") * 3600)
+    until = max(err.get("resets_at") or ((err.get("at") or now) + S.get(None, "architect.quota_window_hours") * 3600),
+                stated or 0)
     return until if until > now else None
+
+
+def architect_quota_until(err, argv, now=None):
+    """Until when a usage-limit stop read from an architect wake's log holds its wakes; None once it does not.
+
+    The implementer's quota handling reads the machine's reading of the providers'
+    windows: keyflip's lines, taken by the quota command the adapters declare and kept in
+    ~/.ao/quota.json, which the quota gate stops a turn on at `quota.block_percent` and an
+    account rotation reads for the provider an adapter's `quota` block names
+    (A.provider_window). The wake reads the same reading, for the provider `argv` spends.
+    When that window is spent, at the gate's percent, the reset it states is one the wake
+    is not started before. A window with headroom stopped nothing, so its reset says
+    nothing of this stop. With no such reading the block is quota_block_until's alone, as
+    it always was (ARCHITECT-WAKE-QUOTA).
+    """
+    if not err or err.get("kind") != "quota":
+        return None
+    provider = A.provider_of(argv)
+    window = A.provider_window(provider) if provider else None
+    spent = bool(window) and (window.get("pct") or 0) >= S.get(None, "quota.block_percent")
+    return quota_block_until(err, now=now, stated=parse_reset(window.get("raw") or "", now=now) if spent else None)
 
 
 def quota_ok(adapter):
@@ -2615,10 +2674,9 @@ def _cycle_impl(args, root):
                 print("queue low, but there is no quota headroom to wake the architect")
                 return 0
             failed = wake_error(log_path)
-            blocked = quota_block_until(failed)
+            blocked = architect_quota_until(failed, argv)
             if blocked:
-                print(f"the last refill hit the architect's limit; waiting until "
-                      f"{time.strftime('%H:%M', time.localtime(blocked))}")
+                print(f"the last refill hit the architect's limit; waiting until {reset_when(blocked)}")
                 return 0
             if failed and failed.get("kind") != "quota" and time.time() - (failed.get("at") or 0) < 6 * 3600:
                 notify(f"{project}: refill failed", f"{failed.get('kind')}: "

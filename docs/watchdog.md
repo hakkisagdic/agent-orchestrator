@@ -138,6 +138,42 @@ restart. The park's alarm is raised every cycle it stands and climbs the ladder
 ([alarms.md](alarms.md)). The quota guard (4) still reads the provider's window through keyflip
 where it is installed; a park needs no keyflip.
 
+## The architect at its usage limit
+
+*In ao since slice ARCHITECT-WAKE-QUOTA: a wake that stopped on the architect's usage limit is not
+started again before that limit resets, read the way the implementer's quota handling reads it,
+and the one notice a report wake's stop rings says when the wakes start again, with the date when
+that is a day or more away.*
+
+A wake is detached, so the next cycle reads what it wrote: a line such as `You've hit your weekly
+limit · resets 4am` is a usage-limit stop. A report wake's stop holds every wake of the architect
+until the reset, and a refill's holds the refills. The block ends at the later of two readings:
+
+- **What the stop names.** A reset it states - `resets in 4h 43m`, `resets Sep 14 at 4am`,
+  `resets 4am` - read against the time the wake wrote it and within the limit the stop names; one
+  `architect.quota_window_hours` after the stop when it states none. A weekly or monthly limit
+  lasts its period, so a clock time already past when it was written is the next day's. Any other
+  limit lasts `architect.quota_window_hours`, and a clock time past by more than that is the time
+  that has gone (#40). Read with that window, a weekly limit that named only a clock time ended its
+  block at once, and the architect could be woken again within minutes, days before its week was
+  over.
+- **What the machine reads of the provider.** The implementer's quota gate and an account rotation
+  read keyflip's window for a provider, kept in `~/.ao/quota.json` by the quota command the adapters
+  declare. The wake reads the same reading, for the provider its adapter's `quota` block names
+  (`"quota": {"provider": "claude"}`). When that window is spent, at `quota.block_percent`, the reset
+  it states - `resets in 3d 4h` for a week - holds the wake as well. A window with headroom stopped
+  nothing, and its reset is not read.
+
+With no reset known - a stop that names none, and no spent window read - the block ends one
+`architect.quota_window_hours` after the stop, as it always did: a reading only ever moves the end
+later.
+
+A report wake's stop is told in one notice, `architect at quota`: "wakes are held until …", with
+the clock time when that is within a day and the date as well when it is further away. It rings
+once, climbs the ladder and is held quiet until that end ([alarms.md](alarms.md)), and it is told
+again only when the end moves, as when a stop on the five-hour window is followed by the week's.
+`ao doctor` names the same end, and a refill that waits names its own in the cycle's trace.
+
 ## Fault catalog
 
 Every fault the watchdog has had, in the order it was found. "Test" names the
@@ -175,6 +211,7 @@ test that would fail if it came back.
 | F28 | installed from a package whose console scripts were not on PATH, launchd ran a missing file every two minutes while `ao watchdog install` said "installed" | install fell back to a clone's `scripts/ao-watchdog` and `bin/ao` whether or not there was a clone | each job names the console script on PATH, the clone's script, or `python -m ao.watchdog` from an interpreter that imports an installed ao; install refuses when there is none, and exits 1 when `schtasks` fails | test_safe_remove | — |
 | F29 | after `ao remove --yes` the watchdog, doctor and telegram jobs ran on against the removed project, and the removal had taken the registry and other projects' logs with it | remove ran `python -m ao watchdog uninstall` without reading the result, and from a clone that interpreter has no ao; it never removed the telegram poller; it deleted every file in `~/.ao` whose name held the key | the jobs are removed in the removal's own process and checked gone before any state goes; then exactly the project's own files and its registry row | test_safe_remove | — |
 | F30 | an implementer that stopped on its usage limit mid-slice read as stuck: every nudge died on the same limit until the backoff ran out and a person was told "agent stuck", and nothing resumed the slice when the limit reset | a usage limit was read only in an architect wake's log, in one harness's words; a nudge that died on one was a failure like any other, and the implementer's own transcript was not read for one | the stop is read from the harness's own reply or the nudge that died on it, in the words its adapter declares: the implementer's running items are parked `blocked`, `needs: quota (resets …)`, under an alarm that climbs the ladder, never nudged, and resumed once in the same session at the reset, at one retry where none was named, when the transcript goes on past the stop, or when keyflip rotates to headroom | test_quota_park | — |
+| F31 | a weekly limit whose stop named only a clock time could be woken again within minutes, days before its week was over, and a block's end was told as "04:00" whatever its day | the stop's reset was read within the five-hour window whatever limit it named, the spent window the machine reads for the provider was not read, and the end was told by its clock alone | a reset is read within the period the stop names; a spent window keyflip reports for the architect's provider holds the wake until the reset it states; the notice names the date beyond a day, and is told again when the end moves | test_architect_wake_quota | — |
 
 ## Scenarios: testing the decision, not the measurement
 
@@ -243,9 +280,10 @@ Best practice, applied:
 - **Told once.** A condition that stands and says what it is about rings the
   desktop and the phone once for what it says and then only climbs: red mails
   on its schedule, and a red with a known end - spent credits until their reset -
-  is held until that end. Another request, a projection come true or another
-  account is told again. With no quota to wake the architect, one handoff goes
-  to the phone for the reports that wait, not one every hour. An open decision
+  is held until that end. Another request, a projection come true, another
+  account or a later end of the architect's usage limit is told again. With no
+  quota to wake the architect, one handoff goes to the phone for the reports
+  that wait, not one every hour. An open decision
   rings once for its question, an unseen request as it crosses each of its
   thresholds, and a failed wake once for what failed; the phone hears of a wake
   retried after a failure only once it has not failed.

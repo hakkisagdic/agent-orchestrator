@@ -46,6 +46,10 @@ PARSE_RESET = [
     ("You've hit your weekly limit · resets Jan 2 at 9:30pm", "2026-12-30 08:00", None, "2027-01-02 21:30"),
     ("weekly limit, resets September 3", "2026-09-01 08:00", None, "2026-09-03 00:00"),
     ("usage limit reached", "2026-09-07 17:00", None, None),
+    # a week's clock-only reset, past when it was written: read within the week, it is the next day's
+    ("You've hit your weekly limit · resets 4am", "2026-09-10 12:00", 7 * DAY, "2026-09-11 04:00"),
+    # keyflip's reading of a weekly window counts days
+    ("Claude (Anthropic) 100%  weekly  resets in 3d 4h", "2026-09-10 12:00", None, "+76:00"),
 ]
 
 
@@ -65,19 +69,79 @@ def test_parse_reset_golden_values(message, written, window, expected):
 # ── watchdog.quota_block_until: a quota error read from the wake log to the end of its block ──
 NOW = 1_800_000_000
 QUOTA_BLOCK = [
-    ("no error", None, None),
-    ("an error that is not quota", {"kind": "binary", "at": NOW}, None),
-    ("a named reset still ahead", {"kind": "quota", "at": NOW - HOUR, "resets_at": NOW + HOUR}, NOW + HOUR),
-    ("no named reset: one window after it was written", {"kind": "quota", "at": NOW - HOUR}, NOW + 4 * HOUR),
-    ("a named reset already passed", {"kind": "quota", "at": NOW - 2 * HOUR, "resets_at": NOW - HOUR}, None),
-    ("no named reset, written a window ago", {"kind": "quota", "at": NOW - 6 * HOUR}, None),
-    ("no time written: a window from now", {"kind": "quota"}, NOW + 5 * HOUR),
+    # (case, error, the reset a spent provider window states, expected)
+    ("no error", None, None, None),
+    ("an error that is not quota", {"kind": "binary", "at": NOW}, None, None),
+    ("a named reset still ahead", {"kind": "quota", "at": NOW - HOUR, "resets_at": NOW + HOUR}, None, NOW + HOUR),
+    ("no named reset: one window after it was written", {"kind": "quota", "at": NOW - HOUR}, None, NOW + 4 * HOUR),
+    ("a named reset already passed", {"kind": "quota", "at": NOW - 2 * HOUR, "resets_at": NOW - HOUR}, None, None),
+    ("no named reset, written a window ago", {"kind": "quota", "at": NOW - 6 * HOUR}, None, None),
+    ("no time written: a window from now", {"kind": "quota"}, None, NOW + 5 * HOUR),
+    # a stated reset only ever moves the end later
+    ("a stated reset later than the named one", {"kind": "quota", "at": NOW - HOUR, "resets_at": NOW + HOUR},
+     NOW + 3 * DAY, NOW + 3 * DAY),
+    ("a stated reset sooner than the named one", {"kind": "quota", "at": NOW - HOUR, "resets_at": NOW + 2 * HOUR},
+     NOW + HOUR, NOW + 2 * HOUR),
+    ("a stated reset beyond the window of a stop that named none", {"kind": "quota", "at": NOW - HOUR},
+     NOW + DAY, NOW + DAY),
+    ("a stated reset holds a stop whose own window is over", {"kind": "quota", "at": NOW - 6 * HOUR},
+     NOW + HOUR, NOW + HOUR),
+    ("a stated reset already passed", {"kind": "quota", "at": NOW - HOUR}, NOW - 60, NOW + 4 * HOUR),
+    ("a stated reset holds no error that is not quota", {"kind": "binary", "at": NOW}, NOW + DAY, None),
 ]
 
 
-@pytest.mark.parametrize("case,err,expected", QUOTA_BLOCK)
-def test_quota_block_until_golden_values(case, err, expected):
-    assert W.quota_block_until(err, now=NOW) == expected, case
+@pytest.mark.parametrize("case,err,stated,expected", QUOTA_BLOCK)
+def test_quota_block_until_golden_values(case, err, stated, expected):
+    assert W.quota_block_until(err, now=NOW, stated=stated) == expected, case
+
+
+# ── watchdog.limit_window: a usage-limit message to the length of the limit it names ──
+LIMIT_WINDOW = [
+    ("You've hit your weekly limit · resets Sep 14 at 4am (Europe/Istanbul)", 7 * DAY),
+    ("You've hit your Weekly limit · resets 4am", 7 * DAY),
+    ("You've hit your monthly limit", 31 * DAY),
+    ("You've hit your session limit · resets 4:30am (Europe/Istanbul)", 5 * HOUR),
+    ("usage limit reached, resets in 4h 43m", 5 * HOUR),
+    ("biweekly usage limit reached", 5 * HOUR),               # a period inside another word is not one
+    ("", 5 * HOUR),
+    (None, 5 * HOUR),
+]
+
+
+@pytest.mark.parametrize("message,expected", LIMIT_WINDOW)
+def test_limit_window_golden_values(message, expected):
+    assert W.limit_window(message) == expected, message
+
+
+# ── watchdog.architect_quota_until: a stop and the machine's reading of its provider to the end of its block ──
+SPENT_WEEK = {"pct": 100, "raw": "Claude (Anthropic) 100%  weekly  resets in 3d 4h"}
+ARCHITECT_QUOTA = [
+    # (case, the architect's command, the stop read from its log, the provider's reading, expected)
+    ("no stop", ["claude"], None, SPENT_WEEK, None),
+    ("a stop that is not a limit", ["claude"], {"kind": "session", "at": NOW - HOUR}, SPENT_WEEK, None),
+    ("no reading: the stop's own block", ["claude"], {"kind": "quota", "at": NOW - HOUR}, None, NOW + 4 * HOUR),
+    ("a spent weekly window states its reset", ["claude"], {"kind": "quota", "at": NOW - HOUR}, SPENT_WEEK,
+     NOW + 3 * DAY + 4 * HOUR),
+    ("a spent window at the gate's own percent", ["/agents/claude"], {"kind": "quota", "at": NOW - HOUR},
+     {"pct": 97, "raw": "Claude (Anthropic) 97%  5h  resets in 4h 30m"}, NOW + 4 * HOUR + 30 * 60),
+    ("a window with headroom says nothing of the stop", ["claude"], {"kind": "quota", "at": NOW - HOUR},
+     {"pct": 12, "raw": "Claude (Anthropic) 12%  5h  resets in 10h"}, NOW + 4 * HOUR),
+    ("a spent window that states no reset", ["claude"], {"kind": "quota", "at": NOW - HOUR},
+     {"pct": 100, "raw": "Claude (Anthropic) 100%  weekly"}, NOW + 4 * HOUR),
+    ("a reading without its line", ["claude"], {"kind": "quota", "at": NOW - HOUR}, {"pct": 100}, NOW + 4 * HOUR),
+    ("a reading without its percent", ["claude"], {"kind": "quota", "at": NOW - HOUR},
+     {"raw": "Claude (Anthropic) weekly  resets in 3d 4h"}, NOW + 4 * HOUR),
+    ("a command no adapter names a provider for", ["some-other-cli"], {"kind": "quota", "at": NOW - HOUR},
+     SPENT_WEEK, NOW + 4 * HOUR),
+]
+
+
+@pytest.mark.parametrize("case,argv,err,reading,expected", ARCHITECT_QUOTA)
+def test_architect_quota_until_golden_values(case, argv, err, reading, expected, monkeypatch):
+    # The reading is the provider's the command spends, as claude-code.json's `quota` block names it.
+    monkeypatch.setattr(A, "provider_window", lambda name: reading if name == "claude" else None)
+    assert W.architect_quota_until(err, argv, now=NOW) == expected, case
 
 
 # ── lib.burn_rate: credit readings to a projection ──
@@ -191,7 +255,9 @@ def test_rounds_golden_values(case, running, reviews, expected, project):
 GOLDEN = {
     W.parse_reset: (PARSE_RESET, 10),
     W._reset_clock: (PARSE_RESET, 6),
-    W.quota_block_until: (QUOTA_BLOCK, 6),
+    W.quota_block_until: (QUOTA_BLOCK, 7),
+    W.limit_window: (LIMIT_WINDOW, 2),
+    W.architect_quota_until: (ARCHITECT_QUOTA, 7),
     A.burn_rate: (BURN_RATE, 11),
     cli._credits_problem: (CREDITS_PROBLEM, 12),
     A.rounds: (ROUNDS, 35),

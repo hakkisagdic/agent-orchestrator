@@ -1409,11 +1409,11 @@ def cmd_doctor(cfg, args):
               f"{C['green'] if em_ok else C['yellow']}{'on' if em_ok else 'off'}{C['reset']}"
               + ("" if (tg_ok or em_ok) else f"  {C['yellow']}orange alarms reach nothing but the desktop — ao email setup{C['reset']}"))
         try:
-            from .watchdog import load_state as _ls
+            from .watchdog import load_state as _ls, reset_when as _reset_when
             _st = _ls(root)
             if _st.get("arch_quota_until", 0) > time.time():
-                print(f"architect       {C['yellow']}at quota{C['reset']} until "
-                      f"{time.strftime('%H:%M', time.localtime(_st['arch_quota_until']))}")
+                # The date too when the end is a day or more away: a week's end is not tonight (ARCHITECT-WAKE-QUOTA).
+                print(f"architect       {C['yellow']}at quota{C['reset']} until {_reset_when(_st['arch_quota_until'])}")
         except Exception:
             pass
         alive = A.active_alarms(A.project_key(root))

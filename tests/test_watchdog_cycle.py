@@ -193,7 +193,8 @@ def test_cycle_previews_and_persists_quota_ladder_until_reset(
     assert W._cycle(dry_args, root) == 0
     red_preview = capsys.readouterr().out
     assert "would send red e-mail" in red_preview
-    assert "would suppress red desktop/Telegram channels (recent notice)" in red_preview
+    # Rung once for the end it names, the notice holds the channels until it names another (ARCHITECT-WAKE-QUOTA).
+    assert "would hold proj: architect at quota: rung once and nothing new since" in red_preview
     unchanged = A.active_alarms("proj", now=clock[0])[0]
     assert unchanged["ring"] == "orange" and unchanged["count"] == 1
     assert len(desktop) == 1 and len(phone) == 1 and mailed == []

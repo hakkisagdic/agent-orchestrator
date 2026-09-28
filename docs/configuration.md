@@ -82,7 +82,7 @@ machine setting written into a project.
 | `alarms.red_repeat_hours` | `6` | machine | hours before a red alarm that still stands e-mails again |
 | `alarms.reset_after_hours` | `2` | machine | hours of quiet after which an alarm episode is over |
 | `quota.block_percent` | `97` | machine | a provider window used at or above this percent stops a wake or a nudge |
-| `architect.quota_window_hours` | `5` | machine | the architect's usage window; a reset named further away is not the one meant |
+| `architect.quota_window_hours` | `5` | machine | the architect's usage window, unless its limit names a week or a month; a reset named further away is not the one meant |
 | `heartbeat.retired_days` | `7` | machine | days of watchdog silence after which a project counts as retired, not dead |
 | `fleet.window_reserve_pct` | `20` | machine | percent of the machine's provider window kept free before a report wake |
 | `binaries.extra_dirs` | `none` | machine | directories searched for agent binaries after PATH, before the usual install locations |

@@ -207,7 +207,8 @@ SETTINGS = {
         "a provider window used at or above this percent stops a wake or a nudge"),
     "architect.quota_window_hours": Setting(
         5, int, 1, None, "machine",
-        "the architect's usage window; a reset named further away is not the one meant"),
+        "the architect's usage window, unless its limit names a week or a month; a reset named further away "
+        "is not the one meant"),
     "heartbeat.retired_days": Setting(
         7, int, 1, None, "machine",
         "days of watchdog silence after which a project counts as retired, not dead"),
