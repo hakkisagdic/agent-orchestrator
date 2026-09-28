@@ -23,7 +23,7 @@ from tests import conftest
 
 POSIX_SYSTEM = {"/usr/bin", "/bin", "/usr/sbin", "/sbin"}
 # The variables the suite's own fixtures set for each test (tests/conftest.py).
-SET_FOR_EACH_TEST = {"AO_SETTINGS", "AO_PROJECT_REGISTRY", "AO_LEDGER_CHECKPOINTS"}
+SET_FOR_EACH_TEST = {"AO_SETTINGS", "AO_PROJECT_REGISTRY", "AO_LEDGER_CHECKPOINTS", "AO_EVENTS"}
 # Places in ao's source that name _BIN_DIRS or a shared install directory without looking there for an agent CLI.
 NOT_A_SEARCH_FOR_AN_AGENT = {
     "src/ao/parts/lib_mail.py:<module>": "binds _BIN_DIRS, which the searches read",

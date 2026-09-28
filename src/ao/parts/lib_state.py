@@ -440,10 +440,15 @@ def verification_by_id(root, vid):
 
 
 def record_verification(root, record):
-    """Durably append one chained verification before reporting its result."""
+    """Durably append one chained verification before reporting its result.
+
+    The machine's event log hears of it once the row is down (EVENTS-LOG).
+    """
     from .storage import append_chained_jsonl
     path = os.path.join(root, ".ao", "ledger", "verifications.jsonl")
-    return append_chained_jsonl(path, scan_record(record), VERIFICATION_CHAIN, legacy_prefix=True)
+    row = append_chained_jsonl(path, scan_record(record), VERIFICATION_CHAIN, legacy_prefix=True)
+    emit_event(root, "verification", {"id": row.get("id"), "passed": row.get("passed"), "profile": row.get("profile")})
+    return row
 
 
 def _granted_trees(root):
@@ -535,7 +540,13 @@ def record_authority(root, granted, reasons, tree, verification, token=None,
     # Keep the reviewer's identity here, not only in the review file. A grant is
     # not real until the chain prefix validates and the locked append, file
     # fsync and (on first creation) directory fsync have all completed.
-    return append_chained_jsonl(path, record, AUTHORITY_CHAIN)
+    row = append_chained_jsonl(path, record, AUTHORITY_CHAIN)
+    if row.get("granted"):
+        # The machine's event log hears of a grant once it is real; a refusal stays in this ledger (EVENTS-LOG).
+        emit_event(root, "authority-granted", {
+            "token": token, "verification": verification, "review": review, "waiver": waiver,
+            "index_tree": candidate.get("index_tree") if isinstance(candidate, dict) else None})
+    return row
 
 
 GATE_LOCK = os.path.join(HOME, ".ao", "gate.lock")

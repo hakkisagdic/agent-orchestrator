@@ -1,4 +1,4 @@
-"""Status: the status screen, watch, fleet, tail and mail commands.
+"""Status: the status screen, watch, fleet, tail, mail and events commands.
 
 A part of src/ao/cli.py (#44): moved out byte for byte and run in its namespace by `_part`,
 where it stood; it is not importable on its own.
@@ -602,3 +602,112 @@ def cmd_mail(cfg, args):
         for r in A.mail_search(root, args.type):
             when = datetime.fromtimestamp(r["at"]).strftime("%d %b %H:%M")
             print(f"  {when}  {r.get('kind') or '':<9} {r['id'][:60]}  {C['dim']}{r.get('summary', '')[:70]}{C['reset']}")
+
+
+# ---- the machine's event log, read and followed (EVENTS-LOG) ------------------------------
+
+EVENTS_FOLLOW_SECONDS = 1.0     # how often `ao events --follow` looks for new lines: a stat and a read, then a sleep
+
+
+def _events_wait(seconds):
+    """The pause between two looks at the event log; a test puts its own in."""
+    time.sleep(seconds)
+
+
+def _event_value(value):
+    """One value of an event as a person reads it: a plain word as it is, anything else as JSON.
+
+    Any program on the machine can write to the log, so a string with a space is quoted, and one
+    holding a character a terminal would act on - an escape, a direction override - is escaped.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str) and value.isprintable():
+        return value if value and not any(ch.isspace() for ch in value) else json.dumps(value, ensure_ascii=False)
+    return json.dumps(value, ensure_ascii=True, separators=(",", ":"), default=str)
+
+
+def _event_text(row):
+    """One event as a line a person reads: its local time, project and kind, then name=value for what it carried.
+
+    A line another program wrote in its own shape is shown too: what it holds beside the time,
+    the project and the kind is read as if it were the payload.
+    """
+    at, when = row.get("at"), "????-??-?? ??:??:??"
+    if isinstance(at, (int, float)) and not isinstance(at, bool):
+        try:
+            when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(at))
+        except (ValueError, OverflowError, OSError):
+            pass
+    fields = dict(row["data"]) if isinstance(row.get("data"), dict) else {}
+    fields.update((key, value) for key, value in row.items()
+                  if key not in ("at", "project", "kind") and not (key == "data" and isinstance(value, dict)))
+    carried = " ".join(f"{_event_value(key)}={_event_value(value)}" for key, value in fields.items()
+                       if value is not None)
+    return (f"{C['dim']}{when}{C['reset']}  {_event_value(row.get('project', '?')):<14} "
+            f"{C['cyan']}{_event_value(row.get('kind', '?')):<17}{C['reset']} {carried}").rstrip()
+
+
+def cmd_events(cfg, args):
+    """What ao did on this machine, read from its event log (EVENTS-LOG).
+
+    The newest events of every project, or of one, or every one since a time; with --follow, then
+    each event as it is written, until Ctrl+C. Following looks at the file once a second - a stat
+    and a read of what is new, never a busy loop - and goes on across the bound's trims
+    (A.EventTail). --json prints each event as a line of JSON in the log's own shape - ao's lines as
+    they were written - for a program to read; what is said about the log itself then goes to
+    standard error, so the output stays one event a line.
+    """
+    tail = A.EventTail()
+    since = args.since.moment() if args.since else None
+
+    def wanted(rows):
+        return [row for row in rows if A.event_matches(row, args.project, since)]
+
+    def say(text):
+        if args.json:
+            print(text, file=sys.stderr, flush=True)
+        else:
+            print(f"{C['dim']}{text}{C['reset']}", flush=True)
+
+    def show(rows):
+        # Flushed a line at a time: a program reading a pipe gets each event as it is written.
+        for row in rows:
+            print(A.event_line(row).decode(UTF8).rstrip("\n") if args.json else _event_text(row), flush=True)
+
+    rows = wanted(tail.poll())
+    shown = rows[-args.n:] if args.n > 0 else rows
+    if len(shown) < len(rows):
+        say(f"{len(rows) - len(shown)} earlier event(s) not shown; -n 0 shows every one")
+    show(shown)
+    skipped = tail.skipped
+    if skipped:
+        say(f"{skipped} line(s) of {tail.path} hold no event and were passed over")
+    if not args.follow:
+        if not rows:
+            say(f"no events{' of ' + args.project if args.project else ''}"
+                f"{' since ' + str(args.since) if args.since else ''} in {tail.path}")
+        return 0
+    say(f"following {tail.path}; Ctrl+C ends it")
+    trouble = None
+    try:
+        while True:
+            _events_wait(EVENTS_FOLLOW_SECONDS)
+            try:
+                rows = tail.poll()
+            except OSError as exc:
+                # Said once, not every second; the follower goes on looking until the file can be read.
+                if str(exc) != trouble:
+                    trouble = str(exc)
+                    say(f"cannot read {tail.path}: {exc}; still looking")
+                continue
+            trouble = None
+            if tail.missed:
+                tail.missed = False
+                say(f"{tail.path} was cut past where this reader had read; events may be missing")
+            if tail.skipped > skipped:
+                say(f"{tail.skipped - skipped} line(s) hold no event and were passed over")
+                skipped = tail.skipped
+            show(wanted(rows))
+    except KeyboardInterrupt:
+        return 0                                        # Ctrl+C is how a follow ends, as it ends `ao watch`

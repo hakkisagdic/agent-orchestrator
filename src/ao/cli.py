@@ -90,6 +90,14 @@ def build_parser():
     t.add_argument("-n", type=int, default=5)
     t.set_defaults(fn=cmd_tail)
 
+    ev = sub.add_parser("events", help="what ao did on this machine, one line an event; --follow as it happens")
+    ev.add_argument("-f", "--follow", action="store_true", help="then print each event as it is written, until Ctrl+C")
+    ev.add_argument("--project", help="one project's events: its key, the name its files in ~/.ao carry")
+    ev.add_argument("--since", type=A.time_arg(), help="written at or after: 30m, 2h, today, a date (2026-09-26)")
+    ev.add_argument("-n", type=int, default=20, help="the newest N before following (default 20; 0: every one)")
+    ev.add_argument("--json", action="store_true", help="each event as a line of JSON, in the shape the log holds")
+    ev.set_defaults(fn=cmd_events)
+
     m = sub.add_parser("mail", help="list, read or send coordination messages")
     m.add_argument("action", choices=["list", "read", "send", "log", "search", "ack", "compact", "sync"])
     m.add_argument("type", nargs="?", default="INFO")

@@ -1019,6 +1019,8 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
             A.helper_register(root, proc.pid, "architect")   # a judge, not a writer
             A.acquire_architect(root, proc.pid, "watchdog wake")   # one judge at a time
             save_state(root, st)
+            A.emit_event(root, "wake", {"why": "reports", "reports": len(stale), "pid": proc.pid,
+                                        "retried": True if retried else None})
             if retried:
                 print(f"retried the architect's wake (pid {proc.pid}); the phone hears of it once it has not failed")
             else:
@@ -2365,6 +2367,7 @@ def _cycle_impl(args, root):
             A.helper_register(root, proc.pid, "architect")   # a judge, not a writer
             A.acquire_architect(root, proc.pid, "watchdog refill")
             save_state(root, st)
+            A.emit_event(root, "wake", {"why": "refill", "queue": depth, "pid": proc.pid})
             print(f"queue low ({depth} < {threshold}); woke the architect")
             return 0
         print("idle, but no open work — leaving it alone")
@@ -2603,6 +2606,8 @@ def _cycle_impl(args, root):
               last_fingerprint=nudged_fp,
               nudge_size=size, nudge_fingerprint=nudged_fp,
               nudge_inputs=A.nudge_inputs(root, cfg))
+    # Told once its first seconds are over, with the exit of a turn that did not outlive them (EVENTS-LOG).
+    A.emit_event(root, "nudge", {"pid": proc.pid, "attempt": st["attempts"], "exit": early})
     if early not in (None, 0):
         tail = ""
         try:

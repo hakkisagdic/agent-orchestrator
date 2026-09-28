@@ -13,8 +13,8 @@ ao config unset round_budget
 
 A **project** setting is read from the project's `.ao/config.json`, then from the
 machine's `~/.ao/settings.json`, then its default. A **machine** setting governs state
-every project on the machine shares - alarm episodes, provider windows, heartbeats,
-where binaries are found - and is read from `~/.ao/settings.json` only. Both files are
+every project on the machine shares - alarm episodes, provider windows, heartbeats, the
+event log, where binaries are found - and is read from `~/.ao/settings.json` only. Both files are
 written whole or not at all. A dotted name is nested in the file:
 `alarms.red_after_minutes` is `{"alarms": {"red_after_minutes": 60}}`.
 
@@ -88,6 +88,7 @@ machine setting written into a project.
 | `watchdog.bypass_adapters` | `none` | machine | adapters whose implementer the watchdog may nudge with the flag that turns off their own sandbox; none: such a nudge is refused |
 | `filters.probe_programs` | `['rtk']` | machine | programs ao doctor may run as a user-level shell-command filter hook, to prove it leaves measurements alone |
 | `filters.probe_timeout_seconds` | `5` | machine | seconds a probed filter hook may take to answer for one measurement command before ao stops asking it |
+| `retention.events_kb` | `2048` | machine | kilobytes the machine's event log, ~/.ao/events.jsonl, keeps before its oldest lines go |
 
 The scheduled watchdog reads `watchdog.idle_minutes` when it is installed; run
 `ao watchdog install` again after changing it. Everything else is read when it is used.

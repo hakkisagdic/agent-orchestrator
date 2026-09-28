@@ -224,6 +224,9 @@ SETTINGS = {
     "filters.probe_timeout_seconds": Setting(
         5, int, 1, 60, "machine",
         "seconds a probed filter hook may take to answer for one measurement command before ao stops asking it"),
+    "retention.events_kb": Setting(
+        2048, int, 64, None, "machine",
+        "kilobytes the machine's event log, ~/.ao/events.jsonl, keeps before its oldest lines go"),
 }
 
 # A setting whose values are words, and the words it takes. Any other value is unusable: set by

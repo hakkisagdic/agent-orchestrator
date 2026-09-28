@@ -2011,6 +2011,18 @@ def _spawn_review_run(root, rid):
                          env=A.self_child_env(), **_reviewer_group())
 
 
+def _review_finished_event(root, state):
+    """Tell the machine's event log that a submitted review ended, and how (EVENTS-LOG).
+
+    Every end a submit or its run writes into the review's state is told - finished, unavailable,
+    failed or stale - so whoever follows the log learns when to collect, without polling `ao reviews`.
+    A run that dies before it writes its end tells nothing, and `ao reviews` shows that review lost.
+    """
+    A.emit_event(root, "review-finished", {"review": state.get("id"), "state": state.get("state"),
+                                            "verdict": state.get("verdict"), "slice": state.get("slice"),
+                                            "artefact": state.get("artefact")})
+
+
 def cmd_review_submit(cfg, args):
     """Pin the staged candidate as a tree, start its review detached, and return its id at once (S1-S3)."""
     root = cfg["root"]
@@ -2053,11 +2065,14 @@ def cmd_review_submit(cfg, args):
              "boundary": getattr(args, "boundary", None), "paths": getattr(args, "paths", None),
              "slice": slice_id, "worktree": root, "index": index, "submitted_at": int(time.time())}
     _write_review_state(root, state)
+    # Told before the run starts, so a run that ends at once is never told first (EVENTS-LOG).
+    A.emit_event(root, "review-submitted", {"review": rid, "slice": slice_id, "tree": candidate["index_tree"]})
     try:
         _spawn_review_run(root, rid)
     except OSError as exc:
         state.update(state="failed", reason=f"could not start the review: {exc}", finished_at=int(time.time()))
         _write_review_state(root, state)
+        _review_finished_event(root, state)
         print(f"{C['red']}{rid} failed to start{C['reset']}: {exc}")
         return 1
     print(rid)
@@ -2086,6 +2101,7 @@ def cmd_review_run(cfg, rid):
                          reason=f"HEAD moved from {state['head'][:12]} to {candidate['head'][:12]} after submit; "
                                 "the pinned tree is no longer this candidate")
             _write_review_state(root, state)
+            _review_finished_event(root, state)
             return 2
         before = A.review_row_count(root)
         code = cmd_review(cfg, SimpleNamespace(boundary=state.get("boundary"), paths=state.get("paths"),
@@ -2098,6 +2114,7 @@ def cmd_review_run(cfg, rid):
                      exit=code, verdict=verdict, artefact=(newest or {}).get("artefact"),
                      tier=(newest or {}).get("tier"), finished_at=int(time.time()))
         _write_review_state(root, state)
+        _review_finished_event(root, state)
         return code
     finally:
         if previous is None:

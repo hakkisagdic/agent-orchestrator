@@ -177,6 +177,9 @@ housekeeping would quietly remove the ability to answer "on what basis did this
 land". Log trimming keeps the tail rather than the head, because the last turn's
 output is the part anyone actually reads when diagnosing a failed nudge.
 
+The machine's event log, `~/.ao/events.jsonl`, needs no pruning: it holds itself to
+`retention.events_kb` as it is written ([surfaces.md](surfaces.md#the-event-log)).
+
 Review artefacts are evidence too, and they are kept by reference. One that a grant, a
 verification, the board, a waiver or a decision names, one of a slice still open or of
 the candidate staged now, and one git tracks never moves. The rest leave once older than

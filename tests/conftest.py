@@ -293,6 +293,23 @@ def _machine_settings(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _events_log(tmp_path_factory):
+    """The machine's event log lives outside the repository; give each test its own file.
+
+    Beside the test's home, not in it, so a test that lists what ao keeps in ~/.ao finds no event
+    log a verification or a mail of its own wrote there.
+    """
+    path = tmp_path_factory.mktemp("events") / "events.jsonl"
+    previous = os.environ.get("AO_EVENTS")
+    os.environ["AO_EVENTS"] = str(path)
+    yield
+    if previous is None:
+        os.environ.pop("AO_EVENTS", None)
+    else:
+        os.environ["AO_EVENTS"] = previous
+
+
+@pytest.fixture(autouse=True)
 def _project_registry(tmp_path_factory):
     """Project keys are registered outside the repository; give each test its own registry."""
     registry = tmp_path_factory.mktemp("project-registry") / "projects.json"

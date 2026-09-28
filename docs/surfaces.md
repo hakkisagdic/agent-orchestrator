@@ -7,30 +7,63 @@ The fix is not a new app. It is **one event log with many cheap readers**.
 
 ## The event log
 
-Not built yet: the event log. Today every surface reads the project's own files, the mailbox,
-the board and the ledgers, as `ao status` does.
+*In ao since slice EVENTS-LOG: ao appends one line to `~/.ao/events.jsonl` each time it records a
+verification, submits a review or sees a submitted one end, grants commit authority, sends mail, and
+nudges or wakes an agent; `ao events` reads the log, and with `--follow` prints each event as it is
+written. Before, a surface learned what ao did by reading each project's files again, and a person
+waiting on a submitted review ran `ao reviews` until it came back.*
 
-<!-- not built: nothing writes an event log; a surface reads the project's files -->
+```bash
+ao events                                   # the newest 20 events of every project on this machine
+ao events --project acme-api --since 2h     # one project's, of the last two hours
+ao events --follow                          # then each event as it is written, until Ctrl+C
+ao events --follow --json                   # each event as a line of JSON, for a program
 ```
-~/.ao/events.jsonl        # append-only, one line per event, never rewritten
-```
+
+Each line is one JSON object: when (`at`, seconds since the epoch, to the millisecond), which
+project (`project`, the key its files in `~/.ao` carry), what happened (`kind`), and a short
+payload (`data`) of ids, names and verdicts - never a body, a diff or a transcript. A field with
+no value is left out.
 
 ```jsonc
-{"ts":"2026-09-03T19:23:11Z","project":"acme-api","actor":"kiro","lane":"impl",
- "kind":"turn_end","summary":"reviewer retried after load failure",
- "credits":354.8,"context_pct":67.5,"tools":540}
-{"ts":"…","project":"acme-api","actor":"self","kind":"gate","result":"pass","tests":"326/326"}
-{"ts":"…","project":"acme-api","actor":"kiro","kind":"review","verdict":"NEEDS_CHANGES","findings":1}
+// ~/.ao/events.jsonl
+{"at":1790413391.207,"project":"acme-api","kind":"verification","data":{"id":"V-1790413391","passed":true,"profile":"quick"}}
+{"at":1790413402.551,"project":"acme-api","kind":"review-submitted","data":{"review":"R-1790413402551","slice":"B8","tree":"4b825dc6…"}}
+{"at":1790414318.004,"project":"acme-api","kind":"review-finished","data":{"review":"R-1790413402551","state":"finished","verdict":"APPROVED","slice":"B8","artefact":"2026-09-26-121838-a1b2c3d.md"}}
 ```
 
-Three kinds of producer feed it:
+| `kind` | written when | `data` |
+|---|---|---|
+| `verification` | `ao verify` records its result | `id`, `passed`, `profile` |
+| `review-submitted` | `ao review submit` pins the staged candidate | `review` (its `R-` id), `slice`, `tree` |
+| `review-finished` | a submitted review ends | `review`, `state` (`finished`, `unavailable`, `failed` or `stale`), `verdict`, `slice`, `artefact` |
+| `authority-granted` | `ao commit-ok` grants | `token`, `verification`, `review`, `waiver`, `index_tree` |
+| `mail-sent` | ao writes a message into the mailbox | `message` (its file name), `kind`, `from`, `to` |
+| `nudge` | the watchdog starts the implementer's turn | `pid`, `attempt`, and `exit` when the turn ended within its first seconds |
+| `wake` | the watchdog wakes the architect | `why` (`reports` or `refill`), `pid`, `reports` or `queue`, and `retried` when a wake before it failed |
 
-- **Hooks**, where the CLI has them. A `Stop` hook with a `command` action appends one
-  line. Cheap, instant, no polling. This is the mechanism to prefer.
-- **A poller**, where it does not. Watch the transcript's write age, derive `turn_end`,
-  read context and cost from the records the vendor already writes.
-- **The orchestrator itself**, for events no agent knows about: mail sent, gate run,
-  commit authority granted, lane started, merge queued.
+What the log leaves out is on the record elsewhere: a refused `ao commit-ok` stays in the authority
+ledger, a review run in the foreground (`ao review` without `submit`) is seen by whoever runs it, a
+submitted review whose run died before writing its end is the one `ao reviews` shows as lost, and a
+message an agent writes into the mailbox by hand is not one ao sent.
+
+The log observes; nothing reads it to decide anything. Writing an event never fails the command
+that did the work: an event that cannot be written is said on standard error, and the
+verification, grant or mail it would have told of stands. It is one file for the whole machine,
+bounded as the other observation stores are: once it is a quarter past `retention.events_kb`
+(2048 KB), its oldest lines go, back to three quarters of it. `ao events --follow` reads on across
+that trim, and says so if a trim ever took lines it had not reached. Every string in a payload is
+scanned for credentials first, as evidence is ([safety.md](safety.md)). `ao remove` leaves a
+project's lines in the log: they are the machine's history.
+
+```bash
+ao config set retention.events_kb 4096 --machine
+```
+
+Not built yet: the other two producers. Hooks, where an agent's CLI has them - a `Stop` hook
+with a `command` action appending a line, cheap and instant - and a poller, where it has none,
+deriving a turn's end, its context and its cost from the records the vendor already writes. Until
+then an agent's turns are read from its transcript, as `ao status` does.
 
 Why this matters: without the log, every surface has to parse *N* vendor transcripts in
 *N* formats. With it, a new surface is a file tail. That is the whole design.

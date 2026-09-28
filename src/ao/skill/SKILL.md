@@ -251,6 +251,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao board ready` | exactly the items that may start now; exit 1 names a broken `needs:` edge |
 | `ao fleet` | every project on this machine at a glance |
 | `ao tail` | the implementer's transcript, live |
+| `ao events [--follow] [--project P] [--since T]` | what ao did on this machine, one line an event: verifications, submitted and finished reviews, grants, mail, nudges and wakes; `--follow` prints each as it is written, `--json` as a line of JSON |
 | `ao mail list|read|send|log|search|ack` | the mailbox and its ledger; `ack` deletes processed messages (delivery confirmation) |
 | `ao note` | architect → implementer note without raw file writes (`--urgent`) |
 | `ao decide` | record an architect decision (`--scope`, `--why`, `--answers D-…`) |

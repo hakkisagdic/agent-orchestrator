@@ -624,6 +624,9 @@ def write_mail(root, cfg, name, body, meta=None):
     mail_ledger_append(root, {"event": "written", "id": name, "kind": meta.get("kind"),
                               "from": meta.get("from"), "to": meta.get("to"),
                               "slice": meta.get("slice"), "summary": summary[:200]})
+    # Named, never quoted: the log is read by programs a message's body was not written for (EVENTS-LOG).
+    emit_event(root, "mail-sent", {"message": name, "kind": meta.get("kind"), "from": meta.get("from"),
+                                   "to": meta.get("to")})
     return name
 
 
