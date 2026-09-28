@@ -84,7 +84,11 @@ them, for a long generated value assigned to any name that says it is secret, su
 that is called is code, `password = os.environ.get(...)`, and is passed over. The few deliberate
 fixtures stand in `tests/hygiene-allowlist.txt`: a credential there named by the start of its SHA-256
 and never by its value, a home by its account in the one file it stands in. An allowance that covers
-nothing fails until it is dropped. The test suite runs on a machine of its own, a temporary home and
-PATH and none of your `AO_` variables: running it reads none of your `~/.ao` or the files those
-variables name and messages none of your channels, and no agent CLI of yours is on its PATH or under
-its home.*
+nothing fails until it is dropped. The test suite runs with a home and a PATH of its own, both
+temporary, and with none of your `AO_` variables but the two fuzz seeds, `AO_FUZZ_SEED` and
+`AO_FUZZ_SEEDS`: running it reads none of your `~/.ao` or the files those variables name, messages
+none of your channels, and finds no agent CLI of yours on its PATH or under its home. In the suite's
+own process, ao's search past PATH - /usr/local/bin and /opt/homebrew/bin, where a package manager
+installs a CLI for every user of the machine - is kept off too. A process a test starts inherits the
+home, the PATH and the variables but not that: an ao a test starts as a child still looks in those two
+directories (SECURITY-DOC-ACCURACY).*

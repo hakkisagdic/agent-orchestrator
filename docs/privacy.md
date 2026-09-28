@@ -10,8 +10,12 @@ account.
 *In ao since slice TRUST-HYGIENE: this page and the [security policy](../SECURITY.md). ao's own
 repository holds no credential and no home directory of the machine it was written on, and a test
 reads every tracked file to keep it so; ao's test suite runs with a temporary home and PATH and none
-of your `AO_` variables, so running it reads none of your `~/.ao` or the files those variables name
-and messages none of your channels ([SECURITY.md](../SECURITY.md#this-repository)).*
+of your `AO_` variables but the two fuzz seeds, so running it reads none of your `~/.ao` or the files
+those variables name and messages none of your channels ([SECURITY.md](../SECURITY.md#this-repository)).*
+
+*In ao since slice SECURITY-DOC-ACCURACY: this page also names what the slices after TRUST-HYGIENE added: the reads
+`ao pr watch` asks of GitHub, the requests of the tool `ao update` runs, the machine's event log, the
+systemd units on Linux and the web view on 127.0.0.1.*
 
 ## What ao reads
 
@@ -66,13 +70,18 @@ written as `[redacted:<rule>]` ([safety.md](safety.md#7b-what-ao-writes-is-scann
   turns it started (`~/.ao/nudge-<project>.log`, `~/.ao/escalate-<project>.log`). Those logs hold what
   the agent CLIs printed, model output included; they stay on the machine, and what a notice quotes
   from one is masked for anything shaped like a token first.
+- `~/.ao/events.jsonl` - one line each time ao records a verification, submits a review or sees one
+  end, grants commit authority, sends mail, or nudges or wakes an agent, for `ao events` to read; its
+  oldest lines go past `retention.events_kb` ([surfaces.md](surfaces.md)).
 - For the machine: the alarms (`~/.ao/alarms.json`), the gate lock (`~/.ao/gate.lock`), the quota and
   binary-version caches (`~/.ao/quota.json`, `~/.ao/binaries.json`), the ledgers' recorded lengths
   (`~/.ao/ledger-checkpoints.json`), pruned records under `~/.ao/archive/<project>/`, and the adapters
   a person adds, under `~/.ao/adapters/`.
 
 **Scheduled jobs:** `ao watchdog install` and `ao telegram install` add launchd jobs on macOS, whose
-files sit in `~/Library/LaunchAgents`; on Windows the watchdog is a Task Scheduler task.
+files sit in `~/Library/LaunchAgents`; on Linux the watchdog and the doctor are systemd user units, in
+`~/.config/systemd/user`; on Windows the watchdog is a Task Scheduler task. `ao uninstall` takes off
+every one of them that is ao's ([getting-started.md](getting-started.md)).
 
 The stores are bounded (`retention.observation_kb`, `retention.evidence_keep`, `ao prune`), and
 `ao remove --yes` takes a project's state, hooks, scheduled jobs and own files in `~/.ao` off again,
@@ -90,10 +99,15 @@ Only these, each once someone has set it up; take the setup away and it stops.
 | A backup or the mail store on a remote | `ao backup --to remote:<name>`, `mail.sync_repo` | GitHub, asked through your `gh` whether the repository is private, then that remote through git | the governance files, or the mail records, scanned for credentials first; nothing unless the host says the repository is private. With `mail.sync_repo` set, each `ao doctor` run also asks the remote how far its copy is, and GitHub whether it is still private ([recovery.md](recovery.md), [messaging.md](messaging.md)) |
 | The account lookup | an implementer whose adapter declares one; Kiro's does | that harness's provider | a request for the account's usage, with the token its CLI already holds, from `ao credits`, `ao cost`, `ao digest`, `ao handoff` and the watchdog every thirty minutes; `ao credits --offline` skips it ([telemetry.md](telemetry.md)) |
 | Borrowed harness content | `ao content add` | the source you name, through git | a fetch of the one commit it is pinned to; `ao content verify` reads only the files on disk |
+| Pull requests | `ao config set pr.watch on`, then `ao pr watch --once` | GitHub, asked through your `gh` | two reads a pass: `gh pr list` for this checkout's open pull requests, and `gh pr view` for each of this project's; nothing is written to GitHub ([pr.md](pr.md)) |
+| Updating ao | `ao update`, which prints the command it will run and asks first | the clone's git remote, or the source of the tool that installed ao: Homebrew, pipx, uv or pip | that tool's own requests for the newer ao; ao adds nothing of its own ([getting-started.md](getting-started.md)) |
 | A2A | `ao a2a serve`, `ao a2a-mcp serve` | 127.0.0.1 only; the agents in `.ao/a2a-agents.json` or `~/.ao/a2a-agents.json` | the board, to anything on this machine; the messages you send, to the agents you registered ([mcp.md](mcp.md)) |
 
-`gh` is asked that one question and nothing else, the two refs above are all ao ever pushes, and ao
-never grants `push` to an agent ([safety.md](safety.md)). When keyflip is installed ao asks it for
+`gh` is asked only these reads - whether a repository is private, and with `pr.watch` on the open
+pull requests - the two refs above are all ao ever pushes, and ao never grants `push` to an agent
+([safety.md](safety.md)). `ao watch --web` serves its pages on 127.0.0.1 alone and answers only a
+request addressed to it there, so nothing of it leaves the machine, though anyone logged in to the
+machine can read it ([surfaces.md](surfaces.md)). When keyflip is installed ao asks it for
 quota windows and budgets, and what keyflip contacts to answer is keyflip's to say
 ([keyflip.md](keyflip.md)). The MCP server speaks to the agent that started it over stdin and stdout,
 and a desktop notification or a Windows toast stays on the desktop.
