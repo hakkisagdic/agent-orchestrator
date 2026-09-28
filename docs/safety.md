@@ -253,6 +253,16 @@ included - so `Bash(rm agent-mail/*)` admits `rm agent-mail/x src/app.py`, and `
 rule in an architect's grant that writes outside ao's coordination files, and an architect grant
 composed before its adapter's current one (`architect-grant`).
 
+*In ao since slice ALLOWLIST-NORMALIZE: a rule is also read as the command it runs. Each program that
+runs the command after it - `env`, `xargs`, `timeout`, `nice`, `nohup`, `time`, `command`, `exec`,
+`stdbuf`, `caffeinate`, `sudo` - is taken off with its own options, as are a rewriter's wrappers
+(`rtk proxy`, `rtk git`) and git's global options (`-C`, `-c`, `--no-pager`, `--git-dir`,
+`--work-tree`). So `Bash(git -C:*)`, written to read a status elsewhere, is named for admitting
+`git commit --no-verify`, and `Bash(timeout 60 pytest:*)` for admitting `pytest -p x`; `ao doctor`
+names such a rule once, for the first forbidden command it admits that way, "as the command it runs".
+A rule already named for a form it admits as it stands is not named again, and an everyday rule behind
+the same words - `Bash(git -C . status:*)`, `Bash(timeout 60 git status:*)` - is not named at all.*
+
 *In ao since slice GATE-LOCK-SAME-ROOT: `ao verify` and `ao merge-check` wait for a holder of the
 machine lock that runs for their own project. They used to wait only for another project's, and ran
 their suite beside an `ao lock -- <command>` in the same checkout.*

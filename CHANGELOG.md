@@ -130,6 +130,7 @@ publishes the release.
 - `ao verify` takes the machine gate lock once it knows the gates it will run, so a project with none, or an unknown profile, is told so at once (VERIFY-LOCK-LATE).
 - A review's counts are never below the findings the reviewer listed outside its notes: an answer that counted HIGH 0 above a listed HIGH finding is NEEDS_CHANGES, and the artefact says which count its list raised (REVIEW-FINDINGS-COUNT).
 - An answer whose verdict line or counts ao cannot read is asked for once more, naming the lines it missed, before the review is INVALID; the artefact says when a reviewer was asked twice (REVIEW-REASK).
+- `ao doctor` reads each grant's rules as the commands they run, behind `timeout`, `nice`, `env`, `sudo` and the other programs that run what follows them, rtk's wrappers and git's global options: `Bash(git -C:*)` is named for admitting `git commit --no-verify`, and `Bash(timeout 60 pytest:*)` for admitting `pytest -p x` (ALLOWLIST-NORMALIZE).
 
 ### Fixes
 

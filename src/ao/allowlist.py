@@ -61,6 +61,31 @@ ARCHITECT_FORBIDDEN = (
 )
 
 # Flags with which a harness grants every tool at once.
+# Programs that run the command after them, each with the options of its own that take the next word as their
+# value (ALLOWLIST-NORMALIZE). A rule admitting one with any arguments admits what it would admit of the command
+# after it: `Bash(timeout 60 pytest:*)` admits `timeout 60 pytest -p x`, which loads any plugin, and
+# `Bash(nice:*)` admits every command there is.
+WRAPPERS = {
+    "env": ("-u", "--unset", "-C", "--chdir"),
+    "xargs": ("-I", "-L", "-n", "-P", "-s", "-d", "-E", "-a", "--arg-file", "--delimiter", "--max-args",
+              "--max-procs", "--max-lines", "--replace", "--max-chars", "--eof"),
+    "timeout": ("-s", "--signal", "-k", "--kill-after"),
+    "nice": ("-n", "--adjustment"),
+    "nohup": (),
+    "time": ("-f", "--format", "-o", "--output"),
+    "command": (),
+    "exec": ("-a",),
+    "stdbuf": ("-i", "-o", "-e", "--input", "--output", "--error"),
+    "caffeinate": ("-t", "-w"),
+    "sudo": ("-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U", "--user", "--group", "--chdir", "--host",
+             "--prompt", "--role", "--type", "--other-user", "--close-from"),
+}
+# Words a wrapper reads before the command that are not options: timeout's duration.
+WRAPPER_OPERANDS = {"timeout": 1}
+# git's global options that take the next word as their value. None of git's global options changes what a
+# subcommand does to the commit hook, so a rule admitting `git -C:*` admits `git -C . commit --no-verify`.
+GIT_VALUE_OPTIONS = ("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env")
+
 GRANT_ALL = ("--dangerously-skip-permissions", "--trust-all-tools", "--yolo", "--full-auto",
              "--dangerously-bypass-approvals-and-sandbox")
 
@@ -140,7 +165,85 @@ def problems(argv, options=None, role=None):
         rule = next((r for r in granted if admits(r, command)), None)
         if rule:
             found.append((reason, command, rule))
+    # A rule that admits a forbidden command only as the command it runs - behind a program that runs what
+    # follows it, a rewriter's wrapper or git's global options - is named once, for the first such command,
+    # and a rule already named for a form it admits as it stands is not named again (ALLOWLIST-NORMALIZE).
+    named = {rule for _, _, rule in found}
+    unwrapped = [(rule, plain) for rule in granted if rule not in named for plain in [normalized_rule(rule)] if plain]
+    for reason, command in forbidden:
+        for rule, plain in unwrapped:
+            if rule not in named and admits(plain, command):
+                found.append((f"{reason}, as the command it runs", command, rule))
+                named.add(rule)
     return found
+
+
+def _after(words, value_options, operands=0, assignments=False):
+    """The words after a program's own options, operands and NAME=VALUE assignments."""
+    i = 0
+    while i < len(words):
+        word = words[i]
+        if word == "--":
+            return words[i + 1:]
+        if word.startswith("-") and len(word) > 1:
+            i += 2 if word in value_options else 1
+        elif assignments and "=" in word and not word.startswith("="):
+            i += 1
+        elif operands:
+            operands, i = operands - 1, i + 1
+        else:
+            break
+    return words[i:]
+
+
+def unwrap(words):
+    """The words a command runs as, with each program that runs the command after it, a rewriter's wrappers
+    and git's global options taken off (ALLOWLIST-NORMALIZE).
+
+    `timeout 60 pytest -p x` runs as `pytest -p x`, `rtk proxy git commit -n` as `git commit -n`, `rtk git -C .
+    commit -n` as `git commit -n`. A wrapper inside a wrapper is taken off too, a bounded number of times.
+    """
+    from . import lib as A
+    words = list(words)
+    rewriters = [(str(r["command"]).strip(), [str(w).split() for w in r.get("runs_any_command") or []
+                                               if isinstance(w, str) and w.strip()])
+                 for r in A.command_rewriters()]
+    for _ in range(8):
+        if not words:
+            break
+        if words[0] in WRAPPERS:
+            words = _after(words[1:], WRAPPERS[words[0]], WRAPPER_OPERANDS.get(words[0], 0),
+                           assignments=words[0] == "env")
+            continue
+        runner = next((w for _, runners in rewriters for w in runners if words[:len(w)] == w), None)
+        if runner:
+            words = words[len(runner):]
+            continue
+        if any(words[0] == name and words[1:2] == ["git"] for name, _ in rewriters):
+            words = words[1:]
+            continue
+        break
+    if words[:1] == ["git"]:
+        words = ["git"] + _after(words[1:], GIT_VALUE_OPTIONS)
+    return words
+
+
+def normalized_rule(rule):
+    """The rule a rule is, read as the command it runs: `Bash(timeout 60 pytest:*)` is `Bash(pytest:*)`, and
+    `Bash(nice:*)`, whose command is any at all, is `Bash(*)`. None for a rule that names no command with any
+    arguments after it, or whose command is already plain (ALLOWLIST-NORMALIZE)."""
+    rule = str(rule).strip()
+    if not (rule.startswith("Bash(") and rule.endswith(")")):
+        return None
+    body = rule[len("Bash("):-1]
+    end = next((end for end in (":*", " *") if body.endswith(end)), None)
+    if end is None or "*" in body[:-len(end)]:
+        return None
+    words = body[:-len(end)].split()
+    plain = unwrap(words)
+    if plain == words:
+        return None
+    return f"Bash({' '.join(plain)}:*)" if plain else "Bash(*)"
 
 
 def through_rewriters(forbidden):
