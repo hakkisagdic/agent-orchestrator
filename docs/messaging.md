@@ -99,6 +99,11 @@ the architect is told, past `mail.unseen_orange_minutes` a person's desktop and 
 `mail.unseen_red_minutes` e-mail, unless an alarm to a person already tells it, whose ladder it
 then follows ([alarms.md](alarms.md)). `ao status` names the oldest unseen message and its age.
 
+*In ao since slice JSON-OUTPUT: `ao status --json` names the marked messages and the unseen ones
+and records none of them as seen, under any AO_ROLE, as `ao_status` records none. A program reads
+that document - a status bar, a scheduled job - and a message recorded as seen by a reader who never
+saw it would never climb the ladder.*
+
 With `mail.store` set to `append-only`, nothing is deleted to prove it was handled. Each message
 is taken into `.ao/mail/store/` and a chained `.ao/ledger/mail-store.jsonl` row the first time the
 watchdog or a mail command sees it; `ao mail ack` and `ao_ack` append a `handled` record naming who

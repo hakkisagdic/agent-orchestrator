@@ -73,6 +73,7 @@ def build_parser():
     s.add_argument("-m", "--messages", type=int, default=6)
     s.add_argument("--window", type=A.time_arg("h"), default=24.0,
                    help="throughput window: hours (24), or 30m, 1d, today, a date (default 24)")
+    s.add_argument("--json", action="store_true", help="print what the panel shows as one JSON document")
     s.set_defaults(fn=cmd_status)
 
     w = sub.add_parser("watch", help="live panel; leave it in a background terminal")
@@ -81,7 +82,9 @@ def build_parser():
     w.add_argument("--all", action="store_true", help="one row per project instead of one panel")
     w.set_defaults(fn=cmd_watch)
 
-    sub.add_parser("fleet", help="one-shot view of every project").set_defaults(fn=cmd_fleet)
+    fl = sub.add_parser("fleet", help="one-shot view of every project")
+    fl.add_argument("--json", action="store_true", help="print the rows as one JSON document")
+    fl.set_defaults(fn=cmd_fleet)
 
     t = sub.add_parser("tail", help="recent messages from the implementer's transcript")
     t.add_argument("-n", type=int, default=5)
@@ -350,6 +353,7 @@ def build_parser():
     n.add_argument("ident", nargs="?", help="a notice id: print its evidence")
     n.add_argument("-n", type=int, default=12)
     n.add_argument("--all", action="store_true", help="include rate-limited ones")
+    n.add_argument("--json", action="store_true", help="print the notices as one JSON document")
     n.set_defaults(fn=cmd_notices)
     pr = sub.add_parser("prune", help="trim accumulated records and logs")
     pr.add_argument("--days", type=A.time_arg("d"), default=7,

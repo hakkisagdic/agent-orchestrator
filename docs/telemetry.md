@@ -151,6 +151,14 @@ Suppressed alerts are recorded too, with `sent: false`. A long run of them is
 itself the signal — it says the condition has held for a long time, which a single
 delivered notification cannot express. `ao notices --all` shows them.
 
+*In ao since slice JSON-OUTPUT: `ao notices --json` prints the list as one JSON document and nothing
+else on stdout, `{"notices": […], "include_suppressed": false}`, newest first, `-n` and `--all`
+choosing the rows as they do for the text. `ao notices <id> --json` prints `{"notice": {…}}`, and for
+an id no notice has, `{"notice": null, "error": "…"}` with exit status 1. A notice has `id`, `at`
+(epoch seconds), `title`, `msg`, `sent` (false for one the rate limit held), `key` and `evidence`
+(`check` and its `samples`, each a `value`, its `source` and `at`), null where a row recorded before
+ao kept it has none.*
+
 ## Keeping the records small
 
 Everything here grows monotonically: the progress ledger gains a row every couple

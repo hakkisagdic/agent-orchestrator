@@ -38,7 +38,34 @@ Why this matters: without the log, every surface has to parse *N* vendor transcr
 ## Surface 1 — terminal dashboard
 
 The default. `ao watch` renders a panel from the project's files; leave it on a second
-monitor. See the TUI section below.
+monitor. See the TUI section below. `ao status` prints the panel once.
+
+*In ao since slice JSON-OUTPUT: `ao status --json` prints what the panel shows as one JSON document
+and nothing else on stdout - no colour, no banner - for a program to read where it had to read the
+panel. The panel is drawn from the same reading, so the two cannot disagree; `-m` and `--window`
+shape both, and the exit status is the panel's. `ao fleet --json` ([parallel.md](parallel.md)) and
+`ao notices --json` ([telemetry.md](telemetry.md)) do the same for theirs.*
+
+| key | what it holds |
+|---|---|
+| `project`, `root`, `at` | the project's name, its directory, and when it was read, in epoch seconds |
+| `implementer` | `adapter`; `state`: working, slowing, stopped, idle or unknown; `seconds_since_write`; `doing`, what its session says it does; `session`, as ao resolved it: `id`, null where ao settled on none; `how`: pinned, recorded, discovered, ambiguous or unresolved; and `why`, what a person reads beside it, which a recorded or discovered session has too, so only a null `id` says ao could not resolve one; `working_elsewhere` (`name`, `root`, `seconds_since_write`) while it writes in a secondary project. Null with no implementer |
+| `workspaces` | null while there is an implementer; without one, up to five workspaces with a local session to point ao at, newest first (`path`, `seconds_since_write`) |
+| `telemetry` | `context_percent`, `cost_unit`, `turns`, `cost_total`, `cost_average`, `cost_delegated`, `last_turn_cost`, `last_turn_tool_calls`, and `machine_quota`: the lines keyflip reports for the other tools on this machine, never the implementer's own pool |
+| `problems` | `nothing_to_do_since` (epoch seconds), `spinning_minutes`, `nudge_error` (`at`, `code`, `tail`, `log`) and `agent_errors` (`time`, `text`) |
+| `returned_reviews` | reviews that ended and nobody collected: `id`, `slice`, `verdict`, `state` |
+| `reviews`, `rounds` | the newest review artefacts (`file`, `verdict`); the rounds the running slice spent and its budget (`spent`, `budget`), null with no artefact |
+| `throughput` | what the window produced: `hours`, `staged`, `landed`, `decisions_asked`, `decisions_open`, `oldest_open_minutes`, `state`, and `stall` (`minutes`, `candidate`, `paths`, `reason`) |
+| `repository` | the newest three commits (`log`), `dirty_files`, and where the checkout stands: `ahead`, `behind`, `base`, `merged`; `ahead`, `behind` and `base` are null with no remote default branch to compare against |
+| `mail` | the mailbox directory (`dir`), the messages in it (`waiting`), the marked ones for the role asking (`urgent`: `id`, `to`, `title`; null when the mailbox could not be read), and those nobody was shown, oldest first (`unseen`: `id`, `class`, `age_seconds`) |
+| `board` | `counts` by state, and the `blocked` items: `id`, `title`, and `why`, null when the board gives no reason |
+| `messages` | the recent messages, oldest first: `time` (HH:MM), `role` (user or assistant), `text` |
+
+Without an implementer `telemetry`, `problems` and `throughput` are null and `messages` is empty.
+Unlike the panel, the document records no message as seen, whoever runs it: a program reads it,
+and a status bar polling it would otherwise keep a marked message no person was shown from climbing
+the watchdog's ladder ([messaging.md](messaging.md)). Such a message is in `urgent` and in `unseen`
+both.
 
 ## Surface 2 — MCP, i.e. any chat app becomes the cockpit
 

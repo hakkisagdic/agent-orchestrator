@@ -18,6 +18,14 @@ so a runaway lane in one cannot touch another.
 
 This axis is cheap. The only shared resource is your machine.
 
+*In ao since slice JSON-OUTPUT: `ao fleet --json` prints the rows as one JSON document and nothing
+else on stdout, `{"at": …, "projects": […]}`: `at` is when they were read, in epoch seconds, and
+each project, in the panel's order, has `name`, `root`, `state`, `seconds_since_write`, `doing`,
+`session` (`id`, `how` and `why`, as the implementer's `session` in `ao status --json`, or null
+with no implementer), `running`, `queued`, `blocked`, `dirty_files`, `mail_waiting`,
+`spinning_minutes` and `has_source`. [surfaces.md](surfaces.md) lists what `ao status --json`
+holds.*
+
 ## Axis 2 — many lanes in one project
 
 A **lane** is one actor working one slice in one workspace. Lanes are where the real

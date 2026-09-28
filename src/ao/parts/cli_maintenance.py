@@ -504,20 +504,34 @@ def cmd_prune(cfg, args):
     return 0
 
 
+def _notice_facts(row):
+    """One recorded notice as `ao notices --json` prints it: every key present, null where an older row has none."""
+    return {"id": row.get("id"), "at": row.get("at"), "title": row.get("title"), "msg": row.get("msg"),
+            "sent": bool(row.get("sent")), "key": row.get("key"), "evidence": row.get("evidence")}
+
+
 def cmd_notices(cfg, args):
     """Alerts this project raised — the desktop notification, kept.
 
     A notification reaches the human and vanishes, so the architect reading the
     panel is the one participant who never sees what the human was told.
+
+    With --json the same rows are one JSON document and nothing else (JSON-OUTPUT): the list,
+    or the one notice an id names, with null and exit 1 for an id no notice has.
     """
     root = cfg["root"]
     wanted = getattr(args, "ident", None)
+    as_json = getattr(args, "json", False)
     if wanted:
         # "Why did I get this?" is one command (#37).
         row = next((r for r in A.notices(root, 10**9, include_suppressed=True) if r.get("id") == wanted), None)
         if not row:
-            print(f"no notice {wanted}; `ao notices --all` lists them with their ids")
+            missing = f"no notice {wanted}; `ao notices --all` lists them with their ids"
+            print(json.dumps({"notice": None, "error": missing}, ensure_ascii=False) if as_json else missing)
             return 1
+        if as_json:
+            print(json.dumps({"notice": _notice_facts(row)}, ensure_ascii=False))
+            return 0
         when = datetime.fromtimestamp(row["at"]).strftime("%d %b %H:%M")
         print(f"{C['b']}{row['title']}{C['reset']}  {C['dim']}{wanted} · {when} · "
               f"{'sent' if row.get('sent') else 'held'} · key {row.get('key')}{C['reset']}")
@@ -526,6 +540,10 @@ def cmd_notices(cfg, args):
             print(f"  {line}")
         return 0
     rows = A.notices(root, args.n, include_suppressed=args.all)
+    if as_json:
+        print(json.dumps({"notices": [_notice_facts(r) for r in rows], "include_suppressed": bool(args.all)},
+                         ensure_ascii=False))
+        return 0
     if not rows:
         print(f"{C['dim']}No notices recorded.{C['reset']}")
         return 0
