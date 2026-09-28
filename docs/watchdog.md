@@ -235,9 +235,40 @@ there is none, install refuses and writes nothing: a job naming a missing file f
 two minutes and says nothing. Windows tasks are resolved the same way, and install exits 1
 when `schtasks` cannot create one.
 
+On Linux the two jobs are systemd user units in `~/.config/systemd/user/`, and nothing needs
+root. Each job is a oneshot service that runs it once and a timer that starts the service:
+`ao-watchdog-<project>` at once and then every `--interval` seconds, as the launchd job's
+RunAtLoad and StartInterval start it, and `ao-doctor-<project>` every fifteen minutes. A timer
+fires to the second, not anywhere in the minute systemd allows by default. Install writes the
+four files and asks `systemctl --user`, by argument vector and never through a shell, to
+reload, enable and restart the timers; it exits 1 with what systemd said when a step fails or
+either timer is not active afterwards. The services keep `KillMode=process`: the watchdog
+starts each nudge in a session of its own and exits, and systemd's default would kill the nudge
+with the unit. An `--interval` below one second is refused, since it would start each cycle as
+the last one ends. The output goes to `~/.ao/watchdog-<project>.log` and
+`~/.ao/doctor-<project>.log`, as on macOS; a systemd older than 240 cannot append to a file,
+ignores that line and keeps the output in its journal. A user's manager runs only while that
+user is logged in unless lingering is on: install and `ao watchdog status` say so when it is
+off, and `loginctl enable-linger` keeps the timers running after a logout.
+`ao watchdog uninstall` disables and stops both timers, removes their files and the link
+`enable` made, and checks each timer is gone.
+
+Where no user systemd answers - a container, WSL without systemd, a `su` or `sudo -u` shell
+that cannot reach the user's manager - install writes nothing, says why, and prints the two
+crontab lines that would run the same jobs, and the command for one watchdog cycle by hand. A
+manager the shell cannot reach may still be running timers installed from a login session:
+uninstall and `ao remove --yes` leave those as they are and name them, so that a session that
+reaches the manager can take them off.
+
+*In ao since slice LINUX-SCHEDULER: `ao watchdog install`, `ao watchdog status` and
+`ao watchdog uninstall` on Linux, through systemd user units where there was a launchd job
+Linux does not have. `ao remove --yes` takes the timers off in its own process and checks them
+gone, `ao doctor` shows the watchdog running from its timer, and the doctor's one cycle of
+grace for a watchdog that came back is read from the timer's interval.*
+
 `ao remove --yes` takes the jobs off in its own process — the watchdog, the doctor and the
-telegram poller on macOS, the two tasks on Windows — and checks each is gone. While one is
-left, the removal stops with the project's state intact and names the job. Then it removes
+telegram poller on macOS, the two timers on Linux, the two tasks on Windows — and checks each
+is gone. While one is left, the removal stops with the project's state intact and names the job. Then it removes
 exactly the project's own files in `~/.ao/`: the names in one table the code that writes them
 shares, such as `heartbeat-<project>`, `watchdog-<project>.log` and `push-<project>.ok`, under
 the project's key and nothing else, so another project whose name contains it, and the
@@ -254,7 +285,7 @@ ao watchdog trace --last 30  # the recorded cycles: time, verdict, the facts tha
 ao writers                   # who is writing (turns, not processes) and what is orphaned
 ao alarms                    # live alarm episodes, their level and age
 ao doctor                    # binaries, last wake, last tick, channels, live alarms
-ao doctor --check            # the same, quiet, exit 1 on problems — runs every 15 min from its own launchd job
+ao doctor --check            # the same, quiet, exit 1 on problems — runs every 15 min from its own launchd job or systemd timer
 ao mail log                  # every message written and when it was consumed
 ```
 

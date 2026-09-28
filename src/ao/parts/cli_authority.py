@@ -5,16 +5,16 @@ where it stood; it is not importable on its own.
 """
 
 
-def _launchd_path():
-    """The PATH a launchd job runs with, fixed when the job is installed.
+def _scheduled_path():
+    """The PATH a scheduled job runs with, fixed when the job is installed.
 
     launchd starts jobs with /usr/bin:/bin:/usr/sbin:/sbin, which does not reach
     ~/.local/bin, where kiro-cli, ao and the watchdog live; the credit sampler ran
-    blind for its whole life because of it. Take the watchdog's child PATH, keep
-    directories that exist, and drop per-shell version-manager directories that
-    disappear when the shell that created them exits.
+    blind for its whole life because of it. A user systemd's own PATH does not reach
+    it either. Take the watchdog's child PATH, keep directories that exist, and drop
+    per-shell version-manager directories that disappear when the shell that created
+    them exits.
     """
-    from xml.sax.saxutils import escape
     from .watchdog import child_path
     seen, keep = set(), []
     for d in child_path().split(os.pathsep):
@@ -22,7 +22,13 @@ def _launchd_path():
             continue
         seen.add(d)
         keep.append(d)
-    return escape(os.pathsep.join(keep))
+    return os.pathsep.join(keep)
+
+
+def _launchd_path():
+    """The PATH a launchd job runs with, escaped as the text of a plist's <string>."""
+    from xml.sax.saxutils import escape
+    return escape(_scheduled_path())
 
 
 def _launchctl(*args, merge=False):

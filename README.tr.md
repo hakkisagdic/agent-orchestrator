@@ -127,14 +127,14 @@ gereken tek yetkidir.
 | `ao skill install` / `ao skill show` | playbook (roller, döngü, yetki, protokol, alarmlar, tüm komutlar) deponun ajanları için: Claude skill, Kiro steering, AGENTS.md |
 | `ao remove --yes [--allow-shared-hooks]` | iki aşamalı kaldırma: dayatma etkinken `.ao-project` dosyasını silip commit et, HEAD ve index artık taşımayınca AO durumunu kaldır; yabancı/korunan hook'lara dokunma. İkinci aşama projenin zamanlanmış işlerini ve `~/.ao` içindeki yalnız kendi dosyalarını kaldırır, kuru koşuda her birini adıyla listeler ve kaldıramadığını adıyla söyleyip 1 ile çıkar ([watchdog.md](docs/watchdog.md)) |
 | `ao init --profile claude-kiro|claude-claude [--review-tier same-family|person] [--language en|tr]` | rol bloklarını ve exact `.ao-project` kayıt işaretini yaz, ama stage etme; tek harness'lı profil bir review katmanı seçer ([profiles.md](docs/profiles.md)); `--language tr` ile ao'nun projeye yazdıkları ve insanlara söyledikleri Türkçe olur ([configuration.md](docs/configuration.md)) |
-| `ao doctor --check` | zamanlayıcı için sessiz doctor: problem başına bir satır, exit 1, alarm — `ao watchdog install` 15 dakikalık launchd işi olarak kurar |
+| `ao doctor --check` | zamanlayıcı için sessiz doctor: problem başına bir satır, exit 1, alarm — `ao watchdog install` 15 dakikalık launchd işi, Linux'ta systemd kullanıcı zamanlayıcısı olarak kurar |
 | `ao email setup` / `ao email test` | kırmızı alarm kanalı: formsubmit.co ile e-posta, sunucu yok ([alarms.md](docs/alarms.md)) |
 | `ao alarms` / `ao alarms test --level red` | canlı alarm bölümleri ve seviyeleri; test tüm kanalları çaldırır |
 | `ao mail log` / `ao mail search <metin>` / `ao mail ack <glob>` | posta defteri: yazılan her mesaj ve ne zaman okunduğu, silindikten sonra da aranabilir |
 | `ao watchdog explain` / `ao watchdog trace` | watchdog neden dürttü ya da dürtmedi: bu döngünün ve kayıtlı döngülerin ölçüm ve kararları ([watchdog.md](docs/watchdog.md)) |
 | `ao source import` | takip sistemindeki işleri panoya kabul et |
 | `ao mail` · `ao notices` | koordinasyon mesajları; projenin ürettiği uyarılar |
-| `ao watchdog install` | takılan ajanı yeniden başlatan launchd işi |
+| `ao watchdog install` | takılan ajanı yeniden başlatan launchd işi, Linux'ta systemd kullanıcı zamanlayıcısı ([watchdog.md](docs/watchdog.md)) |
 | `ao mcp serve` · `ao a2a serve` | durumu MCP istemcilerine / A2A görevi olarak sun |
 | `ao telegram setup` | telefona uyarı, telefondan karar |
 | `ao digest [--days N]` | ne oldu, defterlerden okunur — "neden ilerlemiyor"un da cevabı |

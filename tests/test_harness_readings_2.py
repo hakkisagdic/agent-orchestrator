@@ -302,7 +302,9 @@ def _own_vocabulary(tree):
     This pin guards the second: the core must not hardcode a harness's reason where it reads one.
     A MARKERS key and the keys handed to language.forms are ao naming its own heading, so they are
     not that. A harness that ever spells a stop reason as one of ao's headings is the case this
-    lets through, and it is the narrower risk of the two.
+    lets through, and it is the narrower risk of the two. The verb handed to `_systemctl` - `stop`
+    among `show`, `is-active` and `disable` - is systemd's own command for a unit ao scheduled on
+    Linux (LINUX-SCHEDULER), and reads nothing a harness said.
     """
     ids = set()
     for node in ast.walk(tree):
@@ -312,6 +314,8 @@ def _own_vocabulary(tree):
         elif isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", "")) in ("forms",
                                                                                                         "marker"):
             ids |= {id(argument) for argument in node.args}
+        elif isinstance(node, ast.Call) and getattr(node.func, "id", "") == "_systemctl" and node.args:
+            ids.add(id(node.args[0]))
     return ids
 
 

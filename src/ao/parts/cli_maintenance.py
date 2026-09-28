@@ -116,10 +116,11 @@ def _gitignore_without_ao(root):
 
 
 # The jobs `ao watchdog install` and `ao telegram install` schedule for a project (SAFE-REMOVE). Windows
-# has no telegram task of ao's: `ao telegram install` refuses there.
+# has no telegram task of ao's: `ao telegram install` refuses there. Linux's are SYSTEMD_JOBS, below.
 LAUNCHD_JOBS = ("watchdog", "doctor", "telegram")
 WINDOWS_TASKS = ("watchdog", "doctor")
-# How long a booted-out job may take to leave `launchctl list` before it counts as left.
+# How long a job taken off may take to leave `launchctl list`, or to stop being active in a user
+# systemd, before it counts as left.
 JOB_GONE_SECONDS = 5
 
 
@@ -136,11 +137,256 @@ def _schtasks(*args):
     return (done.stdout + done.stderr).strip(), done.returncode
 
 
-def _installed_jobs(key):
-    """(kind, name) of each job ao scheduled for a project that is there to remove on this platform."""
+def _scheduler():
+    """Which scheduler holds ao's jobs here: Task Scheduler on Windows, a user systemd on Linux, else launchd."""
     if os.name == "nt":
+        return "schtasks"
+    return "systemd" if sys.platform.startswith("linux") else "launchd"
+
+
+# ---- a user systemd, Linux's launchd (LINUX-SCHEDULER) ----------------------------------------
+#
+# Each job `ao watchdog install` schedules is two units in the user's own unit directory: a oneshot
+# service that runs it once, and a timer that starts the service. Nothing here needs root: the units
+# are the user's, run by the user's manager, and asked for with `systemctl --user`.
+
+SYSTEMD_JOBS = ("watchdog", "doctor")
+# Present while systemd is the init system (sd_booted(3)). Without it no manager can hold a unit,
+# whatever a systemctl on PATH answers: a container, or WSL without systemd.
+SYSTEMD_RUNTIME = "/run/systemd/system"
+# The longest unit name systemd accepts, its suffix included.
+SYSTEMD_NAME_MAX = 255
+# What `systemctl is-active` says of a unit that is running or about to be.
+SYSTEMD_UP = ("active", "activating", "reloading")
+LINGER_ADVICE = ("the timers run while you are logged in; to keep them running after you log out: "
+                 "loginctl enable-linger")
+
+# The unit files, as a person reading ~/.config/systemd/user should understand them. A value in them
+# is written by _systemd_word or _systemd_text, which keep a project's path from ending the line.
+SYSTEMD_SERVICE = """# Written by `ao watchdog install`; `ao watchdog uninstall` removes it.
+[Unit]
+Description={description}
+
+[Service]
+Type=oneshot
+ExecStart={argv}
+Environment={path}
+# The watchdog starts each nudge in a session of its own and exits. With systemd's default
+# KillMode, a oneshot unit that ends kills every process left in its control group: the nudge too.
+KillMode=process
+StandardOutput=append:{log}
+StandardError=append:{log}
+"""
+
+SYSTEMD_TIMER = """# Written by `ao watchdog install`; `ao watchdog uninstall` removes it.
+[Unit]
+Description={description}
+
+[Timer]
+# At once when the timer starts, as a launchd job's RunAtLoad, then every interval from the last
+# start, as its StartInterval: to the second, not anywhere in the minute systemd allows by default.
+OnActiveSec=0
+OnUnitActiveSec={seconds}s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
+"""
+
+
+def _systemctl(*args, merge=False):
+    """(what `systemctl --user <args>` printed, its exit status), asked without a shell as launchctl is.
+
+    Its standard error is discarded unless `merge` keeps it in the answer, where a failure says why.
+    """
+    return A._run_program(["systemctl", "--user", *args], stderr=subprocess.STDOUT if merge else subprocess.DEVNULL)
+
+
+def _systemd_dir():
+    """The user unit directory the jobs are written to, and the one a user manager reads by default."""
+    return os.path.join(A.HOME, ".config", "systemd", "user")
+
+
+def _systemd_unit(job, key):
+    """The name, without its suffix, of the units that schedule one of ao's jobs for a project.
+
+    `ao-<job>-<key>`, as the Windows task is named. A unit name holds letters, digits and `:_.-`
+    only, and a project's key may hold any other character: each is written as systemd-escape
+    writes it, `\\xNN` for each of its bytes, a backslash among them, so two keys stay two names.
+    A name longer than systemd accepts keeps its first part and eight hex digits of the key's hash.
+    """
+    import hashlib
+    prefix, key = f"ao-{job}-", key.lower()
+    pieces = [ch if ch.isascii() and (ch.isalnum() or ch in ":_.-")
+              else "".join(f"\\x{byte:02x}" for byte in ch.encode(UTF8, "surrogateescape")) for ch in key]
+    room = SYSTEMD_NAME_MAX - len(prefix) - len(".service")
+    if sum(map(len, pieces)) <= room:
+        return prefix + "".join(pieces)
+    kept = ""
+    for piece in pieces:
+        if len(kept) + len(piece) > room - 9:
+            break
+        kept += piece
+    return f"{prefix}{kept}-{hashlib.sha256(key.encode(UTF8, 'surrogateescape')).hexdigest()[:8]}"
+
+
+def _systemd_files(unit):
+    """The paths of one job's service, its timer, and the link `systemctl --user enable` makes to the timer.
+
+    The link is named as a file of the job's too: a disable that did not run leaves it pointing at
+    a timer that is gone, and the manager then names that missing unit at every login.
+    """
+    return [os.path.join(_systemd_dir(), unit + ".service"), os.path.join(_systemd_dir(), unit + ".timer"),
+            os.path.join(_systemd_dir(), "timers.target.wants", unit + ".timer")]
+
+
+def _systemd_word(word, expand=True):
+    """One word as systemd reads it back unchanged from ExecStart= or Environment= (systemd.syntax(7)).
+
+    Double-quoted, with a backslash and a quote escaped and a control character written as its C
+    escape, which systemd undoes inside quotes; a `%` doubled, since specifiers are expanded before
+    the line is split into words; and, on a line that expands variables (ExecStart=), a `$` doubled.
+    """
+    out = []
+    for ch in word:
+        if ch in '\\"':
+            out.append("\\" + ch)
+        elif ord(ch) < 32 or ord(ch) == 127:
+            out.append(f"\\x{ord(ch):02x}")
+        elif ch == "%" or (ch == "$" and expand):
+            out.append(ch + ch)
+        else:
+            out.append(ch)
+    return '"' + "".join(out) + '"'
+
+
+def _systemd_text(text):
+    """`text` as a value systemd reads with its specifiers and nothing else, such as Description=.
+
+    A `%` doubled; a control character, which would end the line, and a backslash, which at the
+    end of one joins the next line to it, each shown as `?`.
+    """
+    return "".join("?" if ord(ch) < 32 or ch in "\\\x7f" else ch for ch in text).replace("%", "%%")
+
+
+def _systemd_unit_texts(unit, job, argv, seconds, log, root, path):
+    """{file name: text} of the service that runs `argv` once and the timer that starts it every `seconds`."""
+    return {unit + ".service": SYSTEMD_SERVICE.format(
+                description=_systemd_text(f"ao {job} for {root}"),
+                argv=" ".join(_systemd_word(word) for word in argv),
+                path=_systemd_word(f"PATH={path}", expand=False), log=log.replace("%", "%%")),
+            unit + ".timer": SYSTEMD_TIMER.format(
+                description=_systemd_text(f"ao {job} for {root}, every {seconds}s"), seconds=seconds)}
+
+
+def _systemd_interval(path):
+    """The seconds between starts a timer written by `ao watchdog install` names; None when it names none."""
+    try:
+        with open(path, encoding=UTF8) as fh:
+            for line in fh:
+                name, _, value = line.strip().partition("=")
+                if name == "OnUnitActiveSec" and value[:-1].isdigit() and value.endswith("s"):
+                    return int(value[:-1])
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def _systemd_user_problem():
+    """None when a user systemd answers here; else why none does, as a person reads it.
+
+    The jobs run in the user's own manager, which `systemctl --user` reaches through
+    $XDG_RUNTIME_DIR: a container or WSL without systemd has no manager at all, and a `su`
+    or `sudo -u` shell has one it cannot reach.
+    """
+    if not os.path.isdir(SYSTEMD_RUNTIME):
+        return "this machine does not run systemd (a container, WSL without systemd, or another init)"
+    said, status = _systemctl("show", "--property=Version", merge=True)
+    if status == 0:
+        return None
+    if status is None:
+        return "systemctl could not be run"
+    return "systemctl --user reaches no user manager: " + (said.split("\n")[0].strip() or f"exit {status}")
+
+
+def _systemd_states(*units):
+    """{unit: what `systemctl --user is-active` says of it}; None for each when the manager cannot be asked.
+
+    It prints one state for each unit it is given, in order, and `inactive` for a unit it does not know.
+    """
+    said, status = _systemctl("is-active", *units)
+    states = said.split("\n") if said else []
+    if status is None or len(states) != len(units):
+        return dict.fromkeys(units)
+    return {unit: state.strip() for unit, state in zip(units, states)}
+
+
+def _systemd_linger():
+    """Whether this user's manager outlives their last session, "yes" or "no"; None when loginctl cannot say.
+
+    Without it the manager stops when the last session ends, and every timer in it: on a server,
+    the moment the person who installed the jobs logs out.
+    """
+    said, status = A._run_program(["loginctl", "show-user", str(os.getuid()), "--property=Linger"])
+    name, _, value = said.partition("=")
+    return value if status == 0 and name == "Linger" and value in ("yes", "no") else None
+
+
+def _systemd_unschedule(timer):
+    """Take one job's timer and service off the user systemd and out of its directory; what is left, or None.
+
+    Without systemd as the init system nothing can hold them, and their files are all there is to
+    remove. With it, the manager is asked to disable and stop them and then whether the timer is
+    gone. A manager this shell cannot reach may still run them: they are then left as they are,
+    files included, so that a session that reaches it still finds them to take off.
+    """
+    unit = timer[:-len(".timer")]
+    files = _systemd_files(unit)
+    booted = os.path.isdir(SYSTEMD_RUNTIME)
+    if booted:
+        problem = _systemd_user_problem()
+        if problem:
+            if not any(os.path.lexists(path) for path in files):
+                return None                     # nothing of ao's is here, and a manager out of reach cannot be asked
+            return f"{problem} — take it off from a login session of this user: ao watchdog uninstall"
+        # What these two answer is not read: the timer's state afterwards is what decides.
+        _systemctl("disable", "--now", timer)
+        _systemctl("stop", unit + ".service")
+    left = []
+    for path in files:
+        try:
+            if os.path.lexists(path):
+                os.remove(path)
+        except OSError as exc:
+            left.append(f"cannot remove {_home_relative(path)}: {exc}")
+    if not booted:
+        return "; ".join(left) or None
+    _systemctl("daemon-reload")
+    deadline = time.monotonic() + JOB_GONE_SECONDS
+    state = _systemd_states(timer)[timer]
+    while state in SYSTEMD_UP and time.monotonic() < deadline:
+        time.sleep(0.25)
+        state = _systemd_states(timer)[timer]
+    if state is None:
+        left.append(f"the user manager stopped answering — systemctl --user is-active {timer}")
+    elif state in SYSTEMD_UP:
+        left.append(f"still {state} — systemctl --user disable --now {timer}")
+    return "; ".join(left) or None
+
+
+def _installed_jobs(key):
+    """(kind, name) of each job ao scheduled for a project that is there to remove on this platform.
+
+    A user systemd loads ao's units from the files `ao watchdog install` writes and from nowhere
+    else, so on Linux a job is there while one of its files is.
+    """
+    scheduler = _scheduler()
+    if scheduler == "schtasks":
         return [("scheduled task", name) for name in (_windows_task(job, key) for job in WINDOWS_TASKS)
                 if _schtasks("/Query", "/TN", name)[1] == 0]
+    if scheduler == "systemd":
+        return [("systemd timer", unit + ".timer") for unit in (_systemd_unit(job, key) for job in SYSTEMD_JOBS)
+                if any(os.path.lexists(path) for path in _systemd_files(unit))]
     return [("launchd job", label) for label in (_launchd_label(job, key) for job in LAUNCHD_JOBS)
             if _launchd_loaded(label) or os.path.lexists(_launchd_plist(label))]
 
@@ -152,11 +398,14 @@ def _unschedule(name):
     that interpreter has no ao module, the jobs went on running against a removed project, and
     remove said they were gone. The telegram poller, which launchd keeps alive, was never removed.
     """
-    if os.name == "nt":
+    scheduler = _scheduler()
+    if scheduler == "schtasks":
         said, status = _schtasks("/Delete", "/TN", name, "/F")
         if _schtasks("/Query", "/TN", name)[1] == 0:
             return f"Task Scheduler still holds it: {said[:120] or f'schtasks exit {status}'}"
         return None
+    if scheduler == "systemd":
+        return _systemd_unschedule(name)
     plist, left = _launchd_plist(name), []
     if _launchd_loaded(name) and _launchctl("bootout", _launchd_domain(name))[1] != 0 and os.path.exists(plist):
         _launchctl("unload", plist)
@@ -603,6 +852,167 @@ def _schedule_refused(missing):
     return 1
 
 
+def _watchdog_programs():
+    """(the watchdog's words, the doctor's words) a scheduler starts; None, once refused, when either has none.
+
+    launchd and a user systemd both need an absolute program that exists: resolve the one this
+    installation has, or refuse before anything is written, since a job naming a missing file
+    fails silently (SAFE-REMOVE).
+    """
+    wargv = _scheduled_argv("ao-watchdog", ("scripts", "ao-watchdog"), "ao.watchdog")
+    dargv = _scheduled_argv("ao", ("bin", "ao"), "ao")
+    missing = [name for name, argv in (("ao-watchdog", wargv), ("ao", dargv)) if argv is None]
+    if missing:
+        _schedule_refused(missing)
+        return None
+    return wargv, dargv
+
+
+def _job_log(what, key):
+    """Where a scheduled job's output goes: its PROJECT_FILES log in ~/.ao, `watchdog-log` or `doctor-log`."""
+    return os.path.join(A.HOME, ".ao", A.project_file_name(what, key))
+
+
+def _forget_heartbeat(root):
+    """Remove the watchdog's heartbeat with its jobs.
+
+    A heartbeat left behind reads as a dead watchdog to every other project (audit).
+    """
+    try:
+        os.remove(A.heartbeat_path(root))
+    except OSError:
+        pass
+
+
+def _print_watchdog_health(root, log):
+    """How the recorded cycles went and the log's last lines, as `ao watchdog status` shows them under any scheduler."""
+    from .watchdog import cycle_health
+    health = cycle_health(root)
+    if health:
+        took = (f"longest took {health['longest_seconds']:.0f}s at {health['longest_at']}"
+                if health["longest_seconds"] is not None else "durations not recorded yet")
+        gap = (f"longest gap {health['gap_minutes']:.0f}m before {health['gap_at']}"
+               if health["gap_at"] else "no gaps")
+        print(f"cycles  {health['count']} recorded · {took} · {gap}")
+    if os.path.exists(log):
+        print(f"\nlast lines of {log}:")
+        print(_log_tail(log))
+
+
+def _systemd_absent(problem, argvs, seconds, logs):
+    """Say that no user systemd answers here, why, and what runs the same two jobs without it; 1.
+
+    A crontab is the scheduler nearly every Linux has without systemd, and its lines are what
+    a person can paste: the words run through /bin/sh, so each is quoted, and cron reads a `%`
+    as a line break unless it is escaped.
+    """
+    import shlex
+    print(f"{C['red']}not installed{C['reset']}: no user systemd — {problem}")
+    print("  nothing was written. Any scheduler this machine has can run the two jobs; a crontab, for instance:")
+    for job in SYSTEMD_JOBS:
+        minutes = max(1, -(-seconds[job] // 60))
+        line = f"*/{minutes} * * * * {shlex.join(argvs[job])} >> {shlex.quote(logs[job])} 2>&1"
+        print("    " + line.replace("%", "\\%"))
+    print(f"  or one watchdog cycle by hand: {shlex.join(argvs['watchdog'])}")
+    return 1
+
+
+def _watchdog_systemd(cfg, args):
+    """Install, remove or inspect the two jobs as systemd user units: a user systemd is Linux's launchd.
+
+    Each job is a oneshot service and a timer that starts it at once and then every interval, as
+    the launchd job's RunAtLoad and StartInterval do, written to ~/.config/systemd/user and enabled
+    with `systemctl --user`, asked by argument vector. Where no user systemd answers, nothing is
+    written, and what would run the jobs instead is printed (LINUX-SCHEDULER).
+    """
+    root = cfg["root"]
+    key = A.project_key(root).lower()
+    units = {job: _systemd_unit(job, key) for job in SYSTEMD_JOBS}
+    timers = {job: unit + ".timer" for job, unit in units.items()}
+    logs = {job: _job_log(f"{job}-log", key) for job in SYSTEMD_JOBS}
+
+    if args.action == "status":
+        problem = _systemd_user_problem()
+        states = dict.fromkeys(timers.values()) if problem else _systemd_states(*timers.values())
+        present = any(os.path.lexists(path) for unit in units.values() for path in _systemd_files(unit))
+        print(f"unit    {timers['watchdog']}")
+        print(f"timer   {states[timers['watchdog']] or 'unknown'}")
+        print(f"doctor  {states[timers['doctor']] or 'unknown'}  (ao doctor --check every 15m)")
+        print(f"units   {'present' if present else 'absent'}  ({_home_relative(_systemd_dir())})")
+        if problem:
+            print(f"systemd {C['yellow']}{problem}{C['reset']}")
+        else:
+            linger = _systemd_linger()
+            print("linger  " + (f"no — {LINGER_ADVICE}" if linger == "no" else linger or "unknown"))
+        _print_watchdog_health(root, logs["watchdog"])
+        return 0
+
+    if args.action == "uninstall":
+        left = 0
+        for unit in units.values():
+            present = any(os.path.lexists(path) for path in _systemd_files(unit))
+            problem = _systemd_unschedule(unit + ".timer")
+            if problem:
+                left += 1
+                print(f"{C['red']}left{C['reset']} {unit}.timer: {problem}")
+            elif present:
+                print(f"removed {unit}.timer")
+        _forget_heartbeat(root)
+        return 1 if left else 0
+
+    if args.interval < 1:
+        # OnUnitActiveSec=0 starts the next cycle the moment one ends.
+        print(f"{C['red']}not installed{C['reset']}: --interval is the seconds between cycles, at least 1")
+        return 1
+    programs = _watchdog_programs()
+    if programs is None:
+        return 1
+    wargv, dargv = programs
+    argvs = {"watchdog": wargv + ["--root", root, "--idle-minutes", str(args.idle_minutes)],
+             "doctor": dargv + ["-C", root, "doctor", "--check", "--notify"]}
+    seconds = {"watchdog": args.interval, "doctor": 900}
+    problem = _systemd_user_problem()
+    if problem:
+        return _systemd_absent(problem, argvs, seconds, logs)
+    # StandardOutput=append: takes a path as it stands, with no escape a line break could be written as.
+    broken = [log for log in logs.values() if any(ord(ch) < 32 or ord(ch) == 127 for ch in log)]
+    if broken:
+        print(f"{C['red']}not installed{C['reset']}: a unit cannot send output to a path holding a control "
+              f"character: {broken[0]!r}")
+        return 1
+    os.makedirs(_systemd_dir(), exist_ok=True)
+    os.makedirs(os.path.join(A.HOME, ".ao"), exist_ok=True)
+    path = _scheduled_path()
+    for job, unit in units.items():
+        for name, text in _systemd_unit_texts(unit, job, argvs[job], seconds[job], logs[job], root, path).items():
+            with open(os.path.join(_systemd_dir(), name), "w", encoding=UTF8) as fh:
+                fh.write(text)
+    # Restarted rather than started: on a reinstall a timer that is already running starts again and
+    # runs a cycle at once, as the launchd job's bootout and bootstrap do; a start would run none.
+    failed = []
+    for step in (("daemon-reload",), ("enable", *timers.values()), ("restart", *timers.values())):
+        said, status = _systemctl(*step, merge=True)
+        if status != 0:
+            failed.append(said.split("\n")[0].strip() or f"systemctl --user {step[0]} exited {status}")
+    states = _systemd_states(*timers.values())
+    for timer, state in states.items():
+        if state not in SYSTEMD_UP:
+            failed.append(f"{timer} is {state or 'not known to the user manager'}")
+    if failed:
+        print(f"{C['red']}NOT SCHEDULED{C['reset']}: {'; '.join(failed)[:240]}")
+        print(f"  run: systemctl --user enable --now {timers['watchdog']} {timers['doctor']}")
+        return 1
+    print(f"installed {timers['watchdog']}")
+    print(f"installed {timers['doctor']}  (ao doctor --check --notify every 15m — the second, independent check)")
+    print(f"  checks every {args.interval}s · nudges after {args.idle_minutes}m idle")
+    print(f"  units: {_home_relative(_systemd_dir())}")
+    print(f"  log: {logs['watchdog']}")
+    print(f"  remove with: ao -C {root} watchdog uninstall")
+    if _systemd_linger() == "no":
+        print(f"  {C['yellow']}{LINGER_ADVICE}{C['reset']}")
+    return 0
+
+
 def _watchdog_windows(cfg, args):
     """Task Scheduler is Windows' launchd: one task every two minutes, one every fifteen."""
     root = cfg["root"]
@@ -667,17 +1077,20 @@ def cmd_watchdog(cfg, args):
 
 
 def _cmd_watchdog(cfg, args):
-    """Install, remove or inspect the launchd job that restarts a stalled agent."""
+    """Install, remove or inspect the jobs that restart a stalled agent: launchd's, a user systemd's on Linux,
+    Task Scheduler's on Windows."""
     if args.action in ("explain", "trace"):
         return _watchdog_debug(cfg, args)
-    if os.name == "nt":
+    scheduler = _scheduler()
+    if scheduler == "schtasks":
         return _watchdog_windows(cfg, args)
-    import getpass
+    if scheduler == "systemd":
+        return _watchdog_systemd(cfg, args)
     root = cfg["root"]
     key = A.project_key(root).lower()
     label = _launchd_label("watchdog", key)
     plist_path = _launchd_plist(label)
-    log = os.path.join(A.HOME, ".ao", A.project_file_name("watchdog-log", key))
+    log = _job_log("watchdog-log", key)
 
     if args.action == "status":
         loaded = _launchd_listed(label)
@@ -686,17 +1099,7 @@ def _cmd_watchdog(cfg, args):
         print(f"doctor  {'loaded' if dloaded else 'not installed'}  (ao doctor --check every 15m)")
         print(f"plist   {'present' if os.path.exists(plist_path) else 'absent'}")
         print(f"loaded  {loaded if loaded else 'no'}")
-        from .watchdog import cycle_health
-        health = cycle_health(root)
-        if health:
-            took = (f"longest took {health['longest_seconds']:.0f}s at {health['longest_at']}"
-                    if health["longest_seconds"] is not None else "durations not recorded yet")
-            gap = (f"longest gap {health['gap_minutes']:.0f}m before {health['gap_at']}"
-                   if health["gap_at"] else "no gaps")
-            print(f"cycles  {health['count']} recorded · {took} · {gap}")
-        if os.path.exists(log):
-            print(f"\nlast lines of {log}:")
-            print(_log_tail(log))
+        _print_watchdog_health(root, log)
         return
 
     if args.action == "uninstall":
@@ -711,20 +1114,13 @@ def _cmd_watchdog(cfg, args):
         if os.path.exists(dplist):
             os.remove(dplist)
             print(f"removed {dlabel}")
-        # A heartbeat left behind reads as a dead watchdog to every other project (audit).
-        try:
-            os.remove(A.heartbeat_path(root))
-        except OSError:
-            pass
+        _forget_heartbeat(root)
         return
 
-    # launchd needs an absolute program that exists: resolve the one this installation has, or
-    # refuse before anything is written, since a job naming a missing file fails silently (SAFE-REMOVE).
-    wargv = _scheduled_argv("ao-watchdog", ("scripts", "ao-watchdog"), "ao.watchdog")
-    dargv = _scheduled_argv("ao", ("bin", "ao"), "ao")
-    missing = [name for name, argv in (("ao-watchdog", wargv), ("ao", dargv)) if argv is None]
-    if missing:
-        return _schedule_refused(missing)
+    programs = _watchdog_programs()
+    if programs is None:
+        return 1
+    wargv, dargv = programs
     os.makedirs(os.path.dirname(plist_path), exist_ok=True)
     os.makedirs(os.path.join(A.HOME, ".ao"), exist_ok=True)
     open(plist_path, "w", encoding=UTF8).write(PLIST.format(
@@ -756,7 +1152,7 @@ def _cmd_watchdog(cfg, args):
     dargs = dargv + ["-C", root, "doctor", "--check", "--notify"]
     open(dplist, "w", encoding=UTF8).write(PLIST_CMD.format(
         path=_launchd_path(), label=dlabel, args="".join(f"<string>{a}</string>" for a in dargs),
-        interval=900, log=os.path.join(A.HOME, ".ao", A.project_file_name("doctor-log", key))))
+        interval=900, log=_job_log("doctor-log", key)))
     _launchctl("bootout", _launchd_domain(dlabel))
     _launchctl("bootstrap", _launchd_domain(), dplist, merge=True)
     print(f"installed {dlabel}  (ao doctor --check --notify every 15m — the second, independent check)")
@@ -1298,10 +1694,14 @@ def cmd_doctor(cfg, args):
     for name, state, hint in _optional_features(cfg):
         print(f"optional        {name:<9} {state}" + (f"  {C['dim']}{hint}{C['reset']}" if state == "absent" else ""))
     key = A.project_key(root).lower()
-    if os.name == "nt":
+    scheduler = _scheduler()
+    if scheduler == "schtasks":
         # Windows schedules the watchdog with Task Scheduler, not launchd (#71).
         wd = subprocess.run(["schtasks", "/Query", "/TN", _windows_task("watchdog", key)], capture_output=True,
                             text=True, encoding=UTF8, errors="replace").returncode == 0
+    elif scheduler == "systemd":
+        timer = _systemd_unit("watchdog", key) + ".timer"
+        wd = _systemd_states(timer)[timer] in SYSTEMD_UP
     else:
         wd = _launchd_listed(_launchd_label("watchdog", key))
     print(f"watchdog        {C['green']}running{C['reset']}" if wd else

@@ -408,7 +408,10 @@ def test_the_windows_process_table_asks_powershell_by_argument_vector(monkeypatc
 # ---- launchd ----------------------------------------------------------------------------------
 
 def _launchd(monkeypatch):
-    """A launchd that loads what is bootstrapped and answers `launchctl list`, asked through _run_program."""
+    """A launchd that loads what is bootstrapped and answers `launchctl list`, asked through _run_program.
+
+    It is the scheduler on whatever platform the test runs: Linux's own is a user systemd (LINUX-SCHEDULER).
+    """
     loaded, asked = set(), []
 
     def run(argv, cwd=None, timeout=20, stderr=subprocess.DEVNULL):
@@ -430,6 +433,7 @@ def _launchd(monkeypatch):
 
     monkeypatch.setattr(A, "_run_program", run)
     monkeypatch.setattr(os, "getuid", lambda: 501, raising=False)
+    monkeypatch.setattr(cli, "_scheduler", lambda: "launchd")
     return loaded, asked
 
 

@@ -125,7 +125,8 @@ def build_parser():
                     help="seconds to wait if another run, of any project, holds the machine gate lock")
     mc.set_defaults(fn=cmd_merge_check)
 
-    wd = sub.add_parser("watchdog", help="launchd job that restarts a stalled agent")
+    wd = sub.add_parser("watchdog", help="the scheduled job that restarts a stalled agent: launchd, "
+                        "a user systemd on Linux, Task Scheduler on Windows")
     wd.add_argument("action", choices=["install", "uninstall", "status", "explain", "trace"])
     wd.add_argument("--interval", type=int, default=120)
     wd.add_argument("--idle-minutes", type=float, default=None,

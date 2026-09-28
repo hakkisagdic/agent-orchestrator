@@ -411,23 +411,27 @@ DOCTOR_WATCHDOG_ALARMS = {"credits-exhaust": {"key": "credits-exhaust", "level":
 
 # A heartbeat older than this is a watchdog that stopped.
 WATCHDOG_SILENT_AFTER = 360
-# The scheduled check runs every fifteen minutes, from its launchd job or its Windows task:
-# a run this long after its last one follows a silence of its own.
+# The scheduled check runs every fifteen minutes, from its launchd job, its systemd timer or its
+# Windows task: a run this long after its last one follows a silence of its own.
 DOCTOR_SILENT_AFTER = 20 * 60
 
 
 def _watchdog_interval(root):
-    """Seconds between the watchdog's cycles: its launchd job's StartInterval, else two minutes.
+    """Seconds between the watchdog's cycles: its systemd timer's, its launchd job's StartInterval, or two minutes.
 
     Two minutes is what `ao watchdog install` schedules without --interval, and what
-    the Windows task runs.
+    the Windows task runs. Each file is read where it is, whatever the platform: only
+    the scheduler this machine has holds one.
     """
     import plistlib
-    try:
-        with open(_launchd_plist(_launchd_label("watchdog", A.project_key(root))), "rb") as fh:
-            interval = int(plistlib.load(fh).get("StartInterval") or 120)
-    except (OSError, ValueError, TypeError, AttributeError, plistlib.InvalidFileException):
-        interval = 120
+    key = A.project_key(root)
+    interval = _systemd_interval(os.path.join(_systemd_dir(), _systemd_unit("watchdog", key) + ".timer"))
+    if interval is None:
+        try:
+            with open(_launchd_plist(_launchd_label("watchdog", key)), "rb") as fh:
+                interval = int(plistlib.load(fh).get("StartInterval") or 120)
+        except (OSError, ValueError, TypeError, AttributeError, plistlib.InvalidFileException):
+            interval = 120
     return max(60, interval)
 
 

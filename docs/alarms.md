@@ -229,7 +229,8 @@ backstop, and it pages nothing twice:
   It records each of its runs in `~/.ao/doctor-<project>.json`, and a run that finds its
   last one more than twenty minutes ago was stopped too: the jobs were switched off, or
   the machine was off or asleep. Then the watchdog has one of its cycles, the
-  StartInterval of its launchd job, before the doctor pages it dead or pages what that
-  first cycle raises or names. A watchdog whose heartbeat had already stopped when the
-  doctor last ran is paged at once, one that does not come back is paged at the
-  doctor's next run, and a doctor that cannot write its record gives no cycle.
+  StartInterval of its launchd job or the interval of its systemd timer, before the
+  doctor pages it dead or pages what that first cycle raises or names. A watchdog whose
+  heartbeat had already stopped when the doctor last ran is paged at once, one that does
+  not come back is paged at the doctor's next run, and a doctor that cannot write its
+  record gives no cycle.

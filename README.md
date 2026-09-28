@@ -132,14 +132,14 @@ scope is the one authority an implementer must not have.
 | `ao skill install` / `ao skill show` | the playbook (roles, loop, authority, protocol, alarms, every command) rendered for the agents this repo uses: Claude skill, Kiro steering, AGENTS.md |
 | `ao remove --yes [--allow-shared-hooks]` | two-phase removal: delete and commit `.ao-project` while enforcement remains active, then remove AO state after HEAD and index no longer contain it; foreign/protected hooks stay untouched. The second phase takes off the project's scheduled jobs and exactly its own files in `~/.ao`, lists each by name in the dry run, and exits 1 naming what it could not remove ([watchdog.md](docs/watchdog.md)) |
 | `ao init --profile claude-kiro|claude-claude [--review-tier same-family|person] [--language en|tr]` | write role blocks and exact `.ao-project` enrollment marker without staging it; a single-harness profile chooses a review tier ([profiles.md](docs/profiles.md)); `--language tr` has what ao writes into the project and for its people in Turkish ([configuration.md](docs/configuration.md)) |
-| `ao doctor --check` | quiet doctor for a scheduler: one line per problem, exit 1, alarms raised — installed as a 15-minute launchd job by `ao watchdog install` |
+| `ao doctor --check` | quiet doctor for a scheduler: one line per problem, exit 1, alarms raised — installed as a 15-minute launchd job, or systemd user timer on Linux, by `ao watchdog install` |
 | `ao email setup` / `ao email test` | the red alarm channel: e-mail via formsubmit.co, no server ([alarms.md](docs/alarms.md)) |
 | `ao alarms` / `ao alarms test --level red` | live alarm episodes and their level; test rings every channel |
 | `ao mail log` / `ao mail search <text>` / `ao mail ack <glob>` | the mail ledger: every message written and when it was consumed, searchable after deletion |
 | `ao watchdog explain` / `ao watchdog trace` | why the watchdog did or did not act: measurements and verdicts of this cycle, and of the recorded ones ([watchdog.md](docs/watchdog.md)) |
 | `ao source import` | admit tracker items onto the board |
 | `ao mail` · `ao notices` | coordination messages; alerts this project raised |
-| `ao watchdog install` | launchd job that restarts a stalled agent |
+| `ao watchdog install` | launchd job, or systemd user timer on Linux, that restarts a stalled agent ([watchdog.md](docs/watchdog.md)) |
 | `ao mcp serve` · `ao a2a serve` | expose state to MCP clients / as A2A tasks |
 | `ao telegram setup` | alerts to your phone, decisions back from it |
 | `ao digest [--days N]` | what happened, read from the ledgers — also answers "why is nothing moving" |

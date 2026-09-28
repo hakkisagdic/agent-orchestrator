@@ -57,7 +57,10 @@ def _project(parent, name):
 
 
 def _launchd(monkeypatch, stuck=()):
-    """A launchd asked through _run_program: it lists what is loaded, and a stuck label will not boot out."""
+    """A launchd asked through _run_program: it lists what is loaded, and a stuck label will not boot out.
+
+    It is the scheduler on whatever platform the test runs: Linux's own is a user systemd (LINUX-SCHEDULER).
+    """
     loaded, asked = set(), []
 
     def run(argv, cwd=None, timeout=20, stderr=subprocess.DEVNULL):
@@ -78,6 +81,7 @@ def _launchd(monkeypatch, stuck=()):
 
     monkeypatch.setattr(A, "_run_program", run)
     monkeypatch.setattr(os, "getuid", lambda: 501, raising=False)
+    monkeypatch.setattr(cli, "_scheduler", lambda: "launchd")
     return loaded, asked
 
 
