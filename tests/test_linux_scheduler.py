@@ -450,6 +450,27 @@ def test_without_systemd_a_jobs_files_are_all_there_is_to_remove(project, tmp_pa
     assert fake()["calls"] == []
 
 
+# ---- ao uninstall ------------------------------------------------------------------------------
+
+def test_uninstall_takes_every_unit_in_aos_namespace_and_no_other(project, tmp_path, monkeypatch):
+    """`ao uninstall` (UPDATE-UNINSTALL) takes every job ao scheduled on the machine: on Linux each unit in ao's
+    namespace in the user unit directory, a project's the registry lost among them, and never a unit of another's."""
+    fake = _systemd(tmp_path, monkeypatch)
+    units, watchdog, doctor = _units(A.project_key(project["root"]).lower())
+    cli.cmd_watchdog(project, _args())
+    (units / "ao-doctor-gone.service").write_text("[Service]\n", encoding="utf-8")       # a project deleted since
+    (units / "backup.timer").write_text("[Timer]\n", encoding="utf-8")                   # not ao's
+
+    jobs = cli._machine_jobs()
+
+    assert sorted(jobs) == sorted(("systemd timer", f"{unit}.timer") for unit in (watchdog, doctor, "ao-doctor-gone"))
+    assert [cli._unschedule(name) for _, name in jobs] == [None, None, None]
+    assert cli._machine_jobs() == [] and fake()["active"] == []
+    assert (units / "backup.timer").exists()
+    leaves = cli._uninstall_leaves(SimpleNamespace(purge=False), {"kind": None, "where": "/x", "remove": None})
+    assert "systemd: a unit you wrote to run ao stays" in "\n".join(leaves)
+
+
 # ---- the doctor --------------------------------------------------------------------------------
 
 def test_the_doctor_shows_the_watchdog_running_from_its_timer(project, tmp_path, monkeypatch, capsys):

@@ -1057,12 +1057,20 @@ def _print_hook_status(inv):
               f"{target['directory_class']} — {target['path']}")
 
 
-def _hooks_uninstall(inv, allow):
-    plan = [
+def _hook_removal_plan(inv):
+    """The hook files an uninstall takes: ao's exact bytes, current or legacy, untracked, at a target it may write.
+
+    One choice for `ao hooks uninstall` and `ao uninstall`, so what the machine-wide dry run lists is what goes.
+    """
+    return [
         target for target in inv["targets"]
         if target["eligible"] and _state_base(target["static_state"])
         in ("current-local", "current-scoped", "legacy")
     ]
+
+
+def _hooks_uninstall(inv, allow):
+    plan = _hook_removal_plan(inv)
     if _authorization_refusal(plan, allow):
         return 1
     failed = False

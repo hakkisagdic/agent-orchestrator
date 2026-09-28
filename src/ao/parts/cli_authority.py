@@ -56,9 +56,13 @@ def _launchd_listed(label):
     return "\n".join(line for line in _launchctl("list")[0].split("\n") if label in line).strip()
 
 
+# Every launchd label ao gives a job starts with this; `ao uninstall` takes the namespace whole.
+LAUNCHD_NAMESPACE = "com.agentorchestrator."
+
+
 def _launchd_label(job, key):
     """The launchd label of one job ao schedules for a project: `watchdog`, `doctor` or `telegram`."""
-    return f"com.agentorchestrator.{job}.{key.lower()}"
+    return f"{LAUNCHD_NAMESPACE}{job}.{key.lower()}"
 
 
 def _launchd_plist(label):

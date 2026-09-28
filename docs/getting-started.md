@@ -78,3 +78,35 @@ ao commit -m "…"
 
 No push: that stays a person's act. `ao doctor` shows the state of everything above at any
 time.
+
+## 5. Update and uninstall
+
+```bash
+ao update --dry-run                  # how ao was installed, and the command that updates it
+ao update                            # shows that command and asks; --yes runs it without asking
+ao uninstall                         # a dry run: each job, hook and MCP entry it would take
+ao uninstall --yes                   # take them off; --purge also deletes ~/.ao
+```
+
+`ao update` needs nobody to remember how ao went on. A git clone - the README's symlink to
+`bin/ao` - is fast-forwarded with `git pull --ff-only`, and refused while it has uncommitted
+changes, is on no branch or tracks nothing; a Homebrew, pipx or uv install is upgraded by its own
+tool; a pip install by the pip of the interpreter running ao, with `--user` when it went into the
+user's site directory. The command is printed before it runs.
+
+`ao uninstall` takes off what ao set to run or load without anyone asking: its scheduled jobs, its
+hooks in every project the machine registry knows - only files that are ao's exact bytes and
+untracked, so a hook you edited stays - and the `ao` entry `ao init` put into their MCP files. Run
+it before removing the program: once ao is gone, an enrolled project's hook fails every commit with
+"ao not found". It names what it leaves: each project's `.ao/`, ledgers, mailbox and marker
+(`ao remove --yes` in the project takes those, while ao is installed), `~/.ao` unless `--purge`,
+and the program itself, with the command that removes it.
+
+*In ao since slice UPDATE-UNINSTALL: `ao update` and `ao uninstall`. Update asks about the ao that
+runs it, not the first one on PATH. Uninstall takes every launchd job in ao's namespace, those of
+projects deleted since included, and on Linux every systemd user unit in it the same way
+(LINUX-SCHEDULER); on Windows, where Task Scheduler has no namespace to list, the tasks of the
+projects the registry knows. A systemd unit you wrote to run ao yourself is not ao's and stays, and
+the dry run says so. A hook ao cannot prove untracked - one in a hooks directory outside
+every repository - stays too, named, and the uninstall exits 1, as it does for anything it leaves
+behind; `--purge` then keeps `~/.ao`, whose registry is how the next run finds what was left.*

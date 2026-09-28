@@ -109,6 +109,9 @@ scope is the one authority an implementer must not have.
    candidate, the reviewer must answer as another actor, and a throwaway slice must pass verify,
    review and commit-ok. Nothing is committed. [Getting started](docs/getting-started.md) is the
    whole sequence.
+8. Later, `ao update` updates ao the way it was installed, whichever way that was, and `ao uninstall`
+   takes its jobs, hooks and MCP entries off the machine before the program goes
+   ([update and uninstall](docs/getting-started.md#5-update-and-uninstall)).
 
 ## Commands
 
@@ -131,6 +134,8 @@ scope is the one authority an implementer must not have.
 | `ao hooks [status|install|uninstall] [--allow-shared-hooks]` / `ao push allow` | resolve Git's effective hook path; each role is independent, and shared/external/global mutations require explicit command-wide authorization |
 | `ao skill install` / `ao skill show` | the playbook (roles, loop, authority, protocol, alarms, every command) rendered for the agents this repo uses: Claude skill, Kiro steering, AGENTS.md |
 | `ao remove --yes [--allow-shared-hooks]` | two-phase removal: delete and commit `.ao-project` while enforcement remains active, then remove AO state after HEAD and index no longer contain it; foreign/protected hooks stay untouched. The second phase takes off the project's scheduled jobs and exactly its own files in `~/.ao`, lists each by name in the dry run, and exits 1 naming what it could not remove ([watchdog.md](docs/watchdog.md)) |
+| `ao update [--dry-run\|--yes]` | update ao the way it was installed: a git clone fast-forwards, and is refused while it has uncommitted changes; a Homebrew, pipx or uv install upgrades through its own tool, a pip install through the pip of the interpreter running ao. The command is shown first and runs on `--yes` or a yes at the terminal ([getting started](docs/getting-started.md#5-update-and-uninstall)) |
+| `ao uninstall [--yes] [--purge] [--allow-shared-hooks]` | take what ao installed off this machine: every scheduled job of ao's, ao's own hooks in each project the registry knows, and the `ao` entry in their MCP files; a dry run unless `--yes`, naming what it leaves - each project's `.ao/`, `~/.ao` unless `--purge`, and the program, with the command that removes it |
 | `ao init --profile claude-kiro|claude-claude [--review-tier same-family|person] [--language en|tr]` | write role blocks and exact `.ao-project` enrollment marker without staging it; a single-harness profile chooses a review tier ([profiles.md](docs/profiles.md)); `--language tr` has what ao writes into the project and for its people in Turkish ([configuration.md](docs/configuration.md)) |
 | `ao doctor --check` | quiet doctor for a scheduler: one line per problem, exit 1, alarms raised — installed as a 15-minute launchd job, or systemd user timer on Linux, by `ao watchdog install` |
 | `ao email setup` / `ao email test` | the red alarm channel: e-mail via formsubmit.co, no server ([alarms.md](docs/alarms.md)) |

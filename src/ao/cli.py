@@ -55,6 +55,7 @@ A._part("cli_maintenance", globals())
 
 A._part("cli_lanes", globals())
 A._part("cli_pr", globals())
+A._part("cli_install", globals())
 
 
 def build_parser():
@@ -498,6 +499,22 @@ def build_parser():
         help="authorize the whole hook-removal set when Git routes hooks through shared, external, or global/system configuration",
     )
     rm.set_defaults(fn=cmd_remove)
+    up = sub.add_parser("update", help="update ao the way it was installed (git clone, Homebrew, pipx, uv or pip), "
+                                       "saying what it runs first")
+    up_when = up.add_mutually_exclusive_group()
+    up_when.add_argument("--yes", action="store_true", help="run the update without asking")
+    up_when.add_argument("--dry-run", action="store_true", help="say what would run, and run nothing")
+    up.set_defaults(fn=cmd_update)
+    un = sub.add_parser("uninstall", help="take ao's scheduled jobs, hooks and MCP entries off this machine; "
+                                          "a dry run unless --yes")
+    un.add_argument("--yes", action="store_true", help="take them (default is a dry run)")
+    un.add_argument("--purge", action="store_true",
+                    help="also delete ~/.ao: settings, channel credentials, logs, archived reviews, the registry")
+    un.add_argument(
+        "--allow-shared-hooks", action="store_true",
+        help="authorize removing hooks where Git routes them through shared, external, or global/system configuration",
+    )
+    un.set_defaults(fn=cmd_uninstall)
     fo = sub.add_parser("fanout", help="may a fan-out of N sub-agents start now; record what one cost")
     fo.add_argument("action", choices=["ok", "record", "history"], nargs="?", default="ok")
     fo.add_argument("--agents", type=int)

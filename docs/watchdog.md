@@ -277,6 +277,13 @@ under the registry's lock, and the registry stays for every other project. What 
 for the project under `~/.ao/archive/<project>/` is kept. The dry run lists each job, file and
 row by name, as the removal finds them, and a removal that leaves any of them exits 1.
 
+`ao uninstall --yes` takes every job off the machine the same way, one at a time and each checked
+gone: on macOS each launchd job whose label is in ao's namespace, the jobs of projects removed or
+never registered among them, on Linux each user unit in ao's namespace in `~/.config/systemd/user/`,
+the same way, and on Windows the tasks of the projects the registry knows. The
+heartbeats of those projects go with the jobs, since one left behind reads as a dead watchdog
+([getting started](getting-started.md#5-update-and-uninstall)).
+
 ## The instruments
 
 ```bash
