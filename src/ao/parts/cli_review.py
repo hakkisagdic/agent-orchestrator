@@ -607,17 +607,14 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
                 "retryable": False,
             }
 
-        A.helper_register(root, proc.pid, "reviewer")
-        _review_phase("running", f"{label}, pid {proc.pid}")
-        started = time.monotonic()
         try:
+            A.helper_register(root, proc.pid, "reviewer")
+            _review_reviewer(proc.pid)
+            _review_phase("running", f"{label}, pid {proc.pid}")
+            started = time.monotonic()
             try:
                 stdout, stderr = _reviewer_communicate(proc, timeout, label, started,
                                                        stall=S.get(A.load_config(root), "review.stall_minutes") * 60)
-            except KeyboardInterrupt:
-                # Its own group no longer hears the terminal's interrupt; pass it on.
-                _reviewer_kill_and_drain(proc)
-                raise
             except subprocess.TimeoutExpired as expired:
                 stdout, stderr = _reviewer_kill_and_drain(proc)
                 _reviewer_terminal_output(stdout, stderr)
@@ -646,8 +643,15 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
                     "returncode": proc.returncode,
                     "kind": "communication-error", "retryable": False,
                 }
+        except KeyboardInterrupt:
+            # Its own group hears neither the terminal's interrupt nor a signal that stops the run, from
+            # the moment it is started (REVIEWER-ORPHAN); pass it on.
+            _reviewer_kill_and_drain(proc)
+            _DETACHED_RUN["stopped_reviewer"] = proc.pid
+            raise
         finally:
             A.helper_release(root, proc.pid)
+            _review_reviewer(None)
 
         print(f"{C['dim']}reviewer {label} exited {proc.returncode} after "
               f"{_elapsed(time.monotonic() - started)}{C['reset']}")
@@ -696,6 +700,9 @@ def _reviewer_binary_version(root, path, timeout=REVIEW_VERSION_TIMEOUT):
         try:
             try:
                 stdout, stderr = proc.communicate(timeout=timeout)
+            except KeyboardInterrupt:
+                _reviewer_kill_and_drain(proc)             # stopped with the run (REVIEWER-ORPHAN)
+                raise
             except (OSError, subprocess.TimeoutExpired):
                 stdout, stderr = _reviewer_kill_and_drain(proc)
                 _reviewer_terminal_output(stdout, stderr)
@@ -2071,6 +2078,95 @@ def _review_phase(what, on="", section=None):
         print(f"{state['id']}: this phase is not in its state, so `ao reviews` does not show it: {exc}")
 
 
+def _review_reviewer(pid):
+    """Keep in the detached run's state the reviewer it runs, and that process's start (REVIEWER-ORPHAN).
+
+    The reviewer leads a session of its own, so a signal to the run's group does not reach it, and a
+    run killed outright left its reviewer working for nobody. The state names it while it runs, for
+    `ao reviews` to say so and `ao review cancel` to stop it, and only while that pid is still the
+    process that started then. `pid` None takes it out. Outside a detached run this does nothing.
+    """
+    state = _DETACHED_RUN.get("state")
+    if state is None:
+        return
+    if pid is None:
+        state.pop("reviewer", None)
+    else:
+        # helper_register has just read the process table afresh for this pid.
+        state["reviewer"] = {"pid": pid, "start": A._process_start(pid)}
+
+
+def _live_reviewer(state):
+    """The pid of the reviewer a run's state names, while that pid is still the process it started."""
+    reviewer = state.get("reviewer") if isinstance(state.get("reviewer"), dict) else {}
+    pid, start = reviewer.get("pid"), reviewer.get("start")
+    if not isinstance(pid, int) or start in (None, 0, ""):
+        return None
+    return pid if A._process_start(pid, refresh=True) == start else None
+
+
+def _review_runner(state):
+    """The run's pid while that process is still this review's runner, `ao review --run <id>` (REVIEWER-ORPHAN).
+
+    A runner that is gone leaves its pid to whatever process is given it next, so the pid is the
+    runner only while the process holding it was started with the review's id.
+    """
+    from . import procs
+    pid = state.get("pid")
+    if not isinstance(pid, int) or not A._pid_alive(pid):
+        return None
+    try:
+        argv = procs.argv(pid) or []
+    except Exception:
+        return None
+    return pid if "--run" in argv and state.get("id") in argv else None
+
+
+class ReviewRunStopped(KeyboardInterrupt):
+    """A signal that stops the detached run of a submitted review (REVIEWER-ORPHAN).
+
+    It is an interrupt, so every place that stops a reviewer on the terminal's interrupt stops it on
+    this as well, and no `except Exception` on the way out holds it.
+    """
+
+    def __init__(self, signum):
+        super().__init__(signum)
+        self.signum = signum
+
+
+def _stop_on_signals():
+    """Have SIGTERM, SIGHUP and SIGINT stop the detached run as ReviewRunStopped; returns what puts them back.
+
+    The first one raises and any after it are let go, so a second signal cannot cut short the
+    stopping of the reviewer that the first one began.
+    """
+    fired = []
+
+    def stop(signum, frame):
+        if fired:
+            return
+        fired.append(signum)
+        raise ReviewRunStopped(signum)
+
+    before = {}
+    for name in ("SIGTERM", "SIGHUP", "SIGINT"):
+        signum = getattr(signal, name, None)
+        if signum is None:
+            continue
+        try:
+            before[signum] = signal.signal(signum, stop)
+        except (OSError, ValueError):          # not the main thread, or not one this platform lets be caught
+            pass
+
+    def put_back():
+        for signum, handler in before.items():
+            try:
+                signal.signal(signum, handler)
+            except (OSError, ValueError):
+                pass
+    return put_back
+
+
 def _log_by_line():
     """Have this process's standard output written a line at a time; returns what puts it back (REVIEW-START-DELAY).
 
@@ -2103,10 +2199,17 @@ def _review_shown(state, now):
     on = str((phase or {}).get("on") or "")
     if not _review_in_flight(state, now):
         if phase is None:
-            return "lost", ""
-        if what == "starting":
-            return "lost", f"its runner never reported; its log is .ao/reviews/{state.get('id')}.log"
-        return "lost", f"it was {what}" + (f": {on}" if on else "")
+            went = ""
+        elif what == "starting":
+            went = f"its runner never reported; its log is .ao/reviews/{state.get('id')}.log"
+        else:
+            went = f"it was {what}" + (f": {on}" if on else "")
+        orphan = _live_reviewer(state)
+        if orphan:
+            # Killed outright, the runner could not stop the reviewer it started (REVIEWER-ORPHAN).
+            went = "; ".join(part for part in (went, f"its reviewer, pid {orphan}, runs on without it: "
+                                                     f"`ao review cancel {state.get('id')}` stops it") if part)
+        return "lost", went
     if phase is None:
         return "running", ""
     since = _elapsed(now - float(phase.get("since") or now))
@@ -2218,6 +2321,7 @@ def cmd_review_run(cfg, rid):
     started = time.time()
     previous = os.environ.get("GIT_INDEX_FILE")
     put_back = lambda: None                                 # noqa: E731 - what _log_by_line hands back, once it ran
+    handlers_back = _stop_on_signals()
     try:
         state.update(pid=os.getpid(), started_at=int(started),
                      phase={"what": "preparing", "on": "the candidate and its prompt", "since": int(started)})
@@ -2251,6 +2355,25 @@ def cmd_review_run(cfg, rid):
         _write_review_state(root, state)
         _review_finished_event(root, state)
         return code
+    except ReviewRunStopped as stop:
+        # Ended, and said why: the reviewer it had started was stopped on the way out (REVIEWER-ORPHAN).
+        name = getattr(signal.Signals(stop.signum), "name", str(stop.signum))
+        if state.get("state") != "running":
+            # It came after the run had recorded its end, which stands.
+            return 128 + stop.signum
+        stopped = _DETACHED_RUN.get("stopped_reviewer")
+        state.pop("phase", None)
+        state.pop("reviewer", None)
+        state.update(state="failed", finished_at=int(time.time()),
+                     reason=f"the run was stopped by {name}"
+                            + (f"; its reviewer, pid {stopped}, was stopped with it" if stopped else ""))
+        print(f"{time.strftime('%H:%M:%S')} {rid} stopped by {name}")
+        try:
+            _write_review_state(root, state)
+            _review_finished_event(root, state)
+        except OSError as unwritten:
+            print(f"{rid}: could not record that the run was stopped: {unwritten}")
+        return 128 + stop.signum
     except Exception as exc:
         # Ended, not lost: a failed review is one the watchdog raises until someone collects it.
         state.pop("phase", None)
@@ -2267,6 +2390,7 @@ def cmd_review_run(cfg, rid):
                 print(f"{rid}: the event log was not told that the run stopped: {untold}")
         raise
     finally:
+        handlers_back()
         _DETACHED_RUN.clear()
         if previous is None:
             os.environ.pop("GIT_INDEX_FILE", None)
@@ -2277,6 +2401,60 @@ def cmd_review_run(cfg, rid):
         except OSError:
             pass
         put_back()                  # last, so the index and the environment are put back whatever the stream does
+
+
+REVIEW_CANCEL_GRACE_SECONDS = 10
+
+
+def cmd_review_cancel(cfg, args):
+    """Stop a submitted review's run and the reviewer it started; the review is recorded failed (REVIEWER-ORPHAN).
+
+    A run stopped by hand left its reviewer working for nobody: the reviewer leads a session of its
+    own, so nothing sent to the run's group reached it. The run is asked first, with SIGTERM, and it
+    stops its reviewer and records why. A run that is gone, or has not ended within
+    REVIEW_CANCEL_GRACE_SECONDS, is stopped outright, and the reviewer its state names after it, while
+    that pid is still the process the run started. The review is recorded failed, for a fresh submit.
+    """
+    root = cfg["root"]
+    rid = getattr(args, "rid", None)
+    if not rid:
+        print(f"{C['red']}ao review cancel needs a review's id{C['reset']}: `ao reviews` lists them")
+        return 2
+    state = _review_state(root, rid)
+    if not state:
+        print(f"no review {rid}")
+        return 2
+    if state.get("state") != "running":
+        print(f"{rid} has ended: {state.get('state')}; nothing to cancel")
+        return 1
+    runner, how = _review_runner(state), "its runner was already gone"
+    if runner:
+        A.kill_turn(runner, signal.SIGTERM)
+        deadline = time.monotonic() + REVIEW_CANCEL_GRACE_SECONDS
+        while time.monotonic() < deadline and A._pid_alive(runner) \
+                and (_review_state(root, rid) or {}).get("state") == "running":
+            time.sleep(0.1)
+        if A._pid_alive(runner) and (_review_state(root, rid) or {}).get("state") == "running":
+            A.kill_turn(runner, getattr(signal, "SIGKILL", signal.SIGTERM))
+            how = f"its runner, pid {runner}, had not ended {REVIEW_CANCEL_GRACE_SECONDS}s after SIGTERM and was killed"
+        else:
+            how = f"its runner, pid {runner}, was stopped"
+    state = _review_state(root, rid) or state
+    reviewer = _live_reviewer(state)
+    if reviewer:
+        A.kill_turn(reviewer, getattr(signal, "SIGKILL", signal.SIGTERM))
+        A.helper_release(root, reviewer)
+    if state.get("state") == "running":
+        # The run did not record its end: it was gone, or it was killed before it could.
+        state.pop("phase", None)
+        state.pop("reviewer", None)
+        state.update(state="failed", finished_at=int(time.time()),
+                     reason="cancelled by `ao review cancel`: " + how
+                            + (f"; its reviewer, pid {reviewer}, was stopped" if reviewer else ""))
+        _write_review_state(root, state)
+        _review_finished_event(root, state)
+    print(f"{rid} cancelled: {state.get('reason')}")
+    return 0
 
 
 def cmd_review_collect(cfg, args):
@@ -2358,6 +2536,8 @@ def cmd_review(cfg, args):
         return cmd_review_submit(cfg, args)
     if action == "collect":
         return cmd_review_collect(cfg, args)
+    if action == "cancel":
+        return cmd_review_cancel(cfg, args)
     if getattr(args, "run", None):
         return cmd_review_run(cfg, args.run)
     # A submitted review judges a pinned tree; the worktree beside it is the next slice's (#27).

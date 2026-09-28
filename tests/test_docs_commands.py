@@ -422,7 +422,7 @@ def test_the_reading_sees_shell_syntax_synopses_placeholders_markers_and_history
         "docs/sample.md:8: `ao -C ~/project status --window=12 --no-such-option`: "
         "ao status has no option --no-such-option",
         "docs/sample.md:13: `ao review resume R-<id>`: 'resume' is not one of ao review's action choices "
-        "(collect, submit)",
+        "(cancel, collect, submit)",
         "docs/sample.md:13: `ao alarms test --level purple|red`: 'purple' is not one of ao alarms --level's "
         "choices (orange, red, yellow)",
         "docs/sample.md:14: `ao doctor --consist`: ao doctor has no option --consist",

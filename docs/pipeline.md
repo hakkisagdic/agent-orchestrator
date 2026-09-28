@@ -51,11 +51,23 @@ spent and the lock is about to be waited on. A run that stops on an error, from 
 recorded `failed` with the error wherever its state can still be written, and told in the machine's event
 log as every other end is (EVENTS-LOG); it stood at "running" until it read as lost.*
 
+*In ao since slice REVIEWER-ORPHAN: `ao review cancel R-<id>` stops a submitted review's run and the
+reviewer it started, and records the review `failed` with how it was stopped. A run stopped by hand
+left its reviewer working for nobody: the reviewer leads a session of its own, so that a timeout can
+stop it with everything it started, and for the same reason nothing sent to the run reached it. The run
+now stops its reviewer itself on SIGTERM, SIGHUP or SIGINT, from the moment the reviewer starts, and
+records which signal stopped it. A run killed outright cannot: its state names the reviewer while it
+works, with the process's start, and `ao reviews` says of such a lost run that its reviewer runs on and
+that `ao review cancel` stops it. `ao review cancel` asks the run first, with SIGTERM; a run that is gone,
+or has not ended ten seconds later, is stopped outright, and the reviewer after it, while that pid is
+still the process the run started.*
+
 ```bash
 ao review submit --boundary '…'      # returns R-1788… immediately
 ao reviews                            # what is in flight, with elapsed and progress
 ao review collect --any               # the first finished one; blocks only if you ask it to
 ao review collect R-1788…             # a specific one
+ao review cancel R-1788…              # stop it, and the reviewer it started
 ```
 
 At submit time ao records, in `.ao/reviews/R-<id>.json`:
@@ -68,6 +80,7 @@ At submit time ao records, in `.ao/reviews/R-<id>.json`:
 | `boundary`, `sections` | what the reviewer was asked, split as in §2 |
 | `state` | `running` / `finished` / `timeout` / `failed`, with `pid` and `started_at` |
 | `phase` | while it runs: what it is doing, what on, and since when - what `ao reviews` shows |
+| `reviewer` | while a reviewer works: its pid and the process's start - what `ao review cancel` stops |
 
 **Invariant S1.** `ao commit-ok --review R-<id>` grants only if `git write-tree` in the
 current worktree equals the recorded `tree`. A candidate that drifted is refused with the

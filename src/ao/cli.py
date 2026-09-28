@@ -305,10 +305,10 @@ def build_parser():
     hf.add_argument("--no-send", action="store_true")
     hf.set_defaults(fn=cmd_handoff)
     rw = sub.add_parser("review", help="review an exact staged candidate with an independent actor")
-    rw.add_argument("action", nargs="?", choices=["submit", "collect"],
+    rw.add_argument("action", nargs="?", choices=["submit", "collect", "cancel"],
                     help="submit: pin the staged candidate and review it in the background; "
-                         "collect: take a finished review")
-    rw.add_argument("rid", nargs="?", help="collect: the review id")
+                         "collect: take a finished review; cancel: stop a submitted review and its reviewer")
+    rw.add_argument("rid", nargs="?", help="collect, cancel: the review id")
     rw.add_argument("--any", action="store_true", help="collect: the oldest finished review")
     rw.add_argument("--run", help=argparse.SUPPRESS)
     rw.add_argument("--boundary", help="acceptance boundary; defaults to the running slice")
