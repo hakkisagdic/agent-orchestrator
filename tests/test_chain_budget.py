@@ -9,7 +9,7 @@ def _fake_clock(monkeypatch, start=1000.0):
 
 
 def _routes_that_never_finish(monkeypatch, clock, handed):
-    def never_finishes(root, cand, prompt, timeout, strict, primary):
+    def never_finishes(root, cand, prompt, timeout, strict, primary, **_):  # a route takes more than it reads
         handed.append(timeout)
         clock[0] += timeout + cli.REVIEW_KILL_DRAIN_SECONDS
         return cand["id"], "/agents/reviewer", "1.0", {
