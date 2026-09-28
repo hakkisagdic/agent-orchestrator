@@ -37,10 +37,10 @@ def test_a_snapshot_that_lists_no_process_is_not_kept(monkeypatch):
 
 
 def test_a_file_in_the_home_is_named_with_slashes_on_windows_too(monkeypatch):
-    monkeypatch.setattr(A, "HOME", "C:\\Users\\me")
+    monkeypatch.setattr(A, "HOME", "D:\\ao-home")
     with monkeypatch.context() as patch:
         patch.setattr(os, "sep", "\\")
-        shown = cli._home_relative("C:\\Users\\me\\.ao\\nudge-acme-api.log")
+        shown = cli._home_relative("D:\\ao-home\\.ao\\nudge-acme-api.log")
 
     assert shown == "~/.ao/nudge-acme-api.log"
 
