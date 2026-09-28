@@ -13,8 +13,8 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 ## [Unreleased]
 
 The draft of 0.5.0: everything that landed on main after v0.4.0, read from the commits up to
-b000007. Nothing here is released yet, and a commit that lands after b000007 needs its line here
-before it is. The version, the tag, PyPI and the Homebrew formula move together when a person
+b000007 and, after it, from the slices up to RELEASE-NOTES-2, each named on its line. Nothing here is
+released yet, and a slice that lands after RELEASE-NOTES-2 needs its line here before it is. The version, the tag, PyPI and the Homebrew formula move together when a person
 publishes the release.
 
 ### Upgrading from 0.4.0
@@ -63,6 +63,18 @@ publishes the release.
 - `ao catchup --plan` previews the replay of waived reviews and writes nothing; `--limit`, `--slice`, `--author-family … --by` and `--move-only … --by` bound a run or record what a person states (CATCHUP-READY, CATCHUP-EVIDENCE).
 - `ao fanout ok --roots <R> --per-root <K>` gates a two-stage pipeline on its whole bound, R + R×K agents (9c6c54e).
 - `ao prune --review-days <days>` archives review artefacts nothing rests on (REVIEW-RETENTION, #38).
+- `ao board add ID "title" --acceptance "…" [--needs A,B] [--role R]` admits one item to the board only with its acceptance boundary, and records the plan baseline an import records; a phase id such as `ACME-187/1` is admitted, and `--needs` is checked as the board will read it (BOARD-ADD, BOARD-ADD-2).
+- `ao lane start|list|remove ITEM`: a READY board item gets a git worktree and a branch of its own, prepared from the `lane.*` settings, and a lane holding changes nobody committed is not removed (LANE-START).
+- `ao pr watch --once`, with `pr.watch` on, mails the implementer what GitHub says its pull requests need - a failed check, a conflict with the base, changes requested - once each, and writes nothing to GitHub (PR-WATCH).
+- `ao status --json`, `ao fleet --json` and `ao notices --json` print what the panel shows as one JSON document, for an agent or a script (JSON-OUTPUT).
+- `ao events [--follow]` reads the machine's event log, `~/.ao/events.jsonl`: each verification, review submitted or ended, commit grant, mail, nudge and wake, as ao records it (EVENTS-LOG).
+- `ao watch --web [--port N]` serves what `ao watch`, `ao board` and `ao fleet` print as three read-only pages on 127.0.0.1 (WEB-VIEW).
+- `ao propose`, `ao proposals` and the `ao_propose` MCP tool: an agent proposes a rule, a person accepts or rejects it, and neither writes a rule file (RULE-PROPOSALS).
+- `ao cost --usd` estimates the implementer's spend at list prices from `src/ao/prices.json`, naming the table's version and sources; what the table does not price is unknown, never zero (USD-COST).
+- `ao update` updates ao the way it was installed, having shown the command first; `ao uninstall` takes off every scheduled job, hook and MCP entry ao set up, and `--purge` `~/.ao` with them (UPDATE-UNINSTALL).
+- `ao init --adopt` enrolls, in one step, a project an older ao set up or one whose marker nobody staged (INIT-ADOPTION).
+- `ao review cancel <R-id>` stops a submitted review and the reviewer it started, and records it failed with how (REVIEWER-ORPHAN).
+- On Linux, `ao watchdog install`, `status` and `uninstall` run the watchdog and the doctor as systemd user timers (LINUX-SCHEDULER).
 
 ### Behaviour changes
 
@@ -110,6 +122,12 @@ publishes the release.
 - Every time option takes one syntax - `30m`, `2h`, `1d`, `1w`, `today`, `yesterday` or a date, a bare number keeping the unit it always had - and ordinary mistakes end in one line: exit 2 naming the forms, 130 on Ctrl+C, a traceback only with `AO_DEBUG=1` (CLI-ROBUST).
 - Colour reaches only a terminal, `NO_COLOR` and `TERM=dumb` turn it off, and `ao watch` into a pipe prints its panel once (CLI-ROBUST).
 - `ao answer` takes only a key the question offers, or `x <text>` for free text, and refuses a second answer without `--change` (CLI-ROBUST).
+- An MCP server started with `--role` lists and runs only the tools of that role's playbook, and `ao init` writes the role into each registration only one role reads (MCP-ROLES).
+- A boundary that lists criteria is judged criterion by criterion: the reviewer answers `CRITERION <n>: MET` or `NOT MET` for each, and `ao commit-ok` refuses while one is not met or was never judged (CRITERIA-VERDICTS).
+- `ao reviews` says what a review in flight is doing - starting, preparing, waiting and on what, or which reviewer runs - and a run that stops on an error is recorded failed, where it read as lost (REVIEW-START-DELAY).
+- An implementer's usage limit is read in the words its own adapter declares; its slice is parked until the reset and resumed then, where every nudge died on the limit until a person was told the agent was stuck (QUOTA-PARK).
+- An architect wake stopped on its usage limit waits for that limit's reset, a weekly one included, and one notice says when wakes start again (ARCHITECT-WAKE-QUOTA).
+- `ao verify` takes the machine gate lock once it knows the gates it will run, so a project with none, or an unknown profile, is told so at once (VERIFY-LOCK-LATE).
 
 ### Fixes
 
@@ -143,6 +161,7 @@ publishes the release.
 - A keyflip budget a person set now blocks a turn once it is breached: ao reads keyflip's own breach mark (SHELL-FREE).
 - The quota reading is kept between processes for its five minutes, and a failed quota command is no longer cached as an empty reading (CYCLE-GIT).
 - The report a present architect is told about is the implementer's own, not the watchdog's echo of it (977b73c).
+- Stopping a submitted review's run stops the reviewer it started, which leads a session of its own and ran on for nobody; a run killed outright leaves its reviewer named for `ao reviews` and `ao review cancel` (REVIEWER-ORPHAN).
 
 ### Security
 
@@ -182,6 +201,7 @@ publishes the release.
 - A subagent path an adapter declares stays inside its session's directory: only plain names are accepted, a wildcard matches within one name, and a link that leaves the directory is not followed (SUBAGENT-BOUNDS).
 - Adapters in the user's and the project's layers never decide authority: what does is read from the package's adapters only (HARNESS-STORES, #76).
 - Ten named attacks on commit authority run with the suite, each failing closed (ATTACK-SUITE, #7, #90), and the watchdog's guard chain is judged in random worlds against its invariants (SCENARIO-FUZZ, #11).
+- `SECURITY.md` says how to report a flaw privately and what ao does not claim to stop; `docs/privacy.md` lists what ao reads, keeps and sends. The suite runs with a home, PATH and environment of its own, and a test keeps every tracked file free of credentials and home paths (TRUST-HYGIENE, SECURITY-DOC-ACCURACY).
 
 ### Windows
 
@@ -197,6 +217,8 @@ publishes the release.
 - Ids stay unique within Windows' coarse clock tick, a ledger append waits out a reader holding the checkpoint store, and a path written with backslashes counts as the write it is (WINDOWS-FOLLOWUPS, WINDOWS-LANE-3).
 - The gate lock's liveness probe no longer sends its owner a signal (e4e6b7c), and a row store on a drive or UNC path opens (ef4ca79, 2b84483).
 - Not done yet ([docs/windows.md](docs/windows.md)): the commit hook's execution proof fails closed on Windows until a new hook version reads a drive-letter index path, `ao hold` is still to be proven on the Windows lane, and ao needs `PYTHONUTF8=1` there to write a pipe in UTF-8 (part of #9, part of #71).
+- Every entry point sets its standard streams to UTF-8 and every MCP reply is seven-bit JSON, so a default install no longer needs `PYTHONUTF8=1` (WINDOWS-CLOSE).
+- The parent of a process is read from Toolhelp, so `ao lock -- ao verify` runs inside its parent's lock; where no parent can be read, verify says it cannot tell before it waits (ANCESTOR-WINDOWS).
 
 ### Adapters
 
