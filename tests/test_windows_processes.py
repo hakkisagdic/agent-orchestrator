@@ -1,4 +1,4 @@
-"""What #9 asks to be proven on Windows itself; skipped with this reason everywhere else (#71)."""
+"""What #9 and #71 ask to be proven on Windows itself; skipped with this reason everywhere else (#71)."""
 import os
 import subprocess
 import sys
@@ -15,8 +15,8 @@ pytestmark = pytest.mark.skipif(sys.platform != "win32",
 PROBE = ["-c", "import time; time.sleep(60)", "-p"]      # -p: an unattended turn, as its adapter declares
 
 
-def _spawn(cwd):
-    child = subprocess.Popen([sys.executable] + PROBE, cwd=cwd)
+def _spawn(cwd, *extra):
+    child = subprocess.Popen([sys.executable] + PROBE + list(extra), cwd=cwd)
     deadline = time.time() + 20
     while time.time() < deadline:
         procs.refresh()
@@ -55,3 +55,21 @@ def test_an_agent_in_the_tree_is_placed_by_its_directory_and_a_hold_stops_it(pro
     finally:
         if child.poll() is None:
             child.kill()
+
+
+def test_a_command_line_outside_the_code_page_is_read_as_given_and_places_its_turn(tmp_path, monkeypatch):
+    # PowerShell wrote the process table in the console's code page, and a repository whose name that page
+    # lacks was named on no command line ao could read: where the working directory cannot be read, its
+    # turn was not placed (WINDOWS-CLOSE, #71).
+    root = tmp_path / "proje-ılık-→"
+    root.mkdir()
+    monkeypatch.setattr(A, "HOME", str(tmp_path / "home"))           # no helper record of this machine is read
+    adapter = {"send": {"argv": [os.path.basename(sys.executable), "-p", "{prompt}"]}, "detect": {"headless": ["-p"]}}
+    child = _spawn(str(tmp_path), str(root))
+    try:
+        assert procs.argv(child.pid)[-1] == str(root)
+
+        monkeypatch.setattr(procs, "cwd", lambda pid: None)
+        assert child.pid in A.agent_pids(str(root), adapter)
+    finally:
+        child.kill()

@@ -69,6 +69,33 @@ def colour_enabled(stream=None):
     return "NO_COLOR" not in os.environ and terminal(stream)
 
 
+# The error handler Python's UTF-8 mode gives each standard stream.
+UTF8_MODE_ERRORS = (("stdin", "surrogateescape"), ("stdout", "surrogateescape"), ("stderr", "backslashreplace"))
+
+
+def utf8_streams():
+    """Read and write the standard streams in UTF-8, as Python's UTF-8 mode does, whatever the locale (#71).
+
+    Each of ao's entry points calls this before anything else. Every file ao writes is UTF-8, and so
+    is what it prints: an MCP client, a hook, a scheduled job's log and a program reading a pipe all
+    read it as UTF-8. A default Windows install reads and writes a pipe in the ANSI code page
+    instead, and there an arrow, a box line or a Turkish letter ended the command - the MCP server
+    with it - and a body piped in as UTF-8 was read as the code page's characters. A stream already
+    in UTF-8 is left as it is. One that cannot be reconfigured keeps what it had, whatever it
+    raised: there is none (pythonw), a caller replaced it with an object that has no encoding or
+    raises for one, or it was already read from. That is no worse than before, and there is no
+    other stream to say so on; nothing here may stop ao from starting.
+    """
+    import codecs
+    for name, errors in UTF8_MODE_ERRORS:
+        stream = getattr(sys, name, None)
+        try:
+            if codecs.lookup(stream.encoding).name != "utf-8":
+                stream.reconfigure(encoding=UTF8, errors=errors)
+        except Exception:
+            continue
+
+
 class _Palette(dict):
     """ANSI codes by name, each read as "" wherever colour is off.
 

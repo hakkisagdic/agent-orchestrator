@@ -224,6 +224,7 @@ def _command(root, cfg_project, text, chat):
 
 
 def main():
+    A.utf8_streams()                         # the names of the messages it wrote are UTF-8 in its log (#71)
     root = os.getcwd()
     if "-C" in sys.argv:
         root = os.path.abspath(os.path.expanduser(sys.argv[sys.argv.index("-C") + 1]))

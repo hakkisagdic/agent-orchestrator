@@ -962,7 +962,7 @@ def _url_is_private(root, url):
         return None
     try:
         answer = subprocess.run(["gh", "api", f"repos/{found.group(1)}/{found.group(2)}", "--jq", ".private"],
-                                capture_output=True, text=True, timeout=30)
+                                capture_output=True, text=True, encoding=UTF8, errors="replace", timeout=30)
     except (OSError, subprocess.TimeoutExpired):
         return None
     return {"true": True, "false": False}.get(answer.stdout.strip())

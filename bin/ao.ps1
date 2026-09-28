@@ -17,6 +17,13 @@
   STATUS: written from the PowerShell language reference and reviewed, but not yet
   run on Windows - no Windows machine was available. Treat it as `documented`, the
   same bar the adapter registry uses, until someone runs it and says otherwise.
+  tests/test_windows_powershell.py has PowerShell parse it wherever one runs, and
+  reads a board through it on Windows; the Windows lane has not yet run those.
+
+  Text and paths: ao writes UTF-8 without a byte-order mark, and Windows PowerShell
+  reads such a file in the ANSI code page, so every file here is read as UTF-8. A
+  path is taken literally: to PowerShell [ and ] are wildcards. This script is ASCII
+  for the same reason, and spells any other character as a code, [char]0x00B7.
 
   For anything beyond looking: install the Python package.
       winget install Python.Python.3.12
@@ -36,10 +43,12 @@ $ErrorActionPreference = 'Stop'
 
 function Find-Root([string]$Start) {
   # An explicit path is taken at face value; the user knows where their project is.
-  if ($Start) { return (Resolve-Path $Start).Path }
+  if ($Start) { return (Resolve-Path -LiteralPath $Start).Path }
   $dir = (Get-Location).Path
   while ($dir) {
-    if ((Test-Path (Join-Path $dir '.ao')) -or (Test-Path (Join-Path $dir '.git'))) { return $dir }
+    if ((Test-Path -LiteralPath (Join-Path $dir '.ao')) -or (Test-Path -LiteralPath (Join-Path $dir '.git'))) {
+      return $dir
+    }
     $parent = Split-Path $dir -Parent
     if ($parent -eq $dir) { break }
     $dir = $parent
@@ -52,9 +61,10 @@ function Get-Board([string]$Root) {
   # during an incident goes stale during the incident it was built for.
   $path = Join-Path $Root '.ao\board.md'
   $out = [ordered]@{}
-  if (-not (Test-Path $path)) { return $out }
+  if (-not (Test-Path -LiteralPath $path)) { return $out }
   $state = $null
-  foreach ($line in Get-Content $path) {
+  # UTF-8: read in the ANSI code page, a Turkish title and the notes separator came back as other letters (#71).
+  foreach ($line in Get-Content -LiteralPath $path -Encoding UTF8) {
     if ($line -match '^##\s+([a-z]+)\s*$') { $state = $Matches[1]; $out[$state] = @(); continue }
     if (-not $state -or $line.TrimStart() -notlike '- *') { continue }
     if ($line.TrimStart().Substring(2).Trim() -match '^\[([^\]]+)\]\s*(.*)$') {
@@ -81,19 +91,20 @@ function Get-Session([string]$Root) {
   # this repository. There is no fallback: the newest session of another
   # workspace reported an unrelated project's agent (#71).
   $base = Join-Path $env:USERPROFILE '.kiro\sessions'
-  if (-not (Test-Path $base)) { return $null }
-  $want = (Resolve-Path $Root -ErrorAction SilentlyContinue).Path
+  if (-not (Test-Path -LiteralPath $base)) { return $null }
+  $want = (Resolve-Path -LiteralPath $Root -ErrorAction SilentlyContinue).Path
   if (-not $want) { return $null }
   $best = $null
-  foreach ($f in Get-ChildItem $base -Recurse -Filter 'messages.jsonl' -ErrorAction SilentlyContinue) {
+  foreach ($f in Get-ChildItem -LiteralPath $base -Recurse -Filter 'messages.jsonl' -ErrorAction SilentlyContinue) {
     $meta = Join-Path $f.Directory 'session.json'
-    if (-not (Test-Path $meta)) { continue }
+    if (-not (Test-Path -LiteralPath $meta)) { continue }
     $paths = @()
-    try { $paths = @((Get-Content $meta -Raw | ConvertFrom-Json).workspacePaths) } catch { continue }
+    # A workspace under a name outside the ANSI code page matched no session when read in it (#71).
+    try { $paths = @((Get-Content -LiteralPath $meta -Raw -Encoding UTF8 | ConvertFrom-Json).workspacePaths) } catch { continue }
     $match = $false
     foreach ($p in $paths) {
       if (-not $p) { continue }
-      $resolved = (Resolve-Path $p -ErrorAction SilentlyContinue).Path
+      $resolved = (Resolve-Path -LiteralPath $p -ErrorAction SilentlyContinue).Path
       if ($resolved -and $resolved.TrimEnd('\') -ieq $want.TrimEnd('\')) { $match = $true; break }
     }
     if ($match -and (-not $best -or $f.LastWriteTime -gt $best.LastWriteTime)) { $best = $f }
@@ -136,7 +147,7 @@ function Show-Status([string]$Root) {
   Write-Host "`n$state" -ForegroundColor $col -NoNewline
   Write-Host "  last write $([int]($age / 60))m $($age % 60)s ago" -ForegroundColor DarkGray
 
-  Push-Location $Root
+  Push-Location -LiteralPath $Root
   try {
     $dirty = @(git status --porcelain 2>$null).Count
     $log = @(git log --oneline -3 2>$null)
@@ -182,7 +193,7 @@ function Show-Doctor([string]$Root) {
   Write-Host "root      $Root"
   foreach ($p in @('.ao', '.ao\board.md', '.ao\gates.json', 'agent-mail', 'semantic-review')) {
     $full = Join-Path $Root $p
-    if (Test-Path $full) { Write-Host "ok        $p" -ForegroundColor Green }
+    if (Test-Path -LiteralPath $full) { Write-Host "ok        $p" -ForegroundColor Green }
     else { Write-Host "missing   $p" -ForegroundColor DarkGray }
   }
   $sess = Get-Session $Root

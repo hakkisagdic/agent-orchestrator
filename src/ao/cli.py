@@ -575,8 +575,10 @@ def main(argv=None):
     exits 2 naming what it takes, and so does a project directory that does not exist; a
     ledger lock another process holds names the lock and what to do; Ctrl+C exits 130, as a
     shell's own commands do; anything unexpected prints its type and message, and AO_DEBUG=1
-    keeps its traceback for whoever has to find where it came from.
+    keeps its traceback for whoever has to find where it came from. The standard streams are
+    UTF-8 before anything is read or printed, whatever the platform's code page (#71).
     """
+    A.utf8_streams()
     command, root = "ao", None
     try:
         p = build_parser()

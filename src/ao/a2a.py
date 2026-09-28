@@ -137,6 +137,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     global CFG
+    A.utf8_streams()                         # what it prints is UTF-8, as every ao process's is (#71)
     root = sys.argv[sys.argv.index("-C") + 1] if "-C" in sys.argv else None
     port = int(sys.argv[sys.argv.index("--port") + 1]) if "--port" in sys.argv else 8731
     CFG = A.load_config(A.find_root(root))

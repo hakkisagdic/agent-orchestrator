@@ -396,9 +396,9 @@ def test_the_windows_process_table_asks_powershell_by_argument_vector(monkeypatc
     backend.invalidate()
 
     assert backend.argv(42) == ["C:\\x\\a.exe", "-p"]
-    assert asked == [["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                      "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine,"
-                      "ExecutablePath,Name,SessionId,CreationDate | ConvertTo-Json -Compress"]]
+    # The script is one argument; that it hands over a command line outside the code page intact is proven
+    # where PowerShell runs, in test_windows_processes.py.
+    assert asked == [["powershell", "-NoProfile", "-NonInteractive", "-Command", procs._Windows.SNAPSHOT]]
     before = int(time.time() - 1757178612)
     elapsed = backend.elapsed(42)
     assert before <= elapsed <= int(time.time() - 1757178612)

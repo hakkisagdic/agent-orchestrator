@@ -4,6 +4,8 @@ name: tests
 #   - every Monday: macOS and Windows on 3.12;
 #   - on demand, one environment or all:
 #       gh workflow run tests -f os=windows-latest -f python=3.12
+# Every lane's log ends with each test it skipped and the reason (-rs): a test that cannot pass on a
+# platform is skipped there with its reason, never silently absent (#71).
 on:
   push:
     branches: [main]
@@ -50,7 +52,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -e ".[dev]"
-      - run: python -m pytest -q
+      - run: python -m pytest -q -rs
 
   weekly:
     if: github.event_name == 'schedule'
@@ -72,7 +74,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install -e ".[dev]"
-      - run: python -m pytest -q
+      - run: python -m pytest -q -rs
 
   on-demand:
     if: github.event_name == 'workflow_dispatch'
@@ -93,4 +95,4 @@ jobs:
         with:
           python-version: ${{ inputs.python }}
       - run: python -m pip install -e ".[dev]"
-      - run: python -m pytest -q
+      - run: python -m pytest -q -rs

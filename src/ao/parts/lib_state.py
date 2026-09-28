@@ -590,7 +590,7 @@ def acquire_gate_lock(root, timeout=0):
         if not holder:
             try:
                 fd = os.open(GATE_LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                with os.fdopen(fd, "w") as fh:
+                with os.fdopen(fd, "w", encoding=UTF8) as fh:
                     json.dump({"root": root, "pid": os.getpid(),
                                "at": int(time.time())}, fh)
                 return True

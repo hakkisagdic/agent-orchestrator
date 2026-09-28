@@ -254,6 +254,8 @@ def call(name, args):
 
 def main():
     global ROOT
+    # MCP's stdio transport is UTF-8, and each reply below is seven-bit JSON, as ao's own server's are (#71).
+    A.utf8_streams()
     if "-C" in sys.argv:
         ROOT = os.path.abspath(os.path.expanduser(sys.argv[sys.argv.index("-C") + 1]))
     for line in sys.stdin:
@@ -290,8 +292,8 @@ def main():
             sys.stdout.flush()
             continue
         if rid is not None:
-            sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": rid, "result": result},
-                                        ensure_ascii=False, default=str) + "\n")
+            # Escaped to ASCII, as the error reply above always was: a write outside the handler must not fail.
+            sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": rid, "result": result}, default=str) + "\n")
             sys.stdout.flush()
 
 

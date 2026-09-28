@@ -5,11 +5,14 @@ What works, what does not, and how hosted runners exercise it.
 | layer | status |
 |---|---|
 | files: `.ao/`, mailbox, board, backlog, ledgers | works — plain files and Python |
+| what ao prints and reads on its standard streams | UTF-8, as Python's UTF-8 mode sets them, whatever the code page (below) |
 | gates, `ao lock`, `ao verify`, `ao commit-ok`, reviews | work — subprocesses of the project's own tools |
-| MCP server, playbook, `ao init` registration | work (`.mcp.json`, `.kiro/settings/mcp.json`); a server reply holding a character outside the code page needs Python's UTF-8 mode (below) |
-| process introspection (`ao writers`, orphans, hung turns) | first cut: `Win32_Process` through PowerShell as JSON, tree kill via `taskkill /T`; the working directory is read from the process environment block (a 64-bit process, by a 64-bit Python), and where it cannot be read a turn is matched by the repository path on its command line |
+| MCP server, playbook, `ao init` registration | work (`.mcp.json`, `.kiro/settings/mcp.json`); a request is read as UTF-8 and every reply is seven-bit JSON, whatever the code page |
+| process introspection (`ao writers`, orphans, hung turns) | first cut: `Win32_Process` through PowerShell as JSON, tree kill via `taskkill /T`; the working directory is read from the process environment block (a 64-bit process, by a 64-bit Python), proven on the Windows lane, and where it cannot be read a turn is matched by the repository path on its command line |
+| `ao hold` | proven on the Windows lane: a turn placed by its working directory is stopped |
 | scheduler (`ao watchdog install`) | first cut: Task Scheduler (`schtasks`, every 2 min; doctor every 15 min). Each task names a program that exists — the console script on PATH, a clone's script, or `python -m ao.watchdog` from an interpreter that imports an installed ao — or install refuses; install exits 1 when `schtasks` cannot create a task, and `ao remove --yes` deletes both tasks in its own process and checks they are gone |
 | desktop notifications | a toast through PowerShell behind the `toast` feature switch, off by default; Telegram and e-mail carry the orange and red levels |
+| `bin/ao.ps1`, the subset for a machine without Python | `status`, `board` and `doctor`; reads files as UTF-8 and takes paths literally; written and reviewed, not yet run on Windows (below) |
 | commit hook (`ao hooks install`) | installed inside the repository; a shared, external or globally configured hooks directory is refused (#71); its execution proof does not pass yet (below) |
 | pre-push hook | works under Git's own shell |
 
@@ -18,7 +21,15 @@ environment on demand (`gh workflow run tests -f os=windows-latest -f python=3.1
 Ubuntu runs on every push and pull request with the Python 3.9 support floor and 3.12.
 Every lane runs the same suite, and each supported
 runner must pass the process backend's native self-check rather than silently use
-the shell fallback.
+the shell fallback. Each lane's log ends with every test it skipped and the reason
+(`pytest -rs`).
+
+The Windows lane has run. Its first run, on demand on 2026-09-17, failed on what *Found by
+the lane's first run* lists; the run on demand after those fixes that day, and the weekly
+run of 2026-09-21, were green on the hosted runner with Python 3.12: 1232 and then 1280
+tests passed, 59 skipped. Both ran `tests/test_windows_processes.py`, which only Windows
+runs: a live process's working directory read from its environment block, and `ao hold`
+stopping a turn placed by it (#9).
 
 Hosted runners cover platform API behavior and deterministic process crashes: the
 durability tests kill real child processes around storage barriers and use temporary
@@ -26,20 +37,65 @@ paths. They do not provide physical power-loss, storage-controller or filesystem
 qualification, including unsupported and network filesystems. Faults found on a
 hosted runner get a scenario in `tests/test_scenarios.py` like any other.
 
-Not yet done, in order of value: `ao hold` proven on the Windows lane, and the commit
-hook's execution proof. The hook body tells an absolute index path by its leading
-slash, so under Git's shell a drive-letter path — the temporary index the proof hands
-Git, or a linked worktree's index — is taken for a relative one and prefixed with the
-working directory. ao then reads another index than the one Git commits and refuses.
-That fails closed, but no proof passes on Windows until the hook recognises a drive
-letter, and that is a new hook version.
+## Text on a default Windows install
 
-Also not done: ao leaves the encoding of what it writes to a pipe to Python. Every lane
-runs Python in UTF-8 mode (`PYTHONUTF8=1`); a default Windows install does not, and there
-a pipe is written in the ANSI code page. A character outside that page, such as an arrow
-or a box line, then fails the write, the MCP server's replies included (#71, from the
-2026-09-08 audit), and a reader that expects UTF-8 gets the code page's bytes. Until ao
-sets its own streams, run it with `PYTHONUTF8=1` in the environment.
+Every lane runs Python in UTF-8 mode (`PYTHONUTF8=1`); a Python a person installs on
+Windows does not, and there it reads and writes a pipe in the ANSI code page. A character
+outside that page - an arrow is outside the Western and the Turkish one alike, and the
+Turkish letters are outside the Western one - ended the write, and with it the command
+or the MCP server (#71, from the 2026-09-08 audit); a body piped in as UTF-8 was read as
+the code page's letters; and a reader expecting UTF-8 got the code page's bytes.
+
+*In ao since slice WINDOWS-CLOSE:* each of ao's entry points - `ao`, the watchdog, both
+MCP servers, the A2A server and the Telegram poller - first sets its standard streams to
+UTF-8 with the error handlers UTF-8 mode gives them, so a default install reads and
+writes what the lanes do, and ao no longer needs `PYTHONUTF8=1`. Every MCP reply is
+seven-bit JSON, which no code page between the server and its client can change, and a
+reply that echoed a lone surrogate from a request no longer takes the server down. Every
+text file ao opens and every program's output it reads as text names its encoding, and
+a guard keeps it so. `tests/test_windows_close.py` holds this on every platform by
+starting ao with `PYTHONIOENCODING=cp1252`, the streams of a Western Windows install.
+
+PowerShell has code pages of its own. It wrote the process table in the console's, so a
+command line holding a letter outside it - a repository under a user directory with a
+Turkish name, a prompt in Turkish - came back as other letters, and a turn named by its
+repository's path was not placed. The table now leaves PowerShell as UTF-8 bytes on the
+standard output handle itself. Windows PowerShell also reads a file without a byte-order
+mark, which is how ao writes every file, in the ANSI code page: `bin/ao.ps1` read a Turkish
+board title and the notes separator as other letters, and took `[` and `]` in a project's
+path for wildcards. It now reads UTF-8, takes every path literally and is itself ASCII.
+Only a PowerShell can prove these. On Windows, `tests/test_windows_processes.py` reads a
+command line outside the code page back from the table and places its turn, and
+`tests/test_windows_powershell.py` reads a board through `bin/ao.ps1` under a path holding
+`[` and `]`; wherever a PowerShell is installed, the same file has its parser read every
+script ao hands it - the table's query, the toast, `bin/ao.ps1`. They are written and have
+not yet run on the lane; until they do, none of this is a Windows result.
+
+## Still open
+
+- **The commit hook's execution proof.** The hook body tells an absolute index path by
+  its leading slash, so under Git's shell a drive-letter path — the temporary index the
+  proof hands Git, or a linked worktree's index — is taken for a relative one and
+  prefixed with the working directory. ao then reads another index than the one Git
+  commits and refuses. That fails closed, but no proof passes on Windows until the hook
+  recognises a drive letter, and that is a new hook version, which every enrolled
+  repository then reinstalls; it wants a Windows run to prove it before it ships.
+- **A prompt handed to a batch file.** Found by reading, not seen on a Windows machine.
+  An agent CLI installed with npm on Windows is a `.cmd` file, which runs through
+  cmd.exe, and cmd.exe reads its arguments as its own syntax: it ends the command at a
+  line break, replaces `%NAME%`, and a double quote in the text changes what `&` and `|`
+  mean. ao refuses a `.cmd` or `.bat` reviewer for this (#71), but the watchdog hands its
+  prompt to the implementer and the architect as an argument, and the architect's wake
+  prompt runs to several paragraphs: through a `.cmd` the architect would read only the
+  first. The fix is a channel, not a quoting rule: where the adapter declares standard
+  input (Claude Code, Codex and Gemini do, among others) a batch program takes its prompt
+  there, and one that declares none is refused, naming Windows and cmd.exe. It changes
+  how every turn starts, so it is a slice of its own, proven on the lane.
+- **Git's output in `bin/ao.ps1`.** PowerShell reads what a program prints in the
+  console's code page, so where a commit subject holds a letter outside that page,
+  `status` shows other letters in its place.
+- **The toast has never been shown.** A test has PowerShell parse its script, which
+  the lane has not yet run, and no test shows a toast on a person's desktop.
 
 ## Found before the lane first ran
 
@@ -99,13 +155,22 @@ tree kill starts `taskkill`, which a test's stand-in for the reviewer process an
 
 ## What the Windows lane skips, and why
 
-A test that cannot pass on Windows is skipped there with its reason, never left out (#71):
+A test that cannot pass on Windows is skipped there with its reason, never left out (#71),
+and the lane's log lists each one with it:
 
 - the commit hook's execution proof, for the reason above;
 - a hook write that needs `--allow-shared-hooks`, which ao refuses on Windows;
 - POSIX file modes: an executable hook, an owner-only credentials file;
 - fixtures that run through a shebang or are POSIX shell scripts: a reviewer, a
-  conformance harness, a filter named `git`, a fake `keyflip`;
+  conformance harness, a filter named `git`, a fake `keyflip` or quota command. These
+  could run on Windows once each fixture is a program Windows starts - and a reviewer
+  cannot be a `.cmd`, which ao refuses - but each rewrite is a Windows result only when
+  the lane has run it, so they stay skipped, with their reasons, until one does;
 - what Windows does not have: process groups and the CPU they spend, zombie
   processes, a directory fsync, launchd, and the `ps` and `lsof` a process table falls
   back to.
+
+The other way round, `tests/test_windows_processes.py` and the board read through
+`bin/ao.ps1` need Windows itself and run only there. PowerShell's parser reads ao's scripts
+wherever a PowerShell is installed, and `pwsh` runs on Linux and macOS too. Where none is,
+each test says so as it is skipped.

@@ -254,6 +254,14 @@ class _Windows:
     """
     _cache = None
     _cache_at = 0.0
+    # PowerShell writes what a script outputs to a pipe in the console's code page, so a command line
+    # holding a letter outside it - a repository under C:\Users\<a Turkish name>, a prompt in Turkish -
+    # arrived as "?" or as bytes that are not UTF-8, and a turn named by its repository's path was not
+    # placed. The JSON goes to the standard output handle as UTF-8 bytes, past any code page (#71).
+    SNAPSHOT = ("$json = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine,"
+                "ExecutablePath,Name,SessionId,CreationDate | ConvertTo-Json -Compress; "
+                "$bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$json); "
+                "$out = [Console]::OpenStandardOutput(); $out.Write($bytes, 0, $bytes.Length); $out.Flush()")
 
     def invalidate(self):
         self._cache = None
@@ -264,9 +272,7 @@ class _Windows:
         import time as _time
         if self._cache is not None and _time.time() - self._cache_at < 2.0:
             return self._cache
-        cmd = ("Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine,"
-               "ExecutablePath,Name,SessionId,CreationDate | ConvertTo-Json -Compress")
-        out = _run(["powershell", "-NoProfile", "-NonInteractive", "-Command", cmd])
+        out = _run(["powershell", "-NoProfile", "-NonInteractive", "-Command", self.SNAPSHOT])
         rows = []
         try:
             data = _json.loads(out) if out.strip() else []

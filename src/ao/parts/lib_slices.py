@@ -741,7 +741,7 @@ def remote_is_private(root, remote):
         return None
     try:
         answer = subprocess.run(["gh", "api", f"repos/{found.group(1)}/{found.group(2)}", "--jq", ".private"],
-                                capture_output=True, text=True, timeout=30)
+                                capture_output=True, text=True, encoding=UTF8, errors="replace", timeout=30)
     except (OSError, subprocess.TimeoutExpired):
         return None
     return {"true": True, "false": False}.get(answer.stdout.strip())
@@ -823,7 +823,7 @@ def fetch_pinned(source, pin, paths, workdir):
     subprocess.run([git, "-C", workdir, "fetch", "-q", "--depth", "1", source, pin], check=True, capture_output=True,
                    timeout=300)
     fetched = subprocess.run([git, "-C", workdir, "rev-parse", "FETCH_HEAD"], check=True, capture_output=True,
-                             text=True).stdout.strip()
+                             text=True, encoding=UTF8, errors="replace").stdout.strip()
     if fetched != pin:
         raise RuntimeError(f"{source} answered {fetched[:12]}, not the pinned {pin[:12]}")
     if not paths:

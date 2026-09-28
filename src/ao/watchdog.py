@@ -1727,6 +1727,9 @@ def touch_quota_park(root, st, cfg=None):
 
 
 def main():
+    # What a cycle decided is printed, board titles and mail subjects included, to a terminal, a pipe
+    # or the log a scheduled job keeps: in UTF-8, whatever the platform's code page (#71).
+    A.utf8_streams()
     p = argparse.ArgumentParser()
     p.add_argument("--root", required=True)
     p.add_argument("--idle-minutes", type=float, default=None,

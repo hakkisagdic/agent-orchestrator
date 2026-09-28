@@ -25,6 +25,11 @@ service. It reads and writes exactly the same mailbox and repository state the C
 so the two can be mixed: an architect using files and an implementer using MCP interoperate
 without knowing about each other.
 
+*In ao since slice WINDOWS-CLOSE:* a request is read as UTF-8 and every reply is seven-bit
+JSON, whatever the platform's code page, in this server and in the A2A bridge below. On a
+default Windows install a reply holding a Turkish letter or an arrow ended the server
+([windows.md](windows.md)).
+
 ## Tools
 
 Each tool has an access class, which says what calling it does to the project: **read**

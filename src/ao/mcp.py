@@ -431,6 +431,9 @@ def call(name, args, cfg, allow_verify, role=None):
 
 
 def main():
+    # MCP's stdio transport is UTF-8. A client writes a request in it whatever the platform's code
+    # page, and each reply below is seven-bit JSON, which reads the same in any (#71).
+    A.utf8_streams()
     root = None
     allow_verify = "--allow-verify" in sys.argv
     if "-C" in sys.argv:
@@ -493,8 +496,9 @@ def main():
             sys.stdout.flush()
             continue
         if rid is not None:
-            sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": rid, "result": result},
-                                        ensure_ascii=False, default=str) + "\n")
+            # Escaped to ASCII, as the error reply above always was: this write is outside the handler, and
+            # a character the stream cannot carry, or a lone surrogate a request held, took the server down.
+            sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": rid, "result": result}, default=str) + "\n")
             sys.stdout.flush()
 
 
