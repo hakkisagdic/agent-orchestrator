@@ -25,6 +25,13 @@ holder started them, then wait for it as for any other. A parent pid on Windows 
 process and be given to another; a walk through one still ends. `tests/test_gate_lock.py` holds the
 Toolhelp read on the Windows lane, which has not run it yet.*
 
+*In ao since slice WINDOWS-PID-ALIVE: whether a process runs is asked of the process itself, opened
+and waited on for no time, and no longer read from the PowerShell snapshot, which is kept for two
+seconds. A process started inside them was missing from it, so a gate lock its holder had just taken
+read as a dead run's, was cleared, and `ao verify` and `ao merge-check` ran their gates beside the
+holder's; the Windows lane's weekly run found it. Where Windows does not answer, a fresh snapshot
+does. `tests/test_windows_pid_alive.py` holds it.*
+
 The hosted `tests` workflow runs Windows and macOS every week on Python 3.12, and any
 environment on demand (`gh workflow run tests -f os=windows-latest -f python=3.12`);
 Ubuntu runs on every push and pull request with the Python 3.9 support floor and 3.12.

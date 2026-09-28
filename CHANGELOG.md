@@ -230,6 +230,7 @@ publishes the release.
 - Not done yet ([docs/windows.md](docs/windows.md)): the commit hook's execution proof fails closed on Windows until a new hook version reads a drive-letter index path, `ao hold` is still to be proven on the Windows lane, and ao needs `PYTHONUTF8=1` there to write a pipe in UTF-8 (part of #9, part of #71).
 - Every entry point sets its standard streams to UTF-8 and every MCP reply is seven-bit JSON, so a default install no longer needs `PYTHONUTF8=1` (WINDOWS-CLOSE).
 - The parent of a process is read from Toolhelp, so `ao lock -- ao verify` runs inside its parent's lock; where no parent can be read, verify says it cannot tell before it waits (ANCESTOR-WINDOWS).
+- Whether a process runs is asked of the process itself, so a gate lock taken by a run started a moment ago is waited for, where a two-second-old snapshot read it as a dead run's and cleared it (WINDOWS-PID-ALIVE).
 
 ### Adapters
 

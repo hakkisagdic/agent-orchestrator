@@ -372,6 +372,35 @@ class _Windows:
         finally:
             kernel32.CloseHandle(handle)
 
+    @staticmethod
+    def alive(pid, kernel32=None, last_error=None):
+        """Whether `pid` runs, asked of the process itself: opened and waited on for no time (WINDOWS-PID-ALIVE).
+
+        A wait that times out is a running process, and a signalled one has exited, its pid held only by a
+        handle someone keeps. Access is denied only to a process that exists, one this user may not open;
+        a pid no process has is an invalid parameter. Anything else is None. `kernel32` and `last_error`
+        stand in for the platform's where there is none.
+        """
+        if kernel32 is None:
+            from ctypes import wintypes
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.OpenProcess.restype = wintypes.HANDLE
+            kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel32.WaitForSingleObject.restype = wintypes.DWORD
+            kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            last_error = ctypes.get_last_error
+        SYNCHRONIZE, PROCESS_QUERY_LIMITED_INFORMATION = 0x00100000, 0x1000
+        handle = kernel32.OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            error = last_error()
+            return True if error == 5 else False if error == 87 else None      # ACCESS_DENIED, INVALID_PARAMETER
+        try:
+            state = kernel32.WaitForSingleObject(handle, 0)
+            return True if state == 0x102 else False if state == 0 else None   # WAIT_TIMEOUT, WAIT_OBJECT_0
+        finally:
+            kernel32.CloseHandle(handle)
+
     def ppid(self, pid):
         """The parent pid from a Toolhelp snapshot of the process list (ANCESTOR-WINDOWS).
 
@@ -522,6 +551,22 @@ def zombie(pid):
 
 def info(pid):
     return _backend().info(pid)
+
+
+def alive(pid):
+    """Whether process `pid` runs, as Windows answers for the process itself; None where it does not answer.
+
+    Only Windows asks here (WINDOWS-PID-ALIVE): signal 0 is no probe there, and the snapshot its backend
+    reads is kept two seconds, so a process started inside them was not in it and read as gone. None
+    elsewhere, where `kill(pid, 0)` asks the process.
+    """
+    if sys.platform != "win32":
+        return None
+    try:
+        pid = int(pid)
+        return _Windows.alive(pid) if pid > 0 else False
+    except Exception:
+        return None
 
 
 def ppid(pid):

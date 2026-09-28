@@ -2807,9 +2807,16 @@ def _pid_alive(pid):
     if os.name == "nt":
         # On Windows signal 0 is CTRL_C_EVENT, not a harmless existence probe.
         # Sending it to the lock owner interrupts the very gate run whose
-        # liveness we are checking. Use the platform process snapshot instead.
+        # liveness we are checking. The process itself is asked instead: the
+        # snapshot is kept two seconds, and a gate lock taken by a run started
+        # inside them read as a dead run's and was cleared (WINDOWS-PID-ALIVE).
+        # Where Windows does not answer, a fresh snapshot does.
         from . import procs
+        answer = procs.alive(pid)
+        if answer is not None:
+            return answer
         try:
+            procs.refresh()
             return pid in set(procs.all_pids())
         except (OSError, subprocess.SubprocessError, ValueError):
             return False
