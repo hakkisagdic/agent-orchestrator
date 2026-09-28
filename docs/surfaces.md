@@ -71,7 +71,8 @@ Why this matters: without the log, every surface has to parse *N* vendor transcr
 ## Surface 1 — terminal dashboard
 
 The default. `ao watch` renders a panel from the project's files; leave it on a second
-monitor. See the TUI section below. `ao status` prints the panel once.
+monitor, or keep it in a browser tab with `ao watch --web` (Surface 4). See the TUI section below.
+`ao status` prints the panel once.
 
 *In ao since slice JSON-OUTPUT: `ao status --json` prints what the panel shows as one JSON document
 and nothing else on stdout - no colour, no banner - for a program to read where it had to read the
@@ -95,10 +96,10 @@ shape both, and the exit status is the panel's. `ao fleet --json` ([parallel.md]
 | `messages` | the recent messages, oldest first: `time` (HH:MM), `role` (user or assistant), `text` |
 
 Without an implementer `telemetry`, `problems` and `throughput` are null and `messages` is empty.
-Unlike the panel, the document records no message as seen, whoever runs it: a program reads it,
-and a status bar polling it would otherwise keep a marked message no person was shown from climbing
-the watchdog's ladder ([messaging.md](messaging.md)). Such a message is in `urgent` and in `unseen`
-both.
+Unlike the panel in a terminal, the document records no message as seen, whoever runs it: a program
+reads it, and a status bar polling it would otherwise keep a marked message no person was shown from
+climbing the watchdog's ladder ([messaging.md](messaging.md)). Such a message is in `urgent` and in
+`unseen` both.
 
 ## Surface 2 — MCP, i.e. any chat app becomes the cockpit
 
@@ -133,10 +134,35 @@ A `Stop` hook that fires a desktop notification costs one line and reaches you w
 are not looking at anything. Use `command`-type actions, never `agent`-type: an agent
 action on turn-end can start another turn, and now you have a loop.
 
-## Surface 4 — later, optional
+## Surface 4 — a browser tab
 
-A menu-bar item and a small web view are natural next readers of the same log. Neither is
-required, and neither should become the only way to do something.
+`ao watch --web` serves what `ao watch`, `ao board` and `ao fleet` print as three pages on
+127.0.0.1, for a person who would rather keep a browser tab open than a terminal:
+
+```bash
+ao watch --web                # http://127.0.0.1:8732/ is the panel; /board and /fleet sit beside it
+ao watch --web --port 9000    # another port; 0 takes a free one, and the line it prints names it
+ao watch --web --all          # the same pages; the address it prints is the fleet's
+```
+
+*In ao since slice WEB-VIEW: `ao watch --web [--port N]`. It is a view of ao, not a new app. Each
+page is computed when it is asked for, from the project's own files, by the functions the three
+commands print with: the view keeps no state, has no form, answers no method but GET (405 for any
+other) and loads nothing from anywhere else - its style is inline, it runs no script, and its
+Content-Security-Policy allows none. The reads it shares with those commands keep what they keep for
+the next reader, such as a provider's quota reading; the view adds no write of its own. A page
+refreshes itself every `--interval` seconds, 15 unless changed, with a meta tag. The server binds
+127.0.0.1, refuses any address that is not loopback, and answers only a request addressed to
+127.0.0.1 or localhost at its own port, so a page from another site cannot point its own name at this
+machine and read the view through your browser. Loopback keeps the view off the network, not away
+from the machine's other accounts: on a shared machine, anyone logged in can read it. One thing the
+terminal does, a page does not: it marks no urgent message seen. Any process on the machine can
+fetch a page, and a fetch is no proof that a person read it, so the message's alarm keeps climbing
+until a command shows it to its reader. A page carries the panel's colours when ao's own output
+would: started from a terminal, and not while `NO_COLOR` is set.*
+
+A menu-bar item is a natural next reader, not built yet. Neither it nor the tab should become the
+only way to do something.
 
 ## Align, don't depend
 
@@ -201,7 +227,7 @@ ao watch --rich       # uses rich/textual if present, otherwise falls back with 
 |---|---|
 | **Textual as the default** | Beautiful, and a `pip install` before you can see anything. It stays optional. |
 | **Go / Rust TUI (Bubble Tea, ratatui)** | Single binary is genuinely attractive, but it adds cross-compilation, a release pipeline and a second language to a project whose core is a protocol and some scripts. Revisit if the panel becomes the main product. |
-| **Web UI / Electron** | Heaviest possible answer to "show me six numbers", and it competes with Surface 2, which is better. |
+| **Web UI / Electron** | Heaviest possible answer to "show me six numbers", and it competes with Surface 2, which is better. `ao watch --web` is not one: it serves the panel's own text to a tab, with the standard library. |
 | **curses** | In stdlib, but its model fights partial redraw and it degrades badly over SSH. Raw ANSI is simpler and more portable. |
 
 The renderer is deliberately separated from the data layer, so replacing it later costs a

@@ -833,50 +833,63 @@ def cmd_board(cfg, args):
     root = cfg["root"]
     for line in _mailbox_banner(cfg):
         print(line)
+    if getattr(args, "view", None) == "ready" and os.path.exists(os.path.join(root, ".ao", "board.md")):
+        # Exactly the eligible items, for a script: a broken edge exits 1 (#33).
+        graph = A.board_graph(root)
+        for problem in graph["problems"]:
+            print(f"{C['red']}board: {problem}{C['reset']}")
+        for it in graph["ready"]:
+            print(f"{it['id']}  {it['title']}")
+        return 1 if graph["problems"] else 0
+    for line in _board_lines(cfg):
+        print(line)
+    return 0
+
+
+def _board_lines(cfg):
+    """The board as `ao board` prints it below the mailbox banner, one string a line.
+
+    `ao watch --web` serves the same lines, so the page and the command cannot drift apart.
+    """
+    root = cfg["root"]
     b = A.board(root)
     path = os.path.join(root, ".ao", "board.md")
     if not os.path.exists(path):
-        print(f"{C['yellow']}No board here.{C['reset']} Create {C['b']}.ao/board.md{C['reset']} with "
-              f"`## running` / `## blocked` / `## queued` / `## verified` / `## done` sections\n"
-              f"and one `- [ID] title · note: value` line per item.")
-        return 0
+        return [f"{C['yellow']}No board here.{C['reset']} Create {C['b']}.ao/board.md{C['reset']} with "
+                f"`## running` / `## blocked` / `## queued` / `## verified` / `## done` sections\n"
+                f"and one `- [ID] title · note: value` line per item."]
     colours = {"running": C["green"], "blocked": C["red"], "queued": C["dim"],
                "verified": C["cyan"], "done": C["dim"]}
     # Eligible work first: queued items whose `needs:` are all done. This is the
     # dependency graph answering "what is next" without the implementer choosing
     # its own scope. A broken edge is named before anything else (#33).
     graph = A.board_graph(root)
-    if getattr(args, "view", None) == "ready":
-        for problem in graph["problems"]:
-            print(f"{C['red']}board: {problem}{C['reset']}")
-        for it in graph["ready"]:
-            print(f"{it['id']}  {it['title']}")
-        return 1 if graph["problems"] else 0
+    lines = []
     for problem in graph["problems"]:
-        print(f"{C['red']}{C['b']}BOARD{C['reset']}  {C['red']}{problem}{C['reset']}")
+        lines.append(f"{C['red']}{C['b']}BOARD{C['reset']}  {C['red']}{problem}{C['reset']}")
     rd = graph["ready"]
     if rd:
-        print(f"\n{C['b']}{C['green']}READY{C['reset']} {C['dim']}({len(rd)}) — "
-              f"dependencies satisfied{C['reset']}")
+        lines.append(f"\n{C['b']}{C['green']}READY{C['reset']} {C['dim']}({len(rd)}) — "
+                     f"dependencies satisfied{C['reset']}")
         for it in rd:
             role = f"  {C['cyan']}role:{it['role']}{C['reset']}" if it.get("role") else ""
-            print(f"   {C['b']}{it['id']}{C['reset']}  {it['title']}{role}")
+            lines.append(f"   {C['b']}{it['id']}{C['reset']}  {it['title']}{role}")
     for st in ("running", "blocked", "queued", "verified", "done"):
         items = b[st]
         if not items:
             continue
-        print(f"\n{C['b']}{colours[st]}{st.upper()}{C['reset']} {C['dim']}({len(items)}){C['reset']}")
+        lines.append(f"\n{C['b']}{colours[st]}{st.upper()}{C['reset']} {C['dim']}({len(items)}){C['reset']}")
         for it in items:
             notes = "  ".join(f"{C['dim']}{k}:{C['reset']} {v}" if v else f"{C['dim']}{k}{C['reset']}"
                               for k, v in it["notes"].items())
-            print(f"   {C['b']}{it['id']}{C['reset']}  {it['title']}" + (f"   {notes}" if notes else ""))
+            lines.append(f"   {C['b']}{it['id']}{C['reset']}  {it['title']}" + (f"   {notes}" if notes else ""))
             if st in ("running", "queued"):
                 # Named when the item is registered, while widening or splitting is cheap (#35).
                 for advice in A.boundary_advice(root, cfg, it):
-                    print(f"      {C['yellow']}boundary: {advice}{C['reset']}")
+                    lines.append(f"      {C['yellow']}boundary: {advice}{C['reset']}")
     if not any(b.values()):
-        print(f"{C['dim']}Board is empty.{C['reset']}")
-    return 0
+        lines.append(f"{C['dim']}Board is empty.{C['reset']}")
+    return lines
 
 
 def cmd_source(cfg, args):

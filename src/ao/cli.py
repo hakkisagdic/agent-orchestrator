@@ -77,9 +77,13 @@ def build_parser():
     s.set_defaults(fn=cmd_status)
 
     w = sub.add_parser("watch", help="live panel; leave it in a background terminal")
-    w.add_argument("-i", "--interval", type=int, default=15)
+    w.add_argument("-i", "--interval", type=int, default=15, help="seconds between refreshes (default 15)")
     w.add_argument("-m", "--messages", type=int, default=8)
     w.add_argument("--all", action="store_true", help="one row per project instead of one panel")
+    w.add_argument("--web", action="store_true",
+                   help="serve the panel, the board and the fleet as read-only pages on 127.0.0.1 instead")
+    w.add_argument("--port", type=int,
+                   help=f"with --web: the port on 127.0.0.1 (default {WEB_PORT}; 0 takes a free one)")
     w.set_defaults(fn=cmd_watch)
 
     fl = sub.add_parser("fleet", help="one-shot view of every project")

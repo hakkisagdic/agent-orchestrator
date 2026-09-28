@@ -161,12 +161,13 @@ def status_facts(cfg, msg_count=8, window_hours=24.0, shown=False):
     return facts
 
 
-def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0):
+def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0, shown=True):
     """Render the panel from status_facts. When max_lines is given the output never exceeds it:
     the fixed sections are laid out first and the message log — the only elastic
     part — takes whatever is left. A panel taller than the window scrolls, and a
-    scrolled panel stacks its own headers on every refresh."""
-    facts = status_facts(cfg, msg_count, window_hours, shown=True)
+    scrolled panel stacks its own headers on every refresh. With `shown` false the
+    urgent messages it names are not recorded as seen, as in the document (status_facts)."""
+    facts = status_facts(cfg, msg_count, window_hours, shown=shown)
     impl = cfg.get("implementer") or {}
     w = min(width or shutil.get_terminal_size((120, 40)).columns, 130)
     L = []
@@ -377,12 +378,14 @@ def _banner_lines(mailbox_dir, urgent, waiting):
     return lines
 
 
-def _mailbox_banner(cfg):
+def _mailbox_banner(cfg, shown=True):
     """Lines naming the marked messages for the role running this command, and how many others wait (#29).
 
-    A person, or a caller with no AO_ROLE, sees what is marked for either role.
+    A person, or a caller with no AO_ROLE, sees what is marked for either role. With `shown` false
+    nothing is recorded (_marked_mail): `ao watch --web` shows the lines to whatever fetched the
+    page, and a fetch is no proof that the message's reader saw it.
     """
-    marked = _marked_mail(cfg, shown=True)
+    marked = _marked_mail(cfg, shown)
     return [] if marked is None else _banner_lines(cfg.get("mailbox", "agent-mail"), *marked)
 
 
@@ -397,6 +400,11 @@ def cmd_status(cfg, args):
 
 
 def cmd_watch(cfg, args):
+    if getattr(args, "web", False):
+        return _watch_web(cfg, args)
+    if getattr(args, "port", None) is not None:
+        print("ao watch: --port is the port of --web; add --web to serve the pages", file=sys.stderr)
+        return 2
     if not A.terminal():
         # A pipe, a log or a dumb terminal gets the panel once. Looping there wrote the alternate
         # screen and a clear before every frame into whatever read it, and never ended (CLI-ROBUST).
@@ -421,6 +429,64 @@ def cmd_watch(cfg, args):
     finally:
         sys.stdout.write("\033[?25h\033[?1049l")  # cursor back, restore scrollback
         sys.stdout.flush()
+
+
+WEB_PORT = 8732           # `ao watch --web`, beside `ao a2a serve` on 8731
+WEB_COLUMNS = 120         # the width a panel is laid out to when it cannot read its terminal's
+
+
+def _web_pages(root, args):
+    """The pages `ao watch --web` serves (WEB-VIEW): {path: (label, compute)}, each computed when asked for.
+
+    A page is what `ao watch`, `ao board` and `ao fleet` would print at that moment, by the
+    functions those commands print with. The project's config is read again for each request,
+    as each of those commands reads it when it starts, so a view left open for a day shows a
+    session or a role that changed after it started. One difference is deliberate: a page marks
+    no urgent message seen (#30), as `ao status --json` marks none: both read with `shown` false
+    (status_facts). Any process on this machine can fetch a loopback page, and a fetch is no proof
+    that a person read it; an urgent message stays unseen, and its alarm keeps climbing, until a
+    command shows it to its reader.
+    """
+    def panel():
+        return render(A.load_config(root), args.messages, WEB_COLUMNS, shown=False)
+
+    def board():
+        cfg = A.load_config(root)
+        return "\n".join(_mailbox_banner(cfg, shown=False) + _board_lines(cfg))
+
+    def fleet():
+        return "\n".join(render_fleet(WEB_COLUMNS))
+
+    return {"/": ("panel", panel), "/board": ("board", board), "/fleet": ("fleet", fleet)}
+
+
+def _watch_web(cfg, args):
+    """Serve the pages on 127.0.0.1 until Ctrl+C: a browser tab in place of a terminal (WEB-VIEW)."""
+    from . import web
+    port = WEB_PORT if args.port is None else args.port
+    if not 0 <= port <= 65535:
+        print(f"ao watch --web: --port {port}: a port is 0 to 65535, and 0 takes a free one", file=sys.stderr)
+        return 2
+    if args.interval < 1:
+        # A page refreshed every 0 seconds reloads as fast as the browser can ask.
+        print(f"ao watch --web: --interval {args.interval}: a page refreshes at most once a second", file=sys.stderr)
+        return 2
+    root = cfg["root"]
+    try:
+        server = web.listen(_web_pages(root, args), cfg.get("project") or os.path.basename(root), args.interval, port)
+    except OSError as exc:
+        print(f"ao watch --web: cannot listen on 127.0.0.1:{port}: {exc.strerror or exc}", file=sys.stderr)
+        return 1
+    start = "/fleet" if args.all else "/"
+    print(f"ao watch --web: http://127.0.0.1:{server.server_port}{start}  read-only, refreshes every "
+          f"{args.interval}s · Ctrl+C to stop", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    return 0
 
 
 def _fleet_rows():
