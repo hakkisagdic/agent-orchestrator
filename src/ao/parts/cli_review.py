@@ -608,6 +608,7 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
             }
 
         A.helper_register(root, proc.pid, "reviewer")
+        _review_phase("running", f"{label}, pid {proc.pid}")
         started = time.monotonic()
         try:
             try:
@@ -1077,6 +1078,7 @@ def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, s
         row = answered.get(section["name"])
         if row is None:
             print(f"{C['dim']}section {index}/{len(sections)} {section['name']}: asking{C['reset']}")
+            _review_phase("preparing", section=f"section {index}/{len(sections)} {section['name']}")
             asked = f"\n\n{marker}\n{section['question']}"
             invocation = _invoke_reviewer_chain(root, chain, prompt + asked, timeout, strict, primary=primary,
                                                 candidate=candidate, tree=tree,
@@ -1167,7 +1169,12 @@ def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
 
     def invoke(position, route_timeout):
         cand = chain[position]
-        headroom = A.rotate_if_exhausted(None, cand.get("argv") or [], "reviewer") \
+        # The one machine-wide lock a review can wait on: a spent window is rotated under it (#32). The run
+        # says it waits there only once the window is read spent, as it is about to wait.
+        headroom = A.rotate_if_exhausted(
+            None, cand.get("argv") or [], "reviewer",
+            on_wait=lambda: _review_phase("waiting", f"quota headroom for {cand.get('id') or 'reviewer'}; a spent "
+                                                     "window waits on the machine's keyflip rotation lock")) \
             if isinstance(cand, dict) else {"ok": True}
         if not headroom["ok"]:
             # Not spent on an exhausted window: the next route is tried (#32).
@@ -1224,6 +1231,8 @@ def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
                 f"{C['dim']}{len(transient)} transient reviewer route(s) unavailable; "
                 f"retrying once in {REVIEW_RETRY_SECONDS}s.{C['reset']}"
             )
+            _review_phase("waiting", f"{REVIEW_RETRY_SECONDS}s, then "
+                                     f"{', '.join(labels.get(retried, 'reviewer') for retried in transient)} once more")
             _review_retry_wait(REVIEW_RETRY_SECONDS)
             for position in transient:
                 if room() <= 0:
@@ -2025,6 +2034,85 @@ def _review_in_flight(state, now=None):
     return (now or time.time()) - float(state.get("submitted_at") or 0) < 60
 
 
+# What the detached run of a submitted review is doing, as `ao reviews` names it (REVIEW-START-DELAY):
+# its runner has not reported yet, it measures and builds, it waits on something it names, or a
+# reviewer it started is at work.
+REVIEW_PHASES = ("starting", "preparing", "waiting", "running")
+
+# The submitted review this process is running detached, while it runs it: its root, its state and
+# the section it is asking. cmd_review_run fills it and empties it; the reviewer calls deep inside the
+# run read it to say what the run is doing. In any other process it stays empty.
+_DETACHED_RUN = {}
+
+
+def _review_phase(what, on="", section=None):
+    """Say what the detached run of a submitted review is doing now (REVIEW-START-DELAY).
+
+    A submitted review was seen to start its reviewer 69 minutes after the submit while `ao reviews`
+    said "running" the whole time: "running" was read from a state the run wrote once, and its log,
+    the run's standard output, could hold nothing before a reviewer's first heartbeat. The phase now
+    goes into that state with the time it began - `what`, one of REVIEW_PHASES, and `on`, what it
+    prepares, waits on or runs, after the `section` it asks - and each change is a line of the log with
+    the time of day. A phase that cannot be written costs its line in `ao reviews`, never the review.
+    Outside a detached run this does nothing: a review in the foreground shows its progress to whoever
+    started it.
+    """
+    state = _DETACHED_RUN.get("state")
+    if state is None:
+        return
+    if section is not None:
+        _DETACHED_RUN["section"] = section
+    text = "; ".join(part for part in (_DETACHED_RUN.get("section"), on) if part)
+    state["phase"] = {"what": what, "on": text, "since": int(time.time())}
+    print(f"{time.strftime('%H:%M:%S')} {state['id']} {what}" + (f": {text}" if text else ""))
+    try:
+        _write_review_state(_DETACHED_RUN["root"], state)
+    except OSError as exc:
+        print(f"{state['id']}: this phase is not in its state, so `ao reviews` does not show it: {exc}")
+
+
+def _log_by_line():
+    """Have this process's standard output written a line at a time; returns what puts it back (REVIEW-START-DELAY).
+
+    A detached run's standard output is its review's log, a file, which Python writes in blocks: what
+    the run said stayed in memory until a reviewer's heartbeat flushed it, so a run still preparing or
+    waiting left an empty log, and its standard error - the same file, written a line at a time - landed
+    ahead of lines printed before it.
+    """
+    stream = sys.stdout
+    before = getattr(stream, "line_buffering", None)
+    reconfigure = getattr(stream, "reconfigure", None)
+    if before is None or reconfigure is None:
+        return lambda: None
+    reconfigure(line_buffering=True)
+    return lambda: reconfigure(line_buffering=before)
+
+
+def _review_shown(state, now):
+    """(the word `ao reviews` shows for a submitted review, what it is doing or was doing) (REVIEW-START-DELAY).
+
+    A review in flight shows its phase, and how long it has been in it; one whose runner is gone
+    without a result is lost, and says what it was doing when it went. A state written before phases
+    were kept shows as it always did.
+    """
+    word = state.get("state")
+    if word != "running":
+        return word, ""
+    phase = state.get("phase") if isinstance(state.get("phase"), dict) else None
+    what = phase.get("what") if phase and phase.get("what") in REVIEW_PHASES else "running"
+    on = str((phase or {}).get("on") or "")
+    if not _review_in_flight(state, now):
+        if phase is None:
+            return "lost", ""
+        if what == "starting":
+            return "lost", f"its runner never reported; its log is .ao/reviews/{state.get('id')}.log"
+        return "lost", f"it was {what}" + (f": {on}" if on else "")
+    if phase is None:
+        return "running", ""
+    since = _elapsed(now - float(phase.get("since") or now))
+    return what, f"{on} ({since})" if on else f"({since})"
+
+
 def _spawn_review_run(root, rid):
     """Start the detached run of one submitted review, its output in .ao/reviews/<id>.log."""
     log = os.path.join(_reviews_dir(root), f"{rid}.log")
@@ -2083,16 +2171,20 @@ def cmd_review_submit(cfg, args):
             pass
         print(f"{C['red']}could not pin the candidate{C['reset']}: {pinned.stderr.decode(UTF8, 'replace').strip()}")
         return 2
+    submitted = int(time.time())
+    # Written before the runner is started, so its own first write is never overwritten by this one.
     state = {"id": rid, "state": "running", "tree": candidate["index_tree"], "head": candidate["head"],
              "candidate": candidate["digest"], "changed_paths": candidate["changed_paths"],
              "boundary": getattr(args, "boundary", None), "paths": getattr(args, "paths", None),
-             "slice": slice_id, "worktree": root, "index": index, "submitted_at": int(time.time())}
+             "slice": slice_id, "worktree": root, "index": index, "submitted_at": submitted,
+             "phase": {"what": "starting", "on": "its runner has not reported yet", "since": submitted}}
     _write_review_state(root, state)
     # Told before the run starts, so a run that ends at once is never told first (EVENTS-LOG).
     A.emit_event(root, "review-submitted", {"review": rid, "slice": slice_id, "tree": candidate["index_tree"]})
     try:
         _spawn_review_run(root, rid)
     except OSError as exc:
+        state.pop("phase", None)
         state.update(state="failed", reason=f"could not start the review: {exc}", finished_at=int(time.time()))
         _write_review_state(root, state)
         _review_finished_event(root, state)
@@ -2105,7 +2197,17 @@ def cmd_review_submit(cfg, args):
 
 
 def cmd_review_run(cfg, rid):
-    """The detached half of a submit: review the pinned tree, whatever the live index holds now."""
+    """The detached half of a submit: review the pinned tree, whatever the live index holds now.
+
+    It says what it is doing (REVIEW-START-DELAY). Its log is written a line at a time, the first
+    naming the runner, how long after the submit it started and the tree it reviews; each phase after
+    that - preparing, waiting and on what, a reviewer at work - is kept in the state `ao reviews` shows.
+    A run that stops on an error has ended, and is recorded failed with that error, where it used to
+    stand at "running" until `ao reviews` called it lost and nothing said why. The net is the run's
+    from its first step, the write of its own start among them, and an end on an error is told in the
+    machine's event log as every other end is (EVENTS-LOG); where the state cannot be written either,
+    the run says so on its log and tells nothing.
+    """
     from types import SimpleNamespace
     from .storage import read_chained_jsonl
     root = cfg["root"]
@@ -2113,13 +2215,22 @@ def cmd_review_run(cfg, rid):
     if not state or state.get("state") != "running":
         print(f"no running review {rid}")
         return 2
-    state["pid"] = os.getpid()
-    _write_review_state(root, state)
+    started = time.time()
     previous = os.environ.get("GIT_INDEX_FILE")
-    os.environ["GIT_INDEX_FILE"] = state["index"]
+    put_back = lambda: None                                 # noqa: E731 - what _log_by_line hands back, once it ran
     try:
+        state.update(pid=os.getpid(), started_at=int(started),
+                     phase={"what": "preparing", "on": "the candidate and its prompt", "since": int(started)})
+        _write_review_state(root, state)
+        put_back = _log_by_line()
+        print(f"{time.strftime('%H:%M:%S')} {rid} started: runner pid {os.getpid()}, "
+              f"{_elapsed(started - float(state.get('submitted_at') or started))} after the submit, "
+              f"reviewing tree {state.get('tree')}")
+        _DETACHED_RUN.update(root=root, state=state)
+        os.environ["GIT_INDEX_FILE"] = state["index"]
         candidate = A.index_candidate(root)
         if candidate["digest"] != state["candidate"]:
+            state.pop("phase", None)
             state.update(state="stale", finished_at=int(time.time()),
                          reason=f"HEAD moved from {state['head'][:12]} to {candidate['head'][:12]} after submit; "
                                 "the pinned tree is no longer this candidate")
@@ -2133,13 +2244,30 @@ def cmd_review_run(cfg, rid):
                 if isinstance(row, dict) and row.get("candidate") == state["candidate"]]
         newest = rows[-1] if rows else None
         verdict = (newest or {}).get("verdict")
+        state.pop("phase", None)
         state.update(state="finished" if verdict in REVIEWER_VERDICTS else "unavailable" if code == 3 else "failed",
                      exit=code, verdict=verdict, artefact=(newest or {}).get("artefact"),
                      tier=(newest or {}).get("tier"), finished_at=int(time.time()))
         _write_review_state(root, state)
         _review_finished_event(root, state)
         return code
+    except Exception as exc:
+        # Ended, not lost: a failed review is one the watchdog raises until someone collects it.
+        state.pop("phase", None)
+        state.update(state="failed", finished_at=int(time.time()),
+                     reason=f"the run stopped: {type(exc).__name__}: {' '.join(str(exc).split())}"[:400])
+        try:
+            _write_review_state(root, state)
+        except OSError as unwritten:
+            print(f"{rid}: could not record that the run stopped: {unwritten}")
+        else:
+            try:
+                _review_finished_event(root, state)
+            except Exception as untold:             # the error that ended the run is the one raised
+                print(f"{rid}: the event log was not told that the run stopped: {untold}")
+        raise
     finally:
+        _DETACHED_RUN.clear()
         if previous is None:
             os.environ.pop("GIT_INDEX_FILE", None)
         else:
@@ -2148,6 +2276,7 @@ def cmd_review_run(cfg, rid):
             os.remove(state["index"])
         except OSError:
             pass
+        put_back()                  # last, so the index and the environment are put back whatever the stream does
 
 
 def cmd_review_collect(cfg, args):
@@ -2161,7 +2290,10 @@ def cmd_review_collect(cfg, args):
             print(f"no review {rid}")
             return 2
         if state.get("state") == "running":
-            print(f"{rid} is still running: {_elapsed(time.time() - state.get('submitted_at', time.time()))}")
+            now = time.time()
+            shown, doing = _review_shown(state, now)
+            print(f"{rid} is {shown if shown == 'lost' else 'still ' + shown}: "
+                  f"{_elapsed(now - state.get('submitted_at', now))}" + (f"; {doing}" if doing else ""))
             return 1
     else:
         done = [s for s in states if s.get("state") != "running" and not s.get("collected_at")]
@@ -2185,7 +2317,11 @@ def cmd_review_collect(cfg, args):
 
 
 def cmd_reviews(cfg, args):
-    """Every submitted review: its state, its slice, how long it has run, its verdict, and a weaker tier's label."""
+    """Every submitted review: its state, its slice, how long it has run, its verdict, and a weaker tier's label.
+
+    A review in flight shows what it is doing instead of a verdict: starting, preparing, waiting and on
+    what, or running and which reviewer (REVIEW-START-DELAY).
+    """
     from . import tiers as T
     root = cfg["root"]
     states = _review_states(root)
@@ -2195,11 +2331,9 @@ def cmd_reviews(cfg, args):
     now = time.time()
     for state in reversed(states):
         ended = state.get("finished_at") or now
-        shown = state.get("state")
-        if shown == "running" and not _review_in_flight(state, now):
-            shown = "lost"                     # its runner is gone and wrote no result
+        shown, doing = _review_shown(state, now)
         print(f"  {state['id']}  {shown:<11} {str(state.get('slice') or '—'):<18} "
-              f"{_elapsed(ended - state.get('submitted_at', ended)):>8}  {state.get('verdict') or ''}"
+              f"{_elapsed(ended - state.get('submitted_at', ended)):>8}  {state.get('verdict') or doing}"
               f"{'  ' + T.label(state.get('tier')) if T.weaker(state.get('tier')) else ''}"
               f"{'  collected' if state.get('collected_at') else ''}")
     return 0

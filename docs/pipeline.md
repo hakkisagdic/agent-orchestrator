@@ -36,6 +36,21 @@ git object at submit time and to keep one slice per worktree.
 `ao commit-ok --review`, and `review.max_inflight`. The pinned tree is kept as a private index
 file under `.ao/reviews/`, so the running review reads that tree whatever the live index holds.*
 
+*In ao since slice REVIEW-START-DELAY: `ao reviews` says what a review in flight is doing and for how
+long - `starting` until its runner reports, `preparing`, `waiting` and on what, or `running` with the
+section, the reviewer and its pid - and a review whose runner is gone says what it was doing when it
+went. The log, `.ao/reviews/R-<id>.log`, is written a line at a time: its first line names the runner,
+how long after the submit it started and the tree it reviews, and each phase after it is a line with the
+time of day. A review was seen to start its reviewer 69 minutes after its submit while `ao reviews` said
+"running": nothing in its state could say more, and its log - the run's standard output, which Python
+wrote in blocks - could hold nothing before a reviewer's first heartbeat. A review runs no gate and
+takes no gate lock - `ao verify`, `ao merge-check` and `ao lock` take it - so a suite holding that lock
+does not hold a review back. The one machine-wide lock a review can wait on is the keyflip rotation
+lock, with `keyflip.rotation` on, and a review reads `waiting` on it once the provider's window is read
+spent and the lock is about to be waited on. A run that stops on an error, from its first step on, is
+recorded `failed` with the error wherever its state can still be written, and told in the machine's event
+log as every other end is (EVENTS-LOG); it stood at "running" until it read as lost.*
+
 ```bash
 ao review submit --boundary '…'      # returns R-1788… immediately
 ao reviews                            # what is in flight, with elapsed and progress
@@ -52,6 +67,7 @@ At submit time ao records, in `.ao/reviews/R-<id>.json`:
 | `worktree` | which working copy this candidate belongs to |
 | `boundary`, `sections` | what the reviewer was asked, split as in §2 |
 | `state` | `running` / `finished` / `timeout` / `failed`, with `pid` and `started_at` |
+| `phase` | while it runs: what it is doing, what on, and since when - what `ao reviews` shows |
 
 **Invariant S1.** `ao commit-ok --review R-<id>` grants only if `git write-tree` in the
 current worktree equals the recorded `tree`. A candidate that drifted is refused with the

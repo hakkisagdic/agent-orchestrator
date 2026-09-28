@@ -72,7 +72,7 @@ def provider_of(argv):
     return None
 
 
-def rotate_if_exhausted(cfg, argv, who):
+def rotate_if_exhausted(cfg, argv, who, on_wait=None):
     """Before an actor starts: rotate its provider's account through keyflip when the window is spent (#32).
 
     2026-09-07: kiro-cli hit its overage limit and every nudge failed silently for
@@ -82,7 +82,9 @@ def rotate_if_exhausted(cfg, argv, who):
     session on that provider, so rotations are serialised under one machine lock
     and a window another actor already rotated is not rotated again. Returns
     {"ok", "provider", "rotated", "text"}; not ok means no account has headroom,
-    and the caller surfaces that instead of spending the attempt.
+    and the caller surfaces that instead of spending the attempt. `on_wait` is called once the
+    window is read spent, before the lock is waited on, so a caller that says it waits says so only
+    then (REVIEW-START-DELAY).
     """
     provider = provider_of(argv)
     if settings.get(cfg, "keyflip.rotation") != "on" or not provider:
@@ -93,6 +95,8 @@ def rotate_if_exhausted(cfg, argv, who):
         return {"ok": True, "provider": provider, "rotated": False, "text": "headroom"}
     from .storage import _exclusive_lock
     os.makedirs(os.path.join(HOME, ".ao"), exist_ok=True)
+    if on_wait is not None:
+        on_wait()
     with _exclusive_lock(os.path.join(HOME, ".ao", "keyflip-rotation.lock"), timeout=180):
         window = provider_window(provider)
         if window and window["pct"] < ceiling:

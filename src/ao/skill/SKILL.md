@@ -280,7 +280,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao merge-check <branch>` | gate the result of a merge before merging; the record names both parents |
 | `ao review --boundary "…" [--paths …]` | independent prospective review of the exact staged candidate; `--paths` narrows its staged scope |
 | `ao review --commits <range>` | retrospective review of landed work; never authorizes a candidate |
-| `ao review submit [--boundary …]` / `ao review collect <R-id>\|--any` / `ao reviews` | submit pins the staged tree and reviews it in the background, returning an id at once; collect takes a finished one; `ao reviews` lists them; `ao commit-ok --review <R-id>` grants only on the pinned tree |
+| `ao review submit [--boundary …]` / `ao review collect <R-id>\|--any` / `ao reviews` | submit pins the staged tree and reviews it in the background, returning an id at once; collect takes a finished one; `ao reviews` lists them with what each is doing - starting, preparing, waiting and on what, or which reviewer runs; `ao commit-ok --review <R-id>` grants only on the pinned tree |
 | `ao commit-ok` | persist authority for the exact isolated index candidate, verification and prospective review |
 | `ao commit-check` | revalidate the latest persisted grant against Git's active index without issuing or consuming one |
 | `ao writers [--clean]` | live turns (not processes); orphans set aside |

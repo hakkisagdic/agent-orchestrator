@@ -192,7 +192,8 @@ def test_the_architects_route_and_window_are_not_what_a_tool_review_spends(proje
     windows, rotations, rotate = [], [], A.rotate_if_exhausted
     monkeypatch.setattr(A, "provider_window", lambda name: windows.append(name))
     monkeypatch.setattr(A, "rotate_if_exhausted",
-                        lambda cfg, argv, who: rotations.append((list(argv), who)) or rotate(cfg, argv, who))
+                        lambda cfg, argv, who, on_wait=None: rotations.append((list(argv), who))
+                        or rotate(cfg, argv, who, on_wait=on_wait))
 
     assert cli.cmd_review(dict(project, architect=architect, reviewer=route), _args()) == 0
 
