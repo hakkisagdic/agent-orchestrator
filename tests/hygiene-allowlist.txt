@@ -1,0 +1,16 @@
+# Deliberate fixtures that tests/test_tracked_hygiene.py lets stand in tracked files.
+#
+# One a line: <tracked file, or a directory ending in /> <rule> <what was found> <why>
+# What was found is a credential's sha256:<first 16 hex digits> - the test prints it, and this
+# file never holds the secret - or, for home-path, the account's name, which names a file and
+# never a directory: `me` or `dev` is too common to let stand across a tree. An allowance that
+# covers nothing any more fails the test until it is dropped, so this list only shrinks by itself.
+
+docs/audit/2026-09-08-adversarial.md anthropic-key sha256:d2b9a385e95fd469 the made-up key the audit's reproduction of a leaked reviewer error printed, quoted as its evidence
+docs/audit/2026-09-08-adversarial.md github-token sha256:3543c50b0cb9cea8 the made-up token the audit's leak sequences use; tests/test_escalate_durable.py builds the same one at run time
+docs/audit/2026-09-08-adversarial.md home-path me the Windows paths the audit quotes from its reproductions, of a made-up account
+tests/test_processes.py home-path x process-table fixtures name a made-up macOS account
+tests/test_processes.py home-path dev a Windows command line in a process-table fixture names a made-up account
+tests/test_windows_fail_closed.py home-path me a Windows path fixture names a made-up account
+tests/test_windows_followups.py home-path me Windows path fixtures name a made-up account
+tests/test_windows_lane.py home-path me a Windows path fixture names a made-up account

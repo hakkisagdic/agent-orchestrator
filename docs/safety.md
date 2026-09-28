@@ -337,6 +337,14 @@ would erase every digest commit authority reads, so it is not one of these. A wo
 `password` in prose is untouched unless a long value is assigned to it. A test fixture that must
 hold a token-shaped string builds it at run time.
 
+*In ao since slice TRUST-HYGIENE: ao's own repository is held to these rules too, every one of them.
+`tests/test_tracked_hygiene.py` reads every tracked file for them, for a long generated value
+assigned to any name that says it is secret, such as `ENCRYPTION_KEY`, and for home directories such
+as `/Users/<name>`. An assigned value that is called is code - `password = os.environ.get(...)` names
+where a secret is read - and neither assignment rule takes it. A deliberate fixture stands in
+`tests/hygiene-allowlist.txt`, a credential there named by the start of its SHA-256
+([SECURITY.md](../SECURITY.md#this-repository)).*
+
 ## 8. Blast radius of the machine itself
 
 Parallel lanes are cheap to start and expensive to run. Five simultaneous test suites will

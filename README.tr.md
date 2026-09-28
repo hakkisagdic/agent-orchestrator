@@ -213,6 +213,7 @@ olup olmadığını söyler. Yeni adaptör bir JSON dosyasıdır;
 ## Dokümantasyon
 
 [protokol](docs/protocol.md) · [güvenlik](docs/safety.md) · [roller](docs/roles.md) ·
+[gizlilik](docs/privacy.md) · [açık bildirimi](SECURITY.md) ·
 [dilimler](docs/slices.md) · [gate'ler](docs/gates.md) · [kaynaklar](docs/sources.md) ·
 [adaptörler](docs/adapters.md) · [paralellik](docs/parallel.md) · [bulut](docs/cloud.md) ·
 [modeller](docs/models.md) · [telegram](docs/telegram.md) · [mcp](docs/mcp.md) · [telemetri](docs/telemetry.md) ·

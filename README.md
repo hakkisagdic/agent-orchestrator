@@ -229,6 +229,7 @@ qualification, including unsupported and network filesystems.
 
 **[getting started](docs/getting-started.md)** ·
 [protocol](docs/protocol.md) · [safety](docs/safety.md) · [roles](docs/roles.md) ·
+[privacy](docs/privacy.md) · [security policy](SECURITY.md) ·
 [capability matrix](docs/capability-matrix.md) ·
 [architecture decisions](docs/adr/README.md) ·
 [slices](docs/slices.md) · [gates](docs/gates.md) · [sources](docs/sources.md) ·

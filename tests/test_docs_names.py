@@ -726,7 +726,8 @@ Not built yet: `.ao/backlog.md` holding lanes.
 
 def test_the_reading_sees_tools_paths_trees_shown_files_settings_and_markers(tmp_path):
     for name, text in (("src/ao/paths.py", CODE), ("docs/sample.md", SAMPLE), ("README.md", ""), ("README.tr.md", ""),
-                       ("src/ao/skill/SKILL.md", ""), ("docs/lessons.md", "`ao_mail_send` in `.ao/roles.yml`\n")):
+                       ("SECURITY.md", ""), ("src/ao/skill/SKILL.md", ""),
+                       ("docs/lessons.md", "`ao_mail_send` in `.ao/roles.yml`\n")):
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).write_text(text, encoding="utf-8")
 

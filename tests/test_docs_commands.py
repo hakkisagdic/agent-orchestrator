@@ -66,7 +66,8 @@ Marker = collections.namedtuple("Marker", "line reason covers")
 
 
 def _documents(root):
-    paths = sorted((root / "docs").glob("*.md")) + [root / "README.md", root / "README.tr.md",
+    # SECURITY.md sits at the root and is read like the READMEs: a reporter follows the commands it shows.
+    paths = sorted((root / "docs").glob("*.md")) + [root / "README.md", root / "README.tr.md", root / "SECURITY.md",
                                                   root / "src" / "ao" / "skill" / "SKILL.md"]
     named = [(path.relative_to(root).as_posix(), path) for path in paths]
     return [(name, path) for name, path in named
@@ -397,6 +398,7 @@ def test_the_reading_sees_shell_syntax_synopses_placeholders_markers_and_history
     parser = cli.build_parser()
     for name, text in (("docs/sample.md", SAMPLE), ("docs/lessons.md", "`ao brief`\n"),
                        ("README.md", "`ao status`\n"), ("README.tr.md", "`ao board`\n"),
+                       ("SECURITY.md", "`ao --version`, then `ao advisories`\n"),
                        ("src/ao/skill/SKILL.md", "`ao brief --x`\n")):
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).write_text(text, encoding="utf-8")
@@ -425,6 +427,7 @@ def test_the_reading_sees_shell_syntax_synopses_placeholders_markers_and_history
         "choices (orange, red, yellow)",
         "docs/sample.md:14: `ao doctor --consist`: ao doctor has no option --consist",
         "docs/sample.md:37: `ao queue`: ao has no command 'queue'",
+        "SECURITY.md:1: `ao advisories`: ao has no command 'advisories'",
         "src/ao/skill/SKILL.md:1: `ao brief --x`: ao has no command 'brief'",
     ]
     assert _marker_problems(tmp_path, parser) == [
