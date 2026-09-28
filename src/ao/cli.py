@@ -53,6 +53,9 @@ A._part("cli_hooks", globals())
 A._part("cli_maintenance", globals())
 
 
+A._part("cli_lanes", globals())
+
+
 def build_parser():
     """The whole `ao` command line, built without running a command.
 
@@ -155,6 +158,10 @@ def build_parser():
     wt.add_argument("action", nargs="?", choices=["list", "prune"], default="list")
     wt.add_argument("--yes", action="store_true", help="apply the prune (default is a dry run)")
     wt.set_defaults(fn=cmd_worktrees)
+    ln = sub.add_parser("lane", help="one worktree per READY board item, prepared from the lane settings")
+    ln.add_argument("action", nargs="?", choices=["start", "list", "remove"], default="list")
+    ln.add_argument("item", nargs="?", help="start, remove: the board item's id")
+    ln.set_defaults(fn=cmd_lane)
     ro = sub.add_parser("role", help="the role table: show, or reassign a role to an actor")
     ro.add_argument("action", nargs="?", choices=["show", "set", "swap"], default="show")
     ro.add_argument("role", nargs="?", choices=list(A.ROLE_BLOCKS))

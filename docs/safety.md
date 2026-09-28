@@ -32,7 +32,7 @@ Never inject into a session that is mid-turn. Two hazards, two mitigations:
 | Hazard | Mitigation |
 |---|---|
 | Two writers on one session transcript | Ask the OS which agent processes have this repo as their cwd. Start nothing while any of them is alive. |
-| Two writers on one working tree | Write lanes get separate git worktrees; a second write lane in the same workspace is refused. |
+| Two writers on one working tree | Write lanes get separate git worktrees: `ao lane start` makes one per board item and refuses a second lane for an item that has one. |
 | A human needs the tree | `ao hold` stops every agent in it and holds the lock; every restart path checks the lock first. |
 | A turn ended but its processes did not | `ao writers` shows them as orphans (no terminal, dead group leader) and counts zero writers; the watchdog clears them before every count, and `ao hold` / the reaper stop turns by process group so no new ones are made. |
 
@@ -343,8 +343,9 @@ Parallel lanes are cheap to start and expensive to run. Five simultaneous test s
 swap a laptop into uselessness, and each lane individually looks reasonable. `ao verify` and
 `ao merge-check` hold one machine-wide lock while a project's gates run; another project's run
 waits up to `--wait` seconds for it, then refuses rather than start a second suite - and so does a
-run of the same project ([gates.md](gates.md#serialisation-and-machine-pressure)). Not built yet: checking memory pressure before starting work, and refusing a lane rather than
-queueing it into a thrash.
+run of the same project ([gates.md](gates.md#serialisation-and-machine-pressure)). Not built yet:
+checking memory pressure before a lane or a gate run starts, and refusing rather than queueing
+into a thrash; `ao lane start` starts a lane whatever the machine's load ([parallel.md](parallel.md)).
 
 ## 9. What this model does not cover
 

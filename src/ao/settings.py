@@ -168,6 +168,24 @@ SETTINGS = {
         "en", str, None, None, "project",
         "en: the files ao init writes and the markers ao writes into mail are English; tr: Turkish. "
         "The markers of both are read in every project"),
+    "lane.link_paths": Setting(
+        [], list, None, None, "project",
+        "paths ao lane start links into a new lane from the main checkout, such as untracked dependency "
+        "directories; none: nothing is linked"),
+    "lane.env": Setting(
+        [], list, None, None, "project",
+        "NAME=value lines ao lane start writes into a new lane's lane.env_file and gives its post-create command; "
+        "{item}, {lane} and {path} stand for the lane's own"),
+    "lane.env_file": Setting(
+        ".env", str, None, None, "project",
+        "the file at the top of a new lane that lane.env is written to; never one the lane already has"),
+    "lane.post_create": Setting(
+        [], list, None, None, "project",
+        "the command a new lane runs before it is reported ready, as an argument list and never shell text; "
+        "{item}, {lane} and {path} stand for the lane's own; none: nothing runs"),
+    "lane.post_create_timeout": Setting(
+        600, int, 1, None, "project",
+        "seconds a new lane's post-create command may run before the lane is reported not ready"),
     "keyflip.rotation": Setting(
         "off", str, None, None, "machine",
         "on: before an actor starts on a spent window, keyflip rotates the machine's account; off: never"),

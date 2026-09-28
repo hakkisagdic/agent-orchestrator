@@ -61,9 +61,9 @@ Marked from documented behaviour and one local inspection; correct any row you c
 ## The cloud lane
 
 A cloud lane is a lane whose workspace is remote and whose deliverable is a branch. Not built
-yet: ao has no lane command, local or cloud, and what follows is the design:
+yet: ao's lanes are local worktrees ([parallel.md](parallel.md)), and what follows is the design:
 
-<!-- not built: cloud lanes are a design; ao has no lane, lanes or queue command -->
+<!-- not built: cloud lanes are a design; ao lane start takes no --role or --cloud, and ao has no lanes or queue command -->
 ```bash
 ao lane start impl-migrations --role implementer --cloud kiro \
    --brief "Epic 19 analytics migrations, fixture-only, no schema changes outside src/db"

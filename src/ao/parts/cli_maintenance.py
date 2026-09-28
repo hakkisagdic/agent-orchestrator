@@ -99,7 +99,8 @@ def _registry_names(root):
     return sorted(name for name, row in A.project_registry().items() if row.get("root") == real)
 
 
-AO_GITIGNORE = ("agent-mail/*.md", "!agent-mail/README.md", ".ao/inbox/", ".ao/hold", ".ao/sessions.json")
+AO_GITIGNORE = ("agent-mail/*.md", "!agent-mail/README.md", ".ao/inbox/", ".ao/hold", ".ao/sessions.json",
+                ".ao/lanes/")
 
 
 def _gitignore_without_ao(root):
@@ -174,7 +175,7 @@ def _unschedule(name):
 
 
 def cmd_remove(cfg, args):
-    """Take ao off only after every reachable hook target passes one preflight."""
+    """Take ao off only after every reachable hook target passes one preflight, and while no lane stands."""
     root = cfg["root"]
     key, owned = _remove_key(root)
     from . import skillkit
@@ -207,9 +208,20 @@ def cmd_remove(cfg, args):
     if not owned:
         print(f"   {C['dim']}nothing of ~/.ao: no .ao/ here, and the registry holds no project at this path"
               f"{C['reset']}")
+    # A lane's record is in .ao/, and with it gone no ao command could retire the lane's worktree or branch.
+    lanes = A.lane_records(root)
+    for lane in lanes:
+        who = lane.get("item") or lane["name"]
+        print(f"   {C['red']}refused while it stands{C['reset']}: lane {who} at {lane.get('path') or '-'}; "
+              f"`ao lane remove {who}` retires it first")
     if not args.yes:
         print(f"\nre-run with {C['b']}--yes{C['reset']} to do it")
         return 0
+    if lanes:
+        print(f"{C['red']}remove refused; AO state kept intact{C['reset']}: {len(lanes)} lane(s) stand, and "
+              f".ao/ holds what retires them: `ao lane remove {lanes[0].get('item') or lanes[0]['name']}`"
+              + (" and the rest, as `ao lane list` shows" if len(lanes) > 1 else "") + " first")
+        return 1
 
     enrollment = _project_enrollment(root)
     if enrollment["state"] == "broken":

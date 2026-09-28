@@ -552,9 +552,10 @@ def cmd_init(cfg, args):
 
     gi = os.path.join(root, ".gitignore")
     lines = open(gi, encoding=UTF8).read().split("\n") if os.path.exists(gi) else []
-    # The sessions ao settles for this checkout's roles are this machine's, never the repository's (SESSION-IDENTITY).
-    add = [l for l in ("agent-mail/*.md", "!agent-mail/README.md", ".ao/inbox/", ".ao/hold", ".ao/sessions.json")
-           if l not in lines]
+    # The sessions ao settles for this checkout's roles are this machine's, never the repository's (SESSION-IDENTITY),
+    # and so are the lanes it starts from here: each names a directory on this machine (LANE-START).
+    add = [l for l in ("agent-mail/*.md", "!agent-mail/README.md", ".ao/inbox/", ".ao/hold", ".ao/sessions.json",
+                       ".ao/lanes/") if l not in lines]
     if add:
         with open(gi, "a", encoding=UTF8) as fh:
             fh.write("\n# agent-orchestrator: mail is transient; the ledger and reviews are not\n"

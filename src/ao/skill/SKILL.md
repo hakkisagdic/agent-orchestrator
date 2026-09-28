@@ -245,6 +245,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao doctor --consistency [--repair]` | board, ledgers, review artefacts and git checked against each other |
 | `ao prove [--no-review]` | run the guarantees: the hook refuses, the reviewer answers, a throwaway slice lands |
 | `ao worktrees [prune --yes]` | each worktree and what keeps it; retire merged or rejected ones, state archived |
+| `ao lane start <item>` / `ao lane list` / `ao lane remove <item>` | a worktree of its own for a READY board item, beside the main checkout on `lane/<lane>` - the id with each run of characters a branch cannot hold made one hyphen, so `ACME-187/1` is on `lane/ACME-187-1` - prepared from the `lane.*` settings before it is called ready; remove refuses uncommitted changes |
 | `ao recall <words>` | decisions, answers, waivers, review findings and lessons from every project that share the words |
 | `ao board ready` | exactly the items that may start now; exit 1 names a broken `needs:` edge |
 | `ao fleet` | every project on this machine at a glance |

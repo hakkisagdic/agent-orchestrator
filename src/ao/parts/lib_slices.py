@@ -247,7 +247,8 @@ def worktree_facts(root, cfg, sizes=False):
     A worktree may go when its branch is merged into the default branch, when the
     board rejected the slice that owns it (`worktree:` or `branch:` on the item),
     or when its directory is already gone - and never while it holds product
-    changes nobody committed, a review in flight, or the command that is asking.
+    changes nobody committed, a review in flight, or the command that is asking,
+    and never when it is a lane, which `ao lane remove` retires (LANE-START).
     """
     target = default_branch(root)
     board_items = board(root)
@@ -256,8 +257,10 @@ def worktree_facts(root, cfg, sizes=False):
         for item in items:
             owners.append((state, item))
     here = os.path.realpath(root)
+    trees = worktree_list(root)
+    lanes = lane_keeps(root, trees)
     out = []
-    for index, tree in enumerate(worktree_list(root)):
+    for index, tree in enumerate(trees):
         path, branch = tree["path"], tree["branch"]
         real = os.path.realpath(path)
         slice_state = next((state for state, item in owners
@@ -278,6 +281,8 @@ def worktree_facts(root, cfg, sizes=False):
             keep.append(f"{len(dirty)} uncommitted product change(s)")
         if flying:
             keep.append(f"review in flight: {', '.join(flying)}")
+        if os.path.normcase(real) in lanes:
+            keep.append(lanes[os.path.normcase(real)])
         why = "merged into " + target if merged else "its slice was rejected" if slice_state == "rejected" \
             else "its directory is gone" if not exists or tree["prunable"] else None
         may_go = bool(why) and not keep
@@ -313,13 +318,15 @@ def prune_worktree(root, fact, apply=False, now=None):
     steps.append(f"remove the worktree {fact['path']}")
     if apply and os.path.isdir(fact["path"]):
         _git_output(root, "worktree", "remove", "--force", fact["path"])
+    # Before the branch: git will not delete a branch a worktree it lists holds, and a worktree whose
+    # directory someone deleted stays listed until a prune, so its branch could never go (LANE-START).
+    steps.append("git worktree prune")
+    if apply:
+        _git_output(root, "worktree", "prune")
     if fact["branch"]:
         steps.append(f"delete the branch {fact['branch']}")
         if apply:
             _git_output(root, "branch", "-D", fact["branch"])
-    steps.append("git worktree prune")
-    if apply:
-        _git_output(root, "worktree", "prune")
     return steps
 
 

@@ -71,6 +71,11 @@ machine setting written into a project.
 | `implementer.name` | `none` | project | the implementer's name in mail file names; none: its adapter's actor name |
 | `architect.name` | `fable` | project | the architect's name in mail file names |
 | `language` | `en` | project | en: the files ao init writes and the markers ao writes into mail are English; tr: Turkish. The markers of both are read in every project |
+| `lane.link_paths` | `none` | project | paths ao lane start links into a new lane from the main checkout, such as untracked dependency directories; none: nothing is linked |
+| `lane.env` | `none` | project | NAME=value lines ao lane start writes into a new lane's lane.env_file and gives its post-create command; {item}, {lane} and {path} stand for the lane's own |
+| `lane.env_file` | `.env` | project | the file at the top of a new lane that lane.env is written to; never one the lane already has |
+| `lane.post_create` | `none` | project | the command a new lane runs before it is reported ready, as an argument list and never shell text; {item}, {lane} and {path} stand for the lane's own; none: nothing runs |
+| `lane.post_create_timeout` | `600` | project | seconds a new lane's post-create command may run before the lane is reported not ready |
 | `keyflip.rotation` | `off` | machine | on: before an actor starts on a spent window, keyflip rotates the machine's account; off: never |
 | `alarms.red_repeat_hours` | `6` | machine | hours before a red alarm that still stands e-mails again |
 | `alarms.reset_after_hours` | `2` | machine | hours of quiet after which an alarm episode is over |
@@ -130,6 +135,16 @@ least a route that may run can carry. A route whose command would not fit with t
 and whose adapter declares no other channel for its prompt - and on Windows any route that takes its
 prompt in its argument - holds them to one argument's worth: 120 KB with the diff, 30 KB on Windows
 ([adapters.md](adapters.md)).
+
+The `lane.*` settings prepare each worktree `ao lane start` makes ([parallel.md](parallel.md)), in
+this order: `lane.link_paths` are linked from the main checkout, `lane.env` is written into
+`lane.env_file`, and `lane.post_create` runs in the lane with those variables, what it prints kept
+in `.ao/lanes/<lane>.log`. A lane is reported ready only when every step passed, and a `lane.*` value
+ao cannot use - one string where a list belongs, `"npm ci"` for `["npm", "ci"]` - refuses the start
+before anything is made. A list is set with commas - `ao config set lane.post_create npm,ci` - and a
+word that holds a comma is written into `.ao/config.json` itself. `lane.post_create` runs what the
+project's own config names, as a gate in `.ao/gates.json` does, so read it before starting a lane in
+a project someone else set up.
 
 The two filter settings are machine settings on purpose: they decide which programs
 `ao doctor` may run, unattended, and a project's own files are writable by the agents it

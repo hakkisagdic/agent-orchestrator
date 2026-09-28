@@ -58,6 +58,21 @@ def test_merged_and_rejected_worktrees_go_while_dirty_and_reviewed_ones_stay(pro
     assert "1 uncommitted product change(s)" in out and "review in flight: R-1" in out
 
 
+def test_a_worktree_whose_directory_was_deleted_by_hand_goes_with_its_branch(project, tmp_path, capsys):
+    import shutil
+    root = project["root"]
+    gone = _worktree(root, tmp_path, "gone")
+    head = _git(gone, "rev-parse", "HEAD")
+    shutil.rmtree(gone)                 # git still lists it, and would not delete a branch it lists as checked out
+
+    assert cli.cmd_worktrees(project, SimpleNamespace(action="prune", yes=True)) == 0
+
+    assert "its directory is gone" in capsys.readouterr().out
+    assert "gone" not in _git(root, "branch", "--format=%(refname:short)").split()
+    assert len(A.worktree_list(root)) == 1
+    assert head in _git(root, "for-each-ref", "--format=%(objectname)", "refs/ao/archive/").split()
+
+
 def test_the_doctor_names_worktrees_that_may_go_with_their_size(project, tmp_path):
     root = project["root"]
     _worktree(root, tmp_path, "landed")
