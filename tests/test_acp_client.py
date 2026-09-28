@@ -100,7 +100,7 @@ def test_a_turn_is_the_agents_message_chunks_in_order_and_its_stop_reason(agent,
 
     result, decisions = _turn(argv, tmp_path, monkeypatch, "answer")
 
-    assert result == {"stop_reason": "end_turn", "text": "VERDICT: APPROVED", "tool_calls": []}
+    assert result == {"ended": "end_turn", "text": "VERDICT: APPROVED", "tool_calls": []}
     assert decisions == []
     assert [m.get("method") for m in sent()] == ["initialize", "session/new", "session/prompt"]
     prompt = sent()[2]["params"]
@@ -160,7 +160,7 @@ def test_a_turn_past_its_time_is_cancelled_and_its_pending_permission_answered_c
 
     result, decisions = _turn(argv, tmp_path, monkeypatch, "slow", timeout=2)
 
-    assert result["stop_reason"] == "cancelled"
+    assert result["ended"] == "cancelled"
     methods = [m.get("method") for m in sent()]
     assert "session/cancel" in methods
     # The permission asked before the cancel was decided by the policy then; nothing was allowed.
@@ -174,7 +174,7 @@ def test_a_turn_that_does_not_end_even_when_cancelled_is_a_timeout_and_its_agent
 
     result, _ = _turn(argv, tmp_path, monkeypatch, "stuck", timeout=2)
 
-    assert result["stop_reason"] == "timeout"
+    assert result["ended"] == "timeout"
     pid = int(pid_file.read_text())
     deadline = time.monotonic() + 10
     while A._pid_alive(pid) and time.monotonic() < deadline:

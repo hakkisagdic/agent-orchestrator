@@ -295,7 +295,7 @@ class Session:
         return self.session_id
 
     def prompt(self, text, timeout):
-        """One prompt turn: {"stop_reason", "text", "tool_calls"}.
+        """One prompt turn: {"ended", "text", "tool_calls"}, where "ended" is the stop reason the agent gave.
 
         The text is the agent's message chunks joined in the order they came. A turn that has not
         ended by `timeout` is cancelled - pending permission requests answered cancelled, as the
@@ -323,4 +323,4 @@ class Session:
             except ProbeError:
                 stop = "timeout"
         turn, self._turn = self._turn, None
-        return {"stop_reason": stop, "text": "".join(turn["text"]), "tool_calls": list(turn["tool_calls"].values())}
+        return {"ended": stop, "text": "".join(turn["text"]), "tool_calls": list(turn["tool_calls"].values())}

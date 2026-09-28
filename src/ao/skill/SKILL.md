@@ -274,6 +274,9 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao board add ID "title" --acceptance "…" [--needs A,B] [--role R]` | admits one item to `queued`, only with its acceptance boundary; refused, it writes nothing |
 | `ao fleet` | every project on this machine at a glance |
 | `ao tail` | the implementer's transcript, live |
+| `ao agents` | the sessions this project's harnesses told ao of through their lifecycle hooks, and what each is doing: working, waiting, idle or ended |
+| `ao agent-hook <event> [--harness ID]` | what a harness's lifecycle hook runs, not a command to type: it records the event in the event log and prints nothing |
+| `ao harness probe [ID…] [--sessions]` | a person's command: ask each harness that speaks ACP what it supports, sending no prompt, and keep the answer |
 | `ao events [--follow] [--project P] [--since T]` | what ao did on this machine, one line an event: verifications, submitted and finished reviews, grants, mail, nudges and wakes; `--follow` prints each as it is written, `--json` as a line of JSON |
 | `ao mail list|read|send|log|search|ack` | the mailbox and its ledger; `ack` deletes processed messages (delivery confirmation) |
 | `ao note` | architect → implementer note without raw file writes (`--urgent`) |

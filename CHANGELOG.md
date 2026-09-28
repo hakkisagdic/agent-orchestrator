@@ -138,6 +138,7 @@ publishes the release.
 - A slice parked on quota keeps the `needs:` it had before the park on its board line, and gets it back when the park ends, even one the watchdog's state lost (QUOTA-PARK-2).
 - `ao uninstall` and `ao remove` take an MCP entry for ao's only when it runs `ao … mcp serve`, not whenever its command is named ao (UPDATE-UNINSTALL-2).
 - An architect woken again and again by a weekly or monthly limit that names no reset waits twice as long each time, up to the period the stop names (ARCHITECT-WAKE-QUOTA-2).
+- The playbook names `ao agents`, `ao agent-hook` and `ao harness probe`, as it names every command, and an ACP turn's result names its end without a transcript field's name (SUITE-GUARDS).
 
 ### Fixes
 
