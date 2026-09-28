@@ -596,3 +596,62 @@ def test_a_board_move_changes_one_line_and_leaves_every_other_as_written(project
     with open(path, encoding="utf-8") as fh:
         assert fh.read() == written
     assert A.board_move(project["root"], "B7", "running") is False
+
+
+def test_a_lost_park_gives_each_item_back_the_needs_it_carried(project, monkeypatch, tmp_path):
+    """The `needs:` an item had before its park is kept on the board line, so a park the watchdog's state lost
+    gives it back as one that stood does (QUOTA-PARK-2)."""
+    world = _nudges_run(_say(_harness(project, monkeypatch, tmp_path), (600, "prompt", PROMPT),
+                             (400, "harness", LIMIT)), monkeypatch)
+    world.board("running", SLICE + " · needs: the fixture B7 writes")
+    world.cycle(dry_run=False)
+    (parked,) = A.board(world.root)["blocked"]
+    assert parked["notes"]["held-needs"] == "the fixture B7 writes" and parked["notes"]["needs"].startswith("quota (")
+
+    os.remove(W.state_path(world.root))                            # the park is lost with the state
+    world.transcript.write_text("", encoding="utf-8")
+    world.transcript_age(900)
+    world.cycle(dry_run=False)
+
+    (running,) = A.board(world.root)["running"]
+    assert running["notes"].get("needs") == "the fixture B7 writes" and "held-needs" not in running["notes"]
+
+
+def test_an_item_with_no_needs_of_its_own_is_parked_and_resumed_without_one(project, monkeypatch, tmp_path):
+    world = _nudges_run(_say(_harness(project, monkeypatch, tmp_path), (600, "prompt", PROMPT),
+                             (400, "harness", LIMIT)), monkeypatch)
+    world.board("running", SLICE)
+    world.cycle(dry_run=False)
+    (parked,) = A.board(world.root)["blocked"]
+    assert "held-needs" not in parked["notes"]
+
+    os.remove(W.state_path(world.root))
+    world.transcript.write_text("", encoding="utf-8")
+    world.transcript_age(900)
+    world.cycle(dry_run=False)
+
+    (running,) = A.board(world.root)["running"]
+    assert "needs" not in running["notes"] and "held-needs" not in running["notes"]
+
+
+def test_a_lost_park_parked_again_on_a_fresh_stop_keeps_the_needs_it_held(project, monkeypatch, tmp_path):
+    """The review of QUOTA-PARK-2 found a park made again, after the state lost it, clearing the needs the line held."""
+    world = _nudges_run(_say(_harness(project, monkeypatch, tmp_path), (600, "prompt", PROMPT),
+                             (400, "harness", LIMIT)), monkeypatch)
+    world.board("running", SLICE + " · needs: the fixture B7 writes")
+    world.cycle(dry_run=False)
+
+    os.remove(W.state_path(world.root))                            # lost while the limit stands, and a newer
+    _say(world, (600, "prompt", PROMPT), (200, "harness", "You've hit your session limit · resets in 3h"))
+    world.cycle(dry_run=False)                                     # stop names another reset: parked again
+
+    (parked,) = A.board(world.root)["blocked"]
+    assert parked["notes"]["held-needs"] == "the fixture B7 writes"
+
+    os.remove(W.state_path(world.root))                            # lost once more, and nothing says it stands
+    world.transcript.write_text("", encoding="utf-8")
+    world.transcript_age(900)
+    world.cycle(dry_run=False)
+
+    (running,) = A.board(world.root)["running"]
+    assert running["notes"].get("needs") == "the fixture B7 writes" and "held-needs" not in running["notes"]

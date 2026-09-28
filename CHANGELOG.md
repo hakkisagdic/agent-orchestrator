@@ -135,6 +135,7 @@ publishes the release.
 - A rule proposal's evidence names each rate's denominator and says when the review ledger could not be read, and a decision given at a terminal records the login and whether a terminal was attached (RULE-PROPOSALS-2).
 - `ao.acp.Session` holds one ACP session with a harness and runs one prompt turn: the agent's message, its tool calls, and each permission it asks decided by a policy that allows nothing unless told otherwise; nothing drives a harness through it yet (ACP-CLIENT).
 - `ao agent-hook EVENT` is what a harness's lifecycle hook runs: it records the event - the session, its directory, a tool's name - in the machine's event log, never a prompt or a tool's input, prints nothing and always exits 0; `ao agents` shows what each session is doing (HOOK-SPOOL).
+- A slice parked on quota keeps the `needs:` it had before the park on its board line, and gets it back when the park ends, even one the watchdog's state lost (QUOTA-PARK-2).
 
 ### Fixes
 

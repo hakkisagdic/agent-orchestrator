@@ -1459,6 +1459,9 @@ def quota_ok(adapter):
 
 # The `needs:` of a slice parked on quota, and the word the watchdog knows its parks by.
 QUOTA_NEEDS = "quota"
+# The note a parked item keeps its own `needs:` in, on the board itself, so a park the watchdog's state lost
+# gives it back as one that stood does (QUOTA-PARK-2).
+QUOTA_HELD = "held-needs"
 # A failed nudge's tail is the log's last lines: what stands before its own header is an earlier turn's.
 NUDGE_HEADER = re.compile(r"=== \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} nudge.*?===")
 # While a park holds, keyflip is asked to rotate a spent window at most this often, as wakes are spaced:
@@ -1644,8 +1647,12 @@ def quota_park(root, cfg, st, dry_run=False, now=None, adapter=None):
             print(f"{quota_park_ended(park)}: {items} {'running again' if back else 'not parked'}; the cycle goes "
                   "on to resume the implementer's session")
         if not dry_run:
+            # The `needs:` each item had before the park: the park's own record, or the board's where the
+            # watchdog's state lost the park (QUOTA-PARK-2).
+            held = {item["id"]: item["notes"].get(QUOTA_HELD) for item in board["blocked"]}
             for item in back:
-                A.board_move(root, item, "running", {"needs": (park.get("needs") or {}).get(item)})
+                A.board_move(root, item, "running",
+                             {"needs": (park.get("needs") or {}).get(item) or held.get(item), QUOTA_HELD: None})
             st.pop("quota_park", None)
             st.pop("quota_rotation_asked", None)
             st["quota_resumed"] = max(park.get("at") or 0, st.get("quota_resumed") or 0)
@@ -1662,12 +1669,17 @@ def quota_park(root, cfg, st, dry_run=False, now=None, adapter=None):
         if dry_run:
             print(f"DRY RUN: would park {items} on quota {wait}; not nudging")
             return True
-        # A `needs:` the implementer wrote on a running item is kept, and given back when the park ends.
+        # A `needs:` the implementer wrote on a running item is kept, and given back when the park ends; an
+        # item a lost park left blocked keeps the one it holds on its line, where it is parked again on a
+        # fresh stop, rather than have it cleared (QUOTA-PARK-2).
         park["needs"] = {item["id"]: item["notes"]["needs"] for item in board["running"]
                          if item["id"] in park["items"] and item["notes"].get("needs")}
+        park["needs"].update({item["id"]: item["notes"][QUOTA_HELD] for item in board["blocked"]
+                              if item["id"] in park["items"] and item["notes"].get(QUOTA_HELD)
+                              and item["id"] not in park["needs"]})
         for item in park["items"]:
             if said.get(item) != quota_needs(park):
-                A.board_move(root, item, "blocked", {"needs": quota_needs(park)})
+                A.board_move(root, item, "blocked", {"needs": quota_needs(park), QUOTA_HELD: park["needs"].get(item)})
         st["quota_park"] = park
         save_state(root, st)
         touch_quota_park(root, st, cfg)

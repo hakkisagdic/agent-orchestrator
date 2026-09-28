@@ -138,6 +138,11 @@ restart. The park's alarm is raised every cycle it stands and climbs the ladder
 ([alarms.md](alarms.md)). The quota guard (4) still reads the provider's window through keyflip
 where it is installed; a park needs no keyflip.
 
+*In ao since slice QUOTA-PARK-2: a parked item keeps the `needs:` it had before the park on its board line,
+as `held-needs:`, and gets it back when the park ends, where only the watchdog's state kept it: a park the
+state lost - torn or deleted - and read back from the board resumed its items without it. A park made
+again on a fresh stop after the state lost it keeps the `held-needs:` its items' lines hold.*
+
 ## The architect at its usage limit
 
 *In ao since slice ARCHITECT-WAKE-QUOTA: a wake that stopped on the architect's usage limit is not
