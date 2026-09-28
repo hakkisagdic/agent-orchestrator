@@ -155,3 +155,9 @@ projects the registry knows. A systemd unit you wrote to run ao yourself is not 
 the dry run says so. A hook ao cannot prove untracked - one in a hooks directory outside
 every repository - stays too, named, and the uninstall exits 1, as it does for anything it leaves
 behind; `--purge` then keeps `~/.ao`, whose registry is how the next run finds what was left.*
+
+*In ao since slice UPDATE-UNINSTALL-2: an MCP entry is ao's when it runs `ao … mcp serve`, with nothing after
+it but ao's own `--role` and `--allow-verify`, whatever its command is called. An entry named `ao` whose
+program was another one called ao was taken for ao's on its name alone, and removed. `ao remove --yes` finds
+a project's entries as the uninstall does, under the key each adapter declares, and a file it cannot read
+stays, named, and the removal exits 1.*

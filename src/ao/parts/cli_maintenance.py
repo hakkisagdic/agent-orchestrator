@@ -428,16 +428,20 @@ def cmd_remove(cfg, args):
     root = cfg["root"]
     key, owned = _remove_key(root)
     from . import skillkit
-    harness_files, mcp_files = skillkit.ao_files(root)
+    harness_files, _ = skillkit.ao_files(root)
+    # Found as `ao uninstall` finds them, an entry named ao taken only when it runs ao's server, and read
+    # now: the adapters that declare the files may be the project's own, in the .ao/ this removes
+    # (UPDATE-UNINSTALL-2).
+    mcp_entries, mcp_unread = _mcp_entries(root)
     plan = [PROJECT_MARKER, ".ao/", "agent-mail/", cfg.get("reviews", "semantic-review") + "/"] + harness_files
     print(f"{C['b']}ao remove{C['reset']} would delete from {root}:")
     for rel in plan:
         if os.path.exists(os.path.join(root, rel)):
             print(f"   {rel}")
-    for f, name, _ in mcp_files:
-        p = os.path.join(root, f)
-        if os.path.exists(p):
-            print(f"   {f}: the `{name}` server entry (other entries stay)")
+    for path, _, _ in mcp_entries:
+        print(f"   {os.path.relpath(path, root)}: the `ao` server entry (other entries stay)")
+    for path, why in mcp_unread:
+        print(f"   {C['red']}cannot read {os.path.relpath(path, root)}{C['reset']}: {why}; any `ao` entry in it stays")
     if _gitignore_without_ao(root)[2]:
         print("   .gitignore: the lines ao added")
     # Outside the tree, each thing by name, found as the removal below finds it (SAFE-REMOVE).
@@ -540,18 +544,20 @@ def cmd_remove(cfg, args):
             _sh.rmtree(p, ignore_errors=True)
         elif os.path.exists(p):
             os.remove(p)
-    for f, name, remove_when_empty in mcp_files:
-        p = os.path.join(root, f)
-        if os.path.exists(p):
-            try:
-                d = json.load(open(p, encoding=UTF8))
-                if name in (d.get("mcpServers") or {}):
-                    del d["mcpServers"][name]
-                    json.dump(d, open(p, "w", encoding=UTF8), indent=2)
-                if not d.get("mcpServers") and remove_when_empty:
-                    os.remove(p)
-            except (OSError, ValueError):
-                pass
+    for path, mcp_key, remove_when_empty in mcp_entries:
+        shown = os.path.relpath(path, root)
+        try:
+            gone = _drop_mcp_entry(path, mcp_key, remove_when_empty)
+        except (OSError, ValueError) as exc:
+            left.append(path)
+            print(f"{C['red']}left{C['reset']} the `ao` entry in {shown}: {' '.join(str(exc).split())}")
+            continue
+        print(f"removed {shown}, which held only ao's entry" if gone == "file"
+              else f"removed the `ao` entry from {shown}")
+    for path, why in mcp_unread:
+        left.append(path)
+        print(f"{C['red']}left{C['reset']} {os.path.relpath(path, root)}: it cannot be read ({why}), "
+              "so any `ao` entry in it stays")
     gi, keep, dropped = _gitignore_without_ao(root)
     if dropped:
         open(gi, "w", encoding=UTF8).write("\n".join(keep))

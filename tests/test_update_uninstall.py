@@ -563,3 +563,35 @@ def test_a_clone_is_removed_by_deleting_it_and_the_link_that_points_at_it(tmp_pa
     assert removal == f"delete the clone {clone} and the link {link}"
     assert cli._program_removal({"kind": None, "where": "/x", "remove": None}) == "remove it the way it was installed"
     assert cli._program_removal(PIPX) == "run `pipx uninstall ao-orchestrator`"
+
+
+@pytest.mark.parametrize("entry, ours", [
+    ({"command": "/usr/local/bin/ao", "args": ["-C", "/p", "mcp", "serve"]}, True),
+    ({"command": "ao", "args": ["-C", "/p", "mcp", "serve", "--allow-verify", "--role", "reviewer"]}, True),
+    ({"command": "ao", "args": ["-C", "/p", "mcp", "serve", "--role=architect"]}, True),
+    ({"command": "/usr/local/bin/ao", "args": ["daemon", "start"]}, False),     # another program called ao
+    ({"command": "ao", "args": []}, False),
+    ({"command": "ao", "args": ["-C", "/p", "mcp", "serve", "--port", "1"]}, False),
+    ({"command": "ao"}, False),
+])
+def test_an_mcp_entry_is_aos_when_it_runs_aos_server_not_when_its_name_is_ao(entry, ours):
+    """UPDATE-UNINSTALL-2: an entry was taken for ao's on its command's name alone, and removed."""
+    assert cli._serves_ao(entry) is ours
+
+
+@pytest.mark.skipif(os.name == "nt", reason=LAUNCHD_ONLY)
+def test_uninstall_leaves_an_ao_entry_whose_program_is_another_ao(machine, capsys):
+    """UPDATE-UNINSTALL-2: a server named ao whose command is named ao, running no ao server, is not ao's."""
+    theirs = {"mcpServers": {"ao": {"command": "/usr/local/bin/ao", "args": ["daemon", "start"]},
+                             "other": {"command": "other"}}}
+    _write_json(Path(machine.api) / ".mcp.json", theirs)
+
+    assert cli.cmd_uninstall({}, LOOK) == 0
+    listed = _plain(capsys)
+    assert cli.cmd_uninstall({}, UNINSTALL) == 0
+
+    out = _plain(capsys)
+    assert listed.count("the `ao` server entry in .mcp.json (other entries stay)") == 1            # web's alone
+    assert _read_json(Path(machine.api) / ".mcp.json") == theirs
+    assert f"removed .mcp.json of {machine.web}, which held only ao's entry" in out
+    assert f"the `ao` entry from .mcp.json of {machine.api}" not in out

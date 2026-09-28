@@ -91,7 +91,9 @@ def test_remove_undoes_init_and_only_removes_ao_owned_hooks(project, monkeypatch
     _, agents = skillkit.detect_agents(root)
     skillkit.install_playbook(root, agents)
     skillkit.register_mcp(root, agents, exe="/x/ao")
-    json.dump({"mcpServers": {"ao": {"command": "/x/ao"}, "other": {"command": "y"}}}, open(os.path.join(root, ".mcp.json"), "w", encoding="utf-8"))
+    # The entry register_mcp writes: an `ao` entry is taken only when it runs ao's server (UPDATE-UNINSTALL-2).
+    json.dump({"mcpServers": {"ao": {"command": "/x/ao", "args": ["-C", root, "mcp", "serve"]}, "other": {"command": "y"}}},
+              open(os.path.join(root, ".mcp.json"), "w", encoding="utf-8"))
 
     hooks = os.path.join(root, ".git", "hooks")
     os.makedirs(hooks, exist_ok=True)

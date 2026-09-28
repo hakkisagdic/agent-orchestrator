@@ -225,6 +225,33 @@ def test_a_job_left_installed_is_named_and_the_removal_stops_with_state_intact(t
     assert A.registered_key(root) == key
 
 
+@pytest.mark.skipif(os.name == "nt", reason=LAUNCHD_ONLY)
+def test_remove_takes_aos_mcp_entry_and_leaves_one_whose_program_is_another_ao(tmp_path, monkeypatch, capsys):
+    """UPDATE-UNINSTALL-2: `ao remove` took any MCP entry named ao; it takes one only when it runs ao's server."""
+    _home(tmp_path, monkeypatch)
+    _launchd(monkeypatch)
+    root = _project(tmp_path, "svc")
+    theirs = {"mcpServers": {"ao": {"command": "/usr/local/bin/ao", "args": ["daemon", "start"]}}}
+    kiro = Path(root) / ".kiro" / "settings" / "mcp.json"
+    kiro.parent.mkdir(parents=True)
+    kiro.write_text(json.dumps(theirs), encoding="utf-8")
+    ours = {"command": "/opt/ao/bin/ao", "args": ["-C", root, "mcp", "serve", "--role", "implementer"]}
+    mcp = Path(root) / ".mcp.json"
+    mcp.write_text(json.dumps({"mcpServers": {"ao": ours, "other": {"command": "y"}}}), encoding="utf-8")
+    cfg = {"root": root, "reviews": "semantic-review"}
+
+    assert cli.cmd_remove(cfg, SimpleNamespace(yes=False, allow_shared_hooks=False)) == 0
+    listed = _plain(capsys)
+    assert cli.cmd_remove(cfg, REMOVE) == 0
+
+    out = _plain(capsys)
+    assert "   .mcp.json: the `ao` server entry (other entries stay)" in listed
+    assert listed.count("the `ao` server entry") == 1                    # the other program's is not listed
+    assert json.loads(mcp.read_text(encoding="utf-8")) == {"mcpServers": {"other": {"command": "y"}}}
+    assert json.loads(kiro.read_text(encoding="utf-8")) == theirs
+    assert "removed the `ao` entry from .mcp.json" in out and "phase 2/2 complete" in out
+
+
 def test_windows_tasks_are_deleted_in_this_process_and_a_task_left_is_named(monkeypatch):
     tasks, asked = {"ao-watchdog-svc", "ao-doctor-svc"}, []
 

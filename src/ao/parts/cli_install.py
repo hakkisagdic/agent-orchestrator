@@ -229,29 +229,41 @@ def _machine_jobs():
 
 
 def _serves_ao(entry):
-    """Whether an MCP server entry is the one `ao init` registered: it starts ao, or it asks for `mcp serve`.
+    """Whether an MCP server entry is the one `ao init` registered: it runs `ao … mcp serve` (UPDATE-UNINSTALL-2).
 
     skillkit.register_mcp writes {command: the ao it found, args: [-C, <root>, mcp, serve]}, followed by
     `--role <role>` when the registration names one (MCP-ROLES); an agent's own CLI, asked to register the
-    same, keeps the command. A server named `ao` that does neither is someone else's.
+    same, keeps the command, and an ao run as `python -m ao` keeps its interpreter. So an entry is ao's when
+    its arguments end with `mcp serve` and nothing after it but ao's own options, `--role` and
+    `--allow-verify`, whatever its command is called: a server named `ao` whose program is another one
+    called ao was taken for ao's on its name alone, and removed. One ao registered some other way is left,
+    since leaving it is the smaller harm.
     """
     if not isinstance(entry, dict):
         return False
-    command, args = entry.get("command"), entry.get("args")
-    starts_ao = isinstance(command, str) and os.path.splitext(A.re.split(r"[\\/]", command)[-1])[0] == "ao"
+    args = entry.get("args")
     words = [str(word) for word in args] if isinstance(args, list) else []
-    if words[-2:-1] == ["--role"]:
-        words = words[:-2]
-    return starts_ao or words[-2:] == ["mcp", "serve"]
+    served = [index for index in range(len(words) - 1) if words[index:index + 2] == ["mcp", "serve"]]
+    if not served:
+        return False
+    rest, index = words[served[-1] + 2:], 0
+    while index < len(rest):
+        if rest[index] == "--allow-verify" or rest[index].startswith("--role="):
+            index += 1
+        elif rest[index] == "--role" and index + 1 < len(rest):
+            index += 2
+        else:
+            return False
+    return True
 
 
 def _mcp_entries(root):
     """([(file, key, remove when empty)] holding ao's MCP server entry, [(file, why)] that could not be read).
 
     Looked for where `ao init` merged the entry (skillkit.register_mcp): in the file each adapter declares, under
-    the key it declares, which `ao remove` does not read for a harness whose key is not mcpServers. Two adapters
-    may declare one file: it may go when either says so. A declared file that resolves outside the project is
-    not read, so an adapter a project declares for itself cannot point an uninstall at another file.
+    the key it declares. Two adapters may declare one file: it may go when either says so. A declared file that
+    resolves outside the project is not read, so an adapter a project declares for itself cannot point an
+    uninstall at another file. `ao remove` takes its project's entries from here too (UPDATE-UNINSTALL-2).
     """
     from . import skillkit
     declared = {}
