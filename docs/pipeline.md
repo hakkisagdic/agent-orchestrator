@@ -40,8 +40,8 @@ file under `.ao/reviews/`, so the running review reads that tree whatever the li
 long - `starting` until its runner reports, `preparing`, `waiting` and on what, or `running` with the
 section, the reviewer and its pid - and a review whose runner is gone says what it was doing when it
 went. The log, `.ao/reviews/R-<id>.log`, is written a line at a time: its first line names the runner,
-how long after the submit it started and the tree it reviews, and each phase after it is a line with the
-time of day. A review was seen to start its reviewer 69 minutes after its submit while `ao reviews` said
+how long after the submit it started and the tree it reviews, the run preparing from then as its state says,
+and each phase after preparing is a line with the time of day (REVIEW-START-DELAY-2). A review was seen to start its reviewer 69 minutes after its submit while `ao reviews` said
 "running": nothing in its state could say more, and its log - the run's standard output, which Python
 wrote in blocks - could hold nothing before a reviewer's first heartbeat. A review runs no gate and
 takes no gate lock - `ao verify`, `ao merge-check` and `ao lock` take it - so a suite holding that lock
