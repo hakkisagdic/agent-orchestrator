@@ -681,6 +681,60 @@ def _cost_by_feature(cfg, since, window):
     return 0
 
 
+def _usd(amount):
+    """A dollar figure as the estimate prints it: `unknown` for none, and a spend under a cent never as free."""
+    if amount is None:
+        return "unknown"
+    return "<$0.01" if 0 < amount < 0.005 else f"${amount:,.2f}"
+
+
+def _cost_in_usd(cfg, since, window):
+    """`ao cost --usd`: the implementer's tokens priced from the table ao ships, labelled an estimate (USD-COST).
+
+    Each model at each rate is a row, its tokens by kind beneath it. A row the table cannot
+    price says `unknown` and why, never $0.00, and the total is then unknown too, with what the
+    priced rows add up to as a floor. The label names the table's version and each vendor's
+    as-of day and source, so a reader sees how old the prices are and where to check them. An
+    implementer billed in another unit - credits - gets no dollar figure: a credit's price in
+    dollars is its plan's, which no table here holds.
+    """
+    c = A.turn_costs(cfg, since=since, by_model=True)
+    if not c["turns"]:
+        print("no transcript")
+        return 0
+    if c["tokens"] is None:
+        print(f"no estimate in US dollars: {A.implementer_adapter_id(cfg) or 'the implementer'} declares no tokens by "
+              f"model and kind that ao can price (`telemetry.cost.tokens`); `ao cost` counts its spend in its own "
+              f"unit, {c['unit']}")
+        return 0
+    table, problems = A.price_table()
+    if problems:
+        print(f"{C['red']}no estimate in US dollars{C['reset']}: " + "; ".join(problems))
+        return 1
+    estimate = A.usd_estimate(c["tokens"], table)
+    print(f"{C['b']}implementer spend in US dollars: an estimate{C['reset']}  {C['dim']}(list prices, not a bill; "
+          f"{window or 'whole transcript'}){C['reset']}")
+    if not estimate["rows"]:
+        print("  no tokens in this window")
+        return 0
+    order = list(table["kinds"])
+    for row in estimate["rows"]:
+        label = (row["model"] or "a model the transcript does not name") + (f" at {row['rate']}" if row["rate"] else "")
+        why = f"  {C['dim']}{row['why']}{C['reset']}" if row["why"] else ""
+        print(f"  {label:<40}{_usd(row['usd']):>14}{why}")
+        kinds = sorted(row["tokens"], key=lambda kind: order.index(kind) if kind in order else len(order))
+        print(f"    {C['dim']}" + " · ".join(f"{kind} {row['tokens'][kind]:,.0f}" for kind in kinds) + C["reset"])
+    floor = f"  at least {_usd(estimate['priced'])}, what the rows priced add up to" \
+        if estimate["total"] is None and estimate["priced"] else ""
+    print(f"  {C['b']}{'total (estimate)':<40}{_usd(estimate['total']):>14}{C['reset']}{floor}")
+    used = "".join(f"; {vendor} as of {spec['as_of']}, {spec['source']}"
+                   for vendor, spec in estimate["vendors"].items())
+    print(f"  {C['dim']}prices: table version {estimate['version']}{used}{C['reset']}")
+    print(f"  {C['dim']}unknown is never counted as zero: a model, a kind of token or a rate the table does not "
+          f"price{C['reset']}")
+    return 0
+
+
 def cmd_cost(cfg, args):
     """What the coordination spends: the implementer's turns by what they did.
 
@@ -688,6 +742,7 @@ def cmd_cost(cfg, args):
     wrote nothing — ceremony (review/gate commands), coordination (inbox, reports,
     writer checks) — against turns that wrote product. `wasted` counts turns that
     ended in a blocked report without a product change: the queue-empty loop.
+    `--usd` prices the same turns' tokens in US dollars, as an estimate (`_cost_in_usd`).
     """
     root = cfg["root"]
     # One time syntax for every command (CLI-ROBUST): `yesterday` or `30m` reached a pattern of
@@ -697,6 +752,8 @@ def cmd_cost(cfg, args):
     window = when.label() if when else None
     if getattr(args, "features", False):
         return _cost_by_feature(cfg, since, window)
+    if getattr(args, "usd", False):
+        return _cost_in_usd(cfg, since, window)
     c = A.turn_costs(cfg, since=since)
     if not c["turns"]:
         print("no transcript"); return 0

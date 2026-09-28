@@ -1,0 +1,47 @@
+{
+  "about": "The prices `ao cost --usd` estimates a US-dollar cost from (USD-COST). Each is a vendor's published list price in US dollars for `per_tokens` tokens of one kind `kinds` names. `version` counts the changes to this table; each vendor says when its prices were read (`as_of`), where (`source`) and what they do not cover (`scope`). A model or a kind of token this table does not price is unknown to ao, never zero, and a model served free is priced only by an entry that lists it at zero. `ids` are the other ids a model is written as, such as a dated snapshot. docs/telemetry.md says how to update it.",
+  "version": 1,
+  "currency": "USD",
+  "per_tokens": 1000000,
+  "kinds": {
+    "input": "input tokens at the base rate: those after the last cache breakpoint, or all of them without caching",
+    "cache_write_5m": "input tokens written to a prompt cache that lives five minutes",
+    "cache_write_1h": "input tokens written to a prompt cache that lives one hour",
+    "cache_read": "input tokens read from a prompt cache, which also refreshes it",
+    "output": "output tokens, thinking included"
+  },
+  "vendors": {
+    "anthropic": {
+      "as_of": "2026-09-26",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "scope": "Claude API list prices at standard speed with global routing. Not covered: fast mode, the Batch API, US-only inference, Amazon Bedrock and Google Cloud, server tools billed per request such as web search, and negotiated discounts.",
+      "models": {
+        "claude-fable-5-1": {"input": 10, "cache_write_5m": 12.5, "cache_write_1h": 20, "cache_read": 0.25, "output": 50},
+        "claude-mythos-5-1": {"input": 10, "cache_write_5m": 12.5, "cache_write_1h": 20, "cache_read": 0.25, "output": 50},
+        "claude-fable-5": {"input": 10, "cache_write_5m": 12.5, "cache_write_1h": 20, "cache_read": 1, "output": 50},
+        "claude-mythos-5": {"input": 10, "cache_write_5m": 12.5, "cache_write_1h": 20, "cache_read": 1, "output": 50},
+        "claude-opus-5-5": {"input": 4, "cache_write_5m": 5, "cache_write_1h": 8, "cache_read": 0.2, "output": 20},
+        "claude-opus-5": {"input": 5, "cache_write_5m": 6.25, "cache_write_1h": 10, "cache_read": 0.5, "output": 25},
+        "claude-opus-4-8": {"input": 5, "cache_write_5m": 6.25, "cache_write_1h": 10, "cache_read": 0.5, "output": 25},
+        "claude-opus-4-7": {"input": 5, "cache_write_5m": 6.25, "cache_write_1h": 10, "cache_read": 0.5, "output": 25},
+        "claude-opus-4-6": {"input": 5, "cache_write_5m": 6.25, "cache_write_1h": 10, "cache_read": 0.5, "output": 25},
+        "claude-opus-4-5": {"input": 5, "cache_write_5m": 6.25, "cache_write_1h": 10, "cache_read": 0.5, "output": 25,
+                            "ids": ["claude-opus-4-5-20251101"]},
+        "claude-opus-4-1": {"input": 15, "cache_write_5m": 18.75, "cache_write_1h": 30, "cache_read": 1.5, "output": 75,
+                            "ids": ["claude-opus-4-1-20250805"]},
+        "claude-opus-4-0": {"input": 15, "cache_write_5m": 18.75, "cache_write_1h": 30, "cache_read": 1.5, "output": 75,
+                            "ids": ["claude-opus-4-20250514"]},
+        "claude-sonnet-5": {"input": 2, "cache_write_5m": 2.5, "cache_write_1h": 4, "cache_read": 0.2, "output": 10},
+        "claude-sonnet-4-6": {"input": 3, "cache_write_5m": 3.75, "cache_write_1h": 6, "cache_read": 0.3, "output": 15},
+        "claude-sonnet-4-5": {"input": 3, "cache_write_5m": 3.75, "cache_write_1h": 6, "cache_read": 0.3, "output": 15,
+                              "ids": ["claude-sonnet-4-5-20250929"]},
+        "claude-sonnet-4-0": {"input": 3, "cache_write_5m": 3.75, "cache_write_1h": 6, "cache_read": 0.3, "output": 15,
+                              "ids": ["claude-sonnet-4-20250514"]},
+        "claude-haiku-4-5": {"input": 1, "cache_write_5m": 1.25, "cache_write_1h": 2, "cache_read": 0.1, "output": 5,
+                             "ids": ["claude-haiku-4-5-20251001"]},
+        "claude-3-5-haiku-20241022": {"input": 0.8, "cache_write_5m": 1, "cache_write_1h": 1.6, "cache_read": 0.08,
+                                      "output": 4}
+      }
+    }
+  }
+}

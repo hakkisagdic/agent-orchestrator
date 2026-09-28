@@ -670,7 +670,7 @@ def feature_costs(cfg, since=None):
 UNANSWERED = "unanswered"
 
 
-def turn_costs(cfg, since=None):
+def turn_costs(cfg, since=None, by_model=False):
     """Per-turn cost and class from the implementer's transcript.
 
     Returns {"unit", "turns": [ {start, usage, delegated, cls, tool_calls, product_writes,
@@ -694,17 +694,26 @@ def turn_costs(cfg, since=None):
     at a start record, or at a prompt when none is open or the open one ended; the
     start record that follows a turn's prompt is that turn's start, not a second turn
     (`next_turn`). Counting both doubled every turn count and left spend where it was.
+
+    With `by_model`, the same records are also read for the tokens the adapter prices
+    (`telemetry.cost.tokens`), by model, rate and kind, under the same reading (`add_tokens`):
+    each turn holds its own in `tokens`, and the result's `tokens` adds up those of the turns
+    in the window, as `total` adds up their usage - what `ao cost --usd` prices (USD-COST). The
+    result's `tokens` is None when the adapter declares no tokens ao can price.
     """
     import collections
     msgs, _ = session_paths(cfg)
     shape = transcript_shape(implementer_adapter(cfg))
     usage, tool = shape["usage"], shape["tool"]
+    priced = shape["tokens"] if by_model else None
     out = {"unit": shape["unit"], "turns": [], "by_class": {}, "ao_commands": collections.Counter(), "total": 0.0,
            "delegated": 0.0}
+    if by_model:
+        out["tokens"] = {} if priced else None
     if not msgs or not os.path.exists(msgs):
         return out
     recs = read_tail(msgs, 400_000_000)
-    cur, counted = None, {}
+    cur, counted, counted_tokens = None, {}, {}
     in_place, answered = set(), set()           # the turns holding a reply written in the model's place, or its own
 
     def ts(d):
@@ -730,6 +739,8 @@ def turn_costs(cfg, since=None):
             (in_place if in_place_reply(d, shape) else answered).add(id(cur))
         if usage and t == usage["type"]:
             add_usage(cur, pl, usage, counted, subagent)
+            if priced:
+                add_tokens(cur, pl, usage, priced, counted_tokens, subagent)
         # Not an elif: one record of a store that nests its calls carries a response's usage and its tool calls.
         if tool and t == tool["type"]:
             for name, args in tool_calls(pl, tool):
@@ -779,6 +790,148 @@ def turn_costs(cfg, since=None):
             b["wasted_usage"] += tn["usage"]
         out["total"] += tn["usage"]
         out["delegated"] += tn["delegated"]
+        if priced:
+            for key, count in tn.get("tokens", {}).items():
+                out["tokens"][key] = out["tokens"].get(key, 0) + count
+    return out
+
+
+# ---- the spend in US dollars: an estimate from a price table ao ships (USD-COST) ----------------
+#
+# A vendor bills tokens by model and by kind, at list prices it publishes and changes. ao ships
+# those prices as data, src/ao/prices.json, with the day each vendor's were read and where, and
+# prices the tokens `turn_costs(by_model=True)` reads with them. A figure the table cannot back
+# is unknown, never zero: a model or a kind of token it does not price, or a response at a rate
+# it does not list. Only an entry that lists a model at zero prices it free.
+
+PRICES_FILE = os.path.join(_HERE, "prices.json")
+
+
+def _price(value):
+    """Is a value a price ao can quote: a finite number of zero or more, and not a truth value?"""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value < float("inf")
+
+
+def _day(text):
+    """Is a value a calendar day written YYYY-MM-DD?"""
+    try:
+        return isinstance(text, str) and bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", text)) \
+            and bool(datetime.strptime(text, "%Y-%m-%d"))
+    except ValueError:
+        return False
+
+
+def price_problems(table):
+    """What makes a price table one ao cannot quote from, as sentences; [] when it can (USD-COST).
+
+    One mistake can price every row wrong - a price in cents, a kind misspelt and so never
+    charged, one id under two vendors - so a table holding any is used for nothing at all.
+    """
+    if not isinstance(table, dict):
+        return ["the price table is not a JSON object"]
+    problems = []
+    version = table.get("version")
+    if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+        problems.append("`version` must be a whole number from 1, raised whenever a price changes")
+    if table.get("currency") != "USD":
+        problems.append("`currency` must be USD: `ao cost --usd` estimates US dollars")
+    if not _price(table.get("per_tokens")) or not table.get("per_tokens"):
+        problems.append("`per_tokens` must be how many tokens each price is for")
+    kinds = table.get("kinds")
+    if not isinstance(kinds, dict) or not kinds or not all(isinstance(text, str) and text.strip()
+                                                           for text in kinds.values()):
+        problems.append("`kinds` must name each kind of token a price is for, with what it is")
+        kinds = {}
+    vendors = table.get("vendors")
+    if not isinstance(vendors, dict) or not vendors:
+        return problems + ["`vendors` must hold the vendors whose prices the table lists"]
+    seen = {}
+    for vendor, block in vendors.items():
+        if not isinstance(block, dict):
+            problems.append(f"vendor {vendor} is not an object")
+            continue
+        if not _day(block.get("as_of")):
+            problems.append(f"vendor {vendor}: `as_of` must be the day its prices were read, as YYYY-MM-DD")
+        if not isinstance(block.get("source"), str) or not block["source"].strip():
+            problems.append(f"vendor {vendor}: `source` must say where its prices were read")
+        models = block.get("models")
+        if not isinstance(models, dict) or not models:
+            problems.append(f"vendor {vendor}: `models` must list the models it prices")
+            continue
+        for model, entry in models.items():
+            if not isinstance(entry, dict):
+                problems.append(f"{model}: its prices are not an object")
+                continue
+            ids = entry.get("ids", [])
+            if not isinstance(ids, list) or not all(isinstance(ident, str) and ident.strip() for ident in ids):
+                problems.append(f"{model}: `ids` must list the other ids it is written as")
+                ids = []
+            strays = sorted(set(entry) - set(kinds) - {"ids", "note"})
+            if strays:
+                problems.append(f"{model}: {', '.join(strays)} is no kind of token `kinds` names")
+            problems += [f"{model}: `{kind}` must be a price of zero or more" for kind in kinds
+                         if kind in entry and not _price(entry[kind])]
+            if not any(kind in entry for kind in kinds):
+                problems.append(f"{model}: it prices no kind of token")
+            for ident in [model] + ids:
+                if ident in seen:
+                    problems.append(f"{ident} is priced twice, under {seen[ident]} and {vendor}")
+                seen[ident] = vendor
+    return problems
+
+
+def price_table(path=None):
+    """(the price table, its problems): the one ao ships unless `path` names another; None when it has any."""
+    try:
+        with open(path or PRICES_FILE, encoding=UTF8) as fh:
+            table = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return None, [f"the price table could not be read: {exc}"]
+    problems = price_problems(table)
+    return (None if problems else table), problems
+
+
+def usd_estimate(tokens, table):
+    """Tokens by model, rate and kind, priced from a sound price table: an estimate in US dollars (USD-COST).
+
+    `tokens` is what `turn_costs(by_model=True)` adds up. Each row is one model at one rate: its
+    tokens by kind, and its dollars, or `usd` None and `why` they are unknown - the transcript
+    names no model, the table does not list the model or gives no price for a kind of token it
+    spent, or the rate is not the one the table lists (`rate` names the field that said so).
+    Unknown is never zero: `total` is None when any row is unknown, and `priced` adds up the rows
+    that are not, a floor under it. A model the table lists at zero is priced at zero, and only
+    then is it free. `vendors` holds the as-of day and source of each vendor whose prices a row
+    used, for the label.
+    """
+    listed = {ident: (vendor, entry) for vendor, block in table["vendors"].items()
+              for model, entry in block["models"].items() for ident in [model] + entry.get("ids", [])}
+    rows = {}
+    for (model, rate, kind), count in tokens.items():
+        if count:
+            row = rows.setdefault((model, rate), {"model": model, "rate": rate, "tokens": {}})
+            row["tokens"][kind] = row["tokens"].get(kind, 0) + count
+    out = {"version": table["version"], "rows": [], "priced": 0.0, "total": None, "vendors": {}}
+    for model, rate in sorted(rows, key=lambda pair: (pair[0] is None, pair[0] or "", pair[1] or "")):
+        row = rows[(model, rate)]
+        vendor, entry = listed.get(model, (None, {}))
+        unpriced = sorted(kind for kind in row["tokens"] if kind not in table["kinds"] or kind not in entry)
+        if rate is not None:
+            row["why"] = "a rate the table does not price"
+        elif model is None:
+            row["why"] = "the transcript names no model"
+        elif vendor is None:
+            row["why"] = "a model the table does not price"
+        elif unpriced:
+            row["why"] = f"the table gives it no price for {', '.join(unpriced)}"
+        else:
+            row["why"] = None
+        row["usd"] = None if row["why"] else \
+            sum(count * entry[kind] for kind, count in row["tokens"].items()) / table["per_tokens"]
+        if row["usd"] is not None:
+            out["priced"] += row["usd"]
+            out["vendors"][vendor] = {field: table["vendors"][vendor][field] for field in ("as_of", "source")}
+        out["rows"].append(row)
+    out["total"] = out["priced"] if all(row["usd"] is not None for row in out["rows"]) else None
     return out
 
 

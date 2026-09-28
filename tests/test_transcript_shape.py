@@ -185,10 +185,12 @@ def test_an_adapter_that_declares_no_shape_has_nothing_read_from_another_harness
 # declared path. `role` and `parts` join them for the same reason: every chat protocol ao speaks
 # - A2A above all, whose messages are literally made of parts and roles - names them, so a core
 # module that never reads a transcript still has to. A store's record is still reached only where
-# its adapter says, which is what this list is not allowed to stop protecting.
+# its adapter says, which is what this list is not allowed to stop protecting. `model` joins them: the
+# model a role runs is ao's own word throughout its configuration, and a store names the model that
+# answered in a field of that name (USD-COST).
 ORDINARY = {"type", "timestamp", "text", "content", "message", "user", "assistant", "args", "path", "key", "value",
             "success", "result", "name", "usage", "tool_call", "input", "refusal",
-            "data", "state", "status", "error", "tool", "credits", "finish", "stop", "role", "parts"}
+            "data", "state", "status", "error", "tool", "credits", "finish", "stop", "role", "parts", "model"}
 
 
 def _steps(value):
@@ -213,16 +215,22 @@ def _shape_words():
             words |= set(_steps(tool.get(key)))
         for spec in (adapter.get("telemetry") or {}).values():
             if isinstance(spec, dict) and spec.get("from") == "transcript":
-                for key in ("type", "field", "fields", "tools", "text"):
+                for key in ("type", "field", "fields", "tools", "text", "model"):
                     words |= set(_steps(spec.get(key)))
                 for key, value in (spec.get("match") or {}).items():
                     words |= set(_steps(key)) | set(_steps(value))
+                # What prices a record's tokens (USD-COST): each kind's count, and the fields that set its rate.
+                for paths in (spec.get("tokens") or {}).values():
+                    words |= set(_steps(paths))
+                for when in spec.get("priced_when") or []:
+                    words |= set(_steps(when.get("field")))
     return words - ORDINARY
 
 
 def test_no_core_module_names_a_kind_field_or_tool_of_a_shipped_transcript_shape():
     words = _shape_words()
-    assert {"turn_start", "usage_summary", "promptTurnSummaries", "toolName", "fs_write", "payload"} <= words
+    assert {"turn_start", "usage_summary", "promptTurnSummaries", "toolName", "fs_write", "payload",
+            "ephemeral_1h_input_tokens", "inference_geo"} <= words
     word = re.compile(r"(?<![A-Za-z0-9_])(" + "|".join(sorted(map(re.escape, words), key=len, reverse=True))
                       + r")(?![A-Za-z0-9_])")
 

@@ -97,6 +97,102 @@ Only that adapter's samples give the implementer its burn rate, its exhaustion p
 the credits finding, page and line of `ao doctor`. A sample that names no adapter is nobody's,
 and so is every sample written before samples named one.
 
+## In US dollars: an estimate
+
+`ao cost` counts spend in the unit the implementer's harness bills - credits, or tokens - and a
+token count weighs every token alike, though Anthropic, for one, prices a cache read at a tenth of
+an input token - a fortieth on Claude Fable 5.1 and Claude Mythos 5.1, and a twentieth on Claude Opus
+5.5, as its pricing page's footnotes say - and an output token at five times one. `ao cost --usd` prices the same turns'
+tokens by model and by kind, from a price table ao ships:
+
+```bash
+ao cost --usd                # the whole transcript
+ao cost --usd --since 24h    # the turns `ao cost --since 24h` counts
+```
+
+```text
+implementer spend in US dollars: an estimate  (list prices, not a bill; last 24h)
+  claude-opus-5                                   $11.55
+    input 10,000 · cache_write_5m 200,000 · cache_write_1h 400,000 · cache_read 10,000,000 · output 50,000
+  claude-opus-5 at speed "fast"                  unknown  a rate the table does not price
+    input 1,000 · output 90
+  total (estimate)                               unknown  at least $11.55, what the rows priced add up to
+  prices: table version 1; anthropic as of 2026-09-26, https://platform.claude.com/docs/en/about-claude/pricing
+  unknown is never counted as zero: a model, a kind of token or a rate the table does not price
+```
+
+**Where the tokens come from.** Beside the usage `ao cost` already reads (`telemetry.cost`), the
+implementer's adapter declares the path to the model that answered (`model`), the path to its count
+of each kind of token the table prices (`tokens`), and the fields whose values say a response was
+billed at list prices (`priced_when`). They are read from the same records, under the same reading
+(`billing.fallback.reading`) and in the same window as `ao cost`, subagents included, so a response
+counts once however many records repeat it. A kind may name a list of paths, and the first that
+holds a count is read: Claude Code breaks its cache writes down by how long the cache lives, and a
+record written without that breakdown is read as five-minute writes, the default duration.
+
+```jsonc
+// telemetry.cost of Claude Code's adapter, beside the usage it already declares
+"model": "message.model",
+"tokens": {
+  "input": "message.usage.input_tokens",
+  "cache_write_5m": ["message.usage.cache_creation.ephemeral_5m_input_tokens",
+                     "message.usage.cache_creation_input_tokens"],
+  "cache_write_1h": "message.usage.cache_creation.ephemeral_1h_input_tokens",
+  "cache_read": "message.usage.cache_read_input_tokens",
+  "output": "message.usage.output_tokens"
+},
+"priced_when": [
+  { "field": "message.usage.speed", "values": ["standard", null] },
+  { "field": "message.usage.service_tier", "values": ["standard", null] },
+  { "field": "message.usage.inference_geo", "values": ["global", "not_available", null] }
+]
+```
+
+**The table** is `src/ao/prices.json`. Each price is a vendor's published list price in US dollars
+for `per_tokens` (a million) tokens of one kind `kinds` names: `input`, `cache_write_5m`,
+`cache_write_1h`, `cache_read` and `output`. Each vendor says when its prices were read (`as_of`),
+where (`source`) and what they do not cover (`scope`); each model lists its price for each kind, and
+`ids` names the other ids a transcript may write it as, such as a dated snapshot. `version` counts
+the table's changes. ao refuses a table holding any mistake - a negative price, a kind `kinds` does
+not name, an id priced twice, a vendor without its day or its source - and then prints no figure.
+
+```json
+"claude-opus-5": { "input": 5, "cache_write_5m": 6.25, "cache_write_1h": 10, "cache_read": 0.5, "output": 25 }
+```
+
+**The label.** Every figure says it is an estimate: the heading reads *an estimate* and *list
+prices, not a bill*, the total reads *total (estimate)*, and the last lines name the table's version
+and, for each vendor whose prices were used, the day they were read and the page they came from. A
+bill differs from it by what the table does not cover: negotiated discounts, a plan paid by
+subscription rather than by the token, fast mode, the Batch API, US-only inference, Amazon Bedrock
+and Google Cloud, and server tools charged per request, such as web search.
+
+**Unknown is never zero.** A model the table does not list, a kind of token its entry gives no price
+for, and a response billed at a rate `priced_when` does not list - fast mode, another service tier,
+US-only inference - each make a row that reads `unknown`, and says why. The total is then unknown
+too, and says what the priced rows add up to, as a floor: *at least $11.55*. A model served free - a
+free tier, a local model - is priced at zero only by an entry that lists it at zero, whose `note`
+says why; ao never reads the cost a harness writes into its own records, such as the 0.0 of a
+provider that bills elsewhere. An implementer billed in credits gets no dollar figure at all: a
+credit's price in dollars is its plan's, and no table here holds one.
+
+**Updating the table.** Prices change, and the table does not follow them by itself:
+
+1. Read the vendor's pricing page, the one its `source` names.
+2. Change the prices that moved, add each model the transcripts now name with the other ids it is
+   written as, and set the vendor's `as_of` to the day you read the page. A new vendor needs its
+   `as_of`, `source` and `scope` too.
+3. Raise `version` by one.
+4. Run `tests/test_usd_cost.py`: it refuses a table ao could not quote from, and one that leaves a
+   model a shipped adapter runs by default without a price.
+
+*In ao since slice USD-COST: `ao cost --usd` prices the implementer's tokens from src/ao/prices.json,
+by model and kind, under the reading and in the window `ao cost` counts them, and labels the figure an
+estimate at list prices, naming the table's version and each vendor's as-of day and source. What the
+table does not price is unknown, never zero, and a model is free only where the table lists it at
+zero. Claude Code's adapter declares its tokens (`telemetry.cost.model`, `tokens`, `priced_when`); a
+harness billed in credits gets no dollar figure.*
+
 ## Adapter block
 
 ```jsonc

@@ -974,7 +974,8 @@ def transcript_shape(adapter):
     one of them has no words. `transcript.messages.harness_replies` lists, the same way,
     the values a reply holds when the harness wrote it in the model's place
     (`in_place_reply`), and `telemetry.failure.ends` the records that tell a session a
-    task it ran in the background ended (`ended_shape`).
+    task it ran in the background ended (`ended_shape`). `telemetry.cost.tokens`, `model`
+    and `priced_when` say how the tokens a usage record holds are priced (`token_shape`).
     """
     transcript, signals = _block(adapter, "transcript"), _block(adapter, "telemetry")
     record, message_kinds, turn = (_block(transcript, key) for key in ("record", "messages", "turn"))
@@ -1010,7 +1011,9 @@ def transcript_shape(adapter):
         shape["failure"] = {"type": failure["type"], "field": failure["field"],
                             "failed_when": failure["failed_when"], "text": _name(failure.get("text"))}
     shape["ends"] = ended_shape(_block(failure, "ends")) if failure.get("from") == "transcript" else None
-    return subagent_shape(nested_shape(shape, transcript, signals), transcript)
+    shape = nested_shape(shape, transcript, signals)
+    shape["tokens"] = token_shape(cost, shape["usage"])
+    return subagent_shape(shape, transcript)
 
 
 def ended_shape(declared):
@@ -1066,6 +1069,27 @@ def nested_shape(shape, transcript, signals):
     return shape
 
 
+def token_shape(cost, usage):
+    """How a usage record's tokens are priced, from what `telemetry.cost` declares: {model, kinds, when}, or None.
+
+    A vendor prices a token by its model and by its kind - read, written to a cache, read from
+    one, written out - and one count of every kind added up cannot be priced (USD-COST).
+    `tokens` maps each kind of token a price table names to the path of its count in a usage
+    record, or to a list of paths of which the first holding a count is read: a store that
+    broke a count down in a later release declares the breakdown first and the whole after it.
+    `model` is the path to the model that answered. `priced_when` lists the fields whose value
+    sets the rate a vendor charged, each `{field, values}`; a record is at a table's prices
+    when every field holds one of its values, null standing for a field the record does not
+    hold. Tokens are read with usage and under its reading, so a shape with no usage to read
+    has no tokens either, and a declaration ao cannot read whole prices nothing rather than
+    part of it, or every rate alike (`token_problems` says why).
+    """
+    if usage is None or "tokens" not in cost or token_problems(cost):
+        return None
+    return {"model": cost["model"], "kinds": {kind: _names(paths) for kind, paths in cost["tokens"].items()},
+            "when": [{"field": item["field"], "values": item["values"]} for item in cost.get("priced_when", [])]}
+
+
 def subagent_shape(shape, transcript):
     """A transcript shape with the subagent transcripts a session's records start, when its adapter declares them.
 
@@ -1118,6 +1142,36 @@ def subagent_problems(adapter):
     sidecar = _block(declared, "sidecar")
     if sidecar and not _plain_steps(_name(sidecar.get("path"))):
         problems.append(f"`transcript.subagents.sidecar.path` must be {plain}")
+    return problems
+
+
+def token_problems(cost):
+    """What of a `telemetry.cost` block's pricing declaration ao will not read, and why; [] when it reads it all.
+
+    `token_shape` prices nothing from a declaration it cannot read whole, without a word, since a
+    reading must not fail on a layer's mistake; `ao adapters validate` says why before anyone
+    relies on the estimate (USD-COST).
+    """
+    if not any(key in cost for key in ("tokens", "model", "priced_when")):
+        return []
+    problems = [] if cost.get("from") == "transcript" else [
+        "`telemetry.cost.from` must be transcript: tokens are read from the transcript's usage records"]
+    declared = cost.get("tokens")
+    if not isinstance(declared, dict) or not declared or not all(
+            _names(paths) and len(_names(paths)) == (len(paths) if isinstance(paths, list) else 1)
+            for paths in declared.values()):
+        problems.append("`telemetry.cost.tokens` must map each kind of token to a path, or to a list of paths")
+    elif not all(isinstance(kind, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,31}", kind) for kind in declared):
+        # A kind's name is printed as it is declared, and a project's own adapter is written by the agents
+        # it describes: a name that is not a plain word could write a line of the estimate's own.
+        problems.append("`telemetry.cost.tokens` names each kind in lowercase letters, digits and `_`")
+    if not _name(cost.get("model")):
+        problems.append("`telemetry.cost.model` must be the path to the model that answered; without it no token "
+                        "is priced")
+    when = cost.get("priced_when", [])
+    if not isinstance(when, list) or not all(isinstance(item, dict) and _name(item.get("field"))
+                                             and isinstance(item.get("values"), list) for item in when):
+        problems.append("`telemetry.cost.priced_when` must be a list of {field, values}, with values a list")
     return problems
 
 
@@ -1282,6 +1336,89 @@ def _response_growth(counted, body, usage, value):
     charged = counted.get(ident)
     counted[ident] = value if charged is None else max(charged, value)
     return value if charged is None else max(0.0, value - charged)
+
+
+def add_tokens(turn, body, usage, priced, counted, subagent=None):
+    """Charge a usage record's tokens of each priced kind to its turn, by model and rate (USD-COST).
+
+    They are read under the reading `add_usage` applies to the same record, one kind at a time:
+    under `sum` the record adds on; under `per-response` a response's tokens of a kind count once
+    in a reading, at the most its records reached (`counted`, by response and kind); under
+    `peak-per-turn` a turn's tokens of a kind are the most its records reached. A subagent's
+    record is read in the subagent's own turn and charged to `turn`, the session's turn that
+    started it, as `add_usage` charges its usage.
+
+    `turn["tokens"]` maps (model, rate, kind) to a count. The model is None when the record names
+    none, and its JSON string when it holds a character that is not printable: ao prints it on a
+    line of its own, and a line break or an escape in it stays visible there, as in a review
+    header (`review_header_value`). The rate is None when every `priced_when` field holds a value
+    it lists, and otherwise names the first field that does not, by the last step of its path,
+    and what it holds - such as `speed "fast"` - so a response at a rate no table lists is never
+    priced at the rate one does.
+    """
+    counts = {kind: _first_count(body, paths) for kind, paths in priced["kinds"].items()}
+    if not any(counts.values()):
+        return
+    model = _path_value(body, priced["model"])
+    model = review_header_value(model) if isinstance(model, str) and model.strip() else None
+    rate = None
+    for when in priced["when"]:
+        value = _path_value(body, when["field"])
+        if not any(_declared_value(value, listed) for listed in when["values"]):
+            rate = f"{when['field'].rpartition('.')[2]} {json.dumps(value, default=str)}"
+            break
+    ident = _path_value(body, usage["response"]) if usage["reading"] == "per-response" else None
+    peaks = None
+    if usage["reading"] == "peak-per-turn":
+        # A subagent's record reaches its peak in the subagent's own turn, as `add_usage` reads its usage.
+        if subagent is not None and subagent["turn"] is None:
+            subagent["turn"] = {}
+        peaks = (turn if subagent is None else subagent["turn"]).setdefault("token_peaks", {})
+    tokens = turn.setdefault("tokens", {})
+    for kind, count in counts.items():
+        # Keyed by model and rate as well as kind, so a turn whose records name two models keeps both.
+        grown = _token_growth(count, usage["reading"], peaks, counted, (model, rate, kind), ident)
+        if grown:
+            tokens[(model, rate, kind)] = tokens.get((model, rate, kind), 0) + grown
+
+
+def _token_growth(count, reading, peaks, counted, kind, ident):
+    """What a record's count of one kind adds to its turn under a reading, as `add_usage` adds a record's usage.
+
+    `peaks` holds the most each kind reached in the turn read under `peak-per-turn`, and
+    `counted` what each response was charged of each kind under `per-response`.
+    """
+    if reading == "per-response" and isinstance(ident, (str, int)) and not isinstance(ident, bool):
+        charged = counted.get((ident, kind))
+        counted[(ident, kind)] = count if charged is None else max(charged, count)
+        return count if charged is None else max(0, count - charged)
+    if reading == "peak-per-turn":
+        before = peaks.get(kind, 0)
+        peaks[kind] = max(before, count)
+        return peaks[kind] - before
+    return count
+
+
+def _first_count(body, paths):
+    """The count at the first declared path that reaches one - a finite number of zero or more - else 0.
+
+    A path whose `[]` step reaches several entries counts them all, added up, as `record_usage`
+    adds up every entry of a usage field. A later path is read where an earlier one reaches no count,
+    unless the earlier one reads in an object the later ones do not - a breakdown beside a total -
+    and that object is in the record: the breakdown then says the kind is none, and a total is not
+    counted again as this kind while the breakdown names another (USD-COST). Paths in one object are
+    alternatives, and each is tried.
+    """
+    for index, path in enumerate(paths):
+        counts = [value for value in _path_values(body, path) if isinstance(value, (int, float))
+                  and not isinstance(value, bool) and 0 <= value < float("inf")]
+        if counts:
+            return sum(counts)
+        parent, later = str(path).rpartition(".")[0], paths[index + 1:]
+        if parent and later and not all(str(other).startswith(parent + ".") for other in later) \
+                and any(isinstance(value, dict) for value in _path_values(body, parent)):
+            return 0
+    return 0
 
 
 def next_turn(turn, rec, shape, subagent=None):

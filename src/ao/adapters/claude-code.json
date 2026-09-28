@@ -121,8 +121,23 @@
         "message.usage.output_tokens"
       ],
       "unit": "token",
+      "model": "message.model",
+      "tokens": {
+        "input": "message.usage.input_tokens",
+        "cache_write_5m": ["message.usage.cache_creation.ephemeral_5m_input_tokens",
+                           "message.usage.cache_creation_input_tokens"],
+        "cache_write_1h": "message.usage.cache_creation.ephemeral_1h_input_tokens",
+        "cache_read": "message.usage.cache_read_input_tokens",
+        "output": "message.usage.output_tokens"
+      },
+      "priced_when": [
+        {"field": "message.usage.speed", "values": ["standard", null]},
+        {"field": "message.usage.service_tier", "values": ["standard", null]},
+        {"field": "message.usage.inference_geo", "values": ["global", "not_available", null]}
+      ],
       "counted": "Every token a response read or wrote, once per response: input_tokens (input after the last cache breakpoint), cache_creation_input_tokens (input written to the prompt cache), cache_read_input_tokens (input read from it) and output_tokens (thinking included).",
-      "not_counted": "server_tool_use (web search and fetch requests: counts of requests, not tokens); output_tokens_details and cache_creation (breakdowns already inside output_tokens and cache_creation_input_tokens); iterations (a per-iteration breakdown that repeats the total). Tokens are not priced: a cache read is priced far below an input token and is most of a long session's tokens, so a turn's count follows its context size times its responses more closely than its price.",
+      "not_counted": "server_tool_use (web search and fetch requests: counts of requests, not tokens); output_tokens_details and cache_creation (breakdowns already inside output_tokens and cache_creation_input_tokens); iterations (a per-iteration breakdown that repeats the total). The count weighs every token alike: a cache read is priced far below an input token and is most of a long session's tokens, so a turn's count follows its context size times its responses more closely than its price. `ao cost --usd` prices each kind at its own rate instead (`tokens`).",
+      "pricing": "How `ao cost --usd` reads a response for the price table: by the model at message.model, and by kind under the per-response reading, each kind at its own rate. usage.cache_creation breaks the cache writes down by how long the cache lives, five minutes or an hour, and an hour's write costs 1.6 times a five-minute one; a record without the breakdown is read as five-minute writes, the default duration. Measured on the 87,798 usage records of the 400 transcripts written last in the thirty days to 2026-09-26: every record carries the breakdown, 44,347 wrote to a one-hour cache and 43,158 to a five-minute one, and 8 hold a one-hour write that their total leaves out, priced as the breakdown says. A response at another speed (fast mode), service tier or inference geography than priced_when lists is not at the table's list prices and is reported unknown. Every record measured held speed standard or no speed, service_tier standard and inference_geo not_available, but for the replies the harness writes itself (model <synthetic>), which hold neither field and carry no tokens.",
       "note": "One response is written as one record per content block, each repeating the response's usage, so a response is read once, by message.id, under the per-response reading (billing.fallback.reading); adding the records up counted about twice its tokens. A subagent's transcript writes each record with the output tokens so far, so a response costs the most its records reached. A store also writes a response again, turns after the first, and a resumed session's transcript can hold another's responses, so a response is read once in a reading rather than once in a turn.",
       "verified": true
     },

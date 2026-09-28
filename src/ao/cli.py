@@ -426,7 +426,11 @@ def build_parser():
     co = sub.add_parser("cost", help="what the coordination spends: implementer turns by class (product/analysis/ceremony/coordination)")
     co.add_argument("--since", type=A.time_arg(),
                     help="window: 24h, 7d, today, a date (default: whole transcript)")
-    co.add_argument("--features", action="store_true", help="what each feature switch spent, measured")
+    view = co.add_mutually_exclusive_group()
+    view.add_argument("--features", action="store_true", help="what each feature switch spent, measured")
+    view.add_argument("--usd", action="store_true",
+                      help="the spend in US dollars: an estimate from the price table ao ships, unknown for a "
+                           "model it does not price")
     co.set_defaults(fn=cmd_cost)
     cf = sub.add_parser("config", help="what a person can set: list, get, set, unset")
     cf.add_argument("action", choices=["list", "get", "set", "unset"], nargs="?", default="list")

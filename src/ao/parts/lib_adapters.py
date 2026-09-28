@@ -925,7 +925,8 @@ def validate_adapter(adapter):
         if unknown:
             problems.append(f"`{capability}.argv` uses placeholders ao does not fill: {', '.join(unknown)}")
     return (problems + prompt_channel_problems(adapter) + tool_review_problems(adapter) + subagent_problems(adapter)
-            + bypass_problems(adapter) + quota_stop_problems(adapter))
+            + bypass_problems(adapter) + quota_stop_problems(adapter)
+            + token_problems(_block(_block(adapter, "telemetry"), "cost")))
 
 
 def conform_adapter(adapter, harness, workdir):
