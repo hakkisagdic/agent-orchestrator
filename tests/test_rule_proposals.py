@@ -89,8 +89,8 @@ def test_the_evidence_is_the_last_ten_landed_slices_as_ao_stats_measures_them(pr
 
     assert created and proposal["evidence"]["slices"] == [f"S{n}" for n in range(3, 13)]
     assert proposal["evidence"]["stats"] == A.outcome_stats([o for o in landed if int(o["slice"][1:]) >= 3])
-    assert ("The last 10 landed slice(s): 100% approved first time, median 1 review round(s), "
-            "10% with a defect found later.") in question["context"]
+    assert ("The last 10 landed slice(s), 10 of them reviewed: 100% of those approved first time, "
+            "median 1 review round(s); 10% of all 10 with a defect found later.") in question["context"]
 
 
 def test_a_proposal_reaches_the_phone_with_a_button_to_accept_and_one_to_reject(proposing, monkeypatch):

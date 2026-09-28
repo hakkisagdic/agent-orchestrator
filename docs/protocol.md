@@ -324,6 +324,8 @@ proposal is a chained row of the decision ledger and a question in the state `pr
 person accepts or rejects through `ao answer` or the phone; neither the command nor the answer
 writes a rule file.*
 
+*In ao since slice RULE-PROPOSALS-2: the evidence a proposal is decided beside names each rate's denominator - the landed slices, how many of them were reviewed, and which rates are of which - and a review ledger that cannot be read is said unread, where it was shown as no slice having landed. A decision given at a terminal records the login it ran under and whether a terminal was attached, as every other act ao attributes to a person does, and `ao proposals --all` shows both.*
+
 ## Waking the architect
 
 A notification is not an actor. The watchdog could raise a desktop alert and write

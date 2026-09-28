@@ -631,12 +631,15 @@ bu adrese gider; `ao alarms` merdiveni gösterir.
     "proposal.unknown": {"en": "a caller ao did not start ({via})",
                          "tr": "ao'nun başlatmadığı bir çağıran ({via})"},
     "proposal.rule-file": {"en": "Rule file: {path}", "tr": "Kural dosyası: {path}"},
+    # the rates' denominators differ: first time and rounds are the reviewed slices', defects every landed one's
     "proposal.evidence": {
-        "en": "The last {n} landed slice(s): {first_pass}% approved first time, median {rounds} review round(s), "
-              "{defects}% with a defect found later.",
-        "tr": "Son {n} inen dilim: ilk seferde onaylanan %{first_pass}, ortanca {rounds} review turu, "
-              "sonradan kusur bulunan %{defects}.",
+        "en": "The last {n} landed slice(s), {reviewed} of them reviewed: {first_pass}% of those approved first time, "
+              "median {rounds} review round(s); {defects}% of all {n} with a defect found later.",
+        "tr": "Son {n} inen dilim, {reviewed} tanesi review edildi: bunların %{first_pass}'i ilk seferde onaylandı, "
+              "ortanca {rounds} review turu; {n} dilimin %{defects}'inde sonradan kusur bulundu.",
     },
+    "proposal.unread": {"en": "The review ledger could not be read ({why}), so nothing here measures it.",
+                        "tr": "Review defteri okunamadı ({why}); bu yüzden burada onu ölçen bir şey yok."},
     "proposal.no-evidence": {"en": "No slice has landed yet to measure it beside.",
                              "tr": "Yanında ölçülecek, inmiş bir dilim henüz yok."},
     # the note `ao hold release --note` leaves the implementer

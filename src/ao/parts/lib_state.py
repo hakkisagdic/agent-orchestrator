@@ -1422,7 +1422,7 @@ def free_text_option(option):
         option.get("key") == "x" and option.get("label") in language.forms("free-text")))
 
 
-def answer(root, did, key_or_text, by="human", change=False):
+def answer(root, did, key_or_text, by="human", change=False, user=None, interactive=None):
     """Answer one question. Returns the updated record, or None if unknown.
 
     The first word is the key of an option the question offers; a free-text option takes the
@@ -1463,6 +1463,9 @@ def answer(root, did, key_or_text, by="human", change=False):
                             f"ao answer {did} <key> --change replaces it, and both stay on the record")
     row = {"answer": words if free_text_option(chosen) else chosen.get("label"), "answer_key": chosen.get("key"),
            "answered_at": int(time.time()), "answered_by": by}
+    if user is not None or interactive is not None:
+        # The login and the terminal, as every other act ao attributes to a person keeps them (RULE-PROPOSALS-2).
+        row.update(answered_user=user, answered_interactive=bool(interactive))
     rows = rec.get("answers")
     if not isinstance(rows, list):
         # Answered before each answer was a row: that answer becomes the first, so a change keeps it.
@@ -1511,8 +1514,14 @@ def proposal_evidence(root):
     """What a proposal is judged beside: the outcomes of the project's last landed slices, as `ao stats` reads them.
 
     Measured from the ledgers, never typed by the proposer (#49): which slices, and their rounds,
-    first-pass rate, time, size and the defects found in them later.
+    first-pass rate, time, size and the defects found in them later. A review ledger that cannot be read
+    is said so under "unread", where it was read as no slice having landed (RULE-PROPOSALS-2).
     """
+    from .storage import read_chained_jsonl
+    try:
+        read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN)
+    except Exception as exc:
+        return {"slices": [], "stats": outcome_stats([]), "unread": f"{type(exc).__name__}: {exc}"[:200]}
     landed = sorted((o for o in slice_outcomes(root) if o.get("landed_at")), key=lambda o: o["landed_at"])
     recent = landed[-PROPOSAL_EVIDENCE_SLICES:]
     return {"slices": [o["slice"] for o in recent], "stats": outcome_stats(recent)}
@@ -1528,10 +1537,13 @@ def _proposal_context(cfg, author, via, why, path, evidence):
     if path:
         lines.append(language.text(cfg, "proposal.rule-file", path=path))
     stats = evidence["stats"]
-    if stats["slices"]:
+    if evidence.get("unread"):
+        lines.append(language.text(cfg, "proposal.unread", why=evidence["unread"]))
+    elif stats["slices"]:
         def shown(value):
             return "—" if value is None else value
         lines.append(language.text(cfg, "proposal.evidence", n=stats["slices"],
+                                   reviewed=stats["slices"] - stats["waived"],
                                    first_pass=shown(stats["first_pass_pct"]),
                                    rounds=shown((stats["rounds"] or {}).get("median")),
                                    defects=shown(stats["defects_pct"])))
@@ -1568,6 +1580,8 @@ def proposals(root):
             state = PROPOSAL_OUTCOMES.get(question.get("answer_key"), "answered")
         out.append(dict(row, state=state, answer=(question or {}).get("answer"),
                         answered_by=(question or {}).get("answered_by"),
+                        answered_user=(question or {}).get("answered_user"),
+                        answered_interactive=(question or {}).get("answered_interactive"),
                         answered_at=(question or {}).get("answered_at")))
     return out
 

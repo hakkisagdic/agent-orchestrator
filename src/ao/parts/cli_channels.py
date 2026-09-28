@@ -704,9 +704,10 @@ def cmd_answer(cfg, args):
     Only an option the question offers is taken, and a question answered once keeps its
     answer unless --change replaces it; the replaced answer stays in the record (CLI-ROBUST).
     """
+    user, interactive = A._login_and_terminal()
     try:
         rec = A.answer(cfg["root"], args.id, " ".join(args.value), by="terminal",
-                       change=getattr(args, "change", False))
+                       change=getattr(args, "change", False), user=user, interactive=interactive)
     except A.AnswerRefused as exc:
         print(f"{C['red']}not answered{C['reset']}: {exc}")
         return 2
@@ -752,17 +753,21 @@ def cmd_decisions(cfg, args):
 
 def _proposal_evidence_line(proposal):
     """What a proposal was measured beside, in the words `ao stats` uses (RULE-PROPOSALS)."""
-    stats = (proposal.get("evidence") or {}).get("stats") or {}
+    evidence = proposal.get("evidence") or {}
+    stats = evidence.get("stats") or {}
+    if evidence.get("unread"):
+        return f"evidence: none, the review ledger could not be read when it was proposed ({evidence['unread']})"
     if not stats.get("slices"):
         return "evidence: no slice had landed to measure it beside"
     rounds = (stats.get("rounds") or {}).get("median")
-    parts = [f"the last {stats['slices']} landed slice(s)"]
+    reviewed = stats["slices"] - (stats.get("waived") or 0)
+    parts = [f"the last {stats['slices']} landed slice(s), {reviewed} of them reviewed"]
     if stats.get("first_pass_pct") is not None:
-        parts.append(f"{stats['first_pass_pct']}% approved first time")
+        parts.append(f"{stats['first_pass_pct']}% of those approved first time")
     if rounds is not None:
         parts.append(f"median {rounds} review round(s)")
     if stats.get("defects_pct") is not None:
-        parts.append(f"{stats['defects_pct']}% with a defect found later")
+        parts.append(f"{stats['defects_pct']}% of all {stats['slices']} with a defect found later")
     return "evidence: " + ", ".join(parts)
 
 
@@ -845,7 +850,11 @@ def cmd_proposals(cfg, args):
         else:
             answered = (time.strftime("%Y-%m-%d %H:%M", time.localtime(p["answered_at"]))
                         if p.get("answered_at") else "—")
-            print(f"   → {p.get('answer')}  {C['dim']}({p.get('answered_by')}, {answered}, {did}){C['reset']}")
+            who = p.get("answered_by")
+            if p.get("answered_user"):
+                who = f"{who}, login {p['answered_user']}, " + ("a terminal attached" if p.get("answered_interactive")
+                                                               else "no terminal attached")
+            print(f"   → {p.get('answer')}  {C['dim']}({who}, {answered}, {did}){C['reset']}")
     return 0
 
 
