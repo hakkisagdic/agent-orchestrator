@@ -20,13 +20,15 @@ def _serve(module, cfg, extra):
 
 def cmd_mcp(cfg, args):
     """Serve this project's state to any MCP client, over stdio."""
+    # The role is the server's own argument, so the config printed for a client carries it too (MCP-ROLES).
+    role = ["--role", args.role] if args.role is not None else []
     if args.action != "serve":
         print(f"{C['b']}Add to an MCP client's config:{C['reset']}")
         exe = shutil.which("ao") or sys.argv[0]
         print(json.dumps({"mcpServers": {"agent-orchestrator": {
-            "command": exe, "args": ["-C", cfg["root"], "mcp", "serve"]}}}, indent=2))
+            "command": exe, "args": ["-C", cfg["root"], "mcp", "serve"] + role}}}, indent=2))
         return 0
-    return _serve("mcp", cfg, ["--allow-verify"] if args.allow_verify else [])
+    return _serve("mcp", cfg, (["--allow-verify"] if args.allow_verify else []) + role)
 
 
 def cmd_a2a_mcp(cfg, args):

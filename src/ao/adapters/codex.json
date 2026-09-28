@@ -27,6 +27,6 @@
   "busy": { "mtime_glob": "~/.codex/sessions/**/rollout-*.jsonl", "idle_seconds": 240 },
   "detect": { "dirs": [".codex"], "binaries": ["codex"], "processes": ["codex"], "headless": ["exec"] },
   "mcp": { "manual": "~/.codex/config.toml",
-           "snippet": "[mcp_servers.ao]\ncommand = \"{exe}\"\nargs = [\"-C\", \"{root}\", \"mcp\", \"serve\"]" },
+           "snippet": "[mcp_servers.ao]\ncommand = \"{exe}\"\nargs = {args}" },
   "directives": { "steering_files": ["AGENTS.md", "~/.codex/AGENTS.md"], "config": "~/.codex/config.toml" }
 }

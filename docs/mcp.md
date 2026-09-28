@@ -11,6 +11,7 @@ So `ao` also ships as an MCP server. Same protocol, same state, two doors.
 
 ```bash
 ao mcp serve                 # stdio MCP server
+ao mcp serve --role reviewer # the same, serving the reviewer's tools alone (see Roles)
 ```
 
 Register it the way your agent registers any stdio server:
@@ -34,6 +35,7 @@ changes nothing, **write** records something in its mailbox, decisions or ledger
 |---|---|---|
 | `ao_status` | read | The implementer's state, context and cost telemetry, git state, the mailbox and the latest reviews. |
 | `ao_board` | read | Where each pre-authorised work item is, what may start now, and what the board cannot resolve. |
+| `ao_candidate` | read | The candidate staged now and what a review judges it against: the running slice and its boundary, the candidate's digest and paths, and the committed source a test-only candidate exercises. Not the diff. |
 | `ao_notices` | read | Alerts this project raised, and on request the ones the rate limit held back. |
 | `ao_fleet` | read | One row per project with a local agent session. |
 | `ao_inbox` | write | Messages to the implementer that it has not acknowledged; it records that each was shown. |
@@ -47,7 +49,8 @@ changes nothing, **write** records something in its mailbox, decisions or ledger
 
 ## Capability gating
 
-The server has one switch, for the one tool that runs something:
+The server has two switches: `--allow-verify`, for the one tool that runs something, and
+`--role`, for which tools a session is served at all ([Roles](#roles), below).
 
 ```bash
 ao mcp serve                  # every tool but ao_verify
@@ -60,6 +63,50 @@ watchdog, and commit authority with `ao commit-ok` (below).
 
 The invariants from [`safety.md`](safety.md) hold identically over MCP: no tool grants
 push, PR, force-push, hook bypass or foreign-repository mutation.
+
+## Roles
+
+*In ao since slice MCP-ROLES: a server started with `--role` lists and runs only the tools its
+role's playbook uses, and `ao init` writes the role into each registration only one role reads.
+Before it, every agent was served every tool, so a reviewer could send a report and acknowledge
+mail meant for the implementer.*
+
+```bash
+ao mcp serve --role implementer   # the implementer's tools alone
+ao mcp config --role reviewer     # a client's config, with the role among the server's arguments
+```
+
+| Role | Served |
+|---|---|
+| architect | every tool, as before roles existed |
+| implementer | `ao_status`, `ao_board`, `ao_notices`, `ao_inbox`, `ao_ack`, `ao_report`, `ao_ask`, `ao_decisions`, `ao_fanout`, `ao_watchdog`, `ao_verify` |
+| reviewer | `ao_status`, `ao_board`, `ao_candidate` |
+
+A tool outside its role's set is neither listed nor run: called by name anyway, it answers with an
+error and changes nothing. A reviewer reads - the project's state, the board and the candidate it
+judges, what [a stand-in reviewer](standin.md#opening-a-stand-in-reviewer) is told to read - and
+sends no mail and no report. Urgent mail does not ride along on its answers either, since it could
+neither read the message nor acknowledge it. ao starts its own reviewers outside the repository with
+their MCP servers off wherever the adapter can turn them off (`options.mcp_isolation`), so the
+reviewer's set is for a reviewer session that does load the server: a stand-in whose client a person
+configures with `ao mcp config --role reviewer`, or a harness registered as the reviewer alone. The
+implementer is served the tools its playbook's mailbox section names, and `ao_verify`, the gate
+step of its loop, still only with `--allow-verify`.
+
+With no `--role`, or with one it does not know, the server serves every tool, as it did before
+roles existed, and says so in one line on stderr, which an MCP client keeps in its log. Refusing
+instead would take the tools from a session that may be the architect's.
+
+**Which role a registration names.** `ao init` reads it from `.ao/config.json`: the role whose
+block - or a reviewer's fallback - runs a harness that reads the registration. A file holds one
+`ao` entry and two harnesses can read one file (Claude Code and Qoder both read `.mcp.json`), so
+every harness whose adapter declares that file counts; a snippet a person adds by hand is read by
+its own harness alone. One role names the registration. Two or more, or none, name nothing, and
+its server serves every tool: in the default profile Claude Code is both the architect and the
+reviewer, so `.mcp.json` names no role, while Kiro, the implementer alone, is registered as the
+implementer. A project on a capability matrix binds its roles to declared tools rather than to
+harnesses, and its registrations name none. A role reassigned later, with `ao role set` or
+`ao role swap`, reaches the registrations when `ao init` runs again.
 
 ## Files or MCP?
 
@@ -100,10 +147,11 @@ would remove the separation the tool exists to hold. `push` is granted by nothin
 ```bash
 kiro-cli mcp add --name ao --scope workspace \
   --command "$HOME/.local/bin/ao" \
-  --args '["-C","/path/to/project","mcp","serve"]'
+  --args '["-C","/path/to/project","mcp","serve","--role","implementer"]'
 ```
 
-Other clients take the same shape; `ao mcp` with no arguments prints the JSON.
+Other clients take the same shape; `ao mcp` with no arguments prints the JSON, and
+`ao mcp config --role <role>` prints it with the role the harness holds in the project.
 
 ## A2A, and why it is not this
 
@@ -198,7 +246,8 @@ one normalised vocabulary either way.
 
 `ao init` registers the server for every agent it detects — `.mcp.json` for
 Claude Code, `.kiro/settings/mcp.json` for Kiro, a snippet for Codex's
-user-level config — merged into whatever those files already hold, and writes
+user-level config — merged into whatever those files already hold, each naming
+the role its readers hold in the project where they hold one ([Roles](#roles)), and writes
 the playbook (`ao skill install`) into files ao owns — never into CLAUDE.md or
 AGENTS.md unless asked with `--rules`; those are the owner's rule files, and a
 tool appending instructions there is a tool issuing rules nobody authorised. The one step it cannot do is the

@@ -200,7 +200,9 @@ profile reviews with another model of the implementer's family only when a perso
 person`); `ao doctor` names the tier in force.
 
 The MCP server is registered for detected agents (`.mcp.json` for Claude Code,
-`.kiro/settings/mcp.json` for Kiro). Ask the human before running init; afterwards
+`.kiro/settings/mcp.json` for Kiro), each registration naming a role when the harnesses
+reading it hold only one here: that server lists only that role's tools, and a reviewer's
+only reads. Ask the human before running init; afterwards
 tell them to restart the app in this directory and run `ao doctor`. Add `--watchdog`
 (or `ao watchdog install`) for unattended runs; it installs a companion job that runs
 `ao doctor --check` every fifteen minutes as the second, independent check.
@@ -286,7 +288,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao source list|status|import` | external queues (Linear, Jira) feeding the board |
 | `ao handoff` | write a resume briefing when the centre runs out of quota |
 | `ao projects` / `ao adapters` | every workspace with a local agent session; supported agents |
-| `ao mcp serve` / `ao mcp config` | the MCP server and its client config |
+| `ao mcp serve` / `ao mcp config` | the MCP server and its client config; with `--role <role>`, that role's tools alone |
 | `ao a2a serve` / `ao a2a-mcp serve` | A2A: serve the board; bridge remote agents into MCP |
 
 Every time a command takes (`--since`, `--until`, `--days`, `--window`, `ao since`,

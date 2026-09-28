@@ -352,6 +352,10 @@ def build_parser():
     mc = sub.add_parser("mcp", help="serve project state to MCP clients (stdio)")
     mc.add_argument("action", choices=["serve", "config"], nargs="?", default="config")
     mc.add_argument("--allow-verify", action="store_true", help="expose the gate runner too")
+    # Not restricted to choices: a role the server does not know is served every tool, with a
+    # notice, rather than refused before the client sees why (MCP-ROLES).
+    mc.add_argument("--role", help="the role this server serves: architect, implementer or reviewer, each only "
+                                   "its own tools (default: every tool)")
     mc.set_defaults(fn=cmd_mcp)
     am = sub.add_parser("a2a-mcp", help="reach A2A agents from an MCP client (stdio)")
     am.add_argument("action", choices=["serve", "config"], nargs="?", default="config")

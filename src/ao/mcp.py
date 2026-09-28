@@ -10,6 +10,11 @@ whether work may land, and exposing it here would let the implementer grant
 itself the authority the separation exists to withhold. Reading is free; the one
 expensive action, `verify`, is opt-in because it runs the project's real gates.
 
+A second rule narrows it per session (MCP-ROLES): a server started for a role,
+`--role architect|implementer|reviewer`, lists and runs that role's tools alone. A
+reviewer reads and sends nothing; an implementer works its mailbox; the architect
+keeps every tool. `ao init` writes the role into a registration only one role reads.
+
 JSON-RPC 2.0 over stdio, standard library only.
 """
 import json
@@ -17,7 +22,7 @@ import os
 import sys
 import time
 
-from . import __version__, language, lib as A
+from . import __version__, language, lib as A, settings as S
 UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 PROTOCOL = "2025-06-18"
@@ -30,6 +35,11 @@ TOOLS = [
      "description": "Where each pre-authorised work item is: running, blocked (with what it "
                     "waits on), queued, inbox, verified, done. Blocked items are the ones a "
                     "human must act on.",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "ao_candidate",
+     "description": "The candidate staged now and what a review judges it against: the running "
+                    "slice and its boundary, the candidate's digest and paths, and the committed "
+                    "source a test-only candidate exercises. Not the diff. Read-only.",
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "ao_notices",
      "description": "Alerts this project raised, including ones the rate limit suppressed.",
@@ -114,6 +124,46 @@ TOOLS = [
                      "properties": {"profile": {"type": "string"}}}},
 ]
 
+EVERY_TOOL = tuple(tool["name"] for tool in TOOLS)
+
+# The tools each role's playbook uses, and the only ones a server started for that role lists or
+# runs (MCP-ROLES). The implementer's are the tools the playbook's "Talking" section names, and
+# ao_verify, the gate step of its loop, still behind --allow-verify. A reviewer judges a candidate:
+# it reads the project's state, the board and the candidate, and sends no mail and no report. The
+# architect keeps every tool it had before roles existed.
+ROLE_TOOLS = {
+    "architect": EVERY_TOOL,
+    "implementer": ("ao_status", "ao_board", "ao_notices", "ao_inbox", "ao_ack", "ao_report", "ao_ask",
+                    "ao_decisions", "ao_fanout", "ao_watchdog", "ao_verify"),
+    "reviewer": ("ao_status", "ao_board", "ao_candidate"),
+}
+
+
+def role_tools(role):
+    """The names of the tools a server started for `role` lists and runs.
+
+    Every tool when `role` is None or one this server does not know: a registration written
+    before roles existed, one a newer ao wrote, or one a person mistyped. Refusing then would
+    take the tools from a session that may well be the architect's, so the server keeps what it
+    served before roles existed, and `role_notice` says so.
+    """
+    return ROLE_TOOLS.get(role, EVERY_TOOL)
+
+
+def role_notice(role):
+    """The line a server prints on stderr when it cannot hold its session to a role's tools, or None.
+
+    stderr, because stdout is the protocol: an MCP client keeps what its server writes there in
+    its own log, where the person who wrote the registration finds it.
+    """
+    if role in ROLE_TOOLS:
+        return None
+    known = ", ".join(sorted(ROLE_TOOLS))
+    if role is None:
+        return (f"ao mcp: started with no --role, so every tool is served; the roles are {known}, "
+                "and `ao init` writes one into each registration a single role reads")
+    return f"ao mcp: --role {role!r} is none of {known}, so every tool is served"
+
 
 def status_payload(cfg):
     from . import watchdog as W
@@ -155,12 +205,47 @@ def board_payload(root):
             "counts": {k: len(v) for k, v in b.items()}}
 
 
-def call(name, args, cfg, allow_verify):
+def candidate_payload(cfg):
+    """The candidate staged now, and what a review judges it against (MCP-ROLES).
+
+    What `ao review` builds its request from, read the same way: the running slice, its boundary
+    (the file its row points at, or its sentence), the candidate's identity and paths, and the
+    committed source a test-only candidate exercises (#97), within review.context_bytes. The diff
+    is left out: a reviewer is handed the one it judges, and a submitted review judges the tree it
+    pinned, which the index may have moved on from - the digest tells the two apart.
+    """
     root = cfg["root"]
+    running = A.running_slice(root)
+    source = A.read_boundary(root, running)
+    out = {"slice": (running or {}).get("id"), "title": (running or {}).get("title"),
+           "boundary": (source or {}).get("text") or A.slice_boundary(running) or None}
+    try:
+        candidate = A.index_candidate(root)
+    except (RuntimeError, ValueError) as exc:
+        return dict(out, candidate=None, context=None, problem=f"the staged candidate cannot be measured: {exc}")
+    out["candidate"] = {key: candidate[key] for key in ("digest", "head", "index_tree", "changed_paths")}
+    context = A.review_context(root, candidate["changed_paths"], candidate["index_tree"], candidate["head"],
+                               S.get(cfg, "review.context_bytes"))
+    out["context"] = None if context is None else \
+        {key: context[key] for key in ("rev", "paths", "names", "omitted", "text")}
+    return out
+
+
+def call(name, args, cfg, allow_verify, role=None):
+    """Run one tool for a server started for `role`, and return what it answers.
+
+    A tool outside the role's set is refused here, not only left off the listing: a client can
+    call a name it was never shown, and the refusal is the same whichever way the call arrives.
+    """
+    root = cfg["root"]
+    if name in EVERY_TOOL and name not in role_tools(role):
+        return {"error": f"{name} is not one of the {role}'s tools; this server was started with --role {role}"}
     if name == "ao_status":
         return status_payload(cfg)
     if name == "ao_board":
         return board_payload(root)
+    if name == "ao_candidate":
+        return candidate_payload(cfg)
     if name == "ao_notices":
         return {"notices": A.notices(root, args.get("limit", 10),
                                      args.get("include_suppressed", False))}
@@ -317,6 +402,14 @@ def main():
     allow_verify = "--allow-verify" in sys.argv
     if "-C" in sys.argv:
         root = sys.argv[sys.argv.index("-C") + 1]
+    # The role the registration names (MCP-ROLES): fixed for the session, since a harness starts
+    # its servers once, when its session starts. Read as AO_ROLE is, without case or surrounding
+    # space, so a hand-written `Reviewer` is not an unknown role served every tool.
+    role = sys.argv[sys.argv.index("--role") + 1].strip().lower() if "--role" in sys.argv[:-1] else None
+    served = role_tools(role)
+    notice = role_notice(role)
+    if notice:
+        print(notice, file=sys.stderr, flush=True)
     cfg = A.load_config(A.find_root(root))
 
     for line in sys.stdin:
@@ -336,15 +429,17 @@ def main():
             elif method in ("notifications/initialized", "initialized"):
                 continue                                  # notification: no reply
             elif method == "tools/list":
-                result = {"tools": TOOLS}
+                result = {"tools": [tool for tool in TOOLS if tool["name"] in served]}
             elif method == "tools/call":
                 p = req.get("params") or {}
-                payload = call(p.get("name"), p.get("arguments") or {}, cfg, allow_verify)
+                payload = call(p.get("name"), p.get("arguments") or {}, cfg, allow_verify, role)
                 # Ride along on whatever the agent called. MCP has no way to push,
                 # so the next best thing is to attach the message to the next
                 # response it asks for — which costs nothing and arrives sooner
-                # than the agent's own next inbox check.
-                if isinstance(payload, dict) and p.get("name") != "ao_inbox":
+                # than the agent's own next inbox check. Only where ao_inbox is served:
+                # the note sends the agent there, and a role without it - a reviewer -
+                # can neither read the message nor acknowledge it.
+                if isinstance(payload, dict) and p.get("name") != "ao_inbox" and "ao_inbox" in served:
                     urgent = A.urgent_messages(cfg["root"], cfg)
                     if urgent:
                         payload["URGENT_UNACKNOWLEDGED"] = [

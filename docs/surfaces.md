@@ -122,8 +122,9 @@ Not built yet: reading another agent's messages, writing to it and nudging it fr
 app. Today they are `ao tail`, `ao note` and the watchdog.
 
 No terminal, no context switch, no new UI to learn. The chat app you already have becomes
-the control room, and the one switch from [`mcp.md`](mcp.md) applies: `ao_verify` stays off
-until you turn it on.
+the control room, and the switches from [`mcp.md`](mcp.md) apply: `ao_verify` stays off
+until you turn it on, and a server given no `--role` serves every tool, which is what a
+person's own control room wants ([roles](mcp.md#roles)).
 
 The MCP tools read the same files the CLI does, which is why a surface needs no store of its
 own.

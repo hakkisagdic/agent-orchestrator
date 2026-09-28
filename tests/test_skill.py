@@ -26,7 +26,8 @@ def test_init_registers_mcp_and_writes_playbook(project, monkeypatch):
     assert skillkit.install_playbook(root, agents)[".claude/skills/ao/SKILL.md"] == "wrote"
     assert skillkit.register_mcp(root, agents, exe="/usr/local/bin/ao")["claude-code"] == "registered"
     cfg = json.load(open(os.path.join(root, ".mcp.json"), encoding="utf-8"))
-    assert cfg["mcpServers"]["ao"]["args"] == ["-C", root, "mcp", "serve"]
+    # The fixture's architect runs `claude` and is the only role on a harness reading .mcp.json (MCP-ROLES).
+    assert cfg["mcpServers"]["ao"]["args"] == ["-C", root, "mcp", "serve", "--role", "architect"]
     # idempotent, and other servers survive
     cfg["mcpServers"]["other"] = {"command": "x"}
     json.dump(cfg, open(os.path.join(root, ".mcp.json"), "w", encoding="utf-8"))

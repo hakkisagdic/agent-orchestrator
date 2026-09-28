@@ -20,7 +20,7 @@ import re
 import shutil
 import subprocess
 
-from . import lib as A
+from . import lib as A, matrix as M
 UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 MARK_START = "<!-- ao-playbook:start -->"
@@ -177,19 +177,60 @@ def _toml_string_body(value):
     return "".join(out)
 
 
+def registration_role(root, ident):
+    """The role the ao MCP registration for harness `ident` names in this project, or None (MCP-ROLES).
+
+    Read from the project's role blocks: the roles whose block, or a reviewer's fallback, runs
+    a harness that reads the registration. That is every harness whose adapter declares the
+    same file, since two harnesses can read one file and a file holds one `ao` entry; a
+    registration a person adds by hand is read by its own harness alone. Exactly one role names
+    it. Several, or none, name nothing, and the server serves every tool, as before roles
+    existed: a registration read by two roles' sessions cannot hold either to its own tools,
+    and naming one would take tools from the other. A project on a capability matrix binds its
+    roles to declared tools rather than to harnesses, and its registrations name none.
+    """
+    adapters = dict(setup_adapters(root))
+    declared = ((adapters.get(ident) or {}).get("mcp") or {}).get("file")
+    readers = {ident} | {other for other, adapter in adapters.items()
+                         if declared and (adapter.get("mcp") or {}).get("file") == declared}
+    document = A.project_config_document(root)["config"]
+    if not isinstance(document, dict) or M.is_strict(document):
+        return None
+    cfg = A.resolve_roles(root, dict(document))
+    held = set()
+    for role in A.ROLE_BLOCKS:
+        block = cfg.get(role) if isinstance(cfg.get(role), dict) else {}
+        runs = [block]
+        if role == "reviewer":
+            runs += list(block.get("fallbacks") or [])
+        if any(A.block_adapter(each) in readers for each in runs):
+            held.add(role)
+    return held.pop() if len(held) == 1 else None
+
+
+def _snippet(template, exe, root, args):
+    """A manual registration's snippet with `{exe}`, `{root}` and `{args}` filled in one pass.
+
+    One pass, so a value holding a placeholder's spelling is never filled again. `{args}` is the
+    server's arguments as a bracketed list of double-quoted strings, each escaped as `{root}` is.
+    """
+    values = {"exe": _toml_string_body(exe), "root": _toml_string_body(root),
+              "args": "[" + ", ".join(f'"{_toml_string_body(arg)}"' for arg in args) + "]"}
+    return re.sub(r"\{(exe|root|args)\}", lambda match: values[match.group(1)], str(template or ""))
+
+
 def register_mcp(root, agents, exe=None):
     """Register the ao MCP server for each agent, in the file its adapter declares.
 
     Merged, never clobbered: other servers in the same file survive. Returns
     {agent: what happened}. A harness that keeps its servers in a user-level file
-    gets the snippet its adapter declares, and the human decides.
+    gets the snippet its adapter declares, and the human decides. Each registration
+    names the role its readers hold in this project, when they hold one (`registration_role`).
     """
     exe = exe or shutil.which("ao") or os.path.join(A.REPO, "bin", "ao")
-    args = ["-C", root, "mcp", "serve"]
-    server = {"command": exe, "args": args}
     out = {}
 
-    def merge(path, key="mcpServers", extra=None):
+    def merge(path, server, key="mcpServers", extra=None):
         data = {}
         if os.path.exists(path):
             try:
@@ -207,21 +248,23 @@ def register_mcp(root, agents, exe=None):
 
     for ident, adapter in setup_adapters(root, agents):
         mcp = adapter.get("mcp") or {}
+        role = registration_role(root, ident)
+        args = ["-C", root, "mcp", "serve"] + (["--role", role] if role else [])
         if mcp.get("manual"):
-            snippet = str(mcp.get("snippet") or "").replace("{exe}", _toml_string_body(exe)) \
-                .replace("{root}", _toml_string_body(root))
-            out[ident] = f"manual: add to {mcp['manual']}\n{snippet}"
+            out[ident] = f"manual: add to {mcp['manual']}\n{_snippet(mcp.get('snippet'), exe, root, args)}"
             continue
         if not mcp.get("file"):
             continue
         path = _local(root, mcp["file"])
+        server = {"command": exe, "args": args}
         register = mcp.get("register") or []
         if register and shutil.which(register[0]) and not os.path.exists(path):
             argv = [part.replace("{exe}", exe).replace("{args}", json.dumps(args)) for part in register]
             r = subprocess.run(argv, capture_output=True, text=True, encoding=UTF8, errors="replace", cwd=root)
-            out[ident] = "registered" if r.returncode == 0 else merge(path, mcp.get("key", "mcpServers"), mcp.get("extra"))
+            out[ident] = "registered" if r.returncode == 0 else \
+                merge(path, server, mcp.get("key", "mcpServers"), mcp.get("extra"))
         else:
-            out[ident] = merge(path, mcp.get("key", "mcpServers"), mcp.get("extra"))
+            out[ident] = merge(path, server, mcp.get("key", "mcpServers"), mcp.get("extra"))
     return out
 
 
