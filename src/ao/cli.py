@@ -55,6 +55,7 @@ A._part("cli_maintenance", globals())
 
 A._part("cli_lanes", globals())
 A._part("cli_pr", globals())
+A._part("cli_harness", globals())
 A._part("cli_install", globals())
 
 
@@ -212,6 +213,12 @@ def build_parser():
     pw.add_argument("action", choices=["watch"])
     pw.add_argument("--once", action="store_true", help="one pass, then exit; the watchdog does not run it yet")
     pw.set_defaults(fn=cmd_pr)
+    hs = sub.add_parser("harness", help="ask each harness that speaks ACP what it supports; sends no prompt")
+    hs.add_argument("action", choices=["probe"])
+    hs.add_argument("ids", nargs="*", help="the adapters to ask; every one that declares acp.argv when none is named")
+    hs.add_argument("--sessions", action="store_true", help="also ask how many sessions it lists for this directory")
+    hs.add_argument("--timeout", type=float, default=20.0, help="seconds each harness has to answer")
+    hs.set_defaults(fn=cmd_harness)
     bk = sub.add_parser("backup", help="write the governance to a directory, a ref or a private remote")
     bk.add_argument("--to", help="a directory, `ref`, or `remote:<name>`; default backup.to in the config")
     bk.set_defaults(fn=cmd_backup)

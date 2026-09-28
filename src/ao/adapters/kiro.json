@@ -140,6 +140,7 @@
     "idle_seconds": 240,
     "note": "status can remain in_progress across an idle gap; the mtime check is the reliable half."
   },
+  "acp": { "argv": ["kiro-cli", "acp"], "measured": "kiro-cli 2.24.1 answered initialize, 2026-09-28" },
   "detect": {
     "dirs": [".kiro"],
     "binaries": ["kiro-cli"],

@@ -893,6 +893,29 @@ def tool_review_contract(adapter):
     return review if isinstance(review, dict) and not tool_review_problems(adapter) else None
 
 
+def acp_problems(adapter):
+    """What is wrong with an adapter's ACP command, if it declares one (ACP-PROBE).
+
+    `acp.argv` starts the harness speaking ACP on its standard streams: a list of strings with no
+    placeholder, since the protocol carries the prompt and the session, and `acp.measured` names the
+    release and the day it was seen to answer `initialize`.
+    """
+    block = adapter.get("acp")
+    if block is None:
+        return []
+    if not isinstance(block, dict):
+        return ["`acp` must be an object"]
+    problems = []
+    argv = block.get("argv")
+    if not isinstance(argv, list) or not argv or not all(isinstance(a, str) and a for a in argv):
+        problems.append("`acp.argv` must be a list of strings")
+    elif any("{" in a for a in argv):
+        problems.append("`acp.argv` carries no placeholder: the protocol carries the prompt and the session")
+    if not isinstance(block.get("measured"), str) or not block["measured"].strip():
+        problems.append("`acp.measured` must say which release answered, and when")
+    return problems
+
+
 def validate_adapter(adapter):
     """What an adapter is missing or gets wrong, before anyone relies on it (#77)."""
     problems = []
@@ -925,6 +948,7 @@ def validate_adapter(adapter):
         if unknown:
             problems.append(f"`{capability}.argv` uses placeholders ao does not fill: {', '.join(unknown)}")
     return (problems + prompt_channel_problems(adapter) + tool_review_problems(adapter) + subagent_problems(adapter)
+            + acp_problems(adapter)
             + bypass_problems(adapter) + quota_stop_problems(adapter)
             + token_problems(_block(_block(adapter, "telemetry"), "cost")))
 

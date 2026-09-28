@@ -3,6 +3,7 @@
   "name": "opencode",
   "verified": "partial",
   "disclaimer": "The store is mapped on a real install (2026-09-21): one database shared by three opencode versions, 17 sessions, 220 messages, 726 parts. Flags are read from `opencode run --help` on 1.18.27 and 1.17.3, which agree. What ao does with the store is the gap: see reader below.",
+  "acp": { "argv": ["opencode", "acp"], "measured": "opencode 1.18.27 answered initialize and session/list, 2026-09-28" },
   "detect": {
     "dirs": [".opencode"],
     "files": ["opencode.json", "opencode.jsonc", "AGENTS.md"],

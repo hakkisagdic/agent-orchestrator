@@ -358,6 +358,32 @@ because a shape nobody can load is not a capability - see "What ao can reach" be
 ao's own tests run every shipped adapter through the same conformance, so a change in ao that
 would break a third party's adapter breaks ours first.
 
+## What a harness says it supports, asked in ACP
+
+*In ao since slice ACP-PROBE: an adapter's `acp` block and `ao harness probe`. It is the first step of
+driving harnesses through the Agent Client Protocol, where what a harness supports is asked, not measured
+by hand; nothing in ao reads what it answers yet but the command itself.*
+
+An adapter whose harness speaks ACP says how to start it that way: `"acp": {"argv": ["qodercli",
+"--acp"], "measured": "…"}`, a plain command with no placeholder, since the protocol carries the prompt
+and the session, and the release and the day it was seen to answer. Three are declared, the three seen
+to answer on 2026-09-28: `kiro-cli acp`, `opencode acp` and `qodercli --acp`. A harness whose ACP command
+is known only from its documentation has none until it is measured.
+
+```bash
+ao harness probe                  # every harness whose adapter declares acp.argv
+ao harness probe qoder --sessions # one, and how many sessions it lists for this directory
+```
+
+Each harness is started from its `acp.argv`, found as ao finds any program, and asked `initialize`;
+with `--sessions`, where it lists sessions, `session/list` for this directory too. It is sent no prompt
+and opens no session, so asking spends no quota, and it is stopped with everything it started as soon
+as it has answered. What it says - its protocol version, name and release, whether it loads sessions,
+which session, prompt and MCP capabilities it has and which ways it authenticates - is kept in
+`~/.ao/harness/<id>.json`, with when it was asked and which binary answered. How many sessions it listed
+is kept, and nothing of what they are. A harness that is not installed is said to be so; one that does
+not answer within `--timeout` seconds, or ends first, is said not to, and the command exits 1.
+
 ## Support matrix
 
 One row per vendor in [`adapters/vendors.json`](../src/ao/adapters/vendors.json), the canonical list every
