@@ -133,6 +133,7 @@ publishes the release.
 - `ao doctor` reads each grant's rules as the commands they run, behind `timeout`, `nice`, `env`, `sudo` and the other programs that run what follows them, rtk's wrappers and git's global options: `Bash(git -C:*)` is named for admitting `git commit --no-verify`, and `Bash(timeout 60 pytest:*)` for admitting `pytest -p x` (ALLOWLIST-NORMALIZE).
 - `ao harness probe [ID…] [--sessions]` asks each harness whose adapter declares an ACP command what it supports - `initialize`, and with `--sessions` how many sessions it lists here - and keeps the answer in `~/.ao/harness/<id>.json`; it sends no prompt and spends no quota. Kiro, OpenCode and Qoder declare the command they were seen to answer with (ACP-PROBE).
 - A rule proposal's evidence names each rate's denominator and says when the review ledger could not be read, and a decision given at a terminal records the login and whether a terminal was attached (RULE-PROPOSALS-2).
+- `ao.acp.Session` holds one ACP session with a harness and runs one prompt turn: the agent's message, its tool calls, and each permission it asks decided by a policy that allows nothing unless told otherwise; nothing drives a harness through it yet (ACP-CLIENT).
 
 ### Fixes
 

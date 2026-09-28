@@ -384,6 +384,17 @@ which session, prompt and MCP capabilities it has and which ways it authenticate
 is kept, and nothing of what they are. A harness that is not installed is said to be so; one that does
 not answer within `--timeout` seconds, or ends first, is said not to, and the command exits 1.
 
+*In ao since slice ACP-CLIENT: `ao.acp.Session`, which holds one session with a harness and runs one prompt
+turn in it. No command drives a harness through it yet; it is what the next steps build on.* The turn's
+answer is the agent's message chunks joined in the order they came, and its tool calls are kept with their
+last status. Each `session/request_permission` is decided by a policy the caller gives, which picks an option
+the agent offered; the default allows nothing, and a policy that fails or names no offered option allows
+nothing either, answering with the agent's reject option or, where it offers none, `cancelled`. Every
+decision is kept with the tool call it was about. A request for a client method ao does not provide - files,
+terminals - is answered as a method it does not have, since it declares none. A turn past its time is
+cancelled with `session/cancel`, a permission still pending then is answered `cancelled` as the protocol
+asks, and a turn that does not end even so is a timeout; the agent is stopped with everything it started.
+
 ## Support matrix
 
 One row per vendor in [`adapters/vendors.json`](../src/ao/adapters/vendors.json), the canonical list every
