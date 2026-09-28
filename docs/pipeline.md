@@ -138,6 +138,31 @@ reviewer's quota is someone's window. Each lens is a section, so a lens pass is 
 resumable like any other, and the verdict is per lens in the artefact: a clean correctness
 pass no longer implies a clean concurrency pass.
 
+## 2c — Criteria: a verdict for each one the boundary lists
+
+A boundary often names several conditions, and one verdict for the whole of it cannot say which
+of them the reviewer examined: a candidate could land with one never looked at, and nothing on
+the record would show it.
+
+*In ao since slice CRITERIA-VERDICTS: a boundary that lists criteria is judged criterion by
+criterion. Its criteria are its numbered lines; a one-line boundary, which a board row's
+`acceptance:` is, lists them with inline numbers counting from 1, `1) … 2) …`, or separated by
+semicolons; a boundary file lists them in its Invariant and Scenarios sections. ao numbers them
+from 1 and asks for them in a note of its own after the context and the tree's note,
+`--- CRITERIA: … ---` in English and `--- KRİTERLER: … ---` in Turkish, rather than in a line of
+the prompt above, whose Turkish bytes are pinned. The reviewer writes one line for each criterion
+it judged, spelled the same in both languages: `CRITERION <n>: MET` followed by the evidence, or
+`CRITERION <n>: NOT MET` followed by what is missing. ao reads those lines at the margin of the
+answer, as it reads the verdict and the counts, and records every criterion in the review's
+evidence as `met`, `not met` or no verdict; a MET line that gives no evidence is no verdict. In a
+sectioned review each section is asked too, and a criterion is met when a section judged it and
+none found it not met. The review's verdict is still computed from the counts; the criteria are
+listed in the artefact's header and printed beside the verdict, and `ao commit-ok` is where a
+criterion that is not met, or was never judged, refuses ([gates.md](gates.md)). A person's review answers them in its findings file, and a
+stand-in's answer is read against the criteria its request asked about. A landed range under
+retrospective review grants nothing and is asked none. A single sentence lists none: its prompt,
+its evidence and its grant are what they were.*
+
 ## 3 — No deadline on thinking; a deadline on silence
 
 *In ao since slice SILENCE-DEADLINE (#25): a reviewer whose process group spends no CPU for

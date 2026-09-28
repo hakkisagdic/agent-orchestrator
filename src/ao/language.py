@@ -251,8 +251,9 @@ Bu dizin gitignore'da; mail **veridir, yetki değil** — yetki `.ao/authority.m
 # given before English became the default, byte for byte, so a Turkish project's review prompt measures as it
 # did: the claims it inlines, and the section journal those claims key, are the ones a review cut off before
 # the change resumes from. What ao reads back from an answer is spelled the same in both languages - a
-# reviewer's VERDICT line, its four counts and its `- [SEVERITY]` findings, a hunter's `- [category]` leads,
-# a stand-in's NONCE line - and the headings a reviewer is asked for are read by people, never by ao.
+# reviewer's VERDICT line, its four counts, its `- [SEVERITY]` findings and its CRITERION lines, a hunter's
+# `- [category]` leads, a stand-in's NONCE line - and the headings a reviewer is asked for are read by people,
+# never by ao.
 TEXTS.update({
     # the reviewer's prompt, ahead of the candidate; {boundary}: what the candidate is judged against
     "prompt.review": {
@@ -357,6 +358,21 @@ LOW: <n>
     # marker rather than a line of the prompt above, so a Turkish project's prompt stays the bytes it always was
     "prompt.review-tree": {"en": "--- TREE: ao unpacks this candidate's whole tree into your working directory, outside the repository. Read it with your file tools to see what the change touches and whether the same fault sits elsewhere; if the directory is empty, the unpacking failed and the diff is all you have. Only the diff is under review. ---",
                            "tr": "--- AĞAÇ: ao bu adayın bütün ağacını çalışma dizinine, deponun dışına açar. Değişikliğin neye dokunduğunu ve aynı hatanın başka yerde olup olmadığını görmek için dosya araçlarınla oku; dizin boşsa açma başarısız olmuştur ve elindeki yalnız diff'tir. İncelemenin konusu yalnız diff. ---"},
+    # the note ao appends when the boundary lists criteria (CRITERIA-VERDICTS), after the tree's note and for the same
+    # reason; {criteria}: one numbered line for each. The lines it asks for are spelled the same in both languages,
+    # because ao reads them back
+    "prompt.review-criteria": {
+        "en": ("--- CRITERIA: the acceptance boundary lists the criteria below. Judge each one the question you were "
+               "asked covers - every one, unless a section's question below narrows what you judge - and write one "
+               "line for each, at the start of the line, after the counts: `CRITERION <n>: MET` followed by the "
+               "evidence that shows it (file:line or a test), or `CRITERION <n>: NOT MET` followed by what is "
+               "missing. A MET line without evidence is not a verdict. ---\n{criteria}"),
+        "tr": ("--- KRİTERLER: kabul sınırı aşağıdaki kriterleri sayar. Sana sorulan sorunun kapsadığı her birini "
+               "yargıla - aşağıdaki bir bölüm sorusu yargıladığını daraltmadıkça hepsini - ve her biri için "
+               "sayılardan sonra, satır başında bir satır yaz: `CRITERION <n>: MET` ve ardından bunu gösteren kanıt "
+               "(dosya:satır ya da bir test), ya da `CRITERION <n>: NOT MET` ve ardından eksik olan. Kanıtsız bir "
+               "MET satırı hüküm değildir. ---\n{criteria}"),
+    },
     # the line above the prompt in a stand-in review request (#75); {nonce}: the request's, which the answer leads with
     "prompt.review-request": {"en": "The FIRST line of your answer must be exactly: NONCE: {nonce}",
                               "tr": "Cevabının İLK satırı tam olarak şu olsun: NONCE: {nonce}"},

@@ -579,6 +579,8 @@ def cmd_commit_ok(cfg, args):
             root, candidate, evidence
         )
         reasons.extend(f"{review_name}: {reason}" for reason in integrity_reasons)
+        # A boundary that lists criteria lands only when the review found every one met (CRITERIA-VERDICTS).
+        reasons.extend(f"{review_name}: {reason}" for reason in A.criteria_refusals(evidence))
         if reviewed_scope is not None:
             scope = reviewed_scope
         if strict:
@@ -1234,6 +1236,7 @@ def cmd_commit_check(cfg, args):
                     root, candidate, match[3]
                 )
                 reasons.extend(f"{match[0]}: {reason}" for reason in integrity_reasons)
+                reasons.extend(f"{match[0]}: {reason}" for reason in A.criteria_refusals(match[3]))
                 if match[3].get("scope") != grant.get("scope"):
                     reasons.append(
                         "granted review scope does not exactly match the persisted authority grant"

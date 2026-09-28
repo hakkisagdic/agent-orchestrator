@@ -1433,6 +1433,48 @@ def read_boundary(root, item):
     return out
 
 
+# A boundary's numbered line: each is one of its scenarios to review_sections, and one of its criteria here.
+BOUNDARY_NUMBERED_LINE = re.compile(r"^\s*S?(\d{1,2})[.)]\s+(\S.{6,})$", re.M)
+# A number inside one line - `1.`, `1)` or `(1)` - standing between spaces.
+_INLINE_CRITERION = re.compile(r"(?<!\S)\(?(\d{1,2})[.)](?=\s)")
+# A semicolon outside backticks: the one in `ao review --boundary 'a; b'` separates nothing.
+_CRITERIA_SEMICOLON = re.compile(r";(?=(?:[^`]*`[^`]*`)*[^`]*$)")
+# The parts of a boundary file that say what must hold; its paths, out of scope and why-one-slice do not.
+CRITERIA_SECTIONS = ("invariant", "scenarios")
+
+
+def boundary_criteria(boundary, source=None):
+    """[{"id", "text"}] for each criterion an acceptance boundary lists; [] when it lists fewer than two.
+
+    One verdict for a whole boundary let a boundary of five conditions pass with one of
+    them never examined, and nothing on the record said which (CRITERIA-VERDICTS). The
+    criteria are the boundary's numbered lines. A one-line boundary, which a board row's
+    acceptance always is, lists them with inline numbers counting from 1 - `1) … 2) …` -
+    or separated by semicolons. A boundary file (`source`, from read_boundary) lists them
+    in its Invariant and Scenarios sections as ao read the file, at the commit its row
+    names; never in the diff of a later change, nor in what the file puts out of scope. A
+    single sentence lists none, and is reviewed as it always was. The criteria are numbered
+    by position, whatever numbers the boundary wrote, so no two share a name.
+    """
+    if source:
+        sections = source.get("sections") or {}
+        text = "\n".join(body for name, body in sections.items() if name in CRITERIA_SECTIONS)
+    else:
+        text = boundary
+    text = str(text or "").strip()
+    items = [body for _, body in BOUNDARY_NUMBERED_LINE.findall(text)]
+    if len(items) < 2 and "\n" not in text:
+        marks = list(_INLINE_CRITERION.finditer(text))
+        if len(marks) >= 2 and [int(mark.group(1)) for mark in marks] == list(range(1, len(marks) + 1)):
+            ends = [mark.start() for mark in marks[1:]] + [len(text)]
+            items = [text[mark.end():end] for mark, end in zip(marks, ends)]
+        else:
+            items = _CRITERIA_SEMICOLON.split(text)
+    items = [item.strip().rstrip(";,").strip() for item in items]
+    items = [item for item in items if item]
+    return [{"id": number, "text": item} for number, item in enumerate(items, 1)] if len(items) >= 2 else []
+
+
 def declared_paths(item, boundary=None):
     """[(path, new)] a slice declares: its boundary file's Paths section, or its row's `paths:` note."""
     if boundary and boundary.get("sections", {}).get("paths"):

@@ -84,7 +84,9 @@ Anything not forbidden there and inside the slice's scope is allowed.
    `ao status` names it and the watchdog raises it. A parked slice holds no slot.
 7. `ao commit-ok --verify` — runs the quick gates itself when verification is
    stale, then persists a grant only for the exact staged index candidate when
-   its verification and newest matching prospective review approve, no urgent
+   its verification and newest matching prospective review approve, that review
+   found every criterion the boundary lists met (numbered, or separated by
+   semicolons; a refusal names each one not met or never judged), no urgent
    mail is unacknowledged, and no plan drift exists. Authority rows form a
    predecessor hash chain; `ao commit-check` refuses a malformed or broken chain
    before it considers a grant. Enforcement is enrolled only when the root

@@ -1035,7 +1035,7 @@ def review_sections(cfg, item, boundary_text, diff):
         return [{"name": f"lens:{lens}",
                  "question": f"Lens `{lens}`: {REVIEW_LENSES[lens]} Judge the candidate only through this lens, "
                              "and count only the findings it reveals."} for lens in lenses], record
-    scenarios = A.re.findall(r"^\s*S?(\d{1,2})[.)]\s+(\S.{6,})$", boundary_text or "", A.re.M)
+    scenarios = A.BOUNDARY_NUMBERED_LINE.findall(boundary_text or "")
     if len(scenarios) >= 2:
         return [{"name": f"scenario:{number}",
                  "question": f"Scenario {number}: {text.strip()} Judge only whether the candidate satisfies this "
@@ -1121,9 +1121,10 @@ def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, s
     attempt.pop("tool", None)
     if handoffs and all(handoffs) and all(handoff == handoffs[0] for handoff in handoffs):
         attempt["tool"] = handoffs[0]
+    # Each section's own answer too: the combined output indents them, and a criterion is read at an answer's margin.
     return {"used": chain[position], "used_position": position, "attempt": attempt, "failures": {},
             "labels": (last or {}).get("labels") or {}, "chain": chain,
-            "sections": [_section_summary(row) for row in rows]}
+            "sections": [_section_summary(row) for row in rows], "answers": [row["out"] for row in rows]}
 
 
 def _section_summary(row):
@@ -1735,8 +1736,16 @@ def cmd_collect_review(cfg, args):
         print(f"{C['red']}refused{C['reset']}: the staged candidate changed since the request; "
               "the answer is about other bytes")
         return 1
+    # The criteria the request's prompt asked about, which its boundary - for a boundary file, only the
+    # file's name - cannot give back (CRITERIA-VERDICTS).
+    criteria = request.get("criteria")
+    if criteria is not None and not (isinstance(criteria, list) and all(
+            isinstance(item, dict) and isinstance(item.get("id"), int) and isinstance(item.get("text"), str)
+            for item in criteria)):
+        print(f"{C['red']}refused{C['reset']}: request {args.nonce} records criteria ao cannot read")
+        return 2
     route = {"id": f"human-assisted:{model}", "family": "human-assisted"}
-    carried = {"route": route, "out": out, "evidence": {
+    carried = {"route": route, "out": out, "criteria": criteria, "evidence": {
         "transport": "human-carried", "collected_by": by, "nonce": request["nonce"],
         "limits": list(A.STANDIN_LIMITS)}}
     before = A.review_row_count(root)
@@ -1774,8 +1783,12 @@ def _digest_read(given, digest):
     return len(text) >= 12 and bool(A.re.fullmatch(r"[0-9a-f]+", text)) and whole.startswith(text)
 
 
-def _show_person_review(person, diff, evidence, boundary, args):
-    """Print what a reviewer would be handed, with the digest a person records a verdict against; nothing is written."""
+def _show_person_review(person, diff, evidence, boundary, args, criteria=()):
+    """Print what a reviewer would be handed, with the digest a person records a verdict against; nothing is written.
+
+    A boundary's criteria are listed with it, since a person answers them as a reviewer does,
+    in the findings file (CRITERIA-VERDICTS).
+    """
     import shlex
     sys.stdout.write(diff if diff.endswith("\n") else diff + "\n")
     short = evidence["diff_digest"][len("sha256:"):][:PERSON_DIGEST_HEX]
@@ -1784,9 +1797,15 @@ def _show_person_review(person, diff, evidence, boundary, args):
     base = " ".join(part for part in ("ao person-review", f"--by {shlex.quote(person['by'])}", scope) if part)
     print(f"\n{C['b']}what a reviewer would be handed{C['reset']}  {evidence['diff_digest']}")
     print(f"  boundary: {A.review_header_value(boundary)}")
+    if criteria:
+        print(f"  {C['dim']}it lists {len(criteria)} criteria; answer each in the findings file, on a line of its own: "
+              f"CRITERION <n>: MET - the evidence, or CRITERION <n>: NOT MET - what is missing. ao commit-ok "
+              f"grants only when every one is met:{C['reset']}")
+        for criterion in criteria:
+            print(f"    {criterion['id']}. {A.review_header_value(criterion['text'])}")
     print(f"  {C['dim']}nothing was recorded; judge the diff above against the boundary, then record the verdict on "
           f"exactly these bytes:{C['reset']}")
-    print(f"  {base} --verdict APPROVED --digest {short}")
+    print(f"  {base} --verdict APPROVED --digest {short}" + (" --findings <file>" if criteria else ""))
     print(f"  {base} --verdict NEEDS_CHANGES --digest {short} --findings <file>")
     print(f"  {C['dim']}a findings file holds one finding a line: - [BLOCKER|HIGH|MEDIUM|LOW] file:line - what "
           f"breaks; only BLOCKER and HIGH decide{C['reset']}")
@@ -1797,7 +1816,9 @@ def _person_answer(verdict, path):
 
     Counts are read from the findings, never typed, and they decide as a model's do: an
     approval with a BLOCKER or HIGH finding is refused, and so is a rejection naming none.
-    Lines that are not findings are kept indented, so no line of the file reads as a verdict.
+    A criterion's line is kept at the margin, where it is read as a reviewer's is
+    (CRITERIA-VERDICTS); every other line that is not a finding is kept indented, so no
+    line of the file reads as a verdict.
     """
     lines = []
     if path:
@@ -1815,6 +1836,8 @@ def _person_answer(verdict, path):
         found = PERSON_FINDING.match(line.strip())
         if found:
             counts[found.group(1)] += 1
+            kept.append(line.strip())
+        elif A.CRITERION_ANSWER.fullmatch(line.strip()):
             kept.append(line.strip())
         else:
             kept.append("    " + line)
@@ -2345,12 +2368,16 @@ def cmd_review(cfg, args):
     if source:
         evidence["boundary_file"] = {key: source[key] for key in ("file", "commit", "sha256", "changed")}
     evidence["measured_by"] = A.measured_by()
+    # A boundary that lists criteria is judged criterion by criterion. A landed range grants nothing, so
+    # it is asked none, and a stand-in's answer is read against the criteria its request asked about
+    # (CRITERIA-VERDICTS).
+    criteria = [] if args.commits else (carried or {}).get("criteria") or A.boundary_criteria(boundary, source)
     if person:
         # A person reads the bytes a reviewer would be handed and records a verdict on exactly
         # those: shown first with their digest, recorded only when the digest still matches, so
         # a candidate restaged while the person read is never the one approved (REVIEW-TIERS).
         if not person.get("verdict"):
-            _show_person_review(person, diff, evidence, boundary, args)
+            _show_person_review(person, diff, evidence, boundary, args, criteria)
             return 0
         if not _digest_read(person.get("digest"), evidence["diff_digest"]):
             print(f"{C['red']}refused{C['reset']}: the diff is not the one you read - it is "
@@ -2406,8 +2433,13 @@ def cmd_review(cfg, args):
     section_marker = language.text(cfg, "prompt.review-section")
     smallest = language.text(cfg, "prompt.review", boundary=_claims_statement(statement, "") if wanted else statement) \
         + size_note + f"\n\n{candidate_marker}\n" + diff
+    # The criteria are asked in a note after the context and the tree's, where a section's question
+    # follows too, so the note is measured with the question; a boundary with none adds nothing.
+    criteria_note = "" if not criteria else "\n\n" + language.text(
+        cfg, "prompt.review-criteria",
+        criteria="\n".join(f"{criterion['id']}. {criterion['text']}" for criterion in criteria)) + "\n"
     asked = max((len(f"\n\n{section_marker}\n{section['question']}".encode(UTF8)) for section in sections),
-                default=0)
+                default=0) + len(criteria_note.encode(UTF8))
     share = S.get(cfg, "review.context_bytes")
     bound, held = _review_prompt_bound(chain, len(smallest.encode(UTF8)), asked, share, len(diff_bytes), cfg)
     claims = None
@@ -2443,6 +2475,10 @@ def cmd_review(cfg, args):
     treeless = prompt
     if (candidate or {}).get("index_tree"):
         prompt += f"\n\n{language.text(cfg, 'prompt.review-tree')}\n"
+    # Every route is asked the criteria, a tool and a stand-in session too: their answers are read
+    # against them as well (CRITERIA-VERDICTS).
+    prompt += criteria_note
+    treeless += criteria_note
     if held and ((claims or {}).get("inlined", 0) < (claims or {}).get("commits", 0) or (context or {}).get("omitted")):
         print(f"{C['dim']}claims and context were held to one argument's worth, {REVIEW_PROMPT_ARG_BYTES} bytes: "
               f"{held} takes its prompt in its argument alone{C['reset']}")
@@ -2537,7 +2573,7 @@ def cmd_review(cfg, args):
             try:
                 request = A.write_review_request(
                     root, cfg, candidate, scope, evidence.get("diff_digest"), boundary,
-                    evidence.get("slice"), args.paths, treeless)
+                    evidence.get("slice"), args.paths, treeless, criteria=criteria)
             except OSError as exc:
                 request = None
                 print(f"{C['dim']}no stand-in request was written: {exc}{C['reset']}")
@@ -2657,6 +2693,11 @@ def cmd_review(cfg, args):
             reviewer_identity=used["identity"], review_status="complete",
         )
     sev = {key: int(values[0]) for key, values in severity_values.items()}
+    if criteria:
+        # What the review found of each criterion, read from the reviewer's own answer or from each
+        # section's. The verdict below is still the counts'; `ao commit-ok` is where a criterion that is
+        # not met, or was never judged, refuses (CRITERIA-VERDICTS).
+        evidence["criteria"] = A.criterion_verdicts(criteria, invocation.get("answers") or [out])
     # Finding counts are the decision input; reviewer prose cannot quietly
     # override the published rule. MEDIUM and LOW remain non-blocking notes.
     # The artefact carries this adjudicated verdict, a line saying why it
@@ -2750,7 +2791,7 @@ def cmd_review(cfg, args):
               f"- tier: {T.label(review_tier)}" if review_tier else "- tier: not established",
               implementer_line,
               f"- tree: `{A.tree_digest(root, cfg)}`",
-              f"- boundary: {A.review_header_value(boundary)}"]
+              f"- boundary: {A.review_header_value(boundary)}"] + A.review_criteria_lines(evidence.get("criteria"))
     if context is not None:
         header.append(A.review_context_line(context))
     if candidate is not None:
@@ -2788,6 +2829,13 @@ def cmd_review(cfg, args):
     elif review_tier is None and not carried and not strict:
         print(f"{C['yellow']}tier{C['reset']}  not established: no implementer is configured, so the reviewer "
               "was compared with nobody — ao doctor")
+    unmet = A.criteria_refusals(evidence)
+    if unmet:
+        # Said here, where the implementer reads the verdict, rather than first at the refusal.
+        print(f"{C['yellow']}criteria{C['reset']}  {len(unmet)} of {len(evidence['criteria'])} not met or not "
+              "judged; ao commit-ok refuses until every one is met:")
+        for reason in unmet:
+            print("  " + reason[:150])
     if verdict != "APPROVED":
         for line in out.split("\n"):
             if line.strip().startswith("- ["):

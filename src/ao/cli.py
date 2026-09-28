@@ -326,7 +326,8 @@ def build_parser():
                     help="record this verdict; without it the diff and its digest are shown and nothing is recorded")
     pr.add_argument("--digest", help="with --verdict: the digest shown beside the diff you read")
     pr.add_argument("--findings", help="a file of findings, one a line: - [BLOCKER|HIGH|MEDIUM|LOW] file:line - what "
-                                       "breaks; NEEDS_CHANGES needs a BLOCKER or HIGH one")
+                                       "breaks; NEEDS_CHANGES needs a BLOCKER or HIGH one. A boundary's criteria are "
+                                       "answered there too: CRITERION <n>: MET|NOT MET - the evidence")
     pr.add_argument("--boundary", help="acceptance boundary; defaults to the running slice")
     pr.add_argument("--paths", nargs="*", help="narrow the review to these staged paths")
     pr.add_argument("--commits", help="a landed range instead of the staged candidate: what catch-up closes a waiver on")

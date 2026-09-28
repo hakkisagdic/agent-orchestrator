@@ -165,6 +165,13 @@ last file change — or against a verification produced by the same actor that w
 code. Both refusals are enforced, not advised; see separation of duties in
 [`safety.md`](safety.md).
 
+*In ao since slice CRITERIA-VERDICTS: when the boundary lists criteria, an approval is not
+enough. The review records a verdict for each criterion ([pipeline.md](pipeline.md), §2c), and
+`ao commit-ok` refuses unless every one is `met`, naming each criterion that is not met and each
+that has no verdict, with the reviewer's evidence; `ao commit-check` holds the grant to the same
+record. What the review recorded is read, never worked out again from a boundary that may have
+moved since. A review of a single-sentence boundary records no criteria, and grants as before.*
+
 Push is not a gate outcome and never becomes one. It stays a direct human act.
 
 ## Serialisation and machine pressure

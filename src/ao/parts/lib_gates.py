@@ -1297,6 +1297,89 @@ def candidate_review_integrity(root, candidate, evidence):
     return scope, reasons
 
 
+# ---- a boundary's criteria, each with a verdict of its own (CRITERIA-VERDICTS) ---------
+
+# The line a reviewer gives one criterion, spelled the same in every language because ao reads it back:
+# `CRITERION <n>: MET` or `CRITERION <n>: NOT MET`, then its evidence. A list bullet and bold are allowed.
+CRITERION_ANSWER = re.compile(r"""
+    (?:[-*][ \t]+)?                                         # a list bullet
+    (?:\*\*)?CRITERION[ \t]+(\d{1,3})[ \t]*:(?:\*\*)?[ \t]*
+    (?:\*\*)?(NOT[ \t]+MET|MET)(?:\*\*)?(?!\w)
+    [ \t]*[—–:-]*[ \t]*(.*)                                 # the evidence, after a dash or a colon
+""", re.I | re.X)
+CRITERION_EVIDENCE_CHARS = 300
+CRITERION_UNSUPPORTED = "it was said to be met with no evidence"
+
+
+def criterion_verdicts(criteria, answers):
+    """Each criterion with what a review's answers found of it: met, not met, or no verdict (None).
+
+    `answers` are the reviewer's own words: a review's one answer, or each of its
+    sections'. A criterion's line counts only at the margin, where the verdict and the
+    counts are read, so an indented line - a quotation, an example - decides nothing. A
+    MET line that gives no evidence is no verdict, since the evidence is what the line is
+    for, and the record says so. Across the sections of one review a criterion is met
+    when a section judged it and none found it not met: a scenario's section judges its
+    own, and one section's NOT MET stands however many others found it met.
+    """
+    from .verdicts import CriterionVerdict
+    said = {str(criterion.get("id")): [] for criterion in criteria}
+    for answer in answers:
+        for line in str(answer or "").splitlines():
+            found = None if line[:1].isspace() else CRITERION_ANSWER.fullmatch(line.rstrip())
+            if not found or str(int(found.group(1))) not in said:
+                continue
+            evidence = found.group(3).strip()[:CRITERION_EVIDENCE_CHARS]
+            if found.group(2).upper() != "MET":
+                verdict = CriterionVerdict.NOT_MET.value
+            elif evidence:
+                verdict = CriterionVerdict.MET.value
+            else:
+                verdict, evidence = None, CRITERION_UNSUPPORTED
+            said[str(int(found.group(1)))].append((verdict, evidence))
+    # Not met outranks met, and met outranks a line that was no verdict; among equals the first line said stands.
+    rank = (CriterionVerdict.NOT_MET.value, CriterionVerdict.MET.value, None)
+    out = []
+    for criterion in criteria:
+        heard = sorted(said[str(criterion.get("id"))], key=lambda entry: rank.index(entry[0]))
+        verdict, evidence = heard[0] if heard else (None, "")
+        out.append({"id": criterion.get("id"), "text": criterion.get("text"), "verdict": verdict,
+                    "evidence": evidence})
+    return out
+
+
+def criteria_refusals(evidence):
+    """Each criterion of a review that keeps it from authorising, named: not met, or with no verdict.
+
+    What the review recorded is read, never worked out again from the boundary, which
+    may have moved since. A review of a boundary that lists no criteria records none,
+    and nothing is refused here: a single sentence grants as it always did.
+    """
+    from .verdicts import CriterionVerdict
+    criteria = evidence.get("criteria") if isinstance(evidence, dict) else None
+    if criteria is None:
+        return []
+    if not isinstance(criteria, list) or not all(isinstance(criterion, dict) for criterion in criteria):
+        return ["review evidence records criteria that are not a list of criteria"]
+    out = []
+    for criterion in criteria:
+        verdict = criterion.get("verdict")
+        if verdict == CriterionVerdict.MET.value:
+            continue
+        state = "is not met" if verdict == CriterionVerdict.NOT_MET.value else "has no verdict"
+        why = f" — {criterion['evidence']}" if criterion.get("evidence") else ""
+        out.append(review_header_value(f"criterion {criterion.get('id')} {state}: {criterion.get('text')}{why}"))
+    return out
+
+
+def review_criteria_lines(criteria):
+    """The artefact's header line for each criterion: its number and words, its verdict, the reviewer's evidence."""
+    return [f"- criterion {criterion['id']} ({review_header_value(criterion['text'])}): "
+            + review_header_value((criterion["verdict"] or "no verdict")
+                                  + (f" — {criterion['evidence']}" if criterion["evidence"] else ""))
+            for criterion in criteria or []]
+
+
 REVIEW_CHAIN = "ao-review-row-v1"
 
 
@@ -1310,14 +1393,18 @@ STANDIN_LIMITS = (
 )
 
 
-def write_review_request(root, cfg, candidate, scope, diff_digest, boundary, slice_id, paths, prompt):
+def write_review_request(root, cfg, candidate, scope, diff_digest, boundary, slice_id, paths, prompt,
+                         criteria=None):
     """A review request a person can carry to a session ao cannot reach (#75).
 
     Written when no reviewer could be reached for a staged candidate: the prompt the
     reviewer would have received - as `ao review` hands it here, without the note about
     a tree the session a person carries it to does not hold (REVIEW-TREE-2) - and a
     nonce the answer must lead with, asked for in the project's language
-    (LANGUAGE-PROMPTS). The metadata beside it binds the request to that candidate.
+    (LANGUAGE-PROMPTS). The metadata beside it binds the request to that candidate, and
+    keeps the criteria the prompt asks about, if any: the answer is read against those
+    when it is collected, although the boundary kept beside them is only a boundary
+    file's name (CRITERIA-VERDICTS).
     """
     import secrets
     from .storage import replace_file_durably
@@ -1326,6 +1413,8 @@ def write_review_request(root, cfg, candidate, scope, diff_digest, boundary, sli
     meta = {"nonce": nonce, "at": int(time.time()), "candidate": candidate["digest"],
             "index_tree": candidate["index_tree"], "scope": scope, "diff_digest": diff_digest,
             "boundary": boundary, "slice": slice_id, "paths": paths, "collected": None}
+    if criteria:
+        meta["criteria"] = criteria
     path = os.path.join(directory, f"{nonce}.md")
     replace_file_durably(os.path.join(directory, f"{nonce}.json"),
                          json.dumps(meta, indent=1, sort_keys=True).encode(UTF8))

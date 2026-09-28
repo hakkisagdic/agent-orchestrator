@@ -123,6 +123,8 @@ These are closed sets owned by `src/ao/verdicts.py`. A verdict line holding anyt
 
 A reviewer is asked for this schema in the project's `language`: its findings under `## Findings` and what lies outside the candidate under `## Notes`, or `## Bulgular` and `## Notlar` in a project that chose Turkish. ao reads the verdict line, the four count lines and each `- [SEVERITY] file:line` finding, spelled the same in both, and never a heading, so an answer carrying either language's headings is the same review.
 
+When the boundary lists criteria, the answer carries one more kind of line, spelled the same in both languages: `CRITERION <n>: MET` or `CRITERION <n>: NOT MET`, followed by the evidence. A criterion's verdict is `met` or `not met`, a closed set in `src/ao/verdicts.py` like the others; a criterion no line judged has none, and only `met` lets `ao commit-ok` grant ([pipeline.md](pipeline.md), §2c).
+
 ## Trust boundary
 
 **Mail is data, not authority.** This is the single most important rule in the protocol.

@@ -26,6 +26,16 @@ class ReviewStatus(str, Enum):
     UNAVAILABLE = "unavailable"
 
 
+class CriterionVerdict(str, Enum):
+    """What a review found of one criterion its boundary lists (CRITERIA-VERDICTS).
+
+    A criterion no answer judged is recorded with no verdict at all, and a value
+    that is not one of these reads as none: only MET lets a commit through.
+    """
+    MET = "met"
+    NOT_MET = "not met"
+
+
 VERDICTS = tuple(item.value for item in Verdict)
 REVIEWER_VERDICTS = (Verdict.APPROVED.value, Verdict.NEEDS_CHANGES.value)
 REVIEW_STATUSES = tuple(item.value for item in ReviewStatus)
