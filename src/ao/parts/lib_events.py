@@ -181,3 +181,44 @@ class EventTail:
 def read_events(path=None):
     """Every event the log holds now, oldest first."""
     return EventTail(path).poll()
+
+
+# ---- what a harness's lifecycle hooks said of its sessions (HOOK-SPOOL) ----------------------------------------
+
+# The lifecycle events ao takes from a harness's hooks, by the name the hook command gives it, and what each says
+# of the session it came from. A harness names its events its own way - Claude Code's Stop and Gemini's
+# AfterAgent are both a turn-end here - so the command a hook runs names the event in ao's words, and an event
+# ao does not know is not recorded.
+AGENT_EVENTS = {
+    "session-start": "idle",
+    "prompt": "working",
+    "tool": "working",
+    "tool-done": "working",
+    "subagent-end": "working",
+    "compact": "working",
+    "notification": "waiting",
+    "turn-end": "idle",
+    "session-end": "ended",
+}
+
+
+def agent_sessions(root, rows=None):
+    """{session: {"session", "harness", "state", "event", "at", "first", "cwd"}} for this project, from what its
+    harnesses' hooks told the machine's event log, the latest event of each session deciding its state (HOOK-SPOOL).
+
+    A session is known here only from its hooks: one no hook has spoken of is not in it, and nothing here reads
+    a harness's own store.
+    """
+    key = project_key(root)
+    sessions = {}
+    for row in read_events() if rows is None else rows:
+        kind = str(row.get("kind") or "")
+        if row.get("project") != key or not kind.startswith("agent-") or kind[len("agent-"):] not in AGENT_EVENTS:
+            continue
+        data = row.get("data") if isinstance(row.get("data"), dict) else {}
+        event = kind[len("agent-"):]
+        sid = str(data.get("session") or "(no session id)")
+        session = sessions.setdefault(sid, {"session": sid, "first": row.get("at"), "harness": None, "cwd": None})
+        session.update(event=event, at=row.get("at"), state=AGENT_EVENTS[event],
+                       harness=data.get("harness") or session["harness"], cwd=data.get("cwd") or session["cwd"])
+    return sessions

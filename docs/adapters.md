@@ -443,6 +443,31 @@ The first twenty-one rows are Traycer's canonical enum, the coverage this list i
 against; then the harnesses ao shipped before it, and last a tool reviewer. Moving a row to `full` is the most valuable
 contribution this project can take. See [`adapters/README.md`](../src/ao/adapters/README.md).
 
+## A third: the harness says what it is doing
+
+*In ao since slice HOOK-SPOOL: `ao agent-hook EVENT [--harness ID]` and `ao agents`. A harness's lifecycle
+hooks can tell ao what a session is doing, where the two modes below read it back from a store or a
+record. No command installs the hooks yet, and nothing but `ao agents` reads them yet.*
+
+A hook the harness runs on each lifecycle event records the event in the machine's event log
+(`~/.ao/events.jsonl`, as `agent-<event>`), named in ao's words: `session-start`, `prompt`, `tool`,
+`tool-done`, `subagent-end`, `compact`, `notification`, `turn-end` and `session-end`. From the JSON the
+hook hands over, ao keeps the session's id and directory, and a tool's name or a notification's type
+where the event is one - never a prompt, a tool's input or output, or a transcript. The command prints
+nothing, which a harness may read as its own input, and always exits 0, so it neither fails nor holds the
+turn that ran it: input that does not arrive within two seconds is let go, an event ao does not know is
+not recorded, and a directory that is no ao project records nothing. `ao agents` shows each session's
+latest state: working, waiting (a notification, such as a permission prompt), idle (its turn ended) or
+ended. For Claude Code, the hooks are its settings' `hooks` block:
+
+```json
+{"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "ao agent-hook session-start --harness claude-code"}]}],
+           "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "ao agent-hook prompt --harness claude-code"}]}],
+           "Notification": [{"hooks": [{"type": "command", "command": "ao agent-hook notification --harness claude-code"}]}],
+           "Stop": [{"hooks": [{"type": "command", "command": "ao agent-hook turn-end --harness claude-code"}]}],
+           "SessionEnd": [{"hooks": [{"type": "command", "command": "ao agent-hook session-end --harness claude-code"}]}]}}
+```
+
 ## Two observation modes
 
 Not every CLI keeps a transcript you can read, and that turns out not to matter.

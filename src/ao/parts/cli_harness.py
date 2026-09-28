@@ -69,3 +69,78 @@ def cmd_harness(cfg, args):
               f"session: {', '.join(found['session']) or '-'}  mcp: {', '.join(found['mcp']) or '-'}"
               + (f"  sessions here: {found['sessions']}" if "sessions" in found else ""))
     return 1 if failed else 0
+
+
+# ---- a harness's lifecycle hooks: `ao agent-hook EVENT`, and `ao agents` (HOOK-SPOOL) ---------------------------
+
+AGENT_HOOK_BYTES = 1 << 20          # a hook's input past this is not read
+AGENT_HOOK_WAIT = 2.0               # seconds a hook's input may take to arrive
+
+
+def _hook_input():
+    """The JSON a hook hands its command on standard input, or {}: read for AGENT_HOOK_WAIT seconds at most, so
+    a harness that leaves the stream open never holds its own turn on ao."""
+    import threading
+    if sys.stdin is None or sys.stdin.isatty():
+        return {}
+    got = []
+
+    def read():
+        try:
+            got.append(sys.stdin.read(AGENT_HOOK_BYTES + 1))
+        except (OSError, ValueError):
+            pass
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    reader.join(AGENT_HOOK_WAIT)
+    raw = got[0] if got else ""
+    if not raw or len(raw) > AGENT_HOOK_BYTES:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def cmd_agent_hook(cfg, args):
+    """Record one lifecycle event a harness's hook hands ao in the machine's event log, and nothing else (HOOK-SPOOL).
+
+    The hook names the event in ao's words (A.AGENT_EVENTS) and, with --harness, the adapter it is.
+    From what the hook hands over on standard input ao keeps the session's id and directory, and a
+    tool's name or a notification's type where the event is one: never a prompt, a tool's input or
+    output, or a transcript. It writes nothing on standard output, which a harness may read as its
+    own input, and always exits 0, so a hook can neither fail a turn nor hold it: an event ao does not
+    know, or one from a directory that is no ao project, is not recorded, and nothing is said.
+    """
+    root = cfg.get("root")
+    if args.event not in A.AGENT_EVENTS or not root or not os.path.isdir(os.path.join(root, ".ao")):
+        return 0
+    payload = _hook_input()
+
+    def text(key, limit=256):
+        value = payload.get(key)
+        return value[:limit] if isinstance(value, str) and value.strip() else None
+
+    A.emit_event(root, f"agent-{args.event}", {
+        "harness": args.harness, "session": text("session_id", 128), "cwd": text("cwd", 1024),
+        "tool": text("tool_name", 128) if args.event in ("tool", "tool-done") else None,
+        "notice": text("notification_type", 64) if args.event == "notification" else None})
+    return 0
+
+
+def cmd_agents(cfg, args):
+    """The sessions this project's harnesses' hooks have spoken of, and what each is doing now (HOOK-SPOOL)."""
+    sessions = sorted(A.agent_sessions(cfg["root"]).values(), key=lambda s: s.get("at") or 0, reverse=True)
+    if not sessions:
+        print(f"{C['dim']}No harness has told ao of a session here through its hooks.{C['reset']}")
+        return 0
+    now = time.time()
+    tone = {"working": C["green"], "waiting": C["yellow"], "idle": C["dim"], "ended": C["dim"]}
+    for session in sessions:
+        since = _elapsed(now - float(session.get("at") or now))
+        print(f"  {tone.get(session['state'], '')}{session['state']:<8}{C['reset']} "
+              f"{str(session.get('harness') or '?'):<12} {session['session'][:24]:<24} "
+              f"{since:>8}  last: {session['event']}")
+    return 0
