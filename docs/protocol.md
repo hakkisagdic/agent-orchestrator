@@ -272,6 +272,52 @@ Keep the always-included file short and durable. It is paid for on every turn, s
 transient state does not belong there — but the *rule* that resolves a class of
 transient confusion does, and it is the cheapest fix available for a loop.
 
+## Changing the rules: an agent proposes, a person decides
+
+The rules an agent works under - the playbook, a steering or rule file, `.ao/authority.md`, a
+gate - are the one text it must never rewrite because it judges them wrong. An agent that edits
+the rule it is held to has decided its own authority, and nobody else did; and a rule that
+really is wrong still has to reach the person who can change it. A slice whose scope names the
+change is scope, as any slice is. Otherwise an agent proposes the change:
+
+```bash
+ao propose "Run the full gates before review when a slice touches the ledger" \
+  --why "two slices passed quick, were approved, and failed full after landing" \
+  --rule-file .ao/gates.json
+ao proposals                     # what waits for a person
+ao answer D-1789560000 a         # a person decides: a) accept, b) reject, x <their own words>
+ao proposals --all               # every proposal, with its answer
+```
+
+`ao propose`, or `ao_propose` over MCP, records the proposal as a row of the decision ledger,
+`.ao/ledger/decisions.jsonl`, chained as `ao decide` chains its rows. The row holds who proposed
+it, the change, why, the rule file with the digest of its bytes then, and the evidence: the
+outcomes of the project's last ten landed slices, as `ao stats` measures them. Who is what ao can
+establish, as a waived grant records its author: the role of a turn ao started, with the actor
+holding it and its adapter, or a caller ao did not start, by the CLI or MCP. `--why` is required,
+and a rule file must be one of the project's own files. With the row goes a question in
+`.ao/decisions/`, sent to the phone when one is set up, and answered as every question is:
+`ao answer` in a terminal, or a tap on the phone.
+
+The question waits in a state of its own, `proposed`, not `open`: it parks no slice, so no nudge
+stands down for it, it climbs no alarm ladder and wakes no architect, and a handoff does not list
+it among what unblocks the work. `ao decisions` shows it; `ao proposals` lists the open ones, and
+with `--all` each decided one with its answer, who gave it, and whether the rule file changed
+since it was proposed. The same change proposed again while one stands open is not recorded twice.
+
+A person decides it. `ao answer` refuses a proposal's question from a turn ao started, for either
+role, and `ao decide --answers` refuses it before recording or mailing anything: both would be an
+agent deciding the rules it works under. What ao cannot see stays a limit, as with every person's
+act: an agent in a session a person opened, answering at a terminal, looks like that person.
+
+Nothing writes a rule file: not `ao propose`, and not an accepted answer. Accepting records the
+decision; the change itself is an edit a person makes, or has made, where the rule lives.
+
+*In ao since slice RULE-PROPOSALS: `ao propose`, `ao proposals` and the `ao_propose` MCP tool. A
+proposal is a chained row of the decision ledger and a question in the state `proposed`, which a
+person accepts or rejects through `ao answer` or the phone; neither the command nor the answer
+writes a rule file.*
+
 ## Waking the architect
 
 A notification is not an actor. The watchdog could raise a desktop alert and write

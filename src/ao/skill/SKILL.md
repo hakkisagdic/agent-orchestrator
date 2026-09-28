@@ -120,6 +120,15 @@ question never stops the queue, and it is never asked twice. The architect
 answers the parked questions in one pass on return (`ao decisions`); `ao doctor`
 shows how long it has been away and how many wait.
 
+**When a rule is wrong.** The rules you work under - this playbook, a steering or
+rule file, `.ao/authority.md`, a gate - are never yours to change because you judge
+them wrong, however sure you are: only a person's decision, or a slice whose scope
+names the change, touches them. Propose it:
+`ao propose "…" --why "…" [--rule-file <path>]`, or `ao_propose`. It is recorded in
+the decision ledger with the outcomes of the recent slices, and a person accepts or
+rejects it; `ao decisions` shows the answer. Until then, work on under the rule as
+it stands. The same change proposed twice is one proposal.
+
 ## 4. Talking: the mailbox and its tools
 
 - Files: `agent-mail/<YYYYMMDD-HHMM>-<from>-to-<to>-<KIND>-<slug>.md`. Delivery
@@ -127,8 +136,9 @@ shows how long it has been away and how many wait.
   message ao writes carries a front-matter envelope (`kind/from/to/slice/at/id`)
   and is mirrored to `.ao/ledger/mail.jsonl` (`ao mail log`, `ao mail search`).
 - Tools: `ao_inbox`, `ao_ack`, `ao_report {blocked|status|done}`, `ao_ask`
-  (options, answerable from a phone), `ao_decisions`, `ao_status`, `ao_board`,
-  `ao_notices`, `ao_fanout`, `ao_watchdog`.
+  (options, answerable from a phone), `ao_decisions`, `ao_propose` (a change to a
+  rule, for a person to decide), `ao_status`, `ao_board`, `ao_notices`, `ao_fanout`,
+  `ao_watchdog`.
 - **One blocker, one report.** `ao_report` folds a repeat into the standing
   file and returns `repeated: N`; when you see it, end the turn with one line.
   Eighty copies of one request once produced eighty anomalies and forty wakes.
@@ -178,7 +188,9 @@ invariant boundaries, or from a bound source by writing `.ao/inbox/` and running
 Over-budget slice: re-specify (inventory first); the budget restarts at your
 decision. A wake edits `.ao/backlog.md`, `.ao/board.md` and `.ao/inbox/` and no
 other file — never product code, never ao's own source; `ao note` is the only
-door to the mailbox you need.
+door to the mailbox you need. A rule proposal (`ao proposals`) waits for a person,
+not for you: never answer one, and `ao answer` refuses it from a turn ao started. A
+rule of your own that is wrong is proposed the same way, with `ao propose`.
 
 ## 8. Parallel agents
 
@@ -223,7 +235,8 @@ Nothing is skipped silently and nothing is lost.
 ## 11. Never
 
 Push. Open a PR. Force-push or bypass hooks. Tick an epic box. Change an
-architectural contract (write `## DECISION REQUIRED` instead). Present fixture evidence
+architectural contract (write `## DECISION REQUIRED` instead). Change a rule you work
+under because you judge it wrong (propose it with `ao propose`). Present fixture evidence
 as production-qualified. Touch another repository. Kill a process you did not
 start. Run anything in a repository whose owner has not approved it.
 
@@ -258,6 +271,8 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao note` | architect → implementer note without raw file writes (`--urgent`) |
 | `ao decide` | record an architect decision (`--scope`, `--why`, `--answers D-…`) |
 | `ao ask` / `ao answer <D-id> <key>` / `ao decisions` | questions with options; the answers unpark slices. An answer is a key the question offers, `x <text>` for your own words; anything else is refused, naming the keys. An answered question keeps its answer: `--change` replaces it, and the first stays on the record |
+| `ao propose "…" --why "…" [--rule-file <path>]` | propose a change to a rule you work under instead of editing it: recorded in the decision ledger with who, why, the rule file and the recent slices' outcomes, and asked of a person, who accepts or rejects it with `ao answer`; it writes no rule file |
+| `ao proposals [--all]` | the rule proposals waiting for a person; `--all` adds the decided ones, their answers and whether the rule file changed since |
 | `ao lock -- <cmd>` | hold the writer lock, run a gate, record it |
 | `ao verify -p quick|full` | run the declared gates and record the measured result |
 | `ao merge-check <branch>` | gate the result of a merge before merging; the record names both parents |

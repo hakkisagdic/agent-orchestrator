@@ -42,7 +42,8 @@ changes nothing, **write** records something in its mailbox, decisions or ledger
 | `ao_ack` | write | Acknowledges one message once it is applied or rejected: removes it, or records it handled when `mail.store` is append-only. |
 | `ao_report` | write | Writes a report to the architect; `blocked` wakes it on the next watchdog cycle, and a repeat folds into the report already standing. |
 | `ao_ask` | write | Records a question with options for the architect or a person, and sends it to a phone when one is set up. |
-| `ao_decisions` | read | The questions asked, open or answered. |
+| `ao_decisions` | read | The questions asked, open, proposed or answered. |
+| `ao_propose` | write | Records a proposed change to a rule the agent works under, and its question for a person to accept or reject; it writes no rule file ([protocol.md](protocol.md#changing-the-rules-an-agent-proposes-a-person-decides)). |
 | `ao_fanout` | write | Whether a fan-out of N agents may start now; with `action: record`, what one cost ([fanout.md](fanout.md)). |
 | `ao_watchdog` | read | Why the watchdog acted or did not: one dry cycle, or the cycles it recorded. |
 | `ao_verify` | run | Runs the project's gates as `ao verify` does, and records the verification. |
@@ -79,7 +80,7 @@ ao mcp config --role reviewer     # a client's config, with the role among the s
 | Role | Served |
 |---|---|
 | architect | every tool, as before roles existed |
-| implementer | `ao_status`, `ao_board`, `ao_notices`, `ao_inbox`, `ao_ack`, `ao_report`, `ao_ask`, `ao_decisions`, `ao_fanout`, `ao_watchdog`, `ao_verify` |
+| implementer | `ao_status`, `ao_board`, `ao_notices`, `ao_inbox`, `ao_ack`, `ao_report`, `ao_ask`, `ao_decisions`, `ao_propose`, `ao_fanout`, `ao_watchdog`, `ao_verify` |
 | reviewer | `ao_status`, `ao_board`, `ao_candidate` |
 
 A tool outside its role's set is neither listed nor run: called by name anyway, it answers with an
@@ -122,8 +123,10 @@ MCP is an interface to it, not a replacement for it.
 
 ## Coordination over MCP, backed by the same files
 
-The coordination tools, `ao_inbox`, `ao_ack`, `ao_report`, `ao_ask` and `ao_fanout`, are the
-ones that write.
+The coordination tools, `ao_inbox`, `ao_ack`, `ao_report`, `ao_ask`, `ao_propose` and
+`ao_fanout`, are the ones that write. `ao_propose` is on this surface as `ao_ask` is: an agent
+proposes a change to a rule it works under and a person decides it, so it grants nothing, and
+no tool here answers it.
 
 **They read and write the project's files directly**: the mailbox, the decisions and the
 ledgers. There is no MCP-side database,

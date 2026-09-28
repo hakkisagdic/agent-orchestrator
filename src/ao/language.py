@@ -593,6 +593,24 @@ bu adrese gider; `ao alarms` merdiveni gösterir.
     "decide.why": {"en": "**Why:** {why}", "tr": "**Neden:** {why}"},
     "decide.scope": {"en": "**Scope:** {scope}", "tr": "**Kapsam:** {scope}"},
     "decide.record": {"en": "_decision record: {id}_", "tr": "_karar kaydı: {id}_"},
+    # a rule proposal's question, its two options (short: a phone button shows forty characters), and what a
+    # person reads beside it (RULE-PROPOSALS); {who}: the proposer, or proposal.unknown; {via}: cli or mcp
+    "proposal.question": {"en": "Rule proposal: {text}", "tr": "Kural önerisi: {text}"},
+    "proposal.accept": {"en": "Accept: change the rule as proposed", "tr": "Kabul: kural önerildiği gibi değişsin"},
+    "proposal.reject": {"en": "Reject: keep the rule as it is", "tr": "Ret: kural olduğu gibi kalsın"},
+    "proposal.by": {"en": "Proposed by {who} instead of editing the rule. Why: {why}",
+                    "tr": "Kuralı düzenlemek yerine {who} önerdi. Neden: {why}"},
+    "proposal.unknown": {"en": "a caller ao did not start ({via})",
+                         "tr": "ao'nun başlatmadığı bir çağıran ({via})"},
+    "proposal.rule-file": {"en": "Rule file: {path}", "tr": "Kural dosyası: {path}"},
+    "proposal.evidence": {
+        "en": "The last {n} landed slice(s): {first_pass}% approved first time, median {rounds} review round(s), "
+              "{defects}% with a defect found later.",
+        "tr": "Son {n} inen dilim: ilk seferde onaylanan %{first_pass}, ortanca {rounds} review turu, "
+              "sonradan kusur bulunan %{defects}.",
+    },
+    "proposal.no-evidence": {"en": "No slice has landed yet to measure it beside.",
+                             "tr": "Yanında ölçülecek, inmiş bir dilim henüz yok."},
     # the note `ao hold release --note` leaves the implementer
     "hold.released": {
         "en": "# INFO — hold released\n\nHeld: {minutes} minutes\nReason: {reason}\n\n"

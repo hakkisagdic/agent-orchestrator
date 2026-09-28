@@ -144,6 +144,7 @@ scope is the one authority an implementer must not have.
 | `ao telegram setup` | alerts to your phone, decisions back from it |
 | `ao digest [--days N]` | what happened, read from the ledgers — also answers "why is nothing moving" |
 | `ao ask` · `ao answer` · `ao decisions` | questions answerable in one tap; free text always last; an answer must be an offered key, and `ao answer <D-id> <key> --change` replaces one while the first stays on the record |
+| `ao propose "…" --why "…" [--rule-file <path>]` · `ao proposals` | an agent proposes a change to a rule it works under instead of editing it: recorded in the decision ledger with its evidence, and a person accepts or rejects it with `ao answer`; nothing writes the rule file ([protocol.md](docs/protocol.md#changing-the-rules-an-agent-proposes-a-person-decides)) |
 | `ao note` | an architect message into the mailbox, through the tool |
 | `ao review` | review the tree with an actor that did not write it |
 | `ao person-review --by <name>` | a person reads the staged diff, then records `--verdict APPROVED` or `NEEDS_CHANGES` with the `--digest` it showed; bound to the candidate like any review, labeled `person review`, never an agent's command |

@@ -93,10 +93,26 @@ TOOLS = [
     {"name": "ao_decisions",
      "description": "Questions you asked and whether they have been answered. Check "
                     "this at the start of a turn: an answered question is the thing "
-                    "that unparks a slice.",
+                    "that unparks a slice. A rule proposal's question is 'proposed' "
+                    "until a person answers it.",
      "inputSchema": {"type": "object",
                      "properties": {"state": {"type": "string",
-                                              "enum": ["open", "answered"]}}}},
+                                              "enum": ["open", "proposed", "answered"]}}}},
+    {"name": "ao_propose",
+     "description": "Propose a change to a rule you work under - a step of the playbook, a "
+                    "steering or rule file, .ao/authority.md, a gate - instead of editing it. "
+                    "It is recorded in the decision ledger with the outcomes of the project's "
+                    "recent slices, and a person accepts or rejects it; until one does, keep "
+                    "working under the rule as it stands. ao_decisions shows the answer. The "
+                    "same change proposed again is not recorded twice.",
+     "inputSchema": {"type": "object", "required": ["text", "why"],
+                     "properties": {
+                         "text": {"type": "string",
+                                  "description": "the change: what the rule would say, or what would change"},
+                         "why": {"type": "string",
+                                 "description": "what went wrong under the rule as it stands"},
+                         "rule_file": {"type": "string",
+                                       "description": "the file that holds the rule, as a path in the project"}}}},
     {"name": "ao_fanout",
      "description": "Before fanning out to sub-agents: may a fan-out of this size "
                     "start now (hard cap, recent limit hit, provider window)? "
@@ -134,7 +150,7 @@ EVERY_TOOL = tuple(tool["name"] for tool in TOOLS)
 ROLE_TOOLS = {
     "architect": EVERY_TOOL,
     "implementer": ("ao_status", "ao_board", "ao_notices", "ao_inbox", "ao_ack", "ao_report", "ao_ask",
-                    "ao_decisions", "ao_fanout", "ao_watchdog", "ao_verify"),
+                    "ao_decisions", "ao_propose", "ao_fanout", "ao_watchdog", "ao_verify"),
     "reviewer": ("ao_status", "ao_board", "ao_candidate"),
 }
 
@@ -368,12 +384,8 @@ def call(name, args, cfg, allow_verify, role=None):
         # lets the centre route is not.
         delivered = 0
         try:
-            from . import telegram
-            from .cli import _decision_text
-            kb = [[{"text": f"{o['key']}) {o['label'][:40]}",
-                    "callback_data": f"{rec['id']}:{o['key']}"}]
-                  for o in rec["options"] if not o.get("free_text")]
-            delivered = telegram.send(_decision_text(rec, cfg), root, keyboard=kb)
+            from .cli import _phone_decision
+            delivered = _phone_decision(rec, cfg)
         except Exception:
             pass
         return {"id": rec["id"], "options": rec["options"],
@@ -383,6 +395,27 @@ def call(name, args, cfg, allow_verify, role=None):
 
     if name == "ao_decisions":
         return {"decisions": A.decisions(root, args.get("state"))}
+
+    if name == "ao_propose":
+        # A proposal, never an edit: it records the change and asks a person, and writes no rule file. It is
+        # the agent's to make, as a question is; the answer is a person's, and no tool here gives one.
+        try:
+            proposal, question, created = A.propose(root, cfg, args.get("text"), args.get("why"),
+                                                     rule_file=args.get("rule_file"), via="mcp")
+        except A.ProposalRefused as exc:
+            return {"error": str(exc)}
+        if not created:
+            return {"id": proposal["id"], "question": proposal["question"], "standing": True,
+                    "note": "this change is proposed already and waits for a person; do not propose it again"}
+        delivered = 0
+        try:
+            from .cli import _phone_decision
+            delivered = _phone_decision(question, cfg)
+        except Exception:
+            pass
+        return {"id": proposal["id"], "question": proposal["question"], "delivered_to_phone": delivered,
+                "note": "a person accepts or rejects it; keep working under the rule as it stands, and read "
+                        "the answer with ao_decisions"}
 
     if name == "ao_verify":
         if not allow_verify:

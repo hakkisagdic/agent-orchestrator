@@ -70,7 +70,14 @@ def recall_entries(project, root):
         except Exception:
             continue
         for number, row in enumerate(rows, 1):
-            if isinstance(row, dict):
+            if isinstance(row, dict) and row.get("kind") == "proposal":
+                # A rule proposal is a row of the decision ledger, and no architect's decision (RULE-PROPOSALS);
+                # what a person answered is its question's, recalled above.
+                author = row.get("by") if isinstance(row.get("by"), dict) else {}
+                add("proposal", row.get("id"), row.get("at"),
+                    " ".join(str(row.get(key) or "") for key in ("text", "why", "rule_file")),
+                    f"proposed by {author.get('role') or 'a caller ao did not start'}", f"{source}:{number}")
+            elif isinstance(row, dict):
                 add(kind, row.get("id"), row.get("at"), " ".join(str(row.get(key) or "") for key in fields),
                     row.get("event") or ("recorded by " + str(row.get("by") or "architect")), f"{source}:{number}")
     reviews_dir = "semantic-review"
@@ -157,7 +164,8 @@ def architect_absence(root, cfg):
     except Exception:
         pass
     try:
-        rows = decision_rows(root)
+        # Its decisions: a rule proposal in the same ledger is no decision, whoever made it (RULE-PROPOSALS).
+        rows = [row for row in decision_rows(root) if row.get("kind") != "proposal"]
         if rows and _epoch(rows[-1].get("at")):
             seen.append(_epoch(rows[-1].get("at")))
     except Exception:

@@ -160,6 +160,17 @@ def build_parser():
     dc = sub.add_parser("decisions", help="open and answered questions")
     dc.add_argument("-n", type=int, default=10)
     dc.set_defaults(fn=cmd_decisions)
+    po = sub.add_parser("propose", help="propose a change to a rule you work under, for a person to accept or "
+                                        "reject, instead of editing it")
+    po.add_argument("text", nargs="+", help="the change: what the rule would say, or what would change")
+    po.add_argument("--why", help="what went wrong under the rule as it stands; required")
+    po.add_argument("--rule-file", dest="rule_file",
+                    help="the file that holds the rule, as a path in the project (relative to its root)")
+    po.set_defaults(fn=cmd_propose)
+    pp = sub.add_parser("proposals", help="rule proposals waiting for a person; --all adds the decided ones")
+    pp.add_argument("--all", action="store_true", help="also the accepted, rejected and otherwise answered ones")
+    pp.add_argument("-n", type=int, default=20, help="at most this many, newest first (default 20)")
+    pp.set_defaults(fn=cmd_proposals)
     st_ = sub.add_parser("stats", help="slice outcomes: rounds, first-pass rate, time, size, defects found later")
     st_.add_argument("--all", action="store_true", help="every project registered on this machine")
     st_.add_argument("--since", type=A.time_arg(), help="landed at or after: a date (2026-09-10), 7d, yesterday")

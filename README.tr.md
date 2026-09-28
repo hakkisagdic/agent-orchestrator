@@ -139,6 +139,7 @@ gereken tek yetkidir.
 | `ao telegram setup` | telefona uyarı, telefondan karar |
 | `ao digest [--days N]` | ne oldu, defterlerden okunur — "neden ilerlemiyor"un da cevabı |
 | `ao ask` · `ao answer` · `ao decisions` | tek dokunuşla cevaplanan sorular; serbest metin hep sonda; cevap sorunun sunduğu bir harf olmalı, `ao answer <D-id> <harf> --change` bir cevabı değiştirir ve ilki kayıtta kalır |
+| `ao propose "…" --why "…" [--rule-file <yol>]` · `ao proposals` | ajan, altında çalıştığı bir kuralı düzenlemek yerine değişikliği önerir: kanıtıyla karar defterine yazılır, bir insan `ao answer` ile kabul ya da ret eder; kural dosyasına hiçbir şey yazılmaz ([protocol.md](docs/protocol.md#changing-the-rules-an-agent-proposes-a-person-decides)) |
 | `ao note` | kutuya mimar mesajı, araç üzerinden |
 | `ao review` | ağacı, onu yazmayan bir aktörle gözden geçir |
 | `ao person-review --by <ad>` | bir insan stage edilmiş diff'i okur, sonra gösterilen `--digest` ile `--verdict APPROVED` ya da `NEEDS_CHANGES` kaydeder; her review gibi adaya bağlanır, `person review` diye etiketlenir, asla bir ajanın komutu değildir |

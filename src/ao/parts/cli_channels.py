@@ -334,6 +334,19 @@ def _decision_text(rec, cfg=None):
     return "\n".join(lines)
 
 
+def _phone_decision(rec, cfg):
+    """Send a decision to the phone, a button for each option not answered in words; how many chats got it.
+
+    `ao ask`, `ao propose` and their MCP tools send it the same way. It raises what the phone
+    channel raises, and each caller catches it: the question is recorded whether or not a phone
+    hears of it.
+    """
+    from . import telegram
+    keyboard = [[{"text": f"{o['key']}) {o['label'][:40]}", "callback_data": f"{rec['id']}:{o['key']}"}]
+                for o in rec["options"] if not o.get("free_text")]
+    return telegram.send(_decision_text(rec, cfg), cfg["root"], keyboard=keyboard)
+
+
 def cmd_recall(cfg, args):
     """What was decided, found or learned before, in every project on this machine (#43)."""
     results = A.recall(" ".join(args.text), cfg["root"], limit=args.limit)
@@ -676,11 +689,7 @@ def cmd_ask(cfg, args):
         print(f"   {C['yellow']}asked or decided before{C['reset']}: {found['project']} {found['kind']} "
               f"{found['id']} — {found['outcome']}  {C['dim']}{found['source']}{C['reset']}")
     try:
-        from . import telegram
-        kb = [[{"text": f"{o['key']}) {o['label'][:40]}",
-                "callback_data": f"{rec['id']}:{o['key']}"}]
-              for o in rec["options"] if not o.get("free_text")]
-        n = telegram.send(_decision_text(rec, cfg), root, keyboard=kb)
+        n = _phone_decision(rec, cfg)
         print(f"\n{C['dim']}sent to {n} chat(s){C['reset']}" if n else
               f"\n{C['dim']}no phone channel configured — answer with "
               f"`ao answer {rec['id']} <key>`{C['reset']}")
@@ -709,6 +718,10 @@ def cmd_answer(cfg, args):
         print(f"{C['green']}changed{C['reset']} {rec['id']}: {rows[-2].get('answer')} → {rec['answer']}")
     else:
         print(f"{C['green']}answered{C['reset']} {rec['id']}: {rec['answer']}")
+    if rec.get("proposal"):
+        # The answer is the decision; the change itself is a person's edit, which no ao command makes (RULE-PROPOSALS).
+        print(f"  {C['dim']}rule proposal {rec['proposal']}: ao writes no rule file; ao proposals --all shows it "
+              f"with this answer{C['reset']}")
     return 0
 
 
@@ -720,9 +733,12 @@ def cmd_decisions(cfg, args):
         return 0
     for r in sorted(rows, key=lambda x: x["asked_at"], reverse=True)[:args.n]:
         age = int((time.time() - r["asked_at"]) / 60)
-        if r["state"] == "open":
-            print(f"{C['yellow']}OPEN{C['reset']}     {C['b']}{r['id']}{C['reset']}  "
-                  f"{r['question']}  {C['dim']}{age}m{C['reset']}")
+        if r["state"] in ("open", A.PROPOSED):
+            # A rule proposal's question waits for a person, and parks no slice (RULE-PROPOSALS).
+            label = "OPEN" if r["state"] == "open" else "PROPOSED"
+            whose = f", rule proposal {r['proposal']}: a person's to decide" if r.get("proposal") else ""
+            print(f"{C['yellow']}{label}{C['reset']}{' ' * (9 - len(label))}{C['b']}{r['id']}{C['reset']}  "
+                  f"{r['question']}  {C['dim']}{age}m{whose}{C['reset']}")
             for o in r["options"]:
                 print(f"           {C['dim']}{o['key']}){C['reset']} {o['label']}")
         else:
@@ -731,6 +747,105 @@ def cmd_decisions(cfg, args):
             print(f"{C['green']}answered{C['reset']} {C['b']}{r['id']}{C['reset']}  "
                   f"{r['question']}  {C['dim']}→ {r['answer']} "
                   f"({r.get('answered_by')}{was}){C['reset']}")
+    return 0
+
+
+def _proposal_evidence_line(proposal):
+    """What a proposal was measured beside, in the words `ao stats` uses (RULE-PROPOSALS)."""
+    stats = (proposal.get("evidence") or {}).get("stats") or {}
+    if not stats.get("slices"):
+        return "evidence: no slice had landed to measure it beside"
+    rounds = (stats.get("rounds") or {}).get("median")
+    parts = [f"the last {stats['slices']} landed slice(s)"]
+    if stats.get("first_pass_pct") is not None:
+        parts.append(f"{stats['first_pass_pct']}% approved first time")
+    if rounds is not None:
+        parts.append(f"median {rounds} review round(s)")
+    if stats.get("defects_pct") is not None:
+        parts.append(f"{stats['defects_pct']}% with a defect found later")
+    return "evidence: " + ", ".join(parts)
+
+
+def _rule_file_since(root, proposal):
+    """Whether the rule file a proposal names still holds the bytes it was proposed against."""
+    try:
+        _, digest = A.proposal_rule_file(root, proposal["rule_file"])
+    except (A.ProposalRefused, OSError):
+        return "gone since it was proposed"
+    return ("unchanged" if digest == proposal.get("rule_digest") else "changed") + " since it was proposed"
+
+
+def cmd_propose(cfg, args):
+    """An agent proposes a change to a rule it works under, instead of editing it (RULE-PROPOSALS).
+
+    The proposal goes to the decision ledger with who made it, why, the rule file and the
+    outcomes of the project's last landed slices, and its question to a person through the
+    decision flow, and to the phone when one is set up. It writes no rule file, and neither
+    does the answer. Exit 2 when it is refused; 0 when it is recorded, or when the same change
+    stands open already and nothing new is recorded.
+    """
+    if not (args.why or "").strip():
+        print("--why is required: what went wrong under the rule as it stands; a proposal without a reason "
+              "cannot be judged")
+        return 2
+    try:
+        proposal, question, created = A.propose(cfg["root"], cfg, " ".join(args.text), args.why,
+                                                 rule_file=args.rule_file, via="cli")
+    except A.ProposalRefused as exc:
+        print(f"{C['red']}not proposed{C['reset']}: {exc}")
+        return 2
+    did = proposal["question"]
+    if not created:
+        print(f"{C['yellow']}proposed already{C['reset']} {proposal['id']}, open for a person as {did}; "
+              "nothing new was recorded")
+        return 0
+    print(f"{C['green']}proposed{C['reset']} {proposal['id']}  →  {did}, for a person to decide")
+    print(f"   {C['dim']}{_proposal_evidence_line(proposal)}{C['reset']}")
+    print(f"   {C['dim']}accept: ao answer {did} a · reject: ao answer {did} b · in words: ao answer {did} x <text>"
+          f"{C['reset']}")
+    print(f"   {C['dim']}no rule file was written: work on under the rule as it stands{C['reset']}")
+    try:
+        n = _phone_decision(question, cfg)
+        print(f"   {C['dim']}sent to {n} chat(s){C['reset']}" if n else
+              f"   {C['dim']}no phone channel configured{C['reset']}")
+    except Exception as exc:
+        print(f"   {C['dim']}phone delivery skipped: {exc}{C['reset']}")
+    return 0
+
+
+def cmd_proposals(cfg, args):
+    """The rule proposals waiting for a person, newest first; --all adds the decided ones (RULE-PROPOSALS).
+
+    One whose question's file is gone is shown with them: nobody can answer it any more, and
+    dropping it from the list would lose it silently.
+    """
+    root = cfg["root"]
+    rows = A.proposals(root)
+    shown = rows if args.all else [p for p in rows if p["state"] in ("open", "missing")]
+    if not shown:
+        print(f"{C['dim']}No {'' if args.all else 'open '}rule proposals.{C['reset']}")
+        return 0
+    for p in list(reversed(shown))[:args.n]:
+        author = p.get("by") if isinstance(p.get("by"), dict) else {}
+        who = (f"{author.get('actor')} ({author['role']})" if author.get("role")
+               else f"a caller ao did not start ({p.get('via')})")
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(p["at"])) if p.get("at") else "—"
+        tone = C["yellow"] if p["state"] == "open" else C["red"] if p["state"] == "missing" else C["green"]
+        print(f"{tone}{p['state'].upper():<9}{C['reset']}{C['b']}{p['id']}{C['reset']}  {when}  {who}")
+        print(f"   {p.get('text')}")
+        print(f"   {C['dim']}why: {p.get('why')}{C['reset']}")
+        if p.get("rule_file"):
+            print(f"   {C['dim']}rule file: {p['rule_file']}, {_rule_file_since(root, p)}{C['reset']}")
+        print(f"   {C['dim']}{_proposal_evidence_line(p)}{C['reset']}")
+        did = p.get("question")
+        if p["state"] == "open":
+            print(f"   accept: ao answer {did} a · reject: ao answer {did} b")
+        elif p["state"] == "missing":
+            print(f"   {C['red']}its question {did} is gone{C['reset']}: propose it again to ask a person")
+        else:
+            answered = (time.strftime("%Y-%m-%d %H:%M", time.localtime(p["answered_at"]))
+                        if p.get("answered_at") else "—")
+            print(f"   → {p.get('answer')}  {C['dim']}({p.get('answered_by')}, {answered}, {did}){C['reset']}")
     return 0
 
 

@@ -648,6 +648,8 @@ def cmd_decide(cfg, args):
                     rows.append(json.loads(line))
                 except Exception:
                     pass
+        # A rule proposal shares the ledger and is no architect's decision: `ao proposals` lists it (RULE-PROPOSALS).
+        rows = [r for r in rows if isinstance(r, dict) and r.get("kind") != "proposal"]
         if not rows:
             print(f"{C['dim']}No decisions recorded.{C['reset']}")
             return 0
@@ -661,6 +663,13 @@ def cmd_decide(cfg, args):
         print(f"usage: {C['b']}ao decide \"decision\" --why \"…\" [--answers D-123] "
               f"[--scope B2] [--urgent]{C['reset']}")
         return 1
+    asked = next((d for d in A.decisions(root) if d["id"] == args.answers), None) if args.answers else None
+    if asked and asked.get("proposal"):
+        # Refused before anything is recorded or mailed: a decision settling it would reach the implementer as
+        # one, and a rule proposal is a person's to decide (RULE-PROPOSALS).
+        print(f"{C['red']}refused{C['reset']}: {args.answers} asks about rule proposal {asked['proposal']}, which a "
+              f"person decides with ao answer {args.answers} <key>; no architect decision settles it")
+        return 2
     holder = A.architect_lock_holder(root)
     if holder and holder.get("pid") != os.getpid() and holder.get("pid") != os.getppid():
         print(f"{C['yellow']}another architect turn holds the lock{C['reset']} ({holder.get('who')}, pid {holder.get('pid')}, "

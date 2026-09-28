@@ -1314,6 +1314,9 @@ def architect_turn_present(root, architect=None):
 
 
 DECISION_DIR = ".ao/decisions"
+# The state of a rule proposal's question until a person answers it (RULE-PROPOSALS). Not "open": every
+# reader of an open question reads one that parks a slice, and a proposal parks none.
+PROPOSED = "proposed"
 
 
 def decisions(root, state=None):
@@ -1342,7 +1345,7 @@ def decisions(root, state=None):
     return out
 
 
-def ask(root, question, options, context=None, slice_id=None, cfg=None):
+def ask(root, question, options, context=None, slice_id=None, cfg=None, proposal=False, after=0):
     """Record a question. Free text is always the last option.
 
     Options are a convenience, never a cage: the answer that matters is often the
@@ -1351,10 +1354,19 @@ def ask(root, question, options, context=None, slice_id=None, cfg=None):
 
     The free-text option is labeled in the project's language, read from `cfg` or, without one,
     from the project's config on disk (LANGUAGE-OUTPUT).
+
+    A rule proposal's question (`proposal`) waits in the state `proposed` and names its
+    proposal, `P-` with the question's number (RULE-PROPOSALS). It parks no slice, so nothing
+    that waits on an open question waits on it: a nudge standing down, the alarm ladder, a
+    wake of the architect, a handoff's list of what unblocks the work.
+
+    Each question is a file of its own, created and never replaced. Two asked in one second
+    shared an id and the second overwrote the first; the later now takes the next free number.
+    The number also exceeds `after`: a number stays taken where a ledger names it after its
+    question's file is gone, as a rule proposal's does.
     """
     d = os.path.join(root, DECISION_DIR)
     os.makedirs(d, exist_ok=True)
-    did = f"D-{int(time.time())}"
     opts = [{"key": chr(ord('a') + i), "label": o} for i, o in enumerate(options[:8])]
     written = cfg if cfg is not None else project_config_document(root)["config"]
     opts.append({"key": "x", "label": language.marker(written, "free-text"), "free_text": True})
@@ -1365,11 +1377,20 @@ def ask(root, question, options, context=None, slice_id=None, cfg=None):
     except Exception:
         precedents = []
     rec = scan_record({"asked_at": int(time.time()), "question": question, "context": context,
-                       "slice": slice_id, "options": opts, "state": "open",
+                       "slice": slice_id, "options": opts, "state": PROPOSED if proposal else "open",
                        "answer": None, "answered_at": None, "answered_by": None,
                        "precedents": precedents})
-    json.dump(rec, open(os.path.join(d, did + ".json"), "w", encoding=UTF8),
-              ensure_ascii=False, indent=2)
+    number = max(rec["asked_at"], int(after) + 1)
+    while True:
+        did = f"D-{number}"
+        if proposal:
+            rec["proposal"] = f"P-{number}"
+        try:
+            with open(os.path.join(d, did + ".json"), "x", encoding=UTF8) as fh:
+                json.dump(rec, fh, ensure_ascii=False, indent=2)
+            break
+        except FileExistsError:
+            number += 1
     rec["id"] = did
     return rec
 
@@ -1398,11 +1419,20 @@ def answer(root, did, key_or_text, by="human", change=False):
     second answer, which silently replaced the first, unless `change` says it replaces it. Each
     answer is a row of its own under `answers` and the record's answer is the newest, so a change
     leaves what was answered before on the record.
+
+    A rule proposal's question is a person's to answer (RULE-PROPOSALS): an architect's decision
+    (`by` architect, what `ao decide --answers` passes) and a turn ao started for either role are
+    refused, since both are agents working under the rules the proposal would change.
     """
     p = os.path.join(root, DECISION_DIR, did + ".json")
     if not os.path.exists(p):
         return None
     rec = json.load(open(p, encoding=UTF8))
+    if rec.get("proposal"):
+        agent = invoking_role() or ("architect" if by == "architect" else None)
+        if agent:
+            raise AnswerRefused(f"{did} asks about rule proposal {rec['proposal']}, which a person decides, not the "
+                                f"{agent}: ao answer {did} <key> in a person's terminal, or a tap on the phone")
     given = str(key_or_text).split(None, 1)
     key, words = (given[0].lower() if given else ""), (given[1].strip() if len(given) > 1 else "")
     options = [o for o in rec.get("options") or [] if isinstance(o, dict)]
@@ -1431,6 +1461,154 @@ def answer(root, did, key_or_text, by="human", change=False):
     replace_file_durably(p, json.dumps(rec, ensure_ascii=False, indent=2).encode(UTF8))
     rec["id"] = did
     return rec
+
+
+# ── rule proposals: an agent proposes, a person decides (RULE-PROPOSALS) ──────
+
+PROPOSAL_EVIDENCE_SLICES = 10           # the project's last landed slices a proposal is measured beside
+# What a person decided, by the key of the option they chose: `ask` keys options a, b, … in the order
+# given, and `propose` offers accept, then reject. The free-text key is an answer in their own words.
+PROPOSAL_OUTCOMES = {"a": "accepted", "b": "rejected"}
+
+
+class ProposalRefused(ValueError):
+    """A proposal ao does not record: it names no change, gives no reason, or names a file outside the project."""
+
+
+def proposal_rule_file(root, path):
+    """(the rule file as a path in the project, the digest of its bytes now), or ProposalRefused.
+
+    A relative path is read from the project's root, as a path ao records is. The file must be
+    the project's own: a link out of it is followed and refused, so nothing outside the project
+    is read, and nothing outside it is named in a ledger the project keeps.
+    """
+    full = path if os.path.isabs(path) else os.path.join(root, path)
+    if not _within(full, root):
+        raise ProposalRefused(f"{path} is outside the project; name the rule file as a path in it")
+    if not os.path.isfile(full):
+        raise ProposalRefused(f"{path} is no file in the project; name the file that holds the rule")
+    digest = hashlib.sha256()
+    with open(full, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 16), b""):
+            digest.update(chunk)
+    relative = os.path.relpath(os.path.realpath(full), os.path.realpath(root))
+    return relative.replace(os.sep, "/"), "sha256:" + digest.hexdigest()
+
+
+def proposal_evidence(root):
+    """What a proposal is judged beside: the outcomes of the project's last landed slices, as `ao stats` reads them.
+
+    Measured from the ledgers, never typed by the proposer (#49): which slices, and their rounds,
+    first-pass rate, time, size and the defects found in them later.
+    """
+    landed = sorted((o for o in slice_outcomes(root) if o.get("landed_at")), key=lambda o: o["landed_at"])
+    recent = landed[-PROPOSAL_EVIDENCE_SLICES:]
+    return {"slices": [o["slice"] for o in recent], "stats": outcome_stats(recent)}
+
+
+def _proposal_context(cfg, author, via, why, path, evidence):
+    """What a person reads beside a proposal's question, in the project's language: who, why, the file, the evidence."""
+    if author.get("role"):
+        who = f"{author['actor']} ({author['role']})"
+    else:
+        who = language.text(cfg, "proposal.unknown", via=via)
+    lines = [language.text(cfg, "proposal.by", who=who, why=why)]
+    if path:
+        lines.append(language.text(cfg, "proposal.rule-file", path=path))
+    stats = evidence["stats"]
+    if stats["slices"]:
+        def shown(value):
+            return "—" if value is None else value
+        lines.append(language.text(cfg, "proposal.evidence", n=stats["slices"],
+                                   first_pass=shown(stats["first_pass_pct"]),
+                                   rounds=shown((stats["rounds"] or {}).get("median")),
+                                   defects=shown(stats["defects_pct"])))
+    else:
+        lines.append(language.text(cfg, "proposal.no-evidence"))
+    return "\n".join(lines)
+
+
+def _proposed_change(text, path):
+    """What makes two proposals one: the change in any spacing and case, and the file it names."""
+    return " ".join(str(text or "").split()).lower(), path
+
+
+def proposals(root):
+    """Every rule proposal, oldest first, with what its question says now (RULE-PROPOSALS).
+
+    The proposal is its row in the decision ledger. What a person decided is its question's
+    answer, recorded by the decision flow as every answer is and read from there, so the ledger
+    holds no second copy of it to disagree with. `state` is open, accepted, rejected, answered
+    (in the person's own words), or missing when its question's file is gone. A ledger that
+    cannot be read raises, as it does for every reader: it is never read as no proposals.
+    """
+    asked = {rec["id"]: rec for rec in decisions(root)}
+    out = []
+    for row in decision_rows(root):
+        if row.get("kind") != "proposal":
+            continue
+        question = asked.get(row.get("question"))
+        if question is None:
+            state = "missing"
+        elif question.get("state") != "answered":
+            state = "open"
+        else:
+            state = PROPOSAL_OUTCOMES.get(question.get("answer_key"), "answered")
+        out.append(dict(row, state=state, answer=(question or {}).get("answer"),
+                        answered_by=(question or {}).get("answered_by"),
+                        answered_at=(question or {}).get("answered_at")))
+    return out
+
+
+def propose(root, cfg, text, why, rule_file=None, via="cli"):
+    """Record a change an agent proposes to a rule it works under, and ask a person to decide it (RULE-PROPOSALS).
+
+    An agent that edits its own playbook, steering or authority has rewritten the rules it is
+    held to, and nobody decided it. Proposed instead, the change is a row of the decision
+    ledger, chained as `ao decide` chains its rows: who proposed it (the role of a turn ao
+    started, as a waived grant records its author, and `via` the CLI or MCP), the change, why,
+    the file that holds the rule with the digest of its bytes then, and the outcomes of the
+    project's last landed slices. Beside it goes a question a person answers through the
+    decision flow, `ao answer` or a tap on the phone: accept, reject or their own words.
+    Nothing here, and nothing an answer does, writes a rule file.
+
+    Returns (the proposal, its question, True), or (the open proposal of the same change, None,
+    False) when that one stands: the same change proposed twice is one proposal. Raises
+    ProposalRefused for a proposal with no change, no reason or a rule file outside the project.
+    """
+    text, why = str(text or "").strip(), str(why or "").strip()
+    if not text:
+        raise ProposalRefused("a proposal names the change: what the rule would say, or what would change")
+    if not why:
+        raise ProposalRefused("a proposal gives its reason: what went wrong under the rule as it stands")
+    path, digest = proposal_rule_file(root, str(rule_file)) if rule_file else (None, None)
+    made = proposals(root)
+    for standing in made:
+        if standing["state"] == "open" and _proposed_change(standing.get("text"), standing.get("rule_file")) \
+                == _proposed_change(text, path):
+            return standing, None, False
+    author = grant_author(cfg)
+    evidence = proposal_evidence(root)
+    # Numbered past every proposal the ledger holds, so none takes the id of one whose question file is gone.
+    taken = [int(p["id"][2:]) for p in made if str(p.get("id") or "")[:2] == "P-" and p["id"][2:].isdigit()]
+    question = ask(root, language.text(cfg, "proposal.question", text=text),
+                   [language.text(cfg, "proposal.accept"), language.text(cfg, "proposal.reject")],
+                   context=_proposal_context(cfg, author, via, why, path, evidence), cfg=cfg, proposal=True,
+                   after=max(taken, default=0))
+    row = scan_record({"id": question["proposal"], "at": question["asked_at"], "kind": "proposal", "text": text,
+                       "why": why, "rule_file": path, "rule_digest": digest, "question": question["id"],
+                       "by": author, "via": via, "evidence": evidence})
+    from .storage import append_chained_jsonl
+    try:
+        append_chained_jsonl(decisions_path(root), row, DECISION_CHAIN, legacy_prefix=True)
+    except BaseException:
+        # A question the ledger holds no proposal for would be answered for nothing: it is taken back.
+        try:
+            os.remove(os.path.join(root, DECISION_DIR, question["id"] + ".json"))
+        except OSError:
+            pass
+        raise
+    return dict(row, state="open", answer=None, answered_by=None, answered_at=None), question, True
 
 
 def last_nudge_error(root):
