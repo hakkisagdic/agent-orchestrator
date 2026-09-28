@@ -232,6 +232,7 @@ publishes the release.
 - The parent of a process is read from Toolhelp, so `ao lock -- ao verify` runs inside its parent's lock; where no parent can be read, verify says it cannot tell before it waits (ANCESTOR-WINDOWS).
 - Whether a process runs is asked of the process itself, so a gate lock taken by a run started a moment ago is waited for, where a two-second-old snapshot read it as a dead run's and cleared it (WINDOWS-PID-ALIVE).
 - The process backend stays Windows' own whatever its first reading gave, and a reading that lists no process is not kept, so processes are read after a first reading that failed; a file in the home is named `~/…` with slashes, and a lane another checkout started is known for one (WINDOWS-LANE-4).
+- A tree ao stops on Windows is gone from the next reading of the process list, so `ao hold` no longer names the turn it has just stopped as one it could not place (WINDOWS-LANE-5).
 
 ### Adapters
 

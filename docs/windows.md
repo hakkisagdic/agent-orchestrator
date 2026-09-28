@@ -41,6 +41,12 @@ seconds. A file in the home is named `~/…` with slashes there too, and a lane 
 started is known for one, where its path, compared case-folded, hid the case its branch keeps.
 `tests/test_windows_lane_4.py` holds them.*
 
+*In ao since slice WINDOWS-LANE-5: a tree ao stops is gone from the next reading of the process
+list. The snapshot taken before the stop listed it for two seconds more, and a stopped process's
+directory can no longer be read, so `ao hold` named the turn it had just stopped as one it could
+not place and exited 1. Until WINDOWS-PID-ALIVE the hold waited for the stopped turn by that same
+snapshot, which was read again by the time the wait ended. `tests/test_windows_lane_5.py` holds it.*
+
 The hosted `tests` workflow runs Windows and macOS every week on Python 3.12, and any
 environment on demand (`gh workflow run tests -f os=windows-latest -f python=3.12`);
 Ubuntu runs on every push and pull request with the Python 3.9 support floor and 3.12.

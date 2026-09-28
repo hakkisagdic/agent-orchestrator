@@ -2739,6 +2739,16 @@ def writers(root, adapter):
     return process_trees(live, {pid: t[0] for pid, t in table.items()}), sorted(dead)
 
 
+def _tree_stopped():
+    """Forget the process snapshot taken before a tree was stopped on Windows (WINDOWS-LANE-5).
+
+    It lists the stopped tree for two seconds more, and a stopped process's directory can no longer be
+    read: `ao hold` then named the turn it had just stopped as one it could not place, and exited 1.
+    """
+    from . import procs
+    procs.refresh()
+
+
 def kill_turn(pid, sig):
     """Signal a turn — the whole process group when this pid leads one.
 
@@ -2750,6 +2760,7 @@ def kill_turn(pid, sig):
     """
     if os.name == "nt":
         subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True)
+        _tree_stopped()
         return
     try:
         pgid = os.getpgid(pid)
@@ -2776,6 +2787,7 @@ def sweep_orphans(pids, grace=3.0):
     if os.name == "nt":
         for pid in pids:
             subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True)
+        _tree_stopped()
         return list(pids)
     groups = set()
     for pid in pids:
