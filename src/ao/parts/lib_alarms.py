@@ -1515,3 +1515,37 @@ def turn_ended(cfg):
         written = session_write(msgs)
         return all(mtime <= written for mtime, _ in subagent_writes(msgs, shape))
     return False
+
+
+def last_message(cfg):
+    """Who spoke last in the implementer's transcript, or None: {"at", "text", "in_place", "record", "spoken"}.
+
+    The newest prompt or reply that holds words, in the kinds its adapter declares; a record of
+    neither kind, or one whose words are none - a tool's call or result, a note the harness keeps
+    - is passed over. `in_place` says the harness wrote the reply in the model's place
+    (`in_place_reply`): what its service returned where the model gave no answer, a usage limit
+    among them, so its words are the harness's and never the model's prose, and `record` is the
+    record itself, for what the harness keeps beside its words. `spoken` is when the newest words
+    the harness did not write in the model's place were written: a person's, or the model's. Words
+    of any length count, since a person who resumes a session with "go on" has spoken. `at` and
+    `spoken` are epoch seconds, None where a time cannot be read or nobody spoke (QUOTA-PARK).
+    """
+    msgs, _ = session_paths(cfg)
+    if not msgs or not os.path.exists(msgs):
+        return None
+    shape = transcript_shape(implementer_adapter(cfg))
+    kinds = set(shape["prompt"]) | set(shape["reply"])
+    last = None
+    for rec in reversed(read_tail(msgs, 200_000)):
+        if record_kind(rec, shape) not in kinds:
+            continue
+        text = message_words(record_body(rec, shape), shape, shortest=1)
+        if not text:
+            continue
+        at, in_place = _ledger_time(record_time(rec, shape)) or None, in_place_reply(rec, shape)
+        if last is None:
+            last = {"at": at, "text": text, "in_place": in_place, "record": rec, "spoken": None}
+        if not in_place:
+            last["spoken"] = at
+            break
+    return last

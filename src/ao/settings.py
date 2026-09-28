@@ -141,6 +141,9 @@ SETTINGS = {
         2, int, 1, None, "project",
         "hours without a watchdog cycle after which the next one is a resume: one notice names what stands "
         "and its clocks restart"),
+    "watchdog.quota_retry_hours": Setting(
+        5, int, 1, None, "project",
+        "hours a slice parked on a usage limit that named no reset waits before one nudge tries again"),
     "decisions.human_after_minutes": Setting(
         15, int, 1, None, "project",
         "minutes an open decision waits before it rings a person"),

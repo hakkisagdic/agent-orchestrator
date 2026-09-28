@@ -62,6 +62,7 @@ machine setting written into a project.
 | `watchdog.idle_minutes` | `6.0` | project | minutes of implementer silence before the watchdog acts |
 | `watchdog.max_attempts` | `3` | project | nudges without progress before a person is told the implementer is stuck |
 | `watchdog.resume_gap_hours` | `2` | project | hours without a watchdog cycle after which the next one is a resume: one notice names what stands and its clocks restart |
+| `watchdog.quota_retry_hours` | `5` | project | hours a slice parked on a usage limit that named no reset waits before one nudge tries again |
 | `decisions.human_after_minutes` | `15` | project | minutes an open decision waits before it rings a person |
 | `waivers.default_hours` | `24` | project | hours a review waiver stays open when --hours is not given |
 | `waivers.max_hours` | `168` | project | the longest a review waiver may be granted for |
@@ -100,11 +101,11 @@ into mail, such as `## URGENT` and `## DECISION REQUIRED` in English and `## ACÄ
 
 It decides what ao writes for a person as well: `ao digest`, the note `ao handoff` writes and sends,
 the notes `ao decide` and `ao hold release --note` leave, a decision's free-text option, the watchdog's
-lines to the phone, its architect-at-quota and failed-wake alarms, the lines a red alarm's mail adds,
-and every reply the phone is sent. `ao email setup` and `ao telegram setup` set up a channel the whole
-machine shares and print their steps in the machine's choice. What a person types on the phone - a
-command, an answer - is read the same in either language, and an alarm is keyed the same in both, so a
-change of language rings no standing alarm again.
+lines to the phone, its architect-at-quota, parked-on-quota and failed-wake alarms, the lines a red
+alarm's mail adds, and every reply the phone is sent. `ao email setup` and `ao telegram setup` set up a
+channel the whole machine shares and print their steps in the machine's choice. What a person types on
+the phone - a command, an answer - is read the same in either language, and an alarm is keyed the same
+in both, so a change of language rings no standing alarm again.
 
 ```
 ao config set language tr --machine          # every project on this machine that sets none

@@ -55,6 +55,7 @@ Order matters: each guard sees only what the ones above left standing.
 | −1 | hold | `.ao/hold` | stand down; red after four hours |
 | 0 | working here | orphans swept, live turns counted by root | stand down while a turn is live; reap a turn silent past 3× idle, by process group |
 | 1 | idle | the implementer's last write, a subagent's included, vs `--idle-minutes` | not idle yet: stand down |
+| 1b | usage limit | the implementer's newest words, when its harness wrote them in the model's place; the last nudge, when it died within seconds; each in the words its adapter declares | stopped on its limit: park the implementer's running items until the reset, or one retry where none was named, then resume the session once — see [below](#a-slice-parked-on-quota) |
 | 2 | waiting on architect | newest implementer report is a request, inbox empty, queue empty | stand down and say so — a nudge cannot answer it |
 | 2 | open work | inbox mail, product dirt outside coordination dirs, review newer than HEAD | nothing open: refill (2b) or stand down |
 | 2b | refill | queued < threshold (source's, else 1), implementer idle, ≥30 min since last, configured architect process absent | wake the architect to refill |
@@ -90,6 +91,52 @@ from the agent being one agent.
 - **A person's blocker reaches a person.** A blocked item marked `waiting: human` is
   delivered to the human channel directly on the next cycle and never held for an agent
   whose reachability was only assumed.
+
+## A slice parked on quota
+
+*In ao since slice QUOTA-PARK: a usage limit that stops the implementer mid-slice parks the
+slice; it used to read as an agent ignoring its nudges. Two readings say the implementer stopped
+on its limit, and the newer decides: its transcript, when its newest words are a reply its
+harness wrote in the model's place (`transcript.messages.harness_replies` in the adapter), and
+the last nudge, when it died within seconds with the limit in its output. Each is read for the
+words the implementer's own adapter declares its harness stops on (`quota` → `stops`,
+[adapters.md](adapters.md#accounts-windows-and-installs-are-declared-not-coded)); an adapter that
+declares none is never parked, and the model's own words are never read for it. The reset is
+the one the harness records beside its words (`quota` → `resets_at`), else the one its words
+name, read against when they were written and within the limit's own hours. The implementer's
+running items - those no `role:` gives to another actor - move to `blocked` with
+`needs: quota (resets 26 Sep 04:30)`, an alarm tells a person, and no nudge is sent while they
+wait. When the reset has passed they move back to `running`, with any `needs:` they carried
+there, and the cycle goes on to the nudge, which resumes the same session through the adapter's
+`resume` command; a stop is parked, and resumed after, once.*
+
+A limit whose words name no reset parks with `needs: quota (retry 26 Sep 23:10)`: one nudge
+tries again `watchdog.quota_retry_hours` after the stop, or within the limit's own hours where
+those are fewer, and a nudge that dies on the limit again parks the slice again in the same
+cycle, so a reset nobody named costs one nudge a retry and never becomes a loop. Such a park
+used to hold with no end: only a newer stop or a transcript that went on could end it, and while
+it held nothing ran a turn that could bring either. A newer stop that names its reset gives the
+park that time.
+
+A park ends before its time on evidence that the limit is gone. A transcript that went on past
+the stop - a person resumed the session, the model answered, in however few words - ends it,
+whatever reset it named. With `keyflip.rotation` on, a park asks keyflip each cycle to rotate a
+spent window, as the nudge it stands in front of would, and an account with headroom ends it at
+once; the rotation used to wait behind the park until the reset. A dry cycle neither rotates nor
+writes.
+
+The board is the park's face and the watchdog's state its memory, and the board is read back when
+the memory is lost: items blocked on quota with no park in the state - a state file torn or
+deleted - are parked again on the stop read now, and resumed when nothing read says the limit
+stands.
+`ao board` shows the parked items and when they come back, and `ao watchdog explain` names the
+park as the verdict. An item someone takes off `blocked` ends the park, and nothing is moved back
+for it. The nudges that died on the limit before it was read no longer count toward "agent
+stuck": a park that ends forgets the backoff they ran up, a nudge that dies on the limit is told
+as the park and not as "nudge failed", and the architect is not woken to judge it as a failed
+restart. The park's alarm is raised every cycle it stands and climbs the ladder
+([alarms.md](alarms.md)). The quota guard (4) still reads the provider's window through keyflip
+where it is installed; a park needs no keyflip.
 
 ## Fault catalog
 
@@ -127,6 +174,7 @@ test that would fail if it came back.
 | F27 | in the same rehearsal, with the jobs back six hours after the plan reset and the usage unreadable, the resume notice named the credits as standing | the notice named each episode the silence carried and each snooze that ended in it, whatever its own known end | what the silence carried is not named once its known end has passed: an episode's own, or the reset the implementer's last reading named | test_catchup_polish | — |
 | F28 | installed from a package whose console scripts were not on PATH, launchd ran a missing file every two minutes while `ao watchdog install` said "installed" | install fell back to a clone's `scripts/ao-watchdog` and `bin/ao` whether or not there was a clone | each job names the console script on PATH, the clone's script, or `python -m ao.watchdog` from an interpreter that imports an installed ao; install refuses when there is none, and exits 1 when `schtasks` fails | test_safe_remove | — |
 | F29 | after `ao remove --yes` the watchdog, doctor and telegram jobs ran on against the removed project, and the removal had taken the registry and other projects' logs with it | remove ran `python -m ao watchdog uninstall` without reading the result, and from a clone that interpreter has no ao; it never removed the telegram poller; it deleted every file in `~/.ao` whose name held the key | the jobs are removed in the removal's own process and checked gone before any state goes; then exactly the project's own files and its registry row | test_safe_remove | — |
+| F30 | an implementer that stopped on its usage limit mid-slice read as stuck: every nudge died on the same limit until the backoff ran out and a person was told "agent stuck", and nothing resumed the slice when the limit reset | a usage limit was read only in an architect wake's log, in one harness's words; a nudge that died on one was a failure like any other, and the implementer's own transcript was not read for one | the stop is read from the harness's own reply or the nudge that died on it, in the words its adapter declares: the implementer's running items are parked `blocked`, `needs: quota (resets …)`, under an alarm that climbs the ladder, never nudged, and resumed once in the same session at the reset, at one retry where none was named, when the transcript goes on past the stop, or when keyflip rotates to headroom | test_quota_park | — |
 
 ## Scenarios: testing the decision, not the measurement
 

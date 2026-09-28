@@ -13,6 +13,7 @@ Guards, in order — the point is to spend nothing when spending would not help:
                                              process alive but long silent is hung,
                                              and is reaped rather than waited on)
   1. Is the session actually idle?          (mtime)
+  1b. Did it stop on its usage limit?       (park the running slice until the reset)
   2. Is there open work to continue?        (mailbox / dirty tree / NEEDS_CHANGES)
   2b. Did the queue run dry rather than end? (wake the architect, not the implementer)
   3. Is the slice over its round budget?    (if so: notify a human, never nudge)
@@ -1390,6 +1391,282 @@ def quota_ok(adapter):
     return True
 
 
+# ---- a slice parked on the implementer's usage limit (QUOTA-PARK) -----------------------------
+#
+# A usage limit was read only where an architect's wake had failed on one. An implementer that
+# stopped on its own limit mid-slice read as an agent ignoring its nudges: each nudge died on the
+# same limit until the backoff ran out and a person was told it was stuck. Its slice is parked
+# instead, and the reset resumes it.
+
+# The `needs:` of a slice parked on quota, and the word the watchdog knows its parks by.
+QUOTA_NEEDS = "quota"
+# A failed nudge's tail is the log's last lines: what stands before its own header is an earlier turn's.
+NUDGE_HEADER = re.compile(r"=== \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} nudge.*?===")
+# While a park holds, keyflip is asked to rotate a spent window at most this often, as wakes are spaced:
+# a rotation is machine-wide, and one asked every cycle while no account has headroom would move every
+# session on the provider every few minutes.
+QUOTA_ROTATION_SPACING = 900
+
+
+def usage_limit_stop(cfg, st, adapter=None, last=None):
+    """Did the implementer stop on its usage limit? {"at", "text", "resets_at", "hours", "source"} or None (QUOTA-PARK).
+
+    Two readings can say so, and the newer of them decides: the transcript, where its newest words
+    are a reply the harness wrote in the model's place (`last_message`, or `last` when the caller
+    has read it), and the nudge that died within seconds of starting (`last_error`), whose tail is
+    its own process's output. Each is searched for the words the implementer's adapter declares
+    its harness stops on (`quota_stops`), in the order it declares them. An adapter that declares
+    none is never read as stopped: one harness's words are no other's, and while the stop was read
+    by one pattern in one harness's wording, another harness's limit never parked anything. The
+    model's own words are never read either: an implementer at work on quota handling writes about
+    usage limits, and a reply of its own that names one is no stop.
+
+    The reset is the one the harness's reply records beside its words (`quota_reset_path`), else
+    the one its words name - in epoch seconds, where the stop's words hold an `epoch`, or as
+    `parse_reset` reads them against when they were written - and it counts only after the stop
+    and within the limit's own `hours`: a clock time is the next one inside them, and a reset
+    further away is none the words can mean. Read within five hours, a weekly limit that named
+    4am at 18:17 read as that morning's, already gone, and its slice was parked with no reset.
+    """
+    adapter = A.implementer_adapter(cfg) if adapter is None else adapter
+    stops = A.quota_stops(adapter)
+    if not stops:
+        return None
+    said = []
+    last = A.last_message(cfg) if last is None else last
+    if last and last.get("at"):
+        said.append((last["at"], last["text"] if last["in_place"] else "", "transcript", last.get("record")))
+    failed = st.get("last_error") if isinstance(st.get("last_error"), dict) else {}
+    if failed.get("tail") and isinstance(failed.get("at"), (int, float)):
+        said.append((float(failed["at"]), NUDGE_HEADER.split(str(failed["tail"]))[-1], "nudge", None))
+    if not said:
+        return None
+    at, text, source, record = max(said, key=lambda reading: reading[0])
+    for stop in stops:
+        found = stop["words"].search(text)
+        if not found:
+            continue
+        path, window = A.quota_reset_path(adapter), stop["hours"] * 3600
+        recorded = A._path_value(record, path) if record and path else None
+        epoch = found.groupdict().get("epoch")
+        read = [recorded if isinstance(recorded, (int, float)) and not isinstance(recorded, bool) else None,
+                float(epoch) if epoch else None, parse_reset(text, now=at, window=window)]
+        return {"at": at, "text": A.redact(found.group(0).strip())[:300], "source": source, "hours": stop["hours"],
+                "resets_at": next((reset for reset in read if reset is not None and at < reset <= at + window), None)}
+    return None
+
+
+def quota_park_for(stop, items, now, retry):
+    """The park a stop makes of `items`: until its reset or, where its words named none, until one nudge tries again.
+
+    The retry is `retry` seconds after the stop, or the limit's own hours where those are fewer: a
+    limit gone within them is gone by then.
+    """
+    named = stop["resets_at"] is not None
+    hours = stop.get("hours")
+    until = stop["resets_at"] if named else stop["at"] + min(retry, hours * 3600 if hours else retry)
+    return {"items": list(items), "at": stop["at"], "text": stop["text"], "until": until, "named": named,
+            "source": stop["source"], "since": now}
+
+
+def quota_park_step(stop, park, resumed, running, parked, now=None, spoken=None, retry=None):
+    """What a usage-limit stop asks of this cycle: (action, park). It reads and writes nothing (QUOTA-PARK).
+
+    `stop` is what `usage_limit_stop` read this cycle, `park` the park that stands, `resumed` the
+    time of the stop the last park ended for, `running` the implementer's ids under the board's
+    `running`, `parked` the ids blocked on quota, and `spoken` when a person or the model last
+    spoke in the transcript (`last_message`). A stop whose words named no reset is tried again
+    `retry` seconds after it (`watchdog.quota_retry_hours`). The action is None, "park", "hold",
+    "resume" or "clear":
+
+    - a stop parks the running items, unless a park has already ended for it: a stop is parked,
+      and resumed after, once. A stop whose reset has already passed resumes at once;
+    - a park holds until its reset, or until its retry where it named none, and a newer stop
+      gives it that stop's. A park with no end held for as long as its stop stood, and while no
+      turn runs nothing moves a stop on;
+    - it resumes then, or as soon as the transcript went on past its stop - a person resumed the
+      session, the model answered - since that is the limit gone, whatever time it named. A stop
+      that still stands when it is tried again is a newer stop, and parks again: one nudge a
+      retry, never a loop;
+    - a park whose items someone took off `blocked` is over, and nothing is moved back;
+    - items blocked on quota with no park standing are a park the watchdog's state lost, torn or
+      deleted: a stop read now parks them again, and without one nothing says the limit stands,
+      so they resume.
+    """
+    now = time.time() if now is None else now
+    retry = S.get(None, "watchdog.quota_retry_hours") * 3600 if retry is None else retry
+    fresh = stop is not None and stop["at"] > (resumed or 0)
+    if park is None:
+        if parked and not fresh:
+            return "resume", {"items": list(parked), "at": resumed or 0, "until": now, "named": False, "lost": True}
+        if not fresh or not (running or parked):
+            return None, None
+        park = quota_park_for(stop, list(parked) + [item for item in running if item not in parked], now, retry)
+        return ("resume" if park["until"] <= now else "park"), park
+    if not set(park.get("items") or ()) & set(parked):
+        return "clear", park
+    if stop is not None and stop["at"] > (park.get("at") or 0):
+        newer = quota_park_for(stop, park.get("items") or (), now, retry)
+        park = dict(park, **{key: newer[key] for key in ("at", "text", "until", "named", "source")})
+    elif spoken and spoken > (park.get("at") or 0):
+        return "resume", dict(park, went_on=True)
+    return ("resume" if (park.get("until") or 0) <= now else "hold"), park
+
+
+def quota_needs(park):
+    """The `needs:` a slice parked on quota carries: its reset, or when one nudge tries again where none was named."""
+    return f"{QUOTA_NEEDS} ({'resets' if park.get('named') else 'retry'} {_when(park.get('until'))})"
+
+
+def parked_on_quota(item):
+    """Is a board item blocked on quota, as a park writes it: `needs: quota`, with or without its time?"""
+    return (item["notes"].get("needs") or "").split(" (")[0].strip() == QUOTA_NEEDS
+
+
+def implementers_item(item, cfg):
+    """Is a board item the implementer's: tagged for no actor, or for the implementer by its role or its name?
+
+    `role:` tags an item for a particular actor, and an item another actor holds does not stop when
+    the implementer does.
+    """
+    role = (item["notes"].get("role") or "").strip()
+    return not role or A.role_of(role, cfg) == "implementer"
+
+
+def quota_park(root, cfg, st, dry_run=False, now=None, adapter=None):
+    """Keep the running slice parked while the implementer's usage limit stands; True when the cycle stands down.
+
+    What `quota_park_step` decides, written. A park moves the implementer's running items to
+    `blocked` with `needs: quota (resets <time>)`, or `needs: quota (retry <time>)` where no reset
+    was named, and tells a person; while it holds, no nudge is sent. When it ends the items go back
+    to `running`, with any `needs:` the implementer had written on them, and the cycle goes on to
+    the nudge, which resumes the implementer's session through its adapter's resume command: the
+    session the stop was read from. A park that ends forgets the backoff the limit ran up, since
+    the nudges that died on it were no agent ignoring them.
+
+    With `keyflip.rotation` on, a park that would be made asks keyflip to rotate a spent window,
+    as the nudge it stands in front of would, and one that holds asks again every fifteen minutes:
+    an account with headroom ends it at once. A board line that already says what the park says is
+    left as it is. Dry, it neither rotates nor writes (QUOTA-PARK).
+    """
+    now = time.time() if now is None else now
+    adapter = A.implementer_adapter(cfg) if adapter is None else adapter
+    board = A.board(root)
+    parked = [item["id"] for item in board["blocked"] if parked_on_quota(item)]
+    said = {item["id"]: item["notes"].get("needs") for item in board["blocked"]}
+    standing = st.get("quota_park") if isinstance(st.get("quota_park"), dict) else None
+    if standing is None and not parked and not A.quota_stops(adapter):
+        return False                      # nothing parked, and nothing this harness says is a stop
+    last = A.last_message(cfg)
+    action, park = quota_park_step(usage_limit_stop(cfg, st, adapter, last=last), standing, st.get("quota_resumed"),
+                                   [item["id"] for item in board["running"] if implementers_item(item, cfg)],
+                                   parked, now, spoken=(last or {}).get("spoken"),
+                                   retry=S.get(cfg, "watchdog.quota_retry_hours") * 3600)
+    if action is None:
+        return False
+    if action == "park" or (action == "hold" and now - float(st.get("quota_rotation_asked") or 0)
+                            >= QUOTA_ROTATION_SPACING):
+        if not dry_run:
+            st["quota_rotation_asked"] = now
+            headroom = A.rotate_if_exhausted(cfg, (adapter.get("resume") or {}).get("argv") or [], "implementer")
+            if headroom["ok"] and headroom["rotated"]:
+                action, park = "resume", dict(park, rotated=headroom["text"])
+            elif action == "hold" and park == standing:
+                save_state(root, st)      # when it was asked, so the next cycle does not ask again
+    items = ", ".join(park.get("items") or ())
+    if action in ("clear", "resume"):
+        back = [item for item in park.get("items") or () if item in parked] if action == "resume" else []
+        if action == "clear":
+            print(f"{items} taken off blocked on quota by someone else; the park is over")
+        elif dry_run:
+            print(f"DRY RUN: would end the park of {items} on quota and go on to resume the implementer's session")
+            return True
+        else:
+            print(f"{quota_park_ended(park)}: {items} {'running again' if back else 'not parked'}; the cycle goes "
+                  "on to resume the implementer's session")
+        if not dry_run:
+            for item in back:
+                A.board_move(root, item, "running", {"needs": (park.get("needs") or {}).get(item)})
+            st.pop("quota_park", None)
+            st.pop("quota_rotation_asked", None)
+            st["quota_resumed"] = max(park.get("at") or 0, st.get("quota_resumed") or 0)
+            for key in ("idle_answer", "nudge_size", "nudge_fingerprint", "nudge_inputs"):
+                st.pop(key, None)
+            st["attempts"] = 0
+            save_state(root, st)
+        return False
+    until = park.get("until")
+    _FACTS["quota_park"] = {"items": park.get("items"), "until": until, "named": park.get("named")}
+    wait = f"until {_when(until)}" if park.get("named") \
+        else f"with no reset named; one nudge tries again {_when(until)}"
+    if action == "park":
+        if dry_run:
+            print(f"DRY RUN: would park {items} on quota {wait}; not nudging")
+            return True
+        # A `needs:` the implementer wrote on a running item is kept, and given back when the park ends.
+        park["needs"] = {item["id"]: item["notes"]["needs"] for item in board["running"]
+                         if item["id"] in park["items"] and item["notes"].get("needs")}
+        for item in park["items"]:
+            if said.get(item) != quota_needs(park):
+                A.board_move(root, item, "blocked", {"needs": quota_needs(park)})
+        st["quota_park"] = park
+        save_state(root, st)
+        touch_quota_park(root, st, cfg)
+        print(f"{items} parked on quota {wait}: the implementer stopped on its usage limit; not nudging")
+        return True
+    if park != standing and not dry_run:
+        # A newer stop named another end: the board says the one that stands, and a person is told.
+        for item in park.get("items") or ():
+            if item in parked and said.get(item) != quota_needs(park):
+                A.board_move(root, item, "blocked", {"needs": quota_needs(park)})
+        st["quota_park"] = park
+        save_state(root, st)
+        touch_quota_park(root, st, cfg)
+    print(f"{items} parked on quota {wait}; not nudging")
+    return True
+
+
+def quota_park_ended(park):
+    """Why a park ended, in the words a cycle's trace gives it."""
+    if park.get("rotated"):
+        return f"keyflip moved the implementer's window to an account with headroom ({park['rotated']})"
+    if park.get("went_on"):
+        return "the transcript went on past the usage limit"
+    if park.get("lost"):
+        return "blocked on quota with no park standing, and nothing read says the limit stands"
+    if park.get("named"):
+        return f"the usage limit reset {_when(park.get('until'))}"
+    return f"no reset was named, and the retry at {_when(park.get('until'))} is due: one nudge tries again"
+
+
+def touch_quota_park(root, st, cfg=None):
+    """Keep a standing park's alarm raised while its slice waits, as the architect's quota alarm is kept (QUOTA-PARK).
+
+    Raised every cycle the park stands, whichever guard ends the cycle, it climbs the ladder and
+    never lapses: told once, it went quiet two hours later and nothing told a person again, while
+    a slice whose reset nobody named waited on. It rings once for what it says - the items and the
+    words they stopped on - and again when those change. A park with a named reset turns red only
+    once it outstands that reset, and is then held until the reset that stands; one with no reset
+    named is red after the ladder's hour and mailed on red's schedule until it ends, since a person
+    may be what ends it.
+    """
+    park = st.get("quota_park") if isinstance(st.get("quota_park"), dict) else None
+    if not park or not park.get("items"):
+        return False
+    written = _written_in(root) if cfg is None else cfg
+    items, until, named = ", ".join(park["items"]), float(park.get("until") or 0), bool(park.get("named"))
+    red_after = None                      # the ladder's own hour
+    if named:
+        # Red an hour past its reset, not an hour after it began: a park that ends at its reset asks nothing of anyone.
+        red_after = max(0.0, until - float(park.get("since") or until)) \
+            + S.get(written, "alarms.red_after_minutes") * 60
+    return notify(language.text(written, "alarm.quota-park-title", project=A.project_key(root), items=items),
+                  language.text(written, "alarm.quota-park" if named else "alarm.quota-park-unknown",
+                                error=str(park.get("text") or "")[:100], reset=_when(until), items=items),
+                  root, key="quota-park", window=6 * 3600, audience="human", quiet_until=until if named else None,
+                  red_after=red_after, what=f"{items}: {park.get('text')}")
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--root", required=True)
@@ -2022,6 +2299,7 @@ def _cycle_impl(args, root):
         save_state(root, st)
         print("the architect is present and working; its cached quota block is cleared")
     touch_architect_quota(root, st, cfg)
+    touch_quota_park(root, st, cfg)
     if not args.dry_run:
         for e in A.expire_alarms(project):
             _announce_resolved(root, e)
@@ -2209,6 +2487,11 @@ def _cycle_impl(args, root):
     if elsewhere:
         print(f"working in {elsewhere['name']} ({int(elsewhere['age'])}s since its last write there); "
               "not nudging here")
+        return 0
+    # 1b — stopped on its usage limit: the running slice is parked until the limit resets, or one retry
+    # where no reset was named, and no nudge is spent on a window that is spent. When the park ends the
+    # cycle goes on and resumes it (QUOTA-PARK).
+    if quota_park(root, cfg, st, dry_run=args.dry_run, adapter=adapter):
         return 0
 
     # 2 — nothing to continue. Before standing down, ask why: an empty board can
@@ -2617,8 +2900,16 @@ def _cycle_impl(args, root):
             pass
         st.pop("child_pid", None)                 # it is gone; do not guard on a dead pid
         st["last_error"] = {"at": time.time(), "code": early, "tail": tail}
-        notify(f"{project}: nudge failed", f"exit {early}: {tail[-120:] or 'see nudge log'}", root)
-        print(f"nudge failed (exit {early}): {tail}")
+        # A nudge that died on the usage limit parks its slice now, and the park is what a person
+        # is told: a park tried again at its retry would otherwise ring "nudge failed" each time (QUOTA-PARK).
+        try:
+            parked = quota_park(root, cfg, st, adapter=adapter)
+        except Exception as exc:                  # a park that cannot be written must not take the nudge's record
+            parked = False
+            print(f"the park could not be written: {type(exc).__name__}: {str(exc)[:120]}")
+        if not parked:
+            notify(f"{project}: nudge failed", f"exit {early}: {tail[-120:] or 'see nudge log'}", root)
+            print(f"nudge failed (exit {early}): {tail}")
     else:
         st.pop("last_error", None)
     save_state(root, st)

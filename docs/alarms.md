@@ -17,10 +17,11 @@ and verdicts but never writes a notice or alarm episode and never invokes the
 desktop, Telegram, e-mail, or dead-man-switch ping channels.
 
 Some of what an alarm says follows the project's `language` ([configuration.md](configuration.md)),
-and a project whose `language` is `tr` reads it in Turkish: the architect at quota, a failed wake,
-`ao alarms test`, the lines a red mail adds below an alarm's text, and the phone's "architect woken"
-and "architect done" lines. An alarm's key never follows the language, and neither does its audience:
-a project that changes its language raises the episode that stands, and nothing rings again for it.
+and a project whose `language` is `tr` reads it in Turkish: the architect at quota, a slice parked
+on quota, a failed wake, `ao alarms test`, the lines a red mail adds below an alarm's text, and the
+phone's "architect woken" and "architect done" lines. An alarm's key never follows the language, and
+neither does its audience: a project that changes its language raises the episode that stands, and
+nothing rings again for it.
 
 Orange assumes the person is
 near a screen. On 2026-09-05 they were asleep: a queue sat empty for eleven
@@ -129,6 +130,14 @@ plan whose reset was ten days away was mailed every six hours. A spent reading w
 reset has passed says nothing of the plan after it, and the scheduled check pages nothing
 on it: until a fresh reading is taken the credits are unknown, and a usage check that
 cannot read them is reported as such.
+
+A slice parked on the implementer's usage limit ([watchdog.md](watchdog.md#a-slice-parked-on-quota))
+is raised on every cycle its park stands, whichever guard ends the cycle, and rings once for the
+items and the words they stopped on. With a reset named, it turns red only an hour past that
+reset, since a park that ends at its reset asks nothing of anyone, and is then held until the
+reset that stands. With none named it is red after the hour and mailed on red's schedule until
+the park ends: a person may be what ends it. Raised once, it went quiet two hours later, while a
+slice whose reset nobody named waited on.
 
 `ao alarms` lists the live episodes with their level and age. `ao alarms test
 --level red` sends a real test through every channel.

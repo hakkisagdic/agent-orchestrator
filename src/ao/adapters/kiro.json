@@ -274,6 +274,14 @@
       "accuracy": "a floor: sessions on other machines are invisible. The 69% of the account figure recorded here was measured under the peak-per-turn reading; the sum has not been measured against the account."
     }
   },
+  "quota": {
+    "stops": [
+      { "words": "reached your overage limit[^\\n]*", "hours": 744 },
+      { "words": "reached your monthly usage limit[^\\n]*", "hours": 744 },
+      { "words": "ServiceQuotaExceededException[^\\n]*", "hours": 744 }
+    ],
+    "stops_note": "The words a turn ends on when the account's credits stop it: the error a headless run prints as it exits, and the displayError the session store keeps (a session_metadata record, value.errorType OverageLimitReachedError or UsageLimitReachedError). Read on one machine's session store: 32 overage stops, You've reached your overage limit. (Request ID: <id>), and 7 monthly ones, You've reached your monthly usage limit. Please return next month to continue building. (Request ID: <id>); a nudge that hit the overage limit printed a ServiceQuotaExceededException line before it. Neither names a reset: the credits come back at the month's reset (billing.reset_day) or when a person raises the overage limit, so the limit stands at most the longest month, and a slice parked on it is tried again on the watchdog's retry. The store keeps the stop in a record that is neither a prompt nor a reply, which the transcript reading does not read; the nudge that dies on it is read."
+  },
   "models": {
     "default": null,
     "review": null,

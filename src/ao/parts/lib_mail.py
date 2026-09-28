@@ -120,6 +120,77 @@ def rotate_if_exhausted(cfg, argv, who, on_wait=None):
             "text": f"no {provider} account has headroom after rotating for the {who}"}
 
 
+# ---- a usage limit's words are declared, not coded (QUOTA-PARK) --------------------------------
+#
+# A harness that hits its usage limit ends the turn with words of its own: a reply it writes in the
+# model's place, a line its process prints as it exits. Each harness words them its own way, and the
+# one pattern ao read them by was one harness's wording: another's limit was never read as one.
+
+def quota_stops(adapter):
+    """The usage-limit stops an adapter declares (`quota` → `stops`): [{"words", "hours"}]; [] for none.
+
+    `words` is a regular expression that finds the words the harness stops on, and what it matches is
+    the stop a person is told; a group named `epoch` in it holds the reset in epoch seconds, where the
+    harness writes it so. `hours` is the longest the limit stands once it is hit: a reset its words name
+    by the clock alone is the next such time within it, and one named further away than it is not the
+    one meant. A stop without both, or whose words do not compile, is not read, and
+    `quota_stop_problems` says why.
+    """
+    declared = (adapter or {}).get("quota")
+    stops = declared.get("stops") if isinstance(declared, dict) else None
+    found = []
+    for stop in stops if isinstance(stops, list) else []:
+        words, hours = (stop.get("words"), stop.get("hours")) if isinstance(stop, dict) else (None, None)
+        if not isinstance(words, str) or not words or isinstance(hours, bool) \
+                or not isinstance(hours, (int, float)) or hours <= 0:
+            continue
+        try:
+            found.append({"words": re.compile(words), "hours": float(hours)})
+        except re.error:
+            continue
+    return found
+
+
+def quota_reset_path(adapter):
+    """Where a reply the harness wrote in the model's place keeps the reset, in epoch seconds; "" where it keeps none.
+
+    `quota` → `resets_at`: a harness that records the reset beside its words is read by it, and its
+    words are read only where the record holds none.
+    """
+    declared = (adapter or {}).get("quota")
+    path = declared.get("resets_at") if isinstance(declared, dict) else None
+    return path if isinstance(path, str) else ""
+
+
+def quota_stop_problems(adapter):
+    """Each usage-limit stop an adapter declares that ao will not read, and why; [] when it reads them all (QUOTA-PARK).
+
+    `quota_stops` passes such a stop over without a word, since a reading must not fail on a layer's
+    mistake; `ao adapters validate` says why before anyone relies on the declaration.
+    """
+    declared = (adapter or {}).get("quota")
+    if not isinstance(declared, dict):
+        return []
+    problems = []
+    stops = declared.get("stops", [])
+    if not isinstance(stops, list):
+        return ["`quota.stops` must be a list of {words, hours}"]
+    for number, stop in enumerate(stops, 1):
+        words, hours = (stop.get("words"), stop.get("hours")) if isinstance(stop, dict) else (None, None)
+        if not isinstance(words, str) or not words:
+            problems.append(f"`quota.stops` #{number} must name its `words`, a regular expression")
+        else:
+            try:
+                re.compile(words)
+            except re.error as exc:
+                problems.append(f"`quota.stops` #{number} words {words!r} do not compile: {exc}")
+        if isinstance(hours, bool) or not isinstance(hours, (int, float)) or hours <= 0:
+            problems.append(f"`quota.stops` #{number} must say in `hours` how long the limit stands, above 0")
+    if "resets_at" in declared and not (isinstance(declared["resets_at"], str) and declared["resets_at"]):
+        problems.append("`quota.resets_at` must be the path to the reset in the harness's own reply")
+    return problems
+
+
 def fanout_history(root, limit=20):
     p = os.path.join(root, ".ao", "ledger", "fanouts.jsonl")
     if not os.path.exists(p):

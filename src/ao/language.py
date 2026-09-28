@@ -656,6 +656,21 @@ bu adrese gider; `ao alarms` merdiveni gösterir.
     "alarm.wake-failed-title": {"en": "{project}: architect wake failed", "tr": "{project}: mimar uyandırılamadı"},
     "alarm.wake-failed": {"en": "{kind}: {error} — binary: {binary}; `ao doctor`",
                           "tr": "{kind}: {error} — ikili: {binary}; `ao doctor`"},
+    # a slice parked when the implementer stopped on its usage limit ({items}: the board ids, {error}: what
+    # its harness said, {reset}: when the limit resets, or when one nudge tries again where no reset was
+    # named) (QUOTA-PARK)
+    "alarm.quota-park-title": {"en": "{project}: {items} parked on quota",
+                               "tr": "{project}: {items} kota yüzünden park edildi"},
+    "alarm.quota-park": {
+        "en": "{error} — no nudges until {reset}; then the same session is resumed, once",
+        "tr": "{error} — {reset}'e kadar dürtme yok; sonra aynı oturum bir kez devam ettirilir",
+    },
+    "alarm.quota-park-unknown": {
+        "en": "{error} — no reset time was named: one nudge tries again at {reset}; resume the session, or take "
+              "{items} off blocked, to go on sooner",
+        "tr": "{error} — sıfırlanma saati belirtilmedi: {reset}'de bir dürtme yeniden dener; daha erken devam etmek "
+              "için oturumu sürdürün ya da {items} öğesini blocked'dan çıkarın",
+    },
     # the watchdog's lines to the phone about the architect ({n}: reports, {pid}: the process woken)
     "watchdog.architect-done": {"en": "✅ *Architect done* — {n} report(s) closed, queue empty",
                                 "tr": "✅ *Mimar bitirdi* — {n} rapor kapandı, kuyruk boş"},

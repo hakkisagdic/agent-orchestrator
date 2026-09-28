@@ -192,7 +192,17 @@
     "ao_files": [".claude/skills/ao/"]
   },
   "mcp": { "file": ".mcp.json", "remove_when_empty": true },
-  "quota": { "provider": "claude" },
+  "quota": {
+    "provider": "claude",
+    "stops": [
+      { "words": "hit your session limit[^\\n]*", "hours": 5 },
+      { "words": "hit your weekly limit[^\\n]*", "hours": 168 },
+      { "words": "reached your [^\\n]{1,60}? limit\\.[^\\n]*", "hours": 168 },
+      { "words": "usage limit reached\\|(?P<epoch>\\d{9,11})", "hours": 5 }
+    ],
+    "resets_at": "quotaLimits.resetsAt",
+    "stops_note": "The words a turn ends on when a usage limit stops it: the reply the harness writes in the model's place (message.model <synthetic>, error rate_limit, apiErrorStatus 429), and what a headless run prints as it exits. Verified on 2.1 session stores: all 428 replies holding error rate_limit, in 59 stores and their subagents' transcripts, are one of three forms, and none of the 357 other replies the harness wrote in the model's place is: the session limit (hit your session limit · resets <time> (<zone>)), the weekly limit (hit your weekly limit · resets <time>, or resets <month> <day> at <time>), and a model's own allowance (reached your <model> limit. Run /usage-credits to continue or switch models with /model.), which names no reset. From 2.1.235 the reply records the limit beside its words, in quotaLimits: rateLimitType five_hour or seven_day, and resetsAt, the reset in epoch seconds, which 283 of them hold. On each of those 283 the reset the words name, read against the reply's own time within its limit's hours, is resetsAt: 210 session limits, 62 weekly limits that name their day, and 11 that name only the clock and were due 2 to 10 hours later, past a five-hour window. Older releases wrote the limit as usage limit reached|<epoch>, the reset after the bar."
+  },
   "models": {
     "default": "claude-sonnet-5",
     "review": "claude-opus-5",

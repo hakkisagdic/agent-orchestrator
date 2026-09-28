@@ -1557,21 +1557,21 @@ def last_write(transcript, shape):
     return max([session_write(transcript)] + [mtime for mtime, _ in subagent_writes(transcript, shape)])
 
 
-def _strings(o, out, keys, depth=0):
+def _strings(o, out, keys, depth=0, shortest=31):
     if depth > 7:
         return
     if isinstance(o, str):
-        if len(o) > 30:
+        if len(o) >= shortest:
             out.append(o)
     elif isinstance(o, dict):
         for k, v in o.items():
             if k in keys:
-                _strings(v, out, keys, depth + 1)
+                _strings(v, out, keys, depth + 1, shortest)
             elif isinstance(v, (dict, list)):
-                _strings(v, out, keys, depth + 1)
+                _strings(v, out, keys, depth + 1, shortest)
     elif isinstance(o, list):
         for x in o:
-            _strings(x, out, keys, depth + 1)
+            _strings(x, out, keys, depth + 1, shortest)
 
 
 def local_hhmm(ts):
@@ -1595,7 +1595,7 @@ def local_hhmm(ts):
         return ts[11:16]
 
 
-def message_words(body, shape):
+def message_words(body, shape, shortest=31):
     """The text a message record holds, as one line: all of it, or only its word blocks when it holds blocks.
 
     A store that nests blocks in a message writes a tool's result as a block of the
@@ -1607,6 +1607,9 @@ def message_words(body, shape):
     A store also writes notes of its own, and the summary of a compacted conversation, as
     records of the prompt's kind. They are no one speaking, and a record holding what one of
     `transcript.messages.not_words` declares holds no words either.
+
+    A string shorter than `shortest` is passed over, as the panel's lines have always passed short
+    strings over; a reader asking whether anyone spoke at all counts a short answer too.
     """
     if _matches(body, shape.get("not_words") or []):
         return ""
@@ -1614,7 +1617,7 @@ def message_words(body, shape):
     parts = declared_items(body, words) if words and _path_values(body, words["blocks"]) else [body]
     buf = []
     for part in parts:
-        _strings(part, buf, shape["text_keys"])
+        _strings(part, buf, shape["text_keys"], shortest=shortest)
     return " ".join(" ".join(buf).split())
 
 
@@ -2199,6 +2202,60 @@ def board_append(root, state, line):
     nl = text.index("\n", idx) + 1
     text = text[:nl] + line.rstrip() + "\n" + text[nl:]
     open(p, "w", encoding=UTF8).write(text)
+
+
+def board_move(root, item_id, state, notes=None):
+    """Move one item's line under `## <state>`, its notes changed as `notes` says; False when it is not on the board.
+
+    Like an append, a move changes one line of what it read just before and leaves every other
+    line as the implementer wrote it. It also takes that line out of its section, so the file is
+    replaced whole: a reader finds the board before the move or after it, never half of each. A
+    note given None is removed and any other is set; the title and the other notes stay as they
+    were. An item moved to the section it is already in keeps its place there. The item is the
+    first line with its id that `board` reads under a state's heading (QUOTA-PARK).
+
+    A byte that is not UTF-8 - an editor that saved the board in another code page - is read as
+    `board` reads past it, and written back as it was: moving one line rewrites no other.
+    """
+    p = os.path.join(root, ".ao", "board.md")
+    try:
+        with open(p, encoding=UTF8, errors="surrogateescape") as fh:
+            lines = fh.read().split("\n")
+    except OSError:
+        return False
+    section, found = None, None
+    for index, line in enumerate(lines):
+        if line.lstrip().startswith("##"):
+            m = re.match(r"^##\s+([a-z]+)\s*$", line.strip())
+            section = m.group(1) if m and m.group(1) in BOARD_STATES else None
+            continue
+        m = re.match(r"^\s*- \s*\[([^\]]+)\]\s*(.*)$", line)
+        if section and m and m.group(1) == item_id:
+            found = (index, section, m.group(2))
+            break
+    if found is None:
+        return False
+    index, section, rest = found
+    chunks = [chunk.strip() for chunk in rest.split("·")]
+    changed = notes or {}
+    kept = [chunk for chunk in chunks[1:] if chunk and chunk.partition(":")[0].strip() not in changed]
+    line = " · ".join([f"- [{item_id}] {chunks[0]}".rstrip()] + kept
+                      + [f"{key}: {value}" for key, value in changed.items() if value is not None])
+    if section == state:
+        lines[index] = line
+    else:
+        del lines[index]
+        head = next((i for i, text in enumerate(lines)
+                     if re.match(r"^##\s+" + re.escape(state) + r"\s*$", text.strip())), None)
+        if head is None:
+            while lines and not lines[-1].strip():
+                lines.pop()
+            lines += ["", f"## {state}", line, ""]
+        else:
+            lines.insert(head + 1, line)
+    from .storage import replace_file_durably
+    replace_file_durably(p, "\n".join(lines).encode(UTF8, errors="surrogateescape"))
+    return True
 
 
 def record_progress(root, cfg):

@@ -802,7 +802,7 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
                               f"{l['count']} reviews running" for l in loops[:4]] +
                              ["more rounds will not converge this; it needs re-specifying "
                               "or a different actor"]})
-    err = last_nudge_error(root)
+    err = last_nudge_error(root, parked=False)
     if err and time.time() - err.get("at", 0) < 3600:
         out.append({"kind": "restart-failed",
                     "facts": [f"exit {err.get('code')} "
@@ -1611,13 +1611,22 @@ def propose(root, cfg, text, why, rule_file=None, via="cli"):
     return dict(row, state="open", answer=None, answered_by=None, answered_at=None), question, True
 
 
-def last_nudge_error(root):
-    """The most recent failed nudge, if the watchdog recorded one."""
+def last_nudge_error(root, parked=True):
+    """The most recent failed nudge, if the watchdog recorded one.
+
+    `parked=False` leaves out a failure while the implementer's slice is parked on its usage limit,
+    and one no newer than the stop a park has ended for: the park's own alarm tells a person, and an
+    architect woken to judge it spends a window on a condition that waits on a clock (QUOTA-PARK).
+    """
     try:
         st = json.load(open(project_file(root, "watchdog-state"), encoding=UTF8))
     except Exception:
         return None
-    return st.get("last_error")
+    err = st.get("last_error")
+    if not parked and isinstance(err, dict) and (isinstance(st.get("quota_park"), dict)
+                                                 or float(st.get("quota_resumed") or 0) >= (err.get("at") or 0)):
+        return None
+    return err
 
 
 def recent_errors(recs, limit=3, adapter=None):

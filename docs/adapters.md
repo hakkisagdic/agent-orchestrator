@@ -285,6 +285,8 @@ no MCP server it was not given (#24); `ao doctor` and the reviewer check read it
 | `billing.api.driver` | a protocol in `src/ao/drivers.py` (`usage-limits`) with its `token`, `profile`, `body`, `resource` and `login` | `ao credits`, `ao cost`, the credit sampler and the samples `ao doctor` reads, `ao digest`, handoff: each for the implementer's own adapter |
 | `billing.fallback.transcripts` | a glob of transcripts whose usage records are read when the account cannot be | `ao credits --offline`, `ao digest`, for the implementer's own adapter |
 | `quota` → `provider` | the keyflip provider an actor running this harness spends | window reserve, rotation (#32), `ao fanout` |
+| `quota` → `stops` | the words a turn of this harness ends on when a usage limit stops it: a list of `{words, hours}`, `words` a regular expression (a group named `epoch` holds a reset written in epoch seconds) and `hours` the longest the limit stands once hit | the watchdog's park ([watchdog.md](watchdog.md#a-slice-parked-on-quota)), `ao adapters validate` |
+| `quota` → `resets_at` | the path, in a reply the harness writes in the model's place, to the reset it records beside its words, in epoch seconds | the watchdog's park |
 | `detect.install_dirs` | where the harness installs itself outside the usual directories | the newest-binary search |
 | `detect.update` | the command that updates the harness | `ao doctor` on a stale binary |
 
@@ -295,6 +297,27 @@ a lookup runs the command its adapter names, so what a layer an agent can write 
 asked, and there is no first adapter to fall back on. An implementer whose adapter declares none has
 no account ao can read, no credit samples and no credits alarm; every sample names the adapter it
 was read through ([telemetry.md](telemetry.md), "Whose account").
+
+*In ao since slice QUOTA-PARK: a harness's usage limit is read in the words its own adapter
+declares. The watchdog read an implementer's stop by one pattern written in one harness's words,
+so another harness's limit never parked anything: Kiro's "You've reached your overage limit"
+ended every nudge until a person was told the agent was stuck, and even a Claude Code model's
+own limit, "reached your … limit. Run /usage-credits …", was no stop. An adapter that declares
+no stops is never parked. The reset is the one the harness records beside its words, where it
+records one, else the one its words name, read against when they were written: a time named by
+the clock alone is the next such time within `hours`, and one further away than `hours` is
+none the words can mean.*
+
+Measured read-only on Claude Code 2.1 stores: all 428 replies it wrote in the model's place
+holding `error` `rate_limit`, across 59 stores and their subagents' transcripts, match its
+declared words, and none of the 357 other such replies does. From 2.1.235 it records the limit
+beside its words, `quotaLimits.resetsAt` in epoch seconds, and 283 of those replies hold it; on
+each, the reset read from the words within the limit's hours is that value - 210 session limits,
+62 weekly limits that name their day and 11 that name only the clock, due 2 to 10 hours after
+they were written. Read within the five hours a session limit stands, 2 of those 11 read as a
+time already gone. Kiro keeps its stop in the store as a `session_metadata` record,
+`displayError` `OverageLimitReachedError` or `UsageLimitReachedError` (32 and 7 on one machine),
+which no transcript reading reads; the nudge that dies on it prints the same words, and is read.
 
 ## Profiles and actor names are declared, not coded
 
