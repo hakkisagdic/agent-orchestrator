@@ -115,8 +115,14 @@ def build_parser():
     wd.set_defaults(fn=cmd_watchdog)
 
     bd = sub.add_parser("board", help="where each pre-authorised item is")
-    bd.add_argument("view", nargs="?", choices=["ready"],
-                    help="ready: exactly the items that may start now, exit 1 on a broken edge")
+    bd.add_argument("view", nargs="?", choices=["ready", "add"],
+                    help="ready: exactly the items that may start now, exit 1 on a broken edge; "
+                         "add: admit one item, with the boundary it is judged against")
+    bd.add_argument("id", nargs="?", help="add: the item's id, one word")
+    bd.add_argument("title", nargs="?", help="add: what the item is, on one line")
+    bd.add_argument("--acceptance", help="add: what the work must meet, written before it starts")
+    bd.add_argument("--needs", help="add: the ids this item waits for, comma-separated")
+    bd.add_argument("--role", help="add: the role that takes it, when that is not the implementer")
     bd.set_defaults(fn=cmd_board)
     ak = sub.add_parser("ask", help="pose a decision, answerable in one tap")
     ak.add_argument("question", nargs="?")

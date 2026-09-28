@@ -771,6 +771,55 @@ def cmd_since(cfg, args):
     return 0
 
 
+def _board_add(cfg, args):
+    """Admit one item to `queued` the way `ao source import` admits one: only with its boundary.
+
+    Work entered a board by hand-editing `.ao/board.md` or through a tracker import. Both keep the rule
+    that matters - nothing runs unattended without an acceptance boundary written before the work - and
+    the first asks a person to learn a file's shape first. This writes the line the import writes and
+    records the same plan baseline, and it refuses what the import would hold back or the board could
+    not hold: no boundary, an id already there or no line could carry, a dependency on an item that is
+    not on the board. Refused, nothing is written.
+    """
+    import re
+    root = cfg["root"]
+    iid, title = (args.id or "").strip(), " ".join((args.title or "").split())
+    acceptance, role = " ".join((args.acceptance or "").split()), (args.role or "").strip()
+    needs = [part.strip() for part in (args.needs or "").split(",") if part.strip()]
+    board = A.board(root)
+    held = {item["id"] for state in A.BOARD_STATES for item in board.get(state, [])}
+    if not os.path.exists(os.path.join(root, ".ao", "board.md")):
+        problem = "this project has no .ao/board.md; `ao init` writes one"
+    elif not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", iid):
+        problem = f"`{iid}` is not an id a board line can carry: one word of letters, digits, '.', '_' or '-'"
+    elif iid in held:
+        problem = f"{iid} is already on the board"
+    elif not title:
+        problem = "an item needs a title: `ao board add ID \"what it is\" --acceptance \"…\"`"
+    elif not acceptance:
+        problem = ("an item enters the board only with a written acceptance boundary: "
+                   "--acceptance \"what the work must meet\"")
+    elif any("·" in text for text in (title, acceptance, role)):
+        problem = "a title, a boundary and a role hold no '·': it separates a board line's notes"
+    elif [name for name in needs if name not in held]:
+        problem = ("it needs " + ", ".join(name for name in needs if name not in held)
+                   + ", which the board does not hold")
+    else:
+        problem = None
+    if problem:
+        print(f"{C['red']}REFUSED{C['reset']}  {problem}")
+        return 2
+    notes = [("acceptance", acceptance)] + ([("needs", ", ".join(needs))] if needs else []) \
+        + ([("role", role)] if role else [])
+    A.board_append(root, "queued", f"- [{iid}] {title}" + "".join(f" · {key}: {value}" for key, value in notes))
+    digest = A.plan_digest(root, iid)
+    if digest:
+        A.record_plan(root, iid, digest)       # the plan as admitted: later edits are measured against it
+    waiting = f"  {C['dim']}waits for {', '.join(needs)}{C['reset']}" if needs else ""
+    print(f"{C['green']}queued{C['reset']}  {C['b']}{iid}{C['reset']}  {title}{waiting}")
+    return 0
+
+
 def cmd_board(cfg, args):
     """Where every pre-authorised item is, blocked ones first.
 
@@ -778,6 +827,8 @@ def cmd_board(cfg, args):
     act on, and `blocked` is the one that goes unnoticed — work carried on past
     it, so nothing else in the panel looks wrong.
     """
+    if getattr(args, "view", None) == "add":
+        return _board_add(cfg, args)
     root = cfg["root"]
     for line in _mailbox_banner(cfg):
         print(line)

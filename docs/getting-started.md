@@ -63,10 +63,11 @@ last step. The throwaway review spends one short review from the reviewer's quot
 
 ## 4. The first slice
 
-Put it on `.ao/board.md` under `## queued` with its acceptance boundary, then the loop the
-playbook describes:
+Put it on the board with the boundary it will be judged against, then the loop the playbook
+describes:
 
 ```bash
+ao board add FIRST "what the slice does" --acceptance "what it must meet; the suite passes"
 ao board ready                       # what may start now
 # work, then stage exactly the candidate
 ao verify -p quick
