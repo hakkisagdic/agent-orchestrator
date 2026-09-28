@@ -137,6 +137,7 @@ publishes the release.
 - `ao agent-hook EVENT` is what a harness's lifecycle hook runs: it records the event - the session, its directory, a tool's name - in the machine's event log, never a prompt or a tool's input, prints nothing and always exits 0; `ao agents` shows what each session is doing (HOOK-SPOOL).
 - A slice parked on quota keeps the `needs:` it had before the park on its board line, and gets it back when the park ends, even one the watchdog's state lost (QUOTA-PARK-2).
 - `ao uninstall` and `ao remove` take an MCP entry for ao's only when it runs `ao … mcp serve`, not whenever its command is named ao (UPDATE-UNINSTALL-2).
+- An architect woken again and again by a weekly or monthly limit that names no reset waits twice as long each time, up to the period the stop names (ARCHITECT-WAKE-QUOTA-2).
 
 ### Fixes
 

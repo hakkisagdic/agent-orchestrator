@@ -200,3 +200,43 @@ def test_one_notice_says_when_and_says_it_again_only_when_the_end_moves(project,
     W.touch_architect_quota(root, state)
     W.touch_architect_quota(root, state)
     assert len(mailed) == 2 and "wakes are held until 13 Sep 13:06" in mailed[1]
+
+
+# ---- a weekly or monthly limit that names no reset (ARCHITECT-WAKE-QUOTA-2) ------------------------------------
+
+def _stopped_in_a_row(world, stops, log="escalate-log", wake="escalate"):
+    """The architect's last wakes, one segment each, as its log reads them: [(started at, message)]."""
+    os.makedirs(W.STATE_DIR, exist_ok=True)
+    path = os.path.join(W.STATE_DIR, A.project_file_name(log, A.project_key(world.root)))
+    with open(path, "w", encoding="utf-8") as fh:
+        for at, message in stops:
+            fh.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(at))} {wake} /agents/claude 2.1.261 ===\n"
+                     f"{message}\n")
+
+
+@pytest.mark.parametrize("in_a_row, held", [(1, 5 * HOUR), (2, 10 * HOUR), (3, 20 * HOUR), (8, 7 * DAY)])
+def test_each_wake_in_a_row_that_stops_on_a_weekly_limit_naming_no_reset_waits_twice_as_long(
+        world, monkeypatch, in_a_row, held):
+    _reading(monkeypatch)
+    world.transcript_age(900).mail(REPORT, ASKING)
+    last = _written(60)
+    _stopped_in_a_row(world, [(last - (in_a_row - 1 - n) * HOUR, "You've hit your weekly limit")
+                              for n in range(in_a_row)])
+
+    world.cycle(dry_run=False)
+
+    assert not _architect_wakes(world)
+    assert W.load_state(world.root).get("arch_quota_until") == last + held
+
+
+def test_a_stop_that_named_its_reset_breaks_the_run(world, monkeypatch):
+    _reading(monkeypatch)
+    world.transcript_age(900).mail(REPORT, ASKING)
+    last = _written(60)
+    _stopped_in_a_row(world, [(last - 3 * HOUR, "You've hit your weekly limit"),
+                              (last - 2 * HOUR, "You've hit your session limit · resets in 1h"),
+                              (last, "You've hit your weekly limit")])
+
+    world.cycle(dry_run=False)
+
+    assert W.load_state(world.root).get("arch_quota_until") == last + 5 * HOUR

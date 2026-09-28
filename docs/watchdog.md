@@ -173,6 +173,11 @@ With no reset known - a stop that names none, and no spent window read - the blo
 `architect.quota_window_hours` after the stop, as it always did: a reading only ever moves the end
 later.
 
+*In ao since slice ARCHITECT-WAKE-QUOTA-2: a weekly or monthly limit that names no reset held each wake
+one short window, so the architect was woken again and again before its period was over. Each wake in a
+row that stops on one now waits twice as long as the one before - one window, then two, then four - and
+never longer than the period the stop names; a stop that names its reset breaks the run.*
+
 A report wake's stop is told in one notice, `architect at quota`: "wakes are held until …", with
 the clock time when that is within a day and the date as well when it is further away. It rings
 once, climbs the ladder and is held quiet until that end ([alarms.md](alarms.md)), and it is told

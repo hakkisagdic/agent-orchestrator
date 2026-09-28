@@ -1325,9 +1325,31 @@ def wake_error(log_path):
             # A reset is read against when the wake wrote it, not against this cycle, and
             # within the limit the stop names: its period, or the short window.
             resets_at = parse_reset(body, now=at, window=limit_window(text)) if kind == "quota" else None
+            streak = 0
+            if kind == "quota" and resets_at is None:
+                # How many wakes in a row stopped on a weekly or monthly limit that named no reset, this
+                # one the last (ARCHITECT-WAKE-QUOTA-2): each waits twice as long as the one before.
+                for index in range(len(segs) - 4, 0, -4):
+                    if not _period_without_reset(segs[index], segs[index + 3]):
+                        break
+                    streak += 1
             return {"text": text, "binary": binary, "when": when, "at": at, "kind": kind,
-                    "resets_at": resets_at}
+                    "resets_at": resets_at, "streak": streak}
     return None
+
+
+def _period_without_reset(when, body):
+    """Whether a wake's segment stopped on a weekly or monthly limit whose words name no reset."""
+    m = re.search(dict(WAKE_SIGNATURES)["quota"], body)
+    if not m:
+        return False
+    try:
+        at = time.mktime(time.strptime(when, "%Y-%m-%d %H:%M:%S"))
+    except ValueError:
+        return False
+    text = m.group(1).strip()[:300]
+    return limit_window(text) > S.get(None, "architect.quota_window_hours") * 3600 \
+        and parse_reset(body, now=at, window=limit_window(text)) is None
 
 
 def wake_failed(failure, since):
@@ -1397,8 +1419,14 @@ def quota_block_until(err, now=None, stated=None):
     now = now or time.time()
     if not err or err.get("kind") != "quota":
         return None
-    until = max(err.get("resets_at") or ((err.get("at") or now) + S.get(None, "architect.quota_window_hours") * 3600),
-                stated or 0)
+    window = S.get(None, "architect.quota_window_hours") * 3600
+    span = window
+    if not err.get("resets_at") and err.get("streak"):
+        # A weekly or monthly limit that named no reset held its wakes one short window each, so the
+        # architect was woken again and again before its period was over. Each wake in a row that stops
+        # on one waits twice as long as the last, and never longer than the period (ARCHITECT-WAKE-QUOTA-2).
+        span = min(window * 2 ** (int(err["streak"]) - 1), limit_window(err.get("text")))
+    until = max(err.get("resets_at") or ((err.get("at") or now) + span), stated or 0)
     return until if until > now else None
 
 

@@ -88,6 +88,16 @@ QUOTA_BLOCK = [
      NOW + HOUR, NOW + HOUR),
     ("a stated reset already passed", {"kind": "quota", "at": NOW - HOUR}, NOW - 60, NOW + 4 * HOUR),
     ("a stated reset holds no error that is not quota", {"kind": "binary", "at": NOW}, NOW + DAY, None),
+    # a weekly or monthly limit that named no reset, stopped on by wakes in a row (ARCHITECT-WAKE-QUOTA-2)
+    ("the first wake a weekly limit without a reset stops: one window",
+     {"kind": "quota", "at": NOW - HOUR, "text": "hit your weekly limit", "streak": 1}, None, NOW + 4 * HOUR),
+    ("the third in a row: four windows", {"kind": "quota", "at": NOW - HOUR, "text": "hit your weekly limit",
+                                          "streak": 3}, None, NOW + 19 * HOUR),
+    ("the tenth in a row: no longer than the week", {"kind": "quota", "at": NOW - HOUR,
+                                                    "text": "hit your weekly limit", "streak": 10}, None,
+     NOW - HOUR + 7 * DAY),
+    ("a run with a named reset: the reset, not the run", {"kind": "quota", "at": NOW - HOUR, "resets_at": NOW + HOUR,
+                                                         "text": "hit your weekly limit", "streak": 5}, None, NOW + HOUR),
 ]
 
 
@@ -255,7 +265,7 @@ def test_rounds_golden_values(case, running, reviews, expected, project):
 GOLDEN = {
     W.parse_reset: (PARSE_RESET, 10),
     W._reset_clock: (PARSE_RESET, 6),
-    W.quota_block_until: (QUOTA_BLOCK, 7),
+    W.quota_block_until: (QUOTA_BLOCK, 9),
     W.limit_window: (LIMIT_WINDOW, 2),
     W.architect_quota_until: (ARCHITECT_QUOTA, 7),
     A.burn_rate: (BURN_RATE, 11),
