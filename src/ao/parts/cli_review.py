@@ -1103,9 +1103,13 @@ def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, s
             verdict = A._review_verdict(out)
             if verdict not in ("APPROVED", "NEEDS_CHANGES") or any(len(v) != 1 for v in counts.values()):
                 return dict(invocation, sections=[_section_summary(r) for r in rows])
+            decided, raised = _decided_counts({key: int(values[0]) for key, values in counts.items()},
+                                              _listed_findings(out))
             row = {"at": int(time.time()), "section": section["name"], "position": invocation["used_position"],
                    "route": invocation["labels"].get(invocation["used_position"], "reviewer"),
-                   "counts": {key: int(values[0]) for key, values in counts.items()}, "out": A.scan_evidence(out)[0]}
+                   "counts": decided, "out": A.scan_evidence(out)[0]}
+            if raised:
+                row["raised"] = raised
             row["verdict"] = "NEEDS_CHANGES" if row["counts"]["BLOCKER"] or row["counts"]["HIGH"] else "APPROVED"
             if invocation["attempt"].get("tool"):
                 row["tool"] = invocation["attempt"]["tool"]
@@ -1122,7 +1126,7 @@ def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, s
     verdict = "NEEDS_CHANGES" if totals["BLOCKER"] or totals["HIGH"] else "APPROVED"
     body = [f"VERDICT: {verdict}"] + [f"{key}: {value}" for key, value in totals.items()]
     for index, row in enumerate(rows, 1):
-        body += ["", f"## Section {index}/{len(rows)}: {row['section']} — {row['verdict']}"]
+        body += ["", f"## Section {index}/{len(rows)}: {row['section']} — {row['verdict']}"] + row.get("raised", [])
         body += ["    " + line for line in row["out"].splitlines()]
     position = max(row["position"] for row in rows)
     attempt = dict((last or {}).get("attempt") or {"ok": True, "binary": "section journal"}, out="\n".join(body))
@@ -1780,6 +1784,53 @@ def cmd_collect_review(cfg, args):
 # ---- a person reviews: the third tier, for whoever runs one harness (REVIEW-TIERS) --------
 
 PERSON_FINDING = A.re.compile(r"^-\s*\[(BLOCKER|HIGH|MEDIUM|LOW)\]\s*\S")
+REVIEW_SEVERITIES = ("BLOCKER", "HIGH", "MEDIUM", "LOW")
+
+
+# The heading a reviewer's notes stand under, in either language ao asks in: a note is outside the
+# candidate and cannot change the verdict, whatever it carries.
+NOTES_HEADING = A.re.compile(r"#{1,2}\s+(?:notes|notlar)\s*:?\s*", A.re.I)
+
+
+def _listed_findings(out):
+    """How many findings of each severity an answer lists (REVIEW-FINDINGS-COUNT).
+
+    A reviewer declares its counts and lists its findings, and ao read only the counts: an answer
+    that counted HIGH 0 above a listed HIGH finding was an approval. A finding is a line shaped as a
+    person's findings file is read, `- [SEVERITY] …`, at the start of its line; one quoted in an
+    indented or fenced block is not the reviewer's own, and one under the notes heading is a note,
+    which the protocol keeps from the verdict even when it carries a severity. The notes heading is
+    read in either language ao asks in, so an answer is the same review in both.
+    """
+    listed, fenced, notes = dict.fromkeys(REVIEW_SEVERITIES, 0), False, False
+    for line in str(out or "").splitlines():
+        if line.startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        if A.re.match(r"#{1,2}\s", line):
+            notes = bool(NOTES_HEADING.fullmatch(line.rstrip()))
+            continue
+        found = None if notes else PERSON_FINDING.match(line)
+        if found:
+            listed[found.group(1)] += 1
+    return listed
+
+
+def _decided_counts(declared, listed):
+    """(the counts ao decides by, the adjudication line when a listed finding raised one).
+
+    Each count is the larger of the declared and the listed, so a count can only rise: what the
+    reviewer declared still decides where its findings are written in a shape ao does not read.
+    """
+    raised = [key for key in REVIEW_SEVERITIES if listed[key] > declared[key]]
+    counts = {key: max(declared[key], listed[key]) for key in REVIEW_SEVERITIES}
+    if not raised:
+        return counts, []
+    return counts, ["- adjudicated: the reviewer counted " + ", ".join(f"{key} {declared[key]}" for key in raised)
+                    + " and listed " + ", ".join(f"{listed[key]} {key}" for key in raised)
+                    + " finding(s); a count is never below the findings listed"]
 PERSON_FINDINGS_BYTES = 400_000
 PERSON_DIGEST_HEX = 16                      # what the shown command quotes; any 12 or more hex characters match
 
@@ -3006,7 +3057,8 @@ def cmd_review(cfg, args):
             evidence, matrix_resolution, strict_attempts,
             reviewer_identity=used["identity"], review_status="complete",
         )
-    sev = {key: int(values[0]) for key, values in severity_values.items()}
+    sev, raised = _decided_counts({key: int(values[0]) for key, values in severity_values.items()},
+                                  _listed_findings(out))
     if criteria:
         # What the review found of each criterion, read from the reviewer's own answer or from each
         # section's. The verdict below is still the counts'; `ao commit-ok` is where a criterion that is
@@ -3018,7 +3070,7 @@ def cmd_review(cfg, args):
     # differs from the reviewer's, and the reviewer's own words unchanged (#54).
     said = verdict
     verdict = "NEEDS_CHANGES" if (sev["BLOCKER"] or sev["HIGH"]) else "APPROVED"
-    adjudication = []
+    adjudication = list(raised)
     if verdict != said:
         adjudication.append(
             f"- adjudicated: the reviewer wrote {said}; BLOCKER {sev['BLOCKER']} "

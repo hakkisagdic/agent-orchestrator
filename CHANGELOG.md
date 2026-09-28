@@ -128,6 +128,7 @@ publishes the release.
 - An implementer's usage limit is read in the words its own adapter declares; its slice is parked until the reset and resumed then, where every nudge died on the limit until a person was told the agent was stuck (QUOTA-PARK).
 - An architect wake stopped on its usage limit waits for that limit's reset, a weekly one included, and one notice says when wakes start again (ARCHITECT-WAKE-QUOTA).
 - `ao verify` takes the machine gate lock once it knows the gates it will run, so a project with none, or an unknown profile, is told so at once (VERIFY-LOCK-LATE).
+- A review's counts are never below the findings the reviewer listed outside its notes: an answer that counted HIGH 0 above a listed HIGH finding is NEEDS_CHANGES, and the artefact says which count its list raised (REVIEW-FINDINGS-COUNT).
 
 ### Fixes
 
