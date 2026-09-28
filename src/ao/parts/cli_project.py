@@ -926,6 +926,13 @@ def cmd_since(cfg, args):
     return 0
 
 
+# What a board line carries between its brackets and a needs note can name whole: lib_transcript.board
+# reads up to the first ']', lib_state._edge_ids splits at commas and spaces and takes a word in
+# parentheses for a remark, and plan_digest reads the plan named before the first '/'. A backslash is a
+# path separator on one system and not on another, and a '·' separates a line's notes to a person.
+BOARD_ID = r"[^\s,\]\\·(/][^\s,\]\\·]*"
+
+
 def _board_add(cfg, args):
     """Admit one item to `queued` the way `ao source import` admits one: only with its boundary.
 
@@ -933,20 +940,27 @@ def _board_add(cfg, args):
     that matters - nothing runs unattended without an acceptance boundary written before the work - and
     the first asks a person to learn a file's shape first. This writes the line the import writes and
     records the same plan baseline, and it refuses what the import would hold back or the board could
-    not hold: no boundary, an id already there or no line could carry, a dependency on an item that is
-    not on the board. Refused, nothing is written.
+    not hold: no boundary, an id already there or one another item's needs could not name, a dependency
+    on an item that is not on the board. Refused, nothing is written.
+
+    An id is what the board reads between a line's brackets and what a needs note can name: a phase
+    item such as ACME-187/1 is one, baselined on the plan ACME-187 (BOARD-ADD-2). `--needs` is read the
+    way the board reads a needs note, split at commas and spaces, so what is checked is what is written.
     """
     import re
     root = cfg["root"]
+    for line in _mailbox_banner(cfg):
+        print(line)
     iid, title = (args.id or "").strip(), " ".join((args.title or "").split())
     acceptance, role = " ".join((args.acceptance or "").split()), (args.role or "").strip()
-    needs = [part.strip() for part in (args.needs or "").split(",") if part.strip()]
+    needs = [token for token in re.split(r"[,\s]+", args.needs or "") if token]
     board = A.board(root)
     held = {item["id"] for state in A.BOARD_STATES for item in board.get(state, [])}
     if not os.path.exists(os.path.join(root, ".ao", "board.md")):
         problem = "this project has no .ao/board.md; `ao init` writes one"
-    elif not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", iid):
-        problem = f"`{iid}` is not an id a board line can carry: one word of letters, digits, '.', '_' or '-'"
+    elif not re.fullmatch(BOARD_ID, iid):
+        problem = (f"`{iid}` cannot be an id: an id holds no space, comma, ']', backslash or '·' and does not "
+                   "start with '(' or '/', so that a board line carries it whole and a needs note can name it")
     elif iid in held:
         problem = f"{iid} is already on the board"
     elif not title:
@@ -956,6 +970,9 @@ def _board_add(cfg, args):
                    "--acceptance \"what the work must meet\"")
     elif any("·" in text for text in (title, acceptance, role)):
         problem = "a title, a boundary and a role hold no '·': it separates a board line's notes"
+    elif [name for name in needs if not re.fullmatch(BOARD_ID, name)]:
+        problem = ("--needs names " + ", ".join(f"`{name}`" for name in needs if not re.fullmatch(BOARD_ID, name))
+                   + ", which a needs note would not read as an id")
     elif [name for name in needs if name not in held]:
         problem = ("it needs " + ", ".join(name for name in needs if name not in held)
                    + ", which the board does not hold")

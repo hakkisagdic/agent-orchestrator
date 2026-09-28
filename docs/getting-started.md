@@ -111,6 +111,16 @@ ao commit-ok
 ao commit -m "…"
 ```
 
+An id is what the board carries whole between a line's brackets and what another item's `needs`
+can name: no space, comma, `]`, backslash or `·`, and no `(` or `/` first. A phase of a plan, such
+as `ACME-187/1`, is baselined on `.ao/plans/ACME-187.md` as it stood when the item was admitted, so
+a later edit of the plan shows as drift. `--needs A,B` is read the way the board reads a needs note,
+and `--role` names the role that takes the item when that is not the implementer.
+
+*In ao since slice BOARD-ADD-2: ids such as `ACME-187/1` are admitted, and `--needs` is checked as
+the board will read it; before, the first were refused as ids no line could carry, and a dependency
+could pass the check and be written as two ids the board did not hold.*
+
 No push: that stays a person's act. `ao doctor` shows the state of everything above at any
 time.
 

@@ -121,6 +121,7 @@ scope is the one authority an implementer must not have.
 | `ao watch --all` · `ao fleet` | every project, ordered by what needs a human first |
 | `ao watch --web [--port N]` | the panel, the board and the fleet as read-only pages on 127.0.0.1: a browser tab in place of a terminal ([surfaces.md](docs/surfaces.md)) |
 | `ao board` | where each item is; READY = queued items whose `needs:` are done |
+| `ao board add ID "title" --acceptance "…"` | admit one item, only with its acceptance boundary |
 | `ao verify [-p full]` | run the declared gates, record the result |
 | `ao commit-ok [--verify]` | may this tree be committed? decided from evidence |
 | `ao hold` / `ao hold release --note …` | stop every agent in the tree, and keep them stopped |

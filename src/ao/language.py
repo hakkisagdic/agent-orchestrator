@@ -116,7 +116,7 @@ States: `queued` → `running` → (`blocked` ⇄) → `verified` → `done`
 Row format: `- [ID] title · key: value` — `needs:` is required for `blocked`.
 Dependency: `needs: B1, B2` (on a queued item) → it becomes READY once those are done.
 
-The implementer edits this file directly. `ao board` only reads it.
+The implementer edits this file directly. `ao board` reads it, and `ao board add` admits one item to it, with its acceptance boundary.
 
 ## running
 
@@ -139,7 +139,7 @@ Durumlar: `queued` → `running` → (`blocked` ⇄) → `verified` → `done`
 Satır biçimi: `- [ID] başlık · anahtar: değer` — `blocked` için `needs:` zorunlu.
 Bağımlılık: `needs: B1, B2` (kuyruk maddesinde) → tamamlanınca READY olur.
 
-Bu dosyayı uygulayıcı doğrudan düzenler. `ao board` yalnız okur.
+Bu dosyayı uygulayıcı doğrudan düzenler. `ao board` okur; `ao board add` kabul sınırıyla birlikte bir madde ekler.
 
 ## running
 

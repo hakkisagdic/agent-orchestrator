@@ -113,6 +113,7 @@ gereken tek yetkidir.
 | `ao watch --all` · `ao fleet` | tüm projeler, insana en çok ihtiyaç duyan üstte |
 | `ao watch --web [--port N]` | panel, pano ve tüm projeler 127.0.0.1'de salt okunur sayfalar olarak: terminal yerine bir tarayıcı sekmesi ([surfaces.md](docs/surfaces.md)) |
 | `ao board` | her iş nerede; READY = `needs:` bağımlılıkları tamamlanmış kuyruk maddeleri |
+| `ao board add ID "başlık" --acceptance "…"` | bir maddeyi yalnız kabul sınırıyla birlikte kuyruğa alır |
 | `ao verify [-p full]` | tanımlı gate'leri koştur, sonucu kaydet |
 | `ao commit-ok [--verify]` | bu ağaç commit edilebilir mi? kanıttan karar |
 | `ao hold` / `ao hold release --note …` | ağaçtaki tüm ajanları durdur ve durdurulmuş tut |
