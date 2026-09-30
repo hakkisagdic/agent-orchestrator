@@ -1424,15 +1424,13 @@ def _prove_throwaway(cfg):
     Returns (ok, what failed or None, what would fix it or None). The worktree's
     coordination state and review go to ~/.ao/archive/<project>/prove-<stamp>/.
     """
-    import contextlib
     import io
     import shutil
     import tempfile
-    from types import SimpleNamespace
     root = cfg["root"]
     scratch = tempfile.mkdtemp(prefix="ao-prove-")
     tree = os.path.join(scratch, "tree")
-    links, heard = [], io.StringIO()
+    links, unlinked, heard = [], [], io.StringIO()
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     try:
         added = subprocess.run([A.git_binary(), "worktree", "add", "--detach", "--quiet", tree, "HEAD"], cwd=root,
@@ -1440,42 +1438,13 @@ def _prove_throwaway(cfg):
         if added.returncode:
             return False, "a temporary worktree could not be made: " + added.stderr.decode(UTF8, "replace").strip(), \
                 "a repository with at least one commit"
-        os.makedirs(os.path.join(tree, ".ao"), exist_ok=True)
-        for name in ("config.json", "gates.json"):
-            if os.path.exists(os.path.join(root, ".ao", name)):
-                shutil.copy2(os.path.join(root, ".ao", name), os.path.join(tree, ".ao", name))
-        with open(os.path.join(tree, ".ao", "board.md"), "w", encoding=UTF8) as fh:
-            fh.write(f"# Board\n\n## running\n- [AO-PROVE] a throwaway one-line change · acceptance: {PROVE_BOUNDARY}\n"
-                     "\n## blocked\n\n## queued\n\n## verified\n\n## done\n")
-        for name in S.get(cfg, "merge.link_paths"):
-            source, target = os.path.join(root, name), os.path.join(tree, name)
-            if os.path.exists(source) and not os.path.lexists(target):
-                try:
-                    os.symlink(source, target)
-                    links.append(target)
-                except OSError:
-                    pass
-        with open(os.path.join(tree, "ao-prove.txt"), "a", encoding=UTF8) as fh:
-            fh.write(f"ao prove {stamp}\n")
-        subprocess.run([A.git_binary(), "add", "ao-prove.txt"], cwd=tree, check=True, capture_output=True)
-        tree_cfg = A.load_config(tree)
-        with contextlib.redirect_stdout(heard):
-            verified = cmd_verify(tree_cfg, SimpleNamespace(profile="quick", wait=900))
-        if verified != 0:
-            return False, "the quick gates did not pass a one-line change", \
-                "run `ao verify -p quick` and read the failing gate:\n" + _last_lines(heard.getvalue())
-        with contextlib.redirect_stdout(heard):
-            reviewed = cmd_review(tree_cfg, SimpleNamespace(action=None, rid=None, any=False, run=None, boundary=None,
-                                                            paths=None, commits=None, timeout=None))
-        if reviewed != 0:
-            return False, "the reviewer did not approve a trivial candidate", \
-                "read the review it wrote (archived below); exit 3 means no reviewer could review:\n" \
-                + _last_lines(heard.getvalue())
-        with contextlib.redirect_stdout(heard):
-            granted = cmd_commit_ok(tree_cfg, SimpleNamespace(verify=False, profile=None, review=None))
-        if granted != 0:
-            return False, "ao commit-ok refused the approved candidate", _last_lines(heard.getvalue())
-        return True, None, None
+        # A step that raises is a check that failed, said with what would fix it: it ended `ao prove` in a
+        # traceback (PROVE-2).
+        try:
+            return _prove_steps(cfg, root, tree, stamp, links, unlinked, heard)
+        except Exception as exc:
+            return False, f"the throwaway slice stopped: {type(exc).__name__}: {' '.join(str(exc).split())}", \
+                "run the step it names by hand in this checkout, or `ao doctor`"
     finally:
         for link in links:
             try:
@@ -1490,6 +1459,51 @@ def _prove_throwaway(cfg):
         subprocess.run([A.git_binary(), "worktree", "remove", "--force", tree], cwd=root, capture_output=True)
         shutil.rmtree(scratch, ignore_errors=True)
         subprocess.run([A.git_binary(), "worktree", "prune"], cwd=root, capture_output=True)
+
+
+def _prove_steps(cfg, root, tree, stamp, links, unlinked, heard):
+    """The throwaway slice's own steps, in a worktree made for them: (ok, what failed, what would fix it)."""
+    import contextlib
+    import shutil
+    from types import SimpleNamespace
+    os.makedirs(os.path.join(tree, ".ao"), exist_ok=True)
+    for name in ("config.json", "gates.json"):
+        if os.path.exists(os.path.join(root, ".ao", name)):
+            shutil.copy2(os.path.join(root, ".ao", name), os.path.join(tree, ".ao", name))
+    with open(os.path.join(tree, ".ao", "board.md"), "w", encoding=UTF8) as fh:
+        fh.write(f"# Board\n\n## running\n- [AO-PROVE] a throwaway one-line change · acceptance: {PROVE_BOUNDARY}\n"
+                 "\n## blocked\n\n## queued\n\n## verified\n\n## done\n")
+    for name in S.get(cfg, "merge.link_paths"):
+        source, target = os.path.join(root, name), os.path.join(tree, name)
+        if os.path.exists(source) and not os.path.lexists(target):
+            try:
+                os.symlink(source, target)
+                links.append(target)
+            except OSError as exc:
+                # Named when a gate fails: a gate that needed it failed for this, not for the change (PROVE-2).
+                unlinked.append(f"{name} ({' '.join(str(exc).split())})")
+    with open(os.path.join(tree, "ao-prove.txt"), "a", encoding=UTF8) as fh:
+        fh.write(f"ao prove {stamp}\n")
+    subprocess.run([A.git_binary(), "add", "ao-prove.txt"], cwd=tree, check=True, capture_output=True)
+    tree_cfg = A.load_config(tree)
+    with contextlib.redirect_stdout(heard):
+        verified = cmd_verify(tree_cfg, SimpleNamespace(profile="quick", wait=900))
+    if verified != 0:
+        return False, "the quick gates did not pass a one-line change" \
+            + (f"; merge.link_paths could not link {', '.join(unlinked)}" if unlinked else ""), \
+            "run `ao verify -p quick` and read the failing gate:\n" + _last_lines(heard.getvalue())
+    with contextlib.redirect_stdout(heard):
+        reviewed = cmd_review(tree_cfg, SimpleNamespace(action=None, rid=None, any=False, run=None, boundary=None,
+                                                        paths=None, commits=None, timeout=None))
+    if reviewed != 0:
+        return False, "the reviewer did not approve a trivial candidate", \
+            "read the review it wrote (archived below); exit 3 means no reviewer could review:\n" \
+            + _last_lines(heard.getvalue())
+    with contextlib.redirect_stdout(heard):
+        granted = cmd_commit_ok(tree_cfg, SimpleNamespace(verify=False, profile=None, review=None))
+    if granted != 0:
+        return False, "ao commit-ok refused the approved candidate", _last_lines(heard.getvalue())
+    return True, None, None
 
 
 def _last_lines(text, count=6):

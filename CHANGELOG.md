@@ -125,6 +125,7 @@ publishes the release.
 - Colour reaches only a terminal, `NO_COLOR` and `TERM=dumb` turn it off, and `ao watch` into a pipe prints its panel once (CLI-ROBUST).
 - `ao answer` takes only a key the question offers, or `x <text>` for free text, and refuses a second answer without `--change` (CLI-ROBUST).
 - An MCP server started with `--role` lists and runs only the tools of that role's playbook, and `ao init` writes the role into each registration only one role reads (MCP-ROLES).
+- `ao prove` reports a step of its throwaway slice that raised as a check that failed, with what would fix it, and names a `merge.link_paths` entry it could not link when the gates fail (PROVE-2).
 - A boundary that lists criteria is judged criterion by criterion: the reviewer answers `CRITERION <n>: MET` or `NOT MET` for each, and `ao commit-ok` refuses while one is not met or was never judged (CRITERIA-VERDICTS).
 - `ao reviews` says what a review in flight is doing - starting, preparing, waiting and on what, or which reviewer runs - and a run that stops on an error is recorded failed, where it read as lost (REVIEW-START-DELAY).
 - An implementer's usage limit is read in the words its own adapter declares; its slice is parked until the reset and resumed then, where every nudge died on the limit until a person was told the agent was stuck (QUOTA-PARK).
