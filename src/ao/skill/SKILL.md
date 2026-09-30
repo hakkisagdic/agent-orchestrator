@@ -254,6 +254,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao skill install` | (re)write this playbook for the detected agents (ao-owned files only; `--rules` for the owner's rule files) |
 | `ao remove --yes` | two phases: commit `.ao-project` deletion under enforcement, then remove AO-owned state |
 | `ao update [--dry-run\|--yes]` / `ao uninstall [--yes] [--purge]` | a person's commands, never an agent's: update ao the way it was installed, the command shown first; take ao's jobs, hooks and MCP entries off the machine, a dry run unless `--yes` |
+| `ao completion zsh` | a person's shell setup: print the script that completes ao's commands in bash, zsh, fish or PowerShell |
 | `ao status` / `ao watch` / `ao watch --all` | the panel: who is working, quota, problems, mail |
 | `ao board` | READY / running / blocked (`needs:`) / verified / done |
 | `ao room search <words>` / `ao mail compact <days>` | stored messages across projects; collapse old bodies to stubs |

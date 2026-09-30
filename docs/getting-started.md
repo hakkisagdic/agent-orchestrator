@@ -161,3 +161,23 @@ it but ao's own `--role` and `--allow-verify`, whatever its command is called. A
 program was another one called ao was taken for ao's on its name alone, and removed. `ao remove --yes` finds
 a project's entries as the uninstall does, under the key each adapter declares, and a file it cannot read
 stays, named, and the removal exits 1.*
+
+## 6. Shell completion
+
+```bash
+mkdir -p ~/.zfunc && ao completion zsh > ~/.zfunc/_ao    # and fpath=(~/.zfunc $fpath) before compinit
+mkdir -p ~/.local/share/bash-completion/completions && ao completion bash > ~/.local/share/bash-completion/completions/ao
+ao completion fish > ~/.config/fish/completions/ao.fish
+```
+
+In PowerShell the line `ao completion powershell | Out-String | Invoke-Expression` goes into the
+profile `$PROFILE` names. bash loads the file above through the bash-completion package; without it,
+source the file from `~/.bashrc`.
+
+*In ao since slice SHELL-COMPLETION: `ao completion <shell>` prints a script generated from ao's own
+parser each time it runs - the commands, their long options and the choices each declares - so a
+script is as current as the ao that printed it: print it again after `ao update`. Completing a word
+runs no program, ao included, and reads no project. Every word from the parser is written into the
+script as a literal quoted for its shell, and every word the script completes is quoted again on the
+command line, so a choice holding a quote or a `$` can neither break the script nor run anything.
+Where a word has no choices, the shell completes file names.*

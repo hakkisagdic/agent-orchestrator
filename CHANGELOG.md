@@ -12,6 +12,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ## [Unreleased]
 
+### New commands
+
+- `ao completion bash|zsh|fish|powershell` prints a script that completes ao's commands, their options and the choices each declares, generated from the ao that prints it and quoted so no word it holds is read as syntax ([getting started](docs/getting-started.md#6-shell-completion)) (SHELL-COMPLETION).
+
 ### Under the hood
 
 - Test runs dispatched on one branch for different runners or interpreters all run, so the release checklist's runs on Python 3.9 and 3.12 no longer cancel each other (CI-DISPATCH-GROUP).

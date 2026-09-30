@@ -160,6 +160,7 @@ scope is the one authority an implementer must not have.
 | `ao a2a-mcp serve` | reach A2A agents from an MCP-only client |
 | `ao prune` | trim accumulated records and logs |
 | `ao doctor` · `ao adapters` | check the wiring; what is supported and how well |
+| `ao completion zsh` | print a script that completes ao's commands, options and choices; `bash`, `fish` and `powershell` too, installed as [getting started](docs/getting-started.md#6-shell-completion) shows, and printed again after `ao update` |
 | `ao --version` | the installed version |
 
 Hook status separates static intent from executable enforcement. AO enforcement is

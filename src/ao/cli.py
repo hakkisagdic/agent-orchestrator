@@ -57,6 +57,7 @@ A._part("cli_lanes", globals())
 A._part("cli_pr", globals())
 A._part("cli_harness", globals())
 A._part("cli_install", globals())
+A._part("cli_completion", globals())
 
 
 def build_parser():
@@ -578,6 +579,10 @@ def build_parser():
     sk.add_argument("action", choices=["install", "show"], nargs="?", default="install")
     sk.add_argument("--agent", choices=agents, default="auto")
     sk.set_defaults(fn=cmd_skill)
+    cp = sub.add_parser("completion", help="print a script that completes ao's commands, options and choices "
+                                           "in bash, zsh, fish or PowerShell")
+    cp.add_argument("shell", choices=list(COMPLETION_SHELLS), help="the shell the script is for")
+    cp.set_defaults(fn=cmd_completion)
     return p
 
 

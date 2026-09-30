@@ -152,6 +152,7 @@ gereken tek yetkidir.
 | `ao a2a-mcp serve` | MCP-only istemciden A2A ajanlarına ulaş |
 | `ao prune` | biriken kayıt ve logları buda |
 | `ao doctor` · `ao adapters` | bağlantıları denetle; ne destekleniyor ve ne kadar |
+| `ao completion zsh` | ao'nun komutlarını, seçeneklerini ve seçimlerini tamamlayan betiği yazdır; `bash`, `fish` ve `powershell` için de, [başlarken](docs/getting-started.md#6-shell-completion) belgesindeki gibi kurulur ve `ao update` sonrası yeniden yazdırılır |
 | `ao --version` | kurulu sürüm |
 
 Hook durumu statik niyeti çalıştırılabilir dayatmadan ayırır. AO dayatması yalnız
