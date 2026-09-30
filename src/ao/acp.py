@@ -204,14 +204,23 @@ class Session:
         _send(self.proc, {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params})
         return self._await(request_id, method, time.monotonic() + timeout)
 
-    def _await(self, request_id, method, deadline):
-        """The response to `request_id`, handling what the agent sends meanwhile; raises ProbeError."""
+    def _await(self, request_id, method, deadline, heartbeat=None):
+        """The response to `request_id`, handling what the agent sends meanwhile; raises ProbeError.
+
+        With `heartbeat`, (seconds, callback), callback() is called each time that many seconds pass while it
+        waits, whatever the agent streams meanwhile (ACP-REVIEWER).
+        """
+        beat = time.monotonic() + heartbeat[0] if heartbeat else None
         while True:
-            left = deadline - time.monotonic()
+            now = time.monotonic()
+            left = deadline - now
             if left <= 0:
                 raise ProbeError(f"no answer to {method} within the time allowed")
+            if beat is not None and now >= beat:
+                beat = now + heartbeat[0]
+                heartbeat[1]()
             try:
-                line = self.lines.get(timeout=left)
+                line = self.lines.get(timeout=left if beat is None else min(left, beat - now))
             except queue.Empty:
                 continue
             if line is None:
@@ -294,13 +303,14 @@ class Session:
             raise ProbeError("session/new answered no sessionId")
         return self.session_id
 
-    def prompt(self, text, timeout):
+    def prompt(self, text, timeout, heartbeat=None):
         """One prompt turn: {"ended", "text", "tool_calls"}, where "ended" is the stop reason the agent gave.
 
         The text is the agent's message chunks joined in the order they came. A turn that has not
         ended by `timeout` is cancelled - pending permission requests answered cancelled, as the
         protocol asks - and given a few seconds to end; its stop reason is then "cancelled", or
-        "timeout" when it did not end even so.
+        "timeout" when it did not end even so. `heartbeat`, (seconds, callback), is called while the
+        turn runs, as `_await` says, so a caller can say it is alive (ACP-REVIEWER).
         """
         if not self.session_id:
             raise ProbeError("no session: new_session first")
@@ -310,7 +320,7 @@ class Session:
         _send(self.proc, {"jsonrpc": "2.0", "id": request_id, "method": "session/prompt",
                           "params": {"sessionId": self.session_id, "prompt": [{"type": "text", "text": text}]}})
         try:
-            result = self._await(request_id, "session/prompt", time.monotonic() + timeout)
+            result = self._await(request_id, "session/prompt", time.monotonic() + timeout, heartbeat)
             stop = (result or {}).get("stopReason") if isinstance(result, dict) else None
         except ProbeError as exc:
             if "within the time allowed" not in str(exc):

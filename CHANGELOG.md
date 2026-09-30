@@ -21,6 +21,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 - `ao commit` ends each message with Ao- trailers naming the grant it was made under, the tree, the verification and the review or waiver it rested on, and refuses a message that already carries them (COMMIT-TRAILER).
 
+### Adapters
+
+- A reviewer can answer through ACP: with `ao config set review.transport acp`, a route whose adapter declares an ACP command and may review (kiro, qoder) reviews in an ACP session that may read and nothing else, and a turn that ran an edit is no review; spawning stays the default, and a route that cannot is spawned with a line saying why ([adapters.md](docs/adapters.md#what-a-harness-says-it-supports-asked-in-acp)) (ACP-REVIEWER).
+
 ### Under the hood
 
 - Test runs dispatched on one branch for different runners or interpreters all run, so the release checklist's runs on Python 3.9 and 3.12 no longer cancel each other (CI-DISPATCH-GROUP).

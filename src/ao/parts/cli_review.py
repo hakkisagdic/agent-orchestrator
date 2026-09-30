@@ -937,6 +937,13 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, can
             "returncode": None, "kind": "configuration-error",
             "retryable": False,
         }
+    # Where the project asks for it, a route that can answers through its adapter's ACP command, handed
+    # this same prompt; one that cannot is spawned below as it always was, and says why (ACP-REVIEWER).
+    through, spawned = _acp_reviewer_command(root, cand, strict)
+    if through is not None:
+        return _acp_route_invocation(root, label, fallback, through, prompt, timeout, tree=tree)
+    if spawned:
+        print(f"{C['dim']}{label} is spawned, not run through ACP: {spawned}{C['reset']}")
     if tool is None:
         # A reviewer runs in the mode, and with the tools, its adapter pins: a route composed before
         # they were pinned, or written by hand, has them appended here, and says so (GRANTS-PINNED).
@@ -987,6 +994,266 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, can
     attempt["binary"] = exe
     attempt["version"] = version
     return label, exe, version, attempt
+
+
+# ---- a reviewer answers through ACP where the project asks it to (ACP-REVIEWER) ------------
+
+# The stop reasons ACP names for a prompt turn. Another an agent gives is not repeated into a record.
+ACP_STOP_REASONS = ("end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled")
+# The most of an agent's own name and release a review records.
+ACP_AGENT_CHARS = 100
+
+
+def _acp_reviewer_command(root, route, strict):
+    """({"argv", "adapter"}, None): the ACP command a reviewer route answers through; else (None, why it is spawned).
+
+    `review.transport` spawn, the default, gives (None, None): nothing is said and every route runs as
+    its command, as it always did. With acp a route answers through the command its adapter declares in
+    `acp.argv`, read from the package's adapters alone, as a review contract and a prompt channel are: a
+    layer an agent can write must not choose what its reviewer runs. A route that cannot is spawned as it
+    is configured, with a line saying why, and is not refused. The setting is the project's and a chain
+    mixes harnesses, so a refusal would leave a review without a reviewer over how one is reached, where
+    the spawned route is the reviewer it always was, held by its own flags.
+
+    A route cannot when it is a tool reviewer, which ao runs over the candidate file as its contract
+    says; when its adapter declares no ACP command, or one the reviewer's rules refuse
+    (allowlist.reviewer_problems); when its adapter may not review at all, since one that cannot be run
+    without tools (`options.trust_none`) is not taken to ask before it writes either; and when it names
+    a model. The declared command names none, so its session would run whichever model the harness
+    picks while the review records, and stands in the tier of, the model the route names. A capability
+    matrix binding always names one (ACP-REVIEWER).
+    """
+    if S.get(A.project_config_document(root)["config"] or {}, "review.transport") != "acp":
+        return None, None
+    route = route if isinstance(route, dict) else {}
+    if not strict and _tool_route(route):
+        return None, "it is a tool reviewer, which ao runs over the candidate file as its review contract says"
+    identity = route.get("identity") if strict and isinstance(route.get("identity"), dict) else {}
+    ident = str(identity.get("adapter") or A.block_adapter(route) or "")
+    adapter = A.package_adapters().get(ident) if ident else None
+    if not isinstance(adapter, dict):
+        return None, ((f"{ident} is no adapter ao ships" if ident else "no adapter ao ships runs its command")
+                      + ", and only a shipped adapter declares an ACP command")
+    problems = A.acp_problems(adapter)
+    if adapter.get("acp") is None or problems:
+        return None, (f"adapter {ident} declares no ACP command (acp.argv)"
+                      + (f": {'; '.join(problems)}" if problems else ""))
+    eligible, why = A.reviewer_eligibility(adapter)
+    if not eligible:
+        return None, f"adapter {ident} may not review: {why}"
+    model = identity.get("model_argument") if strict else _route_model(route)
+    if model:
+        return None, (f"it names a model ({model}), and the ACP command adapter {ident} declares names none, so "
+                      "its session would run whichever model the harness picks")
+    from . import allowlist
+    argv = [str(part) for part in adapter["acp"]["argv"]]
+    refused = allowlist.reviewer_problems(argv)
+    if refused:
+        return None, f"the ACP command adapter {ident} declares is refused: {'; '.join(refused)}"
+    return {"argv": argv, "adapter": ident}, None
+
+
+def _acp_route_invocation(root, label, fallback, through, prompt, timeout, tree=None):
+    """Resolve and run a route's ACP command: (label, binary, version, attempt), as for a spawned route (ACP-REVIEWER).
+
+    The program is found as a spawned reviewer's is, within the same bounded discovery. A batch program
+    on Windows is not refused here as a spawned one is: its command carries no prompt for cmd.exe to
+    read, since the prompt travels in the protocol.
+    """
+    argv = list(through["argv"])
+    declared_binary = argv[0]
+    try:
+        exe, version = _reviewer_resolve_binary(root, argv[0])
+    except Exception as exc:
+        return label, declared_binary, None, {
+            "ok": False, "out": "", "binary": declared_binary,
+            "reason": f"could not resolve reviewer ({type(exc).__name__})",
+            "returncode": None, "kind": "resolver-error", "retryable": False,
+        }
+    if not exe:
+        return label, declared_binary, version, {
+            "ok": False, "out": "", "binary": declared_binary, "reason": "not installed",
+            "returncode": None, "kind": "missing-binary", "retryable": False,
+        }
+    try:
+        attempt = _run_acp_reviewer(root, [exe] + argv[1:], through["adapter"], prompt, timeout, label,
+                                    fallback=fallback, tree=tree)
+    except Exception as exc:
+        attempt = {
+            "ok": False, "out": "", "reason": f"reviewer invocation failed ({type(exc).__name__})",
+            "returncode": None, "kind": "invocation-unknown", "retryable": False,
+        }
+    attempt["binary"] = exe
+    attempt["version"] = version
+    return label, exe, version, attempt
+
+
+def _acp_reviewer_permission(tool_call, options):
+    """What a reviewer's ACP session is let run when it asks: a read or a search, once, and nothing else (ACP-REVIEWER).
+
+    A reviewer reads (allowlist.REVIEWER_TOOLS). A tool call of a kind that reads or searches is given
+    the option that allows that one call; any other kind - an edit, a deletion, a move, a command, a
+    fetch, a change of mode, or none named - is given none, and the session answers with the agent's
+    reject option. An option that allows always is never picked: it would leave a standing rule in the
+    harness's own settings.
+    """
+    from . import allowlist
+    if tool_call.get("kind") not in allowlist.REVIEWER_TOOL_KINDS:
+        return None
+    return next((option["optionId"] for option in options if option.get("kind") == "allow_once"), None)
+
+
+def _acp_agent_name(agent):
+    """What an agent said it is in `initialize`, its name and release, on one printable line of bounded length; None."""
+    agent = agent if isinstance(agent, dict) else {}
+    text = " ".join(str(agent[key]) for key in ("name", "version") if agent.get(key))
+    return "".join(ch for ch in text if ch.isprintable())[:ACP_AGENT_CHARS].strip() or None
+
+
+def _run_acp_reviewer(root, argv, adapter_id, prompt, timeout, label, fallback=False, tree=None):
+    """Run one reviewer's turn through ACP where `_run_reviewer` would spawn it, and classify it as that does (ACP-REVIEWER).
+
+    The agent runs where a spawned reviewer does: a directory of its own outside the repository, with
+    the candidate's tree unpacked into it, in an environment without Git's bindings. It is asked
+    `initialize`, opens its session in that directory with no MCP server, and is sent the prompt the
+    spawned route would be handed, whole, as one text block. Its answer is its message chunks joined,
+    read as a spawned reviewer's output is. Each permission it asks is decided by
+    `_acp_reviewer_permission`, and a turn in which a tool of a kind that changes something is seen to
+    have run is no review, whatever it answered: the agent ran it without that leave. A turn that ended
+    for any reason but end_turn - a token limit, a refusal - gave no whole answer and is unavailable.
+
+    The exchange shares `timeout`, as a spawned reviewer's run does. A turn past it is cancelled with
+    session/cancel and is a timeout, retried as one, and the agent is stopped with everything it started
+    whatever it answered; one that holds even a write to it past that time is stopped too. It says it is
+    alive every REVIEW_HEARTBEAT_SECONDS, as a spawned reviewer does; the stall check, which reads a
+    process group's CPU, is a spawned reviewer's alone. An attempt records ao's own words: what the agent
+    says, an error it answers with among it, reaches the terminal alone.
+    """
+    import tempfile
+    import threading
+    from . import acp, allowlist
+    print(f"{C['dim']}reviewer: {os.path.basename(argv[0])} through ACP{' (fallback)' if fallback else ''}"
+          f"{C['reset']}")
+
+    def failed(kind, reason, retryable=False):
+        return {"ok": False, "out": "", "reason": reason, "returncode": None, "kind": kind, "retryable": retryable}
+
+    def left(most=None):
+        remaining = max(0.0, deadline - time.monotonic())
+        return remaining if most is None else min(most, remaining)
+
+    with tempfile.TemporaryDirectory(prefix="ao-reviewer-") as fresh:
+        fresh = os.path.realpath(fresh)
+        if _reviewer_temp_is_inside(root, fresh):
+            return failed("isolation-error", "could not create reviewer cwd outside the repository")
+        if tree and _unpack_candidate(root, tree, fresh) is None:
+            print(f"{C['dim']}{label} reads what the prompt carries: the candidate's tree could not be "
+                  f"unpacked{C['reset']}")
+        started = time.monotonic()
+        deadline = started + float(timeout)
+        try:
+            session = acp.Session(argv, fresh, env=_reviewer_environment(fresh),
+                                  permission=_acp_reviewer_permission)
+        except acp.ProbeError as exc:
+            if isinstance(exc.__cause__, OSError):
+                return _reviewer_os_failure(exc.__cause__, "could not start")
+            return failed("spawn-unknown", "could not start (ProbeError)")
+        pid, agent, turn, allowed, outcome, expired = session.proc.pid, {}, None, 0.0, None, []
+
+        def expire():
+            expired.append(True)
+            session.close()
+
+        # A write to an agent that reads nothing more blocks without a bound; stopping it ends the write.
+        guard = threading.Timer(float(timeout) + REVIEW_KILL_DRAIN_SECONDS, expire)
+        guard.daemon = True
+        try:
+            A.helper_register(root, pid, "reviewer")
+            _review_reviewer(pid)
+            _review_phase("running", f"{label} through ACP, pid {pid}")
+            guard.start()
+            try:
+                agent = session.initialize(timeout=left(acp.PROBE_TIMEOUT)).get("agent")
+                session.new_session(timeout=left(acp.PROBE_TIMEOUT))
+                allowed, asked = left(), time.monotonic()
+                if allowed > 0:
+                    turn = session.prompt(prompt, allowed, heartbeat=(REVIEW_HEARTBEAT_SECONDS, lambda: print(
+                        f"{C['dim']}reviewer {label} still working: {_elapsed(time.monotonic() - started)} "
+                        f"elapsed, pid {pid}{C['reset']}", flush=True)))
+                    allowed -= time.monotonic() - asked
+            except (acp.ProbeError, OSError, ValueError) as exc:
+                outcome = exc
+        except KeyboardInterrupt:
+            # Its own group hears neither the terminal's interrupt nor a signal that stops the run, from
+            # the moment it is started (REVIEWER-ORPHAN); pass it on.
+            guard.cancel()
+            session.close()
+            _DETACHED_RUN["stopped_reviewer"] = pid
+            raise
+        finally:
+            guard.cancel()
+            session.close()
+            A.helper_release(root, pid)
+            _review_reviewer(None)
+
+    timed_out = failed("timeout", f"timeout after {timeout}s", retryable=True)
+    if expired:
+        return timed_out
+    if outcome is not None:
+        print(f"{C['dim']}reviewer {label} (terminal only): {type(outcome).__name__}: {outcome}{C['reset']}",
+              file=sys.stderr)
+        if isinstance(outcome, acp.ProbeError) and "within the time allowed" in str(outcome):
+            return timed_out
+        if isinstance(outcome, acp.ProbeError):
+            return failed("acp-error", "ACP: " + str(outcome).split(": ", 1)[0])
+        return failed("communication-error", f"reviewer communication failed ({type(outcome).__name__})")
+    if turn is None:
+        return timed_out
+    ended = turn["ended"] if turn["ended"] in ACP_STOP_REASONS + ("timeout",) else None
+    text = str(turn["text"] or "").strip()
+    refused = sum(1 for decision in session.decisions if decision.get("decision") != "allow_once")
+    print(f"{C['dim']}reviewer {label} ended its ACP turn ({ended or 'with a stop reason ACP does not name'}) "
+          f"after {_elapsed(time.monotonic() - started)}"
+          + (f"; it asked leave {len(session.decisions)} time(s), {refused} refused" if session.decisions else "")
+          + C["reset"])
+    wrote = sorted({str(call.get("kind")) for call in turn["tool_calls"]
+                    if call.get("kind") in allowlist.WRITING_TOOL_KINDS and call.get("status") == "completed"})
+    if wrote:
+        _reviewer_terminal_output(text, "")
+        return failed("wrote", f"it ran a tool that changes something ({', '.join(wrote)}) without ao's leave; "
+                               "a reviewer reads, so its answer is no review")
+    if ended == "timeout" or allowed <= 0:
+        # Cancelled at its time: what it said after, even an answer, came too late, as a spawned one's would.
+        _reviewer_terminal_output(text, "")
+        return timed_out
+    if ended != "end_turn":
+        _reviewer_terminal_output(text, "")
+        return failed("acp-error", f"ACP: its turn ended {ended or 'with a stop reason ACP does not name'}")
+    if not text:
+        return failed("silence", "produced nothing (end_turn)")
+    return {"ok": True, "out": text, "reason": "", "returncode": None, "kind": "success", "retryable": False,
+            "transport": "acp", "acp": {"adapter": adapter_id, "agent": _acp_agent_name(agent)}}
+
+
+def _acp_review_evidence(evidence, attempt):
+    """Record that a review's answer came through ACP: which adapter's command, and what its agent said it is.
+
+    A spawned reviewer's review records what it always did, and no other review records a `transport`,
+    so a reader tells an ACP review from a spawned one by it (ACP-REVIEWER).
+    """
+    if (attempt or {}).get("transport") != "acp":
+        return
+    through = attempt.get("acp") if isinstance(attempt.get("acp"), dict) else {}
+    evidence["transport"] = "acp"
+    evidence["acp"] = {"adapter": through.get("adapter"), "agent": through.get("agent")}
+
+
+def _acp_review_lines(evidence):
+    through = evidence.get("acp") if evidence.get("transport") == "acp" else None
+    if not isinstance(through, dict):
+        return []
+    return [f"- transport: `acp`  adapter: `{A.review_header_value(through.get('adapter'))}`  agent: "
+            f"`{A.review_header_value(through.get('agent') or 'unnamed')}`"]
 
 
 # A lens is a failure mode with the question it asks, never a job title (#78).
@@ -1120,6 +1387,8 @@ def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, s
             row["verdict"] = "NEEDS_CHANGES" if row["counts"]["BLOCKER"] or row["counts"]["HIGH"] else "APPROVED"
             if invocation["attempt"].get("tool"):
                 row["tool"] = invocation["attempt"]["tool"]
+            if invocation["attempt"].get("transport") == "acp":
+                row["acp"] = dict(invocation["attempt"].get("acp") or {}, transport="acp")      # (ACP-REVIEWER)
             append_jsonl(journal, row)
             last = invocation
             print(f"{C['dim']}section {index}/{len(sections)} {section['name']}: {row['verdict']} "
@@ -1142,6 +1411,13 @@ def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, s
     attempt.pop("tool", None)
     if handoffs and all(handoffs) and all(handoff == handoffs[0] for handoff in handoffs):
         attempt["tool"] = handoffs[0]
+    # So does an answer through ACP: the review came through it when every section did, from one adapter's
+    # agent; each section that did says so in its summary (ACP-REVIEWER).
+    through = [row.get("acp") for row in rows]
+    attempt.pop("transport", None)
+    attempt.pop("acp", None)
+    if through and all(through) and all(item == through[0] for item in through):
+        attempt.update(transport="acp", acp=through[0])
     # Each section's own answer too: the combined output indents them, and a criterion is read at an answer's margin.
     return {"used": chain[position], "used_position": position, "attempt": attempt, "failures": {},
             "labels": (last or {}).get("labels") or {}, "chain": chain,
@@ -1149,7 +1425,10 @@ def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, s
 
 
 def _section_summary(row):
-    return {"section": row["section"], "verdict": row["verdict"], "counts": row["counts"], "route": row["route"]}
+    summary = {"section": row["section"], "verdict": row["verdict"], "counts": row["counts"], "route": row["route"]}
+    if row.get("acp"):
+        summary["transport"] = "acp"                                                    # (ACP-REVIEWER)
+    return summary
 
 
 def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
@@ -1367,6 +1646,7 @@ def _reviewer_probe(cfg, timeout=REVIEW_PROBE_TIMEOUT):
             "binary": attempt.get("binary"), "version": attempt.get("version"),
             "reason": "exact nonce echoed", "kind": "success",
             "tier": used.get("tier") if strict else _review_tier(cfg, used)[0],
+            **({"transport": "acp"} if attempt.get("transport") == "acp" else {}),     # (ACP-REVIEWER)
         }
 
     details = []
@@ -1406,7 +1686,8 @@ def _reviewer_probe_text(probe):
     if probe["ok"]:
         from . import tiers as T
         weaker = f"; {T.label(probe.get('tier'))}" if T.weaker(probe.get("tier")) else ""
-        return f"ok — {route} via {binary} ({version}); {probe['reason']}{weaker}"
+        through = " through ACP" if probe.get("transport") == "acp" else ""          # (ACP-REVIEWER)
+        return f"ok — {route} via {binary} ({version}){through}; {probe['reason']}{weaker}"
     return f"failed — {route} via {binary} ({version}); {probe['reason']}"
 
 
@@ -3032,6 +3313,8 @@ def cmd_review(cfg, args):
         return 3
     out = invocation["attempt"]["out"]
     reviewer_executable = invocation["attempt"].get("binary") or "reviewer"
+    # An answer that came through ACP says so wherever this review is recorded, valid or not (ACP-REVIEWER).
+    _acp_review_evidence(evidence, invocation["attempt"])
     rv = used
     # A fallback is recorded as one; it cannot supersede a rejection (#63). An answer
     # a person carried from a stand-in session is not the configured reviewer either (#65),
@@ -3094,7 +3377,7 @@ def cmd_review(cfg, args):
             "",
             A.review_evidence_line(evidence),
             f"- reviewer: `{A.review_header_value(reviewer_label)}`",
-        ] + _tool_review_lines(evidence) + [
+        ] + _tool_review_lines(evidence) + _acp_review_lines(evidence) + [
             f"- boundary: {A.review_header_value(boundary)}",
         ] + ([f"- re-asked: the first answer did not hold {', '.join(reasked)} once each; "
               "the second could not be read either"] if reasked else [])
@@ -3228,7 +3511,7 @@ def cmd_review(cfg, args):
     evidence["counts"] = dict(sev)
     header = [f"# Review {name}", "",
               A.review_evidence_line(evidence),
-              reviewer_line] + _tool_review_lines(evidence) + [
+              reviewer_line] + _tool_review_lines(evidence) + _acp_review_lines(evidence) + [
               f"- tier: {T.label(review_tier)}" if review_tier else "- tier: not established",
               implementer_line,
               f"- tree: `{A.tree_digest(root, cfg)}`",

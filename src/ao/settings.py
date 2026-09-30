@@ -97,6 +97,10 @@ SETTINGS = {
         "refused", str, None, None, "project",
         "refused: a reviewer of the implementer's model family is refused; labeled: another model of that "
         "family may review, labeled weaker independence, once a person opts in with --by, on the record"),
+    "review.transport": Setting(
+        "spawn", str, None, None, "project",
+        "spawn: each reviewer route runs as its command; acp: a route whose adapter declares acp.argv answers "
+        "through ACP, and any other is spawned with a line saying why"),
     "hunter.every_hours": Setting(
         24, int, 1, None, "project",
         "hours between bug hunts the watchdog starts, when the hunter feature is on"),
@@ -237,6 +241,7 @@ SETTINGS = {
 # hand, it is passed over for the default, and `ao doctor` names it.
 CHOICES = {
     "review.same_family": ("refused", "labeled"),
+    "review.transport": ("spawn", "acp"),
     "language": ("en", "tr"),
     "pr.watch": ("off", "on"),
 }

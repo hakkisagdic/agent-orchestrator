@@ -385,7 +385,8 @@ is kept, and nothing of what they are. A harness that is not installed is said t
 not answer within `--timeout` seconds, or ends first, is said not to, and the command exits 1.
 
 *In ao since slice ACP-CLIENT: `ao.acp.Session`, which holds one session with a harness and runs one prompt
-turn in it. No command drives a harness through it yet; it is what the next steps build on.* The turn's
+turn in it. `ao review` is the first command to drive a harness through it, where a project sets
+`review.transport` to `acp` (ACP-REVIEWER, below).* The turn's
 answer is the agent's message chunks joined in the order they came, and its tool calls are kept with their
 last status. Each `session/request_permission` is decided by a policy the caller gives, which picks an option
 the agent offered; the default allows nothing, and a policy that fails or names no offered option allows
@@ -394,6 +395,27 @@ decision is kept with the tool call it was about. A request for a client method 
 terminals - is answered as a method it does not have, since it declares none. A turn past its time is
 cancelled with `session/cancel`, a permission still pending then is answered `cancelled` as the protocol
 asks, and a turn that does not end even so is a timeout; the agent is stopped with everything it started.
+
+*In ao since slice ACP-REVIEWER: a reviewer answers its review through its adapter's `acp.argv` where the
+project sets `review.transport` to `acp`. The three declared commands were seen to answer `initialize`;
+none has yet been measured answering a review, which is why the transport is a project's choice and
+spawning stays the default.* The command is read from the package's adapters alone, as a review contract
+and a prompt channel are: a layer an agent can write does not choose what its reviewer runs. It is found as
+a spawned reviewer's program is, and it runs where one does - a directory of its own outside the
+repository, holding the candidate's tree, with Git's bindings removed from its environment - where its
+session opens with no MCP server. It is sent the prompt the route would have been handed as one text
+block, and its answer, the message chunks joined, is read as a spawned reviewer's output is. The session
+lets the reviewer read and nothing else: a tool call of kind `read` or `search` is given the option that
+allows that one call, and every other kind - an edit, a deletion, a move, a command, a fetch, a change of
+mode - is refused; an option that allows a tool always is never picked, since it would leave a standing
+rule in the harness's own settings. What a harness runs without asking is its own, so a turn in which a
+tool of kind `edit`, `delete`, `move` or `execute` is seen to have completed is no review, whatever it
+answered. The whole exchange has `review_timeout`: a turn past it is cancelled and is a timeout, as a
+spawned reviewer killed at its timeout is. A route whose adapter declares no ACP command, or whose adapter
+may not review (no `options.trust_none`), and a route that names a model, which the declared command
+cannot carry, are spawned as before, each with a line saying why; so is a tool reviewer. What else a
+route's command carries, an effort or an agent profile, belongs to the spawned command and does not reach
+the session ([roles.md](roles.md) says what a review records of it).
 
 ## Support matrix
 

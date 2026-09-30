@@ -344,6 +344,15 @@ allowance, and retain the existing 25-second per-process ceiling. If the deadlin
 expires, AO keeps the first absolute executable already found rather than starting
 another version subprocess.
 
+*In ao since slice ACP-REVIEWER: a route that answers through ACP
+([adapters.md](adapters.md#what-a-harness-says-it-supports-asked-in-acp)) fails in the same classes. A
+turn past `review_timeout` is a timeout, and transient; a turn that ends at a token limit or in a
+refusal gave no whole answer and is `acp-error`; an empty answer is silence; and a turn in which a tool
+that changes something ran is `wrote`, permanent, whatever it answered. A review that came through ACP
+records `transport: acp`, the adapter whose command answered and the name and release its agent gave,
+in its evidence and its header; a sectioned review records it where every section came through one
+adapter's agent.*
+
 Each invocation runs from a disposable non-repository directory with inherited Git
 bindings removed, which prevents an accidental relative `git stash`, `git add`, or
 file write from changing the live candidate. This is mutation containment, not a

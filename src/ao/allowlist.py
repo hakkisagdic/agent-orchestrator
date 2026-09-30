@@ -327,6 +327,11 @@ def through_rewriters(forbidden):
 # A reviewer reads. Tools a reviewer may use, and the Claude Code flags that keep
 # every configured MCP server from starting (#24).
 REVIEWER_TOOLS = ("Read", "Grep", "Glob")
+# The same, as ACP names the kind of a tool call an agent asks leave for: Read reads, Grep and Glob search.
+# A reviewer's ACP session is let run these, once each, and nothing else; a call of a kind that changes
+# something, seen to have run, ran without that leave (ACP-REVIEWER).
+REVIEWER_TOOL_KINDS = ("read", "search")
+WRITING_TOOL_KINDS = ("edit", "delete", "move", "execute")
 
 
 def reviewer_problems(argv):
