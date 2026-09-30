@@ -294,7 +294,7 @@ def test_the_declaration_decides_and_a_layer_an_agent_can_write_does_not(project
 
 # ── the core names nothing these readings declare ──
 
-def _own_vocabulary(tree):
+def _own_vocabulary(tree, protocol=False):
     """Node ids of strings that spell ao's own protocol rather than decide anything about a harness.
 
     `stop` is the key of the heading ao writes into an urgent message (language.MARKERS) and, by
@@ -304,10 +304,15 @@ def _own_vocabulary(tree):
     not that. A harness that ever spells a stop reason as one of ao's headings is the case this
     lets through, and it is the narrower risk of the two. The verb handed to `_systemctl` - `stop`
     among `show`, `is-active` and `disable` - is systemd's own command for a unit ao scheduled on
-    Linux (LINUX-SCHEDULER), and reads nothing a harness said.
+    Linux (LINUX-SCHEDULER), and reads nothing a harness said. `STOP_REASONS` in the ACP client is the
+    protocol's own enumeration of why a prompt turn stops, which two harnesses happen to write in their
+    transcripts too; ao reads it from an agent speaking ACP, never from a harness's store (ACP-REVIEWER).
     """
     ids = set()
     for node in ast.walk(tree):
+        if protocol and isinstance(node, ast.Assign) and isinstance(node.value, ast.Tuple) \
+                and any(getattr(target, "id", "") == "STOP_REASONS" for target in node.targets):
+            ids |= {id(element) for element in node.value.elts}
         if isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict) \
                 and any(getattr(target, "id", "") == "MARKERS" for target in node.targets):
             ids |= {id(key) for key in node.value.keys if key is not None}
@@ -331,7 +336,7 @@ def test_the_core_holds_no_declared_stop_reason_and_no_unattended_argument_where
     found = []
     for path in sorted((ROOT / "src" / "ao").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        docs = _docstrings(tree) | _own_vocabulary(tree)
+        docs = _docstrings(tree) | _own_vocabulary(tree, protocol=path.name == "acp.py")
         found += [f"{path.name}:{node.lineno} {node.value!r}" for node in ast.walk(tree)
                   if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs
                   and node.value in reasons]

@@ -255,6 +255,20 @@ def _nesting_words():
     return words - ORDINARY - {"id"}
 
 
+def _protocol_vocabulary(tree, path):
+    """Node ids of the words the ACP client names the protocol's stop reasons by (ACP-REVIEWER).
+
+    `STOP_REASONS` in ao's ACP client is the protocol's own enumeration of why a prompt turn stops. Two of
+    its words are ones a harness writes in its transcript too, by coincidence of the protocol's design, and
+    ao reads them from an agent speaking ACP, never from a harness's store: they are not the nesting's.
+    """
+    if path.name != "acp.py":
+        return set()
+    return {id(element) for node in ast.walk(tree) if isinstance(node, ast.Assign) and isinstance(node.value, ast.Tuple)
+            and any(getattr(target, "id", "") == "STOP_REASONS" for target in node.targets)
+            for element in node.value.elts}
+
+
 def test_no_core_module_names_a_field_or_value_the_nesting_declares():
     words = _nesting_words()
     assert {"tool_use", "tool_result", "stop_reason", "end_turn", "stop_sequence"} <= words
@@ -264,7 +278,7 @@ def test_no_core_module_names_a_field_or_value_the_nesting_declares():
     found = []
     for path in sorted((ROOT / "src" / "ao").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        docs = _docstrings(tree)
+        docs = _docstrings(tree) | _protocol_vocabulary(tree, path)
         found += [f"{path.name}:{node.lineno} {node.value[:80]!r}" for node in ast.walk(tree)
                   if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs
                   and word.search(node.value)]

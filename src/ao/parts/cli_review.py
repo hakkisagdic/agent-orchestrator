@@ -998,8 +998,6 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, can
 
 # ---- a reviewer answers through ACP where the project asks it to (ACP-REVIEWER) ------------
 
-# The stop reasons ACP names for a prompt turn. Another an agent gives is not repeated into a record.
-ACP_STOP_REASONS = ("end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled")
 # The most of an agent's own name and release a review records.
 ACP_AGENT_CHARS = 100
 
@@ -1209,7 +1207,8 @@ def _run_acp_reviewer(root, argv, adapter_id, prompt, timeout, label, fallback=F
         return failed("communication-error", f"reviewer communication failed ({type(outcome).__name__})")
     if turn is None:
         return timed_out
-    ended = turn["ended"] if turn["ended"] in ACP_STOP_REASONS + ("timeout",) else None
+    # A stop reason ACP does not name is not repeated into a record.
+    ended = turn["ended"] if turn["ended"] in acp.STOP_REASONS + ("timeout",) else None
     text = str(turn["text"] or "").strip()
     refused = sum(1 for decision in session.decisions if decision.get("decision") != "allow_once")
     print(f"{C['dim']}reviewer {label} ended its ACP turn ({ended or 'with a stop reason ACP does not name'}) "
@@ -1226,11 +1225,11 @@ def _run_acp_reviewer(root, argv, adapter_id, prompt, timeout, label, fallback=F
         # Cancelled at its time: what it said after, even an answer, came too late, as a spawned one's would.
         _reviewer_terminal_output(text, "")
         return timed_out
-    if ended != "end_turn":
+    if ended != acp.END_TURN:
         _reviewer_terminal_output(text, "")
         return failed("acp-error", f"ACP: its turn ended {ended or 'with a stop reason ACP does not name'}")
     if not text:
-        return failed("silence", "produced nothing (end_turn)")
+        return failed("silence", f"produced nothing ({acp.END_TURN})")
     return {"ok": True, "out": text, "reason": "", "returncode": None, "kind": "success", "retryable": False,
             "transport": "acp", "acp": {"adapter": adapter_id, "agent": _acp_agent_name(agent)}}
 

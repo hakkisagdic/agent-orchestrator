@@ -25,6 +25,11 @@ PROTOCOL_VERSION = 1
 PROBE_TIMEOUT = 20.0
 CANCEL_GRACE = 5.0                  # seconds a cancelled turn has to end before its agent is stopped
 METHOD_NOT_FOUND = -32601
+# Why a prompt turn stops, in the protocol's own words (StopReason): its whole answer given, or not - a token
+# limit, a request limit, a refusal, a cancellation. They are ACP's, whatever a harness writes in its own
+# transcript, and only the first is an answer that ended as the agent meant it to (ACP-REVIEWER).
+STOP_REASONS = ("end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled")
+END_TURN = STOP_REASONS[0]
 
 
 class ProbeError(RuntimeError):
