@@ -57,6 +57,16 @@ enrolled repository reinstalls with `ao hooks install`. The proof's tests are no
 Windows, and `tests/test_hook_v4.py` runs the lines of the hook that read the path under `sh` on macOS
 and Linux.*
 
+*In ao since slice WINDOWS-CMD-CHANNEL: a batch program the watchdog starts, for the implementer's
+nudge and the architect's wake alike, is handed its prompt on standard input whatever its size,
+where its adapter declares standard input, and is not started where it declares none; the reason
+names Windows and cmd.exe. cmd.exe reads each argument as its own syntax and ends the command at a
+line break, so an architect started through a `.cmd` would have read the first line of its wake.
+The program is judged once it is resolved, just before it starts: a `.cmd` or `.bat`, in any
+case. A prompt file is no channel for it, since its path is an argument too.
+`tests/test_windows_cmd_channel.py` holds it on every platform by deciding as Windows does; the
+lane has not yet started an agent CLI through a `.cmd`.*
+
 The hosted `tests` workflow runs Windows and macOS every week on Python 3.12, and any
 environment on demand (`gh workflow run tests -f os=windows-latest -f python=3.12`);
 Ubuntu runs on every push and pull request with the Python 3.9 support floor and 3.12.
@@ -123,13 +133,14 @@ not yet run on the lane; until they do, none of this is a Windows result.
   An agent CLI installed with npm on Windows is a `.cmd` file, which runs through
   cmd.exe, and cmd.exe reads its arguments as its own syntax: it ends the command at a
   line break, replaces `%NAME%`, and a double quote in the text changes what `&` and `|`
-  mean. ao refuses a `.cmd` or `.bat` reviewer for this (#71), but the watchdog hands its
-  prompt to the implementer and the architect as an argument, and the architect's wake
-  prompt runs to several paragraphs: through a `.cmd` the architect would read only the
-  first. The fix is a channel, not a quoting rule: where the adapter declares standard
-  input (Claude Code, Codex and Gemini do, among others) a batch program takes its prompt
-  there, and one that declares none is refused, naming Windows and cmd.exe. It changes
-  how every turn starts, so it is a slice of its own, proven on the lane.
+  mean. ao refuses a `.cmd` or `.bat` reviewer for this (#71). The watchdog no longer hands
+  such a program its prompt as an argument: where the adapter declares standard input
+  (Claude Code, Codex and Gemini do, among others) the implementer's nudge and the
+  architect's wake reach a batch program there, whatever the prompt's size; a batch
+  program whose adapter declares none is not started, and the watchdog says why, naming
+  Windows and cmd.exe (WINDOWS-CMD-CHANNEL, above). A channel, not a quoting rule: no
+  quoting carries a line break through cmd.exe. What stays open is the proof: it changes
+  how every turn starts, and no agent CLI has yet been started through a `.cmd` on the lane.
 - **Git's output in `bin/ao.ps1`.** PowerShell reads what a program prints in the
   console's code page, so where a commit subject holds a letter outside that page,
   `status` shows other letters in its place.

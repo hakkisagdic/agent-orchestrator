@@ -250,6 +250,7 @@ publishes the release.
 - The process backend stays Windows' own whatever its first reading gave, and a reading that lists no process is not kept, so processes are read after a first reading that failed; a file in the home is named `~/…` with slashes, and a lane another checkout started is known for one (WINDOWS-LANE-4).
 - A tree ao stops on Windows is gone from the next reading of the process list, so `ao hold` no longer names the turn it has just stopped as one it could not place (WINDOWS-LANE-5).
 - The commit hook reads an index path that starts with a drive letter, `C:/…` or `C:\…`, as absolute, where under Git for Windows' shell it put the working directory before one and ao refused, so the hook's execution proof can pass there; it is hook version 4, which each enrolled repository installs with `ao hooks install` (HOOK-V4).
+- A batch program the watchdog starts on Windows, such as an agent CLI npm installs as a `.cmd`, is handed its prompt on standard input whatever its size where its adapter declares it, and is not started where it does not, so cmd.exe no longer ends the architect's wake at its first line (WINDOWS-CMD-CHANNEL).
 
 ### Adapters
 

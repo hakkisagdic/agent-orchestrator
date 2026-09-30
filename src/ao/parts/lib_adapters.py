@@ -1107,6 +1107,60 @@ def prompt_channel_problems(adapter):
     return problems
 
 
+def batch_program(program):
+    """Whether `program` is a batch file, which Windows runs through cmd.exe: `.cmd` or `.bat` (WINDOWS-CMD-CHANNEL).
+
+    An agent CLI installed with npm on Windows is a `.cmd` file, and cmd.exe reads each argument it is
+    handed as its own syntax: it ends the command at a line break, replaces `%NAME%`, and a double quote
+    in the text changes what `&` and `|` mean. No quoting carries a line break through it, so such a
+    program is handed its prompt on standard input, never in an argument (`prompt_input`). The suffix is
+    read in any case, as Windows reads it; elsewhere nothing runs a program through cmd.exe.
+    """
+    return os.name == "nt" and str(program or "").lower().endswith((".cmd", ".bat"))
+
+
+def _batch_stdin(template, ident, adapter, capability):
+    """How a batch program is handed the prompt `template` carries: ((start, stop, arguments), None), the run
+    of the template the adapter's standard input replaces and the arguments put in its place, or (None, why
+    none can be) (WINDOWS-CMD-CHANNEL).
+
+    Only standard input counts. A prompt file is handed over by its path, which is an argument cmd.exe
+    reads like any other.
+    """
+    if not isinstance(adapter, dict):
+        return None, ((f"{ident} is no adapter ao ships" if ident else "no adapter ao ships runs this command")
+                      + ", and only a shipped adapter declares standard input")
+    block = adapter.get(capability) if isinstance(adapter.get(capability), dict) else {}
+    if not isinstance(block.get("stdin"), dict):
+        return None, f"adapter {ident} declares no standard input for `{capability}`"
+    replaces, replacement = block["stdin"].get("replaces"), block["stdin"].get("with")
+    at = _argument_run(template, replaces)
+    if at is None or not isinstance(replacement, list):
+        named = " ".join(str(part) for part in replaces) if isinstance(replaces, list) else ""
+        return None, (f"this command does not carry the arguments adapter {ident} replaces with standard input "
+                      f"for `{capability}` ({named})")
+    return (at, at + len(replaces), [str(part) for part in replacement]), None
+
+
+def _batch_argv(plan, argv):
+    """`argv` with its prompt moved to standard input, for a batch program: (argv, None), or (None, why it
+    cannot be) (WINDOWS-CMD-CHANNEL).
+
+    The command is rendered from the plan's template part for part, and what a caller adds follows it,
+    so the arguments the adapter's standard input replaces stand where the template holds them. They are
+    cut only where they carry the prompt: a command that does not carry it there is refused, since what a
+    cut would take from it is not known.
+    """
+    switch, why = plan.get("batch") or (None, "no standard input was planned for it")
+    if switch is None:
+        return None, why
+    start, stop, arguments = switch
+    carried = [str(part).replace("{prompt}", plan["prompt"]) for part in plan["argv"][start:stop]]
+    if plan.get("channel") != "argument" or list(argv[start:stop]) != carried:
+        return None, "this command does not carry its prompt where its template does"
+    return list(argv[:start]) + list(arguments) + list(argv[stop:]), None
+
+
 def prompt_plan(template, prompt, adapter_id=None, detached=False, env=None):
     """How a prompt reaches the command an argv template runs: (plan, None), or (None, why it cannot) (PROMPT-CHANNEL).
 
@@ -1118,18 +1172,21 @@ def prompt_plan(template, prompt, adapter_id=None, detached=False, env=None):
     can write must not choose the arguments a reviewer runs with. With no channel nothing may start, and
     the reason says how large the prompt is, what the platform carries and what the adapter declares.
     The plan holds the argv template, the channel ("argument", "stdin" or "file"), the run (start, stop)
-    of the arguments the channel put in, and the prompt.
+    of the arguments the channel put in, and the prompt. It also holds `batch`, how a batch program on
+    Windows is handed the prompt whatever its size, as `_batch_stdin` reads it from the same adapter: the
+    program is known only once the command is resolved, so `prompt_input` decides (WINDOWS-CMD-CHANNEL).
     """
     template = list(template or [])
     text = str(prompt)
-    plan = {"argv": template, "channel": "argument", "run": None, "prompt": text}
+    capability = "resume" if any("{session}" in str(part) for part in template) else "send"
+    ident = str(adapter_id or "").strip()
+    adapter = package_adapters().get(ident) if ident else None
+    plan = {"argv": template, "channel": "argument", "run": None, "prompt": text,
+            "batch": _batch_stdin(template, ident, adapter, capability)}
     overflow = argument_overflow([str(part).replace("{prompt}", text) for part in template], env)
     if overflow is None:
         return plan, None
     size = f"the prompt is {len(text.encode(UTF8, 'replace'))} bytes, and {overflow}"
-    capability = "resume" if any("{session}" in str(part) for part in template) else "send"
-    ident = str(adapter_id or "").strip()
-    adapter = package_adapters().get(ident) if ident else None
     if not isinstance(adapter, dict):
         return None, (f"{size}; " + (f"{ident} is no adapter ao ships" if ident else "no adapter ao ships runs this "
                                      "command") + ", and only a shipped adapter declares another channel")
@@ -1162,9 +1219,23 @@ def prompt_input(plan, root=None, argv=None):
     process starts where the platform allows it, so nothing named is left whatever becomes of ao;
     `release_prompt` removes the rest once the process has ended. `given` holds the argv, standard input
     (None when the prompt is not on it) and the directory.
+
+    A batch program on Windows is handed its prompt on standard input whatever its size, where its adapter
+    declares it, and nothing starts where it does not (WINDOWS-CMD-CHANNEL). The watchdog handed the
+    implementer and the architect their prompts as an argument, and cmd.exe would have ended the
+    architect's wake, several paragraphs long, at its first line. It is decided here, on the command that
+    starts, because the watchdog resolves the program only after the prompt's plan is made.
     """
     given = {"argv": list(plan["argv"] if argv is None else argv), "stdin": None, "directory": None}
-    if plan.get("channel") not in PROMPT_CHANNELS:
+    channel = plan.get("channel")
+    if channel != "stdin" and given["argv"] and batch_program(given["argv"][0]):
+        switched, why = _batch_argv(plan, given["argv"])
+        if switched is None:
+            return None, (f"{given['argv'][0]} is a batch file, which Windows runs through cmd.exe, and cmd.exe "
+                          "reads a prompt in an argument as its own syntax, ending it at a line break and "
+                          f"replacing %NAME% in it, so it takes its prompt on standard input alone (#71); {why}")
+        given["argv"], channel = switched, "stdin"
+    if channel not in PROMPT_CHANNELS:
         return given, None
     import tempfile
     binary = getattr(os, "O_BINARY", 0)
@@ -1176,7 +1247,7 @@ def prompt_input(plan, root=None, argv=None):
         path = os.path.join(given["directory"], "prompt")
         with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | binary, 0o600), "wb") as fh:
             fh.write(plan["prompt"].encode(UTF8))
-        if plan["channel"] == "stdin":
+        if channel == "stdin":
             # On Windows the file goes when the last handle on it closes, the process's included.
             given["stdin"] = os.fdopen(os.open(path, os.O_RDONLY | binary | getattr(os, "O_TEMPORARY", 0)), "rb")
             if os.name != "nt":

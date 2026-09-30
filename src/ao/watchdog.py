@@ -924,7 +924,9 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
         # before it was pinned (GRANTS-PINNED), and its grant admits what a command rewriter makes of
         # each command it names, whenever the block was composed (GRANTS-RTK). Past what one argument
         # carries, the prompt goes on standard input where the adapter declares it may; a detached
-        # turn takes no file ao would remove after it (PROMPT-CHANNEL).
+        # turn takes no file ao would remove after it (PROMPT-CHANNEL). A batch program on Windows
+        # takes it there whatever its size, as prompt_input decides once argv[0] is resolved
+        # (WINDOWS-CMD-CHANNEL).
         template, pinned = A.pinned_argv(A.admit_rewrites(arch["argv"])[0], "architect")
         plan, refused = A.prompt_plan(template, prompt, A.block_adapter(arch), detached=True)
         if refused:
@@ -2704,8 +2706,9 @@ def _cycle_impl(args, root):
                 return 0
             prompt = arch.get("prompt", language.text(cfg, "prompt.refill"))
             # As in escalate(): the pinned mode (GRANTS-PINNED), a grant that admits what a command
-            # rewriter makes of its commands (GRANTS-RTK), and past one argument, standard input where
-            # the adapter declares it (PROMPT-CHANNEL).
+            # rewriter makes of its commands (GRANTS-RTK), past one argument, standard input where
+            # the adapter declares it (PROMPT-CHANNEL), and a batch program's prompt there at any size
+            # (WINDOWS-CMD-CHANNEL).
             template, pinned = A.pinned_argv(A.admit_rewrites(arch["argv"])[0], "architect")
             plan, refused = A.prompt_plan(template, prompt, A.block_adapter(arch), detached=True)
             if refused:
@@ -2885,6 +2888,8 @@ def _cycle_impl(args, root):
         prompt += language.text(cfg, "prompt.nudge-editing", paths=", ".join(fe[:8]))
     # Past what one argument carries, the prompt goes on standard input where the implementer's
     # adapter declares it may; a detached turn takes no file ao would remove after it (PROMPT-CHANNEL).
+    # A batch program on Windows takes it there whatever its size, and one whose adapter declares no
+    # standard input is not started: prompt_input decides once argv[0] is resolved (WINDOWS-CMD-CHANNEL).
     # A grant the resume carries of its own admits what a command rewriter makes of each command it
     # names, as the one options.unattended appends does (GRANTS-RTK).
     plan, refused = A.prompt_plan(A.admit_rewrites(adapter.get("resume", {}).get("argv") or [])[0], prompt,
