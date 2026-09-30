@@ -108,6 +108,7 @@ publishes the release.
 - Urgent mail is shown to the role it is addressed to on the commands that role runs - `ao status`, `ao board`, `ao tail` and `ao mail` - not only on lock, verify and commit-ok (URGENT-BOTH-WAYS, #29).
 - An open decision rings a person after `decisions.human_after_minutes`, and wakes deferred through an outage collapse into one instead of replaying in a burst (DECISION-LADDER, #20, #87).
 - The architect is owed a wake until one that worked has the report, so a wake that died at once no longer takes the report with it (ESCALATE-DURABLE, #18, #23, #69).
+- An item a board problem touches is not READY - an id on the board twice, an item that unlocks what is not on it - and a remark in `needs:` names no id however many words it has; `ao doctor` says when the board cannot be read as a graph (READY-GRAPH-2).
 - A notice is held for the architect only when a wake is coming; otherwise it goes to a person and says why no architect will act (HELD-NOTICES, #92a).
 - The playbook states what the implementer may settle without an architect: an open question parks its slice, the nudge names the next READY item, and the implementer stands down only when nothing is READY (AUTONOMY-ENVELOPE, #84).
 - A project may name secondary projects: an implementer working in one is not nudged in the other, and with nothing READY here the nudge names READY work there (SECONDARY-PROJECT, #8, #22, #92).

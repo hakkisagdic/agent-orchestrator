@@ -1837,9 +1837,13 @@ def set_reviewer_state(root, **fields):
 
 
 def _edge_ids(item, field):
-    """Board ids a note names; a parenthesised word is a remark, not an id."""
-    return [token for token in re.split(r"[,\s]+", item["notes"].get(field, ""))
-            if token and not token.startswith("(")]
+    """Board ids a note names; a parenthesised remark is not one, however many words it has.
+
+    Only a word that began with `(` was dropped, so `needs: A (see ticket 12)` needed `ticket` and `12)`
+    and was never READY (READY-GRAPH-2). An unclosed remark runs to the end of the note.
+    """
+    text = re.sub(r"\([^)]*(?:\)|$)", " ", item["notes"].get(field, ""))
+    return [token for token in re.split(r"[,\s]+", text) if token]
 
 
 def board_graph(root):
@@ -1863,11 +1867,14 @@ def board_graph(root):
     Returns {"ready": [item with its role], "problems": [text]}.
     """
     b = board(root)
-    problems, where = [], {}
+    # What a problem touches is not READY: an id listed twice and an item that unlocks what is not on the
+    # board were named and still returned READY (READY-GRAPH-2).
+    problems, where, broken = [], {}, set()
     for state in BOARD_STATES:
         for item in b[state]:
             if item["id"] in where:
                 problems.append(f"{item['id']} is on the board twice, under {where[item['id']]} and {state}")
+                broken.add(item["id"])
             where.setdefault(item["id"], state)
     try:
         with open(os.path.join(root, ".ao", "board.md"), encoding=UTF8, errors="replace") as fh:
@@ -1882,9 +1889,9 @@ def board_graph(root):
             for target in _edge_ids(item, "unlocks"):
                 if target not in where:
                     problems.append(f"{item['id']} unlocks {target}, which is not on the board")
+                    broken.add(item["id"])
                 else:
                     edges.setdefault(target, set()).add(item["id"])
-    broken = set()
     for item_id in sorted(edges):
         for dep in sorted(edges[item_id]):
             if dep not in where:

@@ -257,8 +257,9 @@ def doctor_problems(cfg):
     # A dependency the board cannot resolve makes READY wrong without a word (#33).
     try:
         graph_problems = A.board_graph(root)["problems"]
-    except Exception:
-        graph_problems = []
+    except Exception as exc:
+        # A board that cannot be read as a graph is the finding; it was nothing (READY-GRAPH-2).
+        graph_problems = [f"the board cannot be read as a graph ({' '.join(str(exc).split())})"]
     if graph_problems:
         out.append(("board-graph", "; ".join(graph_problems[:3])
                     + (f" and {len(graph_problems) - 3} more" if len(graph_problems) > 3 else "")
