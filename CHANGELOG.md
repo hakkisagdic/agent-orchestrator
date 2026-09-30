@@ -12,6 +12,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ## [Unreleased]
 
+### Under the hood
+
+- Test runs dispatched on one branch for different runners or interpreters all run, so the release checklist's runs on Python 3.9 and 3.12 no longer cancel each other (CI-DISPATCH-GROUP).
+
 ## [0.5.0] - 2026-10-01
 
 Everything that landed on main after v0.4.0, each line naming the slice that landed it or the

@@ -29,7 +29,9 @@ permissions:
 concurrency:
   # A newer push to the same branch makes an older run's answer moot; a run someone dispatched
   # or the weekly one answers a different question and must not cancel it, or be cancelled by it.
-  group: tests-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  # So do two dispatches for another runner or interpreter: the release checklist starts one on
+  # Python 3.9 and one on 3.12, and the second cancelled the first (CI-DISPATCH-GROUP).
+  group: tests-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.os }}-${{ inputs.python }}
   cancel-in-progress: true
 
 jobs:
