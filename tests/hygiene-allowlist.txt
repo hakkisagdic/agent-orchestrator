@@ -14,3 +14,4 @@ tests/test_processes.py home-path dev a Windows command line in a process-table 
 tests/test_windows_fail_closed.py home-path me a Windows path fixture names a made-up account
 tests/test_windows_followups.py home-path me Windows path fixtures name a made-up account
 tests/test_windows_lane.py home-path me a Windows path fixture names a made-up account
+tests/test_reviewer_tool.py assigned-secret sha256:1702ac307eac58d6 the made-up provider keys the test sets to show a review tool is handed the keys it needs while every setting from the environment is dropped

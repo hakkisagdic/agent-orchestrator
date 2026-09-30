@@ -213,6 +213,7 @@ publishes the release.
 - What ao writes into the repository - review artefacts, mail, decision records, verification output - is scanned for credentials and redacted before a byte is written ([docs/safety.md](docs/safety.md)) (EVIDENCE-SCAN, #48).
 - Nothing derived from a reviewer's output is persisted in reviewer state beyond closed values ao produced (AO59b, #99).
 - The project config is written whole or not at all, so a crash cannot leave an empty config that silently drops an authority opt-in (CONFIG-DURABLE, #56).
+- What ao writes into a repository is cleared of a secret assigned to the name an environment gives it - `DB_PASSWORD`, `CLIENT_SECRET`, `NPM_TOKEN`, `AWS_SECRET_ACCESS_KEY` - and of Slack's `xapp-` app-level tokens (EVIDENCE-SCAN-2).
 - Everything a project keeps outside its tree is keyed by the project, so two checkouts with the same directory name no longer share a push window, watchdog state or scheduled jobs (PROJECT-KEY, #66).
 - ao measures with a compiled git, never through a script or output filter standing in front of it, and records which git in `measured_by` (MEASURE-UNFILTERED, #51).
 - `ao doctor` asks each shell-command filter in front of an agent's shell what it does to every measurement command - git diff, status and log, ao's own commands, the project's gates - and names each command it rewrites, instead of trusting its exclusion list; only a hook declared outside the project, of a program in `filters.probe_programs`, is ever run (FILTER-EXCLUSIONS, part of #52).

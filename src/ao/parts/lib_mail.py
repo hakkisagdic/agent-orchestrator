@@ -589,7 +589,7 @@ def notice_recently_recorded(root, key, window):
 SECRET_PATTERNS = (
     r"sk-[A-Za-z0-9_-]{16,}",
     r"gh[pousr]_[A-Za-z0-9]{20,}",
-    r"xox[abprs]-[A-Za-z0-9-]{10,}",
+    r"(?:xox[abprs]|xapp)-[A-Za-z0-9-]{10,}",
     r"AKIA[0-9A-Z]{16}",
     r"(?i)bearer\s+[A-Za-z0-9._~+/=-]{16,}",
     r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}",
@@ -605,12 +605,18 @@ EVIDENCE_RULES = (
     ("anthropic-key", r"sk-ant-[A-Za-z0-9_-]{16,}"),
     ("openai-key", r"sk-(?:proj-)?[A-Za-z0-9_-]{20,}"),
     ("github-token", r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})"),
-    ("slack-token", r"xox[abprs]-[A-Za-z0-9-]{10,}"),
+    # Slack's app-level tokens begin `xapp-` (EVIDENCE-SCAN-2).
+    ("slack-token", r"(?:xox[abprs]|xapp)-[A-Za-z0-9-]{10,}"),
     ("aws-access-key", r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
     ("jwt", r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),
     ("bearer-token", r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{16,}"),
-    ("assigned-secret", r"(?i)\b(?:api[_-]?key|secret|password|passwd|access[_-]?token)\b[\"']?\s*[:=]\s*[\"']?"
-                        r"[A-Za-z0-9+/_.=-]{12,}"),
+    # The name is read with what an environment puts before it - DB_PASSWORD, CLIENT_SECRET, NPM_TOKEN,
+    # AWS_SECRET_ACCESS_KEY - where `\b` is no boundary after an underscore and none of them matched
+    # (EVIDENCE-SCAN-2). A bare `token` is ao's own grant id, and a name that goes on past the secret word
+    # (`password_env`, `secret_file`) names where one is kept, not the secret; neither is read.
+    ("assigned-secret", r"(?i)(?<![A-Za-z0-9])(?:[A-Za-z0-9]+_)*(?:api[_-]?key|secret(?:[_-]access)?(?:[_-]key)?|"
+                        r"password|passwd|(?:access|auth)[_-]?token|[A-Za-z0-9]+_token|private[_-]?key)"
+                        r"(?![A-Za-z0-9_])[\"']?\s*[:=]\s*[\"']?[A-Za-z0-9+/_.=-]{12,}"),
 )
 
 

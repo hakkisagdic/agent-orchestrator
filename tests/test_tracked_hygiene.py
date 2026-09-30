@@ -197,7 +197,9 @@ def test_each_shape_is_found_once_and_what_only_resembles_one_is_not(tmp_path):
 
     assert all(_generated(value) and _generated(value[::-1]) for value in values)
     assert found == [
-        ("app/settings.py", 1, "high-entropy-assignment"), ("app/settings.py", 2, "high-entropy-assignment"),
+        # DEPLOY_SECRET is a secret's name as an environment writes it, which the evidence rule reads first
+        # (EVIDENCE-SCAN-2); ENCRYPTION_KEY names none of its words, and only the tracked-file rule finds it.
+        ("app/settings.py", 1, "assigned-secret"), ("app/settings.py", 2, "high-entropy-assignment"),
         ("ci/env.sh", 1, "aws-access-key"), ("ci/env.sh", 2, "github-token"),
         ("config/db.yml", 1, "assigned-secret"),
         ("config/service.json", 1, "assigned-secret"),
