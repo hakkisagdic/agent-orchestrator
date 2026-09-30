@@ -62,6 +62,16 @@ def _catchup(cfg, **given):
     return cli.cmd_catchup(cfg, SimpleNamespace(**args))
 
 
+def _approved(cfg, ns):
+    """A review that approves exactly the range it is asked for, recorded as the review ledger records one.
+
+    A stand-in that only exited 0 closed a range that changed lines as if it had none (WAIVER-BOUND-2).
+    """
+    A.record_review(cfg["root"], f"approved-{ns.commits[:7]}-{ns.commits[-7:]}.md", b"VERDICT: APPROVED\n",
+                    {"kind": "commit-range", "commits": ns.commits}, "APPROVED")
+    return 0
+
+
 def _reviews(root):
     return sorted(name for name in os.listdir(os.path.join(root, "semantic-review")) if name.endswith(".md"))
 
@@ -217,7 +227,7 @@ def test_limit_starts_at_most_that_many_reviews_and_slice_takes_one_slices_waive
     heads = [w["head"] for w in waivers] + [_git(root, "rev-parse", "HEAD")]
     ranges = [f"{heads[n]}..{heads[n + 1]}" for n in range(3)]
     seen = []
-    monkeypatch.setattr(cli, "cmd_review", lambda cfg, ns: seen.append(ns.commits) or 0)
+    monkeypatch.setattr(cli, "cmd_review", lambda cfg, ns: seen.append(ns.commits) or _approved(cfg, ns))
     monkeypatch.setattr(W, "run", lambda ns: 0)
 
     assert _catchup(project, limit=0, **PERSON) == 2

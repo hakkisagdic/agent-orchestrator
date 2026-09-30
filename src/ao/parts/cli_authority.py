@@ -581,54 +581,70 @@ def cmd_commit_ok(cfg, args):
     strict_reviewer_identity = None
     review_tier = None
     scope = A.candidate_scope(candidate)
-    if not review_required:
-        pass
-    elif waiver:
-        print(f"{C['yellow']}review waived{C['reset']} by {waiver['by']} ({waiver['id']}): "
-              f"{waiver['why'][:80]} — reconcile with `ao catchup`")
-    elif strict and not any(route["eligible"] for route in matrix_resolution["reviewers"]):
-        reasons.append("capability matrix has no independently eligible reviewer")
-    elif not match:
-        reasons.append(decision["problem"]
-                       or "no APPROVED prospective review is bound to this staged candidate")
-        reasons.extend(waiver_notes)
-    else:
-        review_name, _, rbody, evidence = match
-        reviewed_scope, integrity_reasons = A.candidate_review_integrity(
-            root, candidate, evidence
-        )
-        reasons.extend(f"{review_name}: {reason}" for reason in integrity_reasons)
+
+    def bound_review():
+        """What the review bound to this candidate grants: (its fields, why it does not hold)."""
+        name, _, body, ev = match
+        fields = {"review_name": name, "rbody": body, "evidence": ev, "scope": None, "rwho": None,
+                  "strict_reviewer_identity": None, "review_tier": None}
+        why = []
+        reviewed_scope, integrity_reasons = A.candidate_review_integrity(root, candidate, ev)
+        why.extend(f"{name}: {reason}" for reason in integrity_reasons)
         # A boundary that lists criteria lands only when the review found every one met (CRITERIA-VERDICTS).
-        reasons.extend(f"{review_name}: {reason}" for reason in A.criteria_refusals(evidence))
-        if reviewed_scope is not None:
-            scope = reviewed_scope
+        why.extend(f"{name}: {reason}" for reason in A.criteria_refusals(ev))
+        fields["scope"] = reviewed_scope
         if strict:
-            reasons.extend(
-                f"{review_name}: {reason}"
-                for reason in M.review_evidence_problems(matrix_resolution, evidence)
-            )
-            strict_reviewer_identity = evidence.get("reviewer_identity") \
-                if isinstance(evidence, dict) else None
-            rwho = (strict_reviewer_identity or {}).get("binding") \
-                if isinstance(strict_reviewer_identity, dict) else None
-            review_tier = next((route.get("tier") for route in matrix_resolution["reviewers"]
-                                if route["eligible"] and route["identity"] == strict_reviewer_identity), None)
+            why.extend(f"{name}: {reason}" for reason in M.review_evidence_problems(matrix_resolution, ev))
+            identity = ev.get("reviewer_identity") if isinstance(ev, dict) else None
+            fields["strict_reviewer_identity"] = identity
+            fields["rwho"] = (identity or {}).get("binding") if isinstance(identity, dict) else None
+            fields["review_tier"] = next((route.get("tier") for route in matrix_resolution["reviewers"]
+                                          if route["eligible"] and route["identity"] == identity), None)
         else:
             # Who reviewed is read from the evidence ao wrote, never from the
             # artefact's text, where the implementer's boundary appears too (#60).
-            recorded = evidence.get("reviewer") if isinstance(evidence, dict) else None
-            rwho = recorded.get("id") if isinstance(recorded, dict) else None
-            if not isinstance(rwho, str) or not rwho:
-                rwho = None
-                reasons.append(f"{review_name} records no reviewer in its evidence — "
-                               "run `ao review` again")
+            recorded = ev.get("reviewer") if isinstance(ev, dict) else None
+            who = recorded.get("id") if isinstance(recorded, dict) else None
+            if not isinstance(who, str) or not who:
+                who = None
+                why.append(f"{name} records no reviewer in its evidence — run `ao review` again")
             else:
                 # The tier it was recorded in must still hold: a withdrawn opt-in grants nothing (REVIEW-TIERS).
-                review_tier, refused = _recorded_review_tier(cfg, evidence, rwho)
+                fields["review_tier"], refused = _recorded_review_tier(cfg, ev, who)
                 if refused == "it runs as the implementer":
-                    reasons.append(f"the review was written by the implementer ({rwho})")
+                    why.append(f"the review was written by the implementer ({who})")
                 elif refused:
-                    reasons.append(f"the review's reviewer {rwho} may not review this implementer: {refused}")
+                    why.append(f"the review's reviewer {who} may not review this implementer: {refused}")
+            fields["rwho"] = who
+        return fields, why
+
+    no_eligible = strict and not any(route["eligible"] for route in matrix_resolution["reviewers"])
+    bound, bound_why = bound_review() if review_required and match and not no_eligible else (None, [])
+    if not review_required:
+        pass
+    elif bound is not None and (not bound_why or not waiver):
+        # A candidate a review is bound to stands on that review, and an open waiver is left for what needs
+        # one: the waiver was asked first, and a reviewed candidate was granted as waived, the review
+        # unrecorded and the waiver spent on it (WAIVER-BOUND-2).
+        reasons.extend(bound_why)
+        review_name, rbody, evidence = bound["review_name"], bound["rbody"], bound["evidence"]
+        rwho, review_tier = bound["rwho"], bound["review_tier"]
+        strict_reviewer_identity = bound["strict_reviewer_identity"]
+        if bound["scope"] is not None:
+            scope = bound["scope"]
+        waiver = None
+    elif waiver:
+        if bound_why:
+            print(f"{C['dim']}the review bound to this candidate does not hold ({bound_why[0]}); "
+                  f"the waiver stands in{C['reset']}")
+        print(f"{C['yellow']}review waived{C['reset']} by {waiver['by']} ({waiver['id']}): "
+              f"{waiver['why'][:80]} — reconcile with `ao catchup`")
+    elif no_eligible:
+        reasons.append("capability matrix has no independently eligible reviewer")
+    else:
+        reasons.append(decision["problem"]
+                       or "no APPROVED prospective review is bound to this staged candidate")
+        reasons.extend(waiver_notes)
 
     held = A.hold_state(root)
     if held:
@@ -1300,8 +1316,10 @@ def cmd_commit_check(cfg, args):
             if F.enabled(cfg, "review"):
                 try:
                     running = [item["id"] for item in A.board(root)["running"]]
+                    # The waiver the grant stood on is the one asked; the newest one open was, and a second
+                    # waiver opened for the slice since refused the grant the first had made (WAIVER-BOUND-2).
                     waiver, notes = A.review_waiver_for(
-                        root, running, (candidate or {}).get("digest")
+                        root, running, (candidate or {}).get("digest"), wanted=grant.get("waiver") or None
                     )
                 except Exception as exc:
                     reasons.append(f"cannot validate the live review waiver: {exc}")
@@ -1309,11 +1327,9 @@ def cmd_commit_check(cfg, args):
                     if not waiver:
                         reasons.append(
                             "review is enabled and no matching running-slice waiver is open"
+                            + (f" (the grant stood on {grant['waiver']})" if grant.get("waiver") else "")
                             + (f": {'; '.join(notes)}" if notes else "")
                         )
-                    elif grant.get("waiver") and grant["waiver"] != waiver["id"]:
-                        reasons.append(f"the grant stood on waiver {grant['waiver']}, "
-                                       f"not the open {waiver['id']}")
 
     try:
         drift = A.plan_drift(root)

@@ -142,6 +142,7 @@ publishes the release.
 
 ### Fixes
 
+- A candidate an APPROVED review is bound to stands on that review, where an open waiver for its slice was taken first and spent on it; `ao commit-check` holds a grant to the waiver it stood on; and `ao catchup` closes a range as having no net change only when it has none (WAIVER-BOUND-2).
 - A child that re-enters ao - the review runner, the watchdog's hunt, the MCP server's verify - finds ao when ao runs from a clone with nothing installed; the review runner used to die silently and leave its review "running" until it was lost (LOOP-FIXES).
 - A row store named by a path holding `?`, `#`, `%` or a UNC server opens as the file it names (SQLITE-URI, LOOP-FIXES).
 - `ao verify` and `ao merge-check` wait for a machine gate lock held by their own project, as they did for another project's, so two suites no longer run at once in one checkout (GATE-LOCK-SAME-ROOT).

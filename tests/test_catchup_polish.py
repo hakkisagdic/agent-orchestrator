@@ -18,7 +18,8 @@ import pytest
 
 from ao import cli, features as F, lib as A
 from ao import watchdog as W
-from tests.test_catchup_ready import APPROVED, PERSON, _catchup, _configure, _git, _land, _legacy_waiver, _reviews
+from tests.test_catchup_ready import (APPROVED, PERSON, _approved, _catchup, _configure, _git, _land,
+                                      _legacy_waiver, _reviews)
 from tests.test_noise_repeats import BLOCKED, DAY, HOUR, REQUEST, _heartbeat, _world
 from tests.test_oct1_fixes import _answering, _waived_ranges
 from tests.test_review_chain import _fake
@@ -64,7 +65,7 @@ def test_limit_counts_only_what_a_later_run_would_review_and_the_run_still_close
     empty = A.waive(root, "review", "B9", "quota", by="A. Person", hours=0.0002)      # nothing is granted under it
     time.sleep(1)
     seen = []
-    monkeypatch.setattr(cli, "cmd_review", lambda cfg, ns: seen.append(ns.commits) or 0)
+    monkeypatch.setattr(cli, "cmd_review", lambda cfg, ns: seen.append(ns.commits) or _approved(cfg, ns))
     monkeypatch.setattr(W, "run", lambda ns: 0)
 
     assert _catchup(project, plan=True, limit=1, **PERSON) == 0

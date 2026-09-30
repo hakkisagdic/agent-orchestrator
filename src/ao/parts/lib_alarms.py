@@ -1152,18 +1152,22 @@ def _waiver_candidates(root):
     return bound
 
 
-def review_waiver_for(root, running, candidate_digest, now=None):
+def review_waiver_for(root, running, candidate_digest, now=None, wanted=None):
     """The review waiver that may stand in for a review of this candidate, and why others may not (#67).
 
     It names a running slice exactly, has not expired, and has authorised no other
     candidate. A waiver for every slice, one from before waivers expired, and one
-    already spent on other bytes stand in for nothing.
+    already spent on other bytes stand in for nothing. With `wanted`, only that waiver
+    is asked: a grant is checked against the waiver it stood on, and a second one opened
+    for the same slice since read as a different waiver and refused it (WAIVER-BOUND-2).
     """
     now = time.time() if now is None else now
     bound = _waiver_candidates(root)
     notes = []
     for waiver in reversed(open_waivers(root, gate="review")):
         wid, slice_id = waiver.get("id"), waiver.get("slice")
+        if wanted is not None and wid != wanted:
+            continue
         if slice_id not in running:
             if slice_id == "*":
                 notes.append(f"waiver {wid} names every slice; a waiver covers one")
