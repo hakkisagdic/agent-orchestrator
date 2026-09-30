@@ -197,6 +197,7 @@ publishes the release.
 - A gate's pass and fail counts are read only from the summary line its runner ends with, never from a log line the code under test printed (GATE-SUMMARY, #70).
 - The newest recorded review of a candidate decides, from a chained review ledger: emptying, deleting or back-dating a rejection uncovers no older approval (REVIEW-SELECTION, #63).
 - `ao review --timeout` is accepted and ignored: the timeout is the `review_timeout` setting, so the implementer cannot time out a reviewer that would reject (REVIEW-SELECTION, #63).
+- A new project whose name the machine registry cannot record takes its path's own name, where two projects of one name both took the bare name and a push window allowed in one opened the other's (PROJECT-KEY-2).
 - The reviewer's identity is read from ao's own evidence and compared as an identity, not as a substring (REVIEWER-IDENTITY, #60).
 - A review artefact files the adjudicated verdict above the reviewer's words, kept verbatim; an APPROVED with blocker findings is filed as NEEDS_CHANGES, and `ao commit-ok` refuses it (REVIEW-VERBATIM, #54, #55, #57).
 - A verdict is read from its anchored line, and verdicts and review statuses are closed sets the docs must match (AO25a; CLOSED-ENUMS, #4).

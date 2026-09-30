@@ -252,10 +252,12 @@ def project_key(root):
     from .storage import _exclusive_lock, replace_file_durably
     registry = project_registry_path()
     recorded = os.path.join(real, ".ao", PROJECT_KEY_FILE)
+    registered = False
     try:
         with _exclusive_lock(registry + ".lock"):
             known = project_registry()
             mine = next((name for name, row in known.items() if row.get("root") == real), None)
+            registered = mine is not None
             if mine is None:
                 held = {name.lower() for name, row in known.items()
                         if row.get("root") != real and os.path.isdir(os.path.join(row["root"], ".ao"))}
@@ -274,9 +276,15 @@ def project_key(root):
                 known = {name: row for name, row in known.items() if name.lower() != mine.lower()}
                 known[mine] = {"root": real, "at": int(time.time())}
                 replace_file_durably(registry, json.dumps(known, indent=1, sort_keys=True).encode("utf-8"))
+                registered = True
             replace_file_durably(recorded, json.dumps({"key": mine, "root": real}).encode("utf-8"))
     except OSError:
-        return mine or base
+        # A name the registry did not record is one another project may hold or take: the bare basename came
+        # back here, and a push window allowed in one project of that name opened the other's. The path's
+        # own name is no other project's (PROJECT-KEY-2).
+        if registered or (mine and mine != base):
+            return mine
+        return f"{base}-{hashlib.sha256(real.encode('utf-8')).hexdigest()[:8]}"
     return mine
 
 
