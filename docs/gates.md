@@ -174,6 +174,34 @@ moved since. A review of a single-sentence boundary records no criteria, and gra
 
 Push is not a gate outcome and never becomes one. It stays a direct human act.
 
+## A commit names its grant
+
+```bash
+ao commit -m "land the slice"                        # the message ends with the grant's Ao- trailers
+ao commit-check --range origin/main..HEAD            # each commit has the tree its trailers name
+ao commit-check --range HEAD --since-first-trailer   # all of history from the first commit carrying them
+```
+
+`ao commit` ends the message with git trailers naming the grant it held the index to: `Ao-Grant`,
+the grant's id; `Ao-Tree`, the index tree the grant names; `Ao-Verification`; and `Ao-Review` or
+`Ao-Waiver`, what the grant rested on, `Ao-Review: off` where the review switch was off. They join a
+trailer block the message already ends with, such as its Co-Authored-By, and form one of their own
+otherwise, so `git interpret-trailers --parse` reads each. A message that already carries Ao-
+trailers is refused, not rewritten: they could only be another commit's.
+
+`ao commit-check --range` holds each commit of a range to its trailers. It is read-only and needs no
+`.ao/`: a commit amended, rebased or rewritten after its grant has another tree, and fails. Where the
+checkout's authority ledger can be read, a grant on record that names another tree, verification,
+review or waiver fails the commit too; a grant it does not hold fails nothing, since a grant stays in
+the ledger of the checkout that made it. A merge's tree is git's, not a granted candidate's, so a
+merge is skipped. The tests workflow runs the check on every push to main, over the pushed range.
+
+*In ao since slice COMMIT-TRAILER: the trailers and the range check. The commit carries its authority
+where a hook cannot follow it: a hook runs only on the machine that commits, `--no-verify` skips it,
+and a command rewriter once broke the allowlist that kept it. Requiring the check is a person's step,
+as publishing is: a ruleset on main that requires the `commit trailers` status check, and signed
+commits where you sign them. ao never sets a ruleset.*
+
 ## Serialisation and machine pressure
 
 Lanes think in parallel; gates do not run in parallel. `ao verify` and `ao merge-check` hold

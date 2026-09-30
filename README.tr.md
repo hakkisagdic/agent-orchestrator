@@ -117,6 +117,7 @@ gereken tek yetkidir.
 | `ao board add ID "başlık" --acceptance "…"` | bir maddeyi yalnız kabul sınırıyla birlikte kuyruğa alır |
 | `ao verify [-p full]` | tanımlı gate'leri koştur, sonucu kaydet |
 | `ao commit-ok [--verify]` | bu ağaç commit edilebilir mi? kanıttan karar |
+| `ao commit -m …` · `ao commit-check --range A..B` | yetki verilen adayı commit et, mesajı yetkiyi adlandıran Ao- trailer'larıyla biter; inmiş her commit'in trailer'larının adlandırdığı ağaca sahip olduğunu `.ao/` gerekmeden, CI'ın koştuğu gibi denetle ([gates.md](docs/gates.md#a-commit-names-its-grant)) |
 | `ao hold` / `ao hold release --note …` | ağaçtaki tüm ajanları durdur ve durdurulmuş tut |
 | `ao writers` / `ao writers --clean` | ağaçtaki canlı turlar (süreç değil tur başına bir), öksüzler ayrı; `--clean` yalnız öksüzleri durdurur |
 | `ao fanout ok --agents N` / `ao fanout record …` / `ao fanout history` | N alt-ajanlık fan-out şimdi başlayabilir mi (üst sınır, yakın limit vuruşu, sağlayıcı penceresi); bir koşunun maliyetini kaydet |

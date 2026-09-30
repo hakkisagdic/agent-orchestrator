@@ -56,6 +56,33 @@ jobs:
       - run: python -m pip install -e ".[dev]"
       - run: python -m pytest -q -rs
 
+  trailers:
+    # Each commit a push lands on main names the grant it was made under and has the tree that grant
+    # names (COMMIT-TRAILER). Commits older than the first one carrying the trailers are history from
+    # before ao wrote them. A ruleset that requires this check is the owner's to set, never ao's.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    name: commit trailers
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: every pushed commit has the tree its trailers name
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        # A new branch, or a push that rewrote history, has no before in this history: all of it is read.
+        run: |
+          range="$BEFORE..$AFTER"
+          git cat-file -e "$BEFORE^{commit}" 2>/dev/null || range="$AFTER"
+          PYTHONPATH=src python -m ao commit-check --range "$range" --since-first-trailer
+
   weekly:
     if: github.event_name == 'schedule'
     name: ${{ matrix.os }} / Python 3.12

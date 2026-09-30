@@ -102,8 +102,9 @@ Anything not forbidden there and inside the slice's scope is allowed.
    overwrites foreign/protected content, and requires explicit
    `--allow-shared-hooks` for the whole mutation set when any eligible target is
    shared, external, or selected by global/system config. Then one local commit
-   with `ao commit -m "…"`, which runs the same authority check as the hook and
-   cannot skip it. **No push.**
+   with `ao commit -m "…"`, which runs the same authority check as the hook,
+   cannot skip it, and ends the message with the grant's Ao- trailers - leave
+   those lines out of the message. **No push.**
 8. `ao_report {kind: "done"}`, board `running → done` with the gates named,
    next item. Blocked by a decision? `ao_ask` with options, board `blocked` with
    `needs:`, and move to the next READY item — park and continue. Say who it
@@ -292,7 +293,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao review --commits <range>` | retrospective review of landed work; never authorizes a candidate |
 | `ao review submit [--boundary …]` / `ao review collect <R-id>\|--any` / `ao reviews` / `ao review cancel <R-id>` | submit pins the staged tree and reviews it in the background, returning an id at once; collect takes a finished one; `ao reviews` lists them with what each is doing - starting, preparing, waiting and on what, or which reviewer runs; cancel ends a review and the reviewer it started, never a bare `kill`; `ao commit-ok --review <R-id>` grants only on the pinned tree |
 | `ao commit-ok` | persist authority for the exact isolated index candidate, verification and prospective review |
-| `ao commit-check` | revalidate the latest persisted grant against Git's active index without issuing or consuming one |
+| `ao commit-check` | revalidate the latest persisted grant against Git's active index without issuing or consuming one; `--range A..B` holds each landed commit to the tree its Ao- trailers name |
 | `ao writers [--clean]` | live turns (not processes); orphans set aside |
 | `ao hold` / `ao hold release` | stop unattended turns and keep them stopped |
 | `ao watchdog install|uninstall|status|explain|trace` | the unattended loop and its instruments |

@@ -364,7 +364,8 @@ def build_parser():
     cr.add_argument("--local", action="store_true", help="also show this machine's share")
     cr.add_argument("--reset-day", type=int, help="fallback: override the renewal day")
     cr.set_defaults(fn=cmd_credits)
-    cm = sub.add_parser("commit", help="commit the staged candidate after ao commit-ok; never skips hooks")
+    cm = sub.add_parser("commit", help="commit the staged candidate after ao commit-ok, naming its grant in Ao- "
+                                       "trailers; never skips hooks")
     source = cm.add_mutually_exclusive_group(required=True)
     source.add_argument("-m", "--message")
     source.add_argument("-F", "--file")
@@ -376,8 +377,15 @@ def build_parser():
     ck.set_defaults(fn=cmd_commit_ok)
     cc = sub.add_parser(
         "commit-check",
-        help="pre-commit check: revalidate the recorded grant against the active index",
+        help="pre-commit check: revalidate the recorded grant against the active index; "
+             "--range checks landed commits instead",
     )
+    cc.add_argument("--range", metavar="A..B",
+                    help="check each commit of a revision range instead, or of one commit's whole history: it "
+                         "carries the Ao- trailers ao commit writes and has the tree they name; read-only, and "
+                         "it needs no .ao/, as in CI")
+    cc.add_argument("--since-first-trailer", action="store_true",
+                    help="with --range: leave out the commits older than the first one carrying Ao- trailers")
     cc.set_defaults(fn=cmd_commit_check)
     lk = sub.add_parser("lock", help="run a heavy command under the machine-wide lock")
     lk.add_argument("--wait", type=int, default=1800)

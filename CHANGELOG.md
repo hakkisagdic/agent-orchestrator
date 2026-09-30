@@ -14,7 +14,12 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### New commands
 
+- `ao commit-check --range A..B` holds each landed commit to the tree its Ao- trailers name, read-only and with no `.ao/` needed, and the tests workflow runs it on every push to main ([gates.md](docs/gates.md#a-commit-names-its-grant)) (COMMIT-TRAILER).
 - `ao completion bash|zsh|fish|powershell` prints a script that completes ao's commands, their options and the choices each declares, generated from the ao that prints it and quoted so no word it holds is read as syntax ([getting started](docs/getting-started.md#6-shell-completion)) (SHELL-COMPLETION).
+
+### Behaviour changes
+
+- `ao commit` ends each message with Ao- trailers naming the grant it was made under, the tree, the verification and the review or waiver it rested on, and refuses a message that already carries them (COMMIT-TRAILER).
 
 ### Under the hood
 

@@ -509,6 +509,206 @@ def commits_without_grant(root, limit=50):
             if tree not in trees]
 
 
+# ---- a commit names the grant it was made under (COMMIT-TRAILER) --------------------------------
+
+# The trailers `ao commit` ends a message with, in this order: the grant, the index tree it names, the
+# verification it stood on, and the review or the waiver it rested on. A grant made with the review
+# switch off rested on neither, and its Ao-Review says `off`. Git reads a trailer's key without case.
+COMMIT_TRAILERS = ("Ao-Grant", "Ao-Tree", "Ao-Verification", "Ao-Review", "Ao-Waiver")
+TRAILER_PREFIX = "ao-"
+REVIEW_OFF = "off"
+# A trailer as git finds one with its default separator: letters, digits and hyphens, then the colon,
+# spaces or tabs allowed before it.
+_TRAILER_LINE = re.compile(r"[A-Za-z0-9-]+[ \t]*:")
+_OBJECT_ID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+
+
+def grant_trailers(grant):
+    """[(key, value)] naming the grant a commit is made under, read from its authority row (COMMIT-TRAILER).
+
+    Nothing is worked out again: the tree is the candidate's index tree the grant names, and the review
+    or the waiver is the one it recorded resting on. ValueError when the row is not a grant, or holds a
+    value one line of a message cannot carry.
+    """
+    token = grant.get("token") if isinstance(grant, dict) else None
+    if not isinstance(grant, dict) or grant.get("granted") is not True:
+        raise ValueError(f"{token or 'the authority decision'} is not a grant")
+    candidate = grant.get("candidate") if isinstance(grant.get("candidate"), dict) else {}
+    named = [("Ao-Grant", token), ("Ao-Tree", candidate.get("index_tree")),
+             ("Ao-Verification", grant.get("verification"))]
+    rested = [(key, grant[field]) for key, field in (("Ao-Review", "review"), ("Ao-Waiver", "waiver"))
+              if grant.get(field)]
+    named += rested or [("Ao-Review", REVIEW_OFF)]
+    for key, value in named:
+        if not isinstance(value, str) or not value or value != value.strip() \
+                or any(ch in value for ch in "\r\n\0"):
+            raise ValueError(f"grant {token or '<unnamed>'} records no {key} a trailer can carry")
+    return named
+
+
+def _trailer_block(lines):
+    """Whether a paragraph is trailers alone as git reads them: each line one, or the continuation of one."""
+    return bool(lines) and bool(_TRAILER_LINE.match(lines[0])) \
+        and all(_TRAILER_LINE.match(line) or line[:1] in (" ", "\t") for line in lines[1:])
+
+
+def with_trailers(message, trailers):
+    """`message` ending with `trailers`, in git's conventions (COMMIT-TRAILER).
+
+    Git reads a message's trailers from its last paragraph, and never from the first, its subject. A
+    message whose last paragraph is trailers alone - the Co-Authored-By it ends with - takes these after
+    its own, in one block; any other gets them as a paragraph of their own. Either way every line of the
+    last paragraph is a trailer, so `git interpret-trailers --parse` and `%(trailers)` read each one.
+    Blank lines at either end are dropped, as git drops them. ValueError for a message with nothing in
+    it, and for one whose last paragraph already holds an Ao- trailer: that would be a second set.
+    """
+    lines = message.split("\n")
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if not lines:
+        raise ValueError("the message is empty")
+    blank = [at for at, line in enumerate(lines) if not line.strip()]
+    block = [line.rstrip() for line in lines[blank[-1] + 1:]] if blank else []
+    joined = _trailer_block(block)
+    keys = [line.split(":", 1)[0].strip() for line in block if joined and _TRAILER_LINE.match(line)]
+    carried = sorted({key for key in keys if key.lower().startswith(TRAILER_PREFIX)})
+    if carried:
+        raise ValueError(f"the message already ends with {', '.join(carried)}: ao commit writes the Ao- trailers "
+                         "itself, from the grant it checked, so take those lines out")
+    return "\n".join(lines + ([] if joined else [""]) + [f"{key}: {value}" for key, value in trailers]) + "\n"
+
+
+def _ao_trailers(trailers):
+    """{key: [values]} of the Ao- trailers among [(key, value)], each key spelled as ao writes it."""
+    carried = {}
+    for key, value in trailers:
+        if key.lower().startswith(TRAILER_PREFIX):
+            name = next((known for known in COMMIT_TRAILERS if known.lower() == key.lower()), key)
+            carried.setdefault(name, []).append(value)
+    return carried
+
+
+def landed_commits(root, revisions):
+    """[{sha, tree, parents, trailers}] of the commits `revisions` names, parents first (COMMIT-TRAILER).
+
+    Git reads the trailers itself, through `%(trailers)`: the last paragraph of the message, never its
+    subject, continuations unfolded, one (key, value) a trailer. `revisions` reaches git as one
+    argument. RuntimeError when git cannot list them.
+    """
+    raw = _git_output(root, "log", "--no-show-signature", "--topo-order", "--reverse", "-z",
+                      "--format=%H%n%T%n%P%n%(trailers:only,unfold)", revisions, "--", timeout=300)
+    commits = []
+    for record in raw.decode(UTF8, "replace").split("\0"):
+        lines = record.lstrip("\n").split("\n")
+        if not lines[0]:
+            continue
+        if len(lines) < 3 or not _OBJECT_ID.fullmatch(lines[0]) or not _OBJECT_ID.fullmatch(lines[1]):
+            raise RuntimeError(f"git listed a commit ao cannot read: {lines[0][:40]!r}")
+        trailers = [(key.strip(), value.strip()) for key, colon, value in
+                    (line.partition(":") for line in lines[3:]) if colon and key.strip()]
+        commits.append({"sha": lines[0], "tree": lines[1], "parents": lines[2].split(), "trailers": trailers})
+    return commits
+
+
+def ledger_grants(root):
+    """({token: authority row} this checkout's ledger holds, live and sealed, or None, why it cannot be read).
+
+    (None, None) where there is no authority ledger at all: a clone, as in CI (COMMIT-TRAILER).
+    """
+    path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    if not os.path.exists(path):
+        return None, None
+    from .storage import sealed_rows
+    try:
+        rows = list(authority_rows(root)) + list(sealed_rows(path))
+    except Exception as exc:
+        return None, str(exc)
+    return {row["token"]: row for row in rows if isinstance(row, dict) and isinstance(row.get("token"), str)}, None
+
+
+def trailer_problems(commit, grants=None):
+    """Why a landed commit does not match the grant its Ao- trailers name; [] when it does (COMMIT-TRAILER).
+
+    Each trailer `ao commit` writes must be there once, and the commit's tree must be the tree Ao-Tree
+    names: a commit amended, rebased or rewritten after its grant has another. `grants`, {token: row},
+    is the checkout's authority ledger where it can be read, and a grant on record that names another
+    tree, verification, review or waiver fails the commit too. A grant it does not hold fails nothing:
+    a grant stays in the ledger of the checkout that made it, a lane's in the lane's own.
+    """
+    carried = _ao_trailers(commit["trailers"])
+    if not carried:
+        return ["carries no Ao- trailers, which ao commit writes"]
+    problems = [f"carries {len(values)} {key} trailers" for key, values in carried.items() if len(values) > 1]
+    problems += [f"has no {key} trailer" for key in COMMIT_TRAILERS[:3] if key not in carried]
+    if "Ao-Review" not in carried and "Ao-Waiver" not in carried:
+        problems.append("names no review or waiver its grant rested on")
+    problems += [f"carries {key}, which ao commit does not write"
+                 for key in sorted(set(carried) - set(COMMIT_TRAILERS))]
+    if problems:
+        return problems
+    said = {key: values[0] for key, values in carried.items()}
+    if said["Ao-Tree"] != commit["tree"]:
+        problems.append(f"its tree {commit['tree'][:12]} is not {said['Ao-Tree'][:12]}, the tree its grant names: "
+                        "it changed after the grant")
+    grant = (grants or {}).get(said["Ao-Grant"])
+    if grant is not None:
+        try:
+            recorded = dict(grant_trailers(grant))
+        except ValueError as exc:
+            problems.append(f"the ledger's record of it does not hold: {exc}")
+        else:
+            problems += [f"its {key} is {said.get(key) or 'missing'}, where the ledger's {said['Ao-Grant']} "
+                         f"records {recorded.get(key) or 'none'}"
+                         for key in COMMIT_TRAILERS if said.get(key) != recorded.get(key)]
+    return problems
+
+
+def trailer_audit(root, revisions, since_first=False):
+    """Each commit of a revision range held to the grant its Ao- trailers name (COMMIT-TRAILER).
+
+    Read-only, and it needs no .ao/: `revisions` is `<a>..<b>`, or one commit for all of its history,
+    and each commit in it that is not a merge is judged by `trailer_problems`, against the checkout's
+    authority ledger where one can be read. A merge's tree is git's, not a granted candidate's: it is
+    skipped. `since_first` leaves out the commits older than the first one carrying Ao- trailers - those
+    it descends from - and every commit while none carries them: history from before ao wrote them.
+    Returns {commits, end, first, ledger, unreadable}; each commit also holds merge, exempt, grant,
+    problems and on_record (None where no ledger was read). ValueError for a range ao does not hand to
+    git; RuntimeError when git cannot read it.
+    """
+    spec = str(revisions or "")
+    _, dots, end = spec.partition("..")
+    end = (end or "HEAD") if dots else spec
+    if not spec or "..." in spec or spec.startswith("-") or end.startswith("-") \
+            or any(ch.isspace() or ch == "\0" for ch in spec):
+        raise ValueError(f"{spec!r} is not a range ao reads: give <a>..<b>, or one commit for all of its history")
+    commits = landed_commits(root, spec)
+    first, older = None, set()
+    if since_first:
+        history = landed_commits(root, end)
+        first = next((commit["sha"] for commit in history if _ao_trailers(commit["trailers"])), None)
+        parents = {commit["sha"]: commit["parents"] for commit in history}
+        if first is None:
+            older = set(parents)
+        else:
+            reach = list(parents.get(first, ()))
+            while reach:
+                sha = reach.pop()
+                if sha not in older:
+                    older.add(sha)
+                    reach.extend(parents.get(sha, ()))
+    grants, unreadable = ledger_grants(root)
+    for commit in commits:
+        commit["merge"] = len(commit["parents"]) > 1
+        commit["exempt"] = not commit["merge"] and commit["sha"] in older
+        checked = not (commit["merge"] or commit["exempt"])
+        commit["problems"] = trailer_problems(commit, grants) if checked else []
+        commit["grant"] = (_ao_trailers(commit["trailers"]).get("Ao-Grant") or [None])[0]
+        commit["on_record"] = commit["grant"] in grants if checked and grants is not None else None
+    return {"commits": commits, "end": end, "first": first, "ledger": grants is not None, "unreadable": unreadable}
+
+
 def record_authority(root, granted, reasons, tree, verification, token=None,
                      review=None, reviewer=None, candidate=None, scope=None,
                      matrix=None, role_bindings=None, implementer_identity=None,

@@ -125,6 +125,7 @@ scope is the one authority an implementer must not have.
 | `ao board add ID "title" --acceptance "…"` | admit one item, only with its acceptance boundary |
 | `ao verify [-p full]` | run the declared gates, record the result |
 | `ao commit-ok [--verify]` | may this tree be committed? decided from evidence |
+| `ao commit -m …` · `ao commit-check --range A..B` | commit the granted candidate, its message ending with Ao- trailers that name the grant; check that each landed commit has the tree its trailers name, with no `.ao/` needed, as CI runs it ([gates.md](docs/gates.md#a-commit-names-its-grant)) |
 | `ao hold` / `ao hold release --note …` | stop every agent in the tree, and keep them stopped |
 | `ao writers` / `ao writers --clean` | live turns in the tree (one per turn, not per process), orphans set aside; `--clean` stops only the orphans |
 | `ao fanout ok --agents N` / `ao fanout record …` / `ao fanout history` | may a fan-out of N sub-agents start now (hard cap, recent limit hit, provider window); record what one cost |

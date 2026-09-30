@@ -1115,6 +1115,20 @@ def _commit_hook_probe_response(root):
     return 1
 
 
+def _message_bytes(root, message, file):
+    """The message ao commit was given, as the bytes git would have read (COMMIT-TRAILER).
+
+    `-m` as its argument reached git; `-F -` from standard input; any other `-F` from the file, read
+    where git read it: from the project root, where ao runs git.
+    """
+    if message:
+        return os.fsencode(message)
+    if file == "-":
+        return sys.stdin.buffer.read()
+    with open(os.path.join(root, file), "rb") as fh:
+        return fh.read()
+
+
 def cmd_commit(cfg, args):
     """Commit the staged candidate in the one form a tool grant can safely allow (#58).
 
@@ -1123,8 +1137,17 @@ def cmd_commit(cfg, args):
     runs the same authority check the pre-commit hook runs before Git is asked to
     commit - so a deleted or redirected hook does not skip it - drops inherited
     configuration that could redirect the hooks, and lets them run as usual.
+
+    The message ends with the grant that check held the index to, as git trailers
+    (COMMIT-TRAILER): the grant stays in this checkout's ledger while the commit
+    leaves it, so the commit names its own authority wherever it goes, and
+    `ao commit-check --range` holds it to that. A message that already ends with
+    Ao- trailers is refused, not rewritten: they could only be another commit's,
+    copied with its message, or typed by hand, and ao does not edit what a person
+    wrote into a claim it did not make.
     """
     import subprocess
+    from types import SimpleNamespace
     message, file = getattr(args, "message", None), getattr(args, "file", None)
     if message is not None and file is not None:
         print("ao commit takes exactly one of -m MESSAGE or -F FILE")
@@ -1133,13 +1156,32 @@ def cmd_commit(cfg, args):
         # An empty message was told it had given both or neither (GRANTS-AUDIT-2).
         print("ao commit needs a message: -m MESSAGE with text in it, or -F FILE")
         return 2
-    code = cmd_commit_check(cfg, args)
+    check = SimpleNamespace()
+    code = cmd_commit_check(cfg, check)
     if code:
         return code
     env = {name: value for name, value in os.environ.items()
            if not name.startswith(("GIT_CONFIG", "GIT_DIR", "GIT_WORK_TREE"))}
-    source = ["-m", message] if message else ["-F", file]
-    code = subprocess.run(["git", "commit", *source], cwd=cfg["root"], env=env).returncode
+    source, data = (["-m", message] if message else ["-F", file]), None
+    grant = getattr(check, "granted", None)
+    if grant is not None:
+        # A project ao does not govern passes the check with no grant, and its message stays git's alone.
+        try:
+            trailers = A.grant_trailers(grant)
+        except ValueError as exc:
+            print(f"{C['red']}{C['b']}COMMIT REFUSED{C['reset']}\n  {C['red']}·{C['reset']} {exc}")
+            return 1
+        try:
+            text = _message_bytes(cfg["root"], message, file).decode(UTF8, "surrogateescape")
+            data = A.with_trailers(text, trailers).encode(UTF8, "surrogateescape")
+        except OSError as exc:
+            print(f"ao commit cannot read the message file {file}: {exc}")
+            return 2
+        except ValueError as exc:
+            print(f"{C['red']}{C['b']}COMMIT REFUSED{C['reset']}\n  {C['red']}·{C['reset']} {exc}")
+            return 2
+        source = ["-F", "-"]
+    code = subprocess.run(["git", "commit", *source], cwd=cfg["root"], env=env, input=data).returncode
     if code:
         return code
     # The hook saw the index before Git wrote the tree; what landed is compared
@@ -1158,8 +1200,64 @@ def cmd_commit(cfg, args):
     return 0
 
 
+def _commit_range_check(cfg, args):
+    """Hold each landed commit of a revision range to the grant its Ao- trailers name (COMMIT-TRAILER).
+
+    What `ao commit-check --range` runs, CI among its callers: read-only, and in a clone with no .ao/ it
+    judges by tree alone. Exit 0 when every commit it checked matches, 1 naming each that does not, 2
+    when the range cannot be read. Requiring it is a person's step, a repository ruleset, never ao's.
+    """
+    spec = args.range
+    try:
+        audit = A.trailer_audit(cfg["root"], spec, since_first=bool(getattr(args, "since_first_trailer", False)))
+    except (ValueError, RuntimeError) as exc:
+        print(f"{C['red']}cannot check {spec}{C['reset']}: {exc}")
+        return 2
+    commits = audit["commits"]
+    if not commits:
+        print(f"no commits in {spec}")
+        return 0
+    checked = [commit for commit in commits if not (commit["merge"] or commit["exempt"])]
+    failing = [commit for commit in checked if commit["problems"]]
+    for commit in commits:
+        sha = commit["sha"][:12]
+        if commit["merge"]:
+            print(f"  {C['dim']}merge     {sha}  skipped: a merge's tree is git's, "
+                  f"not a granted candidate's{C['reset']}")
+        elif commit["problems"]:
+            print(f"  {C['red']}NO MATCH{C['reset']}  {sha}  {'; '.join(commit['problems'])}")
+        elif not commit["exempt"]:
+            record = {None: "", True: " · on record", False: " · not in this checkout's ledger"}[commit["on_record"]]
+            print(f"  {C['green']}matches{C['reset']}   {sha}  {commit['grant']} · tree {commit['tree'][:12]}{record}")
+    exempt = sum(1 for commit in commits if commit["exempt"])
+    if exempt:
+        why = (f"older than {audit['first'][:12]}, the first commit carrying Ao- trailers" if audit["first"]
+               else f"no commit in the history of {audit['end']} carries Ao- trailers yet")
+        print(f"  {C['dim']}{exempt} commit(s) not checked: {why}{C['reset']}")
+    if audit["unreadable"]:
+        print(f"  {C['yellow']}checked by tree alone{C['reset']}: the authority ledger cannot be read: "
+              f"{audit['unreadable']}")
+    elif not audit["ledger"]:
+        print(f"  {C['dim']}checked by tree alone: this checkout keeps no authority ledger{C['reset']}")
+    if failing:
+        print(f"{C['red']}{C['b']}TRAILERS DO NOT MATCH{C['reset']}  {len(failing)} of {len(checked)} commit(s) "
+              f"in {spec}: " + ", ".join(commit["sha"][:12] for commit in failing))
+        return 1
+    print(f"{C['green']}{C['b']}TRAILERS MATCH{C['reset']}  {len(checked)} commit(s) checked in {spec}")
+    return 0
+
+
 def cmd_commit_check(cfg, args):
-    """Revalidate the latest persisted grant against Git's exact active index."""
+    """Revalidate the latest persisted grant against Git's exact active index.
+
+    With --range it checks landed commits instead (COMMIT-TRAILER), before anything reads the
+    project's enrollment: a clone in CI holds the tracked marker and no .ao/.
+    """
+    if getattr(args, "range", None) is not None:
+        return _commit_range_check(cfg, args)
+    if getattr(args, "since_first_trailer", False):
+        print("ao commit-check: --since-first-trailer goes with --range")
+        return 2
     root = cfg["root"]
     enrollment = _project_enrollment(root)
     if enrollment["state"] == "uninitialized":
@@ -1365,4 +1463,6 @@ def cmd_commit_check(cfg, args):
 
     token = grant.get("token") or "recorded grant"
     print(f"{C['green']}{C['b']}AUTHORIZED{C['reset']}  {candidate['index_tree']} · {token}")
+    # ao commit names in its message the grant held to the index here, and no other (COMMIT-TRAILER).
+    args.granted = grant
     return 0
