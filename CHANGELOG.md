@@ -203,6 +203,7 @@ publishes the release.
 - A verdict is read from its anchored line, and verdicts and review statuses are closed sets the docs must match (AO25a; CLOSED-ENUMS, #4).
 - A reviewer that runs as the implementer, declares its model family or runs its engine is refused, and an answer a person carried from a stand-in session is recorded as a fallback, which cannot supersede a rejection (REVIEWER-HONESTY, #65).
 - Review routing may be declared as a versioned capability matrix in `.ao/config.json`: once present it fails closed, independence is judged from the declared bindings and model families, a fallback may follow an outage but never trade a rejection for an approval, and the matrix's digest is bound to the evidence ([docs/capability-matrix.md](docs/capability-matrix.md), [ADR 0003](docs/adr/0003-declarative-capability-routing.md); ed03184).
+- An implementer's grant is asked whether it admits `ao config set` for each setting ao reads, not only `review_timeout`, so a grant to change its round budget or waiver limits is named by `ao doctor` (SETTINGS-2).
 - A waived range is reviewed by a model family other than the one that wrote it, taken from the grant it landed under (CATCHUP-READY).
 - A review waiver names one slice and a person, expires, and closes only on a recorded review of its own range (WAIVER-BOUND, #17, #67).
 - The reviewer `ao init` writes starts no MCP server (`--strict-mcp-config` for Claude Code), and `ao doctor` names any reviewer or fallback that can reach beyond reading (REVIEWER-TOOLS, #24).

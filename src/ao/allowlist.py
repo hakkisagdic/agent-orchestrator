@@ -209,7 +209,23 @@ def problems(argv, options=None, role=None):
             if rule not in named and admits(plain, command):
                 found.append((f"{reason}, as the command it runs", command, rule))
                 named.add(rule)
+    if role == "implementer":
+        # Every setting ao reads governs the loop an implementer works in - its round budget, its review's
+        # timeout, how long a waiver lasts - and only `review_timeout` was asked, so a grant of
+        # `ao config set round_budget:*` went unnamed. Each rule is named once, for the first it admits
+        # (SETTINGS-2).
+        for rule in granted:
+            command = next((c for c in settings_commands() if admits(rule, c)), None) if rule not in named else None
+            if command:
+                found.append(("changes a setting that governs its own work", command, rule))
+                named.add(rule)
     return found
+
+
+def settings_commands():
+    """`ao config set` for each setting ao reads, as an implementer's grant is asked it (SETTINGS-2)."""
+    from . import settings as S
+    return tuple(f"ao config set {key} 1" for key in sorted(S.SETTINGS))
 
 
 def _after(words, value_options, operands=0, assignments=False):
