@@ -159,6 +159,7 @@ publishes the release.
 - `ao catchup` gives each waived review only its own slice's commits, instead of every later slice's (CATCHUP-RANGES, #104).
 - A catch-up run no longer lets failing ranges hold the queue, starts no other review once the reviewer is unavailable, bounds only the reviews it starts with `--limit`, and exits 3 when its reviews decided nothing (OCT1-FIXES, CATCHUP-POLISH).
 - `ao verify` no longer records the reviews directory's `.gitkeep` as the newest review (REVIEW-LISTING, #105).
+- A gate's counts are read from the closing summary that ends last, where a `# pass` / `# fail` pair a test printed above pytest's own closing line was read as the run's result (GATE-SUMMARY-2).
 - A reviewer that times out or is interrupted is stopped with its whole process group (REVIEWER-HONESTY, #65).
 - A prompt too long for one argument reaches its CLI on standard input or in a private file where the adapter declares a way, and is otherwise refused before anything starts, instead of failing at spawn as an unreachable reviewer (REVIEWER-HONESTY, #65; PROMPT-CHANNEL).
 - Reviewer discovery shares one deadline, and `ao init` probes the reviewer before it writes anything, leaving nothing behind when the probe fails (AO59b, AO59c, AO59d).

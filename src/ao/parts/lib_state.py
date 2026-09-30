@@ -309,20 +309,24 @@ def gate_counts(output, summary=None):
             return int(groups.get("pass") or 0), int(groups.get("fail") or 0)
         except ValueError:
             return None
+    # Each summary a runner closes with is found where it ends, and the one that ends last counts. A node
+    # pair was taken before any pytest line wherever it stood, so a `# pass 900` / `# fail 0` a test printed
+    # above pytest's own closing line was read as the run's result (GATE-SUMMARY-2).
+    found = []
     # node --test closes with "# pass N" / "# fail N" (TAP) or "ℹ pass N" / "ℹ fail N".
     for mark in ("#", "ℹ"):
-        passes = re.findall(rf"^{mark} pass (\d+)[ \t]*$", tail, re.M)
-        fails = re.findall(rf"^{mark} fail (\d+)[ \t]*$", tail, re.M)
+        passes = list(re.finditer(rf"^{mark} pass (\d+)[ \t]*$", tail, re.M))
+        fails = list(re.finditer(rf"^{mark} fail (\d+)[ \t]*$", tail, re.M))
         if passes and fails:
-            return int(passes[-1]), int(fails[-1])
+            found.append((max(passes[-1].end(), fails[-1].end()),
+                          (int(passes[-1].group(1)), int(fails[-1].group(1)))))
     # pytest closes with "3 failed, 461 passed, 2 skipped in 12.30s".
-    closing = re.findall(r"^=*[ \t]*((?:\d+ [a-z]+(?:, )?)+) in [\d.]+s\b", tail, re.M)
-    if closing:
-        counts = {word: int(n) for n, word in re.findall(r"(\d+) ([a-z]+)", closing[-1])}
+    for closing in re.finditer(r"^=*[ \t]*((?:\d+ [a-z]+(?:, )?)+) in [\d.]+s\b", tail, re.M):
+        counts = {word: int(n) for n, word in re.findall(r"(\d+) ([a-z]+)", closing.group(1))}
         if "passed" in counts or "failed" in counts:
-            return (counts.get("passed", 0),
-                    counts.get("failed", 0) + counts.get("error", 0) + counts.get("errors", 0))
-    return None
+            found.append((closing.end(), (counts.get("passed", 0),
+                                          counts.get("failed", 0) + counts.get("error", 0) + counts.get("errors", 0))))
+    return max(found)[1] if found else None
 
 
 def gate_summary_line(output, summary=None):
