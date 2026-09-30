@@ -177,6 +177,7 @@ publishes the release.
 
 ### Security
 
+- A reviewer is known to run as the implementer when its command carries the implementer's session id as a word of a shell command, or - an id too long to be there by chance - anywhere in an argument, as in `sh -c "… --resume-id <id>"` or `-r<id>`; a harness store whose metadata holds no JSON object no longer stops `ao review` (REVIEWER-IDENTITY-2).
 - A reviewer reads the candidate's own tree, unpacked outside the repository; a tar member is judged by where it lands, so `..\\x` cannot climb out on Windows, and a failed unpack leaves nothing half-written (REVIEW-TREE, REVIEW-TREE-2).
 - An unattended grant admits the rtk-rewritten form of each command it names and nothing wider, and the allowlist check refuses a forbidden command in its rewritten form as it does the plain one (GRANTS-RTK).
 - Commit authority is bound to the exact staged candidate - HEAD, the index's `git write-tree` and its status, digested - and verification, review and grant must all name that candidate ([ADR 0002](docs/adr/0002-immutable-index-candidate-authority.md); 56ea557).

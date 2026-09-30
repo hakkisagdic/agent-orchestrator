@@ -86,21 +86,30 @@ def session_stores(kind):
 def _workspace_sessions(store):
     """Every session a workspace-meta store holds: its id, workspace directory, workspaces and transcript age."""
     base = _home_path(store.get("dir"))
-    if not os.path.isdir(base):
-        return
-    for ws in os.listdir(base):
+    # A directory gone between the listing and the read, and a metadata file that holds no JSON object, are
+    # a session this store does not have; each stopped every reader of the store (REVIEWER-IDENTITY-2).
+    try:
+        workspaces = os.listdir(base) if os.path.isdir(base) else []
+    except OSError:
+        workspaces = []
+    for ws in workspaces:
         wsd = os.path.join(base, ws)
-        if not os.path.isdir(wsd):
+        try:
+            sessions = os.listdir(wsd) if os.path.isdir(wsd) else []
+        except OSError:
             continue
-        for sess in os.listdir(wsd):
+        for sess in sessions:
             meta = os.path.join(wsd, sess, store["meta"])
             msgs = os.path.join(wsd, sess, store["transcript"])
             if not (os.path.exists(meta) and os.path.exists(msgs)):
                 continue
             try:
-                m = json.load(open(meta, encoding=UTF8))
+                with open(meta, encoding=UTF8) as fh:
+                    m = json.load(fh)
                 mtime = os.path.getmtime(msgs)
             except Exception:
+                continue
+            if not isinstance(m, dict):
                 continue
             yield {"session": sess, "workspace_hash": ws, "paths": m.get(store["workspaces"]) or [], "mtime": mtime,
                    "title": m.get(store.get("title") or "title", ""), "status": m.get(store.get("status") or "status", "")}

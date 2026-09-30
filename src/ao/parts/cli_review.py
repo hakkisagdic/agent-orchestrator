@@ -1423,7 +1423,12 @@ def _implementer_sessions(cfg):
         return {session}
     store = A.load_adapter(impl.get("adapter") or "").get("sessions") or {} if impl else {}
     if store.get("kind") == "workspace-meta":
-        found = (A.discover_session(impl.get("cwd") or cfg["root"]) or {}).get("session")
+        # A store that cannot be read names no session, as one that holds none does; it stopped
+        # `ao review` with a traceback before any reviewer was chosen (REVIEWER-IDENTITY-2).
+        try:
+            found = (A.discover_session(impl.get("cwd") or cfg["root"]) or {}).get("session")
+        except (OSError, ValueError, TypeError, AttributeError):
+            found = None
         if found:
             return {str(found)}
     return set()
@@ -1433,16 +1438,32 @@ def _reviewer_is_implementer(route, sessions):
     """Whether a reviewer route without a capability matrix runs as the implementer (#60).
 
     Identities, not labels: the route is the implementer when its id is the
-    implementer's session id, or when its command carries that id as an argument,
-    alone or after `=`. A label that contains the id, or an id the label contains,
+    implementer's session id, or when its command carries that id: as an argument,
+    alone or after `=`, as a word of an argument that is a shell command, or - for an
+    id too long to be there by chance - anywhere in an argument, as in `-r<id>` or a
+    transcript's path. `sh -c "… --resume-id <id>"` ran as the implementer unseen
+    (REVIEWER-IDENTITY-2). A label that contains the id, or an id the label contains,
     says nothing about who runs.
     """
     if not sessions or not isinstance(route, dict):
         return False
     if str(route.get("id") or "") in sessions:
         return True
-    return any(isinstance(arg, str) and (arg in sessions or arg.partition("=")[2] in sessions)
-               for arg in route.get("argv") or [])
+    return any(_names_session(arg, sessions) for arg in route.get("argv") or [])
+
+
+def _names_session(arg, sessions):
+    """Whether one argument of a reviewer's command carries one of the implementer's session ids."""
+    import shlex
+    if not isinstance(arg, str):
+        return False
+    try:
+        words = shlex.split(arg)
+    except ValueError:
+        words = arg.split()
+    if any(word in sessions or word.partition("=")[2] in sessions for word in [arg] + words):
+        return True
+    return any(len(session) >= 16 and session in arg for session in sessions)
 
 
 def _implementer_engines(cfg):
