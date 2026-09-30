@@ -276,8 +276,11 @@ def doctor_problems(cfg):
     # Green branches make a red main when nobody ran their merge (#39).
     try:
         unverified = A.unverified_merges(root, cfg)
-    except Exception:
-        unverified = []
+    except Exception as exc:
+        # A merge ledger that cannot be read vouches for nothing: one row broken took every recent merge
+        # for a checked one, since the error was read as no merge to name (MERGE-EVIDENCE-2).
+        unverified = [("merge ledger", f"cannot be read ({' '.join(str(exc).split())}), so no recent merge "
+                                       "is known to have been checked")]
     if unverified:
         out.append(("unverified-merge", "; ".join(f"{sha[:12]}: {why}" for sha, why in unverified[:3])
                     + (f" and {len(unverified) - 3} more" if len(unverified) > 3 else "")

@@ -192,6 +192,7 @@ publishes the release.
 - Hooks are installed where Git runs them: `core.hooksPath` and the common git directory are honoured, and a shared, external or global hook path needs `--allow-shared-hooks` (AO53, #53).
 - A hook counts as installed only once Git has run it against a synthetic candidate and it returned ao's nonce-bound refusal; a stale, misplaced or fail-open hook reads as not installed (AO59a, #59).
 - Enforcement is opted in by a tracked `.ao-project` marker and an incidental `.ao/` directory is inert (AO59a); `ao init` refuses a marker replaced during its reviewer probe, even one that copies its file metadata (AO59b; MARKER-FORGERY, #102).
+- `ao doctor` says the merge ledger cannot be read, where a broken row took every recent merge for a checked one (MERGE-EVIDENCE-2).
 - No shipped grant admits skipping or redirecting the commit hook, a push window, a gate waiver, removing the hooks, a command run through `ao lock` or an interpreter, and `ao doctor` names any configured actor whose grant does (ACTOR-GRANTS, #58).
 - A harness granted every tool can still commit past the hook, so the watchdog checks every cycle for commits no grant covered and tells the architect once, and `ao doctor` says which guard holds for the configured implementer (ATTACK-SUITE, #109).
 - `ao commit` compares the tree that landed with the tree the grant bound, and `ao doctor` reports commits no grant covered (LANDED-TREE, #64).
