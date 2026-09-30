@@ -173,6 +173,7 @@ publishes the release.
 - The quota reading is kept between processes for its five minutes, and a failed quota command is no longer cached as an empty reading (CYCLE-GIT).
 - The report a present architect is told about is the implementer's own, not the watchdog's echo of it (977b73c).
 - Stopping a submitted review's run stops the reviewer it started, which leads a session of its own and ran on for nobody; a run killed outright leaves its reviewer named for `ao reviews` and `ao review cancel` (REVIEWER-ORPHAN).
+- The watchdog's state reads as a fresh one when its file holds `null`, a list or a string, where the MCP status tool and the watchdog's cycle stopped on it (STATE-SHAPE).
 
 ### Security
 

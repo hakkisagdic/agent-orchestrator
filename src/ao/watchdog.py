@@ -484,10 +484,18 @@ def state_path(root):
 
 
 def load_state(root):
+    """The watchdog's state for a project: a fresh one when the file cannot be read or holds no JSON object.
+
+    Every reader asks it for keys. A file of `null`, a list or a string - it is in ~/.ao, which an agent
+    can write - was handed on as it was, and `ao status`, the MCP status tool and the cycle stopped on
+    the first `.get` (STATE-SHAPE).
+    """
     try:
-        return json.load(open(state_path(root), encoding=UTF8))
+        with open(state_path(root), encoding=UTF8) as fh:
+            state = json.load(fh)
     except Exception:
-        return {"attempts": 0, "last_nudge": 0, "last_size": 0}
+        state = None
+    return state if isinstance(state, dict) else {"attempts": 0, "last_nudge": 0, "last_size": 0}
 
 
 def save_state(root, st):
