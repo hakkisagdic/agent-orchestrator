@@ -1402,7 +1402,11 @@ def _legacy_project(tmp_path, monkeypatch, name="legacy"):
 
 
 def _legacy_absolute_hook(root):
-    """The hook an early ao init wrote: exec ao commit-check, with no guard at all."""
+    """The hook an early ao init wrote: exec ao commit-check, with no guard at all.
+
+    The root is quoted as ao quoted it (PRE_COMMIT_HOOK). Written bare, a Windows root's backslashes are
+    escapes to sh and to shlex alike, so the body was no hook any ao wrote there, and read as ambiguous.
+    """
     path = Path(_git(root, "rev-parse", "--git-path", "hooks/pre-commit").stdout.strip())
     if not path.is_absolute():
         path = Path(root) / path
@@ -1410,7 +1414,7 @@ def _legacy_absolute_hook(root):
     path.write_bytes(
         b"#!/bin/sh\n"
         b"# agent-orchestrator: commit authority is bound to Git's exact active index.\n"
-        + f"exec ao -C {root} commit-check\n".encode("utf-8")
+        + f"exec ao -C {shlex.quote(str(root))} commit-check\n".encode("utf-8")
     )
     path.chmod(0o755)
     return path
