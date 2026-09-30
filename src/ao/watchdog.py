@@ -534,7 +534,16 @@ def child_alive(st):
     if not A._pid_alive(pid):
         return False
     started = st.get("child_start")
-    return started is None or A._process_start(pid) == started
+    if started is not None:
+        return A._process_start(pid) == started
+    # No start was read when the turn was spawned, so the pid alone speaks for it, and a pid another process
+    # was given since kept the refill waiting for good. It is believed for as long as a turn may run
+    # (CYCLE-SAFETY-2).
+    return time.time() - float(st.get("last_nudge") or 0) < UNVERIFIED_CHILD_SECONDS
+
+
+# How long a turn whose start could not be read is taken to be running while its pid is (CYCLE-SAFETY-2).
+UNVERIFIED_CHILD_SECONDS = 6 * 3600
 
 
 def provider_degraded(root, window=900):

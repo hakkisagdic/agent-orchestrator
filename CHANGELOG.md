@@ -167,6 +167,7 @@ publishes the release.
 - A process whose command line merely holds a path starting with an agent's name is not counted as that agent, and a runtime under a path with spaces still is (e0a43ac, 37a26a5).
 - Processes are read through the platform's own interface - libproc and sysctl on macOS, `/proc` on Linux - instead of parsing `ps`, `pgrep` and `lsof` output (54401a7).
 - A zombie process counts as dead, so a killed reviewer is not read as alive in a container whose first process never reaps (LINUX-LANE).
+- A turn the watchdog spawned whose start could not be read is taken to be running by its pid for six hours at most, where a pid another process was given since kept the refill wake waiting for good (CYCLE-SAFETY-2).
 - `ao remove` takes exactly one project's files, jobs and registry row - removing `proj` no longer deletes `bigproject`'s logs - and every job `ao watchdog install` schedules names a program that exists (SAFE-REMOVE).
 - A commit hook falls back on the ao that installed it when `/bin/sh` finds none on `PATH`, and `ao hooks status`, `ao doctor` and `ao prove` print the symlink that fixes it (SAFE-REMOVE).
 - Mail file names keep to letters, digits, dots, dashes and underscores, so a topic holding `/` no longer crashes `ao mail send` (SAFE-NAMES, #19).
