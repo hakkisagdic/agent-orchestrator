@@ -214,6 +214,7 @@ publishes the release.
 - Adapters in the user's and the project's layers never decide authority: what does is read from the package's adapters only (HARNESS-STORES, #76).
 - Ten named attacks on commit authority run with the suite, each failing closed (ATTACK-SUITE, #7, #90), and the watchdog's guard chain is judged in random worlds against its invariants (SCENARIO-FUZZ, #11).
 - `SECURITY.md` says how to report a flaw privately and what ao does not claim to stop; `docs/privacy.md` lists what ao reads, keeps and sends. The suite runs with a home, PATH and environment of its own, and a test keeps every tracked file free of credentials and home paths (TRUST-HYGIENE, SECURITY-DOC-ACCURACY).
+- `ao doctor` names a grant that trusts Kiro's shell tool through `--trust-tools` as one that runs every command, and asks each launch that carries a grant of its own what it admits, not the resume alone; `ao commit` says an empty message is empty (GRANTS-AUDIT-2).
 
 ### Windows
 

@@ -1110,8 +1110,12 @@ def cmd_commit(cfg, args):
     """
     import subprocess
     message, file = getattr(args, "message", None), getattr(args, "file", None)
-    if bool(message) == bool(file):
+    if message is not None and file is not None:
         print("ao commit takes exactly one of -m MESSAGE or -F FILE")
+        return 2
+    if not (file or str(message or "").strip()):
+        # An empty message was told it had given both or neither (GRANTS-AUDIT-2).
+        print("ao commit needs a message: -m MESSAGE with text in it, or -F FILE")
         return 2
     code = cmd_commit_check(cfg, args)
     if code:

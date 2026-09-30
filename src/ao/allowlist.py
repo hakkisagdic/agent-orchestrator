@@ -5,6 +5,11 @@ flag that skips the only commit-time enforcement; one that grants `ao:*` grants
 `ao push allow`; one that grants an interpreter grants everything, because any
 command can be written as a script. So each rule is asked what it would admit,
 command by command, instead of being read for its intent.
+
+`ao verify` is not among the forbidden commands, though it runs what `.ao/gates.json` names and an
+implementer can write that file: a grant that lets an implementer test its work runs code it wrote,
+whatever the command is called. What holds there is the commit hook and `ao commit`, a verification's
+binding to the gate definitions it ran (#61), and the push window - not this list (GRANTS-AUDIT-2).
 """
 import os
 import re
@@ -89,6 +94,10 @@ GIT_VALUE_OPTIONS = ("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--c
 GRANT_ALL = ("--dangerously-skip-permissions", "--trust-all-tools", "--yolo", "--full-auto",
              "--dangerously-bypass-approvals-and-sandbox")
 
+# The tool a `--trust-tools` list trusts every command through: Kiro trusts tools by name, and its shell
+# tool runs whatever command it is given (kiro.dev/docs/reference/built-in-tools, read 2026-09-30).
+SHELL_TOOLS = ("shell", "execute_bash", "execute_cmd", "*")
+
 
 def admits(rule, command):
     """Would this one Claude Code permission rule let `command` run?
@@ -98,6 +107,11 @@ def admits(rule, command):
     (code.claude.com/docs/en/permissions, "Wildcard patterns", read 2026-09-17). Read as a
     prefix only, `Bash(rm agent-mail/*)` looked like one directory's files and admits
     `rm agent-mail/x src/app.py`.
+
+    One command is asked at a time, as the harness asks: it splits a compound command at `&&`,
+    `||`, `;`, `|`, `|&`, `&` and newlines and runs it only when a rule admits each part, so
+    `Bash(git add *)` does not run `git add . && git commit --no-verify` (the same page,
+    "Compound commands", read 2026-09-30). A forbidden command is forbidden standing alone.
     """
     rule = str(rule).strip()
     if rule in ("Bash", "Bash(*)"):
@@ -122,6 +136,22 @@ def rules(argv):
         if arg in ("--allowedTools", "--allowed-tools") and i + 1 < len(argv):
             out.extend(part.strip() for part in str(argv[i + 1]).split(",") if part.strip())
         elif arg.startswith(("--allowedTools=", "--allowed-tools=")):
+            out.extend(part.strip() for part in arg.split("=", 1)[1].split(",") if part.strip())
+    return out
+
+
+def trusted_tools(argv):
+    """The tools an argv trusts by name through --trust-tools, in order (GRANTS-AUDIT-2).
+
+    It scopes a grant as an allowlist does, and names no command: the audit read no rule from it,
+    so a grant that trusted the shell tool was reported as admitting nothing.
+    """
+    out = []
+    for i, arg in enumerate(argv):
+        arg = str(arg)
+        if arg == "--trust-tools" and i + 1 < len(argv):
+            out.extend(part.strip() for part in str(argv[i + 1]).split(",") if part.strip())
+        elif arg.startswith("--trust-tools="):
             out.extend(part.strip() for part in arg.split("=", 1)[1].split(",") if part.strip())
     return out
 
@@ -157,7 +187,11 @@ def problems(argv, options=None, role=None):
     from . import lib as A
     if grants_everything(argv, options):
         return [("grants every tool", "*", "*")]
-    granted = rules(A.admit_rewrites(list(argv))[0] + A.unattended_flags({"options": options or {}}, argv)[0])
+    appended = A.unattended_flags({"options": options or {}}, argv)[0]
+    shell = next((tool for tool in trusted_tools(list(argv) + appended) if tool.lower() in SHELL_TOOLS), None)
+    if shell:
+        return [("trusts the shell tool, which runs every command", "*", f"--trust-tools {shell}")]
+    granted = rules(A.admit_rewrites(list(argv))[0] + appended)
     forbidden = FORBIDDEN + (IMPLEMENTER_FORBIDDEN if role == "implementer" else ()) \
         + (ARCHITECT_FORBIDDEN if role == "architect" else ())
     found = []
@@ -320,7 +354,9 @@ def describe(role, name, found):
     if not found:
         return None
     if found[0][1] == "*":
-        return (f"{role} ({name}) is granted every tool, so no allowlist keeps out a hook bypass "
+        what = "is granted every tool" if found[0][2] == "*" else \
+            f"trusts the shell tool ({found[0][2]}), which runs every command"
+        return (f"{role} ({name}) {what}, so no allowlist keeps out a hook bypass "
                 f"or a push; the commit hook and ao commit are what hold")
     parts = [f"{rule} admits `{command}` ({reason})" for reason, command, rule in found]
     shown = "; ".join(parts[:4])

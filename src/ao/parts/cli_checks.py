@@ -15,6 +15,13 @@ def _actor_grant_problems(cfg):
     if impl.get("adapter"):
         grants.append(("implementer", impl["adapter"],
                        (adapter.get("resume") or {}).get("argv") or [], adapter.get("options") or {}))
+        # Another launch whose argv carries a grant of its own is asked what it admits too; only the resume's
+        # was, and a grant written into another launch went unread (GRANTS-AUDIT-2).
+        for key in sorted(adapter):
+            block = adapter[key]
+            argv = block.get("argv") if key != "resume" and isinstance(block, dict) else None
+            if isinstance(argv, list) and (A.carries_scope(argv) or any(str(arg) in AL.GRANT_ALL for arg in argv)):
+                grants.append((f"implementer {key}", impl["adapter"], argv, {}))
     for role in ("architect", "reviewer"):
         actor = cfg.get(role) or {}
         if actor.get("argv"):
@@ -34,7 +41,7 @@ def _actor_grant_problems(cfg):
                                                      "each unattended turn runs every command outside that sandbox, "
                                                      "with the network, and writes wherever this user can"))
                 continue
-        text = AL.describe(role, name, AL.problems(argv, options, role=role))
+        text = AL.describe(role, name, AL.problems(argv, options, role=role.split()[0]))
         if text and role == "implementer" and A.sandbox_bypass(adapter, A.unattended_flags(adapter, argv)[0]):
             text += (f"; and a person allowed {A.sandbox_bypass(adapter, A.unattended_flags(adapter, argv)[0])[0]} "
                      "on this machine (watchdog.bypass_adapters), so its turns run outside its sandbox, with the network")
