@@ -5,9 +5,15 @@ time, and the contradictions between guards were found one at a time as well. He
 a seed builds a world - a turn in the tree, a person's session, an orphan, the
 transcript's age, the board, a blocked report, mail for the implementer, an open
 decision, a hold, quota, the nudge switch, the round budget, an architect at the
-keyboard - one dry cycle runs in it, and its decision is checked against every
-invariant those faults established. A failure prints its seed and its world:
-AO_FUZZ_SEED=<n> runs that world alone, AO_FUZZ_SEEDS=<count> runs more of them.
+keyboard - one dry cycle runs in it, and its decision is checked against the invariants
+below: those of F1/F2, F9, F10, F11, F14, F19 and #20, and the quota, switch and idle
+rules. The other faults are held by their own scenario tests, one world at a time. A
+failure prints its seed and its world: AO_FUZZ_SEED=<n> runs that world alone,
+AO_FUZZ_SEEDS=<count> runs more of them.
+
+An invariant reads the cycle's trace, so each line it looks for is shown to be one a cycle
+writes: a check whose line the watchdog no longer writes would hold in every world and
+catch nothing (SCENARIO-FUZZ-2).
 """
 import os
 import random
@@ -108,3 +114,32 @@ def test_no_random_world_contradicts_an_invariant(seed, project, monkeypatch, tm
         broken.append(f"a dry cycle started {started}")
     assert not broken, (f"seed {seed} (AO_FUZZ_SEED={seed}): {broken}\nworld: {facts}\ntrace:\n  "
                         + "\n  ".join(trace))
+
+
+class _Forced:
+    """A Random that builds the world whose facts it is given, in the order _build asks for them."""
+    ORDER = ("running", "headless", "person", "orphan", "hold", "blocked_report", "inbox", "decision",
+             "over_budget", "architect_present", "quota", "nudge_on")
+
+    def __init__(self, age, **true):
+        self.age, self.values = age, [0.0 if true.get(name) else 0.99 for name in self.ORDER]
+
+    def choice(self, options):
+        return self.age
+
+    def random(self):
+        return self.values.pop(0)
+
+
+@pytest.mark.parametrize("line, age, facts", [
+    ("· nudging", 10 * IDLE, dict(running=True, quota=True, nudge_on=True)),
+    ("already in this tree", 30, dict(running=True, headless=True, quota=True, nudge_on=True)),
+    ("would wake the architect", 10 * IDLE, dict(quota=True, nudge_on=True)),
+], ids=["nudge", "a turn in the tree", "refill wake"])
+def test_each_line_an_invariant_reads_is_one_a_cycle_writes(line, age, facts, project, monkeypatch, tmp_path):
+    world = World(project, monkeypatch, tmp_path)
+    _build(world, _Forced(age, **facts), monkeypatch)
+
+    trace = world.cycle(dry_run=True)
+
+    assert any(line in written for written in trace), "\n".join(trace)
