@@ -791,12 +791,21 @@ def unseen_messages(root, cfg):
         if name in seen or from_watchdog(name):
             continue
         path = os.path.join(root, box, name)
+        # A message whose body cannot be read, or whose written time in the ledger is no number, is still one
+        # nobody has been shown: it was dropped, and a decision request so read never climbed the ladder. It is
+        # classed by its name and envelope, and aged by its file (UNREAD-AGE-2).
         try:
             with open(path, errors="replace", encoding=UTF8) as fh:
                 body = fh.read(4000)
-            at = float(written.get(name) or os.path.getmtime(path))
-        except (OSError, TypeError, ValueError):
-            continue
+        except OSError:
+            body = ""
+        try:
+            at = float(written.get(name))
+        except (TypeError, ValueError):
+            try:
+                at = os.path.getmtime(path)
+            except OSError:
+                continue                                   # gone since the listing
         out.append({"id": name, "class": mail_class(name, mail_meta(path), body), "at": at,
                     "age": max(0.0, time.time() - at)})
     return sorted(out, key=lambda message: message["at"])

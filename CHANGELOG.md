@@ -93,6 +93,7 @@ publishes the release.
 - A review request separates the candidate that may land from the read-only context it is judged against, and a concern outside the candidate goes under Notes, where it cannot change the verdict (REVIEW-REQUEST, #97, #98).
 - A review's commit-message claims and read-only context get the room its reviewer routes can carry (`review.context_bytes`), instead of what one argument leaves (REVIEW-BUDGET).
 - A running review prints a line every minute naming the reviewer, the time elapsed and its pid, and one line saying how it ended (REVIEW-HEARTBEAT, #21).
+- A message whose body cannot be read, or whose written time in the mail ledger is no number, stays among the unseen and climbs the ladder, classed by its name and aged by its file (UNREAD-AGE-2).
 - A verification keeps each gate's exit code and closing line, `ao_report` appends them to the implementer's report, and a report that claims green over a failed verification is marked `## INCONSISTENT` and raised by the watchdog (REPORT-EVIDENCE, #6).
 - READY is derived from a checked dependency graph: `needs:` and `unlocks:` must name board items, an unknown id, a duplicate or a cycle is a named problem, and an item `waiting:` on someone is not READY (READY-GRAPH, #33).
 - A board row may point at a boundary file, `boundary: path@commit`, which the reviewer gets with its diff since that commit; a slice's declared paths are checked when it is registered (SLICE-BOUNDARY, #35, #73).
