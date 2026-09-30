@@ -46,8 +46,9 @@ a protocol, and a second implementation of any of those is a second thing to be 
 For the rest: `winget install Python.Python.3.12 && pip install ao-orchestrator`.
 The test suite runs on a hosted Windows runner every week and on demand, and passes;
 nothing there runs this script yet. Still open on Windows
-([windows.md](docs/windows.md)): `ao hold` is not proven there, the commit hook's
-execution proof does not pass, and ao needs `PYTHONUTF8=1` in its environment.
+([windows.md](docs/windows.md)): the lane has yet to run the commit hook's execution
+proof, which hook version 4 lets pass, and to start an agent CLI through a `.cmd`, which
+now takes its prompt on standard input.
 
 > **Where this came from.** Extracted from a 30-epic durable-workflow product built
 > over weeks by exactly this loop. Every guard in here exists because something went

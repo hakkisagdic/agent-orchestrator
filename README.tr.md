@@ -47,8 +47,9 @@ olabilecek ikinci bir şeydir. Gerisi için:
 `winget install Python.Python.3.12 && pip install ao-orchestrator`.
 Testler barındırılan bir Windows runner'ında her hafta ve istendiğinde koşar ve geçer;
 orada bu script'i henüz hiçbir şey koşmuyor. Windows'ta hâlâ açık olanlar
-([windows.md](docs/windows.md)): `ao hold` orada kanıtlanmadı, commit hook'unun
-çalıştırma kanıtı geçmiyor ve ao ortamında `PYTHONUTF8=1` ister.
+([windows.md](docs/windows.md)): hook'un 4. sürümüyle geçebilen commit hook'u
+çalıştırma kanıtı ile istemini artık standart girdiden alan, `.cmd` üzerinden
+başlatılan bir ajan CLI'ı Windows hattında henüz koşmadı.
 
 > **Nereden çıktı.** Haftalarca tam olarak bu döngüyle geliştirilen 30 epic'lik
 > dayanıklı-iş-akışı ürününden çıkarıldı. Buradaki her koruma önce bir şey ters

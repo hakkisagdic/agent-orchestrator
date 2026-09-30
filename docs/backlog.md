@@ -23,15 +23,15 @@ the code:
 - **#52**: installing the filter changes the implementer's own environment in both
   projects, and it is measured for a week either side. It waits for the implementer's
   return.
-- **#71** (2026-09-26): the code landed (WINDOWS-FAIL-CLOSED), and the Windows lane ran it green
+- **#71** (2026-10-01): the code landed (WINDOWS-FAIL-CLOSED), and the Windows lane ran it green
   on 2026-09-17 and 2026-09-21. WINDOWS-CLOSE gave every ao process UTF-8 standard streams and
   seven-bit MCP replies and named the encoding of the last four text calls that lacked one,
   each held by a test on every platform; each lane's log now lists what it skipped and why. What
   remains is in [docs/windows.md](windows.md): a lane run of what only PowerShell can prove
   (the process table read as UTF-8, `bin/ao.ps1` reading a board, PowerShell parsing ao's
-  three scripts); a prompt handed to a `.cmd` agent as an argument, which cmd.exe reads as its
-  own syntax - found by reading, not fixed, and a slice of its own; and the commit hook's
-  drive-letter index path, which fails closed and waits for a new hook version.
+  three scripts); and two fixes the lane has yet to run: a `.cmd` agent takes its prompt on
+  standard input, where cmd.exe read one in an argument as its own syntax (WINDOWS-CMD-CHANNEL),
+  and the commit hook reads a drive-letter index path as absolute, where it failed closed (HOOK-V4).
 - **#72**: the implementer's own slice in its project.
 - **#86**: the tool-reviewer route landed (REVIEWER-TOOL): `ao review` hands a tool the exact
   staged candidate and records the adapter, the model and the digest it handed, and the pr-agent
