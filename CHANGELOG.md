@@ -12,10 +12,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ## [Unreleased]
 
-The draft of 0.5.0: everything that landed on main after v0.4.0, read from the commits up to
-b000007 and, after it, from the slices up to RELEASE-NOTES-2, each named on its line. Nothing here is
-released yet, and a slice that lands after RELEASE-NOTES-2 needs its line here before it is. The version, the tag, PyPI and the Homebrew formula move together when a person
-publishes the release.
+## [0.5.0] - 2026-10-01
+
+Everything that landed on main after v0.4.0, each line naming the slice that landed it or the
+backlog row it closed.
 
 ### Upgrading from 0.4.0
 
@@ -270,6 +270,7 @@ publishes the release.
 
 ### Under the hood
 
+- Findings that needed no code change are held by tests or put right in the documents: the log an architect wake writes is one the log bound trims, each trace line the fuzz invariants read is one a cycle writes, a dead session the wake error does not name is not woken again, the Windows lane's fixtures name no person's home, and a review run's first phase is read from its state (BOUNDED-STORES-2, SCENARIO-FUZZ-2, ESCALATE-DURABLE-2, HOME-FIXTURE, REVIEW-START-DELAY-2).
 - `lib.py` and `cli.py` are split into `src/ao/parts/` as pure moves, each proven byte for byte by `ao split-check` (SPLIT-CHECK and fifteen move-only slices, #44).
 - The suite runs on GitHub for every push to main and every pull request (Ubuntu, Python 3.9 and 3.12), on macOS and Windows every week, and a release tag runs it again before anything is published (CI-ON-GITHUB, CI-CONCURRENCY).
 - The GitHub release is created only after the PyPI upload, so it never announces a version pip cannot install yet (CI-ON-GITHUB).
@@ -304,7 +305,8 @@ publishes the release.
 
 - The first release: attach to a coding agent already running, watch it, restart it when it stalls, run its gates independently, and decide from that evidence what may be committed (7fb15cf).
 
-[Unreleased]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.2.0...v0.2.1
