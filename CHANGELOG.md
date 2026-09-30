@@ -84,6 +84,7 @@ publishes the release.
 - A standing condition - spent credits, an open decision, a failing wake, a report no architect will read - is told once for what it says, not on every cycle (NOTICE-NOISE, WAITING-ONE-ALARM, NOISE-REPEATS).
 - The first watchdog cycle after a silence longer than `watchdog.resume_gap_hours` records what it would ring and tells a person once, instead of ringing every record on the age it reached (RESUME-QUIET).
 - Messages are addressed to roles, never to an actor's name, so swapping an actor no longer leaves mail addressed to nobody (ROLE-TABLE, #31).
+- The handoff note, the note a hold's release leaves and a person's message from Telegram are written through write_mail - an envelope naming the roles, the credential scan, the mail ledger - and `ao role swap` names two different roles (ROLE-TABLE-2).
 - A returned review is handled before new work: `ao status` names each one until it is collected, the watchdog raises one left longer than `review.unhandled_minutes`, and the playbook has the implementer take it first (PIPELINE-HANDLE, #28).
 - A review runs as sections, each answer kept before the next is asked, so a review that is cut off resumes where it stopped; a slice may declare the lenses it is reviewed through (REVIEW-SECTIONS, #26, #78).
 - A reviewer is stopped for silence - no CPU for `review.stall_minutes` - rather than for thinking long, and what it said is kept (SILENCE-DEADLINE, #25).

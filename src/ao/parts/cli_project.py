@@ -1188,13 +1188,12 @@ def cmd_hold(cfg, args):
         if args.note:
             # The agent wakes into a tree it did not change. Say what moved, or it
             # spends its first turns rediscovering it — or worse, mistrusting it.
-            box = os.path.join(root, cfg["mailbox"])
-            os.makedirs(box, exist_ok=True)
             impl, arch = A.mail_names(cfg)
             name = f"{datetime.now():%Y%m%d-%H%M}-{arch}-to-{impl}-INFO-hold-released.md"
-            with open(os.path.join(box, name), "w", encoding=UTF8) as fh:
-                fh.write(language.text(cfg, "hold.released", minutes=st.get("minutes", 0),
-                                       reason=st.get("reason", ""), note=args.note))
+            # Through write_mail, as every mail ao writes; it was written past it (ROLE-TABLE-2).
+            A.write_mail(root, cfg, name, language.text(cfg, "hold.released", minutes=st.get("minutes", 0),
+                                                        reason=st.get("reason", ""), note=args.note),
+                         {"kind": "info", "class": "fyi", "from": arch, "to": impl})
             print(f"handover note → {cfg['mailbox']}/{name}")
         return 0
 

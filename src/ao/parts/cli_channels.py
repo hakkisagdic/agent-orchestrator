@@ -455,6 +455,12 @@ def cmd_role(cfg, args):
             return 2
         new[args.role] = args.actor
     else:
+        # A swap names two different roles: with the second left out, or an actor's name in its place, a
+        # role of no name was written into the table and the one named was left empty (ROLE-TABLE-2).
+        if args.role not in A.ROLE_BLOCKS or args.actor not in A.ROLE_BLOCKS or args.actor == args.role:
+            print(f"{C['red']}refused{C['reset']}: ao role swap names two different roles of "
+                  f"{', '.join(A.ROLE_BLOCKS)}")
+            return 2
         new[args.role], new[args.actor] = eventual.get(args.actor), eventual.get(args.role)
     problem = A.assignment_problem(actors, new, S.get(cfg, "repository.kind"), getattr(args, "hotfix", False))
     if problem:
@@ -946,10 +952,12 @@ def cmd_handoff(cfg, args):
     text = "\n".join(lines)
     # Named in the project's language; a note named in either is listed and read the same (LANGUAGE-FILES).
     kind = language.marker(cfg, "handoff-kind")
-    path = os.path.join(root, cfg["mailbox"],
-                        f"{datetime.now():%Y%m%d-%H%M}-{A.mail_names(cfg)[1]}-to-anyone-{kind}.md")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    open(path, "w", encoding=UTF8).write(text + "\n")
+    name = f"{datetime.now():%Y%m%d-%H%M}-{A.mail_names(cfg)[1]}-to-anyone-{kind}.md"
+    path = os.path.join(root, cfg["mailbox"], name)
+    # As every mail ao writes: an envelope with its roles, scanned for credentials, mirrored in the mail
+    # ledger. The note was written past write_mail, and so were none of those (ROLE-TABLE-2).
+    A.write_mail(root, cfg, name, text + "\n",
+                 {"kind": kind, "class": "needs-read", "from": A.mail_names(cfg)[1], "to": "anyone"})
     print(text)
 
     if not args.no_send:

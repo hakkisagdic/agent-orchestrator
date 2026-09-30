@@ -346,7 +346,8 @@ def test_the_handoff_note_is_in_the_projects_language_and_the_phone_is_sent_it_u
 
     note = "\n".join(HANDOFF[chosen])
     [name] = A.mailbox(cfg["root"], cfg["mailbox"])
-    assert _read(os.path.join(cfg["root"], cfg["mailbox"], name)) == note + "\n"
+    # Written through write_mail, as every mail ao writes: its envelope, then the note (ROLE-TABLE-2).
+    assert _read(os.path.join(cfg["root"], cfg["mailbox"], name)).endswith("\n---\n" + note + "\n")
     assert _plain(capsys.readouterr().out).startswith(note + "\n")
     assert sent == [note.split(SUCCESSOR[chosen])[0]]
 
@@ -470,7 +471,8 @@ def test_the_notes_a_decision_and_a_released_hold_leave_are_in_the_projects_lang
         json.dump({"by": "alice", "reason": "maintenance", "at": int(time.time()) - 630, "stopped": []}, fh)
     assert cli.cmd_hold(cfg, SimpleNamespace(action="release", note="rebased onto main")) == 0
     [released] = os.listdir(box)
-    assert released.endswith("-INFO-hold-released.md") and _read(os.path.join(box, released)) == RELEASED[chosen]
+    assert released.endswith("-INFO-hold-released.md") \
+        and _read(os.path.join(box, released)).endswith("\n---\n" + RELEASED[chosen])
 
 
 # ---- alarms: worded in the project's language, keyed and routed the same in either -----------------

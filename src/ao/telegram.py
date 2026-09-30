@@ -186,9 +186,13 @@ def poll(root, cfg_project, seconds=25):
         name = (f"{time.strftime('%Y%m%d-%H%M%S')}-human-to-{A.mail_names(project)[0]}-"
                 f"{language.marker(project, 'urgent-kind')}-{slug}.md")
         who = (m.get("from") or {}).get("username") or chat
-        with open(os.path.join(root, box, name), "w", encoding=UTF8) as fh:
-            fh.write(f"# {text.splitlines()[0][:120]}\n\n{language.marker(project, 'urgent')}\n\n{text}\n\n"
-                     f"---\n_Telegram, {who}, {time.strftime('%Y-%m-%d %H:%M')}_\n")
+        # Through write_mail, as every mail ao writes - its envelope, the credential scan, the mail ledger - where
+        # a person's message was written past all three (ROLE-TABLE-2).
+        A.write_mail(root, dict(project, mailbox=box), name,
+                     f"# {text.splitlines()[0][:120]}\n\n{language.marker(project, 'urgent')}\n\n{text}\n\n"
+                     f"_Telegram, {who}, {time.strftime('%Y-%m-%d %H:%M')}_\n",
+                     {"kind": language.marker(project, "urgent-kind"), "class": "urgent", "from": "human",
+                      "to": A.mail_names(project)[0]})
         written.append(name)
         send(language.text(project, "telegram.saved", name=name), root)
     if last != offset:
