@@ -140,7 +140,7 @@ authority row.
 
 Each store has a retention by kind, enforced as it is written rather than on request, because a
 cleanup that waits to be asked is never run. Observation - notices, progress samples, cycle
-records, and the nudge, watchdog, refill and wake logs - keeps the newest
+records, and the nudge, watchdog, refill and wake logs (the wake's is `escalate-<key>.log`) - keeps the newest
 `retention.observation_kb` and drops the oldest records at a line boundary; the notices ledger
 does this on each write and the watchdog holds the rest every cycle. `ao doctor` names a store
 that is over its bound anyway. What a trim takes from the notices still counts in an alarm's

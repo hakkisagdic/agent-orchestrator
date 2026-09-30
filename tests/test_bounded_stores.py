@@ -92,3 +92,19 @@ def test_an_observation_store_is_held_to_its_bound_as_it_is_written(project):
     assert os.path.getsize(notices) <= 64 * 1024 * 1.25 + 400
     rows = [json.loads(line) for line in open(notices, encoding="utf-8")]
     assert rows[-1]["title"] == "notice 899" and rows[0]["title"] != "notice 0"
+
+
+def test_the_log_an_architect_wake_writes_is_held_to_the_bound(project, tmp_path):
+    """BOUNDED-STORES-2: the retrospective review took the wake log, which the docs call so, for one written
+    under another name than the escalate log the bound holds. It is that log, and it is held."""
+    root, state = project["root"], tmp_path / "state"
+    state.mkdir()
+    with open(os.path.join(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+        json.dump(dict({k: v for k, v in project.items() if k != "root"}, retention={"observation_kb": 64}), fh)
+    wake_log = state / A.project_file_name("escalate-log", A.project_key(root))
+    wake_log.write_text("".join(f"=== wake {n} ===\n" + "y" * 200 + "\n" for n in range(2000)), encoding="utf-8")
+
+    A.bound_observation_logs(root, str(state))
+
+    assert "escalate-log" in A.OBSERVATION_LOGS
+    assert wake_log.stat().st_size <= 64 * 1024 * 1.25 + 400
