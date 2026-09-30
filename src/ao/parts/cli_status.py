@@ -261,8 +261,13 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0, show
 
     # A returned review is handled before new work starts (#28, W1).
     for review in facts["returned_reviews"]:
+        # One that ended with no verdict is collected and submitted again; it was told to be handled as a
+        # review that came back (PIPELINE-HANDLE-2).
         a(f"\n   {C['yellow']}{C['b']}REVIEW RETURNED{C['reset']} for {review['slice'] or 'a slice'}: "
-          f"{review['id']} {review['verdict'] or review['state']} — handle it before new work "
+          f"{review['id']} {review['verdict']} — handle it before new work "
+          f"({C['b']}ao review collect {review['id']}{C['reset']})" if review["verdict"] else
+          f"\n   {C['yellow']}{C['b']}REVIEW ENDED{C['reset']} for {review['slice'] or 'a slice'}: "
+          f"{review['id']} {review['state']}, no verdict — collect it, then submit again "
           f"({C['b']}ao review collect {review['id']}{C['reset']})")
     # reviews + round budget
     if facts["reviews"]:

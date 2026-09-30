@@ -751,12 +751,15 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
     # A review that came back and nobody took is a slice left unattended (#28, W1).
     waited = settings.get(cfg, "review.unhandled_minutes") * 60
     for state in returned_reviews(root):
-        age = time.time() - float(state.get("finished_at") or time.time())
-        if age >= waited:
+        # Its own name: `age` is the transcript's, which the checks below read, and the loop wrote a returned
+        # review's wait over it (PIPELINE-HANDLE-2).
+        unattended = time.time() - float(state.get("finished_at") or time.time())
+        if unattended >= waited:
             out.append({"kind": "review-returned", "key": state["id"],
-                        "facts": [f"{state['id']} for slice {state.get('slice')} returned "
-                                  f"{state.get('verdict') or state.get('state')} {int(age / 60)}m ago and "
-                                  "has not been collected"]})
+                        "facts": [f"{state['id']} for slice {state.get('slice')} "
+                                  + (f"returned {state['verdict']}" if state.get("verdict") else
+                                     f"ended {state.get('state')} with no verdict")
+                                  + f" {int(unattended / 60)}m ago and has not been collected"]})
     # A question asked with `ao ask` wants the architect as much as a report does,
     # and may have no mail at all (#20). Each open one is its own anomaly.
     for decision in decisions(root, "open"):
@@ -1040,7 +1043,10 @@ def returned_reviews(root):
             continue
         if isinstance(state, dict) and state.get("state") not in (None, "running") \
                 and not state.get("collected_at"):
-            out.append(state)
+            # Named by its file where the record names nothing: every reader indexes the id, and one record
+            # without it stopped `ao status` and the watchdog's anomalies (PIPELINE-HANDLE-2).
+            rid = state.get("id")
+            out.append(state if isinstance(rid, str) and rid else dict(state, id=name[:-len(".json")]))
     return out
 
 

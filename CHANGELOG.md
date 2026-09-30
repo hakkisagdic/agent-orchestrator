@@ -151,6 +151,7 @@ publishes the release.
 - The credit check finds the harness CLI under the scheduler's short `PATH`, and says when it cannot read usage instead of skipping the reading silently (CREDITS-SAMPLER, #95a).
 - A credit projection uses only the current account's samples, and a reset named with a date is read, so a week-long limit is not retried every few hours (GOLDEN-VALUES, #36, #41).
 - Every credit reader - `ao credits`, `ao digest`, `ao handoff`, the sampler, the burn rate - reads the implementer's own adapter's account, never the first shipped adapter's (ACCOUNT-READERS).
+- A returned review no longer changes the transcript age the watchdog's later checks read, a review record with no id is named by its file, and a review that ended with no verdict is told to be collected and submitted again (PIPELINE-HANDLE-2).
 - Whether a notice may ring again is read from a record of each key's last times, so a window is counted whole however little the notices ledger still holds (NOTICE-WINDOW).
 - One watchdog cycle runs at a time, and the hold is read again right before a wake, refill or nudge starts (CYCLE-SAFETY, #110).
 - Architect presence is measured from the live process tree, so an interactive architect holds wakes back only while it is really there (#1).

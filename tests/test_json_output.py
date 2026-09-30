@@ -239,8 +239,8 @@ STATUS = "\n".join([
     "   <yellow><b>REVIEW RETURNED</> for S3: R-17 NEEDS_CHANGES — handle it before new work (<b>ao "
     "review collect R-17</>)",
     "",
-    "   <yellow><b>REVIEW RETURNED</> for a slice: R-18 failed — handle it before new work (<b>ao review "
-    "collect R-18</>)",
+    "   <yellow><b>REVIEW ENDED</> for a slice: R-18 failed, no verdict — collect it, then submit again (<b>ao "
+    "review collect R-18</>)",
     "",
     "<b><mag>── REVIEWS ────────────────────────────────────────────────</>",
     "   <red>⚠ round 6/5 — over budget: re-specify, split, or change actor</>",
