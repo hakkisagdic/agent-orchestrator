@@ -14,8 +14,6 @@ from ao import cli, lib as A
 
 # What the Windows lane cannot check here, named where each test skips (#71).
 SHARED_HOOKS_REFUSED = "on Windows ao refuses every hook write that needs --allow-shared-hooks"
-PROOF_UNAVAILABLE = ("the hook tells an absolute index path by its leading slash, so it takes a Windows "
-                     "drive-letter index for a relative one and cannot prove execution there")
 POSIX_MODE = "POSIX executable mode is not a Windows hook property"
 
 
@@ -714,7 +712,6 @@ def test_repository_hook_contract_forces_lf_mode_and_preserves_custom_pre_push(t
 
 
 
-@pytest.mark.skipif(os.name == "nt", reason=PROOF_UNAVAILABLE)
 def test_execution_probe_uses_git_hook_runner_without_repository_residue(
     project, tmp_path, monkeypatch
 ):
@@ -816,7 +813,6 @@ def test_installed_hook_resolves_relative_alternate_index_from_repository_root(
     assert "active index marker query failed" not in output
 
 
-@pytest.mark.skipif(os.name == "nt", reason=PROOF_UNAVAILABLE)
 def test_status_doctor_and_init_report_the_same_execution_proof(
     project, tmp_path, monkeypatch, capsys
 ):
@@ -1058,7 +1054,6 @@ def test_invalid_project_config_has_one_non_raising_pre_dispatch_result(
     assert loaded["_config_problem"] == problem
 
 
-@pytest.mark.skipif(os.name == "nt", reason=PROOF_UNAVAILABLE)
 def test_first_adoption_carries_staged_marker_into_execution_probe(
     project, tmp_path, monkeypatch
 ):
@@ -1077,7 +1072,6 @@ def test_first_adoption_carries_staged_marker_into_execution_probe(
     assert proof["installed"] is True
 
 
-@pytest.mark.skipif(os.name == "nt", reason=PROOF_UNAVAILABLE)
 def test_staged_marker_deletion_remains_enrolled_through_head(
     project, tmp_path, monkeypatch
 ):
@@ -1097,7 +1091,6 @@ def test_staged_marker_deletion_remains_enrolled_through_head(
     assert proof["installed"] is True
 
 
-@pytest.mark.skipif(os.name == "nt", reason=PROOF_UNAVAILABLE)
 def test_alternate_index_first_adoption_is_enrolled_and_probed(
     project, tmp_path, monkeypatch
 ):
@@ -1201,7 +1194,7 @@ def test_public_clone_marker_without_state_refuses_with_init_remediation(
     assert "unconfigured" not in output
 
 
-def test_exact_v2_hook_is_legacy_and_upgrades_to_v3(project):
+def test_exact_v2_hook_is_legacy_and_upgrades_to_v4(project):
     root = project["root"]
     path = Path(root) / ".git" / "hooks" / "pre-commit"
     path.write_bytes(cli._render_v2_local_hook("pre-commit", "."))
@@ -1212,7 +1205,7 @@ def test_exact_v2_hook_is_legacy_and_upgrades_to_v3(project):
     assert cli.cmd_hooks(project, _args("install")) == 0
     # In the git directory the body also names the ao that installed it (SAFE-REMOVE).
     assert path.read_bytes() == cli._render_local_hook("pre-commit", ".", cli._hook_fallback())
-    assert b"ao-hook-v3" in path.read_bytes()
+    assert b"ao-hook-v4" in path.read_bytes()
 
 
 def test_init_writes_exact_unstaged_marker_and_refuses_wrong_reinit(

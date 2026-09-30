@@ -461,8 +461,12 @@ def _hook_may_name_this_machine(directory, top, git_dir, common_dir):
             or not _hook_contains(top, directory))
 
 
-def _render_local_hook(role, root_rel, fallback=None):
-    """Portable bytes for one project-local hook; no machine/family binding unless a fallback ao is named."""
+def _render_v3_local_hook(role, root_rel):
+    """Exact project-local body emitted before the hook read a drive-letter index as absolute (HOOK-V4).
+
+    Kept so that an installed v3 hook reads as legacy and `ao hooks install` replaces it. A fallback
+    ao is taken out of a body before it is compared (SAFE-REMOVE), so none is rendered here.
+    """
     import shlex
     suffix = "" if root_rel in ("", ".") else "/" + shlex.quote(root_rel)
     command = _role_command(role)
@@ -477,13 +481,13 @@ def _render_local_hook(role, root_rel, fallback=None):
         "esac\n"
         + _hook_repository_unset()
         + _hook_project_marker_guard()
-        + _ao_lookup(fallback)
+        + _AO_LOOKUP
         + f"exec \"$ao\" -C \"$root\" {command}\n"
     ).encode(UTF8)
 
 
-def _render_scoped_hook(role, root_rel, family, directory_class, fallback=None):
-    """Family-bound bytes for a shared/external target; unknown routing is fail-open."""
+def _render_v3_scoped_hook(role, root_rel, family, directory_class):
+    """Exact shared/external body emitted before the hook read a drive-letter index as absolute (HOOK-V4)."""
     import shlex
     suffix = "" if root_rel in ("", ".") else "/" + shlex.quote(root_rel)
     command = _role_command(role)
@@ -506,13 +510,76 @@ def _render_scoped_hook(role, root_rel, family, directory_class, fallback=None):
         + "top=$(CDPATH= cd \"$top\" 2>/dev/null && pwd -P) || exit 0\n"
         + f"root=\"$top\"{suffix}\n"
         + _hook_project_marker_guard()
+        + _AO_LOOKUP
+        + f"exec \"$ao\" -C \"$root\" {command}\n"
+    ).encode(UTF8)
+
+
+def _hook_index_case():
+    """How a hook reads Git's index path: absolute as Git gave it, else joined to where Git ran the hook (HOOK-V4).
+
+    ao reads a relative index from the project root, which need not be where Git ran the hook, so
+    the hook joins it to that directory first. It told an absolute path by its leading slash alone:
+    under Git for Windows' shell a path that starts with a drive letter - the temporary index the
+    execution proof hands Git, or a linked worktree's index - was taken for a relative one and joined
+    too, ao read another index than the one Git commits and refused, and no proof passed on Windows.
+    One ASCII letter, a colon and a slash or a backslash start an absolute path as well.
+    """
+    return (
+        "case ${GIT_INDEX_FILE-} in\n"
+        # In the hook this reads [\\/], a bracket holding a backslash and a slash: C:\... and C:/... alike (HOOK-V4).
+        "  \"\"|/*|[A-Za-z]:[\\\\/]*) ;;\n"
+        "  *) GIT_INDEX_FILE=\"$initial_cwd/$GIT_INDEX_FILE\"; export GIT_INDEX_FILE ;;\n"
+        "esac\n"
+    )
+
+
+def _render_local_hook(role, root_rel, fallback=None):
+    """Portable bytes for one project-local hook; no machine/family binding unless a fallback ao is named."""
+    import shlex
+    suffix = "" if root_rel in ("", ".") else "/" + shlex.quote(root_rel)
+    command = _role_command(role)
+    return (
+        "#!/bin/sh\n"
+        f"# agent-orchestrator: ao-hook-v4 role={role} binding=project-local\n"
+        "initial_cwd=$(CDPATH= cd -- . && pwd -P)\n"
+        f"root=\"$initial_cwd\"{suffix}\n"
+        + _hook_index_case()
+        + _hook_repository_unset()
+        + _hook_project_marker_guard()
+        + _ao_lookup(fallback)
+        + f"exec \"$ao\" -C \"$root\" {command}\n"
+    ).encode(UTF8)
+
+
+def _render_scoped_hook(role, root_rel, family, directory_class, fallback=None):
+    """Family-bound bytes for a shared/external target; unknown routing is fail-open."""
+    import shlex
+    suffix = "" if root_rel in ("", ".") else "/" + shlex.quote(root_rel)
+    command = _role_command(role)
+    return (
+        "#!/bin/sh\n"
+        f"# agent-orchestrator: ao-hook-v4 role={role} binding={directory_class}\n"
+        "initial_cwd=$(CDPATH= cd -- . && pwd -P)\n"
+        + _hook_index_case()
+        + _hook_repository_unset()
+        + "common=$(git --literal-pathspecs rev-parse --git-common-dir 2>/dev/null) || exit 0\n"
+        + "case $common in /*) ;; *) common=\"$initial_cwd/$common\" ;; esac\n"
+        + "common=$(CDPATH= cd \"$common\" 2>/dev/null && pwd -P) || exit 0\n"
+        + f"expected={shlex.quote(os.path.realpath(family))}\n"
+        + "[ \"$common\" = \"$expected\" ] || exit 0\n"
+        + "top=$(git --literal-pathspecs rev-parse --show-toplevel 2>/dev/null) || exit 0\n"
+        + "case $top in /*) ;; *) top=\"$initial_cwd/$top\" ;; esac\n"
+        + "top=$(CDPATH= cd \"$top\" 2>/dev/null && pwd -P) || exit 0\n"
+        + f"root=\"$top\"{suffix}\n"
+        + _hook_project_marker_guard()
         + _ao_lookup(fallback)
         + f"exec \"$ao\" -C \"$root\" {command}\n"
     ).encode(UTF8)
 
 
 def _legacy_hook_role(data):
-    """Recognize only byte-exact generated v1/v2 bodies, including stale bindings."""
+    """Recognize only byte-exact generated bodies of every hook version, including stale bindings."""
     import shlex
     if b"\x00" in data:
         return None
@@ -551,8 +618,16 @@ def _legacy_hook_role(data):
     if len(markers) != 1 or " role=" not in markers[0] or " binding=" not in markers[0]:
         return None
     version, declaration = markers[0][len(marker_prefix):].split(" role=", 1)
-    if version not in ("2", "3"):
+    # Each version renders its own exact bodies, so a hook an older ao installed reads as legacy and
+    # `ao hooks install` replaces it: a v3 hook took a drive-letter index for a relative one (HOOK-V4).
+    renderers = {
+        "2": (_render_v2_local_hook, _render_v2_scoped_hook),
+        "3": (_render_v3_local_hook, _render_v3_scoped_hook),
+        "4": (_render_local_hook, _render_scoped_hook),
+    }
+    if version not in renderers:
         return None
+    render_local, render_scoped = renderers[version]
     role, binding = declaration.split(" binding=", 1)
     if role not in _HOOK_ROLES or binding not in ("project-local", "shared", "external"):
         return None
@@ -580,18 +655,12 @@ def _legacy_hook_role(data):
         return None
 
     if binding == "project-local":
-        rendered = (
-            _render_v2_local_hook(role, root_rel)
-            if version == "2" else _render_local_hook(role, root_rel)
-        )
+        rendered = render_local(role, root_rel)
     else:
         family = assignment("expected")
         if not family:
             return None
-        rendered = (
-            _render_v2_scoped_hook(role, root_rel, family, binding)
-            if version == "2" else _render_scoped_hook(role, root_rel, family, binding)
-        )
+        rendered = render_scoped(role, root_rel, family, binding)
     prior = rendered.replace(
         b"initial_cwd=$(CDPATH= cd -- . && pwd -P)\n",
         b"initial_cwd=$PWD\n",

@@ -27,6 +27,7 @@ publishes the release.
 - `ao waive` needs `--slice` and `--by <person>` beside `--why`, and a waiver expires after 24 hours unless `--hours` says otherwise, at most 168 (WAIVER-BOUND, #67).
 - The implementer commits with `ao commit -m …`; the shipped Claude Code grant no longer admits `git commit`, whose `--no-verify` skipped the only commit-time check (ACTOR-GRANTS, #58).
 - A clone run through a shell alias needs a symlink instead, `ln -s <clone>/bin/ao ~/.local/bin/ao`: the commit hook runs under `/bin/sh`, which cannot see an alias (SAFE-REMOVE).
+- Enrolled repositories reinstall their hooks with `ao hooks install`: 0.5.0 writes hook version 4, which reads a Windows drive-letter index path as absolute, and `ao doctor` reads an older ao hook as legacy until it is replaced (HOOK-V4).
 
 ### New commands
 
@@ -248,6 +249,7 @@ publishes the release.
 - Whether a process runs is asked of the process itself, so a gate lock taken by a run started a moment ago is waited for, where a two-second-old snapshot read it as a dead run's and cleared it (WINDOWS-PID-ALIVE).
 - The process backend stays Windows' own whatever its first reading gave, and a reading that lists no process is not kept, so processes are read after a first reading that failed; a file in the home is named `~/…` with slashes, and a lane another checkout started is known for one (WINDOWS-LANE-4).
 - A tree ao stops on Windows is gone from the next reading of the process list, so `ao hold` no longer names the turn it has just stopped as one it could not place (WINDOWS-LANE-5).
+- The commit hook reads an index path that starts with a drive letter, `C:/…` or `C:\…`, as absolute, where under Git for Windows' shell it put the working directory before one and ao refused, so the hook's execution proof can pass there; it is hook version 4, which each enrolled repository installs with `ao hooks install` (HOOK-V4).
 
 ### Adapters
 

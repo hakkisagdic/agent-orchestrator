@@ -13,7 +13,7 @@ What works, what does not, and how hosted runners exercise it.
 | scheduler (`ao watchdog install`) | first cut: Task Scheduler (`schtasks`, every 2 min; doctor every 15 min). Each task names a program that exists — the console script on PATH, a clone's script, or `python -m ao.watchdog` from an interpreter that imports an installed ao — or install refuses; install exits 1 when `schtasks` cannot create a task, and `ao remove --yes` deletes both tasks in its own process and checks they are gone |
 | desktop notifications | a toast through PowerShell behind the `toast` feature switch, off by default; Telegram and e-mail carry the orange and red levels |
 | `bin/ao.ps1`, the subset for a machine without Python | `status`, `board` and `doctor`; reads files as UTF-8 and takes paths literally; written and reviewed, not yet run on Windows (below) |
-| commit hook (`ao hooks install`) | installed inside the repository; a shared, external or globally configured hooks directory is refused (#71); its execution proof does not pass yet (below) |
+| commit hook (`ao hooks install`) | installed inside the repository; a shared, external or globally configured hooks directory is refused (#71); since HOOK-V4 the hook reads a drive-letter index as absolute, and its execution proof has not yet run on the lane (below) |
 | pre-push hook | works under Git's own shell |
 
 *In ao since slice ANCESTOR-WINDOWS: the process that started a process is read from Toolhelp, the
@@ -46,6 +46,16 @@ list. The snapshot taken before the stop listed it for two seconds more, and a s
 directory can no longer be read, so `ao hold` named the turn it had just stopped as one it could
 not place and exited 1. Until WINDOWS-PID-ALIVE the hold waited for the stopped turn by that same
 snapshot, which was read again by the time the wait ended. `tests/test_windows_lane_5.py` holds it.*
+
+*In ao since slice HOOK-V4: the commit hook reads an index path that starts with a drive letter, a
+colon and a slash or a backslash, `C:/…` or `C:\…`, as absolute, as it reads one that starts with a
+slash. It told an absolute path by its leading slash alone, so under Git's shell the temporary index
+the execution proof hands Git, and a linked worktree's index, were taken for relative ones and put
+after the working directory: ao read another index than the one Git commits and refused, and no proof
+passed on Windows. Both hooks are version 4 now: `ao doctor` reads a version 3 hook as legacy, and each
+enrolled repository reinstalls with `ao hooks install`. The proof's tests are no longer skipped on
+Windows, and `tests/test_hook_v4.py` runs the lines of the hook that read the path under `sh` on macOS
+and Linux.*
 
 The hosted `tests` workflow runs Windows and macOS every week on Python 3.12, and any
 environment on demand (`gh workflow run tests -f os=windows-latest -f python=3.12`);
@@ -104,13 +114,11 @@ not yet run on the lane; until they do, none of this is a Windows result.
 
 ## Still open
 
-- **The commit hook's execution proof.** The hook body tells an absolute index path by
-  its leading slash, so under Git's shell a drive-letter path — the temporary index the
-  proof hands Git, or a linked worktree's index — is taken for a relative one and
-  prefixed with the working directory. ao then reads another index than the one Git
-  commits and refuses. That fails closed, but no proof passes on Windows until the hook
-  recognises a drive letter, and that is a new hook version, which every enrolled
-  repository then reinstalls; it wants a Windows run to prove it before it ships.
+- **The commit hook's execution proof.** Since HOOK-V4 the hook reads a drive-letter
+  index path — the temporary index the proof hands Git, or a linked worktree's index —
+  as absolute, where it took one for a relative path and ao refused (above). The tests
+  that prove Git runs the hook are no longer skipped on Windows, and the lane has not
+  run them yet; until it does, none of this is a Windows result.
 - **A prompt handed to a batch file.** Found by reading, not seen on a Windows machine.
   An agent CLI installed with npm on Windows is a `.cmd` file, which runs through
   cmd.exe, and cmd.exe reads its arguments as its own syntax: it ends the command at a
@@ -189,7 +197,6 @@ tree kill starts `taskkill`, which a test's stand-in for the reviewer process an
 A test that cannot pass on Windows is skipped there with its reason, never left out (#71),
 and the lane's log lists each one with it:
 
-- the commit hook's execution proof, for the reason above;
 - a hook write that needs `--allow-shared-hooks`, which ao refuses on Windows;
 - POSIX file modes: an executable hook, an owner-only credentials file;
 - fixtures that run through a shebang or are POSIX shell scripts: a reviewer, a

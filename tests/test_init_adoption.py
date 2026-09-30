@@ -17,7 +17,7 @@ import pytest
 
 from ao import cli, lib as A
 from tests.test_hook_paths import (
-    PROOF_UNAVAILABLE, SHARED_HOOKS_REFUSED, _git, _legacy_absolute_hook, _make_current_ao_available,
+    SHARED_HOOKS_REFUSED, _git, _legacy_absolute_hook, _make_current_ao_available,
 )
 
 COMMIT = ("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--no-verify")
@@ -66,7 +66,6 @@ def _staged(root):
     return _git(root, "diff", "--cached", "--name-only").stdout.split()
 
 
-@pytest.mark.skipif(os.name == "nt", reason=PROOF_UNAVAILABLE)
 def test_adoption_enrolls_a_legacy_project_and_keeps_every_ledger_and_decision(tmp_path, monkeypatch, capsys):
     root, cfg, hook = _legacy(tmp_path, monkeypatch)
     _make_current_ao_available(monkeypatch, tmp_path)
@@ -89,7 +88,6 @@ def test_adoption_enrolls_a_legacy_project_and_keeps_every_ledger_and_decision(t
     assert "land the staged .ao-project through the loop" in out
 
 
-@pytest.mark.skipif(os.name == "nt", reason=PROOF_UNAVAILABLE)
 def test_adopting_again_changes_nothing_before_or_after_the_marker_lands(tmp_path, monkeypatch, capsys):
     root, cfg, hook = _legacy(tmp_path, monkeypatch)
     _make_current_ao_available(monkeypatch, tmp_path)
@@ -191,7 +189,6 @@ def test_options_that_do_not_belong_together_are_refused_before_anything_is_writ
     assert (_ao_state(root), hook.read_bytes()) == (before, old_hook)
 
 
-@pytest.mark.skipif(os.name == "nt", reason=PROOF_UNAVAILABLE)
 def test_a_pre_push_hook_of_the_projects_own_is_kept_and_does_not_fail_the_adoption(tmp_path, monkeypatch, capsys):
     root, cfg, hook = _legacy(tmp_path, monkeypatch)
     _make_current_ao_available(monkeypatch, tmp_path)
@@ -224,7 +221,7 @@ def test_where_git_shares_the_hooks_adoption_asks_for_the_authorization_and_fini
 
     assert cli.cmd_init(cfg, _init("--adopt", "--allow-shared-hooks")) == 0
     assert "commit hook installed (execution proved)" in _plain(capsys)
-    assert b"ao-hook-v3" in hook.read_bytes()
+    assert b"ao-hook-v4" in hook.read_bytes()
 
 
 def test_doctor_names_the_adoption_on_the_commit_hook_row(tmp_path, monkeypatch, capsys):
@@ -250,7 +247,6 @@ def test_doctor_names_the_adoption_once_where_a_current_hook_stands_aside(tmp_pa
     assert finding.startswith("execution proof failed: no .ao-project has ever been tracked here")
 
 
-@pytest.mark.skipif(os.name == "nt", reason=PROOF_UNAVAILABLE)
 def test_once_adopted_the_doctor_has_nothing_to_say_about_the_commit_hook(tmp_path, monkeypatch):
     root, cfg, _ = _legacy(tmp_path, monkeypatch)
     _make_current_ao_available(monkeypatch, tmp_path)
