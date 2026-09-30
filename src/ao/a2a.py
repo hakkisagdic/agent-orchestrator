@@ -22,6 +22,7 @@ Standard library only.
 """
 import json
 import os
+import socketserver
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -135,6 +136,15 @@ class Handler(BaseHTTPRequestHandler):
                          "error": {"code": -32601, "message": f"method not found: {method}"}})
 
 
+class _Server(HTTPServer):
+    """The A2A listener, named by its address: the resolver is not asked for the loopback address's name,
+    which on a machine whose resolver is slow to answer held the server back from listening (LOOPBACK-BIND)."""
+
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
 def main():
     global CFG
     A.utf8_streams()                         # what it prints is UTF-8, as every ao process's is (#71)
@@ -142,7 +152,7 @@ def main():
     port = int(sys.argv[sys.argv.index("--port") + 1]) if "--port" in sys.argv else 8731
     CFG = A.load_config(A.find_root(root))
     # Bind loopback only. This exposes project state; it is not for a network.
-    srv = HTTPServer(("127.0.0.1", port), Handler)
+    srv = _Server(("127.0.0.1", port), Handler)
     print(f"A2A on http://127.0.0.1:{port}  card: /.well-known/agent-card.json", flush=True)
     try:
         srv.serve_forever()

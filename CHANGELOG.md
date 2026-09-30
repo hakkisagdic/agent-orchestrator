@@ -21,6 +21,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 - `ao commit` ends each message with Ao- trailers naming the grant it was made under, the tree, the verification and the review or waiver it rested on, and refuses a message that already carries them (COMMIT-TRAILER).
 
+### Fixes
+
+- `ao watch --web` and the A2A server listen at once where the machine's resolver is slow to name the loopback address, as on a hosted macOS runner: they no longer ask it (LOOPBACK-BIND).
+
 ### Adapters
 
 - A reviewer can answer through ACP: with `ao config set review.transport acp`, a route whose adapter declares an ACP command and may review (kiro, qoder) reviews in an ACP session that may read and nothing else, and a turn that ran an edit is no review; spawning stays the default, and a route that cannot is spawned with a line saying why ([adapters.md](docs/adapters.md#what-a-harness-says-it-supports-asked-in-acp)) (ACP-REVIEWER).

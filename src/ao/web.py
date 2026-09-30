@@ -13,6 +13,7 @@ import html
 import ipaddress
 import os
 import re
+import socketserver
 import sys
 import threading
 import time
@@ -201,6 +202,16 @@ class _Server(ThreadingHTTPServer):
         self.pages, self.name, self.interval = pages, name, interval
         self.computing = threading.Lock()
         super().__init__(address, _Handler)
+
+    def server_bind(self):
+        """Bind, and name the server by its address rather than by asking the resolver for one (LOOPBACK-BIND).
+
+        HTTPServer names itself with socket.getfqdn(), a reverse lookup of the loopback address, and where
+        the resolver does not answer it at once - a hosted macOS runner is such a machine - the view waited
+        out its timeouts before it listened. Nothing here reads the name: every check is by address.
+        """
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
     def hosts(self):
         """The Host values a request may carry: this server's address, by number or as localhost."""
