@@ -102,6 +102,27 @@ def test_a_dead_session_is_not_resumed_again(world, monkeypatch):
     assert "sess-2" in argv and "sess-1" not in argv
 
 
+
+def test_a_dead_session_the_error_does_not_name_is_not_resumed_again(world, monkeypatch):
+    """ESCALATE-DURABLE-2: the retrospective review read this branch as resuming the same dead session when
+    the error named none. The session each wake resumed is recorded as it starts, and is not woken again."""
+    _architect(world, session="auto", argv=["claude", "--resume", "{session}", "-p", "{prompt}"])
+    world.transcript_age(900)
+    world.mail("20260916-1200-kiro-to-fable-BLOCKED-queue.md", BLOCKED)
+    world.cycle(dry_run=False)
+    assert len(_architect_wakes(world)) == 1 and W.load_state(world.root)["arch_session"] == "sess-1"
+
+    wake = W.load_state(world.root)["last_arch_wake"]
+    monkeypatch.setattr(W, "wake_error", lambda log_path: {
+        "text": "No conversation found", "binary": "/agents/claude 2.1.261",
+        "when": "x", "at": int(wake), "kind": "session", "resets_at": None})
+    _age_last_wake(world)
+    world.spawned.clear()
+    trace = world.cycle(dry_run=False)
+
+    assert _architect_wakes(world) == []
+    assert any("no other session was found" in line for line in trace)
+
 def test_a_failed_wake_rings_a_person(world, monkeypatch):
     world.transcript_age(900)
     world.mail("20260916-1200-kiro-to-fable-BLOCKED-queue.md", BLOCKED)
