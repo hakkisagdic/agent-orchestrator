@@ -1378,10 +1378,12 @@ def cmd_catchup(cfg, args):
                 except OSError as exc:
                     print(f"  {C['red']}the architect's decision request was not written{C['reset']}: {exc}")
                     failed.append(w["id"])
-        elif verdict is None and code == 0 and lines != 0:
+        elif verdict is None and code == 0 and A.range_unchanged(root, item["start"], item["end"]) is not True:
             # A review that exits 0 with no verdict recorded for exactly this range closes it only when the
             # range has no net change; one whose record ao cannot find, or a range it cannot size, was taken
-            # for an empty one and its waiver retired unreviewed (WAIVER-BOUND-2).
+            # for an empty one and its waiver retired unreviewed (WAIVER-BOUND-2). No net change is the same
+            # tree at both ends: a range no line of which changed, a binary file's, can still change
+            # (WAIVER-BOUND-3).
             print(f"  the review of {rng} recorded no verdict ao can find; {w['id']} stays open")
             failed.append(w["id"])
         elif verdict is None and code == 0:

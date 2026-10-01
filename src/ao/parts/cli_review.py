@@ -3027,9 +3027,11 @@ def cmd_review(cfg, args):
             print(f"{C['red']}Invalid commit range.{C['reset']}")
             return 2
         try:
+            # The bytes, not a textconv driver's reading of them, and every submodule: either could show a
+            # range that changed as no diff at all (WAIVER-BOUND-3).
             diff_bytes = A._git_output(
-                root, "diff", "--binary", "--full-index", "--no-ext-diff",
-                str(args.commits), "--", timeout=60,
+                root, "diff", "--binary", "--full-index", "--no-ext-diff", "--no-textconv",
+                "--ignore-submodules=none", str(args.commits), "--", timeout=60,
             )
         except RuntimeError as exc:
             print(f"{C['red']}{exc}{C['reset']}")

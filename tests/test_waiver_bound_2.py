@@ -6,11 +6,13 @@ held a grant to the newest open waiver, so a second waiver opened for the slice 
 first had made. And catchup took a review that exited 0 with no verdict it could find, for a range that
 changed lines, for a review of an empty range, and closed its waiver.
 """
+import os
+import subprocess
 from types import SimpleNamespace
 
 from ao import cli, lib as A, watchdog as W
 from tests.test_switches_and_bypass import _allow_candidate_verification
-from tests.test_waiver_bounds import NAMED, _commit_ok, _landed_under_a_waiver, _running, _stage
+from tests.test_waiver_bounds import NAMED, _commit, _commit_ok, _landed_under_a_waiver, _running, _stage
 
 
 def _bound_review(monkeypatch, holds=True):
@@ -74,6 +76,37 @@ def test_a_review_that_records_no_verdict_closes_only_a_range_with_no_net_change
     assert "recorded no verdict ao can find" in capsys.readouterr().out
     assert [w["id"] for w in A.open_waivers(project["root"])] == [waiver["id"]]
 
-    monkeypatch.setattr(A, "range_changed_lines", lambda root, start, end: 0)
+    monkeypatch.setattr(A, "range_unchanged", lambda root, start, end: True)
     assert cli.cmd_catchup(project, NAMED) == 0
     assert A.open_waivers(project["root"]) == []
+
+
+def test_a_review_that_records_no_verdict_keeps_open_a_range_no_line_of_which_changed(project, monkeypatch,
+                                                                                         capsys):
+    """WAIVER-BOUND-3: no changed line was taken for no change, and a binary file, or a textconv driver that reads
+    two versions alike, changes a range git counts no line of."""
+    root = project["root"]
+    blob = os.path.join(root, "src", "blob.bin")
+    os.makedirs(os.path.dirname(blob), exist_ok=True)
+    with open(blob, "wb") as fh:
+        fh.write(b"\x00\x01\x02")
+    subprocess.run(["git", "add", "src/blob.bin"], cwd=root, check=True, capture_output=True)
+    _commit(root, "base")
+    _running(root, "B7")
+    with open(blob, "wb") as fh:
+        fh.write(b"\x00\x09\x02\x03")
+    subprocess.run(["git", "add", "src/blob.bin"], cwd=root, check=True, capture_output=True)
+    _allow_candidate_verification(monkeypatch, A.index_candidate(root))
+    waiver = A.waive(root, "review", "B7", "quota", by="alice (owner)")
+    assert _commit_ok(project, capsys)[0] == 0
+    landed = _commit(root, "b7")
+    parent = subprocess.run(["git", "rev-parse", f"{landed}^"], cwd=root, check=True, capture_output=True,
+                            text=True).stdout.strip()
+    assert A.range_changed_lines(root, parent, landed) == 0 and A.range_unchanged(root, parent, landed) is False
+    monkeypatch.setattr(W, "run", lambda ns: 0)
+    monkeypatch.setattr(cli, "cmd_review", lambda cfg, ns: 0)                    # a diff that showed nothing
+    capsys.readouterr()
+
+    assert cli.cmd_catchup(project, NAMED) == 1
+    assert "recorded no verdict ao can find" in capsys.readouterr().out
+    assert [w["id"] for w in A.open_waivers(root)] == [waiver["id"]]

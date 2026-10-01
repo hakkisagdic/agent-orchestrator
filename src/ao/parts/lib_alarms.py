@@ -1390,6 +1390,20 @@ def range_changed_lines(root, start, end):
     return total
 
 
+def range_unchanged(root, start, end):
+    """Whether a landed range ends on the tree it starts from: True, False, or None when git cannot say.
+
+    No net change is a fact about trees, not about the lines a diff counts: a binary file counts
+    none, and a textconv driver that reads two versions alike, or a submodule set to `ignore =
+    all`, shows a changed range as no diff at all (WAIVER-BOUND-3).
+    """
+    try:
+        trees = _git_output(root, "rev-parse", f"{start}^{{tree}}", f"{end}^{{tree}}").decode(UTF8, "replace").split()
+    except RuntimeError:
+        return None
+    return trees[0] == trees[1] if len(trees) == 2 else None
+
+
 def range_move_proof(root, start, end):
     """(moved, problems): `ao split-check`'s proof, taken on a landed range rather than a candidate (#44).
 
