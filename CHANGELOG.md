@@ -18,6 +18,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- Bookkeeping a session writes after its turn closed, such as a Stop hook's summary, no longer ends that turn while a subagent it started still works, where the watchdog reaped the subagent at the idle window (SUBAGENT-LIVENESS-2).
 - A retrospective range is reviewed in the tree it ends on, unpacked where the reviewer runs and named in its prompt, where its reviewer was handed the diff alone and found its directory empty (REVIEW-RANGE-TREE).
 - The move proof (`ao split-check`) refuses an empty, comment-only or docstring-only file added or removed beside a real move, where it passed as part of the move; an added `__init__.py` changes which packages there are (CATCHUP-EVIDENCE-2).
 - A catch-up closes a waiver only on its own review of the range, recorded with whose range it was, where another review of the same range that ran meanwhile could close it (CATCHUP-READY-2).

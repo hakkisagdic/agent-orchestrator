@@ -1675,13 +1675,22 @@ def turn_ended(cfg):
         return False
     shape = transcript_shape(implementer_adapter(cfg))
     tail = read_tail(msgs, 200_000)
+    skipped = False
     for d in reversed(tail):
         t = record_kind(d, shape)
         if is_bookkeeping(t, shape):
+            skipped = True
             continue                                        # bookkeeping after the turn
         if not closes_turn(d, shape):
             return False
         written = session_write(msgs)
+        if skipped:
+            # Bookkeeping written after the turn closed - a Stop hook's summary, a title - moved the file's time
+            # past a subagent's write the session had not taken back, and the watchdog reaped it at the idle
+            # window: the closing record's own time is when the session last spoke (SUBAGENT-LIVENESS-2).
+            closed = _ledger_time(record_time(d, shape))
+            if closed:
+                written = min(written, closed)
         return all(mtime <= written for mtime, _ in subagent_writes(msgs, shape))
     return False
 

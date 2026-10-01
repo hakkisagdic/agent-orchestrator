@@ -75,6 +75,17 @@ def _subagent(now, last):
 
 # ── a quiet session whose subagent works ──
 
+def test_bookkeeping_written_after_the_turn_closed_does_not_end_a_subagents_work(project, monkeypatch, tmp_path):
+    """SUBAGENT-LIVENESS-2: a Stop hook's summary written after the turn closed moved the session file's time past
+    the subagent's last write, and the turn read as ended while the subagent worked: reaped at the idle window."""
+    from tests.test_second_harness_cost import _bookkeeping
+    now = time.time()
+    session = _background(now) + [_bookkeeping(now - 10, "system", subtype="stop_hook_summary")]
+    cfg, _ = _world(project, monkeypatch, tmp_path, session, {"agent-a1.jsonl": (_subagent(now, 20), None)})
+
+    assert A.turn_ended(cfg) is False
+
+
 def test_a_quiet_session_whose_subagent_works_is_neither_idle_nor_ended(project, monkeypatch, tmp_path):
     now = time.time()
     _running(monkeypatch)
