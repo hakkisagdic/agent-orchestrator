@@ -267,6 +267,14 @@ def _hook_argv(hook):
     return [_home_path(word) for word in words], None
 
 
+# A word that names a file whether or not it is there yet: a separator in it, or a name with an extension
+# (FILTER-EXCLUSIONS-2). A decimal or a version - 1.5, v2 - is no file name.
+_PATH_WORD = re.compile(r"[/\\]")
+_FILE_WORD = re.compile(r"[\w.-]*\.[A-Za-z]\w*")
+# An address on another host names no file here; a file: URL names the path after it.
+_URL_WORD = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
+
+
 def _probe_program(argv, root, programs, search_path):
     """The argv ao may run for a user-level hook, its program resolved, or (None, the rule it fails) (#52).
 
@@ -291,8 +299,17 @@ def _probe_program(argv, root, programs, search_path):
         return None, f"{found} is a batch file, which only a shell runs"
     for word in [found, *argv[1:]]:
         for piece in {word, word.split("=", 1)[-1]}:
+            url = _URL_WORD.match(piece)
+            if url and piece[:url.end()].lower() != "file://":
+                continue
+            piece = piece[url.end():] if url else piece
             candidate = piece if os.path.isabs(piece) else os.path.join(root, piece)
-            if piece and (os.path.isabs(piece) or os.path.lexists(candidate)) and _within(candidate, root):
+            # A path inside the project counts whether or not it exists yet: an agent could write it between this
+            # check and the hook's run, once per command measured, and remove it again (FILTER-EXCLUSIONS-2). An
+            # option is read by its program, not opened: its value after `=` is the piece that can name a file.
+            looks = not piece.startswith("-") and bool(_PATH_WORD.search(piece) or _FILE_WORD.fullmatch(piece))
+            named = os.path.isabs(piece) or os.path.lexists(candidate) or looks
+            if piece and named and _within(candidate, root):
                 return None, f"{piece} lies inside the project, where the agents ao governs can write"
     return [found, *argv[1:]], None
 

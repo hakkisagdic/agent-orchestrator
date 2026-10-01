@@ -145,6 +145,28 @@ def test_no_hook_runs_unless_the_agents_ao_governs_can_neither_write_it_nor_choo
     assert result["asked"] == 0 and "needs a shell" in result["why"]
 
 
+def test_a_hook_argument_naming_a_project_path_not_there_yet_is_refused(project, tmp_path):
+    """FILTER-EXCLUSIONS-2: a relative argument counted as a path only if it existed, so an agent could write
+    `.ao/filter.toml` after the check and have the hook read it, once per command measured."""
+    root = project["root"]
+    ran = tmp_path / "ran"
+    marks = f"open({str(ran)!r}, 'a', encoding='utf-8').write(command + '\\n')\n"
+    _machine([os.path.basename(sys.executable)])
+    for word in ("--config=.ao/filter.toml", "filter.toml"):
+        hook = _hook(tmp_path, "config", marks)
+        hook["args"].append(word)
+        _settings(A.HOME, hook)
+
+        [result] = A.probe_filters(root)
+
+        assert not ran.exists() and result["asked"] == 0 and "lies inside the project" in result["why"], word
+    allowed = [os.path.basename(sys.executable)]
+    assert A._probe_program([sys.executable, "--level=1.5", "v2", "--endpoint=http://localhost:8080/rules"], root,
+                            allowed, os.environ.get("PATH", ""))[1] is None
+    assert "lies inside the project" in A._probe_program([sys.executable, "file://" + root + "/.ao/rules.toml"], root,
+                                                         allowed, os.environ.get("PATH", ""))[1]
+
+
 def test_an_answer_is_read_as_the_harness_reads_it():
     def answer(output="", code=0, err=""):
         return A._hook_answer("git diff", code, output.encode(), err.encode())
