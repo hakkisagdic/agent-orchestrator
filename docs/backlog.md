@@ -26,12 +26,13 @@ the code:
 - **#71** (2026-10-01): the code landed (WINDOWS-FAIL-CLOSED), and the Windows lane ran it green
   on 2026-09-17 and 2026-09-21. WINDOWS-CLOSE gave every ao process UTF-8 standard streams and
   seven-bit MCP replies and named the encoding of the last four text calls that lacked one,
-  each held by a test on every platform; each lane's log now lists what it skipped and why. What
-  remains is in [docs/windows.md](windows.md): a lane run of what only PowerShell can prove
-  (the process table read as UTF-8, `bin/ao.ps1` reading a board, PowerShell parsing ao's
-  three scripts); and two fixes the lane has yet to run: a `.cmd` agent takes its prompt on
-  standard input, where cmd.exe read one in an argument as its own syntax (WINDOWS-CMD-CHANNEL),
-  and the commit hook reads a drive-letter index path as absolute, where it failed closed (HOOK-V4).
+  each held by a test on every platform; each lane's log now lists what it skipped and why. On
+  2026-10-01 the lane ran green on Python 3.9 and 3.12 what only PowerShell can prove (the
+  process table read as UTF-8, `bin/ao.ps1` reading a board, PowerShell parsing ao's three
+  scripts) and the commit hook's execution proof, which passes since the hook reads a
+  drive-letter index path as absolute (HOOK-V4). What remains is in [docs/windows.md](windows.md):
+  above all an agent CLI started through a `.cmd`, which now takes its prompt on standard input
+  where cmd.exe read one in an argument as its own syntax (WINDOWS-CMD-CHANNEL).
 - **#72**: the implementer's own slice in its project.
 - **#86**: the tool-reviewer route landed (REVIEWER-TOOL): `ao review` hands a tool the exact
   staged candidate and records the adapter, the model and the digest it handed, and the pr-agent

@@ -44,11 +44,10 @@ does not guess which session is whose: `ao doctor` says so, and a pinned id sett
 everything else either takes a decision, spends the machine, kills processes or speaks
 a protocol, and a second implementation of any of those is a second thing to be wrong.
 For the rest: `winget install Python.Python.3.12 && pip install ao-orchestrator`.
-The test suite runs on a hosted Windows runner every week and on demand, and passes;
-nothing there runs this script yet. Still open on Windows
-([windows.md](docs/windows.md)): the lane has yet to run the commit hook's execution
-proof, which hook version 4 lets pass, and to start an agent CLI through a `.cmd`, which
-now takes its prompt on standard input.
+The test suite runs on a hosted Windows runner every week and on demand, and passes,
+this script reading a board and the commit hook's execution proof included. Still open
+on Windows ([windows.md](docs/windows.md)): the lane has yet to start an agent CLI
+through a `.cmd`, which now takes its prompt on standard input.
 
 > **Where this came from.** Extracted from a 30-epic durable-workflow product built
 > over weeks by exactly this loop. Every guard in here exists because something went

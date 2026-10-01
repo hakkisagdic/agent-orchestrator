@@ -12,27 +12,6 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ## [Unreleased]
 
-### New commands
-
-- `ao commit-check --range A..B` holds each landed commit to the tree its Ao- trailers name, read-only and with no `.ao/` needed, and the tests workflow runs it on every push to main ([gates.md](docs/gates.md#a-commit-names-its-grant)) (COMMIT-TRAILER).
-- `ao completion bash|zsh|fish|powershell` prints a script that completes ao's commands, their options and the choices each declares, generated from the ao that prints it and quoted so no word it holds is read as syntax ([getting started](docs/getting-started.md#6-shell-completion)) (SHELL-COMPLETION).
-
-### Behaviour changes
-
-- `ao commit` ends each message with Ao- trailers naming the grant it was made under, the tree, the verification and the review or waiver it rested on, and refuses a message that already carries them (COMMIT-TRAILER).
-
-### Fixes
-
-- `ao watch --web` and the A2A server listen at once where the machine's resolver is slow to name the loopback address, as on a hosted macOS runner: they no longer ask it (LOOPBACK-BIND).
-
-### Adapters
-
-- A reviewer can answer through ACP: with `ao config set review.transport acp`, a route whose adapter declares an ACP command and may review (kiro, qoder) reviews in an ACP session that may read and nothing else, and a turn that ran an edit is no review; spawning stays the default, and a route that cannot is spawned with a line saying why ([adapters.md](docs/adapters.md#what-a-harness-says-it-supports-asked-in-acp)) (ACP-REVIEWER).
-
-### Under the hood
-
-- Test runs dispatched on one branch for different runners or interpreters all run, so the release checklist's runs on Python 3.9 and 3.12 no longer cancel each other (CI-DISPATCH-GROUP).
-
 ## [0.5.0] - 2026-10-01
 
 Everything that landed on main after v0.4.0, each line naming the slice that landed it or the
@@ -47,11 +26,14 @@ backlog row it closed.
 - ao writes English unless a project chooses Turkish: `ao config set language tr` in a project, or with `--machine` for every project, brings back the Turkish ao wrote before, byte for byte (LANGUAGE-FILES, LANGUAGE-PROMPTS, LANGUAGE-OUTPUT).
 - `ao waive` needs `--slice` and `--by <person>` beside `--why`, and a waiver expires after 24 hours unless `--hours` says otherwise, at most 168 (WAIVER-BOUND, #67).
 - The implementer commits with `ao commit -m …`; the shipped Claude Code grant no longer admits `git commit`, whose `--no-verify` skipped the only commit-time check (ACTOR-GRANTS, #58).
+- `ao commit` now ends each message with Ao- trailers and refuses a message that already carries them; to make them a gate, require the `commit trailers` status check in a ruleset on main, a person's step ([gates.md](docs/gates.md#a-commit-names-its-grant)) (COMMIT-TRAILER).
 - A clone run through a shell alias needs a symlink instead, `ln -s <clone>/bin/ao ~/.local/bin/ao`: the commit hook runs under `/bin/sh`, which cannot see an alias (SAFE-REMOVE).
 - Enrolled repositories reinstall their hooks with `ao hooks install`: 0.5.0 writes hook version 4, which reads a Windows drive-letter index path as absolute, and `ao doctor` reads an older ao hook as legacy until it is replaced (HOOK-V4).
 
 ### New commands
 
+- `ao commit-check --range A..B` holds each landed commit to the tree its Ao- trailers name, read-only and with no `.ao/` needed, and the tests workflow runs it on every push to main ([gates.md](docs/gates.md#a-commit-names-its-grant)) (COMMIT-TRAILER).
+- `ao completion bash|zsh|fish|powershell` prints a script that completes ao's commands, their options and the choices each declares, generated from the ao that prints it and quoted so no word it holds is read as syntax ([getting started](docs/getting-started.md#6-shell-completion)) (SHELL-COMPLETION).
 - `ao commit -m <message>` (or `-F <file>`) commits the staged candidate after `ao commit-ok`: it runs the commit hook's authority check itself, so a deleted or redirected hook skips nothing, then compares the tree that landed with the tree the grant bound (ACTOR-GRANTS, #58; LANDED-TREE, #64).
 - `ao commit-check` is what the pre-commit hook runs: it revalidates the recorded grant against Git's active index and neither issues nor consumes one ([ADR 0002](docs/adr/0002-immutable-index-candidate-authority.md); 56ea557).
 - `ao config [list|get|set|unset] [--machine]` sets what ao used to decide for you - round budget, review timeout, alarm hours, idle minutes, waiver hours, stall and gate timeouts and more - per project or for the machine ([docs/configuration.md](docs/configuration.md)) (SETTINGS, SETTINGS-2, #74).
@@ -100,6 +82,7 @@ backlog row it closed.
 
 ### Behaviour changes
 
+- `ao commit` ends each message with Ao- trailers naming the grant it was made under, the tree, the verification and the review or waiver it rested on, and refuses a message that already carries them (COMMIT-TRAILER).
 - What ao writes into a project, tells its agents and shows a person is English unless the project's `language` is `tr`; markers written in either language are read in every project (LANGUAGE-FILES, LANGUAGE-PROMPTS, LANGUAGE-OUTPUT).
 - `ao doctor --check` reports to its caller and pages nobody; only the scheduled job, with `--notify`, pages, only for red findings, and a red condition with a known end is mailed once (QUIET-CHECK, #40).
 - One condition rings one alarm whoever sees it: the doctor raises what the watchdog raises under the watchdog's own alarm (ALARM-DEDUPE, #106; NOTICE-NOISE).
@@ -168,6 +151,7 @@ backlog row it closed.
 
 ### Fixes
 
+- `ao watch --web` and the A2A server listen at once where the machine's resolver is slow to name the loopback address, as on a hosted macOS runner: they no longer ask it (LOOPBACK-BIND).
 - A candidate an APPROVED review is bound to stands on that review, where an open waiver for its slice was taken first and spent on it; `ao commit-check` holds a grant to the waiver it stood on; and `ao catchup` closes a range as having no net change only when it has none (WAIVER-BOUND-2).
 - A child that re-enters ao - the review runner, the watchdog's hunt, the MCP server's verify - finds ao when ao runs from a clone with nothing installed; the review runner used to die silently and leave its review "running" until it was lost (LOOP-FIXES).
 - A row store named by a path holding `?`, `#`, `%` or a UNC server opens as the file it names (SQLITE-URI, LOOP-FIXES).
@@ -275,6 +259,7 @@ backlog row it closed.
 
 ### Adapters
 
+- A reviewer can answer through ACP: with `ao config set review.transport acp`, a route whose adapter declares an ACP command and may review (kiro, qoder) reviews in an ACP session that may read and nothing else, and a turn that ran an edit is no review; spawning stays the default, and a route that cannot is spawned with a line saying why ([adapters.md](docs/adapters.md#what-a-harness-says-it-supports-asked-in-acp)) (ACP-REVIEWER, ACP-REVIEWER-2).
 - Adapters load from three layers - the package, `~/.ao/adapters/`, then the project's `.ao/adapters/` - each overriding the one before by id; `ao adapters validate <id|file>` names what a candidate lacks and `ao adapters conform` runs the conformance checks (ADAPTER-LAYERS, #77).
 - Eleven new adapters, all `untested`: qwen, grok, droid, kimi, kilocode, pi, hermes, omp and reasonix written from their own documentation (ADAPTER-SET, #89), trae (be3c724), and pr-agent (REVIEWER-TOOL, part of #86).
 - `adapters/vendors.json` is the one vendor list: each shipped adapter is named by one vendor, a vendor without an adapter says why, and `ao doctor` names a configured actor whose command is not on the machine (ADAPTER-SET, #89).
@@ -291,7 +276,8 @@ backlog row it closed.
 
 ### Under the hood
 
-- Findings that needed no code change are held by tests or put right in the documents: the log an architect wake writes is one the log bound trims, each trace line the fuzz invariants read is one a cycle writes, a dead session the wake error does not name is not woken again, the Windows lane's fixtures name no person's home, and a review run's first phase is read from its state (BOUNDED-STORES-2, SCENARIO-FUZZ-2, ESCALATE-DURABLE-2, HOME-FIXTURE, REVIEW-START-DELAY-2).
+- Test runs dispatched on one branch for different runners or interpreters all run, so the release checklist's runs on Python 3.9 and 3.12 no longer cancel each other (CI-DISPATCH-GROUP).
+- Findings that needed no code change are held by tests or put right in the documents: the log an architect wake writes is one the log bound trims, each trace line the fuzz invariants read is one a cycle writes, a dead session the wake error does not name is not woken again, the Windows lane's fixtures name no person's home and write an early ao's hook as it wrote it, and a review run's first phase is read from its state (BOUNDED-STORES-2, SCENARIO-FUZZ-2, ESCALATE-DURABLE-2, HOME-FIXTURE, REVIEW-START-DELAY-2, HOOK-V4-2).
 - `lib.py` and `cli.py` are split into `src/ao/parts/` as pure moves, each proven byte for byte by `ao split-check` (SPLIT-CHECK and fifteen move-only slices, #44).
 - The suite runs on GitHub for every push to main and every pull request (Ubuntu, Python 3.9 and 3.12), on macOS and Windows every week, and a release tag runs it again before anything is published (CI-ON-GITHUB, CI-CONCURRENCY).
 - The GitHub release is created only after the PyPI upload, so it never announces a version pip cannot install yet (CI-ON-GITHUB).
