@@ -205,16 +205,18 @@ def test_what_is_folded_is_bounded_by_keys_and_by_age(project, monkeypatch):
     monkeypatch.setattr(A, "NOTICE_TIMES_KEYS", 50)                     # the bound, small enough to cross quickly
     clock = _clock(monkeypatch, start=1_790_000_000.0)
     for n in range(150):
-        clock[0] += 1
+        clock[0] += 1000
         A.record_notice(root, "proj: unread decision request", "x", n % 2 == 0, key=f"unseen:{n}")
 
     folded = _folded(root)
-    assert len(folded["keys"]) == 50
-    assert "unseen:99" not in folded["keys"] and "unseen:100" in folded["keys"]
-    assert folded["forgotten_through"] == 1_790_000_100
+    # Past the bound the oldest go, once a day has passed since they were recorded (NOTICE-WINDOW-2).
+    assert len(folded["keys"]) == 87
+    assert "unseen:62" not in folded["keys"] and "unseen:63" in folded["keys"]
+    assert folded["forgotten_through"] == 1_790_063_000
     # A key the fold let go is read from the ledger while a window reaches back past it.
-    assert A.notice_recently_recorded(root, "unseen:0", 24 * HOUR)
-    assert A.notice_recently_sent(root, "unseen:0", HOUR) and not A.notice_recently_sent(root, "unseen:1", HOUR)
+    assert A.notice_recently_recorded(root, "unseen:62", 48 * HOUR)
+    assert A.notice_recently_sent(root, "unseen:62", 48 * HOUR)
+    assert not A.notice_recently_sent(root, "unseen:61", 48 * HOUR)
 
     clock[0] += (A.NOTICE_TIMES_DAYS + 1) * 86400
     A.record_notice(root, "proj: hold standing 4h", "set by owner", True, key="hold-standing")
@@ -222,6 +224,45 @@ def test_what_is_folded_is_bounded_by_keys_and_by_age(project, monkeypatch):
     folded = _folded(root)
     assert list(folded["keys"]) == ["hold-standing"] and os.path.getsize(A.notice_times_path(root)) < 1000
     assert not A.notice_recently_recorded(root, "unseen:149", 24 * HOUR)
+
+
+def test_a_key_past_the_fold_bound_is_kept_while_a_window_can_ask_for_it(project, monkeypatch):
+    """NOTICE-WINDOW-2: past the key bound the oldest keys went whatever their age, and the ledger the check read
+    for them in their place was already trimmed of them."""
+    root = project["root"]
+    _bound(project, 64)
+    monkeypatch.setattr(A, "NOTICE_TIMES_KEYS", 50)
+    clock = _clock(monkeypatch, start=1_790_000_000.0)
+    A.record_notice(root, "proj: k0", "rang", True, key="k0")
+    for n in range(1, 400):
+        clock[0] += 5
+        A.record_notice(root, f"proj: k{n}", "x" * 200, False, key=f"k{n}")
+
+    with open(_ledger(root), encoding="utf-8") as fh:
+        assert '"k0"' not in fh.read()
+    assert A.notice_recently_sent(root, "k0", HOUR)
+
+
+def test_a_fold_that_cannot_be_written_trims_nothing(project, monkeypatch):
+    """NOTICE-WINDOW-2: a fold that could not be written was ignored, and the ledger was trimmed of what no fold
+    had counted."""
+    from ao import storage
+    root = project["root"]
+    _bound(project, 64)
+    clock = _clock(monkeypatch)
+    real, times = storage._replace, A.notice_times_path(root)
+
+    def refuse(source, target):
+        if os.path.abspath(target) == os.path.abspath(times):
+            raise PermissionError(13, "denied", target)
+        return real(source, target)
+    monkeypatch.setattr(storage, "_replace", refuse)
+    A.record_notice(root, "proj: hold standing 4h", "set by owner", True, key="hold-standing")
+    _busy(root, clock, hours=5, rows=900)
+    A.bound_observation_logs(root, W.STATE_DIR)
+
+    assert A.notice_recently_sent(root, "hold-standing", 6 * HOUR)
+    assert A.stores_over_bound(root, A.load_config(root), W.STATE_DIR)
 
 
 def test_a_storm_notice_rings_once_in_its_hour_and_what_the_storm_held_was_not_sent(project, monkeypatch):

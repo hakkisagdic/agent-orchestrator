@@ -527,11 +527,13 @@ def observation_stores(root, state_dir=None):
 def bound_observation_logs(root, state_dir=None):
     """Hold every observation store to its bound; the watchdog does this each cycle (#50).
 
-    The notices are folded first: what the bound trims still counts in a window (NOTICE-WINDOW).
+    The notices are folded first: what the bound trims still counts in a window (NOTICE-WINDOW). A
+    fold that could not be written leaves them whole, past their bound, where `ao doctor` names
+    them (NOTICE-WINDOW-2).
     """
     limit = settings.get(load_config(root), "retention.observation_kb")
-    fold_notice_times(root)
-    return [path for path in observation_stores(root, state_dir) if bound_store(path, limit)]
+    notices = os.path.join(root, ".ao", "ledger", "notices.jsonl") if not fold_notice_times(root) else None
+    return [path for path in observation_stores(root, state_dir) if path != notices and bound_store(path, limit)]
 
 
 def stores_over_bound(root, cfg, state_dir=None):

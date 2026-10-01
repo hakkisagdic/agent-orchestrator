@@ -692,8 +692,12 @@ def cmd_prune(cfg, args):
                 print(f"  {C['green']}{'would drop' if dry else 'dropped'}{C['reset']}  "
                       f"{name:<14} {gone} file(s)  {C['dim']}{desc}{C['reset']}")
             continue
-        if name == "notices" and not dry:
-            A.fold_notice_times(root)             # what the prune drops still counts in a window (NOTICE-WINDOW)
+        # What the prune drops still counts in a window once folded (NOTICE-WINDOW); a fold that could not be
+        # written leaves the ledger whole (NOTICE-WINDOW-2).
+        if name == "notices" and not dry and not A.fold_notice_times(root):
+            print(f"  {C['yellow']}kept{C['reset']}   {name:<14} the notices could not be folded, and what no fold "
+                  f"counted is not dropped  {C['dim']}{desc}{C['reset']}")
+            continue
         dropped, kept, freed = _prune_jsonl(path, cutoff, dry)
         total += freed
         if dropped:

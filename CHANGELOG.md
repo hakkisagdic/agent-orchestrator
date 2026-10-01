@@ -18,6 +18,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- A notice key younger than a day stays in the fold past its 500-key bound, where the ledger a window then read for it could already be trimmed of it, and a fold that cannot be written trims nothing, where the ledger was trimmed of rows no fold had counted; `ao doctor` names the ledger past its bound ([alarms.md](docs/alarms.md)) (NOTICE-WINDOW-2).
 - ao asks xcrun which git to run only for macOS's own /usr/bin/git stub, where any executable `xcrun` beside a compiled git was run once in every process (SUITE-SPEED-2).
 - `--agent` accepts the adapters a project declares in `.ao/adapters` (`ao -C <repo> skill install --agent <name>`), where it refused them as an invalid choice, and `ao init` writes the coordination file of an adapter detected by its files, not only by its directories (HARNESS-SETUP-3).
 - In append-only mail mode a message ao writes is in the store at once, where removing its view file before the next reconcile lost it; compaction writes the archive as durably as the stub that replaces the body and never writes a stub over its own archive, and `ao doctor` names a store it cannot read (MESSAGE-STORE-2).

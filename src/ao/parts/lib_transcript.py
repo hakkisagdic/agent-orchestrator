@@ -2935,10 +2935,10 @@ def record_notice(root, title, msg, sent, key=None, evidence=None, named=None):
             if named:
                 row["named"] = list(named)      # the conditions one resume notice told (RESUME-QUIET)
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-        # Folded before the bound can trim it, so a window still counts it (NOTICE-WINDOW).
-        fold_notice_times(root)
-        # Observation is held to its bound as it is written (#50).
-        bound_store(os.path.join(d, "notices.jsonl"), settings.get(load_config(root), "retention.observation_kb"))
+        # Folded before the bound can trim it, so a window still counts it (NOTICE-WINDOW), and observation is
+        # held to its bound as it is written (#50); a fold that could not be written trims nothing (NOTICE-WINDOW-2).
+        if fold_notice_times(root):
+            bound_store(os.path.join(d, "notices.jsonl"), settings.get(load_config(root), "retention.observation_kb"))
     except OSError:
         pass
 
@@ -2975,9 +2975,12 @@ def notices(root, limit=10, include_suppressed=False):
 # ---- a window read whole: when each notice key was last recorded and sent (NOTICE-WINDOW) --------
 
 # A key not recorded for a week is forgotten, and no more than 500 keys are kept: the longest
-# window a check asks is a day, and a week of conditions names far fewer keys.
+# window a check asks is a day, and a week of conditions names far fewer keys. A key younger
+# than that day is kept past the 500: the ledger the check would read for it in its place
+# may already be trimmed of it (NOTICE-WINDOW-2).
 NOTICE_TIMES_DAYS = 7
 NOTICE_TIMES_KEYS = 500
+NOTICE_TIMES_HOLD = 86400
 
 
 def notice_times_path(root):
@@ -3041,8 +3044,13 @@ def fold_notice_times(root):
     fold another process overtakes, or one that could not be written, leaves only more lines
     for the next fold and for a check to read. It is rebuilt from the ledger when it cannot be
     read, which is why it is replaced whole and not synced. A key not recorded for
-    NOTICE_TIMES_DAYS goes, and past NOTICE_TIMES_KEYS the oldest go; `forgotten_through` says
-    when the newest of them was recorded, and a window reaching back to it reads the ledger.
+    NOTICE_TIMES_DAYS goes, and past NOTICE_TIMES_KEYS the oldest go once NOTICE_TIMES_HOLD has
+    passed since they were recorded; `forgotten_through` says when the newest of them was
+    recorded, and a window reaching back to it reads the ledger.
+
+    Returns whether the fold stands written to the ledger's end: True when nothing was new,
+    False only when it could not be written, and then nothing may trim the ledger
+    (NOTICE-WINDOW-2).
     """
     ledger = os.path.join(root, ".ao", "ledger", "notices.jsonl")
     index = _notice_times(root)
@@ -3052,7 +3060,7 @@ def fold_notice_times(root):
             break
         fresh.append((digest, row))
     if not fresh:
-        return False
+        return True
     keys = index["keys"]
     for _, row in reversed(fresh):
         at, named = row.get("at"), row.get("named")
@@ -3069,7 +3077,9 @@ def fold_notice_times(root):
     forgotten = index.get("forgotten_through") if isinstance(index.get("forgotten_through"), (int, float)) else 0
     old = time.time() - NOTICE_TIMES_DAYS * 86400
     newest_first = sorted(keys, key=lambda name: keys[name]["recorded"], reverse=True)
-    for name in [name for name in newest_first if keys[name]["recorded"] < old] + newest_first[NOTICE_TIMES_KEYS:]:
+    held = time.time() - NOTICE_TIMES_HOLD
+    past = [name for name in newest_first[NOTICE_TIMES_KEYS:] if keys[name]["recorded"] < held]
+    for name in [name for name in newest_first if keys[name]["recorded"] < old] + past:
         if name in keys:
             forgotten = max(forgotten, keys.pop(name)["recorded"])
     path = notice_times_path(root)
