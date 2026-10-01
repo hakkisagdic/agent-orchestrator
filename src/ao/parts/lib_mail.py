@@ -708,6 +708,15 @@ def write_mail(root, cfg, name, body, meta=None):
     # Named, never quoted: the log is read by programs a message's body was not written for (EVENTS-LOG).
     emit_event(root, "mail-sent", {"message": name, "kind": meta.get("kind"), "from": meta.get("from"),
                                    "to": meta.get("to")})
+    # Mail ao writes reaches the append-only store at once: it reached it at the next reconcile, and a view
+    # file removed before then took its message with it (MESSAGE-STORE-2). The view file stands whatever the
+    # store says; one the store cannot take now is taken at the next reconcile, and the doctor names a store
+    # it cannot read.
+    if mail_store_mode(root) == "append-only":
+        try:
+            ingest_mail(root, cfg)
+        except Exception:
+            pass
     return name
 
 
@@ -939,12 +948,22 @@ def compact_messages(root, days, now=None):
         except OSError:
             continue
         archive = f".ao/mail/archive/{mid}.gz"
+        if data.startswith(b"ao-mail-stub v1\n"):
+            # A compaction whose record did not land left its stub, and its archive holds the body: the stub
+            # was read as the body and written over the archive, and the words were gone. The record is what
+            # was missing (MESSAGE-STORE-2).
+            _mail_store_append(root, {"event": "compacted", "id": mid, "archive": archive, "digest": row.get("digest")})
+            compacted.append(mid)
+            done.add(mid)
+            continue
         os.makedirs(os.path.dirname(os.path.join(root, archive)), exist_ok=True)
-        with gzip.open(os.path.join(root, archive), "wb") as fh:
-            fh.write(data)
+        # The archive is written as durably as the stub that replaces the body: written plainly, a crash could
+        # leave a stub pointing at an archive that never reached the disk (MESSAGE-STORE-2).
+        replace_file_durably(os.path.join(root, archive), gzip.compress(data, mtime=0))
         replace_file_durably(path, f"ao-mail-stub v1\ndigest: {row.get('digest')}\narchive: {archive}\n".encode(UTF8))
         _mail_store_append(root, {"event": "compacted", "id": mid, "archive": archive, "digest": row.get("digest")})
         compacted.append(mid)
+        done.add(mid)                   # two writers can each have stored it: it is compacted once
     return compacted
 
 

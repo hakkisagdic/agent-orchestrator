@@ -285,6 +285,15 @@ def doctor_problems(cfg):
         out.append(("unverified-merge", "; ".join(f"{sha[:12]}: {why}" for sha, why in unverified[:3])
                     + (f" and {len(unverified) - 3} more" if len(unverified) > 3 else "")
                     + " — ao merge-check <branch> before merging"))
+    # A mail store that cannot be read leaves the queue to the view alone, where a message removed unhandled
+    # is missing: the queue said nothing of it (MESSAGE-STORE-2).
+    if A.mail_store_mode(root) == "append-only":
+        try:
+            A.unhandled_messages(root)
+        except Exception as exc:
+            out.append(("mail-store", f"the mail store cannot be read ({' '.join(str(exc).split())}), so the queue "
+                                      "is read from the mailbox view alone and a message removed unhandled is "
+                                      "missing from it — restore .ao/ledger/mail-store.jsonl from a backup"))
     # A reviewer whose adapter cannot deny tools is not a reviewer (#88).
     reviewer_adapter = (cfg.get("reviewer") or {}).get("adapter")
     if reviewer_adapter:
