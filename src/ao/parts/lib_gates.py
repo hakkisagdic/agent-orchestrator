@@ -939,6 +939,19 @@ def review_context(root, paths, read_rev, context_rev, budget=REVIEW_CONTEXT_BUD
     return result
 
 
+def range_end_tree(root, commits):
+    """The tree a retrospective range ends on, which its reviewer reads; None where there is none (REVIEW-RANGE-TREE)."""
+    if ".." not in str(commits or ""):
+        return None
+    end = str(commits).split("..", 1)[1].lstrip(".") or "HEAD"
+    if end.startswith("-"):
+        return None
+    try:
+        return _git_output(root, "rev-parse", "--verify", "--quiet", end + "^{tree}").decode("ascii").strip() or None
+    except (RuntimeError, UnicodeError):
+        return None
+
+
 def review_range_context(root, commits, budget=REVIEW_CONTEXT_BUDGET):
     """The same context for a retrospective range, read at the range's end commit."""
     if ".." not in commits:

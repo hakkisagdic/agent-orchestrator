@@ -3195,8 +3195,12 @@ def cmd_review(cfg, args):
     # to holds none: both are handed the prompt as it stands before the note, which is never read back out
     # of one that holds it (REVIEW-TREE-2).
     treeless = prompt
-    if (candidate or {}).get("index_tree"):
-        prompt += f"\n\n{language.text(cfg, 'prompt.review-tree')}\n"
+    # A retrospective range is read where it ends: its reviewer was handed the diff alone, said the directory
+    # was empty, and a finding about code the diff did not show was a guess (REVIEW-RANGE-TREE).
+    review_tree = (candidate or {}).get("index_tree") or (A.range_end_tree(root, args.commits)
+                                                          if args.commits and not person else None)
+    if review_tree:
+        prompt += f"\n\n{language.text(cfg, 'prompt.review-tree' if candidate else 'prompt.review-range-tree')}\n"
     # Every route is asked the criteria, a tool and a stand-in session too: their answers are read
     # against them as well (CRITERIA-VERDICTS).
     prompt += criteria_note
@@ -3238,16 +3242,16 @@ def cmd_review(cfg, args):
             invocation = _invoke_reviewer_sections(
                 root, chain, prompt, sections, _section_journal(root, evidence, boundary, sections, chain),
                 _review_timeout(cfg), strict, primary=rv if not strict else None, candidate=diff_bytes, cfg=cfg,
-                tree=(candidate or {}).get("index_tree"), treeless=treeless)
+                tree=review_tree, treeless=treeless)
             evidence["sections"] = invocation.get("sections")
         else:
             invocation = _invoke_reviewer_chain(
                 root, chain, prompt, _review_timeout(cfg), strict, primary=rv if not strict else None,
-                candidate=diff_bytes, tree=(candidate or {}).get("index_tree"), treeless=treeless,
+                candidate=diff_bytes, tree=review_tree, treeless=treeless,
             )
             invocation = _reask_once(
                 cfg, root, invocation, prompt, _review_timeout(cfg), strict, primary=rv if not strict else None,
-                candidate=diff_bytes, tree=(candidate or {}).get("index_tree"), treeless=treeless)
+                candidate=diff_bytes, tree=review_tree, treeless=treeless)
     # The lines a first answer lacked, when it was asked for again: of this answer, or of the section a
     # sectioned review stopped on (REVIEW-REASK).
     reasked = invocation.get("reasked")

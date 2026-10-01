@@ -79,6 +79,30 @@ def test_the_reviewer_runs_where_that_tree_is(project):
     assert without["ok"] and without["out"].strip() == "False"
 
 
+def test_a_range_is_reviewed_in_the_tree_it_ends_on(project, tmp_path):
+    """REVIEW-RANGE-TREE: a retrospective range's reviewer was handed the diff alone and found its directory empty;
+    it now reads the tree the range ends on, and is told so."""
+    from tests.test_review_chain import _args as _range_args
+    root = project["root"]
+    _repo_with_change(root)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-am", "b"], cwd=root,
+                   check=True)
+    seen = tmp_path / "seen.txt"
+    look = (f"import os, sys; open({str(seen)!r}, 'w', encoding='utf-8').write(str(os.path.isfile('.ao-project')) "
+            "+ chr(10) + sys.argv[1]); print('BLOCKER: 0'); print('HIGH: 0'); print('MEDIUM: 0'); print('LOW: 0'); "
+            "print('VERDICT: APPROVED')")
+    cfg = dict(project, reviewer={"id": "r1", "family": "x", "argv": [sys.executable, "-c", look, "{prompt}"]})
+
+    assert cli.cmd_review(cfg, _range_args(commits="HEAD~1..HEAD")) == 0
+
+    found, prompt = seen.read_text(encoding="utf-8").split("\n", 1)
+    assert found == "True"
+    assert "--- TREE: ao unpacks the whole tree this range ends on into your working directory" in prompt
+    assert A.range_end_tree(root, "HEAD~1..HEAD") == subprocess.run(
+        ["git", "rev-parse", "HEAD^{tree}"], cwd=root, capture_output=True, text=True, check=True).stdout.strip()
+    assert A.range_end_tree(root, "HEAD") is None and A.range_end_tree(root, "HEAD~1..--all") is None
+
+
 def test_the_reviewer_is_told_where_the_tree_is_in_both_languages_without_changing_the_prompt_above():
     """A note of its own, so the Turkish prompt a sectioned review resumes on stays byte for byte."""
     from ao import language
