@@ -8,7 +8,15 @@ REPLACEMENT = cli.PROJECT_MARKER_BYTES.replace(b"v1", b"v9")
 
 
 def _identity_of(path):
-    real = os.lstat(path)
+    """The marker's identity as the fingerprint reads it: through a handle.
+
+    CPython 3.12 and later on Windows read a path's st_ctime as when the file was created and a handle's as
+    when its metadata last changed. The fingerprint is the handle's; taken from the path, the forged identity
+    differed from it whenever the marker was written a clock tick after it was created, and the test failed
+    on a Windows runner now and then.
+    """
+    with open(path, "rb") as fh:
+        real = os.fstat(fh.fileno())
     return SimpleNamespace(
         st_dev=real.st_dev, st_ino=real.st_ino, st_mode=real.st_mode, st_size=real.st_size,
         st_mtime_ns=real.st_mtime_ns, st_ctime_ns=real.st_ctime_ns,
