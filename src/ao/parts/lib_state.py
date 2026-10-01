@@ -1327,11 +1327,12 @@ def escaped_cwd_names(cwd):
 def unplaced_agent_pids(root, adapter):
     """Agent processes that may be working in this tree but cannot be placed (#71).
 
-    Windows exposes no process working directory, and no shipped adapter's command
-    line names the repository, so there a turn in this tree was no writer at all:
-    `ao hold` stopped nothing and the watchdog started a second turn. The guards
-    that must not miss a writer count these and say why. Where a process's
-    directory can be read this is empty.
+    On Windows a process's working directory is read from its own memory, which
+    another user's or an elevated process does not open to ao, and no shipped
+    adapter's command line names the repository: such a turn in this tree was no
+    writer at all, `ao hold` stopped nothing and the watchdog started a second
+    turn. The guards that must not miss a writer count these and say why. Where
+    every process's directory can be read this is empty (WINDOWS-CWD-2).
     """
     if os.name != "nt":
         return []

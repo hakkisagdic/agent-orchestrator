@@ -1252,8 +1252,8 @@ def _hold_unplaced(root, adapter):
     unplaced = A.unplaced_agent_pids(root, adapter)
     if not unplaced:
         return 0
-    print(f"{C['red']}{len(unplaced)} agent process(es) were not stopped{C['reset']}: Windows exposes no "
-          f"process working directory, so they cannot be placed in this tree: {unplaced}. Stop them "
+    print(f"{C['red']}{len(unplaced)} agent process(es) were not stopped{C['reset']}: their working "
+          f"directory could not be read, so they cannot be placed in this tree: {unplaced}. Stop them "
           "by hand if they work here; the hold keeps the watchdog from starting another.")
     return 1
 
@@ -1304,7 +1304,7 @@ def cmd_writers(cfg, args):
     if unplaced:
         # A count that cannot see a writer must not report none (#71).
         print(f"{C['red']}writers unknown{C['reset']} — {len(unplaced)} agent process(es) cannot be placed "
-              f"in a tree: Windows exposes no process working directory ({unplaced})")
+              f"in a tree: their working directory could not be read ({unplaced})")
         return 1
     from . import procs
     table = A._proc_table()

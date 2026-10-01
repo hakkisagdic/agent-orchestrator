@@ -18,6 +18,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- `ao writers`, `ao hold` and the watchdog say an agent process cannot be placed because its working directory could not be read - another user's or an elevated process - where they said Windows exposes no working directory at all (WINDOWS-CWD-2).
 - `ao fanout ok` names the provider whose window it read, in its line and its JSON, where without `--provider` it said "None window" (HARNESS-ACCOUNTS-2).
 - A failed wake's request id is masked by its key whatever its characters, where an id of letters alone made every retry news and a red alarm mailed on each one (NOISE-REPEATS-2).
 - A notice key younger than a day stays in the fold past its 500-key bound, where the ledger a window then read for it could already be trimmed of it, and a fold that cannot be written trims nothing, where the ledger was trimmed of rows no fold had counted; `ao doctor` names the ledger past its bound ([alarms.md](docs/alarms.md)) (NOTICE-WINDOW-2).

@@ -2516,13 +2516,13 @@ def _cycle_impl(args, root):
             A.sweep_orphans(dead)
     running = [p for p in A.agent_pids(root, adapter) if p not in set(dead)]
     _FACTS.update(writers=len(A.process_trees(running)) if running else 0, orphans=len(dead))
-    # Windows cannot say which tree an agent works in (#71). One that cannot be
-    # placed may be this tree's writer; starting another beside it is the two-writer
-    # incident, so stand down and say why.
+    # An agent whose working directory Windows would not let ao read cannot be placed (#71,
+    # WINDOWS-CWD-2). One that cannot be placed may be this tree's writer; starting another
+    # beside it is the two-writer incident, so stand down and say why.
     unplaced = A.unplaced_agent_pids(root, adapter)
     if unplaced:
-        print(f"{len(unplaced)} agent process(es) cannot be placed in a tree - Windows exposes no "
-              f"process working directory ({unplaced}); not starting another turn")
+        print(f"{len(unplaced)} agent process(es) cannot be placed in a tree - their working directory "
+              f"could not be read ({unplaced}); not starting another turn")
         return 0
     if running:
         # A process being alive is not a turn being in flight. An agent can finish
