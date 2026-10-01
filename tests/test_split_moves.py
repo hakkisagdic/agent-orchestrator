@@ -38,6 +38,24 @@ def test_a_definition_moved_byte_for_byte_is_a_pure_move(project):
     assert result == {"moved": [("b", "mod.py", "parts/mod_b.py")], "problems": []}
 
 
+def test_a_file_that_holds_nothing_added_beside_a_move_is_no_part_of_it(project):
+    """CATCHUP-EVIDENCE-2: an empty file holds nothing to compare, and one added beside a real move passed with it."""
+    root = project["root"]
+    _repo(root)
+    _stage(root, LIB.replace('def b(n):\n    return n + 1\n\n\n', '_part("mod_b", globals())\n\n\n'),
+           '"""b, moved"""\n\n\ndef b(n):\n    return n + 1\n')
+    os.makedirs(os.path.join(root, "plugins"), exist_ok=True)
+    with open(os.path.join(root, "plugins", "__init__.py"), "w", encoding="utf-8") as fh:
+        fh.write("# a package now\n")
+    _git(root, "add", "plugins/__init__.py")
+
+    result = A.split_moves(root)
+
+    assert result["moved"] == [("b", "mod.py", "parts/mod_b.py")]
+    assert result["problems"] == ["plugins/__init__.py is added and holds no definition: a file's presence is "
+                                  "not a move"]
+
+
 def test_a_move_that_edits_loses_adds_or_forgets_to_load_is_refused(project):
     root = project["root"]
     _repo(root)

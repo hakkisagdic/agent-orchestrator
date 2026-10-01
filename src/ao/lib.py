@@ -525,7 +525,7 @@ def split_moves(root, start=None, end=None):
         return result.stdout.decode(UTF8, "replace") if result.returncode == 0 else None
 
     old, new = {}, {}
-    old_other, new_other, loaded, parts = [], [], set(), []
+    old_other, new_other, loaded, parts, present = [], [], set(), [], {}
     for path in paths:
         for side, spec, defs, other in (("old", f"{before}:{path}", old, old_other),
                                         ("new", f"{after}:{path}", new, new_other)):
@@ -539,6 +539,7 @@ def split_moves(root, start=None, end=None):
             for name, texts in definitions.items():
                 defs.setdefault(name, []).extend((path, t) for t in texts)
             other.extend(others)
+            present.setdefault(path, {})[side] = bool(definitions or others)
             if side == "new":
                 loaded |= {m.group(1) for m in re.finditer(r"""_part\(\s*["']([\w-]+)["']""", text)}
                 if "/parts/" in f"/{path}" and read(f"{before}:{path}") is None:
@@ -560,6 +561,12 @@ def split_moves(root, start=None, end=None):
             moved.append((name, ", ".join(was), ", ".join(now)))
     if sorted(old_other) != sorted(new_other):
         problems.append("a top-level statement that is not a definition changed")
+    # An empty, comment-only or docstring-only file holds nothing to compare, so one added or removed beside
+    # a real move passed as part of it - an __init__.py changes which packages there are (CATCHUP-EVIDENCE-2).
+    for path, sides in sorted(present.items()):
+        if len(sides) == 1 and not any(sides.values()):
+            problems.append(f"{path} is {'added' if 'new' in sides else 'removed'} and holds no definition: "
+                            "a file's presence is not a move")
     for path in parts:
         if os.path.splitext(os.path.basename(path))[0] not in loaded:
             problems.append(f"{path} is not loaded by any _part call")
