@@ -117,6 +117,26 @@ def test_exhausted_credits_are_mailed_once_and_held_until_the_reset_the_reading_
     assert _on(sent, "email") == ["proj: credits exhausted"] * 2
 
 
+def test_a_reading_that_names_no_reset_holds_nothing_back_until_an_earlier_readings_reset(project, monkeypatch):
+    """NOTICE-NOISE-2: the end an earlier reading named kept holding the alarm for a reading that named none - the
+    next account's, after keyflip moved to it - so its news went unrepeated until the old account's reset."""
+    sent = _channels(monkeypatch)
+    clock = _clock(monkeypatch)
+    root = project["root"]
+    _exhausted(monkeypatch, clock[0] + 10 * DAY)
+    st = {}
+    W._sample_credits(root, st, IMPLEMENTER, "proj", now=clock[0])
+    _exhausted(monkeypatch, None, account="acct-2")
+
+    for _ in range(13):                                   # past the six hours a red alarm waits to repeat
+        clock[0] += 1801
+        W._sample_credits(root, st, IMPLEMENTER, "proj", now=clock[0])
+
+    (alarm,) = A.active_alarms("proj")
+    assert "quiet_until" not in alarm
+    assert len(_on(sent, "email")) >= 3                  # the first, the new account's news, and its repeat
+
+
 def test_the_day_a_projected_run_out_comes_true_is_told_though_the_projection_is_held(project, monkeypatch):
     sent = _channels(monkeypatch)
     clock = _clock(monkeypatch)

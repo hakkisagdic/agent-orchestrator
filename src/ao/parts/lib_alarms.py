@@ -119,6 +119,10 @@ def alarm_touch(project, key, level, now=None, red_after=ALARM_RED_AFTER, title=
         e["title"] = title
     if quiet_until:
         e["quiet_until"] = float(quiet_until)
+    else:
+        # Each raise's own end is the only one that holds: a reading that names none - another account's,
+        # after keyflip moved to it - was held until the reset of the one before (NOTICE-NOISE-2).
+        e.pop("quiet_until", None)
     if evidence:
         e["evidence"] = evidence      # the ladder shows what the notice was raised on (#37)
     news = what is not None and e.get("told_what") is not None and e["told_what"] != what

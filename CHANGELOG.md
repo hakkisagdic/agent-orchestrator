@@ -18,6 +18,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- An alarm is held only until the end its own reading names: a reading that names none, such as the next account's after keyflip moved to it, was held until the reset of the one before (NOTICE-NOISE-2).
 - A subagent's transcript or sidecar is read only as a regular file reached through no final link, so one swapped after the listing for a link outside is not followed and a FIFO no longer hangs the reader; Windows, which has no O_NOFOLLOW, refuses the FIFO alone (SUBAGENT-BOUNDS-2).
 - Two channels answering one question at once - the terminal and the phone - keep one answer and refuse the other as already answered, where the later write dropped the earlier answer (CLI-ROBUST-2).
 - A role's pinned session settles nothing once its transcript is gone from the store, so the architect is no longer woken into the one session left there, which may be the implementer's new one (SESSION-IDENTITY-2).
