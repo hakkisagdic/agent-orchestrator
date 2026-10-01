@@ -287,11 +287,11 @@ def test_a_person_is_shown_the_criteria_and_answers_them_in_the_findings_file(pr
 
     shown = _plain(capsys)
     assert "it lists 3 criteria" in shown and "    2. a restart replays it" in shown
-    assert re.search(r"--verdict APPROVED --digest [0-9a-f]{16} --findings <file>", shown)
+    assert re.search(r"--verdict APPROVED --digest [0-9a-f]{64} --findings <file>", shown)
     findings = tmp_path / "findings.txt"
     findings.write_text("CRITERION 1: MET - read src/a.py\n  CRITERION 2: MET - an indented line is still mine\n"
                         "CRITERION 3: MET - read the test\nsome words that are no finding\n", encoding="utf-8")
-    digest = re.search(r"--digest ([0-9a-f]{16})", shown).group(1)
+    digest = re.search(r"--digest ([0-9a-f]{64})", shown).group(1)
     assert cli.cmd_person_review(cfg, SimpleNamespace(**dict(args, verdict="APPROVED", digest=digest,
                                                              findings=str(findings)))) == 0
     body = _newest(root)

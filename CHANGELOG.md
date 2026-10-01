@@ -22,6 +22,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 - A role's pinned session settles nothing once its transcript is gone from the store, so the architect is no longer woken into the one session left there, which may be the implementer's new one (SESSION-IDENTITY-2).
 - `ao telegram install` schedules a program a scheduler can start, as the watchdog's jobs do, and refuses when there is none, where it named this process's own file and said "installed"; a program found through a relative PATH entry is scheduled by its absolute path (SAFE-REMOVE-2).
 
+### Security
+
+- A person's review records a verdict only against the whole digest of the diff they read, where any 12 or more of its hex digits matched and an author could have swapped in a second diff sharing them ([roles.md](docs/roles.md)) (REVIEW-TIERS-2).
+
 ### Under the hood
 
 - The marker fingerprint's test forges the identity it reads through a handle, as the fingerprint does, so a Windows runner no longer fails it when a clock tick passes between creating the marker and writing it (WINDOWS-FINGERPRINT-TEST).

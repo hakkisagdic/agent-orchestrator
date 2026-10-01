@@ -346,7 +346,7 @@ def build_parser():
     pr.add_argument("--by", required=True, help="the person who reads the diff; never an agent or a role")
     pr.add_argument("--verdict", choices=list(REVIEWER_VERDICTS),
                     help="record this verdict; without it the diff and its digest are shown and nothing is recorded")
-    pr.add_argument("--digest", help="with --verdict: the digest shown beside the diff you read")
+    pr.add_argument("--digest", help="with --verdict: the whole digest shown beside the diff you read")
     pr.add_argument("--findings", help="a file of findings, one a line: - [BLOCKER|HIGH|MEDIUM|LOW] file:line - what "
                                        "breaks; NEEDS_CHANGES needs a BLOCKER or HIGH one. A boundary's criteria are "
                                        "answered there too: CRITERION <n>: MET|NOT MET - the evidence")

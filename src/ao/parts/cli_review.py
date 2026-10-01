@@ -2179,7 +2179,6 @@ def _decided_counts(declared, listed):
                     + " and listed " + ", ".join(f"{listed[key]} {key}" for key in raised)
                     + " finding(s); a count is never below the findings listed"]
 PERSON_FINDINGS_BYTES = 400_000
-PERSON_DIGEST_HEX = 16                      # what the shown command quotes; any 12 or more hex characters match
 
 
 def _person_line(person):
@@ -2190,11 +2189,16 @@ def _person_line(person):
 
 
 def _digest_read(given, digest):
-    """Whether the digest a person quotes is the diff's: the whole `sha256:` value, or 12 or more of its hex digits."""
+    """Whether the digest a person quotes is the diff's whole SHA-256, with or without its `sha256:` prefix.
+
+    A prefix of 12 or more hex digits matched, and the command shown quoted 16: an author who controls the
+    candidate could make a second diff whose digest starts with the same 64 bits - about 2^32 tries - and
+    swap it in after the person read the first. The whole digest leaves nothing to find (REVIEW-TIERS-2).
+    """
     text = str(given or "").strip().lower()
     text = text[len("sha256:"):] if text.startswith("sha256:") else text
     whole = str(digest or "")[len("sha256:"):]
-    return len(text) >= 12 and bool(A.re.fullmatch(r"[0-9a-f]+", text)) and whole.startswith(text)
+    return bool(whole) and text == whole
 
 
 def _show_person_review(person, diff, evidence, boundary, args, criteria=()):
@@ -2205,7 +2209,7 @@ def _show_person_review(person, diff, evidence, boundary, args, criteria=()):
     """
     import shlex
     sys.stdout.write(diff if diff.endswith("\n") else diff + "\n")
-    short = evidence["diff_digest"][len("sha256:"):][:PERSON_DIGEST_HEX]
+    short = evidence["diff_digest"][len("sha256:"):]                  # the whole digest (REVIEW-TIERS-2)
     scope = f"--commits {shlex.quote(args.commits)}" if args.commits else " ".join(
         ["--paths"] + [shlex.quote(path) for path in args.paths]) if args.paths else ""
     base = " ".join(part for part in ("ao person-review", f"--by {shlex.quote(person['by'])}", scope) if part)

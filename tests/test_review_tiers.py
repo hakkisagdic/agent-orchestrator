@@ -79,7 +79,7 @@ def _person(cfg, capsys, **given):
 
 
 def _digest(shown):
-    return re.search(r"--digest ([0-9a-f]{16})", shown).group(1)
+    return re.search(r"--digest ([0-9a-f]{64})", shown).group(1)
 
 
 def _rows(root):
@@ -128,6 +128,9 @@ def test_a_persons_review_is_bound_to_the_bytes_shown_and_grants_as_a_models_doe
     assert _person(cfg, capsys, verdict="APPROVED")[0] == 2     # a verdict names the digest it was given
     code, out = _person(cfg, capsys, verdict="APPROVED", digest="0" * 16)
     assert code == 1 and "not the one you read" in out
+    # A prefix is not the digest, however long: a second diff sharing it could be swapped in (REVIEW-TIERS-2).
+    code, out = _person(cfg, capsys, verdict="APPROVED", digest=digest[:16])
+    assert code == 1 and "not the one you read" in out and _rows(root) == []
     code, out = _person(cfg, capsys, verdict="APPROVED", digest=digest)
     assert code == 0 and T.LABELS[T.PERSON] in out
 

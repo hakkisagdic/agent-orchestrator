@@ -234,6 +234,11 @@ ao person-review --by <name> --verdict APPROVED --digest <digest>   # recorded o
 ao person-review --by <name> --verdict NEEDS_CHANGES --digest <digest> --findings <file>
 ```
 
+*In ao since slice REVIEW-TIERS-2: `--digest` is the whole SHA-256 the first step shows, as the
+command it prints quotes it. Any 12 or more of its hex digits matched before, and 64 bits are
+few enough that an author controlling the candidate could find a second diff sharing them and
+swap it in after the person read the first.*
+
 A findings file holds one finding a line, `- [BLOCKER|HIGH|MEDIUM|LOW] file:line - what
 breaks`; the counts are read from it and decide as a reviewer's do, so an approval with a
 BLOCKER or HIGH finding is refused, and so is a rejection naming none. The review is bound to
