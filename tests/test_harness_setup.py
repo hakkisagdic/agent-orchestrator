@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 
 from ao import skillkit
 
@@ -49,6 +50,45 @@ def test_a_harness_no_code_names_is_detected_and_set_up_from_its_adapter_alone(p
     assert (os.path.join(".newcomer", "mcp.json"), "ao", False) in mcp_files
 
     assert skillkit.rules_wired(root) is True          # its steering directory holds the playbook
+
+
+def test_a_setup_path_that_leaves_the_project_is_written_nowhere_and_never_removed(project, tmp_path):
+    """HARNESS-SETUP-2: the project's adapter layer is one an agent can write, and a playbook, a rule file, an MCP
+    file or a file ao removes declared outside the project was written there, and deleted there."""
+    root = project["root"]
+    outside = dict(NEWCOMER, directives=dict(NEWCOMER["directives"], playbook={"path": "../victim.md"},
+                                             rule_files=["../RULES.md"], ao_files=["../victim.md", "~/x.md"]),
+                   mcp={"file": "~/.config/newcomer/mcp.json"})
+    _declare(root, outside)
+    os.makedirs(os.path.join(root, ".newcomer"))
+
+    written = skillkit.install_playbook(root, {"newcomer"}, rules=True)
+    registered = skillkit.register_mcp(root, {"newcomer"}, exe="/x/ao")
+
+    parent = os.path.dirname(os.path.realpath(root))
+    assert written["../victim.md"] == "not written: outside the project"
+    assert not os.path.exists(os.path.join(parent, "victim.md")) and not os.path.exists(os.path.join(parent, "RULES.md"))
+    assert "../RULES.md" not in skillkit.rule_file_names(root)
+    assert registered["newcomer"].startswith("not written: ~/.config/newcomer/mcp.json lies outside the project")
+    assert not os.path.exists(os.path.join(root, "~"))
+    paths, mcp_files = skillkit.ao_files(root)
+    assert "../victim.md" not in paths and "~/x.md" not in paths
+    assert all(not path.startswith("~") for path, _, _ in mcp_files)
+
+
+def test_a_project_layer_names_no_command_ao_runs_to_register_its_server(project):
+    """HARNESS-SETUP-2: a project adapter's `mcp.register` argv ran during init, a command an agent chose."""
+    root = project["root"]
+    marker = os.path.join(root, "ran")
+    _declare(root, dict(NEWCOMER, mcp=dict(NEWCOMER["mcp"], register=[
+        sys.executable, "-c", f"open({marker!r}, 'w').close()"])))
+    os.makedirs(os.path.join(root, ".newcomer"))
+
+    assert skillkit.register_mcp(root, {"newcomer"}, exe="/x/ao") == {"newcomer": "registered"}
+
+    assert not os.path.exists(marker)
+    with open(os.path.join(root, ".newcomer", "mcp.json"), encoding="utf-8") as fh:
+        assert "ao" in json.load(fh)["servers"]
 
 
 def test_a_name_resolves_through_the_vendor_list_and_rule_files_follow_what_is_declared(project, monkeypatch):

@@ -582,6 +582,9 @@ def cmd_init(cfg, args):
         present = any(os.path.isdir(os.path.join(root, *path.split("/")))
                       for path in (adapter.get("detect") or {}).get("dirs") or [])
         if coordination and (ident == requested or present):
+            if skillkit._local(root, coordination) is None:
+                print(f"  {C['yellow']}not written{C['reset']}  {coordination}: it lies outside the project (HARNESS-SETUP-2)")
+                continue
             put(coordination, STEERING_COORD.format(urgent=language.marker(runtime_cfg, "urgent")))
 
     for rel in wrote:

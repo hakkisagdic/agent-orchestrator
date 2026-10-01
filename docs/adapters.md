@@ -225,6 +225,12 @@ A harness with no such fields is simply not set up: ao writes `.ao/PLAYBOOK.md` 
 pointer, and `--agent` refuses a name no adapter answers to. A project can declare a harness ao
 has never shipped in `.ao/adapters/`, and init sets it up the same way.
 
+Every path these fields name is held to the repository, since the project's layer is one an agent
+can write: a path that is absolute, starts with `~`, or leaves through `..` or a link is written
+nowhere and never removed, and init says it was not written, so a harness whose MCP file lives in
+the home directory is given ao by hand. `mcp.register` is read from the package's adapters only:
+another layer names the file its server goes in, never a program init runs (HARNESS-SETUP-2).
+
 ## Where a harness keeps its sessions is declared, not coded
 
 Session discovery, `session: auto`, each role's transcript path, `ao projects` and `ao fleet`

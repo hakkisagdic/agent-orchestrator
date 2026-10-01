@@ -30,6 +30,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Security
 
+- A setup path an adapter declares - a playbook, rule file, MCP file or coordination file - is written and removed only inside the project, where `../x` or an absolute path was written outside it, `ao remove` deleted it there, and opencode's `~/...` became a directory named `~`; an adapter's `mcp.register` command is taken from the adapters ao ships alone, so a project's own adapter no longer chooses a program `ao init` runs ([adapters.md](docs/adapters.md)) (HARNESS-SETUP-2).
 - A reviewer answering through ACP whose agent ran a call ao refused gives no review, whatever the call's kind, where only a completed edit, deletion, move or command voided it (ACP-REVIEWER-3).
 - A Kiro agent borrowed with `ao content add` loads no MCP configuration (`includeMcpJson`, `useLegacyMcpJson`) and no resource outside the project's tree, each taken out and named, and the resources it keeps are named; a file another entry vendored is refused rather than owned twice (KIRO-CONTENT-2).
 - A tool reviewer runs exactly the command its adapter declares, where a route naming pr-agent ran any program it listed and the review was recorded as pr-agent's; the `pr-agent` extra is bounded to the 0.45 release its adapter was measured against (REVIEWER-TOOL-2).

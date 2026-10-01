@@ -38,8 +38,28 @@ def playbook():
     return "", text
 
 
+def _escapes(rel):
+    """Whether a declared setup path leaves the repository by its words: absolute, a home (`~`), a drive or a `..`."""
+    text = str(rel or "").replace("\\", "/")
+    return not text or text.startswith(("/", "~")) or text[1:2] == ":" or ".." in text.split("/")
+
+
 def _local(root, rel):
-    return os.path.join(root, *str(rel).split("/"))
+    """`rel` inside the repository `root`, or None where it would leave it (HARNESS-SETUP-2).
+
+    A setup path is an adapter's word, and the project's adapter layer is one an agent can write: a
+    playbook, a rule file or an MCP file declared as `../x` was written outside the project, `ao remove`
+    deleted it there, and a home path such as opencode's `~/.config/...` was written into the project as
+    a directory named `~`. The path is held to the repository by its words and by where it resolves.
+    """
+    if _escapes(rel):
+        return None
+    path = os.path.join(root, *str(rel).split("/"))
+    real = os.path.realpath(root)
+    try:
+        return path if os.path.commonpath([real, os.path.realpath(path)]) == real else None
+    except ValueError:
+        return None
 
 
 def setup_adapters(root=None, agents=None):
@@ -82,8 +102,8 @@ def detect_agents(root, requested="auto"):
     found = set()
     for ident, adapter in setup_adapters(root):
         detect = adapter.get("detect") or {}
-        marks = [path for path in (detect.get("dirs") or []) if os.path.isdir(_local(root, path))]
-        marks += [path for path in (detect.get("files") or []) if os.path.exists(_local(root, path))]
+        marks = [path for path in (detect.get("dirs") or []) if os.path.isdir(_local(root, path) or "\0")]
+        marks += [path for path in (detect.get("files") or []) if os.path.exists(_local(root, path) or "\0")]
         if requested == "all" or marks or any(shutil.which(binary) for binary in detect.get("binaries") or []):
             found.add(ident)
     return None, found or {"generic"}
@@ -115,7 +135,8 @@ RULE_POINTER = ("## ao\n\nThis repository runs under agent-orchestrator. Load th
 def rule_file_names(root=None):
     """The owner's rule files: each harness's own, as its adapter declares them, then the shared one."""
     own = sorted({name for _, adapter in setup_adapters(root)
-                  for name in (adapter.get("directives") or {}).get("rule_files") or [] if name != SHARED_RULE_FILE})
+                  for name in (adapter.get("directives") or {}).get("rule_files") or []
+                  if name != SHARED_RULE_FILE and not _escapes(name)})
     return own + [SHARED_RULE_FILE]
 
 
@@ -147,7 +168,8 @@ def install_playbook(root, agents, rules=False):
         if not target.get("path"):
             continue
         header = front if target.get("header") == "frontmatter" else str(target.get("header") or "")
-        out[target["path"]] = _write_marked(_local(root, target["path"]), body, header=header)
+        place = _local(root, target["path"])
+        out[target["path"]] = _write_marked(place, body, header=header) if place else "not written: outside the project"
     if rules:
         own = any(name != SHARED_RULE_FILE for _, adapter in setup_adapters(root, agents)
                   for name in (adapter.get("directives") or {}).get("rule_files") or [])
@@ -256,8 +278,12 @@ def register_mcp(root, agents, exe=None):
         if not mcp.get("file"):
             continue
         path = _local(root, mcp["file"])
+        if path is None:
+            out[ident] = f"not written: {mcp['file']} lies outside the project; add ao to it by hand"
+            continue
         server = {"command": exe, "args": args}
-        register = mcp.get("register") or []
+        # A command ao runs comes from a shipped adapter alone, never a layer an agent can write (HARNESS-SETUP-2).
+        register = ((A.package_adapters().get(ident) or {}).get("mcp") or {}).get("register") or []
         if register and shutil.which(register[0]) and not os.path.exists(path):
             argv = [part.replace("{exe}", exe).replace("{args}", json.dumps(args)) for part in register]
             r = subprocess.run(argv, capture_output=True, text=True, encoding=UTF8, errors="replace", cwd=root)
@@ -273,9 +299,9 @@ def ao_files(root=None):
     paths, mcp_files = [], []
     for _, adapter in setup_adapters(root):
         directives = adapter.get("directives") or {}
-        paths += [path for path in directives.get("ao_files") or [] if path not in paths]
+        paths += [path for path in directives.get("ao_files") or [] if path not in paths and not _escapes(path)]
         mcp = adapter.get("mcp") or {}
-        if mcp.get("file"):
+        if mcp.get("file") and not _escapes(mcp["file"]):
             mcp_files.append((os.path.join(*mcp["file"].split("/")), "ao", bool(mcp.get("remove_when_empty"))))
     return paths, mcp_files
 
@@ -307,11 +333,12 @@ def rules_wired(root):
     needles = ("PLAYBOOK.md", "skills/ao", "ao-playbook", "ao-coordination", "agent-orchestrator")
     candidates = [os.path.join(root, name) for name in rule_file_names(root)]
     for steering in steering_dirs(root):
-        if os.path.isdir(_local(root, steering)):
-            candidates += [os.path.join(_local(root, steering), f) for f in os.listdir(_local(root, steering))]
+        place = _local(root, steering)
+        if place and os.path.isdir(place):
+            candidates += [os.path.join(place, f) for f in os.listdir(place)]
     for _, adapter in setup_adapters(root):
         skills = (adapter.get("directives") or {}).get("skills_dir")
-        if skills and os.path.isdir(os.path.join(_local(root, skills), "ao")):
+        if skills and _local(root, skills) and os.path.isdir(os.path.join(_local(root, skills), "ao")):
             return True                  # a skill is discovered by the agent on its own
     for p in candidates:
         try:
