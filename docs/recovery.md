@@ -120,8 +120,11 @@ none. A remote is refused unless the host confirms the repository is private, be
 to a public product remote would publish the coordination history.
 
 `ao restore <directory>` puts the files back, restoring only those whose bytes match the digest
-they were backed up with and naming the rest, then checks that the authority chain and the
-board validate.
+they were backed up with, and whose path stays inside the checkout, and naming the rest; then
+it checks that the authority chain and the board validate. A backup that restores nothing, or
+no `.ao/config.json`, restores no control plane, and the restore fails. When the authority
+chain cannot be read, `ao backup` keeps every review artefact rather than only those a grant
+names, and says so.
 
 ## What is deliberately not recovered
 

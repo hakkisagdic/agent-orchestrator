@@ -651,7 +651,14 @@ def governance_files(root, cfg):
             if os.path.isfile(os.path.join(root, rel)):
                 out.append(rel)
     except Exception:
-        pass
+        # A chain that cannot be read cannot say which artefacts its grants rest on, and a backup that kept
+        # none of them was complete without a word: every one is kept instead (GOVERNANCE-BACKUP-2).
+        for directory, subdirs, files in os.walk(os.path.join(root, reviews_dir)):
+            subdirs[:] = [d for d in subdirs if not os.path.islink(os.path.join(directory, d))]
+            for name in files:
+                rel = os.path.relpath(os.path.join(directory, name), root).replace(os.sep, "/")
+                if not _BACKUP_SKIP.search(rel) and os.path.isfile(os.path.join(root, rel)):
+                    out.append(rel)
     return sorted(set(out))
 
 
@@ -747,18 +754,36 @@ def remote_is_private(root, remote):
     return {"true": True, "false": False}.get(answer.stdout.strip())
 
 
+def _backup_path(base, rel):
+    """`rel` under `base`, or None where a manifest's words or a link would leave it (GOVERNANCE-BACKUP-2).
+
+    A manifest is not authenticated: `../x` or an absolute path in it was written wherever it
+    pointed. ao writes every path relative, with forward slashes and no `.` or `..` part.
+    """
+    words = str(rel).split("/")
+    if not rel or "\\" in rel or os.path.isabs(rel) or os.path.splitdrive(rel)[0] \
+            or any(word in ("", ".", "..") for word in words):
+        return None
+    path = os.path.join(base, *words)
+    return path if _within(path, base) else None
+
+
 def restore_backup(root, source):
     """Put the governance back from a backup directory, verifying every file against its manifest (#46).
 
     Returns (restored, unverified): a file whose bytes do not match the digest it was
-    backed up with is not restored, and is named.
+    backed up with is not restored, and is named, and so is a path that would leave the
+    checkout or the backup (GOVERNANCE-BACKUP-2).
     """
     with open(os.path.join(source, "manifest.json"), encoding=UTF8) as fh:
         manifest = json.load(fh)
     from .storage import replace_file_durably
     restored, unverified = [], []
     for rel, digest in sorted(manifest["files"].items()):
-        path = os.path.join(source, rel)
+        path, target = _backup_path(source, rel), _backup_path(root, rel)
+        if path is None or target is None:
+            unverified.append(f"{rel}: not a path inside the checkout")
+            continue
         try:
             with open(path, "rb") as fh:
                 data = fh.read()
@@ -768,7 +793,7 @@ def restore_backup(root, source):
         if "sha256:" + hashlib.sha256(data).hexdigest() != digest:
             unverified.append(f"{rel}: its bytes do not match the manifest")
             continue
-        replace_file_durably(os.path.join(root, rel), data)
+        replace_file_durably(target, data)
         restored.append(rel)
     return restored, unverified
 

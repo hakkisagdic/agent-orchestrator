@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import subprocess
@@ -47,6 +48,65 @@ def test_a_backup_restored_into_an_empty_checkout_validates_and_names_what_it_co
     assert "the authority chain and the board validate" in out
     assert [row["granted"] for row in A.authority_rows(str(empty))] == [True, False]
     assert open(empty / ".ao" / "authority.md", encoding="utf-8").read().startswith("# Authority")
+
+
+def test_a_manifest_path_that_leaves_the_checkout_is_restored_nowhere(tmp_path):
+    """GOVERNANCE-BACKUP-2: the manifest is not authenticated, and `../outside.txt` in it was written beside the
+    checkout."""
+    checkout = tmp_path / "parent" / "checkout"
+    checkout.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=checkout, check=True)
+    source = tmp_path / "attacker" / "backup" / "snapshot"
+    source.mkdir(parents=True)
+    (source.parent / "outside.txt").write_bytes(b"owned")
+    digest = "sha256:" + hashlib.sha256(b"owned").hexdigest()
+    (source / "manifest.json").write_text(json.dumps({"schema": 1, "files": {"../outside.txt": digest}}),
+                                          encoding="utf-8")
+
+    restored, unverified = A.restore_backup(str(checkout), str(source))
+
+    assert restored == [] and unverified == ["../outside.txt: not a path inside the checkout"]
+    assert not (tmp_path / "parent" / "outside.txt").exists()
+
+
+def test_a_backup_that_restores_no_control_plane_fails(project, tmp_path, capsys):
+    """GOVERNANCE-BACKUP-2: an empty manifest restored nothing, exited 0 and said the state validated."""
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "manifest.json").write_text(json.dumps({"schema": 1, "files": {}}), encoding="utf-8")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=empty, check=True)
+
+    assert cli.cmd_restore(dict(project, root=str(empty)), SimpleNamespace(source=str(source))) == 1
+
+    out = capsys.readouterr().out
+    assert "restored no control plane" in out and "validate" not in out
+
+
+def test_an_unreadable_authority_chain_keeps_every_review_artefact(project, capsys, tmp_path):
+    """GOVERNANCE-BACKUP-2: a chain that could not be read left out the artefacts its grants rest on, and the
+    backup said nothing."""
+    root = project["root"]
+    reviews = project.get("reviews", "semantic-review")
+    A.record_authority(root, True, [], "sha256:t", "V-1", "C-1", review="grant.md")
+    os.makedirs(os.path.join(root, reviews), exist_ok=True)
+    with open(os.path.join(root, reviews, "grant.md"), "w", encoding="utf-8") as fh:
+        fh.write("VERDICT: APPROVED\n")
+    assert f"{reviews}/grant.md" in A.governance_files(root, project)
+    ledger = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    with open(ledger, encoding="utf-8") as fh:
+        rows = fh.read().splitlines()
+    first = json.loads(rows[0])
+    first["reasons"] = ["edited after the fact"]
+    with open(ledger, "w", encoding="utf-8") as fh:
+        fh.write("\n".join([json.dumps(first)] + rows[1:]) + "\n")
+    with pytest.raises(Exception):
+        A.authority_rows(root)
+
+    assert f"{reviews}/grant.md" in A.governance_files(root, project)
+    assert cli.cmd_backup(project, SimpleNamespace(to=str(tmp_path / "backups"))) == 0
+    assert "the authority chain does not validate" in capsys.readouterr().out
 
 
 def test_a_ref_backup_touches_neither_the_index_nor_the_worktree(project):

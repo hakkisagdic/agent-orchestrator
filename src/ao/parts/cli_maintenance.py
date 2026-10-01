@@ -1618,6 +1618,12 @@ def cmd_backup(cfg, args):
         print(f"{C['red']}not backed up{C['reset']}: {exc}")
         return 1
     print(f"{C['green']}backed up{C['reset']} {len(manifest['files'])} governance file(s) → {manifest['where']}")
+    try:
+        A.authority_rows(cfg["root"])
+    except Exception as exc:
+        # Which artefacts a grant rests on is the chain's word; without it every one was kept (GOVERNANCE-BACKUP-2).
+        print(f"  {C['yellow']}the authority chain does not validate{C['reset']} ({exc}): every review artefact "
+              "was backed up, not only those a grant names")
     return 0
 
 
@@ -1632,6 +1638,12 @@ def cmd_restore(cfg, args):
     print(f"restored {len(restored)} file(s)")
     for line in unverified:
         print(f"  {C['red']}not verified{C['reset']}  {line}")
+    # A backup that put nothing back, or no config, is no control plane: it "validated" and exited 0, and a
+    # script acted on that (GOVERNANCE-BACKUP-2).
+    if not restored or not os.path.isfile(os.path.join(root, ".ao", "config.json")):
+        print(f"{C['red']}the backup restored no control plane{C['reset']}: "
+              + ("no file was restored" if not restored else ".ao/config.json is not among what was restored"))
+        return 1
     try:
         A.authority_rows(root)
         A.board(root)
