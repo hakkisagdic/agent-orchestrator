@@ -1649,41 +1649,45 @@ def answer(root, did, key_or_text, by="human", change=False, user=None, interact
     p = os.path.join(root, DECISION_DIR, did + ".json")
     if not os.path.exists(p):
         return None
-    rec = json.load(open(p, encoding=UTF8))
-    if rec.get("proposal"):
-        agent = invoking_role() or ("architect" if by == "architect" else None)
-        if agent:
-            raise AnswerRefused(f"{did} asks about rule proposal {rec['proposal']}, which a person decides, not the "
-                                f"{agent}: ao answer {did} <key> in a person's terminal, or a tap on the phone")
-    given = str(key_or_text).split(None, 1)
-    key, words = (given[0].lower() if given else ""), (given[1].strip() if len(given) > 1 else "")
-    options = [o for o in rec.get("options") or [] if isinstance(o, dict)]
-    chosen = next((o for o in options if o.get("key") == key), None)
-    free = next((o for o in options if free_text_option(o)), None)
-    if chosen is None:
-        offered = ", ".join(f"{o.get('key')}) {o.get('label')}" for o in options)
-        raise AnswerRefused(f"{did} offers {offered or 'no options'}; {key!r} is not one of them")
-    if free_text_option(chosen) and not words:
-        raise AnswerRefused(f"{key} is answered in your own words: ao answer {did} {key} <text>")
-    if words and not free_text_option(chosen):
-        raise AnswerRefused(f"{key}) {chosen.get('label')} takes no words after it"
-                            + (f"; answer in your own words with {free.get('key')} <text>" if free else ""))
-    if rec.get("state") == "answered" and not change:
-        raise AnswerRefused(f"{did} is already answered: {rec.get('answer')}; "
-                            f"ao answer {did} <key> --change replaces it, and both stay on the record")
-    row = {"answer": words if free_text_option(chosen) else chosen.get("label"), "answer_key": chosen.get("key"),
-           "answered_at": int(time.time()), "answered_by": by}
-    if user is not None or interactive is not None:
-        # The login and the terminal, as every other act ao attributes to a person keeps them (RULE-PROPOSALS-2).
-        row.update(answered_user=user, answered_interactive=bool(interactive))
-    rows = rec.get("answers")
-    if not isinstance(rows, list):
-        # Answered before each answer was a row: that answer becomes the first, so a change keeps it.
-        rows = [{name: rec.get(name) for name in row}] if rec.get("state") == "answered" else []
-    rec.update(row, state="answered", answers=rows + [row])
-    rec = scan_record(rec)
-    from .storage import replace_file_durably
-    replace_file_durably(p, json.dumps(rec, ensure_ascii=False, indent=2).encode(UTF8))
+    from .storage import _exclusive_lock, replace_file_durably
+    # One answer at a time: the terminal and the phone answering at once each read the record unanswered,
+    # and the later write dropped the earlier answer. The record is read inside the lock, which lives
+    # beside the decisions, not among them, whose listing is how a change is noticed (CLI-ROBUST-2).
+    with _exclusive_lock(os.path.join(root, ".ao", "decisions.lock")):
+        rec = json.load(open(p, encoding=UTF8))
+        if rec.get("proposal"):
+            agent = invoking_role() or ("architect" if by == "architect" else None)
+            if agent:
+                raise AnswerRefused(f"{did} asks about rule proposal {rec['proposal']}, which a person decides, not the "
+                                    f"{agent}: ao answer {did} <key> in a person's terminal, or a tap on the phone")
+        given = str(key_or_text).split(None, 1)
+        key, words = (given[0].lower() if given else ""), (given[1].strip() if len(given) > 1 else "")
+        options = [o for o in rec.get("options") or [] if isinstance(o, dict)]
+        chosen = next((o for o in options if o.get("key") == key), None)
+        free = next((o for o in options if free_text_option(o)), None)
+        if chosen is None:
+            offered = ", ".join(f"{o.get('key')}) {o.get('label')}" for o in options)
+            raise AnswerRefused(f"{did} offers {offered or 'no options'}; {key!r} is not one of them")
+        if free_text_option(chosen) and not words:
+            raise AnswerRefused(f"{key} is answered in your own words: ao answer {did} {key} <text>")
+        if words and not free_text_option(chosen):
+            raise AnswerRefused(f"{key}) {chosen.get('label')} takes no words after it"
+                                + (f"; answer in your own words with {free.get('key')} <text>" if free else ""))
+        if rec.get("state") == "answered" and not change:
+            raise AnswerRefused(f"{did} is already answered: {rec.get('answer')}; "
+                                f"ao answer {did} <key> --change replaces it, and both stay on the record")
+        row = {"answer": words if free_text_option(chosen) else chosen.get("label"), "answer_key": chosen.get("key"),
+               "answered_at": int(time.time()), "answered_by": by}
+        if user is not None or interactive is not None:
+            # The login and the terminal, as every other act ao attributes to a person keeps them (RULE-PROPOSALS-2).
+            row.update(answered_user=user, answered_interactive=bool(interactive))
+        rows = rec.get("answers")
+        if not isinstance(rows, list):
+            # Answered before each answer was a row: that answer becomes the first, so a change keeps it.
+            rows = [{name: rec.get(name) for name in row}] if rec.get("state") == "answered" else []
+        rec.update(row, state="answered", answers=rows + [row])
+        rec = scan_record(rec)
+        replace_file_durably(p, json.dumps(rec, ensure_ascii=False, indent=2).encode(UTF8))
     rec["id"] = did
     return rec
 

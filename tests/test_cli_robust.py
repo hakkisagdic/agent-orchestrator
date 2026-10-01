@@ -284,6 +284,38 @@ def test_a_second_answer_needs_change_and_both_stay_on_the_record(project, capsy
     assert [(row["answer"], row["answer_key"]) for row in rec["answers"]] == [("SQLite", "b"), ("Use DuckDB", "x")]
 
 
+def test_two_channels_answering_at_once_keep_one_answer_and_refuse_the_other(project, monkeypatch):
+    """CLI-ROBUST-2: the terminal and the phone answering one question at once each read it unanswered, and the
+    later write dropped the earlier answer. The second now waits for the first, finds it answered and is refused."""
+    import threading
+    from ao import storage
+    root = project["root"]
+    asked = A.ask(root, "Which database for the cache?", ["Postgres", "SQLite"])
+    write, outcomes, phone = storage.replace_file_durably, [], []
+
+    def answer_from_the_phone():
+        try:
+            outcomes.append(A.answer(root, asked["id"], "a", by="phone"))
+        except A.AnswerRefused as exc:
+            outcomes.append(exc)
+
+    def racing_write(path, data):
+        if not phone:                         # the terminal's write: the phone answers while it is under way
+            phone.append(threading.Thread(target=answer_from_the_phone))
+            phone[0].start()
+            phone[0].join(1.0)
+        write(path, data)
+
+    monkeypatch.setattr(storage, "replace_file_durably", racing_write)
+    outcomes.append(A.answer(root, asked["id"], "b", by="terminal"))
+    phone[0].join(10)
+
+    refused = [outcome for outcome in outcomes if isinstance(outcome, A.AnswerRefused)]
+    [rec] = A.decisions(root)
+    assert len(outcomes) == 2 and len(refused) == 1 and "already answered" in str(refused[0])
+    assert [(row["answer"], row["answered_by"]) for row in rec["answers"]] == [("SQLite", "terminal")]
+
+
 def test_a_change_to_an_answer_recorded_before_rows_keeps_that_answer_first(project):
     root = project["root"]
     asked = A.ask(root, "Which queue?", ["files", "sqlite"])
