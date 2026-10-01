@@ -160,7 +160,7 @@ def test_a_hook_argument_naming_a_project_path_not_there_yet_is_refused(project,
         [result] = A.probe_filters(root)
 
         assert not ran.exists() and result["asked"] == 0 and "lies inside the project" in result["why"], word
-    allowed = [os.path.basename(sys.executable)]
+    allowed = [A._program_name(sys.executable)]                  # python.exe is python, as the setting reads it
     assert A._probe_program([sys.executable, "--level=1.5", "v2", "--endpoint=http://localhost:8080/rules"], root,
                             allowed, os.environ.get("PATH", ""))[1] is None
     assert "lies inside the project" in A._probe_program([sys.executable, "file://" + root + "/.ao/rules.toml"], root,

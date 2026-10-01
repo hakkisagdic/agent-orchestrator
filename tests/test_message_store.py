@@ -77,7 +77,7 @@ def test_a_compaction_cut_short_keeps_the_body_and_writes_its_archive_durably(pr
         A.compact_messages(root, 0, now=time.time() + 10)
     monkeypatch.setattr(A, "_mail_store_append", append)
 
-    assert written[0].endswith(os.path.join("archive", NAMES[0] + ".gz"))
+    assert os.path.normpath(written[0]).endswith(os.path.join("archive", NAMES[0] + ".gz"))
     assert A.compact_messages(root, 0, now=time.time() + 10) == [NAMES[0]]
     assert b"the original words" in before and A.message_body(root, NAMES[0]) == before
     assert A.compact_messages(root, 0, now=time.time() + 10) == []

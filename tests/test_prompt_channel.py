@@ -275,8 +275,8 @@ def test_a_hunt_whose_prompt_no_channel_carries_is_refused_and_recorded(project,
     _large_range(root)
     # A harness ao ships, as a hunter must run (BUG-HUNTER-2), with no channel past one argument.
     _declare(monkeypatch, "stand-in", detect={"binaries": [os.path.basename(sys.executable)]},
-             options={"trust_none": ["-I"]})
-    cfg = dict(project, hunter={"id": "h1", "argv": [sys.executable, "-I", "-c", "print()", "{prompt}"],
+             options={"trust_none": ["-B"]})
+    cfg = dict(project, hunter={"id": "h1", "argv": [sys.executable, "-B", "-c", "print()", "{prompt}"],
                                 "bytes_per_run": 400_000})
 
     assert cli.cmd_hunt(cfg, SimpleNamespace(action="run", fingerprint=None)) == 2

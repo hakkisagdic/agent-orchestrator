@@ -27,10 +27,14 @@ def _repo(root):
 
 
 def _stand_in(monkeypatch):
-    """Ship an adapter for the stand-in hunter, a Python script that only reads with -I in its command."""
+    """Ship an adapter for the stand-in hunter, a Python script, with -B as the flag its command must carry.
+
+    -B writes no bytecode and changes nothing else; -I would also drop PYTHONUTF8, and on Windows the
+    leads' dash came back in the ANSI code page, where no lead could be read.
+    """
     shipped = A.package_adapters()
     stand_in = {"id": "stand-in", "detect": {"binaries": [os.path.basename(sys.executable)]},
-                "options": {"trust_none": ["-I"]}}
+                "options": {"trust_none": ["-B"]}}
     monkeypatch.setattr(A, "package_adapters", lambda: dict(shipped, **{"stand-in": stand_in}))
 
 
@@ -48,7 +52,7 @@ def test_a_hunt_mails_new_leads_suppresses_repeats_and_remembers_discards(projec
     root = project["root"]
     _repo(root)
     _stand_in(monkeypatch)
-    cfg = dict(project, hunter={"id": "h1", "argv": [sys.executable, "-I", "-c", LEADS, "{prompt}"]})
+    cfg = dict(project, hunter={"id": "h1", "argv": [sys.executable, "-B", "-c", LEADS, "{prompt}"]})
     before = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=root, capture_output=True,
                             text=True).stdout
 
@@ -102,7 +106,7 @@ def test_a_hunter_missing_a_flag_its_harness_reads_by_is_refused(project, monkey
 
     assert _hunt(dict(project, hunter={"id": "h1", "argv": [sys.executable, "-c", LEADS, "{prompt}"]})) == 2
 
-    assert "its command lacks -I" in capsys.readouterr().out
+    assert "its command lacks -B" in capsys.readouterr().out
 
 
 def test_a_hunt_reads_its_budget_in_bytes(project):
@@ -126,7 +130,7 @@ def test_two_hunts_in_one_minute_keep_both_lead_mails(project, monkeypatch):
     _stand_in(monkeypatch)
     monkeypatch.setattr(cli, "datetime", _OneMinute)
     for lead in ("- [clock] src/a.py:3 parse_reset — x", "- [durability] src/a.py:3 parse_reset — y"):
-        argv = [sys.executable, "-I", "-c", f"print({lead!r})", "{prompt}"]
+        argv = [sys.executable, "-B", "-c", f"print({lead!r})", "{prompt}"]
         assert _hunt(dict(project, hunter={"id": "h1", "argv": argv})) == 0
 
     assert len([name for name in A.mailbox(root, "agent-mail") if "-hunter-to-" in name]) == 2
