@@ -167,6 +167,23 @@ def test_catchup_does_not_close_a_waiver_when_no_review_was_recorded(project, mo
     assert mailed == []
 
 
+def test_catchup_closes_a_waiver_on_its_own_review_not_on_another_of_the_same_range(project, monkeypatch, capsys):
+    """CATCHUP-READY-2: an `ao review --commits` of the same range that ran meanwhile, judged against the implementer
+    configured now and recording no author, was the review the waiver closed on."""
+    waiver, _, _ = _landed_under_a_waiver(project, monkeypatch, capsys)
+    from ao import watchdog as W
+    monkeypatch.setattr(W, "run", lambda ns: 0)
+
+    def concurrent(cfg, ns):
+        A.record_review(cfg["root"], "other.md", b"VERDICT: APPROVED\n",
+                        {"kind": "commit-range", "commits": ns.commits}, "APPROVED")
+        return 2
+    monkeypatch.setattr(cli, "cmd_review", concurrent)
+
+    assert cli.cmd_catchup(project, NAMED) == 3
+    assert [w["id"] for w in A.open_waivers(project["root"])] == [waiver["id"]]
+
+
 def test_a_close_that_cannot_be_written_fails_catchup(project, monkeypatch, capsys):
     root = project["root"]
     _stage(root, "a.py", "value = 1\n")

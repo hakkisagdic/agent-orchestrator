@@ -1344,7 +1344,7 @@ def cmd_catchup(cfg, args):
         # The exit code is not a verdict: a review that refused to run exits 1 or 2
         # too. A waiver closes on the review recorded for exactly this range.
         try:
-            recorded = A.range_review(root, ns.commits, since=before) or {}
+            recorded = A.range_review(root, ns.commits, since=before, author=author) or {}
         except Exception as exc:
             print(f"  {C['red']}review ledger cannot be read{C['reset']}: {exc}; {w['id']} stays open")
             failed.append(w["id"])

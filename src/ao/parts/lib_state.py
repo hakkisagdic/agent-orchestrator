@@ -236,13 +236,18 @@ def candidate_review_decision(root, review_dir, candidate_digest):
     return {"match": None, "problem": None}
 
 
-def range_review(root, commits, since=0):
-    """The ledger row of a retrospective review of exactly this range, recorded after `since` rows, or None."""
+def range_review(root, commits, since=0, author=None):
+    """The ledger row of a retrospective review of exactly this range, recorded after `since` rows, or None.
+
+    Given `author`, only a review of the range as that author's: another review of the same range that
+    ran meanwhile - `ao review --commits`, judged against the implementer configured now - recorded no
+    author, and a catch-up closed its waiver on it (CATCHUP-READY-2).
+    """
     from .storage import read_chained_jsonl
     rows = read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN)
     for row in reversed(rows[since:]):
         if isinstance(row, dict) and row.get("kind") == "commit-range" \
-                and row.get("commits") == commits:
+                and row.get("commits") == commits and (author is None or row.get("author") == author):
             return row
     return None
 

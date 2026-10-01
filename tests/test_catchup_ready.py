@@ -68,7 +68,8 @@ def _approved(cfg, ns):
     A stand-in that only exited 0 closed a range that changed lines as if it had none (WAIVER-BOUND-2).
     """
     A.record_review(cfg["root"], f"approved-{ns.commits[:7]}-{ns.commits[-7:]}.md", b"VERDICT: APPROVED\n",
-                    {"kind": "commit-range", "commits": ns.commits}, "APPROVED")
+                    {"kind": "commit-range", "commits": ns.commits, "author": getattr(ns, "author", None)},
+                    "APPROVED")
     return 0
 
 

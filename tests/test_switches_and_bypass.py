@@ -281,7 +281,8 @@ def _catchup_with_recorded_ranges(project, monkeypatch):
         # stand-in that only exited 0 closed a range that changed lines as if it had none (WAIVER-BOUND-2).
         seen.append(ns.commits)
         A.record_review(cfg["root"], f"approved-{len(seen)}.md", b"VERDICT: APPROVED\n",
-                        {"kind": "commit-range", "commits": ns.commits}, "APPROVED")
+                        {"kind": "commit-range", "commits": ns.commits, "author": getattr(ns, "author", None)},
+                        "APPROVED")
         return 0
     monkeypatch.setattr(cli, "cmd_review", fake_review)
     from ao import watchdog as W

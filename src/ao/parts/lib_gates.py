@@ -1486,6 +1486,9 @@ def record_review(root, name, data, evidence, verdict, reviewer=None, fallback=F
     }
     if row["kind"] == "commit-range":
         row["commits"] = evidence.get("commits")
+        if evidence.get("author") is not None:
+            # Whose range a catch-up reviewed it as, so its waiver closes on its own review (CATCHUP-READY-2).
+            row["author"] = evidence["author"]
     if evidence.get("review_tier"):
         # The tier the review stands in, so a grant, `ao reviews` and `ao stats` label it (REVIEW-TIERS).
         row["tier"] = evidence["review_tier"]
