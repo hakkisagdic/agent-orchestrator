@@ -279,7 +279,11 @@ def cmd_telegram(cfg, args):
         if not c:
             print(f"{C['red']}No config{C['reset']} — run ao telegram setup first")
             return 1
-        exe = shutil.which("ao") or os.path.abspath(sys.argv[0])
+        # The program is one a scheduler can start, as the watchdog's jobs name theirs: never this process's
+        # argv[0], which under `python -m ao` is a module file launchd cannot run (SAFE-REMOVE-2).
+        argv = _scheduled_argv("ao", ("bin", "ao"), "ao")
+        if argv is None:
+            return _schedule_refused(["ao"])
         log = os.path.join(A.HOME, ".ao", A.project_file_name("telegram-log", A.project_key(cfg["root"]).lower()))
         # KeepAlive rather than StartInterval: long polling holds the connection
         # open, so the job wants restarting when it ends, not running on a clock.
@@ -291,7 +295,8 @@ def cmd_telegram(cfg, args):
             '<plist version="1.0"><dict>\n'
             f'  <key>Label</key><string>{label}</string>\n'
             '  <key>ProgramArguments</key>\n'
-            f'  <array><string>{exe}</string><string>-C</string><string>{cfg["root"]}</string>\n'
+            f'  <array>{"".join(f"<string>{word}</string>" for word in argv)}<string>-C</string>'
+            f'<string>{cfg["root"]}</string>\n'
             '    <string>telegram</string><string>poll</string></array>\n'
             f'  <key>EnvironmentVariables</key><dict><key>PATH</key><string>{_launchd_path()}</string></dict>\n'
             '  <key>KeepAlive</key><true/>\n  <key>RunAtLoad</key><true/>\n'

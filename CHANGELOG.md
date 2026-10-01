@@ -16,6 +16,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 - `ao catchup --reviewer <actor>` reviews a run with another reviewer actor of the project's table in place of the reviewer role, leaving the table as it is, so catch-up runs over different slices go side by side on different platforms ([features.md](docs/features.md)) (CATCHUP-REVIEWER).
 
+### Fixes
+
+- `ao telegram install` schedules a program a scheduler can start, as the watchdog's jobs do, and refuses when there is none, where it named this process's own file and said "installed"; a program found through a relative PATH entry is scheduled by its absolute path (SAFE-REMOVE-2).
+
 ### Under the hood
 
 - The marker fingerprint's test forges the identity it reads through a handle, as the fingerprint does, so a Windows runner no longer fails it when a clock tick passes between creating the marker and writing it (WINDOWS-FINGERPRINT-TEST).

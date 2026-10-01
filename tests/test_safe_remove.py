@@ -385,6 +385,41 @@ def test_a_source_tree_is_not_an_installed_package():
     assert cli._package_installed() is False
 
 
+def test_a_program_found_through_a_relative_path_entry_is_named_absolutely(tmp_path, monkeypatch):
+    """SAFE-REMOVE-2: a job starts from `/`, so a program found through a relative PATH entry is made absolute."""
+    _executable(tmp_path / "console" / "ao-watchdog", "#!/bin/sh\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli.shutil, "which", lambda name, *args, **kwargs: os.path.join("console", name))
+
+    assert cli._scheduled_argv("ao-watchdog", ("scripts", "ao-watchdog"), "ao.watchdog") == \
+        [os.path.join(os.getcwd(), "console", "ao-watchdog")]
+
+
+@pytest.mark.skipif(os.name == "nt", reason=LAUNCHD_ONLY)
+def test_the_telegram_job_names_a_program_a_scheduler_can_start(project, tmp_path, monkeypatch, capsys):
+    """SAFE-REMOVE-2: the poller's job named this process's argv[0], under `python -m ao` a module file launchd
+    cannot run, and install said "installed"."""
+    from ao import telegram
+    _launchd(monkeypatch)
+    monkeypatch.setattr(telegram, "config", lambda *args, **kwargs: {"token": "t", "chats": ["1"]})
+    monkeypatch.setattr(cli.shutil, "which", lambda name, *args, **kwargs: None)
+    monkeypatch.setattr(A, "REPO", str(tmp_path / "lib"))
+    monkeypatch.setattr(cli, "_package_installed", lambda: False)
+    agents = Path(A.HOME) / "Library" / "LaunchAgents"
+    agents.mkdir(parents=True)
+    install = SimpleNamespace(action="install", once=False)
+
+    assert cli.cmd_telegram(project, install) == 1
+    assert "not installed" in _plain(capsys) and list(agents.iterdir()) == []
+
+    monkeypatch.setattr(cli, "_package_installed", lambda: True)
+    assert cli.cmd_telegram(project, install) == 0
+    (plist,) = list(agents.iterdir())
+    with open(plist, "rb") as fh:
+        assert plistlib.load(fh)["ProgramArguments"] == [sys.executable, "-m", "ao", "-C", project["root"],
+                                                          "telegram", "poll"]
+
+
 @pytest.mark.skipif(os.name == "nt", reason=LAUNCHD_ONLY)
 def test_install_refuses_a_missing_program_and_schedules_an_installed_packages_modules(project, tmp_path, monkeypatch,
                                                                                          capsys):

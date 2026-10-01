@@ -842,9 +842,11 @@ def _scheduled_argv(console, clone, module):
     the console script on PATH, which carries its own interpreter in its shebang (prefixing
     this process's python imports ao from an interpreter that may not have it); the clone's
     script, with this interpreter, since its shebang is `/usr/bin/env python3`; this
-    interpreter running the module, when it imports ao from its own site directories.
+    interpreter running the module, when it imports ao from its own site directories. A path found
+    through a relative PATH entry is made absolute: a job starts from `/`, not from here (SAFE-REMOVE-2).
     """
     found = shutil.which(console)
+    found = os.path.abspath(found) if found else None
     python = sys.executable if sys.executable and os.path.isfile(sys.executable) else None
     if found:
         in_repo = os.path.realpath(found).startswith(os.path.realpath(A.REPO) + os.sep)
