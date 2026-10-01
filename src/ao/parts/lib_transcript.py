@@ -538,6 +538,10 @@ def resolve_session(root, cfg, role, avoid=()):
         and _resumes_session(other, oblock) and theirs.get("session") in oids \
         and theirs.get("session") != kept else None
     opinned = _pinned_session(oblock) if _resumes_session(other, oblock) else None
+    # A pin settles the other role's session only while the store still holds it, as a record does: a pinned
+    # transcript the harness cleaned up left the one session in the store taken for this role's, which may
+    # be the other's new one (SESSION-IDENTITY-2).
+    opinned = opinned if opinned in oids else None
     oresolved = oblock.get("_session") if isinstance(oblock.get("_session"), dict) else {}
     if opinned or held:
         claim, settled = opinned or held, True

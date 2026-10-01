@@ -239,6 +239,21 @@ def test_the_architects_wake_never_resumes_the_implementers_session(project, mon
     assert A.session_records(world.root)["architect"]["session"] == "s-lead"
 
 
+def test_a_pinned_session_the_store_no_longer_holds_settles_nothing(project):
+    """SESSION-IDENTITY-2: the implementer pinned to a session whose transcript is gone left the one session in the
+    store taken, recorded and resumed as the architect's, where it may be the implementer's new one."""
+    root = project["root"]
+    _config(root, project, implementer={"adapter": "claude-code", "session": "s-old", "name": "claude"},
+            architect=dict(ARCHITECT, session="auto"))
+    _claude_session(root, "s-new", 30)
+
+    cfg = A.load_config(root)
+
+    assert A.session_to_resume(cfg, "architect")[0] is None
+    assert A.session_state(cfg, "architect")["how"] == "ambiguous"
+    assert not os.path.exists(A.sessions_path(root))
+
+
 def test_two_sessions_the_implementer_does_not_hold_are_ambiguous_and_the_architect_is_not_woken(
         project, monkeypatch, tmp_path):
     world = _world(project, monkeypatch, tmp_path,

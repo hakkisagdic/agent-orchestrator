@@ -18,6 +18,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- A role's pinned session settles nothing once its transcript is gone from the store, so the architect is no longer woken into the one session left there, which may be the implementer's new one (SESSION-IDENTITY-2).
 - `ao telegram install` schedules a program a scheduler can start, as the watchdog's jobs do, and refuses when there is none, where it named this process's own file and said "installed"; a program found through a relative PATH entry is scheduled by its absolute path (SAFE-REMOVE-2).
 
 ### Under the hood
