@@ -18,6 +18,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- A subagent's transcript or sidecar is read only as a regular file reached through no final link, so one swapped after the listing for a link outside is not followed and a FIFO no longer hangs the reader; Windows, which has no O_NOFOLLOW, refuses the FIFO alone (SUBAGENT-BOUNDS-2).
 - Two channels answering one question at once - the terminal and the phone - keep one answer and refuse the other as already answered, where the later write dropped the earlier answer (CLI-ROBUST-2).
 - A role's pinned session settles nothing once its transcript is gone from the store, so the architect is no longer woken into the one session left there, which may be the implementer's new one (SESSION-IDENTITY-2).
 - `ao telegram install` schedules a program a scheduler can start, as the watchdog's jobs do, and refuses when there is none, where it named this process's own file and said "installed"; a program found through a relative PATH entry is scheduled by its absolute path (SAFE-REMOVE-2).

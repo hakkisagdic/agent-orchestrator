@@ -625,8 +625,29 @@ def session_to_resume(cfg, role):
 
 # ── transcript ────────────────────────────────────────────────────────────────
 
-def read_tail(path, nbytes=900_000):
+def _open_regular(path):
+    """A binary handle on `path` when, opened, it is a regular file reached through no final link; OSError otherwise.
+
+    A subagent's file is checked by its real path when the directory is listed and opened later: one swapped in
+    between for a link is not followed, and one swapped for a FIFO - or a sidecar that is one - is refused at
+    once, opened without blocking, where reading it hung the reader (SUBAGENT-BOUNDS-2).
+    """
+    import stat as _stat
+    flags = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    handle = open(path, "rb", opener=lambda name, mode: os.open(name, mode | flags))
+    try:
+        if not _stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise OSError(f"{path} is not a regular file")
+    except BaseException:
+        handle.close()
+        raise
+    return handle
+
+
+def read_tail(path, nbytes=900_000, regular=False):
     """Last nbytes of a JSONL transcript, first (partial) line dropped; a database's rows when it keeps them there.
+
+    With `regular`, the file is read only if it is a regular file reached through no final link (`_open_regular`).
 
     A store that holds every session of every project in one database has no file whose tail can
     be read: its transcript is a query bound to one session id. Such a read asks a `DatabaseTail`
@@ -637,8 +658,8 @@ def read_tail(path, nbytes=900_000):
         return path.read(nbytes)
     recs = []
     try:
-        size = os.path.getsize(path)
-        with open(path, "rb") as f:
+        with (_open_regular(path) if regular else open(path, "rb")) as f:
+            size = os.fstat(f.fileno()).st_size
             f.seek(max(0, size - nbytes))
             blob = f.read().decode("utf-8", "ignore")
     except Exception:
@@ -1571,8 +1592,8 @@ def subagents(transcript, shape, sidecars=True):
         if not _inside(meta, directory):
             continue
         try:
-            with open(meta, encoding=UTF8) as fh:
-                call = _path_value(json.load(fh), sidecar["call"])
+            with _open_regular(meta) as fh:
+                call = _path_value(json.loads(fh.read().decode(UTF8)), sidecar["call"])
         except (OSError, ValueError):
             continue
         if isinstance(call, str) and call:
@@ -1609,7 +1630,7 @@ def started_subagents(rec, shape, found, joined):
 
 def subagent_records(path):
     """A subagent transcript's records: all of them, since its whole spend is charged to the turn that started it."""
-    return read_tail(path, 400_000_000)
+    return read_tail(path, 400_000_000, regular=True)
 
 
 def with_subagents(recs, shape, transcript, read=subagent_records):
@@ -1649,7 +1670,7 @@ def subagent_tails(transcript, shape, since, nbytes):
                 continue
         except OSError:
             continue
-        out += read_tail(path, nbytes)
+        out += read_tail(path, nbytes, regular=True)
     return out
 
 

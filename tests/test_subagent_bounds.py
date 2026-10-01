@@ -212,6 +212,55 @@ def test_a_symbolic_link_whose_target_leaves_the_subagent_directory_is_not_follo
     assert [path for path in opened if path.startswith(real(outside) + os.sep)] == []
 
 
+# A final link is not refused where the platform cannot say so: Windows' os.open has no O_NOFOLLOW.
+NO_NOFOLLOW = "Windows has no O_NOFOLLOW, so a file swapped for a link after the listing is followed there"
+
+
+@pytest.mark.skipif(not hasattr(os, "O_NOFOLLOW"), reason=NO_NOFOLLOW)
+def test_a_subagent_file_swapped_for_a_link_after_the_listing_is_not_read(project, monkeypatch, tmp_path):
+    """SUBAGENT-BOUNDS-2: the listing checked each file's real path, and the read opened the path later; a file
+    swapped in between for a link to one outside was read, its spend charged to the implementer."""
+    now = time.time()
+    cfg, transcript = _store(project, monkeypatch, tmp_path, now)
+    beside, outside = tmp_path / "store" / "s1" / "subagents", tmp_path / "outside"
+    listed, swapped = A._declared_files, []
+
+    def swap_after_listing(*args, **kwargs):
+        found = list(listed(*args, **kwargs))
+        if not swapped:
+            os.remove(beside / "agent-a1.jsonl")
+            _link(outside / "agent-x1.jsonl", beside / "agent-a1.jsonl")
+            swapped.append(True)
+        return found
+    monkeypatch.setattr(A, "_declared_files", swap_after_listing)
+
+    assert A.turn_costs(cfg)["delegated"] == 0 and swapped
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="a FIFO is a POSIX file; Windows makes none to swap in")
+def test_a_fifo_where_a_subagent_file_or_its_sidecar_stands_is_refused_without_hanging(project, monkeypatch, tmp_path):
+    """SUBAGENT-BOUNDS-2: a FIFO named as a subagent transcript or as its sidecar hung the reader, which opened it
+    without asking what it was."""
+    import threading
+    now = time.time()
+    cfg, transcript = _store(project, monkeypatch, tmp_path, now)
+    beside = tmp_path / "store" / "s1" / "subagents"
+    os.remove(beside / "agent-a1.meta.json")
+    os.mkfifo(beside / "agent-a1.meta.json")
+    os.mkfifo(beside / "agent-b2.jsonl")
+    shape = A.transcript_shape(A.implementer_adapter(cfg))
+    done = []
+    reader = threading.Thread(target=lambda: done.append((A.subagents(str(transcript), shape), A.turn_costs(cfg))),
+                              daemon=True)
+
+    reader.start()
+    reader.join(20)
+
+    assert done, "reading the subagents hung on a FIFO"
+    found, costs = done[0]
+    assert found["calls"] == {} and costs["delegated"] == _spent(S1)       # a1 itself is still read
+
+
 def test_the_subagents_declared_inside_the_sessions_directory_are_read_from_any_layer_as_before(project, monkeypatch,
                                                                                                 tmp_path):
     now = time.time()
