@@ -12,6 +12,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ## [Unreleased]
 
+### New commands
+
+- `ao catchup --reviewer <actor>` reviews a run with another reviewer actor of the project's table in place of the reviewer role, leaving the table as it is, so catch-up runs over different slices go side by side on different platforms ([features.md](docs/features.md)) (CATCHUP-REVIEWER).
+
 ## [0.5.0] - 2026-10-01
 
 Everything that landed on main after v0.4.0, each line naming the slice that landed it or the

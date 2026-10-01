@@ -1020,6 +1020,31 @@ def _catchup_statement(cfg, args):
     return {"family": family or None, "move_only": moves, "by": by, "user": user, "interactive": interactive}, None
 
 
+def _catchup_reviewer(cfg, actor):
+    """(cfg, None) with `actor` holding the reviewer role for this run alone, or (cfg, why it may not) (CATCHUP-REVIEWER).
+
+    Runs over different slices can then go side by side, each with its own reviewer, as the machine's
+    load and each platform's quota allow. Only an actor `ao role set reviewer` composed may stand in,
+    and never the implementer's: the table is read, not changed, and every rule a review applies to
+    the reviewer role - the author's family, the implementer's session and engine, the flags that
+    keep a reviewer from writing - applies to the actor as it is.
+    """
+    if not actor:
+        return cfg, None
+    actors, roles, _ = A.role_table(cfg)
+    block = actors.get(actor)
+    if not isinstance(block, dict):
+        composed = ", ".join(sorted(name for name, item in actors.items() if item.get("composed"))) or "none"
+        return cfg, f"--reviewer {actor}: the project's table has no such actor; its reviewer actors: {composed}"
+    if actor == roles.get("implementer"):
+        return cfg, f"--reviewer {actor}: {actor} is the implementer, and no actor reviews its own work"
+    if not block.get("composed"):
+        return cfg, f"--reviewer {actor}: only an actor `ao role set reviewer` composed may review, and {actor} was not"
+    print(f"{C['dim']}this run reviews with {actor} in place of {roles.get('reviewer') or 'the reviewer role'}; "
+          f"the table is unchanged{C['reset']}")
+    return dict(cfg, reviewer=dict(block, actor=actor)), None
+
+
 def _catchup_author(item, statement):
     """What a waived range's review is told about who wrote it: its grant's record, and a person's statement."""
     recorded = item.get("author") if isinstance(item.get("author"), dict) else {}
@@ -1142,6 +1167,10 @@ def cmd_catchup(cfg, args):
     limit = getattr(args, "limit", None)
     only = getattr(args, "slice", None)
     statement, refusal = _catchup_statement(cfg, args)
+    if refusal:
+        print(refusal)
+        return 2
+    cfg, refusal = _catchup_reviewer(cfg, getattr(args, "reviewer", None))
     if refusal:
         print(refusal)
         return 2

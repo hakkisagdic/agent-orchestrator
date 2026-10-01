@@ -103,7 +103,10 @@ lines, and which close by proof, `--move-only` included, and the totals, and
 changes nothing;
 `ao catchup --limit 10` starts at most ten reviews, still closes what needs no review and
 says how many waivers wait for a later run to review them, and
-`ao catchup --slice B7` takes one slice's waivers. A range whose last review decided
+`ao catchup --slice B7` takes one slice's waivers, and
+`ao catchup --slice B7 --reviewer <actor>` reviews them with another reviewer actor of the project's
+table in place of the reviewer role, so runs over different slices go side by side, each on its own
+platform, as the machine's load allows. A range whose last review decided
 nothing, UNAVAILABLE or INVALID, waits behind the ranges no review has failed on, so
 repeated runs reach every range; once a review finds the reviewer unavailable, the run
 starts no other review; and an INVALID review is reported as one. The reviews stay synchronous
@@ -120,6 +123,13 @@ had nothing to do: an idle catch-up is no failure. Rehearsing the catch-up plann
 2026-10-01, a run whose every review found the reviewer unavailable exited 0, as a run that
 closed ten waivers did. `ao catchup --plan` exits `0`, or `1` when the waivers cannot be read,
 and a sitting repeats `ao catchup --limit 10` until `ao catchup --plan` counts 0 review(s).
+
+*In ao since slice CATCHUP-REVIEWER: `--reviewer` names an actor `ao role set reviewer` composed,
+read from the table and never written to it; the implementer's actor, or one no reviewer composition
+made, is refused before the run starts. The run is the reviewer role's in every other way: the author's
+family, the implementer's session and engine and the flags that keep a reviewer from writing are held
+against the actor as against the role. Runs over disjoint slices may go side by side; runs over the same
+slice race for its waiver, as two runs without `--reviewer` would.*
 
 Retrospective evidence reconciles the record; it never authorizes a candidate.
 Nothing is skipped silently, and nothing is lost when the run degrades:

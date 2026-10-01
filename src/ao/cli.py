@@ -501,6 +501,9 @@ def build_parser():
                          "closes only if the move proof holds on what it landed, never on the statement. Needs --by")
     cu.add_argument("--by", help="with --author-family or --move-only: the person who states it, recorded with "
                                  "what it decides")
+    cu.add_argument("--reviewer", metavar="ACTOR",
+                    help="a reviewer actor of the project's table reviews this run in place of the reviewer role, "
+                         "so runs over different slices can each have their own; the table is not changed")
     cu.set_defaults(fn=cmd_catchup)
     pg = sub.add_parser("pings", help="dead man's switch: external pings that alarm when they stop")
     pg.add_argument("action", choices=["status", "setup", "test"], nargs="?", default="status")
