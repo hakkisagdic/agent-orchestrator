@@ -599,10 +599,14 @@ def hunt_slice(root, cfg):
                 text = fh.read(budget)
         except (OSError, UnicodeDecodeError):
             continue
-        if files and spent + len(text) > budget:
+        # The budget is bytes, as `hunter.bytes_per_run` says: counted in characters, a file of `é` was read at
+        # twice it (BUG-HUNTER-2). Only a character the cut splits is dropped.
+        text = text.encode(UTF8)[:budget].decode(UTF8, "ignore")
+        size = len(text.encode(UTF8))
+        if files and spent + size > budget:
             break
         files.append((path, text))
-        spent += len(text)
+        spent += size
     from .storage import replace_file_durably
     replace_file_durably(state_path, (json.dumps({"cursor": index % len(candidates)}) + "\n").encode(UTF8))
     return files, cursor

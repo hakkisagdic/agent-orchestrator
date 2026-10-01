@@ -691,16 +691,22 @@ def _cost_by_feature(cfg, since, window):
     measured = A.feature_costs(cfg, since=since)
     if not measured["turns"]:
         print("no transcript turns in this window")
-        return 0
-    span = " to ".join(time.strftime("%d %b %H:%M", time.localtime(at)) for at in (measured["from"], measured["to"]))
-    print(f"{C['b']}implementer spend by feature{C['reset']}  {C['dim']}({measured['unit']}; {measured['turns']} turns, "
-          f"{span}{' — ' + window if window else ''}){C['reset']}")
-    for name, spent in measured["features"].items():
-        share = 100 * spent["usage"] / measured["total"] if measured["total"] else 0
-        print(f"  {name:<18}{spent['turns']:>5} turns {spent['usage']:>9.1f}  {share:>5.1f}%")
+    else:
+        span = " to ".join(time.strftime("%d %b %H:%M", time.localtime(at))
+                           for at in (measured["from"], measured["to"]))
+        print(f"{C['b']}implementer spend by feature{C['reset']}  {C['dim']}({measured['unit']}; {measured['turns']} "
+              f"turns, {span}{' — ' + window if window else ''}){C['reset']}")
+        for name, spent in measured["features"].items():
+            share = 100 * spent["usage"] / measured["total"] if measured["total"] else 0
+            print(f"  {name:<18}{spent['turns']:>5} turns {spent['usage']:>9.1f}  {share:>5.1f}%")
+    # What runs on another command is counted whether or not this transcript has turns: hunts were left out
+    # when it had none, and the hunter runs on its own command, not the architect's (BUG-HUNTER-2).
     for name, count in measured["counted"].items():
-        print(f"  {name:<18}{count:>5} started  {C['dim']}the architect's pool, not this transcript{C['reset']}")
-    print(f"  {'inventory_review':<18}  {C['dim']}counted with review: a transcript cannot tell them apart{C['reset']}")
+        whose = "its own command" if name == "hunter" else "the architect's pool"
+        print(f"  {name:<18}{count:>5} started  {C['dim']}{whose}, not this transcript{C['reset']}")
+    if measured["turns"]:
+        print(f"  {'inventory_review':<18}  {C['dim']}counted with review: a transcript cannot tell them apart"
+              f"{C['reset']}")
     return 0
 
 

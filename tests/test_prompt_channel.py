@@ -273,14 +273,17 @@ def test_a_hunt_whose_prompt_no_channel_carries_is_refused_and_recorded(project,
     monkeypatch.setattr(cli, "_run_reviewer", _no_process)
     root = project["root"]
     _large_range(root)
-    cfg = dict(project, hunter={"id": "h1", "argv": [sys.executable, "-c", "print()", "{prompt}"],
+    # A harness ao ships, as a hunter must run (BUG-HUNTER-2), with no channel past one argument.
+    _declare(monkeypatch, "stand-in", detect={"binaries": [os.path.basename(sys.executable)]},
+             options={"trust_none": ["-I"]})
+    cfg = dict(project, hunter={"id": "h1", "argv": [sys.executable, "-I", "-c", "print()", "{prompt}"],
                                 "bytes_per_run": 400_000})
 
     assert cli.cmd_hunt(cfg, SimpleNamespace(action="run", fingerprint=None)) == 2
 
-    assert "no adapter ao ships runs this command" in capsys.readouterr().out
+    assert "adapter stand-in declares no other channel for `send`" in capsys.readouterr().out
     (run,) = [row for row in A.hunter_rows(root) if row.get("event") == "run"]
-    assert run["ok"] is False and "no adapter ao ships runs this command" in run["reason"]
+    assert run["ok"] is False and "declares no other channel" in run["reason"]
     assert [name for name in A.mailbox(root, "agent-mail") if "-hunter-to-" in name] == []
 
 

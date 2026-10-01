@@ -505,6 +505,28 @@ def cmd_role(cfg, args):
     return 0
 
 
+def _hunter_reading_problems(argv):
+    """What keeps a hunter's command from being one that only reads, by the rule a reviewer meets (BUG-HUNTER-2).
+
+    A reviewer is composed from a harness ao ships that declares how it runs without tools, with
+    those flags; a hunter's command is written by hand. `reviewer_problems` passed a program no
+    adapter declares - `sh -c` rewrote a file - and a harness in a writing mode, such as
+    `codex exec -s workspace-write`. So the command must run a harness ao ships, one able to
+    review, with every flag its `options.trust_none` names.
+    """
+    adapter = A.command_adapter(argv)
+    if not adapter:
+        return ["ao ships no adapter for its command, so nothing declares how it runs without tools"]
+    eligible, why = A.reviewer_eligibility(adapter)
+    if not eligible:
+        return [f"{adapter.get('id')} cannot review: {why}"]
+    if A.tool_review_contract(adapter) is not None:
+        return [f"{adapter.get('id')} is a tool reviewer, which reads a file ao writes for it, not a tree"]
+    missing = [token for token in dict.fromkeys(adapter["options"]["trust_none"]) if token not in argv]
+    return [f"its command lacks {' '.join(missing)}, which {adapter.get('id')} declares leaves it only reading"] \
+        if missing else []
+
+
 def cmd_hunt(cfg, args):
     """A scheduled, read-only bug hunt over a bounded slice of the tree; leads go to the architect (#45).
 
@@ -540,7 +562,7 @@ def cmd_hunt(cfg, args):
     if pinned:
         print(f"{C['dim']}the hunter's command names no {' or '.join(part for part in pinned if part.startswith('-'))}; "
               f"ao appends {' '.join(pinned)}, as its adapter pins for a reviewer{C['reset']}")
-    problems = allowlist.reviewer_problems(argv)
+    problems = allowlist.reviewer_problems(argv) + _hunter_reading_problems(argv)
     if problems:
         print(f"{C['red']}refused{C['reset']}: the hunter must not be able to write — {'; '.join(problems)}")
         return 2
@@ -577,7 +599,10 @@ def cmd_hunt(cfg, args):
         return 3
     if fresh:
         _, architect = A.mail_names(cfg)
-        name = f"{datetime.now():%Y%m%d-%H%M}-hunter-to-{architect}-LEADS-{A.safe_slug(fresh[0]['path'])}.md"
+        # The first lead's fingerprint names the mail: a second hunt in the same minute wrote over the first
+        # one's, and its leads, recorded as sent, were never sent again (BUG-HUNTER-2).
+        name = (f"{datetime.now():%Y%m%d-%H%M}-hunter-to-{architect}-LEADS-{A.safe_slug(fresh[0]['path'])}"
+                f"-{fresh[0]['fingerprint'][:8]}.md")
         body = [f"# {len(fresh)} lead(s) from the bug hunter", "",
                 "Leads, not verdicts: triage each into a backlog row or discard it with `ao hunt discard <id>`.", ""]
         body += [f"- [{lead['category']}] {lead['path']}:{lead['line']} {lead['symbol']} — {lead['finding']}  "

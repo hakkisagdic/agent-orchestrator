@@ -166,7 +166,8 @@ category), so a repeat is not sent again and a discard is remembered. A lead nev
 slice or raises a human alarm.
 
 The hunter is configured as `hunter.argv` and refused unless it cannot write, by the same rule a
-reviewer must meet. It is asked in the project's `language`, and a lead is read in one shape in
+reviewer must meet: its command runs a harness ao ships that can review, with every flag of that
+harness's `options.trust_none` in it. It is asked in the project's `language`, and a lead is read in one shape in
 either: `- [category] path:line symbol — what is wrong`. With the `hunter` feature switched on
 (it is off by default) the watchdog starts one hunt every `hunter.every_hours`, detached, never
 continuously. `ao hunt status` and `ao cost --features` count the runs, so its value can be judged

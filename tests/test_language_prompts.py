@@ -309,7 +309,11 @@ def test_the_hunter_is_asked_in_the_projects_language_and_its_leads_are_read_the
     _hunted_repo(root)
     kept = tmp_path / "hunt-prompt.txt"
     monkeypatch.setenv("AO_TEST_PROMPTS", str(kept))
-    cfg = dict(cfg, hunter={"id": "h1", "argv": [sys.executable, "-c", HUNTER, "{prompt}"]})
+    shipped = A.package_adapters()          # a harness ao ships, for the stand-in hunter (BUG-HUNTER-2)
+    stand_in = {"id": "stand-in", "detect": {"binaries": [os.path.basename(sys.executable)]},
+                "options": {"trust_none": ["-I"]}}
+    monkeypatch.setattr(A, "package_adapters", lambda: dict(shipped, **{"stand-in": stand_in}))
+    cfg = dict(cfg, hunter={"id": "h1", "argv": [sys.executable, "-I", "-c", HUNTER, "{prompt}"]})
 
     assert cli.cmd_hunt(cfg, SimpleNamespace(action="run", fingerprint=None)) == 0
 

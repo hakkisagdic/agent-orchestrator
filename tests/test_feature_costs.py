@@ -21,6 +21,18 @@ def _turn(records, start, usage, *calls):
     records.append({"payload": {"type": "turn_end"}})
 
 
+def test_hunts_are_counted_when_the_transcript_has_no_turns(project, monkeypatch, capsys):
+    """BUG-HUNTER-2: `ao cost --features` returned before what it counts apart when the transcript had no turns."""
+    monkeypatch.setattr(A, "session_paths", lambda cfg: (None, None))
+    A.hunter_record(project["root"], "run", files=[], cursor=0, ok=True, leads=0, sent=0, hunter="h1")
+
+    assert cli.cmd_cost(project, SimpleNamespace(since=None, features=True)) == 0
+
+    out = capsys.readouterr().out
+    assert "no transcript turns in this window" in out and A.re.search(r"hunter\s+1 started", out)
+    assert "its own command" in out
+
+
 def test_each_feature_is_priced_from_what_the_transcript_and_the_watchdog_recorded(project, tmp_path, monkeypatch,
                                                                                   capsys):
     nudged = time.mktime(time.strptime(NUDGED_AT, "%Y-%m-%d %H:%M:%S"))
