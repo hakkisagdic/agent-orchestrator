@@ -1383,7 +1383,8 @@ def cmd_fanout(cfg, args):
           f"tokens ({v['per_agent_source']}) ≈ {v['estimated_tokens']:,} tokens")
     w = v.get("window")
     if w:
-        print(f"   {args.provider} window: {w['pct']}% used, {w['window']} window, resets in {w['resets_in']}"
+        # The provider whose window was read, not the argument: without --provider that named None (HARNESS-ACCOUNTS-2).
+        print(f"   {v['provider']} window: {w['pct']}% used, {w['window']} window, resets in {w['resets_in']}"
               + (f"; {v['spent_this_window']:,} tokens fanned out in it so far" if v['spent_this_window'] else ""))
     for r in v["reasons"]:
         print(f"   {C['yellow'] if not v['ok'] else C['dim']}· {r}{C['reset']}")

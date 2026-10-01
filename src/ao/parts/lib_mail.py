@@ -278,14 +278,15 @@ def fanout_verdict(root, cfg, agents, per_agent_tokens=None, provider=None):
             reasons.append(f"{provider} window {win['pct']}% used, {left}% left < reserve "
                            f"{fc['window_reserve_pct']}%; resets in {win['resets_in']}")
     else:
-        reasons.append(f"{provider} window unreadable (keyflip absent or no line) — "
-                       f"hard cap and history only")
+        reasons.append((f"{provider} window unreadable (keyflip absent or no line)" if provider
+                        else "no keyflip provider runs the architect's command, so no window to read")
+                       + " — hard cap and history only")
     spent = sum(r.get("tokens") or 0 for r in fanout_history(root, 50) if r["at"] >= window_start)
     return {"verdict": verdict, "ok": verdict == "ok", "agents": agents,
             "per_agent_tokens": per,
             "per_agent_source": "arg" if per_agent_tokens else ("observed" if observed else "default"),
             "estimated_tokens": agents * per, "spent_this_window": spent,
-            "window": win, "max_agents": fc["max_agents"], "reasons": reasons}
+            "window": win, "provider": provider, "max_agents": fc["max_agents"], "reasons": reasons}
 
 
 

@@ -26,6 +26,23 @@ def test_low_window_refuses_and_unreadable_window_is_said(project, monkeypatch):
     assert v["ok"] and any("unreadable" in r for r in v["reasons"])
 
 
+def test_the_window_is_named_for_the_provider_read_not_the_argument(project, monkeypatch, capsys):
+    """HARNESS-ACCOUNTS-2: with no --provider the architect's provider's window was read, and the line named None."""
+    from types import SimpleNamespace
+    from ao import cli
+    asked = []
+    window = {"pct": 4, "window": "5h", "resets_in": "4h", "resets_s": 14400}
+    monkeypatch.setattr(A, "provider_window", lambda name: asked.append(name) or window)
+    args = SimpleNamespace(action="ok", agents=3, roots=None, per_root=None, per_agent_tokens=None, provider=None,
+                           json=False, done=None, errors=None, tokens=None, note=None, limit=20)
+
+    assert cli.cmd_fanout(project, args) == 0
+
+    out = capsys.readouterr().out
+    assert asked == ["claude"] and "claude window: 4% used" in out and "None window" not in out
+    assert A.fanout_verdict(project["root"], project, 3)["provider"] == "claude"
+
+
 def test_pipeline_bound_is_gated_not_the_root_count(project, monkeypatch, capsys):
     from types import SimpleNamespace
     from ao import cli
