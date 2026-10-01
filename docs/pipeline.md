@@ -165,7 +165,8 @@ candidate touches - a timestamp brings `clock`, a file write `durability`, a spa
 `subprocess`. The default is `declared`: every lens is a separate reviewer call, and a
 reviewer's quota is someone's window. Each lens is a section, so a lens pass is bounded and
 resumable like any other, and the verdict is per lens in the artefact: a clean correctness
-pass no longer implies a clean concurrency pass.
+pass no longer implies a clean concurrency pass. A lens the row names is asked even when it is
+the only one; a default of `correctness` alone is the whole review.
 
 ## 2c — Criteria: a verdict for each one the boundary lists
 

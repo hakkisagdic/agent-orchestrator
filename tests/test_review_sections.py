@@ -75,6 +75,32 @@ def test_a_review_cut_off_resumes_asking_only_what_was_not_answered(project, tmp
     assert calls.read_text().splitlines() == ["Scenario 3"]
 
 
+def test_a_single_declared_lens_is_asked_and_recorded(project, tmp_path, monkeypatch):
+    """REVIEW-SECTIONS-2: one named lens sent the review whole, and its question was never asked."""
+    root, cfg, calls = _setup(project, tmp_path, monkeypatch,
+                              "- [S1] the store · acceptance: keep it right · lenses: authority")
+
+    assert cli.cmd_review(cfg, _args()) == 0
+
+    assert calls.read_text().splitlines() == ["Lens `authority`"]
+    assert A.review_evidence(_newest(root))["lenses"] == {"asked": ["authority"], "waived": [], "added": []}
+
+
+def test_a_section_journal_tells_two_bindings_of_one_tool_apart(project):
+    """REVIEW-SECTIONS-2: strict routes were keyed by their argv template alone, so a section one binding answered
+    was taken up under the other and recorded as its answer."""
+    a = {"index": 0, "identity": {"binding": "A", "model_argument": "model-a", "family": "x"},
+         "argv": ["tool", "--model", "{model}", "-p", "{prompt}"], "eligible": True}
+    b = dict(a, identity={"binding": "B", "model_argument": "model-b", "family": "y"})
+    sections = [{"name": "scenario:1"}, {"name": "scenario:2"}]
+    evidence = {"diff_digest": "sha256:d"}
+
+    assert cli._section_journal(project["root"], evidence, "b", sections, [a]) \
+        != cli._section_journal(project["root"], evidence, "b", sections, [b])
+    assert cli._section_journal(project["root"], evidence, "b", sections, [{"id": "r1", "argv": ["x"]}]) \
+        == cli._section_journal(project["root"], evidence, "b", sections, [{"id": "r1", "argv": ["y"]}])
+
+
 def test_declared_lenses_are_asked_as_sections_and_recorded(project, tmp_path, monkeypatch):
     root, cfg, calls = _setup(project, tmp_path, monkeypatch,
                               "- [S1] the store · acceptance: keep it right · lenses: correctness, clock, -tests")

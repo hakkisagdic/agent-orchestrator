@@ -1315,7 +1315,9 @@ def review_sections(cfg, item, boundary_text, diff):
             if A.re.search(r"^\+\+\+ b/(?:.*/)?tests?/", diff, A.re.M):
                 lenses.append("tests")
         lenses = [lens for lens in dict.fromkeys(lenses + added) if lens in REVIEW_LENSES and lens not in waived]
-    if len(lenses) >= 2:
+    # A lens the row names is asked even alone: `lenses: authority` went whole, unrecorded, and the question it
+    # declared was never asked (REVIEW-SECTIONS-2). A default of correctness alone is the whole review.
+    if len(lenses) >= 2 or (named and lenses):
         record = {"asked": lenses, "waived": [lens for lens in waived if lens in REVIEW_LENSES],
                   "added": [lens for lens in added if lens in REVIEW_LENSES]}
         return [{"name": f"lens:{lens}",
@@ -1329,11 +1331,24 @@ def review_sections(cfg, item, boundary_text, diff):
     return [], None
 
 
+def _route_key(route):
+    """A reviewer route as a journal names it: its id or argv, and a strict route's binding with it.
+
+    A strict route has no id, and its argv is its tool's template until it is expanded, so one
+    tool bound twice gave one key: a section answered under one binding was taken up under the
+    other and recorded with its identity and tier (REVIEW-SECTIONS-2).
+    """
+    route = route or {}
+    key = str(route.get("id") or route.get("argv"))
+    identity = route.get("identity")
+    return key + json.dumps(identity, sort_keys=True) if isinstance(identity, dict) else key
+
+
 def _section_journal(root, evidence, boundary, sections, chain):
     # No word of the prompt is in the key, whichever language it is written in; the prompt's size reaches
     # the key only through the claims it left room for (LANGUAGE-PROMPTS).
     keyed = [evidence.get("diff_digest"), boundary, [s["name"] for s in sections],
-             [str((route or {}).get("id") or (route or {}).get("argv")) for route in chain]]
+             [_route_key(route) for route in chain]]
     if evidence.get("claims"):
         # A section answered against other claims, or none, is no answer about these.
         keyed.append(evidence["claims"].get("digest"))
