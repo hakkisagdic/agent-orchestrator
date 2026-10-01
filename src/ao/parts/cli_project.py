@@ -579,8 +579,11 @@ def cmd_init(cfg, args):
     requested = skillkit.detect_agents(root, args.agent)[0]
     for ident, adapter in skillkit.setup_adapters(root):
         coordination = (adapter.get("directives") or {}).get("coordination")
-        present = any(os.path.isdir(os.path.join(root, *path.split("/")))
-                      for path in (adapter.get("detect") or {}).get("dirs") or [])
+        detect = adapter.get("detect") or {}
+        # A harness is here by a file of its own as much as by a directory: one declared by its files alone had
+        # the playbook and no coordination (HARNESS-SETUP-3).
+        present = any(os.path.isdir(skillkit._local(root, path) or "\0") for path in detect.get("dirs") or []) \
+            or any(os.path.isfile(skillkit._local(root, path) or "\0") for path in detect.get("files") or [])
         if coordination and (ident == requested or present):
             if skillkit._local(root, coordination) is None:
                 print(f"  {C['yellow']}not written{C['reset']}  {coordination}: it lies outside the project (HARNESS-SETUP-2)")

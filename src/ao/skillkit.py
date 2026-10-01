@@ -87,9 +87,13 @@ def resolve_agent(name, root=None):
     return name
 
 
-def agent_choices():
-    """The names `--agent` accepts: every harness ao sets up, by adapter id and by vendor name."""
-    ids = {ident for ident, _ in setup_adapters()}
+def agent_choices(root=None):
+    """The names `--agent` accepts: every harness ao sets up, by adapter id and by vendor name.
+
+    A project's own adapters are among them where `root` names the project: `ao -C <repo> init --agent <id>`
+    was refused for an adapter the project declared, though init and skill set it up (HARNESS-SETUP-3).
+    """
+    ids = {ident for ident, _ in setup_adapters(root)}
     names = ids | {vendor["id"] for vendor in A.vendor_list() if vendor.get("adapter") in ids}
     return sorted(names) + ["auto", "all"]
 

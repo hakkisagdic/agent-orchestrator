@@ -60,12 +60,13 @@ A._part("cli_install", globals())
 A._part("cli_completion", globals())
 
 
-def build_parser():
+def build_parser(root=None):
     """The whole `ao` command line, built without running a command.
 
     main parses with it, and tests/test_docs_commands.py walks it, so a document that shows
     an invocation this parser refuses fails there rather than in a reader's terminal. Building
-    it reads the adapter catalog once, for the --agent names init and skill share.
+    it reads the adapter catalog once, for the --agent names init and skill share, the project's
+    own adapters among them where `root` names the project (HARNESS-SETUP-3).
     """
     p = argparse.ArgumentParser(prog="ao", description="agent-orchestrator (observation layer)")
     p.add_argument("-C", "--root", help="project directory (default: nearest .ao/ or git root)")
@@ -256,7 +257,7 @@ def build_parser():
     ini = sub.add_parser("init", help="put ao on this project (idempotent)")
     ini.add_argument("--name")
     from . import skillkit as _skillkit
-    agents = _skillkit.agent_choices()      # init and skill offer the same names: one read of the adapter catalog
+    agents = _skillkit.agent_choices(root)  # init and skill offer the same names: one read of the adapter catalog
     ini.add_argument("--agent", choices=agents, default="auto")
     ini.add_argument("--mcp", action="store_true", help="(default) register the MCP server for detected agents")
     ini.add_argument("--no-mcp", action="store_true", help="skip the MCP registration")
@@ -610,7 +611,14 @@ def main(argv=None):
     A.utf8_streams()
     command, root = "ao", None
     try:
-        p = build_parser()
+        # The project the command is for, read before the rest, so --agent knows its own adapters (HARNESS-SETUP-3).
+        early = argparse.ArgumentParser(add_help=False, exit_on_error=False)
+        early.add_argument("-C", "--root")
+        try:
+            given = early.parse_known_args(argv)[0].root
+        except argparse.ArgumentError:
+            given = None                        # the parser proper names what is wrong, as `ao`
+        p = build_parser(A.find_root(given if given and os.path.isdir(os.path.expanduser(given)) else None))
         args = p.parse_args(argv)
         if args.root and not os.path.isdir(os.path.expanduser(args.root)):
             # Taken at face value, a missing directory showed an empty panel and exited 0.

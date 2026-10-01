@@ -1,6 +1,9 @@
 import json
 import os
+import subprocess
 import sys
+
+import pytest
 
 from ao import skillkit
 
@@ -89,6 +92,45 @@ def test_a_project_layer_names_no_command_ao_runs_to_register_its_server(project
     assert not os.path.exists(marker)
     with open(os.path.join(root, ".newcomer", "mcp.json"), encoding="utf-8") as fh:
         assert "ao" in json.load(fh)["servers"]
+
+
+def test_a_project_adapter_is_one_agent_init_and_skill_accept_by_name(project):
+    """HARNESS-SETUP-3: the parser's --agent names were read without the project, so its own adapters were refused."""
+    from ao import cli
+    root = project["root"]
+    _declare(root)
+
+    assert "newcomer" in skillkit.agent_choices(root) and "newcomer" not in skillkit.agent_choices()
+    assert cli.main(["-C", root, "skill", "install", "--agent", "newcomer"]) == 0
+    assert os.path.isfile(os.path.join(root, ".newcomer", "rules", "ao-playbook.md"))
+
+
+def test_a_root_option_missing_its_directory_is_told_by_the_parser_proper(capsys):
+    """HARNESS-SETUP-3: the project is read before the parser is built, and a -C with no directory is still told
+    as `ao` tells it, not by that first reading."""
+    from ao import cli
+    with pytest.raises(SystemExit) as stopped:
+        cli.main(["-C"])
+
+    assert stopped.value.code == 2 and capsys.readouterr().err.startswith("usage: ao ")
+
+
+def test_a_harness_present_by_its_file_alone_gets_its_coordination(tmp_path, monkeypatch, capsys):
+    """HARNESS-SETUP-3: init wrote the coordination only for a harness found by a directory, though the playbook
+    went to every harness found."""
+    from ao import cli
+    from tests import conftest
+    from tests.test_profiles import _init_args
+    root = tmp_path / "repo"
+    root.mkdir()
+    subprocess.run([conftest.GIT, "init", "-q"], cwd=root, check=True)
+    (root / "NEWCOMER.md").write_text("# rules\n", encoding="utf-8")
+    _declare(str(root), dict(NEWCOMER, detect={"files": ["NEWCOMER.md"]}))
+
+    assert cli.cmd_init({"root": str(root)}, _init_args(profile=None, agent="auto")) == 0, capsys.readouterr().out
+
+    assert (root / ".newcomer" / "rules" / "ao-playbook.md").is_file()
+    assert (root / ".newcomer" / "rules" / "ao-coordination.md").is_file()
 
 
 def test_a_name_resolves_through_the_vendor_list_and_rule_files_follow_what_is_declared(project, monkeypatch):

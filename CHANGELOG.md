@@ -18,6 +18,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- `--agent` accepts the adapters a project declares in `.ao/adapters` (`ao -C <repo> skill install --agent <name>`), where it refused them as an invalid choice, and `ao init` writes the coordination file of an adapter detected by its files, not only by its directories (HARNESS-SETUP-3).
 - In append-only mail mode a message ao writes is in the store at once, where removing its view file before the next reconcile lost it; compaction writes the archive as durably as the stub that replaces the body and never writes a stub over its own archive, and `ao doctor` names a store it cannot read (MESSAGE-STORE-2).
 - Bookkeeping a session writes after its turn closed, such as a Stop hook's summary, no longer ends that turn while a subagent it started still works, where the watchdog reaped the subagent at the idle window (SUBAGENT-LIVENESS-2).
 - A retrospective range is reviewed in the tree it ends on, unpacked where the reviewer runs and named in its prompt, where its reviewer was handed the diff alone and found its directory empty (REVIEW-RANGE-TREE).
