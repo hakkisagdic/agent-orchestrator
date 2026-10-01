@@ -1389,7 +1389,10 @@ def wake_failure_told(failure):
     Another kind, another binary or other words is something new, and is told.
     """
     failure = failure or {}
-    words = re.sub(r"(?<![\w-])(?=[\w-]*\d)[\w-]{8,}", "…", A.redact(str(failure.get("text") or "")))
+    # A request id is masked by its key first: one of letters alone has no digit for the rule after it to find,
+    # and each retry read as news (NOISE-REPEATS-2).
+    text = re.sub(r'(?i)(request[ _-]?id"?\s*[:=]\s*"?)[^"\s,}]+', "\\1…", A.redact(str(failure.get("text") or "")))
+    words = re.sub(r"(?<![\w-])(?=[\w-]*\d)[\w-]{8,}", "…", text)
     return f"{failure.get('kind')}:{failure.get('binary') or '?'}:{' '.join(words.split())}"
 
 

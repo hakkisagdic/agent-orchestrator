@@ -323,6 +323,18 @@ def test_a_failure_is_named_by_its_kind_binary_and_words_not_its_time_or_request
     assert W.wake_failure_told(one) != W.wake_failure_told(dict(one, kind="session"))
 
 
+def test_a_request_id_of_letters_alone_is_no_news_either():
+    """NOISE-REPEATS-2: an id was masked only when it held a digit, so one of letters made every retry news."""
+    one = {"kind": "other", "binary": "/agents/claude 2.1.261", "text": 'API Error: 529 {"request_id":"req_abcdefgh"}'}
+
+    assert W.wake_failure_told(one) == W.wake_failure_told(
+        dict(one, text='API Error: 529 {"request_id":"req_ijklmnop"}'))
+    assert W.wake_failure_told(dict(one, text="stream error: request id: abcdefghij")) \
+        == W.wake_failure_told(dict(one, text="stream error: request id: klmnopqrst"))
+    assert W.wake_failure_told(dict(one, text=OVERLOADED % 1)) \
+        == f"other:/agents/claude 2.1.261:{OVERLOADED.replace('req_011CT%08dabcdefgh', '…')}"
+
+
 def test_the_doctor_raises_a_failed_wake_saying_what_the_watchdog_says(project, monkeypatch):
     raised = []
     monkeypatch.setattr(W, "notify", lambda title, msg, root=None, **kw: raised.append(kw) or True)

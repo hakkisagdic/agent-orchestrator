@@ -18,6 +18,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- A failed wake's request id is masked by its key whatever its characters, where an id of letters alone made every retry news and a red alarm mailed on each one (NOISE-REPEATS-2).
 - A notice key younger than a day stays in the fold past its 500-key bound, where the ledger a window then read for it could already be trimmed of it, and a fold that cannot be written trims nothing, where the ledger was trimmed of rows no fold had counted; `ao doctor` names the ledger past its bound ([alarms.md](docs/alarms.md)) (NOTICE-WINDOW-2).
 - ao asks xcrun which git to run only for macOS's own /usr/bin/git stub, where any executable `xcrun` beside a compiled git was run once in every process (SUITE-SPEED-2).
 - `--agent` accepts the adapters a project declares in `.ao/adapters` (`ao -C <repo> skill install --agent <name>`), where it refused them as an invalid choice, and `ao init` writes the coordination file of an adapter detected by its files, not only by its directories (HARNESS-SETUP-3).
