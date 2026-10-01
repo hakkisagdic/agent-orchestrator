@@ -983,6 +983,16 @@ def _steering_item(name, path, tree, blobs, declared):
     return item
 
 
+def _resource_outside(value):
+    """Whether an agent's resource names a file outside the project's tree: a `file://` path that is absolute,
+    starts at a home (`~`), names a drive, or steps up with `..` (KIRO-CONTENT-2)."""
+    text = str(value)
+    if not text.startswith("file://"):
+        return False
+    path = text[len("file://"):].replace("\\", "/")
+    return path.startswith(("/", "~")) or path[1:2] == ":" or ".." in path.split("/")
+
+
 def _agent_item(name, path, tree, blobs, declared, takes_agents):
     """An agent definition in each harness's declared format, with no field in it that runs a command (#15).
 
@@ -1016,6 +1026,19 @@ def _agent_item(name, path, tree, blobs, declared, takes_agents):
         for field in taken:
             definition.pop(field)
             item["skipped"].append((f"agents/{name}.json {field}", str(commands[field])))
+        # A resource is context the agent loads before it runs: one outside the project's tree loads a file
+        # of this machine the source chose - a key, a credential - so it is taken out and named, and what is
+        # kept is named as a grant is (KIRO-CONTENT-2).
+        context = _declared(shape.get("context"))
+        resources = definition.get(context.get("field")) if context.get("field") else None
+        if isinstance(resources, list) and any(_resource_outside(value) for value in resources):
+            for value in resources:
+                if _resource_outside(value):
+                    item["skipped"].append((f"agents/{name}.json {context['field']} {value}",
+                                            "a file outside the project's tree, which the source chose: never "
+                                            "imported"))
+            definition[context["field"]] = [value for value in resources if not _resource_outside(value)]
+            taken.append(context["field"])
         target = f"{directives['agents_dir']}/{name}.json"
         item["files"][target] = (harness, (json.dumps(definition, indent=2, ensure_ascii=False) + "\n").encode(UTF8)
                                  if taken else blobs[oid])
@@ -1024,9 +1047,11 @@ def _agent_item(name, path, tree, blobs, declared, takes_agents):
             if value:
                 shown = value if isinstance(value, list) else sorted(value) if isinstance(value, dict) else [value]
                 item["notes"].append(f"{target} keeps {field} {', '.join(map(str, shown))}: {meaning}")
-        context = _declared(shape.get("context"))
         if context.get("field") and not definition.get(context["field"]):
             item["notes"].append(f"{target} names no {context['field']}: {context.get('empty')}")
+        elif context.get("field") and isinstance(definition.get(context["field"]), list):
+            item["notes"].append(f"{target} keeps {context['field']} "
+                                 f"{', '.join(map(str, definition[context['field']]))}: the context it loads")
     return item
 
 
@@ -1054,6 +1079,14 @@ def _content_refusals(root, items):
             if not why and target in writers:
                 why = f"{target} would be written by both {writers[target]} and {label}"
             writers.setdefault(target, label)
+            # A file another entry vendored is that entry's, whatever its bytes: equal bytes left two entries
+            # owning one file, and removing either took it from the other (KIRO-CONTENT-2).
+            owner = next((f"{dict(CONTENT_KINDS)[kind]} {entry.get(dict(CONTENT_KINDS)[kind])}"
+                          for kind, entries in record.items() for entry in entries
+                          if target in (entry.get("files") or {})
+                          and not (kind == item["kind"] and entry.get(key) == item["name"])), None)
+            if not why and owner:
+                why = f"{target} was vendored as {owner}: remove that first"
             path = os.path.join(root, *target.split("/"))
             if not why and os.path.isdir(path):
                 why = f"{target} is a directory"

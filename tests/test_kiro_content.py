@@ -179,6 +179,55 @@ def test_agents_land_as_cli_definitions_with_no_field_that_runs_a_command(projec
                                                                     "agents/builder.json mcpServers"]
 
 
+def _layer(tmp_path, files):
+    """A source keeping just these files of a Kiro layer in .kiro/, and the commit to pin it at."""
+    source = tmp_path / "layer"
+    for rel, text in files.items():
+        (source / ".kiro" / rel).parent.mkdir(parents=True, exist_ok=True)
+        (source / ".kiro" / rel).write_text(text, encoding="utf-8")
+    _git(source, "init", "-q")
+    _git(source, "add", "-A")
+    _git(source, "commit", "-q", "-m", "a kiro layer")
+    return str(source), _git(source, "rev-parse", "HEAD")
+
+
+def test_an_agent_loads_no_mcp_configuration_and_no_file_from_outside_the_project(project, tmp_path, capsys):
+    """KIRO-CONTENT-2: includeMcpJson started every MCP server the user configured, and a resource outside the
+    project's tree - a key, a credential - was loaded into the agent's context, neither of them named."""
+    root = project["root"]
+    outside = ["file:///etc/hosts", "file://~/.ssh/id_rsa", "file://../secrets.md", "file://D:/ao-home/a.md"]
+    source, pin = _layer(tmp_path, {"agents/reader.json": _agent(
+        "reader", includeMcpJson=True, resources=outside[:2] + ["file://README.md"] + outside[2:] + ["skill://tdd"])})
+
+    assert _add(project, f"{source}@{pin}", agents="reader") == 0
+
+    out = _out(capsys)
+    landed = json.loads(_read(root, ".kiro/agents/reader.json"))
+    assert "includeMcpJson" not in landed and landed["useLegacyMcpJson"] is False      # false loads nothing: kept
+    assert landed["resources"] == ["file://README.md", "skill://tdd"]
+    assert "skipped agents/reader.json includeMcpJson (it loads every MCP server" in out
+    assert all(f"skipped agents/reader.json resources {value} (a file outside the project's tree" in out
+               for value in outside)
+    assert ".kiro/agents/reader.json keeps resources file://README.md, skill://tdd: the context it loads" in out
+
+
+def test_a_file_another_entry_vendored_is_refused_whatever_its_bytes(project, tmp_path, capsys):
+    """KIRO-CONTENT-2: a skill lands as steering in Kiro, and a steering file of the same bytes and name was
+    vendored a second time, two entries owning one file."""
+    root = project["root"]
+    source, pin = _layer(tmp_path, {"skills/foo/SKILL.md": "# foo\n",
+                                    "steering/foo.md": "---\ninclusion: manual\n---\n\n# foo\n"})
+
+    assert _add(project, f"{source}@{pin}", skills="foo") == 0
+    capsys.readouterr()
+    assert _add(project, f"{source}@{pin}", steering="foo") == 2
+
+    assert ".kiro/steering/foo.md was vendored as skill foo: remove that first" in _out(capsys)
+    with open(os.path.join(root, ".ao", "content.json"), encoding="utf-8") as fh:
+        record = json.load(fh)
+    assert [entry["skill"] for entry in record["skills"]] == ["foo"] and record["steering"] == []
+
+
 def test_hooks_are_never_imported_and_each_is_named_with_the_reason(project, tmp_path, capsys):
     root = project["root"]
     source, pin = _ecc(tmp_path)

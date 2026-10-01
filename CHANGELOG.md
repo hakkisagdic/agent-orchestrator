@@ -24,6 +24,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Security
 
+- A Kiro agent borrowed with `ao content add` loads no MCP configuration (`includeMcpJson`, `useLegacyMcpJson`) and no resource outside the project's tree, each taken out and named, and the resources it keeps are named; a file another entry vendored is refused rather than owned twice (KIRO-CONTENT-2).
 - A tool reviewer runs exactly the command its adapter declares, where a route naming pr-agent ran any program it listed and the review was recorded as pr-agent's; the `pr-agent` extra is bounded to the 0.45 release its adapter was measured against (REVIEWER-TOOL-2).
 - A person's review records a verdict only against the whole digest of the diff they read, where any 12 or more of its hex digits matched and an author could have swapped in a second diff sharing them ([roles.md](docs/roles.md)) (REVIEW-TIERS-2).
 

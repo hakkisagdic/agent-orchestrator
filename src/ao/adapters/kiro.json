@@ -173,7 +173,9 @@
       "extension": ".json",
       "commands": {
         "hooks": "hooks are never imported: each runs a command when its trigger fires",
-        "mcpServers": "an MCP server is a command the CLI starts: never imported"
+        "mcpServers": "an MCP server is a command the CLI starts: never imported",
+        "includeMcpJson": "it loads every MCP server in ~/.kiro/settings/mcp.json and .kiro/settings/mcp.json, each a command the CLI starts: never imported",
+        "useLegacyMcpJson": "it loads the MCP servers of the legacy configuration, each a command the CLI starts: never imported"
       },
       "grants": {
         "allowedTools": "the tools it uses without asking",
