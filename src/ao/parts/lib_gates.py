@@ -26,6 +26,11 @@ def _native_executable(path):
     return any(head.startswith(magic) for magic in _NATIVE_MAGIC)
 
 
+# The one git that is an xcrun stub: macOS's own. An xcrun beside any other compiled git was run once a process
+# on every platform but Windows, a program ao had no reason to start (SUITE-SPEED-2).
+_XCRUN_STUB = "/usr/bin/git"
+
+
 def _xcrun_git(candidate):
     """The git an xcrun stub runs, or None when `candidate` is not such a stub.
 
@@ -36,9 +41,9 @@ def _xcrun_git(candidate):
     binary it would run. That answer is taken only when it is itself a compiled
     git, so it can never put a script in front of git.
     """
-    if os.name == "nt":
-        return None
     stub = os.path.realpath(candidate)
+    if stub != _XCRUN_STUB:
+        return None
     xcrun = os.path.join(os.path.dirname(stub), "xcrun")
     if not (_native_executable(stub) and os.path.isfile(xcrun) and os.access(xcrun, os.X_OK)):
         return None

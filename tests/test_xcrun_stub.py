@@ -31,6 +31,7 @@ def _stub_beside_xcrun(tmp_path, monkeypatch, answer=None, exit_code=0):
     monkeypatch.delenv("AO_GIT", raising=False)
     monkeypatch.setenv("PATH", str(stub.parent) + os.pathsep + os.environ.get("PATH", ""))
     monkeypatch.setattr(A, "_GIT_BINARIES", {})
+    monkeypatch.setattr(A, "_XCRUN_STUB", os.path.realpath(str(stub)))          # where macOS keeps its stub
     return stub, real, calls
 
 
@@ -41,6 +42,16 @@ def test_the_stub_is_passed_over_for_the_git_xcrun_names_asked_once(tmp_path, mo
     assert A.git_binary() == str(real)
     assert A.measured_by()["git"] == str(real)
     assert calls.read_text(encoding="utf-8").splitlines() == ["--find git"]
+
+
+def test_an_xcrun_beside_a_git_that_is_not_macos_stub_is_never_run(tmp_path, monkeypatch):
+    """SUITE-SPEED-2: an executable xcrun beside any compiled git was run, once a process, on every platform but
+    Windows; only macOS's own stub is one xcrun answers for."""
+    stub, _, calls = _stub_beside_xcrun(tmp_path, monkeypatch)
+    monkeypatch.setattr(A, "_XCRUN_STUB", "/usr/bin/git")
+
+    assert A.git_binary() == str(stub)
+    assert not calls.exists()
 
 
 def test_ao_git_still_wins_and_xcrun_is_not_asked(tmp_path, monkeypatch):

@@ -332,7 +332,9 @@ def _config_files():
     """Every file core.bare can be read from for this repository, found once.
 
     The repository's own config and config.worktree and the user's global files,
-    present or not, and every file git reports reading, includes among them. A
+    present or not, every file git reports reading, includes among them, and every
+    file an include names, there yet or not: git reads one only once it is there,
+    and a file not watched could turn the repository bare unseen (SUITE-SPEED-2). A
     system file that does not exist is not watched: creating one takes root.
     """
     home = os.path.expanduser("~")
@@ -344,8 +346,17 @@ def _config_files():
         common, worktree = out.splitlines()
         paths += [os.path.join(REPO, common, "config"), os.path.join(REPO, worktree)]
     code, out = _git_text("config", "--list", "--show-origin", "-z")
-    origins = out.split("\0")[0::2] if code == 0 else []
-    paths += [os.path.join(REPO, origin[5:]) for origin in origins if origin.startswith("file:")]
+    fields = out.split("\0") if code == 0 else []
+    for origin, entry in zip(fields[0::2], fields[1::2]):
+        if not origin.startswith("file:"):
+            continue
+        source = os.path.join(REPO, origin[5:])
+        paths.append(source)
+        key, _, value = entry.partition("\n")
+        key = key.lower()
+        if value and (key == "include.path" or key.startswith("includeif.") and key.endswith(".path")):
+            value = os.path.expanduser(value)
+            paths.append(value if os.path.isabs(value) else os.path.join(os.path.dirname(source), value))
     return sorted(set(paths))
 
 
@@ -353,14 +364,8 @@ _CONFIG_FILES = _config_files()
 _BARE = {"signature": None, "value": None}
 
 
-def _core_bare():
-    """`git config --bool core.bare`, asked again only when something it is read from changed.
-
-    Each file's inode, size and nanosecond mtime, and the variables that name or
-    inject git config: git replaces a config file by renaming a new one over it,
-    and any other writer moves its mtime, so an unchanged signature is an
-    unchanged answer, and the git call is saved on nearly every snapshot.
-    """
+def _config_signature():
+    """Each watched file's inode, size and nanosecond mtime, and the variables that name or inject git config."""
     signature = [sorted((key, value) for key, value in os.environ.items()
                         if key.startswith("GIT_") or key in ("HOME", "XDG_CONFIG_HOME"))]
     for path in _CONFIG_FILES:
@@ -370,7 +375,21 @@ def _core_bare():
             signature.append(None)
         else:
             signature.append((st.st_ino, st.st_size, st.st_mtime_ns))
-    if signature != _BARE["signature"]:
+    return signature
+
+
+def _core_bare():
+    """`git config --bool core.bare`, asked again only when something it is read from changed.
+
+    git replaces a config file by renaming a new one over it, and any other writer
+    moves its mtime, so an unchanged signature is an unchanged answer, and the git
+    call is saved on nearly every snapshot. A changed one finds the files again
+    first: a change can add an include, whose file is then watched (SUITE-SPEED-2).
+    """
+    global _CONFIG_FILES
+    if _config_signature() != _BARE["signature"]:
+        _CONFIG_FILES = _config_files()
+        signature = _config_signature()
         _BARE["value"] = _git_text("config", "--bool", "core.bare")[1].strip()
         _BARE["signature"] = signature
     return _BARE["value"]

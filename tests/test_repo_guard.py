@@ -50,6 +50,21 @@ def test_a_bare_flip_made_from_a_linked_worktree_is_seen_though_the_status_still
     assert (before[2], after[2]) == ("false", "true")
 
 
+def test_an_include_added_before_its_file_is_watched_once_the_file_is_written(tmp_path, monkeypatch):
+    """SUITE-SPEED-2: the files core.bare is read from were found once, so the file of an include added later was
+    never watched, and a bare flip written into it kept the answer cached before it."""
+    main = _repository(tmp_path / "main")
+    later = tmp_path / "later.gitconfig"
+    state, _ = _guarding(monkeypatch, main)
+    state()
+    _git(main, "config", "include.path", str(later))
+    assert state()[2] == "false"
+
+    later.write_text("[core]\n\tbare = true\n", encoding="utf-8")
+
+    assert state()[2] == "true"
+
+
 def test_commits_staging_and_a_branch_switch_are_seen_and_a_fetch_is_not(tmp_path, monkeypatch):
     main = _repository(tmp_path / "main")
     _git(tmp_path, "clone", "-q", "--bare", str(main), str(tmp_path / "remote.git"))

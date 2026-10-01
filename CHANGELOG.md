@@ -18,6 +18,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- ao asks xcrun which git to run only for macOS's own /usr/bin/git stub, where any executable `xcrun` beside a compiled git was run once in every process (SUITE-SPEED-2).
 - `--agent` accepts the adapters a project declares in `.ao/adapters` (`ao -C <repo> skill install --agent <name>`), where it refused them as an invalid choice, and `ao init` writes the coordination file of an adapter detected by its files, not only by its directories (HARNESS-SETUP-3).
 - In append-only mail mode a message ao writes is in the store at once, where removing its view file before the next reconcile lost it; compaction writes the archive as durably as the stub that replaces the body and never writes a stub over its own archive, and `ao doctor` names a store it cannot read (MESSAGE-STORE-2).
 - Bookkeeping a session writes after its turn closed, such as a Stop hook's summary, no longer ends that turn while a subagent it started still works, where the watchdog reaped the subagent at the idle window (SUBAGENT-LIVENESS-2).
@@ -41,6 +42,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Under the hood
 
+- The suite's repository guard watches the file an include names before that file exists, where an include added during a run left its file unwatched and a bare flip written into it unseen (SUITE-SPEED-2).
 - The marker fingerprint's test forges the identity it reads through a handle, as the fingerprint does, so a Windows runner no longer fails it when a clock tick passes between creating the marker and writing it (WINDOWS-FINGERPRINT-TEST).
 
 ## [0.5.0] - 2026-10-01
