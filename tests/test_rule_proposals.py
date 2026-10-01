@@ -312,8 +312,9 @@ def test_neither_the_proposal_nor_its_answer_writes_the_playbook_or_the_rule_fil
 
     after = _files(root)
     changed = sorted(path for path in set(before) | set(after) if before.get(path) != after.get(path))
-    assert changed and all(path.startswith((".ao/ledger/decisions.jsonl", ".ao/decisions/D-")) for path in changed), \
-        changed
+    # The decisions, their ledger, and the lock one answer at a time is given under (CLI-ROBUST-2).
+    assert changed and all(path.startswith((".ao/ledger/decisions.jsonl", ".ao/decisions/D-", ".ao/decisions.lock"))
+                           for path in changed), changed
     assert (after[playbook], after[RULE]) == (before[playbook], before[RULE])
     assert [p["state"] for p in A.proposals(root)] == ["accepted", "accepted"]
 
