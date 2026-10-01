@@ -58,4 +58,6 @@ dev = ["pytest>=8"]
 # A reviewer ao runs as a tool over the staged candidate, on its own provider (#86). Tier two:
 # absent, the reviewer reports itself unavailable and names this extra. pr-agent needs Python
 # 3.12, above ao's floor, so on an older interpreter the extra installs nothing rather than fail.
-pr-agent = ["pr-agent>=0.45.0; python_version >= '3.12'"]
+# Bounded to the release its adapter was measured against: a later one could move the answer
+# marker or rename a model setting, and ao would record the model it pinned (REVIEWER-TOOL-2).
+pr-agent = ["pr-agent>=0.45.0,<0.46; python_version >= '3.12'"]

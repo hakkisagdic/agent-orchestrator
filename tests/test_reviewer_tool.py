@@ -59,6 +59,13 @@ WATCHED = ("CONFIG__MODEL", "CONFIG__MODEL_WEAK", "CONFIG__MODEL_REASONING", "CO
            "SETTINGS_FILE_FOR_DYNACONF", "ANTHROPIC__KEY", "OPENAI_API_KEY", "GIT_DIR")
 
 
+def _declare(monkeypatch, argv):
+    """The package's pr-agent adapter declaring `argv` as its command: a tool route runs nothing else (REVIEWER-TOOL-2)."""
+    shipped = A.package_adapters()
+    declared = dict(shipped["pr-agent"], send=dict(shipped["pr-agent"]["send"], argv=list(argv)))
+    monkeypatch.setattr(A, "package_adapters", lambda: dict(shipped, **{"pr-agent": declared}))
+
+
 def _tool(tmp_path, monkeypatch, mode="approve"):
     """A tool route running the fake, and the file it records into; reviewers start in a clean temporary directory."""
     scratch = tmp_path / "reviewer-tmp"
@@ -70,9 +77,10 @@ def _tool(tmp_path, monkeypatch, mode="approve"):
     script = tmp_path / "fake_review_tool.py"
     script.write_text(f"RECORD = {str(record)!r}\nMODE = {mode!r}\nWATCHED = {WATCHED!r}\n" + FAKE_TOOL,
                       encoding="utf-8")
+    argv = [sys.executable, str(script), "--diff-file", "{diff_file}", "--output", "{output}", "ask", "{prompt}"]
+    _declare(monkeypatch, argv)
     route = {"id": "tool-reviewer", "adapter": "pr-agent", "kind": "tool", "model": MODEL, "family": "other-family",
-             "argv": [sys.executable, str(script), "--diff-file", "{diff_file}", "--output", "{output}", "ask",
-                      "{prompt}"]}
+             "argv": list(argv)}
     return route, record
 
 
@@ -114,6 +122,30 @@ def test_ao_hands_the_tool_the_exact_staged_candidate_and_the_evidence_names_it(
     assert "+x = 2" in seen["question"] and "SEEN: " + digest in body
     assert not seen["repository_above"] and seen["env"]["GIT_DIR"] is None
     assert os.path.commonpath((os.path.realpath(root), seen["cwd"])) != os.path.realpath(root)
+
+
+def test_a_tool_route_that_runs_another_program_than_its_adapter_declares_reviews_nothing(
+        project, tmp_path, monkeypatch, capsys):
+    """REVIEWER-TOOL-2: a route naming pr-agent ran any program it listed, and the review was recorded as pr-agent's."""
+    root = project["root"]
+    _repo_with_change(root)
+    shipped = A.package_adapters
+    route, record = _tool(tmp_path, monkeypatch)
+    monkeypatch.setattr(A, "package_adapters", shipped)          # the shipped adapter: its command is pr-agent's
+
+    assert cli.cmd_review(dict(project, reviewer=route), _args()) == 3
+
+    assert not record.exists() and "runs the command adapter pr-agent declares" in capsys.readouterr().out
+    assert all("VERDICT: APPROVED" not in open(os.path.join(root, "semantic-review", name), encoding="utf-8").read()
+               for name in os.listdir(os.path.join(root, "semantic-review")))
+
+
+def test_the_pr_agent_extra_is_bounded_to_the_release_its_adapter_was_measured_against():
+    """REVIEWER-TOOL-2: an unbounded pin let a pr-agent whose settings moved answer while ao recorded its pinned model."""
+    with open(os.path.join(os.path.dirname(__file__), os.pardir, "pyproject.toml"), encoding="utf-8") as fh:
+        (requirement,) = [line for line in fh.read().splitlines() if line.startswith("pr-agent = [")]
+    assert ">=0.45.0,<0.46;" in requirement
+    assert "pr-agent==0.45.*" in A.package_adapters()["pr-agent"]["review"]["install"]
 
 
 def test_a_tool_reviewers_approval_is_evidence_commit_ok_grants_on(project, tmp_path, monkeypatch, capsys):
@@ -163,7 +195,9 @@ def test_an_absent_tool_is_unavailable_and_says_what_would_install_it(project, t
     root = project["root"]
     _repo_with_change(root)
     route, _ = _tool(tmp_path, monkeypatch)
-    route = dict(route, argv=["ao-test-absent-review-tool"] + route["argv"][2:])
+    absent = ["ao-test-absent-review-tool"] + route["argv"][2:]
+    _declare(monkeypatch, absent)                              # the adapter's own command, not on this machine
+    route = dict(route, argv=absent)
     monkeypatch.setattr(cli, "_tool_beside_interpreter", lambda name: None)
     install = A.load_adapter("pr-agent")["review"]["install"]
 

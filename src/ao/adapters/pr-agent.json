@@ -45,7 +45,7 @@
                "CONFIG__USE_REPO_SETTINGS_FILE": "false", "CONFIG__USE_GLOBAL_SETTINGS_FILE": "false" },
       "note": "Whoever runs `ao review` owns its environment, and pr-agent reads every <TABLE>__<KEY> variable as a setting: the model, its fallbacks, extra instructions, artifacts injected into prompts, callbacks that ship prompts elsewhere. Every such variable is removed except the provider sections, which carry credentials and endpoints; so are Dynaconf's own controls (a settings file to load), the PR_AGENT_ variables (an extra config URL, a config branch) and the ARTIFACT_ variables. fallback_models is a plain string on purpose: at v0.45.0 settings merge, so a list given in the environment is appended to the default fallback list, while a string replaces it and pr-agent splits it on commas. max_model_tokens is raised so the budget pr-agent trims its own copy of the diff to is the model's context rather than its default of 32000, which a prompt carrying the candidate and its context can exhaust before any of the diff fits; pr-agent then skips the model call and answers nothing."
     },
-    "install": "pipx install pr-agent (Python 3.12 or later), or pip install 'ao-orchestrator[pr-agent]'",
+    "install": "pipx install 'pr-agent==0.45.*' (Python 3.12 or later), or pip install 'ao-orchestrator[pr-agent]'",
     "limits": ["pr-agent does not report which model answered; ao records the model it pinned in every model setting pr-agent reads",
                "pr-agent's own settings files on this machine are read below the environment, and ao does not read or check them"]
   },

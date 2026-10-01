@@ -307,6 +307,12 @@ def _tool_invocation(route, prompt, candidate):
     problems = A.tool_review_problems(adapter, route.get("argv"))
     if problems:
         return None, "; ".join(problems)
+    # A route that named the tool's adapter ran any program it listed, and the review was recorded as that
+    # tool's: it runs the command its adapter declares, as `ao role set reviewer` composes it (REVIEWER-TOOL-2).
+    send = adapter.get("send") if isinstance(adapter.get("send"), dict) else {}
+    if [str(part) for part in route.get("argv") or []] != [str(part) for part in send.get("argv") or []]:
+        return None, (f"a tool reviewer runs the command adapter {ident} declares, as `ao role set reviewer {ident}` "
+                      "composes it, and this route runs another")
     model = route.get("model")
     if not isinstance(model, str) or not model.strip() or not model.isprintable() or len(model) > 200:
         return None, "a tool reviewer records the model it runs, and this route names none (model)"
