@@ -17,9 +17,31 @@ elif command -v python3 >/dev/null 2>&1; then
 else
   PY=python
 fi
+# The refs being pushed come on standard input, once.
+refs=$(cat)
+# The suite took half an hour in one process. Where pytest-xdist is installed (the dev
+# extra) it runs in AO_PREPUSH_WORKERS processes, 4 unless set, and 0 keeps one; each
+# process gets a home and a PATH of its own from tests/conftest.py, as one process does.
+workers=${AO_PREPUSH_WORKERS:-4}
+parallel=""
+if [ "$workers" -gt 0 ] 2>/dev/null && "$PY" -c "import xdist" >/dev/null 2>&1; then
+  parallel="-n $workers --dist loadfile"
+fi
+# What the pushed commits touch runs first, so a red there is known in a minute and
+# not at the end of the suite. The whole suite still runs after it.
+touched=$(printf '%s\n' "$refs" | "$PY" .githooks/changed_tests.py)
+if [ -n "$touched" ]; then
+  echo "pre-push: first the $(printf '%s\n' "$touched" | wc -l | tr -d ' ') test file(s) the pushed commits touch"
+  # shellcheck disable=SC2086
+  if ! PYTHONDONTWRITEBYTECODE=1 "$PY" -m pytest -q -x $parallel $touched; then
+    echo "pre-push: tests failed; push refused"
+    exit 1
+  fi
+fi
 # No pipe: a pipe to tail would hide pytest's exit status and let a missing
 # pytest or a red suite pass the hook vacuously.
-if ! PYTHONDONTWRITEBYTECODE=1 "$PY" -m pytest -q -x; then
+# shellcheck disable=SC2086
+if ! PYTHONDONTWRITEBYTECODE=1 "$PY" -m pytest -q -x $parallel; then
   echo "pre-push: tests failed; push refused"
   exit 1
 fi

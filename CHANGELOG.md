@@ -50,6 +50,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Under the hood
 
+- The pre-push hook runs the tests the pushed commits touch first, then the whole suite in four processes where pytest-xdist (now in the `dev` extra) is installed - `AO_PREPUSH_WORKERS` sets how many, 0 keeps one - so a push waits about 6 minutes rather than half an hour (PREPUSH-PARALLEL).
 - The stand-in hunter in the tests runs Python with -B rather than -I, which dropped PYTHONUTF8 and on Windows left its leads unreadable, and two of the day's tests compare program names and paths as Windows writes them (WINDOWS-TESTS-2).
 - The suite's repository guard watches the file an include names before that file exists, where an include added during a run left its file unwatched and a bare flip written into it unseen (SUITE-SPEED-2).
 - The marker fingerprint's test forges the identity it reads through a handle, as the fingerprint does, so a Windows runner no longer fails it when a clock tick passes between creating the marker and writing it (WINDOWS-FINGERPRINT-TEST).

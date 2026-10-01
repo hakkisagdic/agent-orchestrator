@@ -229,8 +229,10 @@ The hosted `tests` workflow runs the suite on every push to main and every pull 
 on Ubuntu, with Python 3.9 (the support floor) and 3.12; macOS and Windows run every
 week and on demand (`gh workflow run tests -f os=windows-latest -f python=3.12`). The
 repository is public, so the hosted runners cost nothing, and the pre-push hook still
-runs the suite locally before a push. A release tag runs the suite again before it
-publishes. Hosted runs cover OS
+runs the suite locally before a push: first the tests the pushed commits touch, then the
+whole suite, in four processes where pytest-xdist (the `dev` extra) is installed -
+`AO_PREPUSH_WORKERS` sets how many, and 0 keeps one. A release tag runs the suite again
+before it publishes. Hosted runs cover OS
 API behavior and deterministic process crashes with real child processes and
 temporary paths. They are not physical power-loss, storage-controller or filesystem
 qualification, including unsupported and network filesystems.
