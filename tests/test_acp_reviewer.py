@@ -52,6 +52,14 @@ while True:
         if turn == "ask":
             ask(session, "read")
             ask(session, "edit")
+        if turn == "ignored":
+            say({"jsonrpc": "2.0", "id": "perm-o", "method": "session/request_permission",
+                 "params": {"sessionId": session, "toolCall": {"toolCallId": "o", "title": "o", "kind": "other"},
+                            "options": [{"optionId": "once", "name": "Allow", "kind": "allow_once"},
+                                        {"optionId": "no", "name": "Reject", "kind": "reject_once"}]}})
+            receive()
+            update(session, {"sessionUpdate": "tool_call", "toolCallId": "o", "title": "o", "kind": "other",
+                             "status": "completed"})
         if turn == "wrote":
             update(session, {"sessionUpdate": "tool_call", "toolCallId": "w", "title": "Edit a.py", "kind": "edit",
                              "status": "completed"})
@@ -112,6 +120,13 @@ def test_a_turn_that_ran_an_edit_without_leave_is_no_review_whatever_it_answered
 
     assert not attempt["ok"] and attempt["kind"] == "wrote"
     assert "without ao's leave" in attempt["reason"] and attempt["out"] == ""
+
+
+def test_a_turn_that_ran_a_call_ao_refused_is_no_review_whatever_its_kind(project, monkeypatch):
+    """ACP-REVIEWER-3: a call of kind `other` ao refused, which the agent ran all the same, left the answer a review."""
+    attempt = _review(project, monkeypatch, "ignored")
+
+    assert not attempt["ok"] and attempt["kind"] == "wrote" and "(other)" in attempt["reason"]
 
 
 def test_a_turn_past_its_time_is_cancelled_and_is_a_timeout(project, monkeypatch):

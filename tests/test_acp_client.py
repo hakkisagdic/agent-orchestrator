@@ -114,7 +114,7 @@ def test_a_permission_is_rejected_by_default_and_the_tool_call_is_kept(agent, tm
     result, decisions = _turn(argv, tmp_path, monkeypatch, "tool")
 
     assert result["tool_calls"] == [{"id": "t1", "title": "Run git commit", "kind": "execute", "status": "failed"}]
-    assert decisions == [{"tool": "Run git commit", "kind": "execute", "decision": "reject_once"}]
+    assert decisions == [{"id": "t1", "tool": "Run git commit", "kind": "execute", "decision": "reject_once"}]
     replies = [m for m in sent() if m.get("id") == "perm-1"]
     assert replies == [{"jsonrpc": "2.0", "id": "perm-1", "result": {"outcome": {"outcome": "selected",
                                                                                   "optionId": "no"}}}]
@@ -131,7 +131,7 @@ def test_a_policy_picks_the_option_it_allows(agent, tmp_path, monkeypatch):
     result, decisions = _turn(argv, tmp_path, monkeypatch, "tool", permission=allow_reads_and_this)
 
     assert seen == [("execute", ["allow_once", "reject_once"])]
-    assert decisions == [{"tool": "Run git commit", "kind": "execute", "decision": "allow_once"}]
+    assert decisions == [{"id": "t1", "tool": "Run git commit", "kind": "execute", "decision": "allow_once"}]
     assert result["tool_calls"][0]["status"] == "completed"
 
 
@@ -164,7 +164,7 @@ def test_a_turn_past_its_time_is_cancelled_and_its_pending_permission_answered_c
     methods = [m.get("method") for m in sent()]
     assert "session/cancel" in methods
     # The permission asked before the cancel was decided by the policy then; nothing was allowed.
-    assert decisions == [{"tool": "Edit a.py", "kind": "edit", "decision": "cancelled"}]
+    assert decisions == [{"id": "t2", "tool": "Edit a.py", "kind": "edit", "decision": "cancelled"}]
 
 
 def test_a_turn_that_does_not_end_even_when_cancelled_is_a_timeout_and_its_agent_is_stopped(

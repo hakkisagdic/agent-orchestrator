@@ -277,8 +277,8 @@ class Session:
         options = [o for o in params.get("options") or [] if isinstance(o, dict) and o.get("optionId")]
         if self._turn is not None and self._turn.get("cancelled"):
             # A request pending when the turn was cancelled is answered cancelled, as the protocol asks.
-            self.decisions.append({"tool": tool_call.get("title"), "kind": tool_call.get("kind"),
-                                   "decision": "cancelled"})
+            self.decisions.append({"id": tool_call.get("toolCallId"), "tool": tool_call.get("title"),
+                                   "kind": tool_call.get("kind"), "decision": "cancelled"})
             return {"outcome": "cancelled"}
         try:
             chosen = None if self._turn is None else self.permission(tool_call, options)
@@ -289,7 +289,8 @@ class Session:
             chosen = next((o["optionId"] for o in options if str(o.get("kind", "")).startswith("reject")), None)
         outcome = {"outcome": "selected", "optionId": chosen} if chosen else {"outcome": "cancelled"}
         kind = ids.get(chosen, {}).get("kind") if chosen else "cancelled"
-        self.decisions.append({"tool": tool_call.get("title"), "kind": tool_call.get("kind"), "decision": kind})
+        self.decisions.append({"id": tool_call.get("toolCallId"), "tool": tool_call.get("title"),
+                               "kind": tool_call.get("kind"), "decision": kind})
         return outcome
 
     def _reply(self, request_id, result):

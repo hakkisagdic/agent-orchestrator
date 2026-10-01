@@ -410,7 +410,8 @@ allows that one call, and every other kind - an edit, a deletion, a move, a comm
 mode - is refused; an option that allows a tool always is never picked, since it would leave a standing
 rule in the harness's own settings. What a harness runs without asking is its own, so a turn in which a
 tool of kind `edit`, `delete`, `move` or `execute` is seen to have completed is no review, whatever it
-answered. The whole exchange has `review_timeout`: a turn past it is cancelled and is a timeout, as a
+answered, and neither is one in which a call ao refused is seen to have completed, whatever its kind
+(ACP-REVIEWER-3). The whole exchange has `review_timeout`: a turn past it is cancelled and is a timeout, as a
 spawned reviewer killed at its timeout is. A route whose adapter declares no ACP command, or whose adapter
 may not review (no `options.trust_none`), and a route that names a model, which the declared command
 cannot carry, are spawned as before, each with a line saying why; so is a tool reviewer. What else a

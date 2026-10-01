@@ -1221,12 +1221,18 @@ def _run_acp_reviewer(root, argv, adapter_id, prompt, timeout, label, fallback=F
           f"after {_elapsed(time.monotonic() - started)}"
           + (f"; it asked leave {len(session.decisions)} time(s), {refused} refused" if session.decisions else "")
           + C["reset"])
-    wrote = sorted({str(call.get("kind")) for call in turn["tool_calls"]
-                    if call.get("kind") in allowlist.WRITING_TOOL_KINDS and call.get("status") == "completed"})
+    # A call ao refused that the agent ran all the same is no read, whatever its kind - `other`, `fetch`, or
+    # none, which ACP reads as other - so it voids the review as a call that changes something does
+    # (ACP-REVIEWER-3).
+    refused_ids = {decision.get("id") for decision in session.decisions
+                   if decision.get("decision") != "allow_once" and decision.get("id")}
+    wrote = sorted({str(call.get("kind") or "other") for call in turn["tool_calls"]
+                    if call.get("status") == "completed"
+                    and (call.get("kind") in allowlist.WRITING_TOOL_KINDS or call.get("id") in refused_ids)})
     if wrote:
         _reviewer_terminal_output(text, "")
-        return failed("wrote", f"it ran a tool that changes something ({', '.join(wrote)}) without ao's leave; "
-                               "a reviewer reads, so its answer is no review")
+        return failed("wrote", f"it ran a tool that changes something or that ao refused ({', '.join(wrote)}) "
+                               "without ao's leave; a reviewer reads, so its answer is no review")
     if ended == "timeout" or allowed <= 0:
         # Cancelled at its time: what it said after, even an answer, came too late, as a spawned one's would.
         _reviewer_terminal_output(text, "")
