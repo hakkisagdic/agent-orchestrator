@@ -38,6 +38,7 @@ import signal
 import sys
 import time
 
+from . import journal as J
 from . import language
 from . import lib as A
 from . import settings as S
@@ -513,14 +514,66 @@ def save_state(root, st):
     replace_file_durably(state_path(root), json.dumps(st, indent=2).encode(UTF8))
 
 
+# How long a claimed wake or refill holds when nothing says how it went: the fifteen minutes a failed wake waits.
+WAKE_LEASE = 900
+
+
 def arch_alive(root, architect):
     """Is any configured architect turn currently alive?
 
     A remembered pid or lock can be reused after its process dies. Measure the
     configured binary and cwd again instead; this still prevents two headless
-    watchdog helpers while releasing a dead one on the next scan.
+    watchdog helpers while releasing a dead one on the next scan. A wake the
+    journal holds counts too: one cut off between its start and its record
+    was a headless architect no record named (JOURNAL-2).
     """
-    return A.architect_turn_present(root, architect)
+    return A.architect_turn_present(root, architect) or _architect_step_under_way(root)
+
+
+def _architect_step_under_way(root):
+    """Whether a wake or refill the journal holds is still under way: claimed and not yet started, or its process
+    alive and the one that started (JOURNAL-2)."""
+    try:
+        steps = J.under_way(A.project_file(root, "journal"), "architect")
+    except Exception:
+        return False
+    for _, pid, start in steps:
+        if pid is None:
+            return True                    # started, or cut off starting: the lease says how long to believe it
+        if _step_process_alive(pid, start):
+            return True
+    return False
+
+
+def _step_process_alive(pid, start):
+    """Whether the process a step started still runs: its pid alive and its start the one recorded."""
+    return bool(pid) and A._pid_alive(pid) and (start is None or A._process_start(pid) in (None, start))
+
+
+def _claim_step(root, step):
+    """Whether this cycle may start `step`; where the journal cannot be read, it may, as before it (JOURNAL-2).
+
+    A step whose process has ended holds nothing: a wake that failed is retried after its fifteen minutes, as
+    the wake's own record says, whatever its lease. Only one cut off before its start was written, or one
+    still running, holds its key.
+    """
+    path = A.project_file(root, "journal")
+    try:
+        current = J.step(path, step)
+        if current and current["state"] == "started" and not _step_process_alive(current["pid"], current["start"]):
+            J.finished(path, step, "ended")
+        return J.claim(path, step, "architect", WAKE_LEASE)
+    except Exception as exc:
+        print(f"the journal could not be read ({type(exc).__name__}); starting {step} on the process scan alone")
+        return True
+
+
+def _record_start(root, step, pid):
+    """The pid and start of a step's process, written the moment it has one (JOURNAL-2)."""
+    try:
+        J.started(A.project_file(root, "journal"), step, pid, A._process_start(pid, refresh=True))
+    except Exception as exc:
+        print(f"the journal did not take the start of {step} ({type(exc).__name__}); the process scan stands in")
 
 
 def child_alive(st):
@@ -1029,6 +1082,15 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
             # A wake after one that failed in the last day is a retry: it was the same line to the phone
             # every fifteen minutes while a transport kept failing, and none of them was a woken architect.
             retried = wake_failed(err, last_wake) and time.time() - float(err.get("at") or 0) < 24 * 3600
+            # Claimed before its process starts, under the session and the reports it is handed (JOURNAL-2).
+            step = "wake:{}:{}".format(sess or "new", A.hashlib.sha256("\n".join(sorted(pending)).encode(UTF8))
+                                       .hexdigest()[:12])
+            if sess and A.session_in_use(sess):
+                print(f"the architect's session {sess} is resumed by a running process already; not waking")
+                return woke
+            if not _claim_step(root, step):
+                print("a wake for these reports was started and is not known to have ended; not waking again")
+                return woke
             os.makedirs(STATE_DIR, exist_ok=True)
             with open(log_path, "a", encoding=UTF8) as log:
                 log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} escalate {resolved} {ver} ===\n")
@@ -1048,6 +1110,7 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
                                             start_new_session=True)
                 finally:
                     A.release_prompt(given)
+            _record_start(root, step, proc.pid)
             st["arch_pid"] = proc.pid
             st["last_arch_wake"] = time.time()
             st["handed"] = {m: mtimes[m] for m in pending if m in mtimes}
@@ -2766,6 +2829,11 @@ def _cycle_impl(args, root):
             if refused:
                 print(f"queue low, but the architect's prompt cannot be handed over: {refused}")
                 return 0
+            # As a wake is: claimed before its process starts (JOURNAL-2).
+            step = "refill:{}:{}".format(sess or "new", int(time.time() // 3600))
+            if (sess and A.session_in_use(sess)) or not _claim_step(root, step):
+                print("queue low, but a refill was started and is not known to have ended; waiting")
+                return 0
             os.makedirs(STATE_DIR, exist_ok=True)
             with open(log_path, "a", encoding=UTF8) as log:
                 log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} refill {resolved} {ver} ===\n")
@@ -2778,6 +2846,7 @@ def _cycle_impl(args, root):
                                             start_new_session=True)
                 finally:
                     A.release_prompt(given)
+            _record_start(root, step, proc.pid)
             st.update(arch_pid=proc.pid, last_refill=time.time())
             A.helper_register(root, proc.pid, "architect")   # a judge, not a writer
             A.acquire_architect(root, proc.pid, "watchdog refill")

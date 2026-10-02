@@ -325,6 +325,10 @@ PROJECT_FILES = {
     "helpers-lock": "helpers-{key}.json.lock",
     "reviewer": "reviewer-{key}.json",
     "architect-lock": "architect-{key}.lock",
+    # What the watchdog starts, claimed before its process does (JOURNAL-2), and the files SQLite keeps beside it.
+    "journal": "journal-{key}.db",
+    "journal-wal": "journal-{key}.db-wal",
+    "journal-shm": "journal-{key}.db-shm",
 }
 
 

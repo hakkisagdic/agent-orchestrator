@@ -8,9 +8,13 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 
-from ao import watchdog as W
+import pytest
+
+from ao import lib as A, watchdog as W
+from tests.scenarios import World
 
 SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
 WRITER = """
@@ -51,3 +55,127 @@ def test_a_state_written_while_its_writer_is_killed_reads_whole(project, tmp_pat
             state = json.load(fh)
         assert state["n"] >= 1 and len(state["pad"]) == 400000
         assert W.load_state(root)["n"] == state["n"]
+
+
+# ---- what the watchdog starts is claimed before it starts (JOURNAL-2) ----------------------------------------------
+
+BLOCKED = "# queue empty\n\n## KARAR GEREKLİ\n"
+
+
+def test_a_step_is_claimed_once_while_its_lease_holds_and_again_once_it_has_passed(tmp_path):
+    from ao import journal as J
+    path = str(tmp_path / "journal.db")
+
+    assert J.claim(path, "wake:s1:abc", "architect", 900, now=1000.0)
+    assert not J.claim(path, "wake:s1:abc", "architect", 900, now=1500.0)
+    assert J.under_way(path, "architect", now=1500.0) == [("wake:s1:abc", None, None)]
+    J.started(path, "wake:s1:abc", 4242, 999.5)
+    assert J.under_way(path, "architect", now=1500.0) == [("wake:s1:abc", 4242, 999.5)]
+    assert J.claim(path, "wake:s1:abc", "architect", 900, now=2000.0)              # the lease has passed
+    J.finished(path, "wake:s1:abc")
+    assert J.under_way(path, "architect", now=2001.0) == []
+
+
+def test_of_many_claims_at_once_one_holds(tmp_path):
+    from ao import journal as J
+    path = str(tmp_path / "journal.db")
+    held, start = [], threading.Barrier(8)
+
+    def claim():
+        start.wait()
+        held.append(J.claim(path, "refill:s1:1", "architect", 900))
+    threads = [threading.Thread(target=claim) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert sorted(held) == [False] * 7 + [True]
+
+
+@pytest.fixture
+def world(project, monkeypatch, tmp_path):
+    return World(project, monkeypatch, tmp_path)
+
+
+def _agent_turns(world):
+    """What the cycle started of the agents' own programs, which the scenario resolves under /agents/."""
+    return [argv for argv in world.spawned if isinstance(argv, list) and argv and str(argv[0]).startswith("/agents/")]
+
+
+def _architect_wakes(world):
+    return [argv for argv in world.spawned if isinstance(argv, list) and argv and argv[0].endswith("/claude")]
+
+
+def test_a_wake_cut_off_after_its_process_started_is_not_started_again(world, monkeypatch):
+    """The wake's process started, and the cycle was killed before it registered it: the next cycle, seeing no
+    architect it knew of, woke a second one into the same session."""
+    world.transcript_age(900)
+    world.mail("20260916-1200-kiro-to-fable-BLOCKED-queue.md", BLOCKED)
+    register = A.helper_register
+
+    def killed(root, pid, what):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(A, "helper_register", killed)
+    with pytest.raises(KeyboardInterrupt):
+        world.cycle(dry_run=False)
+    (first,) = _architect_wakes(world)
+    world.process(99999, list(first))                    # the architect it started runs on, recorded nowhere
+    monkeypatch.setattr(A, "helper_register", register)
+    world.spawned.clear()
+
+    world.cycle(dry_run=False)
+
+    assert _architect_wakes(world) == []
+
+
+def test_a_wake_cut_off_before_its_start_was_written_holds_its_claim_for_its_lease(world, monkeypatch):
+    from ao import journal as J
+    world.transcript_age(900)
+    world.mail("20260916-1200-kiro-to-fable-BLOCKED-queue.md", BLOCKED)
+    started = J.started
+
+    def killed(path, key, pid, start):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(J, "started", killed)
+    with pytest.raises(KeyboardInterrupt):
+        world.cycle(dry_run=False)
+    assert len(_architect_wakes(world)) == 1
+    monkeypatch.setattr(J, "started", started)
+    world.spawned.clear()
+
+    world.cycle(dry_run=False)
+
+    assert _architect_wakes(world) == []
+    later = time.time() + W.WAKE_LEASE + 60
+    monkeypatch.setattr(time, "time", lambda: later)
+    world.cycle(dry_run=False)
+    assert len(_architect_wakes(world)) == 1             # nothing ran it, and the lease has passed
+
+
+def test_a_resume_cut_off_after_its_process_started_is_not_resumed_twice(world, monkeypatch):
+    """Exactly one resume after a kill -9 during the resume: the implementer's turn is found in its tree."""
+    world.board("running", "- [B8] slice · since: 2026-09-05 10:00").transcript_age(700)
+
+    class Running:
+        pid, returncode = 99999, None
+
+        def poll(self):
+            return None
+    monkeypatch.setattr(W.subprocess, "Popen", lambda argv, **kw: world.spawned.append(argv) or Running())
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)              # the nudge's twelve seconds to fail
+    measure = A._process_start
+
+    def killed(pid, refresh=False):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(A, "_process_start", killed)
+    with pytest.raises(KeyboardInterrupt):
+        world.cycle(dry_run=False)
+    (first,) = _agent_turns(world)
+    world.process(99999, list(first), cwd=world.root)
+    monkeypatch.setattr(A, "_process_start", measure)
+    world.spawned.clear()
+
+    world.cycle(dry_run=False)
+
+    assert _agent_turns(world) == []

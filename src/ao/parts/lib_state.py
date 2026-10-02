@@ -1324,6 +1324,21 @@ def escaped_cwd_names(cwd):
     return cwd.replace("/", "-").replace(".", "-"), re.sub(r"[^A-Za-z0-9-]", "-", cwd)
 
 
+def session_in_use(session):
+    """Pids whose command line resumes `session`: as an argument of its own, or after `=` (JOURNAL-2)."""
+    from . import procs
+    if not session:
+        return []
+    found = []
+    for pid in procs.all_pids():
+        if pid == os.getpid():
+            continue
+        av = procs.argv(pid) or []
+        if any(str(arg) == session or str(arg).endswith("=" + session) for arg in av[1:]):
+            found.append(pid)
+    return found
+
+
 def unplaced_agent_pids(root, adapter):
     """Agent processes that may be working in this tree but cannot be placed (#71).
 
