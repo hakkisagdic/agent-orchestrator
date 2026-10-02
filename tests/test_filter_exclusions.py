@@ -167,6 +167,20 @@ def test_a_hook_argument_naming_a_project_path_not_there_yet_is_refused(project,
                                                          allowed, os.environ.get("PATH", ""))[1]
 
 
+def test_a_file_address_is_judged_by_the_path_it_decodes_to(project):
+    """FILTER-EXCLUSIONS-3: the text after file:// was judged as it stood, so an encoded project path passed, and on
+    Windows so did any file:///C:/ address."""
+    import pathlib
+    root = project["root"]
+    allowed = [A._program_name(sys.executable)]
+    uri = pathlib.Path(root, ".ao", "filter.toml").as_uri()
+    encoded = "file:///" + uri[len("file:///"):].replace("/", "%2F")
+
+    for word in (uri, encoded, "--config=" + encoded):
+        why = A._probe_program([sys.executable, word], root, allowed, os.environ.get("PATH", ""))[1]
+        assert why and "lies inside the project" in why, word
+
+
 def test_an_answer_is_read_as_the_harness_reads_it():
     def answer(output="", code=0, err=""):
         return A._hook_answer("git diff", code, output.encode(), err.encode())

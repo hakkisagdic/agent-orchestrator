@@ -123,7 +123,8 @@ these hold, and reports any other filter as not verified, naming the rule it fai
   which no project can widen, and resolves - through the agents' `PATH`, leaving out any
   directory inside the project - to an executable outside the project; no argument names a
   path inside the project, whether or not it is there yet (a word with a separator, or a file
-  name with an extension, is taken as a path; an address on another host is not), and a batch
+  name with an extension, is taken as a path; an address on another host is not, and a `file:`
+  address is read as the path it decodes to), and a batch
   file, which only a shell runs, is refused;
 - it needs no shell: `command` with `args`, or a command that is only words, with no `$`,
   backquote, pipe, redirection, glob, `;`, `&` or backslash. Declare anything else as

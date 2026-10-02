@@ -37,6 +37,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Security
 
+- A `file:` address in a filter hook's arguments is judged by the path it decodes to, where a percent-encoded project path, or on Windows any `file:///C:/...` address, passed the project boundary (FILTER-EXCLUSIONS-3).
 - The move proof (`ao split-check`), which closes a waived review with no reviewer, accepts a definition moved only into a part that the module it left loads with a top-level `_part` call, where a whole-file rename or a part another module loads passed; it reads the load from the call itself, sees a part's call removed, and compares other statements file by file ([slices.md](docs/slices.md)) (SPLIT-CHECK-2).
 - A call ao refused that an ACP reviewer's agent ran under an empty tool-call id, or none, voids the review as any refused call that ran does (ACP-REVIEWER-4).
 - `ao mail sync` tells a URL from a directory as git does, so `github.com:owner/repo.git`, an SSH alias or `HTTPS://...` is a host to ask, not a directory that is private by being local, and a host ao cannot ask is refused; the product's own remote is refused in any of its URL forms; compacted archives are scanned for credentials before they leave; and `ao doctor` reports mail stored since the last sync, or never synced, and a target it cannot read ([messaging.md](docs/messaging.md)) (MAIL-SYNC-2).

@@ -307,7 +307,15 @@ def _probe_program(argv, root, programs, search_path):
             url = _URL_WORD.match(piece)
             if url and piece[:url.end()].lower() != "file://":
                 continue
-            piece = piece[url.end():] if url else piece
+            if url:
+                # The path a file address names, as a program opening it reads it: percent-decoded, and on
+                # Windows `/C:/x` as `C:\x`; the text after the scheme alone let an encoded project path pass
+                # (FILTER-EXCLUSIONS-3).
+                from urllib.request import url2pathname
+                try:
+                    piece = url2pathname(piece[url.end():])
+                except (OSError, ValueError):
+                    return None, f"{word} is a file address ao cannot read as a path"
             candidate = piece if os.path.isabs(piece) else os.path.join(root, piece)
             # A path inside the project counts whether or not it exists yet: an agent could write it between this
             # check and the hook's run, once per command measured, and remove it again (FILTER-EXCLUSIONS-2). An
