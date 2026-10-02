@@ -492,7 +492,7 @@ def outcome_stats(outcomes):
 OBSERVATION_LOGS = ("nudge-log", "watchdog-log", "refill-log", "escalate-log", "cycles")      # PROJECT_FILES
 
 
-def bound_store(path, kb):
+def bound_store(path, kb, in_place=False):
     """Keep an observation store within its bound as it is written: past it, the oldest records go (#50).
 
     Measured 2026-09-08: notices 3.2 MB, a nudge log 2.6 MB, and `ao prune`, which
@@ -500,6 +500,10 @@ def bound_store(path, kb):
     manual cleanup has. A store is trimmed once it is a quarter over its bound,
     back to three quarters of it, at a line boundary, so it is not rewritten on
     every write. Evidence is never trimmed here; it is sealed.
+
+    A log a started process writes is trimmed `in_place`, in the file it holds open: replaced
+    by a new file, the process wrote on into the old one, and what a wake that failed said
+    never reached the log its failure is read from (JOURNAL-3).
     """
     limit = int(kb) * 1024
     try:
@@ -508,11 +512,39 @@ def bound_store(path, kb):
         return False
     if size <= limit * 1.25:
         return False
+    if in_place:
+        return _trim_in_place(path, int(limit * 0.75))
     from .storage import replace_file_durably
     with open(path, "rb") as fh:
         fh.seek(size - int(limit * 0.75))
         tail = fh.read()
     replace_file_durably(path, tail[tail.find(b"\n") + 1:])
+    return True
+
+
+def _trim_in_place(path, keep):
+    """Keep the last `keep` bytes of `path`, from a line boundary, in the same file (JOURNAL-3).
+
+    A writer appends to the file's end, so what it writes after the trim follows the kept tail;
+    what it wrote while the tail was read is read again before the file is cut.
+    """
+    try:
+        with open(path, "r+b") as fh:
+            size = fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, size - keep))
+            tail = fh.read()
+            tail = tail[tail.find(b"\n") + 1:]
+            end = fh.seek(0, os.SEEK_END)
+            if end > size:
+                fh.seek(size)
+                tail += fh.read()
+            fh.seek(0)
+            fh.write(tail)
+            fh.truncate()
+            fh.flush()
+            os.fsync(fh.fileno())
+    except OSError:
+        return False
     return True
 
 
@@ -533,7 +565,9 @@ def bound_observation_logs(root, state_dir=None):
     """
     limit = settings.get(load_config(root), "retention.observation_kb")
     notices = os.path.join(root, ".ao", "ledger", "notices.jsonl") if not fold_notice_times(root) else None
-    return [path for path in observation_stores(root, state_dir) if path != notices and bound_store(path, limit)]
+    # A log a started process may still write is trimmed in the file it holds (JOURNAL-3).
+    return [path for path in observation_stores(root, state_dir)
+            if path != notices and bound_store(path, limit, in_place=path.endswith(".log"))]
 
 
 def stores_over_bound(root, cfg, state_dir=None):

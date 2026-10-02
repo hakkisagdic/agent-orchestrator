@@ -57,6 +57,37 @@ def test_a_state_written_while_its_writer_is_killed_reads_whole(project, tmp_pat
         assert W.load_state(root)["n"] == state["n"]
 
 
+# ---- a log a started process writes is trimmed in the file it holds (JOURNAL-3) ----------------------------------
+
+CHILD = """
+import sys, time
+for n in range(int(sys.argv[1])):
+    print("line %d " % n + "x" * 200, flush=True)
+time.sleep(1.0)
+print("the last words of a failed wake", flush=True)
+"""
+
+
+def test_a_log_trimmed_while_its_process_writes_keeps_what_the_process_writes_after(project, tmp_path):
+    """A log replaced by a new file left its process writing into the old one, and the failure it wrote last
+    never reached the log the watchdog reads a wake's failure from."""
+    from ao import lib as A
+    log = tmp_path / "escalate.log"
+    script = tmp_path / "child.py"
+    script.write_text(CHILD, encoding="utf-8")
+    with open(log, "a", encoding="utf-8") as fh:
+        process = subprocess.Popen([sys.executable, str(script), "7000"], stdout=fh, stderr=subprocess.STDOUT)
+    deadline = time.time() + 30
+    while (not log.exists() or log.stat().st_size < 1_400_000) and time.time() < deadline:
+        time.sleep(0.05)
+
+    assert A.bound_store(str(log), 1024, in_place=True)
+    process.wait(timeout=30)
+
+    text = log.read_text(encoding="utf-8")
+    assert "the last words of a failed wake" in text and log.stat().st_size < 1_300_000
+
+
 # ---- what the watchdog starts is claimed before it starts (JOURNAL-2) ----------------------------------------------
 
 BLOCKED = "# queue empty\n\n## KARAR GEREKLİ\n"

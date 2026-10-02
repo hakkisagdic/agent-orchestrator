@@ -18,6 +18,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- The watchdog trims a spawn log in the file a running architect or nudge writes, where it wrote a new file over it and what the process wrote after - a failed wake's last words, a quota stop - was lost, so the wake counted as handed (JOURNAL-3).
 - An architect wake or refill is claimed in a journal (`~/.ao/journal-<key>.db`, SQLite, written ahead and synced) before its process starts, and its pid is written the moment it has one, so a cycle cut off between starting the architect and recording it no longer wakes a second one into the same session; a process already resuming the session counts as a wake under way ([watchdog.md](docs/watchdog.md)) (JOURNAL-2).
 - The watchdog's state is written whole or not at all, where a kill -9, a power cut or a Ctrl+C mid-write left it torn and the next cycle, reading a fresh state, could resume a parked turn or wake the architect a second time (JOURNAL-1).
 - An opencode implementer's spend is read from each assistant message's tokens, per response, where it was declared from the session and `ao cost`, the panel and the MCP status counted nothing; a failed tool call reads as failed, where the declaration named fields no reader takes (ADAPTER-SQLITE-READER-2).
