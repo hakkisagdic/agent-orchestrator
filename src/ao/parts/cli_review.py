@@ -1223,9 +1223,8 @@ def _run_acp_reviewer(root, argv, adapter_id, prompt, timeout, label, fallback=F
           + C["reset"])
     # A call ao refused that the agent ran all the same is no read, whatever its kind - `other`, `fetch`, or
     # none, which ACP reads as other - so it voids the review as a call that changes something does
-    # (ACP-REVIEWER-3).
-    refused_ids = {decision.get("id") for decision in session.decisions
-                   if decision.get("decision") != "allow_once" and decision.get("id")}
+    # (ACP-REVIEWER-3). Its id is matched as given: a refused call with an empty id or none passed (ACP-REVIEWER-4).
+    refused_ids = {decision.get("id") for decision in session.decisions if decision.get("decision") != "allow_once"}
     wrote = sorted({str(call.get("kind") or "other") for call in turn["tool_calls"]
                     if call.get("status") == "completed"
                     and (call.get("kind") in allowlist.WRITING_TOOL_KINDS or call.get("id") in refused_ids)})
