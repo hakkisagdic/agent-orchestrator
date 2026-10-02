@@ -119,11 +119,13 @@ than delete; switching a live project first, with the old steering, would hand i
 `ao mail sync` takes the store off the machine. Locally it is committed under `refs/ao/mail`, a
 dedicated ref that is never a product branch and never pushed to the product's remote. The sync
 target is one private repository holding every project's mail under `refs/mail/<project>`, named
-per project as `mail.sync_repo` - opt-in, and refused when it is the product's own remote. At push
-time the host is asked whether the repository is private (a directory on this machine counts as
-private); a public or unknown one is refused, named and logged. Every record is scanned for
-credentials before it leaves. `ao doctor` reports a store ahead of its private copy and a target it
-could not verify. The concentration risk is real and stated: that one repository holds every
+per project as `mail.sync_repo` - opt-in, and refused when it is the product's own remote, in any of
+its URL forms. At push time the host is asked whether the repository is private (a directory on this
+machine counts as private, and a URL is told from a directory as git tells it, so `host:path` is a
+host); a public or unknown one is refused, named and logged, and so is a host ao cannot ask, such as
+an SSH alias. Every record is scanned for credentials before it leaves, compacted archives
+included. `ao doctor` reports a store whose ledger has moved past its private copy, a store never
+synced, and a target it could not verify or read. The concentration risk is real and stated: that one repository holds every
 project's decisions.
 
 ## Sync: local ref, separate private repository

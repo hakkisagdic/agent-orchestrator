@@ -342,7 +342,8 @@ def doctor_problems(cfg):
     if sync:
         local, remote, problem = sync
         if problem:
-            out.append(("mail-sync", problem + " — ao mail sync refuses it"))
+            out.append(("mail-sync", problem + (" — ao mail sync refuses it" if problem.endswith("verified private")
+                                                else "")))
         elif local and local != remote:
             out.append(("mail-sync", "the message store is ahead of its private copy — ao mail sync"))
     # An implementer with nothing pre-authorised to pick up next stalls the moment

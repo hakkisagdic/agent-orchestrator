@@ -987,12 +987,35 @@ def room_search(text, root=None, limit=20):
 
 # ---- the message store syncs to one private repository, never the product's remote (#83) --
 
+def _remote_identity(url):
+    """(host, path) a git URL names, alike for its https, ssh and host:path forms; None for a path on this machine."""
+    url = (url or "").strip()
+    found = re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://(?:[^@/]+@)?([^/:]+)(?::\d+)?/(.+)$", url)
+    if not found and _scp_like(url):
+        found = re.match(r"^(?:[^@]+@)?([^:]+):(.+)$", url)
+    if not found:
+        return None
+    return found.group(1).lower(), found.group(2).strip("/").removesuffix(".git").lower()
+
+
+def _scp_like(url):
+    """Whether git reads `url` as host:path over SSH: a colon before any slash, with or without a user (MAIL-SYNC-2)."""
+    colon, slash = url.find(":"), url.find("/")
+    return colon > 0 and not 0 <= slash < colon and not (os.name == "nt" and re.match(r"^[A-Za-z]:", url))
+
+
 def _url_is_private(root, url):
-    """True for a local path, or when the host says the repository is private; None when it cannot say (#83)."""
+    """True for a local path, or when the host says the repository is private; None when it cannot say (#83).
+
+    A URL is classified as git classifies it (MAIL-SYNC-2): `github.com:owner/repo.git`, an alias
+    from ~/.ssh/config and `HTTPS://...` were taken for directories on this machine, and mail was
+    pushed with no host asked. A host ao cannot ask - an alias, another server - is not confirmed.
+    """
     import shutil
-    if url and not re.match(r"^[a-z][a-z0-9+.-]*://|^[^/]+@[^:]+:", url):
+    url = url or ""
+    if url and not re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", url) and not _scp_like(url):
         return True                              # a directory on this machine publishes nothing
-    found = re.search(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?$", url or "")
+    found = re.search(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?$", url, re.I)
     if not found or not shutil.which("gh"):
         return None
     try:
@@ -1013,7 +1036,13 @@ def mail_ref_commit(root):
             rel = os.path.relpath(os.path.join(directory, name), root).replace(os.sep, "/")
             with open(os.path.join(root, rel), "rb") as fh:
                 data = fh.read()
-            if not name.endswith(".gz"):
+            if name.endswith(".gz"):
+                # A compacted body is scanned as every other record is before it leaves: an agent writes its
+                # mail by hand, and a credential in it reached the private copy inside the archive (MAIL-SYNC-2).
+                import gzip
+                data = gzip.compress(scan_evidence(gzip.decompress(data).decode(UTF8, "replace"))[0].encode(UTF8),
+                                     mtime=0)
+            else:
                 data = scan_evidence(data.decode(UTF8, "replace"))[0].encode(UTF8)
             entries[rel] = data
     if os.path.exists(ledger):
@@ -1060,7 +1089,10 @@ def sync_mail(root, cfg):
     if not target:
         raise RuntimeError("no mail.sync_repo is named; syncing is opt-in per project")
     origin = git_text(root, "remote", "get-url", "origin")
-    if origin and target.rstrip("/").removesuffix(".git") == origin.rstrip("/").removesuffix(".git"):
+    # The product's remote in any of its forms: https and git@ name one repository (MAIL-SYNC-2).
+    same = origin and (target.rstrip("/").removesuffix(".git") == origin.rstrip("/").removesuffix(".git")
+                       or _remote_identity(target) is not None and _remote_identity(target) == _remote_identity(origin))
+    if same:
         raise RuntimeError("mail.sync_repo is this product's own remote; mail never goes there")
     private = _url_is_private(root, target)
     if private is not True:
@@ -1073,12 +1105,34 @@ def sync_mail(root, cfg):
 
 
 def mail_sync_state(root, cfg):
-    """(local commit, remote commit or None, problem or None) for `ao doctor` (#83)."""
+    """(local, remote commit or None, problem or None) for `ao doctor` (#83).
+
+    `local` is the last synced commit while the store is as it synced, and "unsynced" once its
+    ledger has moved past the copy in that commit: only `ao mail sync` moves the ref, so mail
+    stored since, or a store never synced, read as up to date (MAIL-SYNC-2). Read, never written:
+    the doctor commits nothing. A target that cannot be read is named, not taken for one behind.
+    """
     target = (settings.get(cfg, "mail.sync_repo") or "").strip()
     if not target:
         return None
-    local = git_text(root, "rev-parse", "--verify", "--quiet", "refs/ao/mail") or None
-    remote = (git_text(root, "ls-remote", target, f"refs/mail/{project_key(root)}").split() or [None])[0]
+    synced = git_text(root, "rev-parse", "--verify", "--quiet", "refs/ao/mail") or None
+    try:
+        with open(os.path.join(root, ".ao", "ledger", "mail-store.jsonl"), encoding=UTF8) as fh:
+            now = scan_evidence(fh.read())[0]
+    except OSError:
+        now = None
+    copy = None
+    if synced and now is not None:
+        try:
+            copy = _git_output(root, "show", "refs/ao/mail:.ao/ledger/mail-store.jsonl").decode(UTF8, "replace")
+        except RuntimeError:
+            copy = None
+    local = synced if now is None or copy == now else "unsynced"
+    try:
+        remote = (_git_output(root, "ls-remote", target, f"refs/mail/{project_key(root)}", timeout=60)
+                  .decode(UTF8, "replace").split() or [None])[0]
+    except RuntimeError as exc:
+        return local, None, f"{target} cannot be read ({' '.join(str(exc).split())})"
     problem = None if _url_is_private(root, target) is True else f"{target} could not be verified private"
     return local, remote, problem
 
