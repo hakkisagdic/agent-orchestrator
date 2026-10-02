@@ -70,6 +70,61 @@ def test_a_move_that_edits_loses_adds_or_forgets_to_load_is_refused(project):
     assert "parts/mod_b.py is not loaded by any _part call" in problems
 
 
+def test_a_rename_or_a_part_another_module_loads_is_no_move(project):
+    """SPLIT-CHECK-2: the proof never asked which module loads a part, so a whole-file rename passed as a move."""
+    root = project["root"]
+    _repo(root)
+    _git(root, "mv", "mod.py", "mod2.py")
+
+    assert any("which no file it left loads as its part" in p for p in A.split_moves(root)["problems"])
+
+    _git(root, "mv", "mod2.py", "mod.py")
+    with open(os.path.join(root, "other.py"), "w", encoding="utf-8") as fh:
+        fh.write("def helper():\n    return 1\n\n\ndef main():\n    return helper()\n")
+    _git(root, "add", "other.py")
+    _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "other")
+    with open(os.path.join(root, "other.py"), "w", encoding="utf-8") as fh:
+        fh.write("def main():\n    return helper()\n")
+    _git(root, "add", "other.py")
+    _stage(root, LIB + '\n\n_part("mod_b", globals())\n', "def helper():\n    return 1\n")
+
+    assert any(p.startswith("helper moved to parts/mod_b.py") for p in A.split_moves(root)["problems"])
+
+
+def test_a_load_the_proof_reads_is_a_call_and_one_removed_is_seen(project):
+    """SPLIT-CHECK-2: a mention of the call in a docstring counted as loading the part, and removing an existing
+    part's load passed unseen."""
+    root = project["root"]
+    _repo(root)
+    _stage(root, LIB.replace('"""a module"""', '"""a module; _part("mod_b", globals())"""')
+           .replace('def b(n):\n    return n + 1\n\n\n', ''), 'def b(n):\n    return n + 1\n')
+
+    assert "parts/mod_b.py is not loaded by any _part call" in A.split_moves(root)["problems"]
+
+    with open(os.path.join(root, "mod.py"), "w", encoding="utf-8") as fh:
+        fh.write(LIB + '\n\n_part("x", globals())\n')
+    with open(os.path.join(root, "parts", "x.py"), "w", encoding="utf-8") as fh:
+        fh.write("def xx():\n    return 2\n")
+    _git(root, "add", "mod.py", "parts/x.py")
+    _git(root, "rm", "-q", "--cached", "parts/mod_b.py")
+    _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "x")
+    _stage(root, LIB.replace('def b(n):\n    return n + 1\n\n\n', '_part("mod_b", globals())\n\n\n'),
+           'def b(n):\n    return n + 1\n')
+
+    assert "the _part call that loaded x is gone" in A.split_moves(root)["problems"]
+
+
+def test_a_statement_moved_between_files_is_no_move(project):
+    """SPLIT-CHECK-2: other statements were compared as one pool, so an import moved into a part passed."""
+    root = project["root"]
+    _repo(root)
+    _stage(root, LIB.replace("import os\n", "").replace('def b(n):\n    return n + 1\n\n\n',
+                                                          '_part("mod_b", globals())\n\n\n'),
+           'import os\n\n\ndef b(n):\n    return n + 1\n')
+
+    assert "a top-level statement that is not a definition changed in mod.py" in A.split_moves(root)["problems"]
+
+
 def test_a_part_runs_in_the_namespace_of_the_module_it_came_from(tmp_path, monkeypatch):
     (tmp_path / "shared.py").write_text("def twice():\n    return helper() * 2\n", encoding="utf-8")
     monkeypatch.setattr(A, "_PARTS_DIR", str(tmp_path))

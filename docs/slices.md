@@ -230,9 +230,13 @@ suite passes without edits.
 A split slice is marked `move-only` on its board line. `ao commit-ok` then refuses the candidate
 unless `ao split-check` finds a pure move:
 
-- every definition that leaves a file arrives in another, byte for byte;
-- no definition is edited in place, lost or added, and no other top-level statement changes;
-- every part the candidate adds is loaded by a `_part` call.
+- every definition that leaves a module arrives, byte for byte, in a part that module loads with a
+  top-level `_part` call: a rename, or a part another module loads, runs in another namespace and
+  is no move;
+- no definition is edited in place, lost or added, no other top-level statement changes in any
+  file, and no part's `_part` call is removed;
+- every part the candidate adds is loaded by a top-level `_part` call, which a mention of one in a
+  docstring or a comment is not.
 
 The grant records that proof: the slice that declared the move and how many definitions moved.
 A split that lands under a review waiver with that record is not reviewed afterwards: `ao catchup`

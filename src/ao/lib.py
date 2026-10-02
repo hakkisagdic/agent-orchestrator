@@ -470,13 +470,15 @@ _PART_CALL = re.compile(r"""^(?:\w+\.)?_part\(\s*["']([\w-]+)["']\s*,\s*globals\
 
 
 def top_level_statements(source, filename="<source>"):
-    """(definitions, others) of one Python source: {name: [text]} for each top-level def, class
-    and simple assignment, decorators included, and [text] for every other top-level statement
-    except a part being loaded and a leading docstring."""
+    """(definitions, others, loads) of one Python source: {name: [text]} for each top-level def,
+    class and simple assignment, decorators included; [text] for every other top-level statement
+    except a part being loaded and a leading docstring; and the name of each part a top-level
+    `_part(name, globals())` call loads, which a mention in a docstring or a comment is not
+    (SPLIT-CHECK-2)."""
     import ast
     tree = ast.parse(source, filename)
     lines = source.splitlines(keepends=True)
-    definitions, others = {}, []
+    definitions, others, loads = {}, [], []
     for index, node in enumerate(tree.body):
         start = min([node.lineno] + [d.lineno for d in getattr(node, "decorator_list", [])])
         text = "".join(lines[start - 1:node.end_lineno])
@@ -492,23 +494,25 @@ def top_level_statements(source, filename="<source>"):
             for name in names:
                 definitions.setdefault(name, []).append(text)
         elif _PART_CALL.match(text.strip()):
-            continue
+            loads.append(_PART_CALL.match(text.strip()).group(1))
         elif index == 0 and isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) \
                 and isinstance(node.value.value, str):
             continue
         else:
             others.append(text)
-    return definitions, others
+    return definitions, others, loads
 
 
 def split_moves(root, start=None, end=None):
     """What the staged candidate moves between Python files, and everything that is not a pure move (#44).
 
     A definition moves when it leaves one file and arrives in another; it must arrive
-    byte for byte. In a candidate that moves, nothing else may change: no definition
-    edited in place, lost or added, no other top-level statement changed, and every
-    part the candidate adds is loaded by a `_part(name, globals())` call. Returns
-    {"moved": [(name, from, to)], "problems": [text]}.
+    byte for byte, into a part the module it left loads with a top-level
+    `_part(name, globals())` call: a rename, or a part another module loads, runs in
+    another namespace (SPLIT-CHECK-2). In a candidate that moves, nothing else may
+    change: no definition edited in place, lost or added, no other top-level statement
+    changed in any file, no part's load removed, and every part the candidate adds is
+    loaded. Returns {"moved": [(name, from, to)], "problems": [text]}.
 
     Given two commits, the same proof reads a range that landed: `end` against `start`.
     A waived review of a move closes on it once the move has landed.
@@ -525,25 +529,25 @@ def split_moves(root, start=None, end=None):
         return result.stdout.decode(UTF8, "replace") if result.returncode == 0 else None
 
     old, new = {}, {}
-    old_other, new_other, loaded, parts, present = [], [], set(), [], {}
+    # Statements and loads are kept by file: one moved between files changed both (SPLIT-CHECK-2).
+    other, loads, parts, present = {"old": {}, "new": {}}, {"old": {}, "new": {}}, [], {}
     for path in paths:
-        for side, spec, defs, other in (("old", f"{before}:{path}", old, old_other),
-                                        ("new", f"{after}:{path}", new, new_other)):
+        for side, spec, defs in (("old", f"{before}:{path}", old), ("new", f"{after}:{path}", new)):
             text = read(spec)
             if text is None:
                 continue
             try:
-                definitions, others = top_level_statements(text, path)
+                definitions, others, loaded = top_level_statements(text, path)
             except SyntaxError as exc:
                 return {"moved": [], "problems": [f"{path} does not parse on the {side} side: {exc.msg}"]}
             for name, texts in definitions.items():
                 defs.setdefault(name, []).extend((path, t) for t in texts)
-            other.extend(others)
-            present.setdefault(path, {})[side] = bool(definitions or others)
-            if side == "new":
-                loaded |= {m.group(1) for m in re.finditer(r"""_part\(\s*["']([\w-]+)["']""", text)}
-                if "/parts/" in f"/{path}" and read(f"{before}:{path}") is None:
-                    parts.append(path)
+            other[side][path] = sorted(others)
+            loads[side][path] = set(loaded)
+            present.setdefault(path, {})[side] = bool(definitions or others or loaded)
+            if side == "new" and "/parts/" in f"/{path}" and read(f"{before}:{path}") is None:
+                parts.append(path)
+    loaded = set().union(*loads["new"].values())
     moved, problems = [], []
     for name in sorted(set(old) | set(new)):
         before, after = old.get(name, []), new.get(name, [])
@@ -558,9 +562,20 @@ def split_moves(root, start=None, end=None):
             problems.append(f"{name} changed" + (f" on its way from {', '.join(was)} to {', '.join(now)}"
                                                  if was != now else f" in {', '.join(now)}"))
         elif was != now:
-            moved.append((name, ", ".join(was), ", ".join(now)))
-    if sorted(old_other) != sorted(new_other):
-        problems.append("a top-level statement that is not a definition changed")
+            # A definition leaves a module only for a part that module loads, as a split does: renamed, or
+            # into a part another module loads, it runs in another namespace (SPLIT-CHECK-2).
+            loader = set().union(*(loads["new"].get(path, set()) for path in was))
+            stray = [path for path in now if path not in was and ("/parts/" not in f"/{path}" or
+                     os.path.splitext(os.path.basename(path))[0] not in loader)]
+            if stray:
+                problems.append(f"{name} moved to {', '.join(stray)}, which no file it left loads as its part")
+            else:
+                moved.append((name, ", ".join(was), ", ".join(now)))
+    for path in sorted(set(other["old"]) | set(other["new"])):
+        if other["old"].get(path, []) != other["new"].get(path, []):
+            problems.append(f"a top-level statement that is not a definition changed in {path}")
+    for name in sorted(set().union(*loads["old"].values()) - loaded):
+        problems.append(f"the _part call that loaded {name} is gone")
     # An empty, comment-only or docstring-only file holds nothing to compare, so one added or removed beside
     # a real move passed as part of it - an __init__.py changes which packages there are (CATCHUP-EVIDENCE-2).
     for path, sides in sorted(present.items()):
