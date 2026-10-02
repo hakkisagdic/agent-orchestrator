@@ -1315,8 +1315,9 @@ def review_sections(cfg, item, boundary_text, diff):
                 lenses.append("tests")
         lenses = [lens for lens in dict.fromkeys(lenses + added) if lens in REVIEW_LENSES and lens not in waived]
     # A lens the row names is asked even alone: `lenses: authority` went whole, unrecorded, and the question it
-    # declared was never asked (REVIEW-SECTIONS-2). A default of correctness alone is the whole review.
-    if len(lenses) >= 2 or (named and lenses):
+    # declared was never asked (REVIEW-SECTIONS-2). So is a lone lens left by adding one and waiving the default,
+    # `+authority, -correctness` (REVIEW-SECTIONS-3). A default of correctness alone is the whole review.
+    if lenses and (named or lenses != ["correctness"]):
         record = {"asked": lenses, "waived": [lens for lens in waived if lens in REVIEW_LENSES],
                   "added": [lens for lens in added if lens in REVIEW_LENSES]}
         return [{"name": f"lens:{lens}",

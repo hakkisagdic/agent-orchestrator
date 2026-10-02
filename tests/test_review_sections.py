@@ -86,6 +86,18 @@ def test_a_single_declared_lens_is_asked_and_recorded(project, tmp_path, monkeyp
     assert A.review_evidence(_newest(root))["lenses"] == {"asked": ["authority"], "waived": [], "added": []}
 
 
+def test_a_lens_added_where_the_default_is_waived_is_asked_and_recorded(project, tmp_path, monkeypatch):
+    """REVIEW-SECTIONS-3: `+authority, -correctness` left authority alone, unnamed, and the review went whole."""
+    root, cfg, calls = _setup(project, tmp_path, monkeypatch,
+                              "- [S1] the store · acceptance: keep it right · lenses: +authority, -correctness")
+
+    assert cli.cmd_review(cfg, _args()) == 0
+
+    assert calls.read_text().splitlines() == ["Lens `authority`"]
+    assert A.review_evidence(_newest(root))["lenses"] == {"asked": ["authority"], "waived": ["correctness"],
+                                                          "added": ["authority"]}
+
+
 def test_a_section_journal_tells_two_bindings_of_one_tool_apart(project):
     """REVIEW-SECTIONS-2: strict routes were keyed by their argv template alone, so a section one binding answered
     was taken up under the other and recorded as its answer."""
