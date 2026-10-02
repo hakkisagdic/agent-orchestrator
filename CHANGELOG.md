@@ -18,6 +18,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- A mail body the append-only store holds without its row - the row's append failed after the body landed - is taken in at the next reconcile, where a view removed before then left the message out of the queue (MESSAGE-STORE-3).
 - `ao writers`, `ao hold` and the watchdog say an agent process cannot be placed because its working directory could not be read - another user's or an elevated process - where they said Windows exposes no working directory at all (WINDOWS-CWD-2).
 - `ao fanout ok` names the provider whose window it read, in its line and its JSON, where without `--provider` it said "None window" (HARNESS-ACCOUNTS-2).
 - A failed wake's request id is masked by its key whatever its characters, where an id of letters alone made every retry news and a red alarm mailed on each one (NOISE-REPEATS-2).

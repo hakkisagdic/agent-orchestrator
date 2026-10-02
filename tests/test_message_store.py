@@ -55,6 +55,29 @@ def test_mail_ao_writes_is_in_the_store_before_any_reconcile(project):
     assert A.mailbox(root, "agent-mail") == [NAMES[0]]
 
 
+def test_a_body_stored_without_its_row_is_taken_in_at_the_next_reconcile(project, monkeypatch):
+    """MESSAGE-STORE-3: the body was stored and its row's append failed; with the view removed before the next
+    reconcile, the message was gone from the queue and its body orphaned in the store."""
+    from ao import storage
+    root = project["root"]
+    cfg = _mode(project, "append-only")
+    append = A._mail_store_append
+
+    def lock_held(root_, row):
+        if row.get("event") == "message":
+            raise storage.LedgerLockTimeout("timed out")
+        return append(root_, row)
+    monkeypatch.setattr(A, "_mail_store_append", lock_held)
+    _write(root, cfg, NAMES[0])
+    monkeypatch.setattr(A, "_mail_store_append", append)
+    os.remove(os.path.join(root, "agent-mail", NAMES[0]))
+
+    A.reconcile_mail_ledger(root, cfg)
+
+    assert A.mailbox(root, "agent-mail") == [NAMES[0]]
+    assert os.path.exists(os.path.join(root, "agent-mail", NAMES[0]))
+
+
 def test_a_compaction_cut_short_keeps_the_body_and_writes_its_archive_durably(project, monkeypatch):
     """MESSAGE-STORE-2: the archive was written without reaching the disk before the body became its stub, and a
     compaction whose record did not land left a stub the next one wrote over the archive."""

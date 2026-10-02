@@ -851,18 +851,30 @@ def _store_path(root, mid):
 
 
 def ingest_mail(root, cfg):
-    """Take every message in the mailbox view into the append-only store, once (#80)."""
+    """Take every message in the mailbox view into the append-only store, once (#80).
+
+    A body stored with no row - the row's append failed after the body landed, and the view was
+    removed before the next reconcile - is taken from the store itself; only the view was read,
+    and the message was gone from the queue with its body orphaned (MESSAGE-STORE-3).
+    """
     from .storage import replace_file_durably
     box = os.path.join(root, cfg.get("mailbox", "agent-mail"))
     known = {row.get("id") for row in mail_store_rows(root) if row.get("event") == "message"}
+    views = set(os.listdir(box)) if os.path.isdir(box) else set()
+    store = os.path.join(root, ".ao", "mail", "store")
+    stored = set(os.listdir(store)) if os.path.isdir(store) else set()
     taken = []
-    for name in (sorted(os.listdir(box)) if os.path.isdir(box) else []):
+    for name in sorted(views | stored):
         if name == "README.md" or not name.endswith(".md") or name in known:
             continue
-        with open(os.path.join(box, name), "rb") as fh:
+        source = os.path.join(box, name) if name in views else _store_path(root, name)
+        with open(source, "rb") as fh:
             data = fh.read()
-        replace_file_durably(_store_path(root, name), data)
-        meta = mail_meta(os.path.join(box, name))
+        if name not in views and data.startswith(b"ao-mail-stub v1\n"):
+            continue
+        if name in views:
+            replace_file_durably(_store_path(root, name), data)
+        meta = mail_meta(source)
         _mail_store_append(root, {"event": "message", "id": name,
                                   "digest": "sha256:" + hashlib.sha256(data).hexdigest(),
                                   "from": meta.get("from"), "to": meta.get("to"), "kind": meta.get("kind")})
