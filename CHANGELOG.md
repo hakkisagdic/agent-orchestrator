@@ -18,6 +18,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- The watchdog's state is written whole or not at all, where a kill -9, a power cut or a Ctrl+C mid-write left it torn and the next cycle, reading a fresh state, could resume a parked turn or wake the architect a second time (JOURNAL-1).
 - An opencode implementer's spend is read from each assistant message's tokens, per response, where it was declared from the session and `ao cost`, the panel and the MCP status counted nothing; a failed tool call reads as failed, where the declaration named fields no reader takes (ADAPTER-SQLITE-READER-2).
 - A lone lens left by adding one and waiving the default (`lenses: +authority, -correctness`) is asked and recorded with its waiver, where the review went whole (REVIEW-SECTIONS-3).
 - A mail body the append-only store holds without its row - the row's append failed after the body landed - is taken in at the next reconcile, where a view removed before then left the message out of the queue (MESSAGE-STORE-3).

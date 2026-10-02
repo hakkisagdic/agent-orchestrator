@@ -499,10 +499,18 @@ def load_state(root):
 
 
 def save_state(root, st):
+    """Write the watchdog's state whole, or not at all (JOURNAL).
+
+    It was written over in place: a kill -9, a power cut or a Ctrl+C mid-write left the file torn,
+    a torn file reads as a fresh state, and the markers that a park was resumed, a report handed to
+    a wake, a nudge counted were gone - the next cycle could resume or wake a second time. It is now
+    replaced whole and synced, so a reader finds the state before the write or after it.
+    """
     if _DRY_RUN.get():
         return
+    from .storage import replace_file_durably
     os.makedirs(STATE_DIR, exist_ok=True)
-    json.dump(st, open(state_path(root), "w", encoding=UTF8), indent=2)
+    replace_file_durably(state_path(root), json.dumps(st, indent=2).encode(UTF8))
 
 
 def arch_alive(root, architect):
