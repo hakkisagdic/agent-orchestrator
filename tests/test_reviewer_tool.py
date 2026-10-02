@@ -79,6 +79,8 @@ def _tool(tmp_path, monkeypatch, mode="approve"):
                       encoding="utf-8")
     argv = [sys.executable, str(script), "--diff-file", "{diff_file}", "--output", "{output}", "ask", "{prompt}"]
     _declare(monkeypatch, argv)
+    # The fake states the release the contract was measured against, as pr-agent's --version does.
+    monkeypatch.setattr(cli, "_reviewer_binary_version", lambda root_, path, timeout=None: "0.45.0")
     route = {"id": "tool-reviewer", "adapter": "pr-agent", "kind": "tool", "model": MODEL, "family": "other-family",
              "argv": list(argv)}
     return route, record
@@ -146,6 +148,20 @@ def test_the_pr_agent_extra_is_bounded_to_the_release_its_adapter_was_measured_a
         (requirement,) = [line for line in fh.read().splitlines() if line.startswith("pr-agent = [")]
     assert ">=0.45.0,<0.46;" in requirement
     assert "pr-agent==0.45.*" in A.package_adapters()["pr-agent"]["review"]["install"]
+
+
+def test_a_tool_of_another_release_is_unavailable_not_taken_for_the_measured_one(project, tmp_path, monkeypatch):
+    """REVIEWER-TOOL-3: the extra bounded what was installed, and a later pr-agent first on PATH answered as 0.45."""
+    root = project["root"]
+    _repo_with_change(root)
+    route, record = _tool(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli, "_reviewer_binary_version", lambda root_, path, timeout=None: "0.46.0")
+
+    assert cli.cmd_review(dict(project, reviewer=route), _args()) == 3
+
+    body = _only_review(root)
+    assert "VERDICT: UNAVAILABLE" in body and "0.45" in body
+    assert not record.exists() and A.rounds(root, "semantic-review") == 0
 
 
 def test_a_tool_reviewers_approval_is_evidence_commit_ok_grants_on(project, tmp_path, monkeypatch, capsys):

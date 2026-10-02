@@ -39,6 +39,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Security
 
+- A tool reviewer runs only at the release its review contract was measured against (`review.release`, 0.45 for pr-agent): one whose `--version` names another release, or none, is unavailable, where a later pr-agent first on PATH answered as the pinned one ([adapters.md](docs/adapters.md)) (REVIEWER-TOOL-3).
 - A `file:` address in a filter hook's arguments is judged by the path it decodes to, where a percent-encoded project path, or on Windows any `file:///C:/...` address, passed the project boundary (FILTER-EXCLUSIONS-3).
 - The move proof (`ao split-check`), which closes a waived review with no reviewer, accepts a definition moved only into a part that the module it left loads with a top-level `_part` call, where a whole-file rename or a part another module loads passed; it reads the load from the call itself, sees a part's call removed, and compares other statements file by file ([slices.md](docs/slices.md)) (SPLIT-CHECK-2).
 - A call ao refused that an ACP reviewer's agent ran under an empty tool-call id, or none, voids the review as any refused call that ran does (ACP-REVIEWER-4).

@@ -978,6 +978,17 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, can
             "returncode": None, "kind": "missing-binary",
             "retryable": False,
         }
+    # The extra bounds what is installed, not what runs: a later release first on PATH answered as the one the
+    # contract was measured against, and one that states no version is not taken for it (REVIEWER-TOOL-3).
+    release = str(((tool or {}).get("contract") or {}).get("release") or "")
+    if release and _reviewer_version_key(version)[:len(release.split("."))] != _reviewer_version_key(release):
+        return label, declared_binary, version, {
+            "ok": False, "out": "", "binary": exe,
+            "reason": (f"{exe} is {version or 'of a version it does not state'}, not the {release} release adapter "
+                       f"{tool['adapter']} was measured against") + (f"; {tool['install']}" if tool.get("install")
+                                                                       else ""),
+            "returncode": None, "kind": "missing-binary", "retryable": False,
+        }
     argv[0] = exe
     if os.name == "nt" and exe.lower().endswith((".cmd", ".bat")):
         return label, declared_binary, version, {

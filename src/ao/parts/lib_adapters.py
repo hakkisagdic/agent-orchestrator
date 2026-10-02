@@ -843,6 +843,8 @@ def tool_review_problems(adapter, argv=None):
             "".encode(review["encoding"])
         except (LookupError, TypeError):
             problems.append(f"`review.encoding` is {review['encoding']!r}, which is not an encoding")
+    if "release" in review and not re.fullmatch(r"\d+(?:\.\d+)*", str(review["release"])):
+        problems.append("`review.release` names the release the contract was measured against, in dotted digits")
     answer = review.get("answer")
     if not isinstance(answer, dict) or answer.get("from") != "output":
         problems.append("`review.answer.from` must be output: the file ao names in {output}")

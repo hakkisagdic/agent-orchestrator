@@ -138,6 +138,7 @@ it - and a `review` contract, which ao reads from the package's adapters only:
 | `review` → `environment` | `remove` and `keep`: patterns, matched without regard to case, for inherited variables the tool would read as settings and the ones it keeps; `set`: the variables that pin it, with `{model}` and `{timeout}` |
 | `review` → `encoding` | the encoding the tool reads the diff in; a candidate in another is refused before the tool starts |
 | `review` → `install`, `limits` | what would install it, named when it is absent; what ao cannot know about its answer, written into the evidence |
+| `review` → `release` | the release the contract was measured against, in dotted digits: a tool whose `--version` names another release, or none, is unavailable rather than taken for it |
 
 ```bash
 ao role set reviewer pr-agent --model <provider/model> --family <family>
