@@ -190,7 +190,8 @@ def test_an_adapter_that_declares_no_shape_has_nothing_read_from_another_harness
 # answered in a field of that name (USD-COST).
 ORDINARY = {"type", "timestamp", "text", "content", "message", "user", "assistant", "args", "path", "key", "value",
             "success", "result", "name", "usage", "tool_call", "input", "refusal",
-            "data", "state", "status", "error", "tool", "credits", "finish", "stop", "role", "parts", "model"}
+            "data", "state", "status", "error", "tool", "credits", "finish", "stop", "role", "parts", "model",
+            "tokens", "output", "read", "write"}
 
 
 def _steps(value):

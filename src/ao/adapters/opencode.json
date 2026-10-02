@@ -105,21 +105,30 @@
       "note": "Tokens are stored per message, per step-finish part and aggregated per session, but no model window is, so a context percentage would rest on a guessed window. opencode's own context is a session_context_epoch row, and that table is empty in this store."
     },
     "cost": {
-      "from": "session",
-      "fields": ["cost", "tokens_input", "tokens_output", "tokens_reasoning", "tokens_cache_read", "tokens_cache_write"],
-      "unit": "usd+token",
-      "counted": "the session's aggregate columns, one row per session; the same numbers appear per message in data.cost and data.tokens, and per step in the step-finish part, so read one level and not all three.",
+      "from": "transcript",
+      "type": "assistant",
+      "response": "id",
+      "fields": ["tokens.input", "tokens.output", "tokens.reasoning", "tokens.cache.read", "tokens.cache.write"],
+      "unit": "token",
+      "counted": "each assistant message's data.tokens, one response a row, keyed by its id. Measured 2026-10-03 on six sessions of 1 to 2,525 messages: the session's aggregate columns are exactly these summed, input, output, reasoning, cache read and write alike, and output and reasoning are counted apart. Declared `from: session`, nothing read the aggregates and ao cost read 0 (ADAPTER-SQLITE-READER-2).",
       "verified": true,
       "note": "Aggregates are real and large where cost is not: one session reads tokens_output 23,564, tokens_cache_read 1,729,222, tokens_cache_write 87,649 with cost 0.0, because every message's cost is 0.0 in a store whose provider bills elsewhere. A panel that priced opencode by cost would show a working agent spending nothing."
     },
     "failure": {
       "from": "transcript",
-      "table": "part",
-      "kind": "tool",
-      "field": "data.state.status",
+      "type": "assistant",
+      "blocks": "parts[]",
+      "match": {"type": "tool"},
+      "field": "state.status",
       "failed_when": "error",
-      "text": "data.state.error",
+      "text": "state.error",
       "note": "The harness's own verdict per call, beside an assistant message's data.error for a turn that died at the provider."
+    }
+  },
+  "billing": {
+    "fallback": {
+      "reading": "per-response",
+      "note": "A turn spans many assistant messages - most end on tool-calls - so each message is one response of the turn, not the whole of it (ADAPTER-SQLITE-READER-2)."
     }
   },
   "busy": {

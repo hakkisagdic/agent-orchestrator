@@ -130,6 +130,41 @@ def test_a_record_holds_its_own_columns_and_its_json_columns_fields_together(tmp
         "do the thing, then write the file it asks for", "writing it now, which is the second thing I was asked to do"]
 
 
+def _shipped_opencode(tmp_path, change):
+    """The fixture store with `change` (sql, values) applied, read through the opencode adapter ao ships."""
+    import sqlite3
+    db, _ = make_store(tmp_path)
+    connection = sqlite3.connect(db)
+    connection.execute(*change)
+    connection.commit()
+    connection.close()                       # Windows locks a database held open
+    shipped = A.package_adapters()["opencode"]
+    adapter = dict(shipped, transcript=dict(shipped["transcript"], path=db))
+    recs = A.DatabaseTail(db, "ses_one", adapter["transcript"]["record"], adapter["transcript"]["freshness"]).read()
+    return recs, adapter
+
+
+def test_the_shipped_opencode_declaration_reads_a_messages_tokens_as_its_turns_spend(tmp_path):
+    """ADAPTER-SQLITE-READER-2: spend was declared from the session, which nothing reads, and ao cost read 0."""
+    tokens = {"input": 10, "output": 3, "reasoning": 0, "cache": {"read": 400, "write": 20}}
+    recs, adapter = _shipped_opencode(tmp_path, ("UPDATE message SET data = ? WHERE id = 'msg_a2'", (json.dumps(
+        {"role": "assistant", "finish": "tool-calls", "cost": 0.0, "tokens": tokens}),)))
+
+    tel = A.telemetry(recs, adapter)
+
+    assert (tel["total"], tel["turns"], tel["unit"]) == (433, 1, "token")
+
+
+def test_the_shipped_opencode_declaration_reads_an_errored_tool_part_as_a_failed_call(tmp_path):
+    """ADAPTER-SQLITE-READER-2: the failure block named a table and kind no reader takes, so no call ever failed."""
+    part = {"type": "tool", "tool": "bash", "callID": "c2",
+            "state": {"status": "error", "input": {"command": "pytest"}, "error": "Error: exit code 1"}}
+    insert = "INSERT INTO part VALUES ('prt_5', 'msg_a2', 'ses_one', 2050, 2050, ?)"
+    recs, adapter = _shipped_opencode(tmp_path, (insert, (json.dumps(part),)))
+
+    assert [text for _, text in A.recent_errors(recs, 3, adapter)] == ["Error: exit code 1"]
+
+
 def test_a_tail_is_the_newest_rows_and_no_more_than_its_bytes(tmp_path, monkeypatch):
     db, adapter = read_adapter(tmp_path, monkeypatch)
     tail = A.DatabaseTail(db, "ses_one", adapter["transcript"]["record"], adapter["transcript"]["freshness"])
@@ -223,6 +258,7 @@ def test_a_working_directory_is_a_bound_value_never_query_text(tmp_path, monkeyp
     connection.close()
 
     assert A._sqlite_sessions(adapter["id"], STORE, "/work/?'';DROP--") == []
+    assert [row["session"] for row in A._sqlite_sessions(adapter["id"], STORE, "/work/?';DROP--")] == ["ses_odd"]
     assert A._sqlite_sessions(adapter["id"], STORE, "/work/alpha") and A._sqlite_sessions(adapter["id"], STORE, "") == []
 
 
