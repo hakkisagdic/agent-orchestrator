@@ -1214,11 +1214,27 @@ def cmd_hold(cfg, args):
     hold = {"by": args.by, "reason": args.reason or "manual intervention", "at": int(time.time()), "stopped": []}
     os.makedirs(os.path.dirname(path), exist_ok=True)
     replace_file_durably(path, json.dumps(hold, indent=2).encode(UTF8))
+    late = None
     try:
         with _exclusive_lock(os.path.join(W.STATE_DIR, W.CYCLE_LOCK.format(key=A.project_key(root))), timeout=60):
             pass
-    except (OSError, LedgerLockTimeout):
-        print(f"{C['dim']}a watchdog cycle is still running; counting the turns as they stand{C['reset']}")
+    except LedgerLockTimeout:
+        late = "a watchdog cycle that began before this hold was still running after a minute"
+    except OSError as exc:
+        late = f"the watchdog's cycle lock could not be taken ({exc})"
+    code = _hold_stop(root, adapter, args, path, hold)
+    if late:
+        # Counted while that cycle ran: a turn it starts after its last reading of the hold is not counted (JOURNAL-6).
+        print(f"{C['yellow']}{late}{C['reset']}: the hold stands, and a cycle reads it again before it starts a "
+              "turn, but a turn it started as the hold was placed may not be stopped - `ao hold status` shows "
+              "it, and `ao hold` again stops it")
+        return 1
+    return code
+
+
+def _hold_stop(root, adapter, args, path, hold):
+    """Count the unattended turns in this tree, record them in the hold, and stop them (JOURNAL-6)."""
+    from .storage import replace_file_durably
     pids = A.agent_pids(root, adapter, headless_only=True)
     hold["stopped"] = pids
     replace_file_durably(path, json.dumps(hold, indent=2).encode(UTF8))

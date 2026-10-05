@@ -185,6 +185,64 @@ def test_a_park_whose_transcript_is_gone_is_told_and_its_alarm_stands(world):
     world.cycle(dry_run=False)
 
     assert any("a parked slice cannot resume" in title for title, *_ in world.notices)
+    assert any(title.endswith("B8 parked on quota") for title, *_ in world.notices)     # the park's own alarm
+
+
+def test_a_hold_whose_wait_on_a_running_cycle_times_out_stops_what_it_counted_and_says_so(project, monkeypatch,
+                                                                                         capsys):
+    """JOURNAL-6-2: after a minute's wait on a cycle that began before the hold, `ao hold` counted the turns as they
+    stood, said HELD and exited 0; a turn that cycle started after the count ran on and nobody was told."""
+    from types import SimpleNamespace
+    from ao import cli, storage
+    root = project["root"]
+    running, stopped = [7001], []
+    monkeypatch.setattr(A, "agent_pids", lambda root_, adapter, headless_only=False: list(running))
+    monkeypatch.setattr(A, "orphans", lambda root_, adapter, table=None: [])
+    monkeypatch.setattr(A, "unplaced_agent_pids", lambda root_, adapter: [])
+    monkeypatch.setattr(A, "kill_turn", lambda pid, sig: stopped.append(pid))
+    monkeypatch.setattr(cli, "_alive", lambda pid: False)
+    real = storage._exclusive_lock
+    monkeypatch.setattr(storage, "_exclusive_lock", lambda path, timeout=10.0:     # the minute, made half a second
+                        real(path, min(timeout, 0.5) if str(path).endswith(".cycle.lock") else timeout))
+    lock = os.path.join(W.STATE_DIR, W.CYCLE_LOCK.format(key=A.project_key(root)))
+    holding, release = threading.Event(), threading.Event()
+
+    def cycle():
+        with real(lock, timeout=5):
+            holding.set()
+            release.wait(10)
+    thread = threading.Thread(target=cycle)
+    thread.start()
+    holding.wait(5)
+
+    code = cli.cmd_hold(project, SimpleNamespace(action="hold", by="a person", reason="test", grace=1, note=None))
+    release.set()
+    thread.join()
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "still running after a minute" in out and "`ao hold` again stops it" in out
+    assert stopped == [7001] and A.hold_state(root)["stopped"] == [7001]
+
+
+def test_a_report_wake_reads_a_hold_placed_while_its_window_rotated(world, monkeypatch):
+    """JOURNAL-6-2: the report wake read the hold before it rotated the architect's window, which can wait minutes
+    on keyflip, and woke the architect under a hold placed meanwhile."""
+    from ao.storage import replace_file_durably
+    world.transcript_age(900)
+    world.mail("20260916-1200-kiro-to-fable-BLOCKED-queue.md", BLOCKED)
+
+    def rotation(cfg, argv, who, on_wait=None):
+        if who == "architect":
+            hold = {"by": "a person", "reason": "test", "at": int(time.time()), "stopped": []}
+            replace_file_durably(os.path.join(world.root, A.HOLD_FILE), json.dumps(hold).encode("utf-8"))
+        return {"ok": True, "provider": None, "rotated": False, "text": "headroom"}
+    monkeypatch.setattr(A, "rotate_if_exhausted", rotation)
+
+    trace = world.cycle(dry_run=False)
+
+    assert _architect_wakes(world) == []
+    assert "held by a person since this cycle began; not waking the architect" in trace
 
 
 # ---- shared records changed one writer at a time (JOURNAL-7) ------------------------------------------------------

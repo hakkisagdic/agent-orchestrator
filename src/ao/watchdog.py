@@ -1072,10 +1072,6 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
         if resolved and st.get("arch_quota_until", 0) > time.time():
             print(f"architect at quota until {reset_when(st['arch_quota_until'])}; not waking")
             resolved = None
-        held = A.hold_state(root)
-        if resolved and held:
-            print(f"held by {held.get('by')} since this cycle began; not waking the architect")
-            resolved = None
         if resolved and not args.dry_run:
             # An exhausted window is rotated through keyflip first, when it may be (#32).
             headroom = A.rotate_if_exhausted(cfg, argv, "architect")
@@ -1084,6 +1080,11 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
                 notify(f"{key}: no headroom", headroom["text"] + " — a person decides", root,
                        key=f"no-headroom:{headroom['provider']}", window=6 * 3600, audience="human")
                 resolved = None
+        # Read after the rotation, which can wait minutes on keyflip, as the nudge and the refill read it (JOURNAL-6).
+        held = A.hold_state(root)
+        if resolved and held:
+            print(f"held by {held.get('by')} since this cycle began; not waking the architect")
+            resolved = None
         if resolved:
             argv[0] = resolved
             record_pinned(root, pinned)

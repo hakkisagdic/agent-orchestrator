@@ -33,7 +33,7 @@ Never inject into a session that is mid-turn. Two hazards, two mitigations:
 |---|---|
 | Two writers on one session transcript | Ask the OS which agent processes have this repo as their cwd. Start nothing while any of them is alive. |
 | Two writers on one working tree | Write lanes get separate git worktrees: `ao lane start` makes one per board item and refuses a second lane for an item that has one. |
-| A human needs the tree | `ao hold` stops every agent in it and holds the lock; every restart path checks the lock first. |
+| A human needs the tree | `ao hold` stops every agent in it and holds the lock; every restart path reads the lock again right before it starts a turn. A hold that cannot wait out a watchdog cycle already running says so and exits 1. |
 | A turn ended but its processes did not | `ao writers` shows them as orphans (no terminal, dead group leader) and counts zero writers; the watchdog clears them before every count, and `ao hold` / the reaper stop turns by process group so no new ones are made. |
 
 **Do not infer this from file timestamps.** That was the original design — status AND
