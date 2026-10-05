@@ -304,3 +304,16 @@ def test_a_file_address_with_a_backslash_or_a_control_character_is_refused(proje
                  f"{base}/x/.\n./{name}/.ao/filter.toml", f"--config={base}/x/.\r./{name}/.ao/filter.toml"):
         why = A._probe_program([sys.executable, word], root, allowed, os.environ.get("PATH", ""))[1]
         assert why and "read differently" in why, repr(word)
+
+
+def test_a_bare_file_address_without_a_leading_slash_is_refused(project, monkeypatch):
+    """FILTER-EXCLUSIONS-7: `file:x/y` has no authority and no root; a URL reader takes the path from the root and ao
+    took it under the project, so the two could name different files."""
+    root = os.path.realpath(project["root"])
+    allowed = [A._program_name(sys.executable)]
+
+    for word in ("file:.ao/filter.toml", "file:../elsewhere/filter.toml", "--config=file:x/y.toml"):
+        why = A._probe_program([sys.executable, word], root, allowed, os.environ.get("PATH", ""))[1]
+        assert why and "read differently" in why, word
+    _on_windows(monkeypatch)
+    assert "read differently" in A._probe_program(["rtk", "file:C:/repo/.ao/filter.toml"], "C:\\repo", {"rtk"}, "")[1]

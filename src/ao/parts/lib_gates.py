@@ -319,9 +319,13 @@ def _probe_program(argv, root, programs, search_path):
                 # Python 3.14 - drops a query and a fragment, reads a `\` as `/` and drops a tab, CR or LF; one
                 # decoding the text after the scheme, as url2pathname did before 3.14, keeps them as path, `?/../..`
                 # and all. ao cannot tell which reads it, and judged whichever its own Python is (FILTER-EXCLUSIONS-6).
-                if any(mark in address for mark in ("?", "#", "\\", "\t", "\r", "\n")):
-                    return None, (f"{word!r} is a file address holding a query or fragment, a backslash or a control "
-                                  "character, which programs read differently")
+                # `file:x/y` names no root: a URL reader takes it from the root, and ao took it under the project
+                # (FILTER-EXCLUSIONS-7).
+                bare = piece[:url.end()].lower() == "file:"
+                if bare and not address.startswith("/") \
+                        or any(mark in address for mark in ("?", "#", "\\", "\t", "\r", "\n")):
+                    return None, (f"{word!r} is a file address with no root, or holding a query or fragment, a "
+                                  "backslash or a control character, which programs read differently")
                 if address[:10].lower() == "localhost/":
                     address = address[9:]           # this machine, as a program reads it: no directory of the path
                 try:
