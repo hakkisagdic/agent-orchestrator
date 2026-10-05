@@ -244,6 +244,11 @@ def _git(root, *args):
     subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
 
 
+def _config_value(path):
+    """A path as a git config file holds it: a backslash there begins an escape, and a Windows path has them."""
+    return str(path).replace("\\", "\\\\")
+
+
 def _bare_named(tmp_path, name):
     subprocess.run(["git", "init", "-q", "--bare", str(tmp_path / name)], check=True)
     return tmp_path / name
@@ -286,7 +291,7 @@ def test_the_url_a_remote_names_is_not_rewritten_a_second_time(project, tmp_path
     root, cfg = _store(project, "backup")
     _git(root, "remote", "add", "backup", str(mail))
     _git(root, "remote", "set-url", "--push", "backup", str(mail))
-    _git(root, "config", f"url.{tmp_path}/stranger.pushInsteadOf", f"{tmp_path}/mail")
+    _git(root, "config", f"url.{tmp_path / 'stranger'}.pushInsteadOf", str(tmp_path / "mail"))
 
     with pytest.raises(RuntimeError, match="name the repository git reaches"):
         A.sync_mail(root, cfg)
@@ -338,7 +343,8 @@ def test_a_remote_kept_outside_the_repositorys_config_is_not_taken_for_a_directo
     stranger = _bare_named(tmp_path, "stranger.git")
     root, cfg = _store(project, "mailbox")
     person = tmp_path / "gitconfig"
-    person.write_text(f'[user]\n\tname = t\n\temail = t@t\n[remote "mailbox"]\n\turl = {stranger}\n', encoding="utf-8")
+    person.write_text(f'[user]\n\tname = t\n\temail = t@t\n[remote "mailbox"]\n\turl = {_config_value(stranger)}\n',
+                      encoding="utf-8")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(person))
 
     with pytest.raises(RuntimeError, match="git reads mailbox as"):
@@ -369,7 +375,7 @@ def test_an_origin_kept_in_the_global_config_is_the_products_own_remote(project,
     product = _bare(tmp_path)
     root, cfg = _store(project, str(product))
     global_config = tmp_path / "gitconfig"
-    global_config.write_text(f'[remote "origin"]\n\turl = {product}\n', encoding="utf-8")
+    global_config.write_text(f'[remote "origin"]\n\turl = {_config_value(product)}\n', encoding="utf-8")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
     _never_pushed(monkeypatch)
 

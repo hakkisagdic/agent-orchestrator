@@ -163,8 +163,11 @@ def test_a_hook_argument_naming_a_project_path_not_there_yet_is_refused(project,
     allowed = [A._program_name(sys.executable)]                  # python.exe is python, as the setting reads it
     assert A._probe_program([sys.executable, "--level=1.5", "v2", "--endpoint=http://localhost:8080/rules"], root,
                             allowed, os.environ.get("PATH", ""))[1] is None
-    assert "lies inside the project" in A._probe_program([sys.executable, "file://" + root + "/.ao/rules.toml"], root,
-                                                         allowed, os.environ.get("PATH", ""))[1]
+    # as a URL names it: `"file://" + root` holds a backslash on Windows, which is refused as read differently
+    import pathlib
+    uri = pathlib.Path(root, ".ao", "rules.toml").as_uri()
+    assert "lies inside the project" in A._probe_program([sys.executable, uri], root, allowed,
+                                                         os.environ.get("PATH", ""))[1]
 
 
 def test_a_file_address_is_judged_by_the_path_it_decodes_to(project):
