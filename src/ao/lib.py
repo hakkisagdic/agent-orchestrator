@@ -37,16 +37,18 @@ def _parts_folder(folder, path=os.path):
 def _part(name, namespace):
     """Run the part `name` in `namespace` - the globals of the module it was moved out of.
 
-    The part is read from the parts folder beside that module, `namespace["__file__"]`: a module
-    in any folder runs the file the move proof read, where every call read lib.py's own parts/
-    (SPLIT-CHECK-4). A namespace that names no file reads _PARTS_DIR.
+    The part is read from the parts folder beside the file whose code calls this - the module, or a
+    part that loads one - as it was compiled: a module in any folder runs the file the move proof read,
+    where every call read lib.py's own parts/ (SPLIT-CHECK-4). It was read beside `namespace["__file__"]`,
+    which the module's own code - an earlier part, an import alias, `globals().update` - could bind to
+    another place than the proof read (SPLIT-CHECK-6). Code compiled from no file reads _PARTS_DIR.
 
     Compiled through the import system's own loader, so a part's bytecode is cached like
     any module's and an `ao` hook does not recompile thousands of lines on every run.
     """
     from importlib.machinery import SourceFileLoader
-    module = namespace.get("__file__")
-    folder = _parts_folder(os.path.dirname(os.path.abspath(module))) if module else _PARTS_DIR
+    caller = sys._getframe(1).f_code.co_filename
+    folder = _parts_folder(os.path.dirname(os.path.abspath(caller))) if os.path.isfile(caller) else _PARTS_DIR
     path = os.path.join(folder, f"{name}.py")
     exec(SourceFileLoader(f"ao.parts.{name}", path).get_code(f"ao.parts.{name}"), namespace)
 
@@ -530,20 +532,6 @@ def _part_file(module, name):
     return posixpath.join(_parts_folder(posixpath.dirname(module), posixpath), f"{name}.py")
 
 
-def _sets_file(source):
-    """Whether a module binds `__file__` - by assignment, `global`, or `globals()["__file__"]` (SPLIT-CHECK-5)."""
-    import ast
-    for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.Name) and node.id == "__file__" and isinstance(node.ctx, (ast.Store, ast.Del)):
-            return True
-        if isinstance(node, (ast.Global, ast.Nonlocal)) and "__file__" in node.names:
-            return True
-        if isinstance(node, ast.Subscript) and isinstance(node.ctx, (ast.Store, ast.Del)) \
-                and getattr(node.slice, "value", None) == "__file__":
-            return True
-    return False
-
-
 def split_moves(root, start=None, end=None):
     """What the staged candidate moves between Python files, and everything that is not a pure move (#44).
 
@@ -572,7 +560,7 @@ def split_moves(root, start=None, end=None):
     old, new = {}, {}
     # Statements and loads are kept by file: one moved between files changed both (SPLIT-CHECK-2).
     other, loads, parts, present = {"old": {}, "new": {}}, {"old": {}, "new": {}}, [], {}
-    order, file_setters = {"old": {}, "new": {}}, set()
+    order = {"old": {}, "new": {}}
     for path in paths:
         for side, spec, defs in (("old", f"{before}:{path}", old), ("new", f"{after}:{path}", new)):
             text = read(spec)
@@ -590,12 +578,7 @@ def split_moves(root, start=None, end=None):
             present.setdefault(path, {})[side] = bool(definitions or others or loaded)
             if side == "new" and "/parts/" in f"/{path}" and read(f"{before}:{path}") is None:
                 parts.append(path)
-            if side == "new" and loaded and _sets_file(text):
-                file_setters.add(path)
-    # `_part` reads parts beside `__file__`, so a module that sets it reads them from wherever it says, and the
-    # proof read them beside the module's path (SPLIT-CHECK-5).
-    moved, problems = [], [f"{path} sets __file__, which moves where its parts are read"
-                           for path in sorted(file_setters)]
+    moved, problems = [], []
     for name in sorted(set(old) | set(new)):
         before, after = old.get(name, []), new.get(name, [])
         if not after:

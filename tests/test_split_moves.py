@@ -2,6 +2,8 @@ import os
 import subprocess
 from types import SimpleNamespace
 
+import pytest
+
 from ao import cli, lib as A
 
 LIB = '"""a module"""\nimport os\n\nX = 1\n\n\ndef a():\n    return X\n\n\ndef b(n):\n    return n + 1\n\n\ndef c():\n    return b(1)\n'
@@ -130,7 +132,8 @@ def test_a_part_runs_in_the_namespace_of_the_module_it_came_from(tmp_path, monke
     monkeypatch.setattr(A, "_PARTS_DIR", str(tmp_path))
     namespace = {"helper": lambda: 21}
 
-    A._part("shared", namespace)
+    # called from code compiled from no file, as `_part` reads _PARTS_DIR for
+    exec(compile('_part("shared", namespace)', "<no file>", "exec"), {"_part": A._part, "namespace": namespace})
 
     assert namespace["twice"]() == 42 and namespace["twice"].__globals__ is namespace
     namespace["helper"] = lambda: 5
@@ -311,9 +314,11 @@ def test_a_part_runs_from_the_parts_folder_beside_the_module_that_loads_it(tmp_p
     (tmp_path / "lib_parts").mkdir()
     (tmp_path / "lib_parts" / "mod_b.py").write_text("def b(n):\n    return n * 100\n", encoding="utf-8")
     monkeypatch.setattr(A, "_PARTS_DIR", str(tmp_path / "lib_parts"))
-    namespace = {"__file__": str(tmp_path / "sub" / "mod.py")}
+    module = tmp_path / "sub" / "mod.py"
+    module.write_text('_part("mod_b", globals())\n', encoding="utf-8")
+    namespace = {"_part": A._part, "__file__": str(module)}
 
-    A._part("mod_b", namespace)
+    exec(compile(module.read_text(encoding="utf-8"), str(module), "exec"), namespace)
 
     assert namespace["b"](1) == 2
 
@@ -323,16 +328,38 @@ def test_ao_s_own_modules_read_their_parts_where_they_always_did():
         assert A._parts_folder(os.path.dirname(os.path.abspath(module.__file__))) == A._PARTS_DIR
 
 
-def test_a_module_that_sets_its_own_file_proves_no_move(project):
-    """SPLIT-CHECK-5: `_part` reads parts beside `__file__`, so a module that sets it reads them from wherever it says,
-    and the proof read them beside the module's path."""
+def test_a_module_that_binds_its_file_proves_its_move_all_the_same(project):
+    """SPLIT-CHECK-6: `_part` reads beside the file whose code calls it, so a module that binds `__file__` moves
+    nothing the proof reads, and is no longer refused for it - nor for a function's own `__file__`."""
     root = project["root"]
     _repo(root)
-    moved = '__file__ = "/elsewhere/mod.py"\n' + _split_b()
-    _write_files(root, {"mod.py": LIB.replace('"""a module"""\n', '"""a module"""\n__file__ = "/elsewhere/mod.py"\n')},
-                 commit="file")
-    _write_files(root, {"mod.py": moved.replace('__file__ = "/elsewhere/mod.py"\n"""a module"""\n',
-                                                '"""a module"""\n__file__ = "/elsewhere/mod.py"\n'),
-                        "parts/mod_b.py": B})
+    binds = '"""a module"""\n__file__ = "/elsewhere/mod.py"\n'
+    _write_files(root, {"mod.py": LIB.replace('"""a module"""\n', binds)}, commit="file")
+    _write_files(root, {"mod.py": _split_b().replace('"""a module"""\n', binds), "parts/mod_b.py": B})
 
-    assert any("sets __file__" in p for p in A.split_moves(root)["problems"])
+    result = A.split_moves(root)
+
+    assert result["problems"] == [] and [name for name, _, _ in result["moved"]] == ["b"]
+
+
+@pytest.mark.parametrize("binding", [
+    'globals().update(__file__={elsewhere!r})\n',
+    'from os.path import join as __file__\n',
+    '_part("x", globals())\n',                                 # an earlier part that binds it
+])
+def test_a_module_that_rebinds_its_file_still_runs_its_parts_beside_it(tmp_path, binding):
+    """SPLIT-CHECK-6: an earlier part, an import alias or `globals().update` bound `__file__` elsewhere, and `_part`
+    ran the part found there, where the proof read the one beside the module."""
+    elsewhere = tmp_path / "elsewhere"
+    for folder, said in ((tmp_path, "beside the module"), (elsewhere, "elsewhere")):
+        (folder / "parts").mkdir(parents=True)
+        (folder / "parts" / "mod_b.py").write_text(f"def b():\n    return {said!r}\n", encoding="utf-8")
+    (tmp_path / "parts" / "x.py").write_text(f"__file__ = {str(elsewhere / 'mod.py')!r}\n", encoding="utf-8")
+    module = tmp_path / "mod.py"
+    module.write_text(binding.format(elsewhere=str(elsewhere / "mod.py")) + '_part("mod_b", globals())\n',
+                      encoding="utf-8")
+    namespace = {"_part": A._part, "__file__": str(module)}
+
+    exec(compile(module.read_text(encoding="utf-8"), str(module), "exec"), namespace)
+
+    assert namespace["b"]() == "beside the module"
