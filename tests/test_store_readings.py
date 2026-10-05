@@ -165,6 +165,28 @@ def test_the_shipped_opencode_declaration_reads_an_errored_tool_part_as_a_failed
     assert [text for _, text in A.recent_errors(recs, 3, adapter)] == ["Error: exit code 1"]
 
 
+def test_every_failed_tool_part_of_one_message_reads_as_a_failed_call(tmp_path):
+    """Two calls one message made that both failed are two failed calls: the reader kept one block a record."""
+    def failed(call, command, error):
+        return json.dumps({"type": "tool", "tool": "bash", "callID": call,
+                           "state": {"status": "error", "input": {"command": command}, "error": error}})
+    insert = ("INSERT INTO part VALUES ('prt_5', 'msg_a2', 'ses_one', 2050, 2050, ?), "
+              "('prt_6', 'msg_a2', 'ses_one', 2060, 2060, ?)")
+    recs, adapter = _shipped_opencode(tmp_path, (insert, (failed("c2", "pytest", "Error: exit code 1"),
+                                                          failed("c3", "ruff check .", "Error: ruff found 3 errors"))))
+
+    assert [text for _, text in A.recent_errors(recs, 3, adapter)] == ["Error: exit code 1", "Error: ruff found 3 errors"]
+    assert [text for _, text in A.recent_errors(recs, 1, adapter)] == ["Error: ruff found 3 errors"]
+
+
+def test_a_records_children_hang_on_it_oldest_first(tmp_path, monkeypatch):
+    """A message's parts are in the store's order: the child rows are asked for oldest first and kept so."""
+    db, adapter = read_adapter(tmp_path, monkeypatch)
+    recs = A.DatabaseTail(db, "ses_one", adapter["transcript"]["record"], adapter["transcript"]["freshness"]).read()
+
+    assert [part["id"] for part in recs[1]["parts"]] == ["prt_2", "prt_3"]
+
+
 def test_a_tail_is_the_newest_rows_and_no_more_than_its_bytes(tmp_path, monkeypatch):
     db, adapter = read_adapter(tmp_path, monkeypatch)
     tail = A.DatabaseTail(db, "ses_one", adapter["transcript"]["record"], adapter["transcript"]["freshness"])

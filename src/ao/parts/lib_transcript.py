@@ -840,8 +840,7 @@ class DatabaseTail:
                 spent += len(blob) or len(json.dumps(record, default=str))
                 if spent >= nbytes:
                     break
-        kept.reverse()
-        return kept
+        return kept[::-1] if nbytes else kept   # a budget walks the rows newest first; turn them back
 
     def _nest(self, records):
         """Attach each record's child records under the key its adapter names, when it declares them.

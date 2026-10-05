@@ -1950,9 +1950,10 @@ def recent_errors(recs, limit=3, adapter=None):
         if failure and pl is not None and record_kind(r, shape) == failure["type"]:
             failed = [item for item in declared_items(pl, failure)
                       if _declared_value(_path_value(item, failure["field"]), failure["failed_when"])]
-            if failed:
-                # A result nested in a message: its verdict and output are the block's.
-                raws.append(str(_path_value(failed[-1], failure["text"]) or "") if failure["text"] else "")
+            # Results nested in a message are each a call that failed, its verdict and output the block's;
+            # read newest first, as the records are.
+            raws.extend(str(_path_value(item, failure["text"]) or "") if failure["text"] else ""
+                        for item in reversed(failed))
         for raw in raws:
             # Failed tool output is usually a wall of passing lines with the real
             # cause buried in it. Lead with the line that actually failed.
