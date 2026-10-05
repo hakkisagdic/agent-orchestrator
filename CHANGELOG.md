@@ -65,6 +65,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Security
 
+- A reviewer's or the hunter's reading flag given with an equals sign and a second word (`--tools=Read,Grep,Glob Edit`) is refused as the form with a space is, since yargs reads both as a list, where appending it to a composed route passed; ao's own prompt, or a placeholder it fills, after such a flag is no second value (REVIEWER-REACH-4).
 - `ao-api-review` asks a provider on this machine directly, where a proxy the environment named received the request and its key in plain text and could answer for the provider; a key holding a character no header carries is refused without its value, where the error that refused it printed it; and `ao doctor` finds the client where a review does, in a Windows interpreter's Scripts directory too ([adapters.md](docs/adapters.md)) (API-REVIEWER-2).
 - An origin kept in ~/.gitconfig counts as the product's remote in the form git rewrites it to as well as the form it is written in, where `product-short` with an insteadOf naming the product let the mail be pushed to it, and a refusal names the rewrite git picks by the longest prefix, where it named the first rule written ([messaging.md](docs/messaging.md)) (MAIL-SYNC-6).
 - A filter hook argument that becomes an address once a URL reader drops its leading or trailing spaces and control characters, or a tab, CR or LF (`<TAB>file:///...`), is refused, where ao read it as a relative path that could climb out of the project (FILTER-EXCLUSIONS-8).

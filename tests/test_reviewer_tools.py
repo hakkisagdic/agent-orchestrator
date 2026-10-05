@@ -216,3 +216,23 @@ def test_a_reading_flag_given_after_the_end_of_options_or_with_more_values_does_
     assert any("lacks" in p for p in A.reading_problems(after_end)), after_end
     assert any("more than one value" in p for p in A.reading_problems(widened)), widened
     assert A.reading_problems(composed) == []
+
+
+
+def test_a_reading_flag_given_again_with_an_equals_sign_and_a_second_word_does_not_count():
+    """REVIEWER-REACH-4: yargs reads `--tools=Read,Grep,Glob Edit` as two values, as it reads the form with a space;
+    only the space form was asked, so appending it to a composed route passed."""
+    composed = A.compose_reviewer("qoder", model="m")["argv"]
+
+    assert A.reading_problems(composed + ["--tools=Read,Grep,Glob"]) == []
+    assert any("more than one value (Read,Grep,Glob Edit)" in p
+               for p in A.reading_problems(composed + ["--tools=Read,Grep,Glob", "Edit"]))
+    assert any("more than one value ((empty) fs_write)" in p for p in A.reading_problems(
+        ["kiro-cli", "chat", "--no-interactive", "{prompt}", "--trust-tools=", "fs_write"]))
+
+
+def test_ao_s_own_prompt_after_a_reading_flag_is_no_second_value():
+    """REVIEWER-REACH-4: kiro takes its prompt as the word after its options, and a route may put it there."""
+    assert A.reading_problems(["kiro-cli", "chat", "--no-interactive", "--trust-tools=", "{prompt}"]) == []
+    assert A.reading_problems(["kiro-cli", "chat", "--no-interactive", "--trust-tools=", "review this"],
+                              prompt="review this") == []

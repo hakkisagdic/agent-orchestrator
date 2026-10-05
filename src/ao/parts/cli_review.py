@@ -1042,7 +1042,7 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, can
         # so a qwen, qoder, pi, omp, hermes, kilo, reasonix or kiro route without them could write (REVIEWER-REACH-2).
         # A program no adapter runs stays a hand-written route's own (docs/adapters.md).
         if A.command_adapter(argv) is not None:
-            reach += A.reading_problems(argv)
+            reach += A.reading_problems(argv, prompt=prompt)
         if reach:
             return label, None, None, {
                 "ok": False, "out": "", "reason": "a reviewer must not be able to write: " + "; ".join(reach),

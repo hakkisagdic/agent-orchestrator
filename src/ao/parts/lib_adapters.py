@@ -486,7 +486,7 @@ def compose_reviewer(adapter_id, model=None, effort=None, root=None, family=None
     return route
 
 
-def reading_problems(argv):
+def reading_problems(argv, prompt=None):
     """What keeps a command from one that only reads, by the rule a reviewer's and the hunter's meet
     (BUG-HUNTER-2, REVIEWER-REACH-2).
 
@@ -495,7 +495,7 @@ def reading_problems(argv):
     names a flag that widens; with none of these, `pi -p`, `omp -p` and `hermes -z` edit and run commands,
     `kilo run` edits, and qwen, qoder, reasonix and kiro run in whatever mode a person's settings or another
     flag names. So the command must run a harness ao ships, one able to review, with every flag its
-    `options.trust_none` names.
+    `options.trust_none` names. `prompt` is the text ao hands it in place of `{prompt}`.
     """
     adapter = command_adapter(argv)
     if not adapter:
@@ -524,15 +524,20 @@ def reading_problems(argv):
         for at, arg in enumerate(args):
             if arg == flag:
                 given = args[at + 1] if at + 1 < len(args) and not args[at + 1].startswith("-") else None
-                # A flag that takes a list may take every word after it: `--tools Read,Grep,Glob Edit` reads Edit
-                # as a tool, where only the first word was asked (REVIEWER-REACH-3).
-                if given is not None and at + 2 < len(args) and not args[at + 2].startswith("-"):
-                    found.append(f"it gives {flag} more than one value ({given} {args[at + 2]}), and "
-                                 f"{adapter.get('id')} may read them all")
-                    continue
+                after = at + 2
             elif arg.startswith(flag + "="):
-                given = arg.split("=", 1)[1]
+                given, after = arg.split("=", 1)[1], at + 1
             else:
+                continue
+            # A flag that takes a list may take every word after it: `--tools Read,Grep,Glob Edit` reads Edit as a
+            # tool, where only the first word was asked (REVIEWER-REACH-3), and a parser such as yargs reads
+            # `--tools=Read,Grep,Glob Edit` so too (REVIEWER-REACH-4).
+            # ao's own words - its prompt, a placeholder it fills - are no value smuggled after a flag, wherever a
+            # route puts them: kiro takes its prompt as the word after its options.
+            if given is not None and after < len(args) and not args[after].startswith("-") \
+                    and not (args[after] == prompt or re.fullmatch(r"\{[a-z_]+\}", args[after])):
+                found.append(f"it gives {flag} more than one value ({given or '(empty)'} {args[after]}), and "
+                             f"{adapter.get('id')} may read them all")
                 continue
             if given == value or (given is not None and "," in value
                                   and set(filter(None, given.split(","))) <= set(value.split(","))):
