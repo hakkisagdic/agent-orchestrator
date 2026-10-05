@@ -94,7 +94,7 @@ def test_what_a_process_appends_while_the_tail_is_read_is_kept_once(tmp_path, mo
     """JOURNAL-3-2: the catch-up read again from the old end what the first read had already taken."""
     log = tmp_path / "nudge.log"
     log.write_bytes(b"".join(b"line %06d %s\n" % (n, b"x" * 200) for n in range(7000)))
-    fd = os.open(log, os.O_WRONLY | os.O_APPEND)
+    fd = os.open(log, os.O_WRONLY | os.O_APPEND | getattr(os, "O_BINARY", 0))   # Windows opens text, writing \r\n
     real = open
 
     class Reading:                          # the trimmer's file: a process appends as the first read starts
