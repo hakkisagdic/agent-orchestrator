@@ -48,8 +48,34 @@ def test_ao_role_names_an_adapter_and_a_model_and_the_doctor_names_an_ineligible
     cfg = A.load_config(root)
     assert cfg["reviewer"]["actor"] == "claude-code-reviewer-some-model"
     assert cfg["reviewer"]["argv"][-3:] == ["--allowedTools", "Read,Grep,Glob", "--strict-mcp-config"]
-    bad = SimpleNamespace(**dict(vars(args), actor="codex"))
+    bad = SimpleNamespace(**dict(vars(args), actor="aider"))
     assert cli.cmd_role(cfg, bad) == 2
-    assert "codex is ineligible for the reviewer role" in capsys.readouterr().out
+    assert "aider is ineligible for the reviewer role" in capsys.readouterr().out
     problems = dict(cli.doctor_problems(dict(cfg, reviewer={"adapter": "aider", "argv": ["aider", "{prompt}"]})))
     assert "reviewer-ineligible:aider" in problems
+
+
+def test_codex_reviews_in_its_read_only_sandbox_without_the_persons_config():
+    """CODEX-REVIEWER: measured on codex-cli 0.160.0, its read-only sandbox read a file and refused a write and the
+    network; the person's config.toml offered the model computer use, a browser and web search."""
+    route = A.compose_reviewer("codex", model="gpt-6-luna", effort="high", family="openai")
+    argv = route["argv"]
+
+    assert argv[:3] == ["codex", "exec", "{prompt}"]
+    assert argv[argv.index("--sandbox") + 1] == "read-only"
+    assert {"--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--ephemeral"} <= set(argv)
+    assert argv[argv.index("-c") + 1] == "model_reasoning_effort=high"
+    assert allowlist.reviewer_problems(argv) == [] and A.pin_conflicts(argv, "reviewer") == []
+
+
+def test_a_codex_reviewer_that_loads_the_persons_config_or_may_write_is_named(project):
+    plain = ["codex", "exec", "{prompt}", "--sandbox", "read-only"]
+    writing = ["codex", "exec", "{prompt}", "--ignore-user-config", "--sandbox", "workspace-write"]
+
+    assert "it starts every configured MCP server (no --ignore-user-config)" in allowlist.reviewer_problems(plain)
+    assert allowlist.reviewer_problems(writing) == ["it runs with --sandbox workspace-write, where ao pins read-only"]
+    assert A.pinned_argv(["codex", "exec", "{prompt}", "--ignore-user-config"], "reviewer")[1] == \
+        ["--sandbox", "read-only"]
+    problems = dict(cli.doctor_problems(dict(project, reviewer={"adapter": "codex", "family": "openai",
+                                                                "argv": plain})))
+    assert any("no --ignore-user-config" in str(text) for text in problems.values()), problems

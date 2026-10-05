@@ -20,14 +20,22 @@ not the protocol.
 
 A reviewer must not be able to write, so every adapter declares `options.trust_none`: the
 flags that leave the harness only reading, or `null` with `trust_none_why`, which makes it
-**ineligible for the reviewer role** rather than silently unsafe. Nine adapters -
-`claude-code`, `hermes`, `kilocode`, `kiro`, `omp`, `pi`, `qoder`, `qwen` and `reasonix` -
-declare how to deny tools with a non-empty `options.trust_none`; every other adapter says why
-it cannot, or why nobody has verified that it can.
+**ineligible for the reviewer role** rather than silently unsafe. Ten adapters -
+`claude-code`, `codex`, `hermes`, `kilocode`, `kiro`, `omp`, `pi`, `qoder`, `qwen` and
+`reasonix` - declare how to deny tools with a non-empty `options.trust_none`; every other
+adapter says why it cannot, or why nobody has verified that it can.
+
+No flag removes `codex exec`'s shell tool, so its `trust_none` runs it in its own read-only
+sandbox, which on codex-cli 0.160.0 read a file and refused a write and the network. It also
+leaves out the person's `config.toml`, which offered the model computer use, a browser and web
+search, and their execpolicy rules; it runs outside a repository and keeps the review out of the
+person's sessions. A codex reviewer is pinned to `--sandbox read-only`, and `ao doctor` names one
+that loads the person's configuration.
 
 ```bash
 ao role set reviewer claude-code --model claude-opus-5
 ao role set reviewer kiro --model <model> --effort high
+ao role set reviewer codex --model <model> --effort high --family openai
 ```
 
 `ao role set reviewer <adapter>` composes the invocation from the adapter - `send.argv`, then
@@ -438,7 +446,7 @@ the adapter says so in its `disclaimer`. **Reviewer** is whether the adapter can
 | Vendor | Adapter | Verified | Reviewer | Note |
 |---|---|---|---|---|
 | `claude` | `claude-code` | full | eligible | Claude Code |
-| `codex` | `codex` | untested | ineligible | OpenAI Codex CLI |
+| `codex` | `codex` | partial | eligible | OpenAI Codex CLI |
 | `opencode` | `opencode` | partial | ineligible | opencode |
 | `traycer` | — | — | — | no adapter: an orchestrator of agents, as ao is, not an agent ao drives |
 | `cursor` | `cursor-agent` | documented | ineligible | Cursor Agent CLI |
@@ -979,7 +987,7 @@ is a fine implementer and cannot hold the reviewer role, and ao refuses the bind
 inventing a flag. Silence would mean guessing, and a reviewer that can write is not a reviewer.
 
 **Values are mapped and clamped, never passed through.** Effort ladders differ — one harness
-accepts `minimal|low|medium|high`, another `low|medium|high|xhigh|max`. ao asks for its own
+accepts `low|medium|high`, another `low|medium|high|xhigh|max`. ao asks for its own
 level; the adapter declares what it supports in `effort_values`; the resolver picks the nearest
 available and **records that it clamped**, because a run at `high` reported as `max` is a lie
 about how hard the model tried.

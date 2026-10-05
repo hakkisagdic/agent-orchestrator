@@ -12,6 +12,7 @@ interface, the two observation modes and the support matrix.
 | `antigravity.json` | **full** | agy 1.1.19 — call-return mode, token accounting verified |
 | `claude-code.json` | **full** | Claude Code |
 | `opencode.json` | partial | storage path verified, flags from docs |
+| `codex.json` | partial | codex-cli 0.160.0 — the reviewer's command measured; the session store not |
 | everything else | untested | written from documented interfaces |
 
 `untested` means exactly that: the file encodes a documented interface that nobody has run

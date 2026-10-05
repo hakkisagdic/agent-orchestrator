@@ -14,6 +14,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### New commands
 
+- `ao role set reviewer codex --model <model> --family openai` composes a Codex reviewer: `codex exec` in its own read-only sandbox, without the person's `config.toml` and execpolicy rules, outside any repository and out of the person's sessions, as measured on codex-cli 0.160.0; every codex reviewer is pinned to `--sandbox read-only`, and `ao doctor` names one that loads the person's configuration ([adapters.md](docs/adapters.md#a-reviewer-is-composed-from-its-adapter)) (CODEX-REVIEWER).
 - `ao catchup --reviewer <actor>` reviews a run with another reviewer actor of the project's table in place of the reviewer role, leaving the table as it is, so catch-up runs over different slices go side by side on different platforms ([features.md](docs/features.md)) (CATCHUP-REVIEWER).
 
 ### Fixes

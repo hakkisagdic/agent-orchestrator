@@ -1,6 +1,6 @@
 {
-  "id": "codex", "name": "OpenAI Codex CLI", "verified": "untested",
-  "disclaimer": "Written from documented interface, not verified against an install. Flags drift; correct and open a PR.",
+  "id": "codex", "name": "OpenAI Codex CLI", "verified": "partial",
+  "disclaimer": "The reviewer's command - exec with its prompt, --model, -c model_reasoning_effort and options.trust_none - was run against codex-cli 0.160.0 on 2026-10-05; the rest is written from the documented interface and not verified against an install. Flags drift; correct and open a PR.",
   "send":   { "argv": ["codex", "exec", "{prompt}"],
               "stdin": { "replaces": ["{prompt}"], "with": ["-"],
                          "note": "Verified from the command reference (learn.chatgpt.com/docs/developer-commands, surface cli), read 2026-09-17: codex exec takes PROMPT as `string | - (read stdin)`, and `-` pipes the prompt from stdin." } },
@@ -9,11 +9,18 @@
                          "note": "Verified from the same reference: codex exec resume takes its PROMPT as `string | - (read stdin)` too." } },
   "quota": { "provider": "codex" },
   "options": {
-    "trust_none": null,
-    "trust_none_why": "codex exec keeps its shell tool; --sandbox read-only limits it but does not remove it",
+    "trust_none": ["--sandbox", "read-only", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--ephemeral"],
+    "trust_none_note": "No flag removes codex exec's shell tool; its read-only sandbox leaves it reading. Measured on codex-cli 0.160.0, 2026-10-05: under --sandbox read-only, cat read a file, touch was refused (Operation not permitted) and curl resolved no host. Without --ignore-user-config the person's $CODEX_HOME/config.toml offered the model computer use, a browser and web search, and with it only the shell tool, waits and subagents. --ignore-rules leaves out the person's execpolicy rules, whose allow decisions approve commands without asking. ao runs a reviewer in a directory outside any repository, which codex exec refuses without --skip-git-repo-check, and --ephemeral keeps the review out of the person's sessions.",
+    "pin": {
+      "reviewer": ["--sandbox", "read-only"],
+      "note": "codex exec runs read-only unless told otherwise, and a person's config.toml may set sandbox_mode; a reviewer names its sandbox, so no setting widens it."
+    },
+    "mcp_isolation": { "required": ["--ignore-user-config"],
+                       "why": "MCP servers and plugins live in $CODEX_HOME/config.toml, which codex loads unless told not to (#24)" },
     "model": ["--model", "{model}"],
     "effort": ["-c", "model_reasoning_effort={effort}"],
-    "effort_values": ["minimal", "low", "medium", "high"],
+    "effort_values": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+    "effort_note": "The values the Responses API named when it refused another, through codex-cli 0.160.0 on 2026-10-05; each model takes a subset, listed in ~/.codex/models_cache.json.",
     "output_json": ["--json"],
     "trust_all": ["--dangerously-bypass-approvals-and-sandbox"],
     "sandbox": ["--sandbox", "{mode}"],
