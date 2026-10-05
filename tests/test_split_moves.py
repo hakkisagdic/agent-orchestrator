@@ -150,3 +150,135 @@ def test_a_move_only_slice_cannot_land_a_candidate_that_is_not_a_pure_move(proje
     out = capsys.readouterr().out
     assert "SPLIT-B is move-only: b changed on its way from mod.py to parts/mod_b.py" in out
     assert cli.cmd_split_check(project, SimpleNamespace()) == 1
+
+
+# ---- a module runs its old statements in their old order with its new parts in place (SPLIT-CHECK-3) ----------
+
+B = 'def b(n):\n    return n + 1\n'
+
+
+def _write_files(root, files, commit=None):
+    for path, text in files.items():
+        full = os.path.join(root, path)
+        os.makedirs(os.path.dirname(full) or root, exist_ok=True)
+        with open(full, "w", encoding="utf-8") as fh:
+            fh.write(text)
+    _git(root, "add", *files)
+    if commit:
+        _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", commit)
+
+
+def _split_b(load='_part("mod_b", globals())\n\n\n'):
+    """LIB with b replaced, where it stood, by `load`."""
+    return LIB.replace(B + '\n\n', load)
+
+
+def test_a_definition_moved_to_a_parts_folder_its_load_does_not_run_is_no_move(project):
+    """`_part` runs parts/<name>.py beside the module; any */parts/ folder whose file had the loaded name passed."""
+    root = project["root"]
+    _repo(root)
+    _write_files(root, {"mod.py": _split_b(), "lib/parts/mod_b.py": B})
+
+    problems = A.split_moves(root)["problems"]
+
+    assert any(p.startswith("b moved to lib/parts/mod_b.py") for p in problems)
+    assert "lib/parts/mod_b.py is not loaded by any _part call" in problems
+
+
+def test_a_load_moved_to_another_module_is_seen(project):
+    """Removed loads were one set over every file: a load moved to another module removed none."""
+    root = project["root"]
+    _repo(root)
+    _write_files(root, {"mod.py": LIB + '\n\n_part("x", globals())\n', "parts/x.py": 'def xx():\n    return 2\n',
+                        "other.py": 'def main():\n    return 1\n'}, commit="x")
+    _write_files(root, {"mod.py": _split_b(), "parts/mod_b.py": B,
+                        "other.py": 'def main():\n    return 1\n\n\n_part("x", globals())\n'})
+
+    problems = A.split_moves(root)["problems"]
+
+    assert "the _part call that loaded x is gone" in problems
+    assert any(p.startswith("other.py ") for p in problems)              # x now runs in other's namespace
+
+
+def test_statements_swapped_in_a_file_are_no_move(project):
+    """A file's other statements were compared sorted, so two swapped read as unchanged."""
+    root = project["root"]
+    _repo(root)
+    events = 'EVENTS = []\nEVENTS.append("a")\nEVENTS.append("b")\n'
+    _write_files(root, {"mod.py": LIB.replace("import os\n", "import os\n" + events)}, commit="events")
+    swapped = events.replace('EVENTS.append("a")\nEVENTS.append("b")', 'EVENTS.append("b")\nEVENTS.append("a")')
+    _write_files(root, {"mod.py": _split_b().replace("import os\n", "import os\n" + swapped), "parts/mod_b.py": B})
+
+    assert "a top-level statement that is not a definition changed in mod.py" in A.split_moves(root)["problems"]
+
+
+def test_a_part_loaded_where_its_definitions_did_not_run_is_no_move(project):
+    """join moves byte for byte, but its part now runs before the import it used to override."""
+    root = project["root"]
+    _repo(root)
+    custom = 'def join(*parts):\n    return "+".join(parts)\n'
+    old = LIB.replace("import os\n", "from os.path import join\n") + '\n\n' + custom
+    _write_files(root, {"mod.py": old}, commit="join")
+    new = old.replace('\n\n' + custom, '\n').replace("from os.path import join\n",
+                                                       '_part("mod_join", globals())\nfrom os.path import join\n')
+    _write_files(root, {"mod.py": new, "parts/mod_join.py": custom})
+
+    assert any(p.startswith("mod.py ") for p in A.split_moves(root)["problems"])
+
+
+def test_a_definition_moves_only_into_a_part_the_module_it_left_loads(project):
+    """Loaders were pooled over every file holding a same-named definition: one module's load let another lose b."""
+    root = project["root"]
+    _repo(root)
+    _write_files(root, {"other.py": B + '\n\ndef main():\n    return b(2)\n'}, commit="other")
+    _write_files(root, {"other.py": 'def main():\n    return b(2)\n',
+                        "mod.py": LIB + '\n\n_part("mod_b", globals())\n',
+                        "parts/mod_b.py": B})
+
+    assert any(p.startswith("other.py ") for p in A.split_moves(root)["problems"])
+
+
+def test_a_load_with_a_comment_after_it_is_a_load(project):
+    root = project["root"]
+    _repo(root)
+    _write_files(root, {"mod.py": _split_b('_part("mod_b", globals())  # b, moved\n\n\n'), "parts/mod_b.py": B})
+
+    assert A.split_moves(root) == {"moved": [("b", "mod.py", "parts/mod_b.py")], "problems": []}
+
+
+def test_a_load_of_an_existing_part_added_to_a_module_is_no_move(project):
+    """A load added beside an existing one was never compared: the part's names now shadow the module's."""
+    root = project["root"]
+    _repo(root)
+    _write_files(root, {"mod.py": LIB + '\n\n_part("x", globals())\n', "parts/x.py": 'def main():\n    return 2\n',
+                        "other.py": 'def main():\n    return 1\n'}, commit="x")
+    _write_files(root, {"mod.py": _split_b() + '\n\n_part("x", globals())\n', "parts/mod_b.py": B,
+                        "other.py": 'def main():\n    return 1\n\n\n_part("x", globals())\n'})
+
+    assert any(p.startswith("other.py ") for p in A.split_moves(root)["problems"])
+
+
+def test_same_named_definitions_traded_between_modules_are_no_move(project):
+    """Definitions were matched by name across files, so two modules could swap implementations unseen."""
+    root = project["root"]
+    _repo(root)
+    _write_files(root, {"other.py": 'def a():\n    return "other"\n'}, commit="other")
+    _write_files(root, {"other.py": 'def a():\n    return X\n',
+                        "mod.py": _split_b().replace('def a():\n    return X\n', 'def a():\n    return "other"\n'),
+                        "parts/mod_b.py": B})
+
+    problems = A.split_moves(root)["problems"]
+
+    assert any(p.startswith("other.py ") for p in problems) and any(p.startswith("mod.py ") for p in problems)
+
+
+def test_a_definition_reordered_against_a_statement_is_no_move(project):
+    """Statements kept in order still miss a definition moved across one: MODE is now always "plain"."""
+    root = project["root"]
+    _repo(root)
+    mode = 'MODE = "plain"\nif os.environ.get("X"):\n    MODE = "x"\n'
+    _write_files(root, {"mod.py": LIB.replace("import os\n", "import os\n" + mode)}, commit="mode")
+    swapped = 'if os.environ.get("X"):\n    MODE = "x"\nMODE = "plain"\n'
+    _write_files(root, {"mod.py": _split_b().replace("import os\n", "import os\n" + swapped), "parts/mod_b.py": B})
+
+    assert any(p.startswith("mod.py ") for p in A.split_moves(root)["problems"])

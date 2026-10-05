@@ -470,18 +470,21 @@ _PART_CALL = re.compile(r"""^(?:\w+\.)?_part\(\s*["']([\w-]+)["']\s*,\s*globals\
 
 
 def top_level_statements(source, filename="<source>"):
-    """(definitions, others, loads) of one Python source: {name: [text]} for each top-level def,
+    """(definitions, others, loads, order) of one Python source: {name: [text]} for each top-level def,
     class and simple assignment, decorators included; [text] for every other top-level statement
-    except a part being loaded and a leading docstring; and the name of each part a top-level
-    `_part(name, globals())` call loads, which a mention in a docstring or a comment is not
-    (SPLIT-CHECK-2)."""
+    except a part being loaded and a leading docstring; the name of each part a top-level
+    `_part(name, globals())` call loads, which a mention in a docstring is not (SPLIT-CHECK-2); and
+    every statement but the docstring in the order it runs, ("load", name) or ("text", text)
+    (SPLIT-CHECK-3)."""
     import ast
     tree = ast.parse(source, filename)
     lines = source.splitlines(keepends=True)
-    definitions, others, loads = {}, [], []
+    definitions, others, loads, order = {}, [], [], []
     for index, node in enumerate(tree.body):
         start = min([node.lineno] + [d.lineno for d in getattr(node, "decorator_list", [])])
         text = "".join(lines[start - 1:node.end_lineno])
+        # The call's own source, not its lines: a comment after it is no other statement (SPLIT-CHECK-3).
+        load = _PART_CALL.match(ast.get_source_segment(source, node) or "") if isinstance(node, ast.Expr) else None
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             names = [node.name]
         elif isinstance(node, ast.Assign) and all(isinstance(t, ast.Name) for t in node.targets):
@@ -493,14 +496,26 @@ def top_level_statements(source, filename="<source>"):
         if names:
             for name in names:
                 definitions.setdefault(name, []).append(text)
-        elif _PART_CALL.match(text.strip()):
-            loads.append(_PART_CALL.match(text.strip()).group(1))
+            order.append(("text", text))
+        elif load:
+            loads.append(load.group(1))
+            order.append(("load", load.group(1)))
         elif index == 0 and isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) \
                 and isinstance(node.value.value, str):
             continue
         else:
             others.append(text)
-    return definitions, others, loads
+            order.append(("text", text))
+    return definitions, others, loads, order
+
+
+def _part_file(module, name):
+    """The file `_part(name, globals())` in `module` runs: parts/<name>.py beside the module, or beside a part
+    that loads one - where _PARTS_DIR is for every module of ao's that loads a part (SPLIT-CHECK-3)."""
+    import posixpath
+    folder = posixpath.dirname(module)
+    return posixpath.join(folder if posixpath.basename(folder) == "parts" else posixpath.join(folder, "parts"),
+                          f"{name}.py")
 
 
 def split_moves(root, start=None, end=None):
@@ -531,23 +546,24 @@ def split_moves(root, start=None, end=None):
     old, new = {}, {}
     # Statements and loads are kept by file: one moved between files changed both (SPLIT-CHECK-2).
     other, loads, parts, present = {"old": {}, "new": {}}, {"old": {}, "new": {}}, [], {}
+    order = {"old": {}, "new": {}}
     for path in paths:
         for side, spec, defs in (("old", f"{before}:{path}", old), ("new", f"{after}:{path}", new)):
             text = read(spec)
             if text is None:
                 continue
             try:
-                definitions, others, loaded = top_level_statements(text, path)
+                definitions, others, loaded, sequence = top_level_statements(text, path)
             except SyntaxError as exc:
                 return {"moved": [], "problems": [f"{path} does not parse on the {side} side: {exc.msg}"]}
             for name, texts in definitions.items():
                 defs.setdefault(name, []).extend((path, t) for t in texts)
-            other[side][path] = sorted(others)
+            other[side][path] = others                      # in their order (SPLIT-CHECK-3)
             loads[side][path] = set(loaded)
+            order[side][path] = sequence
             present.setdefault(path, {})[side] = bool(definitions or others or loaded)
             if side == "new" and "/parts/" in f"/{path}" and read(f"{before}:{path}") is None:
                 parts.append(path)
-    loaded = set().union(*loads["new"].values())
     moved, problems = [], []
     for name in sorted(set(old) | set(new)):
         before, after = old.get(name, []), new.get(name, [])
@@ -564,9 +580,8 @@ def split_moves(root, start=None, end=None):
         elif was != now:
             # A definition leaves a module only for a part that module loads, as a split does: renamed, or
             # into a part another module loads, it runs in another namespace (SPLIT-CHECK-2).
-            loader = set().union(*(loads["new"].get(path, set()) for path in was))
-            stray = [path for path in now if path not in was and ("/parts/" not in f"/{path}" or
-                     os.path.splitext(os.path.basename(path))[0] not in loader)]
+            loader = {_part_file(path, part) for path in was for part in loads["new"].get(path, set())}
+            stray = [path for path in now if path not in was and path not in loader]
             if stray:
                 problems.append(f"{name} moved to {', '.join(stray)}, which no file it left loads as its part")
             else:
@@ -574,16 +589,37 @@ def split_moves(root, start=None, end=None):
     for path in sorted(set(other["old"]) | set(other["new"])):
         if other["old"].get(path, []) != other["new"].get(path, []):
             problems.append(f"a top-level statement that is not a definition changed in {path}")
-    for name in sorted(set().union(*loads["old"].values()) - loaded):
-        problems.append(f"the _part call that loaded {name} is gone")
+    for path in sorted(loads["old"]):
+        for name in sorted(loads["old"][path] - loads["new"].get(path, set())):
+            problems.append(f"the _part call that loaded {name} is gone")
+    # A part the candidate adds runs where the module that loads it loads it. Put in place there, each
+    # file's statements must be its old ones in their old order - loads of existing parts included - and an
+    # added file must be such a part, put in place once (SPLIT-CHECK-3).
+    added = {path for path in order["new"] if path not in order["old"]}
+    placed = set()
+    for path in sorted(order["old"]):
+        inlined = []
+        for kind, value in order["new"].get(path, []):
+            target = _part_file(path, value) if kind == "load" else None
+            if target in added and target not in placed:
+                placed.add(target)
+                inlined.extend(order["new"][target])
+            else:
+                inlined.append((kind, value))
+        if inlined != order["old"][path]:
+            problems.append(f"{path} does not run its old statements in their old order with its new parts in place")
+    for path in sorted(added - placed):
+        if present.get(path, {}).get("new"):
+            problems.append(f"{path} is added and is no new part that a module it was moved out of loads")
     # An empty, comment-only or docstring-only file holds nothing to compare, so one added or removed beside
     # a real move passed as part of it - an __init__.py changes which packages there are (CATCHUP-EVIDENCE-2).
     for path, sides in sorted(present.items()):
         if len(sides) == 1 and not any(sides.values()):
             problems.append(f"{path} is {'added' if 'new' in sides else 'removed'} and holds no definition: "
                             "a file's presence is not a move")
+    loaded_files = {_part_file(path, part) for path, names in loads["new"].items() for part in names}
     for path in parts:
-        if os.path.splitext(os.path.basename(path))[0] not in loaded:
+        if path not in loaded_files:
             problems.append(f"{path} is not loaded by any _part call")
     if not moved and not problems:
         problems.append("nothing moved")

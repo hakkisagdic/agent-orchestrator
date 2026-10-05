@@ -335,7 +335,8 @@ def test_a_person_states_which_waived_slices_only_moved_code_and_each_closes_onl
                               "reviewer") in out
         # A statement closes nothing the proof does not hold for: an edit, and a move beside a document.
         assert (f"{edited['id']} (SPLIT-E)" in out and "A. Person states it is a pure move, and the landed range is not "
-                "one: b changed in parts/mod_b.py; keeping it open" in out)
+                "one: b changed in parts/mod_b.py; parts/mod_b.py does not run its old statements in their old "
+                "order with its new parts in place; keeping it open" in out)
         assert (f"{documented['id']} (SPLIT-D)" in out and "A. Person states it is a pure move, and the landed range "
                 "is not one: docs/notes.md changed, and the proof reads Python definitions only; keeping it open" in out)
         assert "--move-only SPLIT-X: no open review waiver names it; nothing is proven or closed" in out
@@ -374,3 +375,23 @@ def test_a_catchup_review_is_recorded_as_the_waived_slices_whatever_runs_now(pro
     # `ao stats` counts the defect a retrospective review found against the slice that landed it.
     [outcome] = A.slice_outcomes(root)
     assert (outcome["slice"], outcome["defect_found"]) == ("B7", True)
+
+
+def test_a_split_whose_part_runs_before_the_import_it_replaced_cannot_land_as_move_only(project, monkeypatch, capsys):
+    """SPLIT-CHECK-3: join moved byte for byte, but its part was loaded before the import it used to override, so
+    build() gave "a/b" where it gave "a+b"; commit-ok let it land as move-only and catchup closed it unreviewed."""
+    monkeypatch.delenv("AO_ROLE", raising=False)
+    root = project["root"]
+    custom = 'def join(*parts):\n    return "+".join(parts)\n'
+    build = '\n\ndef build():\n    return join("a", "b")\n'
+    _write(root, "mod.py", '"""a module"""\nfrom os.path import join\n\n\n' + custom + build)
+    _git(root, "commit", "-q", "-m", "base")
+    _running(root, "[SPLIT-J] split · move-only")
+    _write(root, "mod.py", '"""a module"""\n_part("mod_join", globals())\nfrom os.path import join\n' + build)
+    _write(root, "parts/mod_join.py", custom)
+    _allow_candidate_verification(monkeypatch, A.index_candidate(root))
+    capsys.readouterr()
+
+    assert cli.cmd_commit_ok(project, SimpleNamespace(verify=False, profile=None)) == 1
+    assert ("SPLIT-J is move-only: mod.py does not run its old statements in their old order with its new parts "
+            "in place") in capsys.readouterr().out
