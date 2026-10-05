@@ -216,7 +216,13 @@ class Session:
         except OSError as exc:
             raise ProbeError(f"could not start {argv[0]}: {exc}") from exc
         self.lines = queue.Queue()
-        threading.Thread(target=_read, args=(self.proc.stdout, self.lines), daemon=True).start()
+        # A session that fails to start after its agent did - no thread left for the reader - stops the agent: nobody
+        # holds a session to close (REVIEWER-ORPHAN-5).
+        try:
+            threading.Thread(target=_read, args=(self.proc.stdout, self.lines), daemon=True).start()
+        except BaseException:
+            _stop(self.proc)
+            raise
         self._turn = None
 
     def __enter__(self):

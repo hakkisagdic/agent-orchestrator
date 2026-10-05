@@ -685,6 +685,12 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
                 "returncode": None, "kind": "spawn-unknown",
                 "retryable": False,
             }
+        except BaseException:
+            # Whatever ends the start puts the handlers back: left holding, they would let every later stop go
+            # (REVIEWER-ORPHAN-5).
+            handlers_back()
+            handlers_back.release()
+            raise
 
         try:
             handlers_back.release()
@@ -1274,6 +1280,15 @@ def _run_acp_reviewer(root, argv, adapter_id, prompt, timeout, label, fallback=F
             if isinstance(exc.__cause__, OSError):
                 return _reviewer_os_failure(exc.__cause__, "could not start")
             return failed("spawn-unknown", "could not start (ProbeError)")
+        except Exception as exc:
+            # The session stopped its agent before this reached here (REVIEWER-ORPHAN-5).
+            handlers_back()
+            handlers_back.release()
+            return failed("spawn-unknown", f"could not start ({type(exc).__name__})")
+        except BaseException:
+            handlers_back()
+            handlers_back.release()
+            raise
         pid, agent, turn, allowed, outcome, expired = session.proc.pid, {}, None, 0.0, None, []
 
         def expire():

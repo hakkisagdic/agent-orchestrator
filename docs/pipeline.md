@@ -63,7 +63,10 @@ or has not ended ten seconds later, is stopped outright, and the reviewer after 
 still the process the run started. A review in the foreground - `ao review`, and each review
 `ao catchup` starts - stops its reviewer on the same signals (REVIEWER-ORPHAN-3). A signal that comes
 while the reviewer is being started waits until ao holds the reviewer, and stops it then; raised inside
-the start, it left a reviewer that had already begun with nobody to stop it (REVIEWER-ORPHAN-4).*
+the start, it left a reviewer that had already begun with nobody to stop it (REVIEWER-ORPHAN-4). A
+start that fails after the reviewer began - an ACP session whose reader could not start - stops it,
+and whatever ends a start puts the handlers back, where they were left holding every later stop
+(REVIEWER-ORPHAN-5).*
 
 ```bash
 ao review submit --boundary '…'      # returns R-1788… immediately

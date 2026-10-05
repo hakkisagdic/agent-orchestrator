@@ -293,3 +293,46 @@ def test_a_signal_that_comes_while_an_acp_reviewer_starts_stops_it_once_ao_holds
     (session,) = started
     assert _until(lambda: session.proc.poll() is not None, 30)
     assert signal.getsignal(signal.SIGTERM) is before
+
+
+def test_an_acp_session_that_fails_to_start_after_its_agent_did_stops_it_and_holds_no_stop(project, monkeypatch):
+    """REVIEWER-ORPHAN-5: a session whose reader could not start raised past ao with its agent running, and the
+    signal handlers, still holding, would have let every later stop go."""
+    from ao import acp
+    started, real = [], acp.subprocess.Popen
+    monkeypatch.setattr(acp.subprocess, "Popen", lambda *a, **kw: started.append(real(*a, **kw)) or started[-1])
+
+    class NoThread:
+        def __init__(self, *args, **kw):
+            pass
+
+        def start(self):
+            raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(acp, "threading", SimpleNamespace(Thread=NoThread))
+    before = signal.getsignal(signal.SIGTERM)
+
+    attempt = cli._run_acp_reviewer(project["root"], [sys.executable, "-c", "import time; time.sleep(120)"],
+                                    "acp-test", "review this", 60, "acp-test")
+
+    (proc,) = started
+    assert attempt["kind"] == "spawn-unknown" and "RuntimeError" in attempt["reason"]
+    assert _until(lambda: proc.poll() is not None, 30)
+    assert signal.getsignal(signal.SIGTERM) is before
+
+
+def test_a_start_ended_by_what_is_no_error_puts_the_handlers_back(project, monkeypatch):
+    """REVIEWER-ORPHAN-5: only an error was caught around the start; anything else left the handlers holding."""
+    class Ended(BaseException):
+        pass
+
+    def start(*args, **kw):
+        raise Ended()
+
+    monkeypatch.setattr(cli.subprocess, "Popen", start)
+    before = signal.getsignal(signal.SIGTERM)
+
+    with pytest.raises(Ended):
+        cli._run_reviewer(project["root"], [sys.executable, "-c", "pass"], 60)
+
+    assert signal.getsignal(signal.SIGTERM) is before
