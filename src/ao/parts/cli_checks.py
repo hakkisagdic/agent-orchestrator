@@ -1413,10 +1413,9 @@ def cmd_catchup(cfg, args):
               f"family; {totals['proven']} closed by proof, with no reviewer; "
               f"{len(A.deferred_open(root))} deferred wake(s) and nudge(s) a run replays")
         return 1 if failed else 0
-    for r in A.deferred_open(root):
-        print(f"  deferred {r['kind']} ({r.get('reason', '')}) since {time.strftime('%d %b %H:%M', time.localtime(r['at']))}")
-        A.deferred_close(root, r["id"], "replayed by catchup")
-        did += 1
+    # A deferral is replayed by a cycle that runs with it in view, and closed after it: closed first, a cycle
+    # that then did not run - no watchdog, or another cycle holding the project - left it forgotten (JOURNAL-4).
+    ran = False
     if A.heartbeat_age(root) is None:
         # A cycle writes this project's heartbeat. Where no watchdog runs, that file
         # goes stale within minutes and every sibling watchdog reports it as dead.
@@ -1424,7 +1423,20 @@ def cmd_catchup(cfg, args):
     else:
         print(f"{C['dim']}running one watchdog cycle to act on what is now possible{C['reset']}")
         from . import watchdog as W
+        beat = os.path.getmtime(A.heartbeat_path(root))
         W.run(SimpleNamespace(root=root, idle_minutes=S.get(cfg, "watchdog.idle_minutes"), dry_run=False))
+        try:
+            ran = os.path.getmtime(A.heartbeat_path(root)) > beat
+        except OSError:
+            ran = False
+        if not ran:
+            print(f"{C['dim']}another cycle holds this project; what was deferred waits for it{C['reset']}")
+    for r in A.deferred_open(root):
+        print(f"  deferred {r['kind']} ({r.get('reason', '')}) since {time.strftime('%d %b %H:%M', time.localtime(r['at']))}"
+              + ("" if ran else "; stays open: no cycle ran"))
+        if ran:
+            A.deferred_close(root, r["id"], "replayed by catchup's cycle")
+            did += 1
     code = _catchup_exit(failed, started, decided)
     print(f"{C['green']}catchup{C['reset']} handled {did} item(s)"
           + (f"; none of the {started} review(s) it started decided anything" if code == 3 else ""))

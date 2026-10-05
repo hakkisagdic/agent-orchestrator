@@ -88,6 +88,59 @@ def test_a_log_trimmed_while_its_process_writes_keeps_what_the_process_writes_af
     assert "the last words of a failed wake" in text and log.stat().st_size < 1_300_000
 
 
+# ---- deferred work is closed only once it was done or a cycle ran with it (JOURNAL-4) -----------------------------
+
+def test_a_later_end_moves_the_deferral_that_stands(project):
+    root = project["root"]
+    first = A.deferred_append(root, "wake", reason="architect quota", until=1000)
+
+    again = A.deferred_append(root, "wake", reason="architect quota", until=2000)
+
+    assert again["id"] == first["id"] and [(r["id"], r["until"]) for r in A.deferred_open(root)] == [(first["id"], 2000)]
+
+
+def test_catchup_closes_deferred_work_only_after_a_cycle_ran_with_it(project, monkeypatch, capsys):
+    """Catchup closed every deferral as replayed and then ran its cycle, or skipped it: a cycle that did not run
+    left the deferred wake forgotten."""
+    from ao import cli
+    from tests.test_waiver_bounds import NAMED
+    root = project["root"]
+    deferred = A.deferred_append(root, "wake", reason="architect quota")
+    os.makedirs(os.path.dirname(A.heartbeat_path(root)), exist_ok=True)
+    with open(A.heartbeat_path(root), "w", encoding="utf-8"):
+        pass
+    os.utime(A.heartbeat_path(root), (time.time() - 60, time.time() - 60))
+    monkeypatch.setattr(W, "run", lambda ns: 0)                         # another cycle held the project
+
+    cli.cmd_catchup(project, NAMED)
+
+    assert [r["id"] for r in A.deferred_open(root)] == [deferred["id"]]
+    assert "stays open: no cycle ran" in capsys.readouterr().out
+
+    def ran(ns):
+        with open(A.heartbeat_path(root), "w", encoding="utf-8"):
+            pass
+        return 0
+    monkeypatch.setattr(W, "run", ran)
+    cli.cmd_catchup(project, NAMED)
+
+    assert A.deferred_open(root) == []
+
+
+def test_a_wake_started_after_a_deferral_closes_it_in_the_next_cycle(world):
+    """A deferred wake stayed open after the wake it waited for, and piled up for `ao doctor` and catchup; it is
+    closed a cycle later, so the notice a silence owes still names it in the cycle that woke."""
+    deferred = A.deferred_append(world.root, "wake", reason="architect quota")
+    world.transcript_age(900)
+    world.mail("20260916-1200-kiro-to-fable-BLOCKED-queue.md", BLOCKED)
+    world.cycle(dry_run=False)
+    assert len(_architect_wakes(world)) == 1 and [r["id"] for r in A.deferred_open(world.root)] == [deferred["id"]]
+
+    world.cycle(dry_run=False)
+
+    assert A.deferred_open(world.root) == []
+
+
 # ---- what the watchdog starts is claimed before it starts (JOURNAL-2) ----------------------------------------------
 
 BLOCKED = "# queue empty\n\n## KARAR GEREKLİ\n"

@@ -990,34 +990,39 @@ def unique_ns():
 # replays the queue when the way is clear. This is the "bypass now, reconcile
 # later" the human asked for: the run degrades, it never forgets.
 
+def _deferred_write(root, row):
+    """One row of the deferred queue, appended under its lock and synced before it returns (JOURNAL-4)."""
+    from .storage import append_jsonl
+    try:
+        os.makedirs(os.path.join(root, ".ao", "ledger"), exist_ok=True)
+        append_jsonl(os.path.join(root, ".ao", "ledger", "deferred.jsonl"), row)
+    except OSError:
+        pass
+
+
 def deferred_append(root, kind, **fields):
     """Defer one kind of work; an open deferral of that kind is the one that stands (#87).
 
     A wake is state, not a queue of attempts: fourteen deferred wakes piled up over
-    one outage and replayed in a burst when it ended.
+    one outage and replayed in a burst when it ended. A later end the work waits for
+    moves the standing one's: it was dropped, and the queue kept the first (JOURNAL-4).
     """
     standing = next((row for row in deferred_open(root) if row.get("kind") == kind), None)
     if standing:
+        until = fields.get("until")
+        if isinstance(until, (int, float)) and until > float(standing.get("until") or 0):
+            _deferred_write(root, {"event": "until", "id": standing["id"], "until": until, "at": int(time.time())})
+            standing = dict(standing, until=until)
         return standing
-    d = os.path.join(root, ".ao", "ledger")
     rec = {"event": "deferred", "id": f"DF-{int(time.time())}-{kind}", "kind": kind, "at": int(time.time())}
     rec.update(fields)
-    try:
-        os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, "deferred.jsonl"), "a", encoding=UTF8) as fh:
-            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    except OSError:
-        pass
+    _deferred_write(root, rec)
     return rec
 
 
 def deferred_close(root, did, outcome="done"):
-    d = os.path.join(root, ".ao", "ledger")
-    try:
-        with open(os.path.join(d, "deferred.jsonl"), "a", encoding=UTF8) as fh:
-            fh.write(json.dumps({"event": "closed", "id": did, "at": int(time.time()), "outcome": outcome}) + "\n")
-    except OSError:
-        pass
+    _deferred_write(root, {"event": "closed", "id": did, "at": int(time.time()), "outcome": outcome})
+
 
 
 def deferred_open(root):
@@ -1032,6 +1037,8 @@ def deferred_open(root):
             continue
         if r.get("event") == "deferred":
             rows[r["id"]] = r
+        elif r.get("event") == "until" and r.get("id") in rows:
+            rows[r["id"]] = dict(rows[r["id"]], until=r.get("until"))
         elif r.get("event") == "closed":
             closed.add(r["id"])
     return [r for i, r in rows.items() if i not in closed]

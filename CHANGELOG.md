@@ -18,6 +18,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- `ao catchup` closes deferred wakes and nudges only once a cycle has run with them, where it closed them as replayed before a cycle that might not run; a later end moves the deferral that stands; a wake or nudge started after a deferral closes it; and the queue is appended under its lock and synced (JOURNAL-4).
 - The watchdog trims a spawn log in the file a running architect or nudge writes, where it wrote a new file over it and what the process wrote after - a failed wake's last words, a quota stop - was lost, so the wake counted as handed (JOURNAL-3).
 - An architect wake or refill is claimed in a journal (`~/.ao/journal-<key>.db`, SQLite, written ahead and synced) before its process starts, and its pid is written the moment it has one, so a cycle cut off between starting the architect and recording it no longer wakes a second one into the same session; a process already resuming the session counts as a wake under way ([watchdog.md](docs/watchdog.md)) (JOURNAL-2).
 - The watchdog's state is written whole or not at all, where a kill -9, a power cut or a Ctrl+C mid-write left it torn and the next cycle, reading a fresh state, could resume a parked turn or wake the architect a second time (JOURNAL-1).

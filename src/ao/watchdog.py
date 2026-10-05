@@ -550,6 +550,18 @@ def _step_process_alive(pid, start):
     return bool(pid) and A._pid_alive(pid) and (start is None or A._process_start(pid) in (None, start))
 
 
+def _close_deferred_done(root, st):
+    """Close a deferral the work it waited for has since done: a wake or a nudge started after it (JOURNAL-4).
+
+    Closed in the cycle after the work, not as the work starts: the notice a silence owes names what was
+    deferred through it, and that notice is written after the wake in the same cycle.
+    """
+    done = {"wake": float(st.get("last_arch_wake") or 0), "nudge": float(st.get("last_nudge") or 0)}
+    for row in A.deferred_open(root):
+        if done.get(row.get("kind"), 0) > float(row.get("at") or 0):
+            A.deferred_close(root, row["id"], "woken" if row.get("kind") == "wake" else "nudged")
+
+
 def _claim_step(root, step):
     """Whether this cycle may start `step`; where the journal cannot be read, it may, as before it (JOURNAL-2).
 
@@ -2469,6 +2481,7 @@ def _cycle_impl(args, root):
     if not args.dry_run:
         A.reconcile_mail_ledger(root, cfg)  # deleted mail becomes a consumed row
         A.record_progress(root, cfg)      # history of what moved, for the spin check
+        _close_deferred_done(root, st)
     project = A.project_key(root)
     try:
         bd = A.board(root)
