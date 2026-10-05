@@ -72,3 +72,42 @@ def test_a_reviewer_whose_harness_declares_no_stream_or_that_writes_text_is_read
 def test_a_kiro_reviewer_that_names_text_output_is_named():
     assert allowlist.reviewer_problems(KIRO + ["--output-format", "text"]) == \
         ["it runs with --output-format text, where ao pins stream-json"]
+
+
+# ---- a reviewer whose provider failed to answer this time is a passing failure, retried (KIRO-TRANSIENT) --------
+
+import os  # noqa: E402
+import sys  # noqa: E402
+
+import pytest  # noqa: E402
+
+FAILED_TO_GENERATE = "\n".join([
+    json.dumps({"type": "runStarted", "data": {"payloadSchema": "acp", "acpProtocolVersion": 1, "engine": "v2"}}),
+    json.dumps({"type": "runError", "data": {"sessionId": "s1", "stage": "prompt",
+                                             "message": "Internal error (code -32603): Kiro failed to generate a response"}}),
+])
+
+
+def test_a_kiro_run_its_provider_failed_to_answer_is_read_as_passing():
+    """Measured on kiro-cli 2.27.1 on 2026-10-05: a Sol review exited 1 after six minutes with this runError, and the
+    review was UNAVAILABLE and not retried, as a reviewer that cannot run is."""
+    argv = A.pinned_argv(KIRO, "reviewer")[0]
+
+    assert cli._stream_error(argv, FAILED_TO_GENERATE) == "Internal error (code -32603): Kiro failed to generate a response"
+    assert cli._stream_error(argv, FAILED_TO_GENERATE.replace("failed to generate a response", "the model refused")) is None
+    assert cli._stream_error(KIRO, FAILED_TO_GENERATE) is None                  # text output names no runError
+    assert cli._stream_error(["claude", "-p", "x", "--output-format", "stream-json"], FAILED_TO_GENERATE) is None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the stand-in harness is a script its shebang runs")
+def test_a_reviewer_whose_provider_failed_to_answer_is_a_temporary_exit_retried(project, tmp_path):
+    harness = tmp_path / "kiro-cli"
+    harness.write_text(f"#!{sys.executable}\nimport sys\nprint({FAILED_TO_GENERATE!r})\nsys.exit(1)\n",
+                       encoding="utf-8")
+    harness.chmod(0o755)
+    argv = [str(harness)] + A.pinned_argv(KIRO, "reviewer")[0][1:]
+
+    attempt = cli._run_reviewer(project["root"], [part.replace("{prompt}", "review this") for part in argv], 30)
+
+    assert attempt["kind"] == "temporary-exit" and attempt["retryable"] is True
+    assert "failed to generate a response" in attempt["reason"]

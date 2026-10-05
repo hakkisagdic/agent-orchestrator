@@ -59,7 +59,9 @@ remark went on from the remark's last word, was not read, and the review was ask
 for twice. An adapter whose harness can write its messages as ACP session updates names the flags
 in `options.answer_stream` and pins them for a reviewer (`--output-format stream-json` for kiro);
 ao reads the answer from those updates with a line break where a tool call fell. A review over ACP
-is read the same way.
+is read the same way. A run that ends on an error the adapter names passing in
+`options.answer_stream.transient` - Kiro's `failed to generate a response` - is a temporary
+failure, retried once as a reviewer that exits 75 is, not a reviewer that cannot run.
 
 ## A turn's grant is declared, and so is every flag that turns approvals off
 

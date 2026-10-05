@@ -20,6 +20,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- A Kiro review whose provider failed to answer this time - `Internal error (code -32603): Kiro failed to generate a response` - is a temporary failure and is retried, where it was a reviewer that cannot run and the review closed UNAVAILABLE; an adapter that answers in session updates names such errors in `options.answer_stream.transient` ([adapters.md](docs/adapters.md)) (KIRO-TRANSIENT).
 - A review in the foreground - `ao review`, and each review `ao catchup` starts - stopped by SIGTERM, SIGHUP or SIGINT stops its reviewer, where only a submitted review's detached run did and a foreground one left its reviewer, which leads a session of its own, working and spending for nobody ([pipeline.md](docs/pipeline.md)) (REVIEWER-ORPHAN-3).
 - `ao catchup` reports and counts a deferral its own watchdog cycle closed, where the cycle closed it first and catchup said nothing of it; and a deferral recorded to the second closes on work started at the very start of the next second (JOURNAL-4-3).
 - A watchdog cycle that ends because a lock it takes inside timed out says which lock and exits 1, where every lock timeout read as another cycle holding the project and the cycle stood down with exit 0 (WATCHDOG-LOCK).

@@ -576,6 +576,31 @@ def _answer_stream(argv, stdout):
     return acp.answer_text(updates) if updates else stdout
 
 
+def _stream_error(argv, stdout):
+    """The runError message a reviewer's session updates end on, when its adapter declares it passing; else None.
+
+    A provider that failed to answer this time is not a reviewer that cannot run: a Sol review exited 1 after six
+    minutes on `Kiro failed to generate a response`, and the review was UNAVAILABLE and not retried. An adapter that
+    answers in session updates names the messages of such failures in `options.answer_stream.transient`
+    (KIRO-TRANSIENT).
+    """
+    adapter = A.command_adapter(argv)
+    stream = ((adapter or {}).get("options") or {}).get("answer_stream") or {}
+    flags, patterns = stream.get("argv"), stream.get("transient") or []
+    if not flags or not patterns or any(A._named(argv, flag) != (True, value) for flag, value in A._flag_pairs(flags)):
+        return None
+    for line in (stdout or "").splitlines():
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        data = record.get("data") if isinstance(record, dict) and isinstance(record.get("data"), dict) else {}
+        message = str(data.get("message") or "")
+        if record.get("type") == "runError" and any(A.re.search(pattern, message) for pattern in patterns):
+            return message
+    return None
+
+
 def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, channel=None, tree=None):
     """Run one reviewer outside the repository and classify invocation status.
 
@@ -700,13 +725,14 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
 
         print(f"{C['dim']}reviewer {label} exited {proc.returncode} after "
               f"{_elapsed(time.monotonic() - started)}{C['reset']}")
+        passing = _stream_error(argv, stdout) if proc.returncode != 0 else None
         stdout = _answer_stream(argv, stdout)
         out = (stdout if (stdout or "").strip() else stderr or "").strip()
         if proc.returncode != 0:
-            temporary = proc.returncode == 75
+            temporary = proc.returncode == 75 or passing is not None
             _reviewer_terminal_output(stdout, stderr)
             return {
-                "ok": False, "out": "", "reason": f"exited {proc.returncode}",
+                "ok": False, "out": "", "reason": f"exited {proc.returncode}" + (f": {passing}" if passing else ""),
                 "returncode": proc.returncode,
                 "kind": "temporary-exit" if temporary else "nonzero-exit",
                 "retryable": temporary,

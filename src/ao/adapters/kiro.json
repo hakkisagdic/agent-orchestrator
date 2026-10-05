@@ -71,7 +71,9 @@
     ],
     "answer_stream": {
       "argv": ["--output-format", "stream-json"],
-      "note": "Measured on kiro-cli 2.27.1, 2026-10-05: the text output ran a turn's messages together where a tool call came between them ('I will read the file now.Done reading.'), and runFinished.finalText does too. stream-json writes each message chunk and each tool call as an ACP session update, {type: sessionUpdate, data: {sessionId, update}}, so a reader can break the text where a tool call fell."
+      "note": "Measured on kiro-cli 2.27.1, 2026-10-05: the text output ran a turn's messages together where a tool call came between them ('I will read the file now.Done reading.'), and runFinished.finalText does too. stream-json writes each message chunk and each tool call as an ACP session update, {type: sessionUpdate, data: {sessionId, update}}, so a reader can break the text where a tool call fell.",
+      "transient": ["failed to generate a response", "(?i)\\brate.?limit", "(?i)throttl", "(?i)temporarily unavailable"],
+      "transient_note": "A run that ends on a runError whose message matches one of these is a passing failure of the provider, retried as a reviewer that exits 75 is. Measured on kiro-cli 2.27.1, 2026-10-05: a Sol review exited 1 after six minutes on `Internal error (code -32603): Kiro failed to generate a response`."
     },
     "pin": {
       "reviewer": ["--output-format", "stream-json"],
