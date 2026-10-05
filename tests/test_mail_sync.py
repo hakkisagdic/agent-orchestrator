@@ -393,3 +393,40 @@ def test_a_refusal_names_where_git_pushes_not_where_it_fetches(project, tmp_path
 
     with pytest.raises(RuntimeError, match="pushed"):
         A.sync_mail(root, cfg)
+
+
+def test_an_origin_git_rewrites_is_the_products_own_remote_as_git_rewrites_it(project, tmp_path, monkeypatch):
+    """MAIL-SYNC-6: an origin kept in ~/.gitconfig as `product-short`, with an insteadOf naming the product, was
+    compared as written, while `git push origin` reaches the product's repository, and the mail went there."""
+    product = _bare(tmp_path)
+    root, cfg = _store(project, str(product))
+    global_config = tmp_path / "gitconfig"
+    global_config.write_text(f'[remote "origin"]\n\turl = product-short\n'
+                             f'[url "{_config_value(product)}"]\n\tinsteadOf = product-short\n', encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
+    _never_pushed(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="this product's own remote"):
+        A.sync_mail(root, cfg)
+
+
+def test_a_refusal_names_the_rewrite_git_picks_by_the_longest_prefix(project, monkeypatch):
+    """MAIL-SYNC-6: of two pushInsteadOf rules that both match, git takes the longest prefix; the refusal named the
+    first one written, a place git would not push."""
+    root, cfg = _store(project, "mailbox/repo")
+    for key, value in (("url./wrong/.pushInsteadOf", "mail"), ("url./right/.pushInsteadOf", "mailbox")):
+        subprocess.run(["git", "config", key, value], cwd=root, check=True)
+    _never_pushed(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="to /right//repo"):
+        A.sync_mail(root, cfg)
+
+
+def test_a_rewrite_is_chosen_as_git_chooses_it():
+    """git's alias_url: the longest prefix, and of two as long, the base git read first, whichever entry came first."""
+    entries = [("url.A.pushinsteadof", "y"), ("url.B.pushinsteadof", "x"), ("url.A.pushinsteadof", "x"),
+               ("url.C.insteadof", "xyz")]
+
+    assert A._git_rewrite("x/repo", entries, "pushinsteadof") == ("A/repo", "url.A.pushinsteadof", "x")
+    assert A._git_rewrite("xyz/repo", entries, "insteadof") == ("C/repo", "url.C.insteadof", "xyz")
+    assert A._git_rewrite("z/repo", entries, "pushinsteadof") is None

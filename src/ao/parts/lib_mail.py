@@ -1034,6 +1034,24 @@ def _git_config_entries(root, pattern):
             if record]
 
 
+def _git_rewrite(url, entries, rule):
+    """(url as git rewrites it, the rule's key, its prefix) by the url.<base>.<rule> entries among `entries`; else None.
+
+    git's alias_url: the longest prefix wins, and of two as long, the one whose base git read first. The
+    first entry that matched was taken, and a refusal could name a place git would not push (MAIL-SYNC-6).
+    """
+    rewrites = {}                                # each base with its prefixes, in the order git first reads it
+    for key, value in entries:
+        if key.startswith("url.") and key.endswith("." + rule):
+            rewrites.setdefault(key[4:key.rindex(".")], []).append((key, value))
+    best = None
+    for base, rules in rewrites.items():
+        for key, prefix in rules:
+            if url.startswith(prefix) and (best is None or len(prefix) > len(best[2])):
+                best = (base + url[len(prefix):], key, prefix)
+    return best
+
+
 def _git_reads_otherwise(root, url):
     """Why `git push url` would not reach `url` itself, or None (MAIL-SYNC-4).
 
@@ -1046,9 +1064,9 @@ def _git_reads_otherwise(root, url):
     entries = _git_config_entries(root, r"^(remote\..+\.[^.]+|url\..+\.pushinsteadof)$")
     # What git pushes to is said before what it fetches from: a pushInsteadOf wins over an insteadOf when git
     # pushes, and the refusal named the fetch's rewrite, a place git would not push (MAIL-SYNC-5).
-    for key, value in entries:
-        if key.startswith("url.") and url.startswith(value):
-            return f"git pushes {url} to {key[4:key.rindex('.')]}{url[len(value):]} ({key} = {value})"
+    pushed = _git_rewrite(url, entries, "pushinsteadof")
+    if pushed:
+        return f"git pushes {url} to {pushed[0]} ({pushed[1]} = {pushed[2]})"
     seen = _git_output(root, "ls-remote", "--get-url", url).decode(UTF8, "replace").strip()
 
     def spelled(text):                           # a path git prints with its own separators is the same path
@@ -1192,8 +1210,13 @@ def sync_mail(root, cfg):
     origins = {line.strip() for line in (git_text(root, "remote", "get-url", "--all", "origin").splitlines()
                                          + git_text(root, "remote", "get-url", "--push", "--all", "origin").splitlines())}
     # `git remote get-url` knows only the repository's own remotes; an origin kept in ~/.gitconfig is still where
-    # `git push origin` goes (MAIL-SYNC-5).
-    origins |= {value.strip() for _, value in _git_config_entries(root, r"^remote\.origin\.(url|pushurl)$")}
+    # `git push origin` goes (MAIL-SYNC-5), as git rewrites it: `product-short` with an insteadOf naming the product
+    # was compared as written, and the mail went to the product (MAIL-SYNC-6).
+    entries = _git_config_entries(root, r"^(remote\.origin\.(url|pushurl)|url\..+\.(insteadof|pushinsteadof))$")
+    for key, value in entries:
+        if key in ("remote.origin.url", "remote.origin.pushurl"):
+            origins |= {value.strip()} | {rewritten[0].strip() for rewritten in (
+                _git_rewrite(value, entries, "insteadof"), _git_rewrite(value, entries, "pushinsteadof")) if rewritten}
     same = any(origin and (target.rstrip("/").removesuffix(".git") == origin.rstrip("/").removesuffix(".git")
                            or _remote_identity(target) is not None and _remote_identity(target) == _remote_identity(origin))
                for origin in origins)

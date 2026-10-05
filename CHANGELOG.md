@@ -64,6 +64,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Security
 
+- An origin kept in ~/.gitconfig counts as the product's remote in the form git rewrites it to as well as the form it is written in, where `product-short` with an insteadOf naming the product let the mail be pushed to it, and a refusal names the rewrite git picks by the longest prefix, where it named the first rule written ([messaging.md](docs/messaging.md)) (MAIL-SYNC-6).
 - A filter hook argument that becomes an address once a URL reader drops its leading or trailing spaces and control characters, or a tab, CR or LF (`<TAB>file:///...`), is refused, where ao read it as a relative path that could climb out of the project (FILTER-EXCLUSIONS-8).
 - The move proof refuses a module that loads parts and sets its own `__file__`, which moves where `_part` reads them away from where the proof read them (SPLIT-CHECK-5).
 - A reviewer's or the hunter's command whose reading flag stands only after `--`, where it is no option, or is given a second word a harness may read as more of its list (`--tools Read,Grep,Glob Edit`), is refused, where the first was taken for the flag and the second was never asked (REVIEWER-REACH-3).
