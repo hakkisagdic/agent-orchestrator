@@ -122,7 +122,9 @@ target is one private repository holding every project's mail under `refs/mail/<
 per project as `mail.sync_repo` - opt-in, and refused when it is the product's own remote, in any of
 its URL forms. A remote's name there is judged as the one URL `git push` reaches with it, its pushurl
 where one is set, and a value that begins with `-` is an option to git and is refused before git sees
-it. At push time the host is asked whether the repository is private (a directory on this
+it. A target git would read as another remote, or rewrite by `url.<base>.insteadOf` or
+`pushInsteadOf`, is refused, naming where git would take it, and the product's own remote is every
+URL origin fetches from and pushes to. At push time the host is asked whether the repository is private (a directory on this
 machine counts as private, and a URL is told from a directory as git tells it, so `host:path` is a
 host); GitHub is asked only about a repository on github.com itself. A public or unknown one is
 refused, named and logged, and so is a host ao cannot ask, such as an SSH alias. Every record is scanned for credentials before it leaves, compacted archives

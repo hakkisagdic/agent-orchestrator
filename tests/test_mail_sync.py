@@ -170,7 +170,7 @@ def test_the_doctor_judges_a_remote_named_in_place_of_a_url_by_its_url(project, 
     _no_gh(monkeypatch)
     real = A._git_output
     monkeypatch.setattr(A, "_git_output", lambda root, *args, **kw: b"" if "ls-remote" in args
-                        else real(root, *args, **kw))                            # no host is read
+                        and "--get-url" not in args else real(root, *args, **kw))  # no host is read; --get-url reads none
 
     local, remote, problem = A.mail_sync_state(root, cfg)
 
@@ -236,3 +236,128 @@ def test_a_governance_backup_remote_is_judged_by_the_url_it_pushes_to_on_github_
 
     assert A.remote_is_private(root, "backup") is None and asked == []
     assert A.remote_is_private(root, "--upload-pack=true") is None and asked == []
+
+
+# ---- the URL judged is the URL git reaches: no rewrite, no remote's name, every origin URL (MAIL-SYNC-4) -----------
+
+def _git(root, *args):
+    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+
+
+def _bare_named(tmp_path, name):
+    subprocess.run(["git", "init", "-q", "--bare", str(tmp_path / name)], check=True)
+    return tmp_path / name
+
+
+def _mail_refs(bare):
+    out = subprocess.run(["git", "--git-dir", str(bare), "for-each-ref", "--format=%(refname)", "refs/mail"],
+                         capture_output=True, text=True, check=True).stdout
+    return out.split()
+
+
+def _says_private(monkeypatch):
+    import shutil
+    asked = []
+    real_which, real_run = shutil.which, subprocess.run
+    monkeypatch.setattr(shutil, "which", lambda name, *a, **k: "gh" if name == "gh" else real_which(name, *a, **k))
+    monkeypatch.setattr(subprocess, "run", lambda argv, *a, **kw: (asked.append(argv) or SimpleNamespace(stdout="true\n"))
+                        if argv[:1] == ["gh"] else real_run(argv, *a, **kw))
+    return asked
+
+
+@pytest.mark.parametrize("target, rule", [("mailbox", "pushInsteadOf"), ("mailbox", "insteadOf"),
+                                          ("https://github.com/example/team-mail.git", "pushInsteadOf")])
+def test_a_target_git_rewrites_is_refused_not_judged_as_written(project, tmp_path, monkeypatch, target, rule):
+    """`mailbox` was judged a private directory, and a github.com URL by GitHub's answer, while a url.<base> rule
+    sent the push to another repository."""
+    stranger = _bare_named(tmp_path, "stranger.git")
+    root, cfg = _store(project, target)
+    _says_private(monkeypatch)
+    _git(root, "config", f"url.{stranger}.{rule}", target)
+
+    with pytest.raises(RuntimeError, match="name the repository git reaches"):
+        A.sync_mail(root, cfg)
+    assert _mail_refs(stranger) == []
+    assert "name the repository git reaches" in A.mail_sync_state(root, cfg)[2]
+
+
+def test_the_url_a_remote_names_is_not_rewritten_a_second_time(project, tmp_path):
+    mail, stranger = _bare_named(tmp_path, "mail.git"), _bare_named(tmp_path, "stranger.git")
+    root, cfg = _store(project, "backup")
+    _git(root, "remote", "add", "backup", str(mail))
+    _git(root, "remote", "set-url", "--push", "backup", str(mail))
+    _git(root, "config", f"url.{tmp_path}/stranger.pushInsteadOf", f"{tmp_path}/mail")
+
+    with pytest.raises(RuntimeError, match="name the repository git reaches"):
+        A.sync_mail(root, cfg)
+    assert _mail_refs(stranger) == [] and _mail_refs(mail) == []
+
+
+def test_a_remote_whose_url_git_rewrites_once_syncs_to_the_rewritten_url(project, tmp_path):
+    mail = _bare_named(tmp_path, "mail.git")
+    root, cfg = _store(project, "backup")
+    _git(root, "remote", "add", "backup", "mailshort")
+    _git(root, "config", f"url.{mail}.insteadOf", "mailshort")
+
+    commit, where = A.sync_mail(root, cfg)
+
+    assert where == f"{mail} refs/mail/{A.project_key(root)}" and _mail_refs(mail) == [f"refs/mail/{A.project_key(root)}"]
+
+
+def test_a_push_url_that_names_another_remote_is_refused(project, tmp_path):
+    """A remote whose pushurl is `origin` resolved to `origin`, judged a private directory, and `git push origin`
+    took the mail to the product."""
+    product, mail = _bare_named(tmp_path, "product.git"), _bare_named(tmp_path, "mail.git")
+    root, cfg = _store(project, "backup")
+    _git(root, "remote", "add", "origin", str(product))
+    _git(root, "remote", "add", "backup", str(mail))
+    _git(root, "remote", "set-url", "--push", "backup", "origin")
+
+    with pytest.raises(RuntimeError, match="git reads origin as"):
+        A.sync_mail(root, cfg)
+    local, remote, problem = A.mail_sync_state(root, cfg)
+    assert _mail_refs(product) == [] and remote is None and "git reads origin as" in problem
+
+
+def test_a_url_that_is_also_a_remotes_name_is_refused(project, tmp_path, monkeypatch):
+    mail, stranger = _bare_named(tmp_path, "mail.git"), _bare_named(tmp_path, "stranger.git")
+    url = "https://github.com/example/team-mail.git"
+    root, cfg = _store(project, "backup")
+    _says_private(monkeypatch)
+    _git(root, "remote", "add", "backup", str(mail))
+    _git(root, "remote", "set-url", "--push", "backup", url)
+    _git(root, "config", f"remote.{url}.url", str(stranger))       # `git remote add` refuses the name; config takes it
+
+    with pytest.raises(RuntimeError, match="name the repository git reaches"):
+        A.sync_mail(root, cfg)
+    assert _mail_refs(stranger) == []
+
+
+def test_a_remote_kept_outside_the_repositorys_config_is_not_taken_for_a_directory(project, tmp_path, monkeypatch):
+    """`git remote get-url` knows only this repository's remotes; `git push` also takes one from ~/.gitconfig."""
+    stranger = _bare_named(tmp_path, "stranger.git")
+    root, cfg = _store(project, "mailbox")
+    person = tmp_path / "gitconfig"
+    person.write_text(f'[user]\n\tname = t\n\temail = t@t\n[remote "mailbox"]\n\turl = {stranger}\n', encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(person))
+
+    with pytest.raises(RuntimeError, match="git reads mailbox as"):
+        A.sync_mail(root, cfg)
+    assert _mail_refs(stranger) == []
+
+
+@pytest.mark.parametrize("how", ["two pushurls", "two urls"])
+def test_every_url_origin_pushes_to_is_the_products_own_remote(project, tmp_path, how):
+    """The guard read origin's first push URL alone, and `git push origin` reaches every one."""
+    product, mirror = _bare_named(tmp_path, "product.git"), _bare_named(tmp_path, "mirror.git")
+    root, cfg = _store(project, str(mirror))
+    _git(root, "remote", "add", "origin", str(product))
+    if how == "two pushurls":
+        _git(root, "remote", "set-url", "--add", "--push", "origin", str(product))
+        _git(root, "remote", "set-url", "--add", "--push", "origin", str(mirror))
+    else:
+        _git(root, "config", "--add", "remote.origin.url", str(mirror))
+
+    with pytest.raises(RuntimeError, match="this product's own remote"):
+        A.sync_mail(root, cfg)
+    assert _mail_refs(mirror) == []

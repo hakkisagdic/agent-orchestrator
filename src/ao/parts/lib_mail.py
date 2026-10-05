@@ -1016,6 +1016,49 @@ def _scp_like(url):
     return colon > 0 and not 0 <= slash < colon and not (os.name == "nt" and re.match(r"^[A-Za-z]:", url))
 
 
+def _git_config_entries(root, pattern):
+    """(key, value) of every git config entry whose key matches `pattern`, from every file git reads (MAIL-SYNC-4).
+
+    git answers 1 when no key matches; any other failure is no answer, and is not taken for an empty one.
+    """
+    try:
+        result = subprocess.run([git_binary(), "config", "-z", "--get-regexp", pattern], cwd=root,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError(f"cannot read git config: {exc}") from exc
+    if result.returncode == 1:
+        return []
+    if result.returncode:
+        raise RuntimeError(f"cannot read git config: {result.stderr.decode(UTF8, 'replace').strip()[:240]}")
+    return [tuple(record.partition("\n")[::2]) for record in result.stdout.decode(UTF8, "replace").split("\0")
+            if record]
+
+
+def _git_reads_otherwise(root, url):
+    """Why `git push url` would not reach `url` itself, or None (MAIL-SYNC-4).
+
+    git looks a word up as a remote's name, in every config file, before it reads it as a URL, and
+    rewrites a URL by url.<base>.insteadOf and, when it pushes, url.<base>.pushInsteadOf: `mailbox`
+    was judged a private directory while a pushInsteadOf sent it to another host, a remote's pushurl
+    `origin` was pushed to as the remote origin, and a remote kept in ~/.gitconfig, which
+    `git remote get-url` does not know, was taken for a directory.
+    """
+    seen = _git_output(root, "ls-remote", "--get-url", url).decode(UTF8, "replace").strip()
+
+    def spelled(text):                           # a path git prints with its own separators is the same path
+        text = text.replace("\\", "/").rstrip("/")
+        return text.lower() if os.name == "nt" else text
+    if spelled(seen) != spelled(url):
+        return f"git reads {url} as {seen}"     # a remote of that name, from any config file, or an insteadOf
+    for key, value in _git_config_entries(root, r"^(remote\..+\.[^.]+|url\..+\.pushinsteadof)$"):
+        name = key[key.index(".") + 1:key.rindex(".")]
+        if key.startswith("remote.") and name == url:
+            return f"{url} is also the name of a remote ({key})"
+        if key.startswith("url.") and url.startswith(value):
+            return f"git pushes {url} to {name}{url[len(value):]} ({key} = {value})"
+    return None
+
+
 def _push_url(root, target):
     """The one URL `git push target` reaches: the push URL of the remote `target` names, else `target` (MAIL-SYNC-3).
 
@@ -1024,19 +1067,26 @@ def _push_url(root, target):
     the product's remote - and `git push origin` took the mail to the product. A name is judged, read
     and pushed as the URL it names. A word that begins with `-` is an option to git, not a repository:
     `--upload-pack=<command>` ran the command on every `ao doctor`, and it is refused before git sees it.
+    The URL is then pushed to and read as itself, so one git would read as another remote or rewrite
+    is refused, naming what git reaches (MAIL-SYNC-4).
     """
     if str(target or "").startswith("-"):
         raise RuntimeError(f"{target!r} is an option to git, not a repository")
     try:
         urls = _git_output(root, "remote", "get-url", "--push", "--all", target).decode(UTF8, "replace")
     except RuntimeError:
-        return target                            # no remote of that name: git reads it as a URL or a path
-    urls = [url.strip() for url in urls.splitlines() if url.strip()]
-    if len(urls) != 1:
-        raise RuntimeError(f"the remote {target} pushes to {len(urls)} URLs; name one repository")
-    if urls[0].startswith("-"):
-        raise RuntimeError(f"the remote {target} names {urls[0]!r}, an option to git, not a repository")
-    return urls[0]
+        urls = target                            # no remote of that name here: git reads it as a URL or a path
+    else:
+        urls = [url.strip() for url in urls.splitlines() if url.strip()]
+        if len(urls) != 1:
+            raise RuntimeError(f"the remote {target} pushes to {len(urls)} URLs; name one repository")
+        if urls[0].startswith("-"):
+            raise RuntimeError(f"the remote {target} names {urls[0]!r}, an option to git, not a repository")
+        urls = urls[0]
+    why = _git_reads_otherwise(root, urls)
+    if why:
+        raise RuntimeError(f"{why}; name the repository git reaches")
+    return urls
 
 
 def _github_says_private(url):
@@ -1135,8 +1185,9 @@ def sync_mail(root, cfg):
         raise RuntimeError("no mail.sync_repo is named; syncing is opt-in per project")
     target = _push_url(root, target)
     # The product's remote in any of its forms - https and git@ name one repository (MAIL-SYNC-2) - where it
-    # fetches and where it pushes (MAIL-SYNC-3).
-    origins = {git_text(root, "remote", "get-url", "origin"), git_text(root, "remote", "get-url", "--push", "origin")}
+    # fetches and where it pushes (MAIL-SYNC-3), every URL of each: `git push origin` reaches them all (MAIL-SYNC-4).
+    origins = {line.strip() for line in (git_text(root, "remote", "get-url", "--all", "origin").splitlines()
+                                         + git_text(root, "remote", "get-url", "--push", "--all", "origin").splitlines())}
     same = any(origin and (target.rstrip("/").removesuffix(".git") == origin.rstrip("/").removesuffix(".git")
                            or _remote_identity(target) is not None and _remote_identity(target) == _remote_identity(origin))
                for origin in origins)
