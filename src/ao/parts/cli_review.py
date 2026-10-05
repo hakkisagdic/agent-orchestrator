@@ -543,6 +543,32 @@ def _remove_everything_in(home):
             pass
 
 
+def _answer_stream(argv, stdout):
+    """A reviewer's answer as its messages read, from the session updates its adapter declares it writes.
+
+    kiro-cli's text output runs a turn's messages together where a tool call came between them, so a verdict
+    written after a remark went on from the remark's last word (REVIEW-SEGMENTS). An adapter whose harness
+    writes each message chunk and each tool call as an ACP session update names the flags that make it, in
+    `options.answer_stream`; when the command carries them, the answer is read from those updates with a line
+    break where a tool call fell. Anything else, and a stream that holds no update, is read as written.
+    """
+    from . import acp
+    adapter = A.command_adapter(argv)
+    flags = (((adapter or {}).get("options") or {}).get("answer_stream") or {}).get("argv")
+    if not flags or any(A._named(argv, flag) != (True, value) for flag, value in A._flag_pairs(flags)):
+        return stdout
+    updates = []
+    for line in (stdout or "").splitlines():
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        data = record.get("data") if isinstance(record, dict) and isinstance(record.get("data"), dict) else {}
+        if record.get("type") == "sessionUpdate" and isinstance(data.get("update"), dict):
+            updates.append(data["update"])
+    return acp.answer_text(updates) if updates else stdout
+
+
 def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, channel=None, tree=None):
     """Run one reviewer outside the repository and classify invocation status.
 
@@ -661,6 +687,7 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
 
         print(f"{C['dim']}reviewer {label} exited {proc.returncode} after "
               f"{_elapsed(time.monotonic() - started)}{C['reset']}")
+        stdout = _answer_stream(argv, stdout)
         out = (stdout if (stdout or "").strip() else stderr or "").strip()
         if proc.returncode != 0:
             temporary = proc.returncode == 75

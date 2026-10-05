@@ -47,6 +47,14 @@ whose adapter cannot deny tools. Whatever composed a route, it runs with the fla
 for a reviewer (below): `claude-code`'s `trust_none` carries `--tools Read,Grep,Glob` and
 `--permission-mode dontAsk`, so no setting of the person's widens it.
 
+A reviewer's verdict is read only where it stands at the start of a line. `kiro-cli`'s text output
+runs a turn's messages together where a tool call came between them, so a verdict written after a
+remark went on from the remark's last word, was not read, and the review was asked again and paid
+for twice. An adapter whose harness can write its messages as ACP session updates names the flags
+in `options.answer_stream` and pins them for a reviewer (`--output-format stream-json` for kiro);
+ao reads the answer from those updates with a line break where a tool call fell. A review over ACP
+is read the same way.
+
 ## A turn's grant is declared, and so is every flag that turns approvals off
 
 A turn nobody attends cannot answer a permission prompt, so what it may do is settled when ao starts

@@ -36,6 +36,31 @@ class ProbeError(RuntimeError):
     """An agent that did not answer what it was asked, and why."""
 
 
+def _take(parts, update):
+    """Add a session update's message text to `parts`, or the line break a tool call makes between two messages.
+
+    An agent writes a remark, calls a tool and writes its answer: run together, the answer's first line went on
+    from the remark's last word, and a verdict line ao reads at the start of a line was not read (REVIEW-SEGMENTS).
+    """
+    kind = update.get("sessionUpdate") if isinstance(update, dict) else None
+    if kind == "agent_message_chunk":
+        content = update.get("content") if isinstance(update.get("content"), dict) else {}
+        if content.get("type") == "text":
+            parts.append(str(content.get("text") or ""))
+    elif kind == "tool_call":
+        last = next((part for part in reversed(parts) if part), "")
+        if last and not last.endswith("\n"):
+            parts.append("\n")
+
+
+def answer_text(updates):
+    """The text of an agent's messages in a turn's session updates, broken where a tool call fell between two."""
+    parts = []
+    for update in updates or []:
+        _take(parts, update)
+    return "".join(parts)
+
+
 def _group():
     """Start the agent as the leader of its own process group, so stopping it stops what it started."""
     if os.name == "nt":
@@ -254,11 +279,8 @@ class Session:
         if method == "session/update" and self._turn is not None:
             update = params.get("update") if isinstance(params.get("update"), dict) else {}
             kind = update.get("sessionUpdate")
-            if kind == "agent_message_chunk":
-                content = update.get("content") if isinstance(update.get("content"), dict) else {}
-                if content.get("type") == "text":
-                    self._turn["text"].append(str(content.get("text") or ""))
-            elif kind in ("tool_call", "tool_call_update"):
+            _take(self._turn["text"], update)
+            if kind in ("tool_call", "tool_call_update"):
                 call_id = update.get("toolCallId")
                 call = self._turn["tool_calls"].setdefault(call_id, {"id": call_id})
                 call.update({key: update[key] for key in ("title", "kind", "status") if key in update})
