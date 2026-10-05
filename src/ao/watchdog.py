@@ -1982,9 +1982,10 @@ def run(args):
             record_cycle(root, args, started)
     from .storage import LedgerLockTimeout, _exclusive_lock
     key = A.project_key(root)
+    lock = os.path.join(STATE_DIR, CYCLE_LOCK.format(key=key))
     try:
         os.makedirs(STATE_DIR, exist_ok=True)
-        with _exclusive_lock(os.path.join(STATE_DIR, CYCLE_LOCK.format(key=key)), timeout=0):
+        with _exclusive_lock(lock, timeout=0):
             try:
                 A.bound_observation_logs(root, STATE_DIR, busy=_logs_written(root))   # every store is bounded (#50)
             except OSError:
@@ -1995,7 +1996,11 @@ def run(args):
                 return code
             finally:
                 record_cycle(root, args, started)
-    except LedgerLockTimeout:
+    except LedgerLockTimeout as exc:
+        if getattr(exc, "path", lock) != lock:
+            # A lock the cycle took inside it was held too long: no other cycle, and standing down hid it (WATCHDOG-LOCK).
+            print(f"the cycle could not take {exc.path} in time; it ends here, and the next cycle tries again")
+            return 1
         print("another watchdog cycle is running for this project; standing down")
         return 0
 

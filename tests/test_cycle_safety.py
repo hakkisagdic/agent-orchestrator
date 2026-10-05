@@ -166,3 +166,27 @@ def test_a_refill_that_hit_the_limit_waits_for_its_window(world, monkeypatch):
 
     assert any("the last refill hit the architect's limit; waiting until" in line for line in trace)
     assert _turns(world) == []
+
+
+def test_a_lock_the_cycle_takes_inside_that_times_out_is_said_and_is_no_other_cycle(project, monkeypatch, capsys):
+    """WATCHDOG-LOCK: every lock timeout that left a cycle read as another cycle holding the project: it stood down
+    with exit 0, and a lock held too long inside the cycle went unseen."""
+    def stuck(args, root):
+        raise storage.LedgerLockTimeout("timed out locking /x/alarms.json.lock", "/x/alarms.json.lock", 10)
+    monkeypatch.setattr(W, "_cycle", stuck)
+
+    code = W.run(SimpleNamespace(root=project["root"], idle_minutes=6, dry_run=False))
+
+    out = capsys.readouterr().out
+    assert code == 1 and "/x/alarms.json.lock" in out and "standing down" not in out
+
+
+def test_a_cycle_that_finds_the_project_held_still_stands_down(project, monkeypatch, capsys):
+    os.makedirs(W.STATE_DIR, exist_ok=True)
+    lock = os.path.join(W.STATE_DIR, W.CYCLE_LOCK.format(key=A.project_key(project["root"])))
+    monkeypatch.setattr(W, "_cycle", lambda args, root: pytest.fail("a second cycle ran"))
+
+    with storage._exclusive_lock(lock):
+        code = W.run(SimpleNamespace(root=project["root"], idle_minutes=6, dry_run=False))
+
+    assert code == 0 and "another watchdog cycle is running for this project; standing down" in capsys.readouterr().out
