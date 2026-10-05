@@ -1355,6 +1355,42 @@ def _route_key(route):
     return key + json.dumps(identity, sort_keys=True) if isinstance(identity, dict) else key
 
 
+def _section_lease(journal):
+    """(the lease's path, None) when this review may ask the journal's sections, else (None, the pid that asks).
+
+    The lease names its holder by pid and start: one whose process has ended, cut off without
+    releasing it, holds nothing (JOURNAL-7).
+    """
+    path = journal + ".lease"
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    mine = json.dumps({"pid": os.getpid(), "start": A._process_start(os.getpid())}).encode(UTF8)
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        try:
+            with open(path, encoding=UTF8) as fh:
+                holder = json.load(fh)
+        except (OSError, ValueError):
+            holder = {}
+        pid = holder.get("pid") if isinstance(holder, dict) else None
+        if pid and pid != os.getpid() and A._pid_alive(pid) \
+                and holder.get("start") in (None, A._process_start(pid)):
+            return None, pid
+        from .storage import replace_file_durably
+        replace_file_durably(path, mine)
+        return path, None
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(mine)
+    return path, None
+
+
+def _section_lease_release(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 def _section_journal(root, evidence, boundary, sections, chain):
     # No word of the prompt is in the key, whichever language it is written in; the prompt's size reaches
     # the key only through the claims it left room for (LANGUAGE-PROMPTS).
@@ -2079,6 +2115,27 @@ def cmd_collect_review(cfg, args):
     request = A.review_request(root, args.nonce)
     if not request:
         print(f"{C['red']}refused{C['reset']}: there is no review request {args.nonce}"); return 2
+    # One collect at a time for a request: two at once both recorded a review of one answer (JOURNAL-7).
+    from .storage import LedgerLockTimeout, _exclusive_lock, read_chained_jsonl
+    try:
+        with _exclusive_lock(os.path.join(A.review_requests_dir(root), f"{request['nonce']}.collect.lock"),
+                             timeout=5):
+            return _collect_review(cfg, args, root, by, model, read_chained_jsonl)
+    except LedgerLockTimeout:
+        print(f"{C['red']}refused{C['reset']}: request {args.nonce} is being collected by another command")
+        return 2
+
+
+def _collect_review(cfg, args, root, by, model, read_chained_jsonl):
+    """The collect itself, under the request's lock: the request read again, and a review already recorded for its
+    nonce - a collect cut off before it marked the request - taken as the one it records (JOURNAL-7)."""
+    from types import SimpleNamespace
+    request = A.review_request(root, args.nonce)
+    recorded = [row for row in read_chained_jsonl(A.review_ledger_path(root), A.REVIEW_CHAIN)
+                if isinstance(row, dict) and row.get("nonce") == request["nonce"]]
+    if recorded and not request.get("collected"):
+        A.mark_review_request_collected(root, request["nonce"], recorded[-1].get("artefact"), by)
+        request = A.review_request(root, args.nonce)
     if request.get("collected"):
         print(f"{C['red']}refused{C['reset']}: request {args.nonce} was already collected into "
               f"{request['collected'].get('artefact')}")
@@ -3272,11 +3329,21 @@ def cmd_review(cfg, args):
         if lenses:
             evidence["lenses"] = lenses
         if sections:
-            # A review of eight questions is eight bounded calls, resumable one by one (#26).
-            invocation = _invoke_reviewer_sections(
-                root, chain, prompt, sections, _section_journal(root, evidence, boundary, sections, chain),
-                _review_timeout(cfg), strict, primary=rv if not strict else None, candidate=diff_bytes, cfg=cfg,
-                tree=review_tree, treeless=treeless)
+            # A review of eight questions is eight bounded calls, resumable one by one (#26). One review asks a
+            # journal's sections at a time: two at once both asked the open ones and paid for each (JOURNAL-7).
+            journal = _section_journal(root, evidence, boundary, sections, chain)
+            lease, holder = _section_lease(journal)
+            if lease is None:
+                print(f"{C['red']}not reviewed{C['reset']}: another review of this candidate is asking its sections "
+                      f"(pid {holder}); what it answers is journalled, and this one would ask it again")
+                return 3
+            try:
+                invocation = _invoke_reviewer_sections(
+                    root, chain, prompt, sections, journal, _review_timeout(cfg), strict,
+                    primary=rv if not strict else None, candidate=diff_bytes, cfg=cfg, tree=review_tree,
+                    treeless=treeless)
+            finally:
+                _section_lease_release(lease)
             evidence["sections"] = invocation.get("sections")
         else:
             invocation = _invoke_reviewer_chain(

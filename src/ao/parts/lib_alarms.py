@@ -35,11 +35,33 @@ def load_alarms():
 
 
 def save_alarms(d):
+    """Write the episodes whole: written over in place, a write cut off left a file that read as none (JOURNAL-7)."""
+    from .storage import replace_file_durably
     try:
         os.makedirs(os.path.dirname(alarms_path()), exist_ok=True)
-        json.dump(d, open(alarms_path(), "w", encoding=UTF8), indent=1)
+        replace_file_durably(alarms_path(), json.dumps(d, indent=1).encode(UTF8))
     except OSError:
         pass
+
+
+def _alarm_store_locked(change):
+    """Run one read-modify-write of the alarm files under their lock (JOURNAL-7).
+
+    Every project's watchdog, its doctor and `ao alarms` share ~/.ao/alarms.json, and each read
+    the file, changed it and wrote it back: two at once lost one's change. Where the lock cannot be
+    had in ten seconds the change is made without it, rather than a notice going unsent.
+    """
+    import functools
+
+    @functools.wraps(change)
+    def locked(*args, **kwargs):
+        from .storage import LedgerLockTimeout, _exclusive_lock
+        try:
+            with _exclusive_lock(alarms_path() + ".lock", timeout=10):
+                return change(*args, **kwargs)
+        except LedgerLockTimeout:
+            return change(*args, **kwargs)
+    return locked
 
 
 def alarm_snoozes_path():
@@ -54,11 +76,12 @@ def load_alarm_snoozes():
 
 
 def _save_alarm_snoozes(d):
+    from .storage import replace_file_durably
     os.makedirs(os.path.dirname(alarm_snoozes_path()), exist_ok=True)
-    with open(alarm_snoozes_path(), "w", encoding=UTF8) as fh:
-        json.dump(d, fh, indent=1)
+    replace_file_durably(alarm_snoozes_path(), json.dumps(d, indent=1).encode(UTF8))
 
 
+@_alarm_store_locked
 def alarm_snooze(project, key, until, by="human", why=""):
     """Keep one alarm off the human channels until a date; it stays on the record.
 
@@ -74,6 +97,7 @@ def alarm_snooze(project, key, until, by="human", why=""):
     return d[f"{project}:{key}"]
 
 
+@_alarm_store_locked
 def alarm_unsnooze(project, key):
     d = load_alarm_snoozes()
     gone = d.pop(f"{project}:{key}", None)
@@ -90,6 +114,7 @@ def alarm_snoozed(project, key, now=None):
     return None
 
 
+@_alarm_store_locked
 def alarm_touch(project, key, level, now=None, red_after=ALARM_RED_AFTER, title=None,
                 persist=True, quiet_until=None, evidence=None, what=None):
     """Calculate a raise of `key` at `level`; return (level to ring at, episode).
@@ -146,6 +171,7 @@ def alarm_touch(project, key, level, now=None, red_after=ALARM_RED_AFTER, title=
     return ring, dict(e, news=news)
 
 
+@_alarm_store_locked
 def alarm_mailed(project, key, now=None, what=None):
     d = load_alarms()
     k = f"{project}:{key}"
@@ -157,6 +183,7 @@ def alarm_mailed(project, key, now=None, what=None):
         save_alarms(d)
 
 
+@_alarm_store_locked
 def alarm_rang(project, key, now=None, what=None):
     """Record that the orange channels told this episode, and what they told (NOTICE-NOISE).
 
@@ -173,6 +200,7 @@ def alarm_rang(project, key, now=None, what=None):
         save_alarms(d)
 
 
+@_alarm_store_locked
 def alarm_named(project, key, now=None):
     """Record that a resume notice named a red episode instead of mailing it (RESUME-QUIET).
 
@@ -403,6 +431,7 @@ def heartbeat_age(root):
         return None
 
 
+@_alarm_store_locked
 def expire_alarms(project, now=None, quiet_for=None):
     """Episodes that went quiet are over; return them once and forget them.
 

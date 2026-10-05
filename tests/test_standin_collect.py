@@ -75,6 +75,30 @@ def test_a_collected_rejection_is_a_round_recorded_with_its_transport_and_limits
     assert code == 2 and "already collected" in out
 
 
+def test_a_collect_cut_off_before_it_marked_its_request_records_no_second_review(project, tmp_path, monkeypatch,
+                                                                                capsys):
+    """JOURNAL-7: a collect recorded the review and then marked the request; cut off between the two, the next
+    collect recorded the same answer a second time."""
+    cfg, request = _unreachable(project)
+    root = cfg["root"]
+    mark = A.mark_review_request_collected
+
+    def killed(*args, **kwargs):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(A, "mark_review_request_collected", killed)
+    try:
+        _collect(cfg, request["nonce"], _answer(tmp_path, request["nonce"], REJECTED), capsys)
+    except KeyboardInterrupt:
+        pass
+    monkeypatch.setattr(A, "mark_review_request_collected", mark)
+    assert len(_carried_rows(root)) == 1
+
+    code, out = _collect(cfg, request["nonce"], _answer(tmp_path, request["nonce"], REJECTED), capsys)
+
+    assert code == 2 and "already collected" in out and len(_carried_rows(root)) == 1
+    assert A.review_request(root, request["nonce"])["collected"]["artefact"] == _carried_rows(root)[0]["artefact"]
+
+
 def test_a_collected_approval_authorises_the_commit(project, tmp_path, monkeypatch, capsys):
     cfg, request = _unreachable(project)
     root = cfg["root"]

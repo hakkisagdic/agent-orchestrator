@@ -187,6 +187,54 @@ def test_a_park_whose_transcript_is_gone_is_told_and_its_alarm_stands(world):
     assert any("a parked slice cannot resume" in title for title, *_ in world.notices)
 
 
+# ---- shared records changed one writer at a time (JOURNAL-7) ------------------------------------------------------
+
+def test_two_writers_of_the_alarm_episodes_lose_neither_ones_raises(project):
+    """Every project's watchdog shares ~/.ao/alarms.json, and each read it, changed it and wrote it back."""
+    def raise_often(key):
+        for _ in range(40):
+            A.alarm_touch("proj", key, "orange")
+    threads = [threading.Thread(target=raise_often, args=(key,)) for key in ("one", "two")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    episodes = A.load_alarms()
+    assert episodes["proj:one"]["count"] == 40 and episodes["proj:two"]["count"] == 40
+
+
+def test_a_sections_journal_one_review_holds_is_not_asked_by_a_second(project, tmp_path):
+    from ao import cli
+    journal = str(tmp_path / "sections" / "abc.jsonl")
+    sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        os.makedirs(os.path.dirname(journal), exist_ok=True)
+        with open(journal + ".lease", "w", encoding="utf-8") as fh:
+            json.dump({"pid": sleeper.pid, "start": A._process_start(sleeper.pid)}, fh)
+
+        assert cli._section_lease(journal) == (None, sleeper.pid)
+    finally:
+        sleeper.kill()
+        sleeper.wait()
+
+    lease, holder = cli._section_lease(journal)             # its holder ended: the lease holds nothing
+    assert lease == journal + ".lease" and holder is None
+    cli._section_lease_release(lease)
+    assert not os.path.exists(lease)
+
+
+def test_a_review_finds_its_sections_journal_held_and_asks_nothing(project, tmp_path, monkeypatch):
+    from tests.test_review_sections import SCENARIOS, _args, _setup
+    from ao import cli
+    root, cfg, calls = _setup(project, tmp_path, monkeypatch, "- [S1] the claim journal")
+    monkeypatch.setattr(cli, "_section_lease", lambda journal: (None, 4242))
+
+    assert cli.cmd_review(cfg, _args(SCENARIOS)) == 3
+
+    assert not calls.exists() or calls.read_text() == ""
+
+
 # ---- what the watchdog starts is claimed before it starts (JOURNAL-2) ----------------------------------------------
 
 BLOCKED = "# queue empty\n\n## KARAR GEREKLİ\n"

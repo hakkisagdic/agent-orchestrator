@@ -1535,6 +1535,10 @@ def record_review(root, name, data, evidence, verdict, reviewer=None, fallback=F
     if evidence.get("review_tier"):
         # The tier the review stands in, so a grant, `ao reviews` and `ao stats` label it (REVIEW-TIERS).
         row["tier"] = evidence["review_tier"]
+    if evidence.get("nonce"):
+        # The request a carried answer came back for, so a collect cut off before it marked the request finds
+        # the review it already recorded (JOURNAL-7).
+        row["nonce"] = evidence["nonce"]
     return append_chained_jsonl(review_ledger_path(root), row, REVIEW_CHAIN)
 
 
