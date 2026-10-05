@@ -317,3 +317,21 @@ def test_a_bare_file_address_without_a_leading_slash_is_refused(project, monkeyp
         assert why and "read differently" in why, word
     _on_windows(monkeypatch)
     assert "read differently" in A._probe_program(["rtk", "file:C:/repo/.ao/filter.toml"], "C:\\repo", {"rtk"}, "")[1]
+
+
+def test_a_file_address_a_url_reader_finds_once_it_drops_spaces_and_controls_is_refused(project):
+    """FILTER-EXCLUSIONS-8: a URL reader drops C0 controls and spaces at a word's ends and a tab, CR or LF anywhere
+    before it reads the scheme, so `<TAB>file:///repo/.ao/filter.toml#/../..` is the project's file to Node's
+    fileURLToPath, where ao read a relative path climbing out of the project and let it pass."""
+    import pathlib
+    root = os.path.realpath(project["root"])
+    uri = pathlib.Path(root, ".ao", "filter.toml").as_uri()
+    climb = "#" + "/.." * (root.count(os.sep) + 6)
+    allowed = [A._program_name(sys.executable)]
+
+    for word in ("\t" + uri + climb, " " + uri + climb, "fi\tle" + uri[4:] + climb, "--config=\x01" + uri + climb,
+                 "\nhttps://example.com/x"):
+        why = A._probe_program([sys.executable, word], root, allowed, os.environ.get("PATH", ""))[1]
+        assert why and "read differently" in why, repr(word)
+    # a word that is no address once the reader drops them is read as it was
+    assert A._probe_program([sys.executable, " -q"], root, allowed, os.environ.get("PATH", ""))[1] is None

@@ -280,6 +280,9 @@ _FILE_WORD = re.compile(r"[\w.-]*\.[A-Za-z]\w*")
 _URL_WORD = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
 # A file address with no authority, `file:/C:/x` or `file:x`, which Node and Rust read as a path (FILTER-EXCLUSIONS-5).
 _FILE_URL_BARE = re.compile(r"file:(?!//)", re.I)
+# What a URL reader drops before it reads the scheme, as the WHATWG URL standard says and Node, Rust's url and
+# Python's urlsplit do: C0 controls and spaces at either end, and a tab, CR or LF anywhere (FILTER-EXCLUSIONS-8).
+_URL_READER_DROPS = re.compile(r"\A[\x00-\x20]+|[\x00-\x20]+\Z|[\t\r\n]")
 
 
 def _probe_program(argv, root, programs, search_path):
@@ -306,6 +309,12 @@ def _probe_program(argv, root, programs, search_path):
         return None, f"{found} is a batch file, which only a shell runs"
     for word in [found, *argv[1:]]:
         for piece in {word, word.split("=", 1)[-1]}:
+            # `<TAB>file:///repo/.ao/filter.toml#/../..` is the project's file to a URL reader, and to ao it was a
+            # relative path climbing out of the project (FILTER-EXCLUSIONS-8).
+            read = _URL_READER_DROPS.sub("", piece)
+            if read != piece and (_URL_WORD.match(read) or _FILE_URL_BARE.match(read)):
+                return None, (f"{word!r} is an address once a URL reader drops its spaces and control characters, "
+                              "and a path to a program that keeps them, which programs read differently")
             url = _URL_WORD.match(piece) or _FILE_URL_BARE.match(piece)
             if url and piece[:url.end()].lower() not in ("file://", "file:"):
                 continue

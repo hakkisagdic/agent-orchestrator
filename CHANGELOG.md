@@ -61,6 +61,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Security
 
+- A filter hook argument that becomes an address once a URL reader drops its leading or trailing spaces and control characters, or a tab, CR or LF (`<TAB>file:///...`), is refused, where ao read it as a relative path that could climb out of the project (FILTER-EXCLUSIONS-8).
 - The move proof refuses a module that loads parts and sets its own `__file__`, which moves where `_part` reads them away from where the proof read them (SPLIT-CHECK-5).
 - A reviewer's or the hunter's command whose reading flag stands only after `--`, where it is no option, or is given a second word a harness may read as more of its list (`--tools Read,Grep,Glob Edit`), is refused, where the first was taken for the flag and the second was never asked (REVIEWER-REACH-3).
 - The product's own remote includes an origin kept in `~/.gitconfig`, which `git remote get-url` does not know and `git push origin` reaches, where mail to it was pushed; and a refusal names where git would push a target, a pushInsteadOf before an insteadOf (MAIL-SYNC-5).
