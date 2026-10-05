@@ -79,6 +79,24 @@
       "reviewer": ["--output-format", "stream-json"],
       "note": "A reviewer answers in session updates (answer_stream): read as text, a verdict written after a remark went on from the remark's last word, and the review was asked again and paid for twice."
     },
+    "reviewer_agent": {
+      "argv": ["--agent", "{agent}"],
+      "path": ".kiro/agents/{agent}.json",
+      "config": {
+        "name": "{agent}",
+        "description": "ao's reviewer: it reads, and has no tool that writes, runs a command or reaches a server",
+        "prompt": null,
+        "mcpServers": {},
+        "tools": ["read", "grep", "glob"],
+        "toolAliases": {},
+        "allowedTools": [],
+        "resources": [],
+        "toolsSettings": {},
+        "includeMcpJson": false,
+        "model": null
+      },
+      "note": "Measured on kiro-cli 2.27.1, 2026-10-05: with --no-interactive, a tool --trust-tools= leaves untrusted runs all the same - a `touch` made its file, and reviewers ran tests, built virtual environments under /tmp and installed packages. Run as this agent, with --output-format stream-json, it read the file it was asked to, had no tool to write with, and made nothing. ao writes it into the reviewer's own directory for each run, after the candidate's tree, under a name the tree cannot know."
+    },
     "trust_none": [
       "--trust-tools="
     ],

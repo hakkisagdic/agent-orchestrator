@@ -32,6 +32,16 @@ search, and their execpolicy rules; it runs outside a repository and keeps the r
 person's sessions. A codex reviewer is pinned to `--sandbox read-only`, and `ao doctor` names one
 that loads the person's configuration.
 
+`--trust-tools=` does not hold kiro on its own. On kiro-cli 2.27.1, with `--no-interactive`, a tool
+it leaves untrusted runs all the same, since nobody is there to ask: a `touch` made its file, and
+reviewers ran tests, built virtual environments under /tmp and installed packages. So kiro declares
+`options.reviewer_agent`, a Kiro agent whose tools are `read`, `grep` and `glob` alone, with no MCP
+server. For each run ao writes it into the reviewer's own directory, after the candidate's tree and
+under a name the tree cannot know, and names it with `--agent`; run so, kiro read the file it was
+asked to and had no tool to write with. A tree that holds `.kiro` or `.kiro/agents` as a link or a
+file is refused rather than written through, and a reviewer's or the hunter's command that names
+`--agent` itself is refused (KIRO-READONLY).
+
 ```bash
 ao role set reviewer claude-code --model claude-opus-5
 ao role set reviewer kiro --model <model> --effort high
@@ -1019,7 +1029,8 @@ holds if ao asks in **its own vocabulary** and the adapter answers in the harnes
 make that work, and each exists because a real harness broke the naive version:
 
 **Ask for the capability; let the adapter spell it.** ao asks *run this with no tools*. One
-harness spells that `--trust-tools=`, another `--allowedTools ""`, another a read-only sandbox
+harness spells that `--trust-tools=` with an agent ao writes whose tools only read, another
+`--allowedTools ""`, another a read-only sandbox
 mode. ao must not know which. It reads `options.trust_none` and uses whatever is there.
 
 **An absent capability is declared, not guessed.** `trae` has no documented tool-less mode, so

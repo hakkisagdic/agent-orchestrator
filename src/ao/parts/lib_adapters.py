@@ -512,6 +512,12 @@ def reading_problems(argv, prompt=None):
     missing = [token for token in dict.fromkeys(declared) if token not in args]
     if missing:
         return [f"its command lacks {' '.join(missing)}, which {adapter.get('id')} declares leaves it only reading"]
+    # A harness ao runs as a reviewer agent of its own takes no other: one a command names could hold any tool
+    # (KIRO-READONLY).
+    agent = adapter["options"].get("reviewer_agent")
+    flag = agent["argv"][0] if isinstance(agent, dict) and agent.get("argv") else None
+    if flag and any(arg == flag or arg.startswith(flag + "=") for arg in args):
+        return [f"it names {flag}, where ao runs {adapter.get('id')} as an agent of its own that only reads"]
     # A flag of them given again with another value is asked too, as a pinned flag is: a harness that takes
     # the last of two runs with it (`--trust-tools= --trust-tools=fs_write`, or `--approval-mode plan`
     # then `--approval-mode auto-edit`).
@@ -1012,6 +1018,26 @@ def acp_problems(adapter):
     return problems
 
 
+def reviewer_agent_problems(adapter):
+    """What keeps ao from writing the reviewer agent an adapter declares in `options.reviewer_agent` (KIRO-READONLY)."""
+    agent = ((adapter or {}).get("options") or {}).get("reviewer_agent")
+    if agent is None:
+        return []
+    if not isinstance(agent, dict):
+        return ["`options.reviewer_agent` must be an object"]
+    problems = []
+    argv, path, config = agent.get("argv"), agent.get("path"), agent.get("config")
+    if not (isinstance(argv, list) and argv and all(isinstance(part, str) for part in argv)
+            and str(argv[0]).startswith("-") and sum("{agent}" in part for part in argv) == 1):
+        problems.append("`options.reviewer_agent.argv` must be a flag, carrying {agent} in exactly one argument")
+    if not (isinstance(path, str) and "{agent}" in path and not path.startswith("/") and "\\" not in path
+            and ".." not in path.split("/")):
+        problems.append("`options.reviewer_agent.path` must be a path within the reviewer's directory, carrying {agent}")
+    if not (isinstance(config, dict) and isinstance(config.get("tools"), list)):
+        problems.append("`options.reviewer_agent.config` must be an object that names its `tools`")
+    return problems
+
+
 def validate_adapter(adapter):
     """What an adapter is missing or gets wrong, before anyone relies on it (#77)."""
     problems = []
@@ -1044,7 +1070,7 @@ def validate_adapter(adapter):
         if unknown:
             problems.append(f"`{capability}.argv` uses placeholders ao does not fill: {', '.join(unknown)}")
     return (problems + prompt_channel_problems(adapter) + tool_review_problems(adapter) + subagent_problems(adapter)
-            + acp_problems(adapter)
+            + acp_problems(adapter) + reviewer_agent_problems(adapter)
             + bypass_problems(adapter) + quota_stop_problems(adapter)
             + token_problems(_block(_block(adapter, "telemetry"), "cost")))
 

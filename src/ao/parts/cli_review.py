@@ -591,6 +591,45 @@ def _stream_error(argv, stdout):
     return None
 
 
+def _reviewer_agent(fresh, argv):
+    """argv naming the reviewer agent its adapter declares, written into the reviewer's own directory; (argv, None),
+    or (argv, why) when it cannot be written there (KIRO-READONLY).
+
+    kiro-cli 2.27.1 runs a tool `--trust-tools=` leaves untrusted when nobody is there to ask: reviewers ran tests,
+    built virtual environments and installed packages. An adapter whose harness reads an agent file names one whose
+    tools only read, in `options.reviewer_agent`. ao writes it after the candidate's tree, under a name the tree
+    cannot know, so no agent of the tree's own stands in for it; a folder on its way that the tree holds as a link
+    or a file is refused, as the agent would be written somewhere else.
+    """
+    import secrets
+    adapter = A.command_adapter(argv)
+    agent = ((adapter or {}).get("options") or {}).get("reviewer_agent")
+    if agent is None:
+        return argv, None
+    problems = A.reviewer_agent_problems(adapter)
+    if problems:
+        return argv, f"{adapter.get('id')}'s reviewer agent cannot be written: " + "; ".join(problems)
+    name = "ao-reviewer-" + secrets.token_hex(8)
+    parts = agent["path"].replace("{agent}", name).split("/")
+    folder = fresh
+    for part in parts[:-1]:
+        folder = os.path.join(folder, part)
+        if os.path.islink(folder) or os.path.lexists(folder) and not os.path.isdir(folder):
+            return argv, (f"the candidate's tree holds {os.path.relpath(folder, fresh)} as a link or a file, where ao "
+                          "writes the agent the reviewer runs as")
+        if not os.path.isdir(folder):
+            os.mkdir(folder)
+    config = json.loads(json.dumps(agent["config"]).replace("{agent}", name))
+    try:
+        fd = os.open(os.path.join(folder, parts[-1]),
+                     os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    except OSError as exc:
+        return argv, f"the agent the reviewer runs as could not be written ({type(exc).__name__})"
+    with os.fdopen(fd, "w", encoding=UTF8) as fh:
+        json.dump(config, fh, indent=2)
+    return list(argv) + [part.replace("{agent}", name) for part in agent["argv"]], None
+
+
 def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, channel=None, tree=None):
     """Run one reviewer outside the repository and classify invocation status.
 
@@ -630,6 +669,11 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
         if tree and tool is None and _unpack_candidate(root, tree, fresh) is None:
             print(f"{C['dim']}{label} reads what the prompt carries: the candidate's tree could not be "
                   f"unpacked{C['reset']}")
+        if tool is None:
+            argv, refused = _reviewer_agent(fresh, argv)
+            if refused:
+                return {"ok": False, "out": "", "reason": refused, "returncode": None, "kind": "isolation-error",
+                        "retryable": False}
         env, handoff = _reviewer_environment(fresh), None
         if tool is not None:
             prepared = _tool_prepare(fresh, argv, env, timeout, tool)
