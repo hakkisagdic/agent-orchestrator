@@ -1067,7 +1067,8 @@ def deferred_append(root, kind, **fields):
             _deferred_write(root, {"event": "until", "id": standing["id"], "until": until, "at": int(time.time())})
             standing = dict(standing, until=until)
         return standing
-    rec = {"event": "deferred", "id": f"DF-{int(time.time())}-{kind}", "kind": kind, "at": int(time.time())}
+    now = time.time()
+    rec = {"event": "deferred", "id": f"DF-{int(now)}-{kind}", "kind": kind, "at": now}
     rec.update(fields)
     _deferred_write(root, rec)
     return rec

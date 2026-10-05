@@ -135,7 +135,9 @@ Retrospective evidence reconciles the record; it never authorizes a candidate.
 Nothing is skipped silently, and nothing is lost when the run degrades:
 
 - deferred nudges and wakes (quota) are queued in `.ao/ledger/deferred.jsonl`
-  and replayed by `ao catchup`;
+  and replayed by `ao catchup`'s watchdog cycle; a row closes only once the
+  wake or nudge it waited for has started, never because a cycle ran, so one
+  still out of quota stays open;
 - the credit burn rate is sampled every half hour; when it says the plan runs
   out before it resets, the alarm is red, days ahead;
 - `ao pings setup --url …` gives an external service (healthchecks.io) a

@@ -173,32 +173,37 @@ def test_a_later_end_moves_the_deferral_that_stands(project):
     assert again["id"] == first["id"] and [(r["id"], r["until"]) for r in A.deferred_open(root)] == [(first["id"], 2000)]
 
 
-def test_catchup_closes_deferred_work_only_after_a_cycle_ran_with_it(project, monkeypatch, capsys):
+def test_catchup_closes_deferred_work_once_its_work_was_done(project, monkeypatch, capsys):
     """Catchup closed every deferral as replayed and then ran its cycle, or skipped it: a cycle that did not run
-    left the deferred wake forgotten."""
+    left the deferred wake forgotten. Then it closed every row once its cycle ran, though that cycle could not do
+    the work either and had just deferred it again (JOURNAL-4-2): a row closes on the work it waited for."""
     from ao import cli
     from tests.test_waiver_bounds import NAMED
     root = project["root"]
     deferred = A.deferred_append(root, "wake", reason="architect quota")
-    os.makedirs(os.path.dirname(A.heartbeat_path(root)), exist_ok=True)
-    with open(A.heartbeat_path(root), "w", encoding="utf-8"):
-        pass
-    os.utime(A.heartbeat_path(root), (time.time() - 60, time.time() - 60))
+    _old_heartbeat(root)
     monkeypatch.setattr(W, "run", lambda ns: 0)                         # another cycle held the project
-
     cli.cmd_catchup(project, NAMED)
-
     assert [r["id"] for r in A.deferred_open(root)] == [deferred["id"]]
     assert "stays open: no cycle ran" in capsys.readouterr().out
 
-    def ran(ns):
-        with open(A.heartbeat_path(root), "w", encoding="utf-8"):
-            pass
+    def ran_still_blocked(ns):
+        ns.ran = True
         return 0
-    monkeypatch.setattr(W, "run", ran)
+    monkeypatch.setattr(W, "run", ran_still_blocked)
     cli.cmd_catchup(project, NAMED)
+    assert [r["id"] for r in A.deferred_open(root)] == [deferred["id"]]
+    assert "stays open: its cycle could not do it yet" in capsys.readouterr().out
 
-    assert A.deferred_open(root) == []
+    def woke(ns):
+        st = W.load_state(root)
+        st["last_arch_wake"] = time.time()
+        W.save_state(root, st)
+        ns.ran = True
+        return 0
+    monkeypatch.setattr(W, "run", woke)
+    cli.cmd_catchup(project, NAMED)
+    assert A.deferred_open(root) == [] and _closed(root) == [(deferred["id"], "woken")]
 
 
 def test_a_wake_started_after_a_deferral_closes_it_in_the_next_cycle(world):
@@ -587,3 +592,202 @@ def test_a_resume_cut_off_after_its_process_started_is_not_resumed_twice(world, 
     world.cycle(dry_run=False)
 
     assert _agent_turns(world) == []
+
+
+# ---- a deferral closes on the work it waited for, not on a cycle that ran (JOURNAL-4-2) ---------------------------
+
+class _Clock:
+    def __init__(self, at):
+        self.at = at
+
+    def time(self):
+        return self.at
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+def _deferred_rows(root):
+    path = os.path.join(root, ".ao", "ledger", "deferred.jsonl")
+    return [json.loads(line) for line in open(path, encoding="utf-8") if line.strip()] if os.path.exists(path) else []
+
+
+def _closed(root):
+    return [(r["id"], r["outcome"]) for r in _deferred_rows(root) if r["event"] == "closed"]
+
+
+def _old_heartbeat(root, age=60):
+    path = A.heartbeat_path(root)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    open(path, "w").close()
+    os.utime(path, (time.time() - age, time.time() - age))
+    return path
+
+
+def _deferred_earlier(monkeypatch, root, kind, seconds=1200, **fields):
+    monkeypatch.setattr(A, "time", _Clock(time.time() - seconds))
+    row = A.deferred_append(root, kind, **fields)
+    monkeypatch.setattr(A, "time", time)
+    return row
+
+
+def _nudges(world):
+    return [a for a in world.spawned if isinstance(a, list) and a and str(a[0]).endswith("/kiro-cli")]
+
+
+def _running_nudge(world, monkeypatch):
+    class Running:
+        pid, returncode = 99999, None
+
+        def poll(self):
+            return None
+    monkeypatch.setattr(W.subprocess, "Popen", lambda argv, **kw: world.spawned.append(argv) or Running())
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+
+
+def test_a_row_catchups_cycle_writes_because_it_still_cannot_nudge_stays_open(world, capsys):
+    from ao import cli
+    from tests.test_waiver_bounds import NAMED
+    world.board("running", "- [B8] slice · since: 2026-09-05 10:00").transcript_age(3600)
+    world.quota = False
+    _old_heartbeat(world.root)
+
+    cli.cmd_catchup(world.cfg, NAMED)
+
+    assert [r["kind"] for r in A.deferred_open(world.root)] == ["nudge"] and _closed(world.root) == []
+    assert "stays open: its cycle could not do it yet" in capsys.readouterr().out
+
+
+def test_a_standing_row_its_cycle_still_cannot_do_stays_open(world, monkeypatch):
+    from ao import cli
+    from tests.test_waiver_bounds import NAMED
+    world.board("running", "- [B8] slice · since: 2026-09-05 10:00").transcript_age(3600)
+    world.quota = False
+    standing = _deferred_earlier(monkeypatch, world.root, "nudge", reason="implementer quota")
+    _old_heartbeat(world.root)
+
+    cli.cmd_catchup(world.cfg, NAMED)
+
+    assert [r["id"] for r in A.deferred_open(world.root)] == [standing["id"]] and _closed(world.root) == []
+
+
+def test_a_row_whose_nudge_catchups_cycle_starts_closes_as_done(world, monkeypatch, capsys):
+    from ao import cli
+    from tests.test_waiver_bounds import NAMED
+    world.board("running", "- [B8] slice · since: 2026-09-05 10:00").transcript_age(3600)
+    standing = _deferred_earlier(monkeypatch, world.root, "nudge", reason="implementer quota")
+    _running_nudge(world, monkeypatch)
+    _old_heartbeat(world.root)
+
+    cli.cmd_catchup(world.cfg, NAMED)
+
+    assert len(_nudges(world)) == 1
+    assert A.deferred_open(world.root) == [] and _closed(world.root) == [(standing["id"], "nudged")]
+    assert "catchup handled 1 item(s)" in capsys.readouterr().out.replace("\x1b[32m", "").replace("\x1b[0m", "")
+
+
+def test_a_wake_row_inside_its_quota_window_stays_open(world, monkeypatch):
+    from ao import cli
+    from tests.test_waiver_bounds import NAMED
+    world.transcript_age(900)
+    world.mail("20260916-1200-kiro-to-fable-BLOCKED-queue.md", BLOCKED)
+    until = time.time() + 3600
+    st = W.load_state(world.root)
+    st["arch_quota_until"] = until
+    W.save_state(world.root, st)
+    standing = _deferred_earlier(monkeypatch, world.root, "wake", reason="architect quota", until=until)
+    _old_heartbeat(world.root)
+
+    cli.cmd_catchup(world.cfg, NAMED)
+
+    assert [r["id"] for r in A.deferred_open(world.root)] == [standing["id"]] and _closed(world.root) == []
+
+
+def test_a_cycle_that_stops_at_a_hold_leaves_the_row_open(world, monkeypatch):
+    from ao import cli
+    from tests.test_waiver_bounds import NAMED
+    world.board("running", "- [B8] slice · since: 2026-09-05 10:00").transcript_age(3600)
+    standing = _deferred_earlier(monkeypatch, world.root, "nudge", reason="implementer quota")
+    with open(os.path.join(world.root, ".ao", "hold"), "w", encoding="utf-8") as fh:
+        json.dump({"by": "A. Person", "reason": "looking at it", "at": time.time()}, fh)
+    _old_heartbeat(world.root)
+
+    cli.cmd_catchup(world.cfg, NAMED)
+
+    assert [r["id"] for r in A.deferred_open(world.root)] == [standing["id"]] and _closed(world.root) == []
+
+
+def test_a_nudge_a_fraction_of_a_second_before_a_deferral_does_not_close_it(project, monkeypatch):
+    root = project["root"]
+    second = 1_791_200_100
+    monkeypatch.setattr(A, "time", _Clock(second + 0.9))
+    A.deferred_append(root, "nudge", reason="implementer quota")
+    monkeypatch.setattr(A, "time", time)
+
+    W._close_deferred_done(root, {"last_nudge": second + 0.7})
+    assert len(A.deferred_open(root)) == 1
+
+    W._close_deferred_done(root, {"last_nudge": second + 1.2})
+    assert A.deferred_open(root) == []
+
+
+def test_a_whole_second_row_on_disk_counts_from_the_end_of_its_second(project):
+    root = project["root"]
+    second = 1_791_200_100
+    path = os.path.join(root, ".ao", "ledger", "deferred.jsonl")
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"event": "deferred", "id": f"DF-{second}-nudge", "kind": "nudge", "at": second}) + "\n")
+
+    W._close_deferred_done(root, {"last_nudge": second + 0.7})
+    assert len(A.deferred_open(root)) == 1
+
+    W._close_deferred_done(root, {"last_nudge": second + 1.2})
+    assert A.deferred_open(root) == []
+
+
+def test_a_cycle_that_ran_inside_one_timestamp_quantum_is_read_as_run(world, monkeypatch, capsys):
+    from ao import cli
+    from tests.test_waiver_bounds import NAMED
+    world.board("running", "- [B8] slice · since: 2026-09-05 10:00").transcript_age(3600)
+    standing = _deferred_earlier(monkeypatch, world.root, "nudge", reason="implementer quota")
+    _running_nudge(world, monkeypatch)
+    path = _old_heartbeat(world.root)
+    quantum = float(int(time.time()))
+    os.utime(path, (quantum, quantum))
+    beat = A.heartbeat
+
+    def coarse(root):
+        beat(root)
+        os.utime(A.heartbeat_path(root), (quantum, quantum))
+    monkeypatch.setattr(A, "heartbeat", coarse)
+
+    cli.cmd_catchup(world.cfg, NAMED)
+
+    out = capsys.readouterr().out
+    assert "another cycle holds this project" not in out
+    assert A.deferred_open(world.root) == [] and _closed(world.root) == [(standing["id"], "nudged")]
+
+
+def test_another_cycles_beat_is_not_read_as_catchups_cycle(world, monkeypatch, capsys):
+    from ao import cli
+    from ao.storage import _exclusive_lock
+    from tests.test_waiver_bounds import NAMED
+    world.board("running", "- [B8] slice · since: 2026-09-05 10:00").transcript_age(3600)
+    world.quota = False
+    standing = _deferred_earlier(monkeypatch, world.root, "nudge", reason="implementer quota")
+    _old_heartbeat(world.root)
+    run = W.run
+
+    def raced(args):
+        A.heartbeat(args.root)
+        return run(args)
+    monkeypatch.setattr(W, "run", raced)
+    os.makedirs(W.STATE_DIR, exist_ok=True)
+    lock = os.path.join(W.STATE_DIR, W.CYCLE_LOCK.format(key=A.project_key(world.root)))
+
+    with _exclusive_lock(lock):
+        cli.cmd_catchup(world.cfg, NAMED)
+
+    out = capsys.readouterr().out
+    assert "another cycle holds this project" in out and "stays open: no cycle ran" in out
+    assert [r["id"] for r in A.deferred_open(world.root)] == [standing["id"]] and _closed(world.root) == []

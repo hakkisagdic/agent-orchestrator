@@ -557,9 +557,19 @@ def _close_deferred_done(root, st):
     deferred through it, and that notice is written after the wake in the same cycle.
     """
     done = {"wake": float(st.get("last_arch_wake") or 0), "nudge": float(st.get("last_nudge") or 0)}
+    closed = []
     for row in A.deferred_open(root):
-        if done.get(row.get("kind"), 0) > float(row.get("at") or 0):
+        if done.get(row.get("kind"), 0) > _deferred_since(row):
             A.deferred_close(root, row["id"], "woken" if row.get("kind") == "wake" else "nudged")
+            closed.append(row)
+    return closed
+
+
+def _deferred_since(row):
+    """When a deferral was written. A whole-second `at` was cut down to its second, and the deferral may have
+    been written up to a second after it: only work started past that second is work started after it."""
+    at = row.get("at") or 0
+    return float(at) + (1.0 if isinstance(at, int) else 0.0)
 
 
 def _claim_step(root, step):
@@ -1943,7 +1953,9 @@ def run(args):
             except OSError:
                 pass
             try:
-                return _cycle(args, root)
+                code = _cycle(args, root)
+                args.ran = True               # this process's cycle ran to its end (catchup reads it)
+                return code
             finally:
                 record_cycle(root, args, started)
     except LedgerLockTimeout:

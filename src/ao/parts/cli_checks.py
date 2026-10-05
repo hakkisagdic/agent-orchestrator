@@ -1416,27 +1416,26 @@ def cmd_catchup(cfg, args):
     # A deferral is replayed by a cycle that runs with it in view, and closed after it: closed first, a cycle
     # that then did not run - no watchdog, or another cycle holding the project - left it forgotten (JOURNAL-4).
     ran = False
+    from . import watchdog as W
     if A.heartbeat_age(root) is None:
         # A cycle writes this project's heartbeat. Where no watchdog runs, that file
         # goes stale within minutes and every sibling watchdog reports it as dead.
         print(f"{C['dim']}no watchdog runs for this project; skipping the cycle{C['reset']}")
     else:
         print(f"{C['dim']}running one watchdog cycle to act on what is now possible{C['reset']}")
-        from . import watchdog as W
-        beat = os.path.getmtime(A.heartbeat_path(root))
-        W.run(SimpleNamespace(root=root, idle_minutes=S.get(cfg, "watchdog.idle_minutes"), dry_run=False))
-        try:
-            ran = os.path.getmtime(A.heartbeat_path(root)) > beat
-        except OSError:
-            ran = False
+        cycle = SimpleNamespace(root=root, idle_minutes=S.get(cfg, "watchdog.idle_minutes"), dry_run=False)
+        W.run(cycle)
+        ran = bool(getattr(cycle, "ran", False))
         if not ran:
             print(f"{C['dim']}another cycle holds this project; what was deferred waits for it{C['reset']}")
+    # A deferral closes on the work it waited for, started after it by this cycle or an earlier one. One the
+    # cycle still could not do - it deferred it again, or wrote it - stays open.
+    for r in W._close_deferred_done(root, W.load_state(root)):
+        print(f"  deferred {r['kind']} ({r.get('reason', '')}) since {time.strftime('%d %b %H:%M', time.localtime(r['at']))}: done")
+        did += 1
     for r in A.deferred_open(root):
         print(f"  deferred {r['kind']} ({r.get('reason', '')}) since {time.strftime('%d %b %H:%M', time.localtime(r['at']))}"
-              + ("" if ran else "; stays open: no cycle ran"))
-        if ran:
-            A.deferred_close(root, r["id"], "replayed by catchup's cycle")
-            did += 1
+              + ("; stays open: its cycle could not do it yet" if ran else "; stays open: no cycle ran"))
     code = _catchup_exit(failed, started, decided)
     print(f"{C['green']}catchup{C['reset']} handled {did} item(s)"
           + (f"; none of the {started} review(s) it started decided anything" if code == 3 else ""))
