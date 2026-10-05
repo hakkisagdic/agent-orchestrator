@@ -988,3 +988,42 @@ def test_the_architects_own_resume_of_the_session_still_stops_a_wake(world):
 
     assert _architect_wakes(world) == []
     assert any("is resumed by a running process already" in line for line in trace)
+
+
+def test_a_whole_second_row_closes_on_work_started_at_the_start_of_the_next_second(project):
+    """JOURNAL-4-3: a row cut to its second was written before the next second began, so work started then is
+    work started after it."""
+    root = project["root"]
+    second = 1_791_200_100
+    path = os.path.join(root, ".ao", "ledger", "deferred.jsonl")
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"event": "deferred", "id": f"DF-{second}-nudge", "kind": "nudge", "at": second}) + "\n")
+
+    W._close_deferred_done(root, {"last_nudge": float(second + 1)})
+
+    assert A.deferred_open(root) == []
+
+
+def test_a_deferral_catchups_cycle_closes_is_reported_and_counted(project, monkeypatch, capsys):
+    """JOURNAL-4-3: the cycle closes what it did itself, before catchup asks: catchup reported nothing and counted
+    nothing for the deferral its own cycle replayed."""
+    from ao import cli
+    from tests.test_waiver_bounds import NAMED
+    root = project["root"]
+    deferred = A.deferred_append(root, "wake", reason="architect quota")
+    _old_heartbeat(root)
+
+    def woke_and_closed(ns):
+        st = W.load_state(root)
+        st["last_arch_wake"] = time.time() + 2
+        W.save_state(root, st)
+        W._close_deferred_done(root, st)                 # as the cycle does after its work
+        ns.ran = True
+        return 0
+    monkeypatch.setattr(W, "run", woke_and_closed)
+
+    cli.cmd_catchup(project, NAMED)
+
+    out = capsys.readouterr().out.replace("\x1b[32m", "").replace("\x1b[0m", "")
+    assert A.deferred_open(root) == [] and _closed(root) == [(deferred["id"], "woken")]
+    assert "deferred wake (architect quota)" in out and ": done" in out and "catchup handled 1 item(s)" in out

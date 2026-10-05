@@ -1417,6 +1417,8 @@ def cmd_catchup(cfg, args):
     # that then did not run - no watchdog, or another cycle holding the project - left it forgotten (JOURNAL-4).
     ran = False
     from . import watchdog as W
+    # What was open before the cycle: the cycle closes what it did itself, before catchup asks (JOURNAL-4-3).
+    before = {row["id"]: row for row in A.deferred_open(root)}
     if A.heartbeat_age(root) is None:
         # A cycle writes this project's heartbeat. Where no watchdog runs, that file
         # goes stale within minutes and every sibling watchdog reports it as dead.
@@ -1430,7 +1432,9 @@ def cmd_catchup(cfg, args):
             print(f"{C['dim']}another cycle holds this project; what was deferred waits for it{C['reset']}")
     # A deferral closes on the work it waited for, started after it by this cycle or an earlier one. One the
     # cycle still could not do - it deferred it again, or wrote it - stays open.
-    for r in W._close_deferred_done(root, W.load_state(root)):
+    W._close_deferred_done(root, W.load_state(root))
+    standing = {row["id"] for row in A.deferred_open(root)}
+    for r in (row for rid, row in before.items() if rid not in standing):
         print(f"  deferred {r['kind']} ({r.get('reason', '')}) since {time.strftime('%d %b %H:%M', time.localtime(r['at']))}: done")
         did += 1
     for r in A.deferred_open(root):
