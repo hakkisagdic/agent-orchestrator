@@ -530,6 +530,20 @@ def _part_file(module, name):
     return posixpath.join(_parts_folder(posixpath.dirname(module), posixpath), f"{name}.py")
 
 
+def _sets_file(source):
+    """Whether a module binds `__file__` - by assignment, `global`, or `globals()["__file__"]` (SPLIT-CHECK-5)."""
+    import ast
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Name) and node.id == "__file__" and isinstance(node.ctx, (ast.Store, ast.Del)):
+            return True
+        if isinstance(node, (ast.Global, ast.Nonlocal)) and "__file__" in node.names:
+            return True
+        if isinstance(node, ast.Subscript) and isinstance(node.ctx, (ast.Store, ast.Del)) \
+                and getattr(node.slice, "value", None) == "__file__":
+            return True
+    return False
+
+
 def split_moves(root, start=None, end=None):
     """What the staged candidate moves between Python files, and everything that is not a pure move (#44).
 
@@ -558,7 +572,7 @@ def split_moves(root, start=None, end=None):
     old, new = {}, {}
     # Statements and loads are kept by file: one moved between files changed both (SPLIT-CHECK-2).
     other, loads, parts, present = {"old": {}, "new": {}}, {"old": {}, "new": {}}, [], {}
-    order = {"old": {}, "new": {}}
+    order, file_setters = {"old": {}, "new": {}}, set()
     for path in paths:
         for side, spec, defs in (("old", f"{before}:{path}", old), ("new", f"{after}:{path}", new)):
             text = read(spec)
@@ -576,7 +590,12 @@ def split_moves(root, start=None, end=None):
             present.setdefault(path, {})[side] = bool(definitions or others or loaded)
             if side == "new" and "/parts/" in f"/{path}" and read(f"{before}:{path}") is None:
                 parts.append(path)
-    moved, problems = [], []
+            if side == "new" and loaded and _sets_file(text):
+                file_setters.add(path)
+    # `_part` reads parts beside `__file__`, so a module that sets it reads them from wherever it says, and the
+    # proof read them beside the module's path (SPLIT-CHECK-5).
+    moved, problems = [], [f"{path} sets __file__, which moves where its parts are read"
+                           for path in sorted(file_setters)]
     for name in sorted(set(old) | set(new)):
         before, after = old.get(name, []), new.get(name, [])
         if not after:

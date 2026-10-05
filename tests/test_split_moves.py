@@ -321,3 +321,18 @@ def test_a_part_runs_from_the_parts_folder_beside_the_module_that_loads_it(tmp_p
 def test_ao_s_own_modules_read_their_parts_where_they_always_did():
     for module in (A, cli):
         assert A._parts_folder(os.path.dirname(os.path.abspath(module.__file__))) == A._PARTS_DIR
+
+
+def test_a_module_that_sets_its_own_file_proves_no_move(project):
+    """SPLIT-CHECK-5: `_part` reads parts beside `__file__`, so a module that sets it reads them from wherever it says,
+    and the proof read them beside the module's path."""
+    root = project["root"]
+    _repo(root)
+    moved = '__file__ = "/elsewhere/mod.py"\n' + _split_b()
+    _write_files(root, {"mod.py": LIB.replace('"""a module"""\n', '"""a module"""\n__file__ = "/elsewhere/mod.py"\n')},
+                 commit="file")
+    _write_files(root, {"mod.py": moved.replace('__file__ = "/elsewhere/mod.py"\n"""a module"""\n',
+                                                '"""a module"""\n__file__ = "/elsewhere/mod.py"\n'),
+                        "parts/mod_b.py": B})
+
+    assert any("sets __file__" in p for p in A.split_moves(root)["problems"])
