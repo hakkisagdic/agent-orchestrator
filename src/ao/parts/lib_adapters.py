@@ -368,16 +368,39 @@ def adapter_binaries(adapter):
     return [os.path.basename(str(argv[0]))] if isinstance(argv, list) and argv else []
 
 
+def tool_beside_interpreter(name):
+    """The command an optional extra installed beside the interpreter ao runs on, or None (#86).
+
+    An extra lands in ao's own environment, whose scripts directory need not be on PATH: beside the
+    interpreter in a virtual environment, and on Windows in the Scripts directory of an interpreter
+    installed for everyone, which is not beside it (API-REVIEWER). A review and `ao doctor` look for it
+    alike: the doctor looked beside the interpreter alone, and named a reviewer a review would find
+    absent (API-REVIEWER-2).
+    """
+    import sys
+    import sysconfig
+    name = str(name)
+    if not name or os.path.basename(name) != name:
+        return None
+    try:
+        scripts = sysconfig.get_path("scripts")
+    except (KeyError, TypeError, ValueError):
+        scripts = None
+    for here in dict.fromkeys(place for place in (os.path.dirname(sys.executable or ""), scripts) if place):
+        for extension in ((".exe", "") if os.name == "nt" else ("",)):
+            candidate = os.path.join(here, name + extension)
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                return candidate
+    return None
+
+
 def absent_adapter_binaries(cfg):
     """(actor, adapter, binaries) for each configured actor whose adapter's command this machine lacks (#89).
 
     A command an optional extra installed beside the interpreter ao runs on is there too (#86).
     """
-    import sys
-
     def present(name):
-        beside = os.path.join(os.path.dirname(sys.executable), name) if sys.executable else ""
-        return bool(binary_candidates(name)) or (os.path.isfile(beside) and os.access(beside, os.X_OK))
+        return bool(binary_candidates(name)) or tool_beside_interpreter(name) is not None
 
     actors, _, _ = role_table(cfg)
     out = []

@@ -348,26 +348,9 @@ def _tool_repository_above(directory):
 
 
 def _tool_beside_interpreter(name):
-    """The command an optional extra installed beside the interpreter ao runs on, or None (#86).
-
-    An extra lands in ao's own environment, whose scripts directory need not be on PATH: beside the
-    interpreter in a virtual environment, and on Windows in the Scripts directory of an interpreter
-    installed for everyone, which is not beside it (API-REVIEWER).
-    """
-    import sysconfig
-    name = str(name)
-    if not name or os.path.basename(name) != name:
-        return None
-    try:
-        scripts = sysconfig.get_path("scripts")
-    except (KeyError, TypeError, ValueError):
-        scripts = None
-    for here in dict.fromkeys(place for place in (os.path.dirname(sys.executable or ""), scripts) if place):
-        for extension in ((".exe", "") if os.name == "nt" else ("",)):
-            candidate = os.path.join(here, name + extension)
-            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-                return candidate
-    return None
+    """The command an optional extra installed beside the interpreter ao runs on, or None, as `ao doctor` finds it
+    (#86, API-REVIEWER-2)."""
+    return A.tool_beside_interpreter(name)
 
 
 def _tool_prepare(fresh, argv, env, timeout, tool):

@@ -8,7 +8,7 @@ model reads what the prompt carries and nothing else, so there is nothing to den
 The provider is the machine's. `review.api_providers` names each by a word, with its base URL and
 the environment variable that holds its key; the model is `<provider>/<model>`. The key is read
 from that variable at the moment it is sent, sent to that URL alone - over HTTPS, or to this
-machine - and never carried through a redirect. It is never written anywhere.
+machine with no proxy between - and never carried through a redirect. It is never written anywhere.
 """
 import argparse
 import json
@@ -93,6 +93,10 @@ def main(argv=None):
     key = os.environ.get(variable)
     if not key:
         return refuse(f"{variable} is not set, and it holds {provider}'s key")
+    # A header carries printable ASCII alone, and the error that refuses one names its value: a key holding a line
+    # break was printed with it (API-REVIEWER-2). What the key holds is not said.
+    if not re.fullmatch(r"[\x20-\x7e]+", key):
+        return refuse(f"{variable} holds a character outside printable ASCII, which no header carries")
     if not os.path.isfile(args.diff_file):
         return refuse(f"the candidate {args.diff_file} is not there")
     prompt = sys.stdin.read() if args.prompt == "-" else args.prompt
@@ -100,15 +104,22 @@ def main(argv=None):
     request = urllib.request.Request(url + "/chat/completions", data=body, method="POST", headers={
         "Content-Type": "application/json", "Authorization": f"Bearer {key}",
         "User-Agent": f"ao/{__version__}"})
+    # A provider on this machine is asked directly. A proxy the environment named took a request for 127.0.0.1, its
+    # key in plain text, to wherever the proxy was (API-REVIEWER-2); one over HTTPS passes a proxy as a tunnel, which
+    # carries the key encrypted.
+    handlers = [_NoRedirect()]
+    if urllib.parse.urlparse(url).hostname in LOOPBACK:
+        handlers.append(urllib.request.ProxyHandler({}))
     try:
-        opener = urllib.request.build_opener(_NoRedirect())
+        opener = urllib.request.build_opener(*handlers)
         with opener.open(request, timeout=args.timeout) as response:
             answer = json.loads(response.read().decode(UTF8, "replace"))
     except urllib.error.HTTPError as exc:
         said = exc.read(300).decode(UTF8, "replace").replace(key, "<key>") if exc.fp else ""
         return refuse(f"{provider} answered HTTP {exc.code}" + (f": {' '.join(said.split())}" if said else ""), FAILED)
     except (urllib.error.URLError, OSError, ValueError) as exc:
-        return refuse(f"{provider} could not be asked ({type(exc).__name__}: {exc})", FAILED)
+        said = str(exc).replace(key, "<key>")
+        return refuse(f"{provider} could not be asked ({type(exc).__name__}: {said})", FAILED)
     text = _content(answer)
     if not text.strip():
         return refuse(f"{provider} gave no answer for {model}", FAILED)

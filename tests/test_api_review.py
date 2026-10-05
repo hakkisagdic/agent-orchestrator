@@ -6,6 +6,7 @@ tools: the model reads what the prompt carries. These run it against a stand-in 
 """
 import http.server
 import json
+import os
 import threading
 
 import pytest
@@ -207,3 +208,56 @@ def test_a_prompt_past_one_argument_reaches_the_client_on_its_standard_input(pro
     assert code == 0 and "diff --git" in asked["body"]["messages"][0]["content"]
     (handed,) = [argv for argv in started if argv and argv[0] == client]
     assert handed[-1] == "-" and not any("diff --git" in part for part in handed)
+
+
+def test_a_provider_on_this_machine_is_asked_directly_whatever_proxy_is_named(monkeypatch, tmp_path, endpoint):
+    """API-REVIEWER-2: urllib sent a request for 127.0.0.1 through the proxy the environment named, its key in plain
+    text, and took that proxy's answer for the provider's."""
+    served, proxy = endpoint(), endpoint()
+    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
+    monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
+    for name in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY"):
+        monkeypatch.setenv(name, proxy.url.rsplit("/", 1)[0])
+    for name in ("no_proxy", "NO_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+
+    code, answer = _run(tmp_path, "local/m")
+
+    assert code == 0 and answer == APPROVED
+    assert proxy.requests == [] and len(served.requests) == 1
+
+
+def test_a_key_no_header_carries_is_refused_and_never_shown(monkeypatch, tmp_path, endpoint, capsys):
+    """API-REVIEWER-2: the error that refused a key holding a line break named the header's value, and the key was
+    printed with it."""
+    served = endpoint()
+    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
+    monkeypatch.setenv("AO_TEST_API_KEY", "a-key\nfor-this-test")
+
+    code, answer = _run(tmp_path, "local/m")
+
+    said = capsys.readouterr().err
+    assert code == 2 and answer is None and served.requests == []
+    assert "AO_TEST_API_KEY" in said and "a-key" not in said and "for-this-test" not in said
+
+
+def test_the_doctor_finds_the_client_where_a_review_finds_it(project, monkeypatch, tmp_path):
+    """API-REVIEWER-2: an interpreter installed for everyone on Windows keeps its scripts in Scripts, not beside
+    python.exe; a review found the client there, and `ao doctor` named it absent."""
+    import sys
+    import sysconfig
+    scripts, real = tmp_path / "Scripts", sysconfig.get_path
+    scripts.mkdir()
+    client = scripts / ("ao-api-review.exe" if os.name == "nt" else "ao-api-review")
+    client.write_text("", encoding="utf-8")
+    client.chmod(0o755)
+    monkeypatch.setattr(A, "binary_candidates", lambda name, path=None: [])
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "elsewhere" / "python"))
+    monkeypatch.setattr(sysconfig, "get_path", lambda name, *a, **kw: str(scripts) if name == "scripts"
+                        else real(name, *a, **kw))
+    cfg = dict(project, implementer={"adapter": "openai-api", "session": "s1", "name": "dev"})
+
+    assert A.absent_adapter_binaries(cfg) == [] and cli._tool_beside_interpreter("ao-api-review") == str(client)
+
+    client.unlink()
+    assert A.absent_adapter_binaries(cfg) == [("dev", "openai-api", ["ao-api-review"])]

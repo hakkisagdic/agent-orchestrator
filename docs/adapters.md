@@ -193,8 +193,10 @@ message, and writes the answer it gets; it has no tools, so the model reads what
 and nothing else. The providers are the machine's: `review.api_providers` names each by a word, with
 its base URL and the environment variable that holds its key, and a route names `<word>/<model>`.
 The key is read from that variable when the request is sent, goes to that URL alone - over HTTPS, or
-to this machine - and is never carried through a redirect; a provider whose key could leave
-unprotected, or whose variable is unset, is said and nothing is sent. A prompt past one argument
+to this machine with no proxy between - and is never carried through a redirect; a provider whose key
+could leave unprotected, or whose variable is unset or holds what no header carries, is said, the
+key's value never, and nothing is sent. `ao doctor` finds the client where a review does, in a
+Windows interpreter's Scripts directory too. A prompt past one argument
 reaches it on its standard input. A gateway that serves several model families through one key
 reviews with whichever the route names, so the family is named as for any tool:
 
