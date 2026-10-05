@@ -88,6 +88,7 @@ machine setting written into a project.
 | `fleet.window_reserve_pct` | `20` | machine | percent of the machine's provider window kept free before a report wake |
 | `binaries.extra_dirs` | `none` | machine | directories searched for agent binaries after PATH, before the usual install locations |
 | `watchdog.bypass_adapters` | `none` | machine | adapters whose implementer the watchdog may nudge with the flag that turns off their own sandbox; none: such a nudge is refused |
+| `review.api_providers` | `none` | machine | OpenAI-compatible providers the API reviewer may ask, each `<word> <base URL> <variable holding its key>`; a reviewer names one as `<word>/<model>`; none: no provider |
 | `filters.probe_programs` | `['rtk']` | machine | programs ao doctor may run as a user-level shell-command filter hook, to prove it leaves measurements alone |
 | `filters.probe_timeout_seconds` | `5` | machine | seconds a probed filter hook may take to answer for one measurement command before ao stops asking it |
 | `retention.events_kb` | `2048` | machine | kilobytes the machine's event log, ~/.ao/events.jsonl, keeps before its oldest lines go |

@@ -39,6 +39,7 @@ Documentation = "https://github.com/hakkisagdic/agent-orchestrator/blob/main/doc
 [project.scripts]
 ao = "ao.cli:main"
 ao-watchdog = "ao.watchdog:main"
+ao-api-review = "ao.api_review:main"
 
 [tool.hatch.version]
 # The wheel, the package and `ao --version` read this one line. Written twice, it drifted: the

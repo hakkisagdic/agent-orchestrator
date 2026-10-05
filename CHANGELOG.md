@@ -14,6 +14,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### New commands
 
+- A reviewer reached through an OpenAI-compatible chat API: `ao-api-review`, ao's own standard-library client, installed with ao and run as a tool reviewer (`ao role set reviewer openai-api --model <provider>/<model> --family <family>`). It asks the provider once with the review prompt and writes the answer; it has no tools. The machine names its providers in `review.api_providers` - a word, a base URL and the environment variable holding the key - and the key goes to that URL alone, over HTTPS or to this machine, never through a redirect ([adapters.md](docs/adapters.md)) (API-REVIEWER).
 - `ao role set reviewer codex --model <model> --family openai` composes a Codex reviewer: `codex exec` in its own read-only sandbox, without the person's `config.toml` and execpolicy rules, outside any repository and out of the person's sessions, as measured on codex-cli 0.160.0; every codex reviewer is pinned to `--sandbox read-only`, and `ao doctor` names one that loads the person's configuration ([adapters.md](docs/adapters.md#a-reviewer-is-composed-from-its-adapter)) (CODEX-REVIEWER).
 - `ao catchup --reviewer <actor>` reviews a run with another reviewer actor of the project's table in place of the reviewer role, leaving the table as it is, so catch-up runs over different slices go side by side on different platforms ([features.md](docs/features.md)) (CATCHUP-REVIEWER).
 

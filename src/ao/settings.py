@@ -226,6 +226,10 @@ SETTINGS = {
         [], list, None, None, "machine",
         "adapters whose implementer the watchdog may nudge with the flag that turns off their own sandbox; "
         "none: such a nudge is refused"),
+    "review.api_providers": Setting(
+        [], list, None, None, "machine",
+        "OpenAI-compatible providers the API reviewer may ask, each `<word> <base URL> <variable holding its key>`; "
+        "a reviewer names one as `<word>/<model>`; none: no provider"),
     "filters.probe_programs": Setting(
         ["rtk"], list, None, None, "machine",
         "programs ao doctor may run as a user-level shell-command filter hook, to prove it leaves measurements alone"),

@@ -1,0 +1,207 @@
+"""A reviewer reached through an OpenAI-compatible chat API, as a tool ao runs over the candidate (API-REVIEWER).
+
+`ao-api-review` is ao's own stdlib client. It asks a provider the machine names in `review.api_providers` once,
+with the review prompt as the only message, and writes the answer where ao reads a tool's answer. It has no
+tools: the model reads what the prompt carries. These run it against a stand-in of the endpoint on this machine.
+"""
+import http.server
+import json
+import threading
+
+import pytest
+
+from ao import api_review, cli, lib as A, storage
+from tests.test_review_chain import _args, _repo_with_change
+
+APPROVED = "VERDICT: APPROVED\nBLOCKER: 0\nHIGH: 0\nMEDIUM: 0\nLOW: 0\n\n## Findings\nNone."
+
+
+class _Endpoint:
+    """A chat-completions stand-in on 127.0.0.1: it keeps each request and answers as it is told."""
+
+    def __init__(self, answer=APPROVED, status=200, location=None):
+        self.requests, endpoint = [], self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                endpoint.requests.append({"path": self.path, "headers": dict(self.headers),
+                                          "body": json.loads(body or b"{}")})
+                if location:
+                    self.send_response(302)
+                    self.send_header("Location", location)
+                    self.end_headers()
+                    return
+                reply = json.dumps({"choices": [{"message": {"role": "assistant", "content": answer}}]}).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(reply)))
+                self.end_headers()
+                self.wfile.write(reply)
+
+            def log_message(self, *args):
+                pass
+
+        self.server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}/v1"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+@pytest.fixture
+def endpoint():
+    made = []
+
+    def make(**kw):
+        made.append(_Endpoint(**kw))
+        return made[-1]
+    yield make
+    for one in made:
+        one.close()
+
+
+def _providers(monkeypatch, tmp_path, *entries):
+    """The machine's settings, holding these providers; the suite's own home stays as it is."""
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"review": {"api_providers": list(entries)}}), encoding="utf-8")
+    monkeypatch.setenv("AO_SETTINGS", str(path))
+    return path
+
+
+def _run(tmp_path, model, prompt="review this"):
+    diff, out = tmp_path / "candidate.diff", tmp_path / "answer.md"
+    diff.write_text("diff --git a/x b/x\n", encoding="utf-8")
+    code = api_review.main(["--model", model, "--diff-file", str(diff), "--output", str(out), prompt])
+    return code, (out.read_text(encoding="utf-8") if out.exists() else None)
+
+
+def test_the_client_asks_its_provider_once_and_writes_the_answer(monkeypatch, tmp_path, endpoint, capsys):
+    served = endpoint()
+    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
+    monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
+
+    code, answer = _run(tmp_path, "local/glm-5.3", "the review prompt, the diff in it")
+
+    assert code == 0 and answer == APPROVED
+    (asked,) = served.requests
+    assert asked["path"] == "/v1/chat/completions"
+    assert asked["headers"]["Authorization"] == "Bearer" + " " + "a-key-for-this-test"
+    assert asked["body"] == {"model": "glm-5.3",
+                             "messages": [{"role": "user", "content": "the review prompt, the diff in it"}]}
+    assert "a-key-for-this-test" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("entry, why", [
+    ("remote http://example.com/v1 AO_TEST_API_KEY", "https"),
+    ("remote https://example.com/v1 not-a-name", "environment variable"),
+    ("remote https://example.com/v1", "a word, a base URL and"),
+])
+def test_a_provider_whose_key_could_leave_unprotected_is_refused_before_anything_is_sent(
+        monkeypatch, tmp_path, capsys, entry, why):
+    _providers(monkeypatch, tmp_path, entry)
+    monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
+
+    code, answer = _run(tmp_path, "remote/m")
+
+    assert code == 2 and answer is None and why in capsys.readouterr().err
+
+
+def test_a_provider_not_named_or_a_key_not_set_is_said_and_nothing_is_sent(monkeypatch, tmp_path, endpoint, capsys):
+    served = endpoint()
+    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
+    monkeypatch.delenv("AO_TEST_API_KEY", raising=False)
+
+    assert _run(tmp_path, "elsewhere/m")[0] == 2 and "review.api_providers names no elsewhere" in capsys.readouterr().err
+    assert _run(tmp_path, "local/m")[0] == 2 and "AO_TEST_API_KEY is not set" in capsys.readouterr().err
+    assert _run(tmp_path, "no-provider")[0] == 2 and "<provider>/<model>" in capsys.readouterr().err
+    assert served.requests == []
+
+
+def test_a_redirect_is_not_followed_with_the_key(monkeypatch, tmp_path, endpoint, capsys):
+    elsewhere = endpoint()
+    served = endpoint(location=elsewhere.url + "/chat/completions")
+    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
+    monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
+
+    code, answer = _run(tmp_path, "local/m")
+
+    assert code == 1 and answer is None and elsewhere.requests == []
+    assert "HTTP 302" in capsys.readouterr().err
+
+
+def test_an_error_or_an_empty_answer_writes_nothing(monkeypatch, tmp_path, endpoint, capsys):
+    failing, silent = endpoint(status=503), endpoint(answer="")
+    _providers(monkeypatch, tmp_path, f"failing {failing.url} AO_TEST_API_KEY", f"silent {silent.url} AO_TEST_API_KEY")
+    monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
+
+    assert _run(tmp_path, "failing/m") == (1, None) and "HTTP 503" in capsys.readouterr().err
+    assert _run(tmp_path, "silent/m") == (1, None) and "no answer" in capsys.readouterr().err
+
+
+def test_the_adapter_composes_a_tool_reviewer_ao_may_run():
+    adapter = A.load_adapter("openai-api")
+
+    assert A.reviewer_eligibility(adapter) == (True, None) and A.tool_review_problems(adapter) == []
+    route = A.compose_reviewer("openai-api", model="evren/glm-5.3", family="zhipu")
+    assert route["kind"] == "tool" and route["argv"] == adapter["send"]["argv"]
+    assert (route["model"], route["family"]) == ("evren/glm-5.3", "zhipu")
+
+
+def test_a_review_through_the_api_reviewer_is_read_and_recorded(project, monkeypatch, tmp_path, endpoint):
+    """End to end: ao writes the candidate, runs the client as a tool in a directory of its own, and reads the
+    answer the stand-in endpoint gave."""
+    root = project["root"]
+    _repo_with_change(root)
+    served = endpoint()
+    home = tmp_path / "home"
+    (home / ".ao").mkdir(parents=True)
+    (home / ".ao" / "settings.json").write_text(json.dumps(
+        {"review": {"api_providers": [f"local {served.url} AO_TEST_API_KEY"]}}), encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))                    # the tool reads the machine's settings as ao does
+    monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
+    client = cli._tool_beside_interpreter("ao-api-review")
+    if client is None:
+        pytest.skip("the client's script is installed with ao, and this interpreter has none")
+    monkeypatch.setattr(cli, "_reviewer_resolve_binary", lambda root, name: (
+        (client, "ao-api-review") if name == "ao-api-review" else (None, None)))
+    route = dict(A.compose_reviewer("openai-api", model="local/glm-5.3", family="zhipu"), id="rv")
+
+    code = cli.cmd_review(dict(project, reviewer=route), _args())
+
+    row = storage.read_chained_jsonl(A.review_ledger_path(root), A.REVIEW_CHAIN)[-1]
+    assert code == 0 and row["verdict"] == "APPROVED"
+    (asked,) = served.requests
+    assert asked["body"]["model"] == "glm-5.3" and "diff --git" in asked["body"]["messages"][0]["content"]
+
+
+def test_a_prompt_past_one_argument_reaches_the_client_on_its_standard_input(project, monkeypatch, tmp_path, endpoint):
+    """Linux carries no argument over 131,072 bytes, and a review prompt carries a diff of up to 400 KB: the client
+    takes - for its prompt and reads it from standard input, as its adapter declares (PROMPT-CHANNEL)."""
+    root = project["root"]
+    _repo_with_change(root)
+    served = endpoint()
+    home = tmp_path / "home"
+    (home / ".ao").mkdir(parents=True)
+    (home / ".ao" / "settings.json").write_text(json.dumps(
+        {"review": {"api_providers": [f"local {served.url} AO_TEST_API_KEY"]}}), encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
+    client = cli._tool_beside_interpreter("ao-api-review")
+    if client is None:
+        pytest.skip("the client's script is installed with ao, and this interpreter has none")
+    monkeypatch.setattr(cli, "_reviewer_resolve_binary", lambda root, name: (
+        (client, "ao-api-review") if name == "ao-api-review" else (None, None)))
+    monkeypatch.setattr(A, "argument_overflow", lambda argv, env=None: "this platform carries less in one argument")
+    started, real = [], cli.subprocess.Popen
+    monkeypatch.setattr(cli.subprocess, "Popen", lambda argv, *a, **kw: started.append(list(argv)) or real(argv, *a, **kw))
+    route = dict(A.compose_reviewer("openai-api", model="local/glm-5.3", family="zhipu"), id="rv")
+
+    code = cli.cmd_review(dict(project, reviewer=route), _args())
+
+    (asked,) = served.requests
+    assert code == 0 and "diff --git" in asked["body"]["messages"][0]["content"]
+    (handed,) = [argv for argv in started if argv and argv[0] == client]
+    assert handed[-1] == "-" and not any("diff --git" in part for part in handed)

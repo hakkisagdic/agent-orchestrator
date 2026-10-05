@@ -179,6 +179,22 @@ ao asks keyflip about no provider for it, and never runs the architect's route.
 mode (`--diff-file`) reads the candidate with no pull request and no platform token and publishes
 nowhere, and `ask` carries ao's prompt. A capability-matrix project cannot bind a tool reviewer yet.
 
+`openai-api` is ao's own client, `ao-api-review`, installed with ao and using nothing but the standard
+library. It asks an OpenAI-compatible `/chat/completions` once, with ao's review prompt as the only
+message, and writes the answer it gets; it has no tools, so the model reads what the prompt carries
+and nothing else. The providers are the machine's: `review.api_providers` names each by a word, with
+its base URL and the environment variable that holds its key, and a route names `<word>/<model>`.
+The key is read from that variable when the request is sent, goes to that URL alone - over HTTPS, or
+to this machine - and is never carried through a redirect; a provider whose key could leave
+unprotected, or whose variable is unset, is said and nothing is sent. A prompt past one argument
+reaches it on its standard input. A gateway that serves several model families through one key
+reviews with whichever the route names, so the family is named as for any tool:
+
+```bash
+ao config set review.api_providers "example https://api.example.com/v1 EXAMPLE_API_KEY" --machine
+ao role set reviewer openai-api --model example/<model> --family <family>
+```
+
 ## A prompt past one argument reaches its command another way
 
 A review prompt carries a diff of up to 400 KB and the context it is judged against, and it went to the
@@ -489,6 +505,7 @@ the adapter says so in its `disclaimer`. **Reviewer** is whether the adapter can
 | `trae` | `trae` | untested | ineligible | Trae Agent (ByteDance) |
 | `cloud` | `cloud-generic` | partial | ineligible | Generic cloud agent (pull-request delivered) |
 | `pr-agent` | `pr-agent` | untested | eligible | PR-Agent, a tool reviewer ao runs over the candidate (#86) |
+| `openai-api` | `openai-api` | partial | eligible | an OpenAI-compatible chat API, through ao's own client, a tool reviewer (API-REVIEWER) |
 
 The first twenty-one rows are Traycer's canonical enum, the coverage this list is measured
 against; then the harnesses ao shipped before it, and last a tool reviewer. Moving a row to `full` is the most valuable

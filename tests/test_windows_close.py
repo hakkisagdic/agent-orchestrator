@@ -168,8 +168,8 @@ def _first_statements_of_main():
 def test_every_entry_point_sets_its_streams_before_it_reads_or_prints_anything():
     firsts = _first_statements_of_main()
 
-    assert sorted(firsts) == ["src/ao/a2a.py", "src/ao/a2a_mcp.py", "src/ao/cli.py", "src/ao/mcp.py",
-                              "src/ao/telegram.py", "src/ao/watchdog.py"]
+    assert sorted(firsts) == ["src/ao/a2a.py", "src/ao/a2a_mcp.py", "src/ao/api_review.py", "src/ao/cli.py",
+                              "src/ao/mcp.py", "src/ao/telegram.py", "src/ao/watchdog.py"]
     assert set(firsts.values()) == {"A.utf8_streams()"}
 
 

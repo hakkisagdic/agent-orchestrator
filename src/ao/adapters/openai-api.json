@@ -1,0 +1,64 @@
+{
+  "id": "openai-api",
+  "name": "OpenAI-compatible API (ao's own client)",
+  "contract": 1,
+  "kind": "tool-reviewer",
+  "verified": "partial",
+  "disclaimer": "ao's own stdlib client, ao-api-review, run here against a stand-in of the chat-completions endpoint on this machine (tests/test_api_review.py); a provider's own answer is proven on a local candidate by the owner, whose key it is.",
+  "roles": {
+    "reviewer": "eligible: one completion over the review prompt, through a provider's HTTP API, with no tools",
+    "implementer": "ineligible: it writes no code",
+    "architect": "ineligible: it answers one question and keeps no session"
+  },
+  "send": {
+    "argv": [
+      "ao-api-review",
+      "--model",
+      "{model}",
+      "--diff-file",
+      "{diff_file}",
+      "--output",
+      "{output}",
+      "{prompt}"
+    ],
+    "note": "The prompt carries the candidate's diff; the diff file is the same bytes, handed as every tool reviewer is handed them.",
+    "stdin": {
+      "replaces": [
+        "{prompt}"
+      ],
+      "with": [
+        "-"
+      ],
+      "note": "A prompt past what one argument carries is read from standard input: ao-api-review takes - for it."
+    }
+  },
+  "options": {
+    "trust_none": [],
+    "trust_none_note": "nothing to deny: the client has no tools, and the model reads the prompt it is sent and nothing else",
+    "model": null,
+    "model_note": "<provider>/<model>: the provider a word review.api_providers names on this machine, with its base URL and the environment variable holding its key",
+    "effort": null,
+    "effort_note": "ao composes no effort for a tool"
+  },
+  "review": {
+    "candidate": "diff-file",
+    "encoding": "utf-8",
+    "answer": {
+      "from": "output"
+    },
+    "environment": {
+      "remove": [
+        "^AO_SETTINGS$"
+      ],
+      "note": "The providers are read from the machine's own settings file: one named through AO_SETTINGS could send the review, and its key, elsewhere."
+    }
+  },
+  "detect": {
+    "binaries": [
+      "ao-api-review"
+    ],
+    "headless": [
+      "--output"
+    ]
+  }
+}
