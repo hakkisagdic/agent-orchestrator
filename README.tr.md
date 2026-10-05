@@ -208,9 +208,9 @@ söyler.
 | doğrulama | adaptörler |
 |---|---|
 | **full** — her yetenek gerçek koşumda sınandı | kiro, claude-code, antigravity |
-| **partial** — durumu okur, bazı yetenekler sınanmadı | opencode, command-code |
+| **partial** — durumu okur, bazı yetenekler sınanmadı | opencode, command-code, codex, qoder, openai-api |
 | **documented** — yayımlanmış dokümandan yazıldı, henüz koşulmadı | cursor-agent |
-| **untested** — şema hazır, ilk koşumu bekliyor | codex, gemini, aider, amp, copilot, amazon-q, deepseek, qoder, ollama |
+| **untested** — şema hazır, ilk koşumu bekliyor | gemini, aider, amp, copilot, amazon-q, deepseek, ollama, droid, grok, hermes, kilocode, kimi, omp, pi, pr-agent, qwen, reasonix, trae |
 
 `ao adapters` bu tabloyu makinende gerçekte kurulu olanla yan yana gösterir; ve
 [keyflip](https://github.com/hakkisagdic/keyflip) varsa, CLI kurulu olmasa bile hesap

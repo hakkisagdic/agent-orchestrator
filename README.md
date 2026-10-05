@@ -216,9 +216,9 @@ These are not style preferences. Each one is a failure that cost real hours.
 | verified | adapters |
 |---|---|
 | **full** — every capability exercised in a production run | kiro, claude-code, antigravity |
-| **partial** — reads state, some capabilities unexercised | opencode, command-code |
+| **partial** — reads state, some capabilities unexercised | opencode, command-code, codex, qoder, openai-api |
 | **documented** — written from published docs, not yet run | cursor-agent |
-| **untested** — schema present, needs a first run | codex, gemini, aider, amp, copilot, amazon-q, deepseek, qoder, ollama |
+| **untested** — schema present, needs a first run | gemini, aider, amp, copilot, amazon-q, deepseek, ollama, droid, grok, hermes, kilocode, kimi, omp, pi, pr-agent, qwen, reasonix, trae |
 
 `ao adapters` shows this table against what is actually installed on your machine, and
 — with [keyflip](https://github.com/hakkisagdic/keyflip) — whether an account exists
