@@ -64,7 +64,9 @@ is read the same way. A run that ends on an error the adapter names passing in
 failure, retried once as a reviewer that exits 75 is, not a reviewer that cannot run. So is a run
 that wrote session updates and ended on no message, as Sol through kiro-cli did in three of twelve
 reviews, and a turn over ACP that ended with nothing said; a reviewer that writes text and wrote
-none shows no turn, and is not asked again (REVIEW-EMPTY-TURN).
+none shows no turn, and is not asked again (REVIEW-EMPTY-TURN). A run that answers in session
+updates answers there alone: what it writes to stderr is shown on the terminal and never read as
+its answer (REVIEW-EMPTY-TURN-2).
 
 ## A turn's grant is declared, and so is every flag that turns approvals off
 

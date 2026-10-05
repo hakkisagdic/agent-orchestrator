@@ -140,3 +140,19 @@ def test_a_turn_that_ran_and_ended_on_no_message_is_asked_once_more(project, tmp
     quiet.write_text(f"#!{sys.executable}\n", encoding="utf-8")
     quiet.chmod(0o755)
     assert cli._run_reviewer(project["root"], [str(quiet), "review this"], 30)["retryable"] is False
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the stand-in harness is a script its shebang runs")
+def test_a_turn_that_ended_on_no_message_is_not_answered_by_its_stderr(project, tmp_path, capsys):
+    """REVIEW-EMPTY-TURN-2: a run that answers in session updates said nothing there, and a warning on its stderr
+    was read as its answer, a success no route after it or retry replaced."""
+    harness = tmp_path / "kiro-cli"
+    harness.write_text(f"#!{sys.executable}\nimport sys\nprint({EMPTY_TURN!r})\n"
+                       "print('warning: a newer kiro-cli is out', file=sys.stderr)\n", encoding="utf-8")
+    harness.chmod(0o755)
+    argv = [str(harness)] + A.pinned_argv(KIRO, "reviewer")[0][1:]
+
+    attempt = cli._run_reviewer(project["root"], [part.replace("{prompt}", "review this") for part in argv], 30)
+
+    assert not attempt["ok"] and attempt["kind"] == "silence" and attempt["retryable"] is True
+    assert "a newer kiro-cli is out" in capsys.readouterr().err          # shown on the terminal, read as no answer

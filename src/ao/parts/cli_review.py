@@ -728,7 +728,9 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
         passing = _stream_error(argv, stdout) if proc.returncode != 0 else None
         ran = bool(_stream_updates(argv, stdout))
         stdout = _answer_stream(argv, stdout)
-        out = (stdout if (stdout or "").strip() else stderr or "").strip()
+        # A run that answers in session updates answers there alone: its stderr is diagnostics, and a warning there
+        # was read as the answer of a turn that ended on no message (REVIEW-EMPTY-TURN-2).
+        out = (stdout if (stdout or "").strip() else "" if ran else stderr or "").strip()
         if proc.returncode != 0:
             temporary = proc.returncode == 75 or passing is not None
             _reviewer_terminal_output(stdout, stderr)
@@ -741,6 +743,8 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
         if tool is not None:
             return _tool_answer(fresh, tool, handoff, stdout, stderr)
         if not out:
+            if ran:
+                _reviewer_terminal_output("", stderr)
             # A turn that ran - it wrote session updates - and ended on no message is its provider's passing failure:
             # Sol through kiro-cli 2.27.1 ended three of twelve reviews so on 2026-10-05, after minutes of reading,
             # and exited 0. A reviewer that writes text and wrote none shows no turn, and is not asked again
