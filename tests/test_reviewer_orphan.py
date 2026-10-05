@@ -228,3 +228,28 @@ def test_a_signal_after_the_run_recorded_its_end_leaves_that_end(project, monkey
     state = cli._review_state(root, spawned[0])
     assert (state["state"], state["verdict"]) == ("finished", "APPROVED")
     assert signal.getsignal(signal.SIGTERM) is before           # put back as the run found it
+
+
+@POSIX
+def test_a_review_in_the_foreground_stopped_by_a_signal_stops_its_reviewer(project, tmp_path):
+    """REVIEWER-ORPHAN-3: only a submitted review's detached run stopped its reviewer on SIGTERM. `ao review` and
+    `ao catchup` in the foreground, stopped so, left their reviewer - which leads a session of its own - working
+    for nobody, and a hosted reviewer spent its credits on it."""
+    root = project["root"]
+    _repo_with_change(root)
+    _with_reviewer(project)
+    pid_file = tmp_path / "reviewer.pid"
+    env = dict(os.environ, AO_TEST_PID=str(pid_file), HOME=A.HOME)
+    run = subprocess.Popen([sys.executable, "-m", "ao", "-C", root, "review", "--boundary", "b"], env=env,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    reviewer = None
+    try:
+        assert _until(lambda: pid_file.exists() or run.poll() is not None), "the review ended before its reviewer began"
+        reviewer = int(pid_file.read_text(encoding="utf-8"))
+        run.send_signal(signal.SIGTERM)
+        run.wait(timeout=60)
+
+        assert _until(lambda: not A._pid_alive(reviewer), 30)
+        assert run.returncode != 0
+    finally:
+        _stop_leftovers(reviewer, run.pid if run.poll() is None else None)

@@ -20,6 +20,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- A review in the foreground - `ao review`, and each review `ao catchup` starts - stopped by SIGTERM, SIGHUP or SIGINT stops its reviewer, where only a submitted review's detached run did and a foreground one left its reviewer, which leads a session of its own, working and spending for nobody ([pipeline.md](docs/pipeline.md)) (REVIEWER-ORPHAN-3).
 - `ao catchup` reports and counts a deferral its own watchdog cycle closed, where the cycle closed it first and catchup said nothing of it; and a deferral recorded to the second closes on work started at the very start of the next second (JOURNAL-4-3).
 - A watchdog cycle that ends because a lock it takes inside timed out says which lock and exits 1, where every lock timeout read as another cycle holding the project and the cycle stood down with exit 0 (WATCHDOG-LOCK).
 - Every failed tool call one message of a store-backed harness holds is read as a failed call, where the reader kept one failed block per record, and opencode's parts were also turned in the wrong order, so the error read was the message's oldest; on a real store 36 of 44 failed calls were read, now all 44 (ADAPTER-SQLITE-READER-3).

@@ -60,7 +60,8 @@ records which signal stopped it. A run killed outright cannot: its state names t
 works, with the process's start, and `ao reviews` says of such a lost run that its reviewer runs on and
 that `ao review cancel` stops it. `ao review cancel` asks the run first, with SIGTERM; a run that is gone,
 or has not ended ten seconds later, is stopped outright, and the reviewer after it, while that pid is
-still the process the run started.*
+still the process the run started. A review in the foreground - `ao review`, and each review
+`ao catchup` starts - stops its reviewer on the same signals (REVIEWER-ORPHAN-3).*
 
 ```bash
 ao review submit --boundary '…'      # returns R-1788… immediately
