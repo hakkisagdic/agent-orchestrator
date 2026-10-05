@@ -203,3 +203,16 @@ def test_a_trust_none_flag_given_again_with_another_value_is_refused(project, mo
 
 def test_a_narrower_list_than_trust_none_names_is_no_override():
     assert A.reading_problems(["pi", "-p", "{prompt}", "--tools", "read,grep,find,ls", "--tools", "read"]) == []
+
+
+def test_a_reading_flag_given_after_the_end_of_options_or_with_more_values_does_not_count():
+    """REVIEWER-REACH-3: a token after `--` is no option, though the check found it there; and a variadic flag given a
+    second word - `--tools Read,Grep,Glob Edit` - takes it as a tool, where the check read only the first."""
+    composed = A.compose_reviewer("qoder", model="m")["argv"]
+    at = composed.index("--tools")
+    after_end = composed[:at] + ["--"] + composed[at:]
+    widened = composed[:at + 2] + ["Edit,Write"] + composed[at + 2:]
+
+    assert any("lacks" in p for p in A.reading_problems(after_end)), after_end
+    assert any("more than one value" in p for p in A.reading_problems(widened)), widened
+    assert A.reading_problems(composed) == []

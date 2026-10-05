@@ -61,6 +61,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Security
 
+- A reviewer's or the hunter's command whose reading flag stands only after `--`, where it is no option, or is given a second word a harness may read as more of its list (`--tools Read,Grep,Glob Edit`), is refused, where the first was taken for the flag and the second was never asked (REVIEWER-REACH-3).
 - The product's own remote includes an origin kept in `~/.gitconfig`, which `git remote get-url` does not know and `git push origin` reaches, where mail to it was pushed; and a refusal names where git would push a target, a pushInsteadOf before an insteadOf (MAIL-SYNC-5).
 - A filter hook argument that is a bare file address naming no root (`file:x/y`) is refused, where ao took it under the project while a URL reader takes it from the root (FILTER-EXCLUSIONS-7).
 - A part is run from the parts folder beside the module that loads it, the folder the move proof reads, where every load ran lib.py's own `parts/`: a module in another folder that split code out passed the proof as a pure move and then failed to import, or silently ran an older part of the same name, and catchup closed its waiver with no reviewer. ao's own modules load the same files as before ([slices.md](docs/slices.md)) (SPLIT-CHECK-4).

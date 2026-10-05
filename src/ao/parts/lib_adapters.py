@@ -483,6 +483,8 @@ def reading_problems(argv):
     if tool_review_contract(adapter) is not None:
         return [f"{adapter.get('id')} is a tool reviewer, which reads a file ao writes for it, not a tree"]
     args = [str(arg) for arg in argv or []]
+    # What follows `--` is no option, though a word there spelled like one was found (REVIEWER-REACH-3).
+    args = args[:args.index("--")] if "--" in args else args
     declared = adapter["options"]["trust_none"]
     missing = [token for token in dict.fromkeys(declared) if token not in args]
     if missing:
@@ -499,6 +501,12 @@ def reading_problems(argv):
         for at, arg in enumerate(args):
             if arg == flag:
                 given = args[at + 1] if at + 1 < len(args) and not args[at + 1].startswith("-") else None
+                # A flag that takes a list may take every word after it: `--tools Read,Grep,Glob Edit` reads Edit
+                # as a tool, where only the first word was asked (REVIEWER-REACH-3).
+                if given is not None and at + 2 < len(args) and not args[at + 2].startswith("-"):
+                    found.append(f"it gives {flag} more than one value ({given} {args[at + 2]}), and "
+                                 f"{adapter.get('id')} may read them all")
+                    continue
             elif arg.startswith(flag + "="):
                 given = arg.split("=", 1)[1]
             else:
