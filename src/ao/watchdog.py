@@ -588,6 +588,24 @@ def _record_start(root, step, pid):
         print(f"the journal did not take the start of {step} ({type(exc).__name__}); the process scan stands in")
 
 
+def _logs_written(root):
+    """The spawn logs a process an earlier cycle started may still write, each left whole until it ends (JOURNAL-3-2).
+
+    Every spawn is made inside a cycle, under the cycle's lock, after the logs were bounded: what may write
+    one as it is bounded is a turn or a wake an earlier cycle started. Where that cannot be told, none of
+    the three is trimmed this cycle.
+    """
+    key = A.project_key(root)
+    log = lambda what: os.path.join(STATE_DIR, A.project_file_name(what, key))     # noqa: E731
+    try:
+        busy = {log("nudge-log")} if child_alive(load_state(root)) else set()
+        if arch_alive(root, A.load_config(root).get("architect") or {}):
+            busy |= {log("escalate-log"), log("refill-log")}
+        return busy
+    except Exception:
+        return {log("nudge-log"), log("escalate-log"), log("refill-log")}
+
+
 def child_alive(st):
     """Is the turn we last started still running?
 
@@ -1921,7 +1939,7 @@ def run(args):
         os.makedirs(STATE_DIR, exist_ok=True)
         with _exclusive_lock(os.path.join(STATE_DIR, CYCLE_LOCK.format(key=key)), timeout=0):
             try:
-                A.bound_observation_logs(root, STATE_DIR)       # every store is bounded (#50)
+                A.bound_observation_logs(root, STATE_DIR, busy=_logs_written(root))   # every store is bounded (#50)
             except OSError:
                 pass
             try:

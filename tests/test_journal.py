@@ -68,6 +68,8 @@ print("the last words of a failed wake", flush=True)
 """
 
 
+@pytest.mark.skipif(os.name == "nt", reason="a child's handle does not append on Windows (CPython gh-86772); the "
+                                            "watchdog leaves the log of a process it started whole until it ends")
 def test_a_log_trimmed_while_its_process_writes_keeps_what_the_process_writes_after(project, tmp_path):
     """A log replaced by a new file left its process writing into the old one, and the failure it wrote last
     never reached the log the watchdog reads a wake's failure from."""
@@ -88,7 +90,79 @@ def test_a_log_trimmed_while_its_process_writes_keeps_what_the_process_writes_af
     assert "the last words of a failed wake" in text and log.stat().st_size < 1_300_000
 
 
-# ---- deferred work is closed only once it was done or a cycle ran with it (JOURNAL-4) -----------------------------
+def test_what_a_process_appends_while_the_tail_is_read_is_kept_once(tmp_path, monkeypatch):
+    """JOURNAL-3-2: the catch-up read again from the old end what the first read had already taken."""
+    log = tmp_path / "nudge.log"
+    log.write_bytes(b"".join(b"line %06d %s\n" % (n, b"x" * 200) for n in range(7000)))
+    fd = os.open(log, os.O_WRONLY | os.O_APPEND)
+    real = open
+
+    class Reading:                          # the trimmer's file: a process appends as the first read starts
+        def __init__(self, fh):
+            self.fh, self.reads = fh, 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return self.fh.__exit__(*exc)
+
+        def __getattr__(self, name):
+            return getattr(self.fh, name)
+
+        def read(self, *a):
+            self.reads += 1
+            if self.reads == 1:
+                os.write(fd, b"written while the tail was read\n")
+            return self.fh.read(*a)
+
+    monkeypatch.setattr(A, "open", lambda *a, **k: Reading(real(*a, **k)), raising=False)
+    try:
+        assert A.bound_store(str(log), 1024, in_place=True)
+    finally:
+        os.close(fd)
+
+    assert log.read_bytes().count(b"written while the tail was read\n") == 1
+
+
+WAITING_CHILD = """
+import sys
+print("a turn the watchdog started", flush=True)
+sys.stdin.readline()
+print("API Error: 529 overloaded", flush=True)
+"""
+
+
+def test_a_log_a_started_process_still_writes_is_left_whole_until_it_ends(project, tmp_path):
+    """JOURNAL-3-2: on Windows a child's handle does not append (CPython gh-86772), so a log trimmed under it
+    grew a gap of NULs and kept no bound; on any system a line written as the file was cut could be lost."""
+    root = project["root"]
+    os.makedirs(W.STATE_DIR, exist_ok=True)
+    log = os.path.join(W.STATE_DIR, A.project_file_name("nudge-log", A.project_key(root)))
+    with open(log, "wb") as fh:
+        fh.write(b"".join(b"line %06d %s\n" % (n, b"x" * 200) for n in range(14000)))     # past 1.25 x 2 MB
+    script = tmp_path / "turn.py"
+    script.write_text(WAITING_CHILD, encoding="utf-8")
+    with open(log, "a", encoding="utf-8") as fh:
+        fh.write("=== a nudge ===\n")
+        fh.flush()
+        process = subprocess.Popen([sys.executable, str(script)], stdin=subprocess.PIPE, stdout=fh,
+                                   stderr=subprocess.STDOUT, text=True)
+    st = W.load_state(root)
+    st.update(child_pid=process.pid, child_start=A._process_start(process.pid, refresh=True))
+    W.save_state(root, st)
+    size = os.path.getsize(log)
+
+    A.bound_observation_logs(root, W.STATE_DIR, busy=W._logs_written(root))
+
+    assert os.path.getsize(log) >= size                     # left whole while its turn runs
+    process.communicate("\n", timeout=30)
+    A.bound_observation_logs(root, W.STATE_DIR, busy=W._logs_written(root))
+
+    data = open(log, "rb").read()
+    assert len(data) < 2 * 1024 * 1024 and b"\0" not in data
+    assert b"API Error: 529 overloaded" in data[-20000:]
+
 
 def test_a_later_end_moves_the_deferral_that_stands(project):
     root = project["root"]

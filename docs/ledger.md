@@ -142,8 +142,9 @@ Each store has a retention by kind, enforced as it is written rather than on req
 cleanup that waits to be asked is never run. Observation - notices, progress samples, cycle
 records, and the nudge, watchdog, refill and wake logs (the wake's is `escalate-<key>.log`) - keeps the newest
 `retention.observation_kb` and drops the oldest records at a line boundary; the notices ledger
-does this on each write and the watchdog holds the rest every cycle. `ao doctor` names a store
-that is over its bound anyway. What a trim takes from the notices still counts in an alarm's
+does this on each write and the watchdog holds the rest every cycle. A log a turn or a wake the
+watchdog started is still writing is left whole until that process ends, and is bounded in a later
+cycle. `ao doctor` names a store that is over its bound anyway. What a trim takes from the notices still counts in an alarm's
 window: each notice is folded first into `.ao/ledger/notice-times.json`, when each key was last
 recorded and sent, which keeps a week and at most 500 keys ([alarms](alarms.md)).
 

@@ -526,7 +526,11 @@ def _trim_in_place(path, keep):
     """Keep the last `keep` bytes of `path`, from a line boundary, in the same file (JOURNAL-3).
 
     A writer appends to the file's end, so what it writes after the trim follows the kept tail;
-    what it wrote while the tail was read is read again before the file is cut.
+    what it appended while the tail was read is read on from where that read ended (JOURNAL-3-2).
+    No portable cut asks whether the end moved, so a line appended between that last read and the
+    cut is lost, and a writer whose handle does not append - a child's on Windows (CPython
+    gh-86772) - writes on past the new end: the watchdog leaves a log a process it started still
+    writes whole until that process ends.
     """
     try:
         with open(path, "r+b") as fh:
@@ -534,10 +538,7 @@ def _trim_in_place(path, keep):
             fh.seek(max(0, size - keep))
             tail = fh.read()
             tail = tail[tail.find(b"\n") + 1:]
-            end = fh.seek(0, os.SEEK_END)
-            if end > size:
-                fh.seek(size)
-                tail += fh.read()
+            tail += fh.read()                       # appended while the tail was read, read once (JOURNAL-3-2)
             fh.seek(0)
             fh.write(tail)
             fh.truncate()
@@ -556,18 +557,31 @@ def observation_stores(root, state_dir=None):
     return stores + [os.path.join(state_dir, project_file_name(what, key)) for what in OBSERVATION_LOGS]
 
 
-def bound_observation_logs(root, state_dir=None):
+def bound_observation_logs(root, state_dir=None, busy=()):
     """Hold every observation store to its bound; the watchdog does this each cycle (#50).
 
     The notices are folded first: what the bound trims still counts in a window (NOTICE-WINDOW). A
     fold that could not be written leaves them whole, past their bound, where `ao doctor` names
     them (NOTICE-WINDOW-2).
+
+    A log in `busy` is one a process the watchdog started may still write, and is left whole until
+    that process ends; on Windows a log is replaced, never cut under a handle that does not append,
+    and one another process holds stays over its bound this cycle while the rest are bounded
+    (JOURNAL-3-2).
     """
     limit = settings.get(load_config(root), "retention.observation_kb")
     notices = os.path.join(root, ".ao", "ledger", "notices.jsonl") if not fold_notice_times(root) else None
-    # A log a started process may still write is trimmed in the file it holds (JOURNAL-3).
-    return [path for path in observation_stores(root, state_dir)
-            if path != notices and bound_store(path, limit, in_place=path.endswith(".log"))]
+    bounded = []
+    for path in observation_stores(root, state_dir):
+        if path == notices or path in busy:
+            continue
+        try:
+            # Elsewhere a log a started process may still write is trimmed in the file it holds (JOURNAL-3).
+            if bound_store(path, limit, in_place=path.endswith(".log") and os.name != "nt"):
+                bounded.append(path)
+        except OSError:
+            continue
+    return bounded
 
 
 def stores_over_bound(root, cfg, state_dir=None):
