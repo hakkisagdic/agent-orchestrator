@@ -984,6 +984,16 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, can
         if pinned:
             print(f"{C['dim']}{label} names no {' or '.join(part for part in pinned if part.startswith('-'))}; "
                   f"ao appends {' '.join(pinned)}, as its adapter pins for a reviewer{C['reset']}")
+        # A reviewer must not be able to write: a route whose command names a wider mode than its adapter
+        # pins, or is granted every tool, is refused here as the hunter and an ACP command are, not only
+        # named by `ao doctor` (REVIEWER-REACH).
+        from . import allowlist
+        reach = allowlist.reviewer_problems(argv)
+        if reach:
+            return label, None, None, {
+                "ok": False, "out": "", "reason": "a reviewer must not be able to write: " + "; ".join(reach),
+                "returncode": None, "kind": "configuration-error", "retryable": False,
+            }
     declared_binary = str(argv[0])
     try:
         exe, version = _reviewer_resolve_binary(root, argv[0])

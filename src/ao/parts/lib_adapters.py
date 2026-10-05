@@ -583,13 +583,23 @@ def pin_conflicts(argv, role, adapter=None):
     A comma-separated list that names no more than the pinned list is narrower, and no conflict.
     """
     out = []
+    args = [str(arg) for arg in argv or []]
     for flag, value in role_pin(argv, role, adapter):
-        named, given = _named(argv, flag)
-        if not named or value is None or given == value:
+        if value is None:
             continue
-        if given is not None and "," in value and set(filter(None, given.split(","))) <= set(value.split(",")):
-            continue
-        out.append(f"it runs with {flag} {given if given is not None else '(no value)'}, where ao pins {value}")
+        # Every occurrence is asked: a harness takes the last of two, or refuses them, and the first said nothing.
+        for at, arg in enumerate(args):
+            if arg == flag:
+                given = args[at + 1] if at + 1 < len(args) and not args[at + 1].startswith("-") else None
+            elif arg.startswith(flag + "="):
+                given = arg.split("=", 1)[1]
+            else:
+                continue
+            if given == value:
+                continue
+            if given is not None and "," in value and set(filter(None, given.split(","))) <= set(value.split(",")):
+                continue
+            out.append(f"it runs with {flag} {given if given is not None else '(no value)'}, where ao pins {value}")
     return out
 
 

@@ -356,6 +356,11 @@ def reviewer_problems(argv):
     # adapter's to declare (`options.mcp_isolation`, #76); so is the mode it runs in (GRANTS-PINNED).
     from . import lib as A
     found.extend(A.pin_conflicts(args, "reviewer"))
+    pinned = {flag for flag, _ in A.role_pin(args, "reviewer")}
+    for argument in A.bypass_arguments(args):
+        flag = argument.split(" ", 1)[0].split("=", 1)[0]
+        if argument not in GRANT_ALL and flag not in pinned:
+            found.append(f"it carries {argument}, which approves for it, sandboxes nothing or checks no permission")
     program = os.path.basename(args[0]).lower().split(".")[0]
     for adapter in A.package_adapters().values():
         if program not in A.adapter_binaries(adapter):

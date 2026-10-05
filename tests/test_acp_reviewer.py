@@ -170,7 +170,7 @@ def test_the_transport_decides_whether_a_route_answers_through_acp(project, monk
     _, _, _, attempt = cli._reviewer_route_invocation(root, route, "review this", 60, False, route)
     assert attempt["ok"] and through == [(["/agents/qodercli", "--acp"], "qoder")] and len(spawned) == 1
 
-    claude = {"id": "claude-reviewer", "adapter": "claude-code", "argv": ["claude", "-p", "{prompt}"]}
+    claude = {"id": "claude-reviewer", "adapter": "claude-code", "argv": ["claude", "-p", "{prompt}", "--strict-mcp-config"]}
     cli._reviewer_route_invocation(root, claude, "review this", 60, False, claude)
     assert len(spawned) == 2
     assert "claude-reviewer is spawned, not run through ACP: adapter claude-code declares no ACP command" \

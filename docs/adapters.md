@@ -45,7 +45,10 @@ writing argv by hand. A hand-written reviewer argv still works and stays the exc
 `ao adapters` shows which adapters may review, and `ao doctor` reports a configured reviewer
 whose adapter cannot deny tools. Whatever composed a route, it runs with the flags its adapter pins
 for a reviewer (below): `claude-code`'s `trust_none` carries `--tools Read,Grep,Glob` and
-`--permission-mode dontAsk`, so no setting of the person's widens it.
+`--permission-mode dontAsk`, so no setting of the person's widens it. A route whose own command
+could still write - a wider mode than its adapter pins, every tool granted, a flag that approves
+for it, or MCP servers its adapter isolates - is refused where a review starts it, as the bug
+hunter and an ACP command are, not only named by `ao doctor`.
 
 A reviewer's verdict is read only where it stands at the start of a line. `kiro-cli`'s text output
 runs a turn's messages together where a tool call came between them, so a verdict written after a
