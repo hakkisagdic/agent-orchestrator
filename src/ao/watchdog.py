@@ -542,12 +542,24 @@ def _architect_step_under_way(root):
             return True                    # started, or cut off starting: the lease says how long to believe it
         if _step_process_alive(pid, start):
             return True
-    return False
+    # Past its lease a step's process still holds while it is provably the one recorded: a long architect turn
+    # cut off before it was registered is no record's but the journal's.
+    try:
+        steps = J.running(A.project_file(root, "journal"), "architect")
+    except Exception:
+        return False
+    return any(_step_process_proven(pid, start) for _, pid, start in steps)
 
 
 def _step_process_alive(pid, start):
     """Whether the process a step started still runs: its pid alive and its start the one recorded."""
     return bool(pid) and A._pid_alive(pid) and (start is None or A._process_start(pid) in (None, start))
+
+
+def _step_process_proven(pid, start):
+    """Whether the process a step started still runs, its start recorded and read again the same: past a lease
+    an unreadable start proves nothing, and a reused pid never holds."""
+    return bool(pid) and start is not None and A._pid_alive(pid) and A._process_start(pid) == start
 
 
 def _close_deferred_done(root, st):
@@ -582,12 +594,37 @@ def _claim_step(root, step):
     path = A.project_file(root, "journal")
     try:
         current = J.step(path, step)
-        if current and current["state"] == "started" and not _step_process_alive(current["pid"], current["start"]):
-            J.finished(path, step, "ended")
+        if current and current["state"] == "started":
+            if _step_process_proven(current["pid"], current["start"]):
+                return False                       # its process still runs: it holds its key past its lease
+            if not _step_process_alive(current["pid"], current["start"]):
+                J.finished(path, step, "ended")
         return J.claim(path, step, "architect", WAKE_LEASE)
     except Exception as exc:
         print(f"the journal could not be read ({type(exc).__name__}); starting {step} on the process scan alone")
+        # Failing open is meant - a broken journal must not stop every wake - and a person is told that two
+        # wakes are now kept apart by the process scan alone (JOURNAL-2-2).
+        notify(f"{A.project_key(root)}: the watchdog's journal cannot be written",
+               f"{type(exc).__name__}: {exc}. Wakes and refills start on the process scan alone until it can.",
+               root, key="journal-unwritable", window=6 * 3600, audience="human")
         return True
+
+
+def _adopt_started_steps(root):
+    """Register the architect a cut-off cycle started and never registered: the journal holds its pid and start.
+
+    Unregistered, it was no helper - the implementer's checks counted it as a turn in this tree and reaped it
+    as a hung one - and past its lease a second wake started beside it (JOURNAL-2).
+    """
+    try:
+        steps = J.running(A.project_file(root, "journal"), "architect")
+    except Exception:
+        return
+    helpers = A.helper_pids(root, "architect")
+    for _, pid, start in steps:
+        if pid not in helpers and _step_process_proven(pid, start):
+            A.helper_register(root, pid, "architect")
+            print(f"the architect pid {pid} a cut-off cycle started is registered now")
 
 
 def _record_start(root, step, pid):
@@ -1126,7 +1163,7 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
             # Claimed before its process starts, under the session and the reports it is handed (JOURNAL-2).
             step = "wake:{}:{}".format(sess or "new", A.hashlib.sha256("\n".join(sorted(pending)).encode(UTF8))
                                        .hexdigest()[:12])
-            if sess and A.session_in_use(sess):
+            if sess and A.session_in_use(sess, arch):
                 print(f"the architect's session {sess} is resumed by a running process already; not waking")
                 return woke
             if not _claim_step(root, step):
@@ -2521,6 +2558,7 @@ def _cycle_impl(args, root):
     size = os.path.getsize(msgs)
     st = load_state(root)
     if not args.dry_run:
+        _adopt_started_steps(root)        # before anything counts writers or decides a wake
         A.reconcile_mail_ledger(root, cfg)  # deleted mail becomes a consumed row
         A.record_progress(root, cfg)      # history of what moved, for the spin check
         _close_deferred_done(root, st)
@@ -2886,7 +2924,7 @@ def _cycle_impl(args, root):
                 return 0
             # As a wake is: claimed before its process starts (JOURNAL-2).
             step = "refill:{}:{}".format(sess or "new", int(time.time() // 3600))
-            if (sess and A.session_in_use(sess)) or not _claim_step(root, step):
+            if (sess and A.session_in_use(sess, arch)) or not _claim_step(root, step):
                 print("queue low, but a refill was started and is not known to have ended; waiting")
                 return 0
             os.makedirs(STATE_DIR, exist_ok=True)

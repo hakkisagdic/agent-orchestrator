@@ -791,3 +791,171 @@ def test_another_cycles_beat_is_not_read_as_catchups_cycle(world, monkeypatch, c
     out = capsys.readouterr().out
     assert "another cycle holds this project" in out and "stays open: no cycle ran" in out
     assert [r["id"] for r in A.deferred_open(world.root)] == [standing["id"]] and _closed(world.root) == []
+
+
+# ---- a started step holds while its process provably runs; only the architect resumes its session (JOURNAL-2-2) --
+
+SID = "0b7c7d3e-5a8e-4a43-9d3f-2f0e5d1c9a11"
+ARCH = {"argv": ["claude", "--resume", "{session}", "-p", "{prompt}"]}
+
+
+def _architect(world, **fields):
+    world.cfg["architect"] = dict(world.cfg["architect"], **fields)
+    stored = {k: v for k, v in world.cfg.items() if k != "root"}
+    with open(os.path.join(world.root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+        json.dump(stored, fh)
+
+
+def test_a_started_step_is_read_whatever_its_lease(tmp_path):
+    from ao import journal as J
+    path = str(tmp_path / "journal.db")
+    assert J.claim(path, "wake:new:abc", "architect", 900, now=1000.0)
+    J.started(path, "wake:new:abc", 4242, 999.5)
+    assert J.under_way(path, "architect", now=1901.0) == []
+    assert J.running(path, "architect") == [("wake:new:abc", 4242, 999.5)]
+    J.finished(path, "wake:new:abc")
+    assert J.running(path, "architect") == []
+
+
+def test_a_wake_cut_off_before_it_registered_holds_past_its_lease_while_its_process_runs(world, monkeypatch):
+    """A sessionless architect cut off before it was registered: neither the helper scan nor `session_in_use` sees
+    it, the journal is all there is, and past its lease a second wake started beside it."""
+    monkeypatch.setattr(A, "_process_start", lambda pid, refresh=False: 1234.5 if pid == 99999 else None)
+    world.transcript_age(900)
+    world.mail("20260916-1200-kiro-to-fable-BLOCKED-queue.md", BLOCKED)
+    register = A.helper_register
+
+    def killed(root, pid, what):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(A, "helper_register", killed)
+    with pytest.raises(KeyboardInterrupt):
+        world.cycle(dry_run=False)
+    (first,) = _architect_wakes(world)
+    world.process(99999, list(first))
+    monkeypatch.setattr(A, "helper_register", register)
+    world.spawned.clear()
+
+    later = time.time() + W.WAKE_LEASE + 60
+    monkeypatch.setattr(time, "time", lambda: later)
+    trace = world.cycle(dry_run=False)
+    assert _architect_wakes(world) == []
+    assert any("an architect wake is already running" in line for line in trace)
+
+    world.procs.pop(99999, None)                          # it ended: the key is released and the wake retried
+    world.cycle(dry_run=False)
+    assert len(_architect_wakes(world)) == 1
+
+
+def test_a_reused_pid_does_not_hold_a_step_past_its_lease(monkeypatch):
+    monkeypatch.setattr(A, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(A, "_process_start", lambda pid, refresh=False: 2000.0)     # another process now
+    assert not W._step_process_proven(4242, 999.5)
+    monkeypatch.setattr(A, "_process_start", lambda pid, refresh=False: None)       # unreadable
+    assert not W._step_process_proven(4242, 999.5)
+    assert not W._step_process_proven(4242, None)                                    # never recorded
+
+
+def test_an_architect_a_cut_off_cycle_started_is_adopted_and_neither_reaped_nor_doubled(world, monkeypatch):
+    monkeypatch.setattr(A, "_process_start", lambda pid, refresh=False: 1234.5 if pid == 99999 else None)
+    world.transcript_age(900)
+    world.mail("20260916-1200-kiro-to-fable-BLOCKED-queue.md", BLOCKED)
+
+    def killed(root, pid, what):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(A, "helper_register", killed)
+    with pytest.raises(KeyboardInterrupt):
+        world.cycle(dry_run=False)
+    (first,) = _architect_wakes(world)
+    world.process(99999, list(first))
+    # the registry as the scenario keeps it: what helper_register writes, helper_pids reads
+    monkeypatch.setattr(A, "helper_register", lambda root, pid, what: world.helper(pid, what))
+    world.spawned.clear()
+
+    later = time.time() + W.WAKE_LEASE + 60
+    monkeypatch.setattr(time, "time", lambda: later)
+    trace = world.cycle(dry_run=False)
+
+    assert _architect_wakes(world) == []
+    assert 99999 in world.procs                                  # not reaped as a hung implementer turn
+    assert any("is registered now" in line for line in trace)
+    assert not any("reaping" in line for line in trace)
+
+
+def test_of_many_processes_opening_a_new_journal_at_once_none_is_refused(tmp_path):
+    """Switching a new journal to WAL answered `database is locked` at once to a second opener, past the busy
+    timeout, and a claim failed as if the journal could not be written."""
+    child = ("import sys, time, json\nsys.path.insert(0, %r)\nfrom ao import journal as J\n"
+             "at = float(sys.argv[1])\nwhile time.time() < at: pass\n"
+             "print(json.dumps(J.claim(sys.argv[2], 'refill:s1:1', 'architect', 900)))\n") % SRC
+    for round_ in range(5):
+        path = str(tmp_path / f"j{round_}.db")
+        at = time.time() + 1.0
+        runs = [subprocess.Popen([sys.executable, "-c", child, str(at), path], stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, text=True) for _ in range(12)]
+        answers = [run.communicate() for run in runs]
+        assert all(run.returncode == 0 for run in runs), [err for _, err in answers if err][:1]
+        assert sorted(json.loads(out) for out, _ in answers) == [False] * 11 + [True]
+
+
+def test_a_journal_that_cannot_be_written_starts_the_step_and_tells_a_person(world, monkeypatch):
+    """Failing open is meant - a broken journal must not stop every wake - but nobody was told the single-owner
+    guarantee was off."""
+    from ao import journal as J
+
+    def unwritable(*args, **kwargs):
+        raise J.sqlite3.OperationalError("disk I/O error")
+    monkeypatch.setattr(J, "claim", unwritable)
+
+    assert W._claim_step(world.root, "wake:new:abc") is True
+
+    assert any(title.endswith("the watchdog's journal cannot be written") and audience == "human"
+               for title, _, audience, _ in world.notices)
+
+
+@pytest.mark.parametrize("argv, hit", [
+    (["claude", "--resume", SID, "-p", "x"], True),
+    (["/opt/x/bin/claude", "--resume", SID], True),
+    (["node", "/opt/claude-code/cli.js", "--resume", SID], True),    # the adapter's process name in the path
+    (["node", "/opt/node_modules/claude/cli.js", "--resume", SID], True),
+    (["node", "/opt/tools/indexer.js", SID], False),                  # a runtime running something else
+    (["grep", "-r", SID, "/srv/x/.claude"], False),
+    (["python3", "worker.py", SID], False),
+    (["jq", "--arg", "s", SID, "."], False),
+    (["tmux", "new-session", "-d", "-s", SID], False),
+    (["docker", "run", "--label=" + SID, "img"], False),
+])
+def test_only_the_architects_harness_resumes_its_session(monkeypatch, argv, hit):
+    from ao import procs
+    monkeypatch.setattr(procs, "all_pids", lambda: [4242])
+    monkeypatch.setattr(procs, "argv", lambda pid: argv if pid == 4242 else None)
+    assert (A.session_in_use(SID, ARCH) == [4242]) is hit
+
+
+def test_an_equals_form_harness_still_counts(monkeypatch):
+    from ao import procs
+    monkeypatch.setattr(procs, "all_pids", lambda: [4242])
+    monkeypatch.setattr(procs, "argv", lambda pid: ["agy", f"--conversation={SID}", "--print=x"])
+    assert A.session_in_use(SID, {"argv": ["agy", "--conversation={session}", "--print={prompt}"]}) == [4242]
+
+
+def test_an_unrelated_process_naming_the_session_does_not_stop_a_wake(world):
+    _architect(world, session="auto", argv=["claude", "--resume", "{session}", "-p", "{prompt}"])
+    world.transcript_age(900)
+    world.mail("20260916-1200-kiro-to-fable-BLOCKED-queue.md", BLOCKED)
+    world.process(4242, ["python3", "worker.py", "sess-1"], cwd="/elsewhere")
+
+    world.cycle(dry_run=False)
+
+    assert len(_architect_wakes(world)) == 1
+
+
+def test_the_architects_own_resume_of_the_session_still_stops_a_wake(world):
+    _architect(world, session="auto", argv=["claude", "--resume", "{session}", "-p", "{prompt}"])
+    world.transcript_age(900)
+    world.mail("20260916-1200-kiro-to-fable-BLOCKED-queue.md", BLOCKED)
+    world.process(4242, ["/agents/claude", "--resume", "sess-1", "-p", "x"], cwd="/elsewhere")
+
+    trace = world.cycle(dry_run=False)
+
+    assert _architect_wakes(world) == []
+    assert any("is resumed by a running process already" in line for line in trace)

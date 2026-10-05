@@ -1324,16 +1324,23 @@ def escaped_cwd_names(cwd):
     return cwd.replace("/", "-").replace(".", "-"), re.sub(r"[^A-Za-z0-9-]", "-", cwd)
 
 
-def session_in_use(session):
-    """Pids whose command line resumes `session`: as an argument of its own, or after `=` (JOURNAL-2)."""
+def session_in_use(session, architect=None):
+    """Pids whose command line resumes `session`: as an argument of its own, or after `=` (JOURNAL-2).
+
+    Only the architect's own harness resumes its session: a `grep`, a `jq --arg` or a tmux named for the id
+    carries it too, and held every wake while it ran.
+    """
     from . import procs
     if not session:
         return []
+    names = _architect_names(architect)
     found = []
     for pid in procs.all_pids():
         if pid == os.getpid():
             continue
         av = procs.argv(pid) or []
+        if names and not _is_configured_agent_process(names, av):
+            continue
         if any(str(arg) == session or str(arg).endswith("=" + session) for arg in av[1:]):
             found.append(pid)
     return found
@@ -1423,6 +1430,19 @@ def discover_architect(cwd):
     best = found[0]
     return {"session": best["session"], "transcript": best["transcript"], "age": int(time.time() - best["mtime"]),
             "adapter": best["adapter"], "sessions": [row["session"] for row in found]}
+
+
+def _architect_names(architect):
+    """The program names the configured architect runs as: its command and that adapter's other names (#76)."""
+    configured = (architect or {}).get("argv") or []
+    command = _program_name(configured[0]) if configured else ""
+    names = {command} if command else set()
+    for ident, adapter in package_adapters().items():
+        known = {_program_name(name) for name in [ident, *adapter_binaries(adapter),
+                                                  *((adapter.get("detect") or {}).get("processes") or [])] if name}
+        if command in known:
+            names.update(known)
+    return names
 
 
 def _architect_process_roots(root, architect=None, helper_only=False):

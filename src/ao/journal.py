@@ -36,7 +36,18 @@ def available():
 def _connect(path):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     connection = sqlite3.connect(path, timeout=10.0, isolation_level=None)
-    connection.execute("PRAGMA journal_mode=WAL")
+    # Switching a new file to WAL answers SQLITE_BUSY at once, past the busy timeout, while another
+    # connection opens it: retried within the same ten seconds.
+    deadline = time.monotonic() + 10.0
+    while True:
+        try:
+            connection.execute("PRAGMA journal_mode=WAL")
+            break
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc) or time.monotonic() >= deadline:
+                connection.close()
+                raise
+            time.sleep(0.01)
     connection.execute("PRAGMA synchronous=FULL")
     for statement in SCHEMA:
         connection.execute(statement)
@@ -97,6 +108,20 @@ def step(path, key):
     finally:
         connection.close()
     return dict(zip(("state", "pid", "start", "lease_until"), row)) if row else None
+
+
+def running(path, kind):
+    """[(key, pid, start)] of the steps of `kind` started with a pid and a start, whatever their lease: a caller
+    that finds the process still the one recorded holds it as under way past its lease."""
+    if sqlite3 is None or not os.path.exists(path):
+        return []
+    connection = _connect(path)
+    try:
+        return [tuple(row) for row in connection.execute(
+            "SELECT key, pid, start FROM steps WHERE kind = ? AND state = 'started' AND pid IS NOT NULL "
+            "AND start IS NOT NULL", (kind,))]
+    finally:
+        connection.close()
 
 
 def under_way(path, kind, now=None):
