@@ -265,32 +265,130 @@ def test_two_writers_of_the_alarm_episodes_lose_neither_ones_raises(project):
 def test_a_sections_journal_one_review_holds_is_not_asked_by_a_second(project, tmp_path):
     from ao import cli
     journal = str(tmp_path / "sections" / "abc.jsonl")
-    sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    src = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
+    holder = subprocess.Popen([sys.executable, "-c", (
+        f"import sys, time; sys.path.insert(0, {src!r}); from ao import cli\n"
+        f"lease = cli._section_lease({journal!r}); print('held', flush=True); time.sleep(60)")],
+        stdout=subprocess.PIPE, text=True)
     try:
-        os.makedirs(os.path.dirname(journal), exist_ok=True)
-        with open(journal + ".lease", "w", encoding="utf-8") as fh:
-            json.dump({"pid": sleeper.pid, "start": A._process_start(sleeper.pid)}, fh)
-
-        assert cli._section_lease(journal) == (None, sleeper.pid)
+        assert holder.stdout.readline().strip() == "held"
+        assert cli._section_lease(journal) is None
     finally:
-        sleeper.kill()
-        sleeper.wait()
+        holder.kill()
+        holder.wait()
 
-    lease, holder = cli._section_lease(journal)             # its holder ended: the lease holds nothing
-    assert lease == journal + ".lease" and holder is None
-    cli._section_lease_release(lease)
-    assert not os.path.exists(lease)
+    lease = cli._section_lease(journal)                     # its holder ended: the lease holds nothing
+    assert lease is not None
+    lease.close()
 
 
 def test_a_review_finds_its_sections_journal_held_and_asks_nothing(project, tmp_path, monkeypatch):
     from tests.test_review_sections import SCENARIOS, _args, _setup
     from ao import cli
     root, cfg, calls = _setup(project, tmp_path, monkeypatch, "- [S1] the claim journal")
-    monkeypatch.setattr(cli, "_section_lease", lambda journal: (None, 4242))
+    monkeypatch.setattr(cli, "_section_lease", lambda journal: None)
 
     assert cli.cmd_review(cfg, _args(SCENARIOS)) == 3
 
     assert not calls.exists() or calls.read_text() == ""
+
+
+def test_an_alarm_change_is_not_written_blind_when_the_store_is_busy(project, monkeypatch):
+    """JOURNAL-7-2: past ten seconds without the store's lock a change was written without it, and the stalled
+    holder's copy then overwrote it; a person's unsnooze lost that way silenced an alarm until its date."""
+    from ao import storage
+    real = storage._exclusive_lock
+    monkeypatch.setattr(storage, "_exclusive_lock",                       # the ten seconds, made short
+                        lambda path, timeout=10.0: real(path, timeout=min(timeout, 0.2)))
+    A.alarm_touch("proj", "old", "orange")
+    A.alarm_snooze("proj", "old", time.time() + 3600, why="waiting on the owner")
+    before = open(A.alarms_path(), "rb").read()
+
+    with real(A.alarms_path() + ".lock", timeout=1):      # a writer that has read the episodes and not yet written
+        ring, episode = A.alarm_touch("proj", "new", "orange")
+        assert ring == "orange" and episode["count"] == 1  # the notice is still decided, from the store as it stands
+        assert open(A.alarms_path(), "rb").read() == before
+        with pytest.raises(storage.LedgerLockTimeout):     # a person's unsnooze is refused, not written blind
+            A.alarm_unsnooze("proj", "old")
+
+    assert "proj:new" not in A.load_alarms()               # left for the next raise, which records it
+    A.alarm_touch("proj", "new", "orange")
+    assert A.load_alarms()["proj:new"]["count"] == 1
+    assert A.alarm_snoozed("proj", "old")
+
+
+def test_a_notice_still_rings_while_the_alarm_store_is_busy(project, monkeypatch):
+    from ao import email, storage, telegram
+    real = storage._exclusive_lock
+    monkeypatch.setattr(storage, "_exclusive_lock", lambda path, timeout=10.0: real(path, timeout=min(timeout, 0.2)))
+    rung = []
+    monkeypatch.setattr(W, "desktop_notify", lambda title, msg, cfg=None: rung.append(title) or True)
+    monkeypatch.setattr(telegram, "send", lambda text, root=None, keyboard=None: rung.append(text) or 1)
+    monkeypatch.setattr(email, "send", lambda subject, body, root=None, opener=None: True)
+
+    with real(A.alarms_path() + ".lock", timeout=1):
+        assert W.notify("proj: disk", "the disk is full", project["root"], key="disk", audience="human") is True
+
+    assert rung and rung[0] == "proj: disk"
+    assert "proj:disk" not in A.load_alarms()               # its record is left for the next raise
+
+
+LEASE_CONTENDER = """
+import os, sys, time
+sys.path.insert(0, {src!r})
+from ao import cli, lib as A
+journal, me, other, gate = sys.argv[1:5]
+real = A._pid_alive
+def judged_after_both_read(pid):          # a lease read as a holder's pid was judged after both reviews read it
+    open(gate + "." + me, "w").close()
+    deadline = time.time() + 10
+    while not os.path.exists(gate + "." + other) and time.time() < deadline:
+        time.sleep(0.01)
+    return real(pid)
+A._pid_alive = judged_after_both_read
+while not os.path.exists(gate):
+    time.sleep(0.005)
+lease = cli._section_lease(journal)       # held while the process keeps it
+print("HOLDS" if lease is not None else "refused", flush=True)
+time.sleep(1.5)                           # asking its sections, the lease held
+"""
+
+
+def test_two_reviews_that_find_a_dead_holder_do_not_both_hold_the_lease(tmp_path):
+    """JOURNAL-7-2: both read a lease whose holder had ended, both replaced it, and both asked and paid."""
+    journal = str(tmp_path / "sections" / "abc.jsonl")
+    os.makedirs(os.path.dirname(journal))
+    ended = subprocess.Popen([sys.executable, "-c", "pass"])
+    ended.wait()
+    with open(journal + ".lease", "w", encoding="utf-8") as fh:            # left by a review that was killed
+        json.dump({"pid": ended.pid, "start": 1}, fh)
+    script = tmp_path / "contender.py"
+    script.write_text(LEASE_CONTENDER.format(src=SRC), encoding="utf-8")
+    gate = str(tmp_path / "go")
+    reviews = [subprocess.Popen([sys.executable, str(script), journal, me, other, gate],
+                                stdout=subprocess.PIPE, text=True)
+               for me, other in (("one", "two"), ("two", "one"))]
+    time.sleep(1.0)
+    open(gate, "w").close()
+    answers = [review.communicate(timeout=60)[0].strip() for review in reviews]
+
+    assert sorted(answers) == ["HOLDS", "refused"]
+
+
+def test_a_review_that_finds_the_lease_held_asks_nothing(project, tmp_path, monkeypatch):
+    import glob
+    from tests.test_review_sections import SCENARIOS, _args, _setup
+    from ao import cli, storage
+    root, cfg, calls = _setup(project, tmp_path, monkeypatch, "- [S1] the claim journal", fail="Scenario 3")
+    assert cli.cmd_review(cfg, _args(SCENARIOS)) == 3                     # cut off at its third section
+    [journal] = glob.glob(os.path.join(root, ".ao", "reviews", "sections", "*.jsonl"))
+    calls.write_text("", encoding="utf-8")
+    monkeypatch.setenv("AO_TEST_FAIL", "")
+
+    with storage._exclusive_lock(journal + ".lease", timeout=1):           # held as a running review holds it
+        assert cli.cmd_review(cfg, _args(SCENARIOS)) == 3
+
+    assert calls.read_text() == ""
 
 
 # ---- what the watchdog starts is claimed before it starts (JOURNAL-2) ----------------------------------------------

@@ -44,24 +44,48 @@ def save_alarms(d):
         pass
 
 
-def _alarm_store_locked(change):
+def _alarm_store_locked(when_busy):
     """Run one read-modify-write of the alarm files under their lock (JOURNAL-7).
 
     Every project's watchdog, its doctor and `ao alarms` share ~/.ao/alarms.json, and each read
-    the file, changed it and wrote it back: two at once lost one's change. Where the lock cannot be
-    had in ten seconds the change is made without it, rather than a notice going unsent.
+    the file, changed it and wrote it back: two at once lost one's change. A change holds the lock
+    for about a millisecond; one that cannot have it in ten seconds stands behind a stalled writer,
+    whose stale copy would overwrite whatever was written past it. Nothing is written without the
+    lock: `when_busy(change, *args, **kwargs)` is what the caller gets instead, and None raises.
     """
+    import contextlib
     import functools
 
-    @functools.wraps(change)
-    def locked(*args, **kwargs):
-        from .storage import LedgerLockTimeout, _exclusive_lock
-        try:
-            with _exclusive_lock(alarms_path() + ".lock", timeout=10):
+    def wrap(change):
+        @functools.wraps(change)
+        def locked(*args, **kwargs):
+            from .storage import LedgerLockTimeout, _exclusive_lock
+            held = contextlib.ExitStack()
+            try:
+                held.enter_context(_exclusive_lock(alarms_path() + ".lock", timeout=10))
+            except LedgerLockTimeout:
+                if when_busy is None:
+                    raise
+                print(f"ao: the alarm store was held past ten seconds; {change.__name__} is left for the "
+                      "next cycle", file=sys.stderr)
+                return when_busy(change, *args, **kwargs)
+            with held:
                 return change(*args, **kwargs)
-        except LedgerLockTimeout:
-            return change(*args, **kwargs)
-    return locked
+        return locked
+    return wrap
+
+
+def _as_preview(change, *args, **kwargs):
+    """A raise reckoned from the episodes as they stand and not written: the notice still goes (JOURNAL-7)."""
+    return change(*args, **dict(kwargs, persist=False))
+
+
+def _left_for_next_cycle(change, *args, **kwargs):
+    return None
+
+
+def _none_expired(change, *args, **kwargs):
+    return []
 
 
 def alarm_snoozes_path():
@@ -81,7 +105,7 @@ def _save_alarm_snoozes(d):
     replace_file_durably(alarm_snoozes_path(), json.dumps(d, indent=1).encode(UTF8))
 
 
-@_alarm_store_locked
+@_alarm_store_locked(None)
 def alarm_snooze(project, key, until, by="human", why=""):
     """Keep one alarm off the human channels until a date; it stays on the record.
 
@@ -97,7 +121,7 @@ def alarm_snooze(project, key, until, by="human", why=""):
     return d[f"{project}:{key}"]
 
 
-@_alarm_store_locked
+@_alarm_store_locked(None)
 def alarm_unsnooze(project, key):
     d = load_alarm_snoozes()
     gone = d.pop(f"{project}:{key}", None)
@@ -114,7 +138,7 @@ def alarm_snoozed(project, key, now=None):
     return None
 
 
-@_alarm_store_locked
+@_alarm_store_locked(_as_preview)
 def alarm_touch(project, key, level, now=None, red_after=ALARM_RED_AFTER, title=None,
                 persist=True, quiet_until=None, evidence=None, what=None):
     """Calculate a raise of `key` at `level`; return (level to ring at, episode).
@@ -171,7 +195,7 @@ def alarm_touch(project, key, level, now=None, red_after=ALARM_RED_AFTER, title=
     return ring, dict(e, news=news)
 
 
-@_alarm_store_locked
+@_alarm_store_locked(_left_for_next_cycle)
 def alarm_mailed(project, key, now=None, what=None):
     d = load_alarms()
     k = f"{project}:{key}"
@@ -183,7 +207,7 @@ def alarm_mailed(project, key, now=None, what=None):
         save_alarms(d)
 
 
-@_alarm_store_locked
+@_alarm_store_locked(_left_for_next_cycle)
 def alarm_rang(project, key, now=None, what=None):
     """Record that the orange channels told this episode, and what they told (NOTICE-NOISE).
 
@@ -200,7 +224,7 @@ def alarm_rang(project, key, now=None, what=None):
         save_alarms(d)
 
 
-@_alarm_store_locked
+@_alarm_store_locked(_left_for_next_cycle)
 def alarm_named(project, key, now=None):
     """Record that a resume notice named a red episode instead of mailing it (RESUME-QUIET).
 
@@ -431,7 +455,7 @@ def heartbeat_age(root):
         return None
 
 
-@_alarm_store_locked
+@_alarm_store_locked(_none_expired)
 def expire_alarms(project, now=None, quiet_for=None):
     """Episodes that went quiet are over; return them once and forget them.
 

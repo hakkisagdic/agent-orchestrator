@@ -1383,39 +1383,19 @@ def _route_key(route):
 
 
 def _section_lease(journal):
-    """(the lease's path, None) when this review may ask the journal's sections, else (None, the pid that asks).
+    """The journal's section lease, held until released or this process ends; None when another review holds it.
 
-    The lease names its holder by pid and start: one whose process has ended, cut off without
-    releasing it, holds nothing (JOURNAL-7).
+    The operating system holds it, as it holds every ledger lock: a holder that has ended, however it
+    ended, holds nothing, and two reviews cannot both come away holding it (JOURNAL-7).
     """
-    path = journal + ".lease"
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    mine = json.dumps({"pid": os.getpid(), "start": A._process_start(os.getpid())}).encode(UTF8)
+    import contextlib
+    from .storage import LedgerLockTimeout, _exclusive_lock
+    lease = contextlib.ExitStack()
     try:
-        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except FileExistsError:
-        try:
-            with open(path, encoding=UTF8) as fh:
-                holder = json.load(fh)
-        except (OSError, ValueError):
-            holder = {}
-        pid = holder.get("pid") if isinstance(holder, dict) else None
-        if pid and pid != os.getpid() and A._pid_alive(pid) \
-                and holder.get("start") in (None, A._process_start(pid)):
-            return None, pid
-        from .storage import replace_file_durably
-        replace_file_durably(path, mine)
-        return path, None
-    with os.fdopen(fd, "wb") as fh:
-        fh.write(mine)
-    return path, None
-
-
-def _section_lease_release(path):
-    try:
-        os.remove(path)
-    except OSError:
-        pass
+        lease.enter_context(_exclusive_lock(journal + ".lease", timeout=0))
+    except LedgerLockTimeout:
+        return None
+    return lease
 
 
 def _section_journal(root, evidence, boundary, sections, chain):
@@ -3359,18 +3339,16 @@ def cmd_review(cfg, args):
             # A review of eight questions is eight bounded calls, resumable one by one (#26). One review asks a
             # journal's sections at a time: two at once both asked the open ones and paid for each (JOURNAL-7).
             journal = _section_journal(root, evidence, boundary, sections, chain)
-            lease, holder = _section_lease(journal)
+            lease = _section_lease(journal)
             if lease is None:
-                print(f"{C['red']}not reviewed{C['reset']}: another review of this candidate is asking its sections "
-                      f"(pid {holder}); what it answers is journalled, and this one would ask it again")
+                print(f"{C['red']}not reviewed{C['reset']}: another review of this candidate is asking its sections; "
+                      "what it answers is journalled, and this one would ask it again")
                 return 3
-            try:
+            with lease:
                 invocation = _invoke_reviewer_sections(
                     root, chain, prompt, sections, journal, _review_timeout(cfg), strict,
                     primary=rv if not strict else None, candidate=diff_bytes, cfg=cfg, tree=review_tree,
                     treeless=treeless)
-            finally:
-                _section_lease_release(lease)
             evidence["sections"] = invocation.get("sections")
         else:
             invocation = _invoke_reviewer_chain(
