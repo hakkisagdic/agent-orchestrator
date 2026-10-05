@@ -623,6 +623,81 @@ def test_a_resume_cut_off_after_its_process_started_is_not_resumed_twice(world, 
     assert _agent_turns(world) == []
 
 
+def _nudge_log(root):
+    return os.path.join(W.STATE_DIR, A.project_file_name("nudge-log", A.project_key(root)))
+
+
+def _past_its_bound(log):
+    with open(log, "ab") as fh:                                     # 2.9 MB, past 1.25 x the 2 MB default
+        fh.write(b"".join(b"line %06d %s\n" % (n, b"x" * 200) for n in range(14000)))
+    return os.path.getsize(log)
+
+
+def _nudge_cut_off_in_its_first_seconds(world, monkeypatch):
+    """A live cycle starts a nudge and is killed in the twelve seconds it waits for the turn to fail; the turn,
+    in a session of its own, runs on."""
+    class Running:
+        pid, returncode = 99999, None
+
+        def poll(self):
+            raise KeyboardInterrupt                                  # Ctrl+C on ao catchup, a bootout, a stop
+    monkeypatch.setattr(W.subprocess, "Popen", lambda argv, **kw: world.spawned.append(argv) or Running())
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(A, "_process_start", lambda pid, refresh=False: "the turn's start")
+    with pytest.raises(KeyboardInterrupt):
+        world.cycle(dry_run=False)
+    (turn,) = _agent_turns(world)
+    world.process(99999, list(turn), cwd=world.root)
+
+
+def test_a_nudge_is_on_record_before_its_first_seconds_are_waited_out(world, monkeypatch):
+    """JOURNAL-3-2 review: child_pid was saved only after the twelve seconds, so a cycle cut off in them left a turn
+    no state named."""
+    world.board("running", "- [B8] slice · since: 2026-09-05 10:00").transcript_age(700)
+
+    _nudge_cut_off_in_its_first_seconds(world, monkeypatch)
+
+    st = W.load_state(world.root)
+    assert (st.get("child_pid"), st.get("child_start")) == (99999, "the turn's start") and W.child_alive(st)
+
+
+def test_the_log_of_a_turn_a_cut_off_cycle_started_is_left_whole(world, monkeypatch):
+    """JOURNAL-3-2 review: the next cycle read the nudge log as no turn's and cut it under the turn writing it."""
+    world.board("running", "- [B8] slice · since: 2026-09-05 10:00").transcript_age(700)
+    _nudge_cut_off_in_its_first_seconds(world, monkeypatch)
+    log = _nudge_log(world.root)
+    size = _past_its_bound(log)
+
+    A.bound_observation_logs(world.root, W.STATE_DIR, busy=W._logs_written(world.root))
+
+    assert os.path.getsize(log) >= size
+
+
+def test_an_unattended_turn_no_state_names_holds_the_nudge_log(world):
+    """Whatever cut the record off - a kill, a crash, a turn past six hours with no start - the process scan that
+    keeps a second turn from starting still finds the turn, and its log waits for it."""
+    world.process(99999, ["/agents/kiro-cli", "chat", "--resume-id", "s1", "--no-interactive", "devam"])
+    os.makedirs(W.STATE_DIR, exist_ok=True)
+    log = _nudge_log(world.root)
+    size = _past_its_bound(log)
+
+    A.bound_observation_logs(world.root, W.STATE_DIR, busy=W._logs_written(world.root))
+
+    assert os.path.getsize(log) >= size
+
+
+def test_a_persons_session_in_the_tree_does_not_hold_the_nudge_log(world):
+    """Only a turn the watchdog could have started holds it: a person's session would hold it all day."""
+    world.process(520, ["/agents/kiro-cli", "chat"], headless=False, tty="ttys001")
+    os.makedirs(W.STATE_DIR, exist_ok=True)
+    log = _nudge_log(world.root)
+    _past_its_bound(log)
+
+    A.bound_observation_logs(world.root, W.STATE_DIR, busy=W._logs_written(world.root))
+
+    assert os.path.getsize(log) <= 2048 * 1024
+
+
 # ---- a deferral closes on the work it waited for, not on a cycle that ran (JOURNAL-4-2) ---------------------------
 
 class _Clock:

@@ -642,13 +642,19 @@ def _logs_written(root):
 
     Every spawn is made inside a cycle, under the cycle's lock, after the logs were bounded: what may write
     one as it is bounded is a turn or a wake an earlier cycle started. Where that cannot be told, none of
-    the three is trimmed this cycle.
+    the three is trimmed this cycle. A turn is the one the state names, or any unattended turn in this tree:
+    a cycle cut off between starting a turn and recording it left one no state names, which the process
+    scan that keeps a second turn from starting beside it still finds (JOURNAL-3-3).
     """
     key = A.project_key(root)
     log = lambda what: os.path.join(STATE_DIR, A.project_file_name(what, key))     # noqa: E731
     try:
-        busy = {log("nudge-log")} if child_alive(load_state(root)) else set()
-        if arch_alive(root, A.load_config(root).get("architect") or {}):
+        cfg = A.load_config(root)
+        impl = cfg.get("implementer") or {}
+        turn = child_alive(load_state(root)) or bool(
+            impl and A.agent_pids(root, A.load_adapter(impl.get("adapter", ""), root), headless_only=True))
+        busy = {log("nudge-log")} if turn else set()
+        if arch_alive(root, cfg.get("architect") or {}):
             busy |= {log("escalate-log"), log("refill-log")}
         return busy
     except Exception:
@@ -3172,6 +3178,15 @@ def _cycle_impl(args, root):
                                     start_new_session=True)
         finally:
             A.release_prompt(given)
+    # The turn is on record before its first seconds are waited out: a cycle cut off in them left a turn
+    # running in a session of its own that no state named, and the next cycle cut the log it still wrote
+    # (JOURNAL-3-3).
+    try:
+        child_start = A._process_start(proc.pid, refresh=True)
+    except Exception:
+        child_start = None
+    st.update(child_pid=proc.pid, child_start=child_start, last_nudge=time.time())
+    save_state(root, st)
 
     # Give it a moment to fail. A healthy turn runs for minutes; anything that
     # exits within seconds died rather than started.
@@ -3183,10 +3198,6 @@ def _cycle_impl(args, root):
             break
 
     nudged_fp = A.work_fingerprint(root)
-    try:
-        child_start = A._process_start(proc.pid, refresh=True)
-    except Exception:
-        child_start = None
     st.update(attempts=st.get("attempts", 0) + 1, last_nudge=time.time(),
               last_size=size, child_pid=proc.pid, child_start=child_start,
               last_fingerprint=nudged_fp,
