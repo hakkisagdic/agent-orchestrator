@@ -2671,6 +2671,10 @@ def _is_agent_process(pid, names, argv=None):
     return False
 
 
+# Programs that run another program an agent is: its identity is the program they run (JOURNAL-2-3).
+AGENT_RUNTIMES = frozenset({"node", "bun", "deno", "python", "python3"})
+
+
 def _is_configured_agent_process(names, argv):
     """Exact configured launcher or runtime-package identity for one agent role.
 
@@ -2683,8 +2687,7 @@ def _is_configured_agent_process(names, argv):
     wanted = {_program_name(name) for name in names if name}
     if _program_name(argv[0]) in wanted:
         return True
-    runtimes = {"node", "bun", "deno", "python", "python3"}
-    if _program_name(argv[0]) not in runtimes:
+    if _program_name(argv[0]) not in AGENT_RUNTIMES:
         return False
     for token in argv[:3]:
         components = {

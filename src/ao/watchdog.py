@@ -605,10 +605,14 @@ def _claim_step(root, step):
     except Exception as exc:
         print(f"the journal could not be read ({type(exc).__name__}); starting {step} on the process scan alone")
         # Failing open is meant - a broken journal must not stop every wake - and a person is told that two
-        # wakes are now kept apart by the process scan alone (JOURNAL-2-2).
-        notify(f"{A.project_key(root)}: the watchdog's journal cannot be written",
-               f"{type(exc).__name__}: {exc}. Wakes and refills start on the process scan alone until it can.",
-               root, key="journal-unwritable", window=6 * 3600, audience="human")
+        # wakes are now kept apart by the process scan alone (JOURNAL-2-2), unless the telling fails too: the step
+        # starts whatever the alarm does (JOURNAL-2-3).
+        try:
+            notify(f"{A.project_key(root)}: the watchdog's journal cannot be written",
+                   f"{type(exc).__name__}: {exc}. Wakes and refills start on the process scan alone until it can.",
+                   root, key="journal-unwritable", window=6 * 3600, audience="human")
+        except Exception as told:
+            print(f"the journal's alarm could not be raised ({type(told).__name__})")
         return True
 
 

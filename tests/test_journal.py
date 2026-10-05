@@ -1102,3 +1102,32 @@ def test_a_deferral_catchups_cycle_closes_is_reported_and_counted(project, monke
     out = capsys.readouterr().out.replace("\x1b[32m", "").replace("\x1b[0m", "")
     assert A.deferred_open(root) == [] and _closed(root) == [(deferred["id"], "woken")]
     assert "deferred wake (architect quota)" in out and ": done" in out and "catchup handled 1 item(s)" in out
+
+
+# ---- the journal fails open whatever the alarm does; a runtime's architect is the program it runs (JOURNAL-2-3) ----
+
+def test_a_journal_that_cannot_be_written_starts_the_step_even_where_its_alarm_cannot_ring(world, monkeypatch):
+    """Failing open is meant, and it hung on the alarm: a notify that raised made the claim raise with it."""
+    from ao import journal as J
+
+    def unwritable(*args, **kwargs):
+        raise J.sqlite3.OperationalError("disk I/O error")
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("the alarm store is unreadable")
+    monkeypatch.setattr(J, "claim", unwritable)
+    monkeypatch.setattr(W, "notify", broken)
+
+    assert W._claim_step(world.root, "wake:new:abc") is True
+
+
+def test_an_architect_a_runtime_runs_is_known_by_the_program_it_runs(monkeypatch):
+    """`node` was the identity of an architect run as `node /opt/claude-code/cli.js`, and any node process naming the
+    session held every wake."""
+    from ao import procs
+    arch = {"argv": ["node", "/opt/claude-code/cli.js", "--resume", "{session}", "-p", "{prompt}"]}
+    table = {4242: ["node", "/opt/tools/indexer.js", SID], 4243: ["node", "/opt/claude-code/cli.js", "--resume", SID]}
+    monkeypatch.setattr(procs, "all_pids", lambda: list(table))
+    monkeypatch.setattr(procs, "argv", lambda pid: table.get(pid))
+
+    assert A.session_in_use(SID, arch) == [4243]
