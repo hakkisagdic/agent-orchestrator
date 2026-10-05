@@ -275,7 +275,8 @@ def test_a_signal_that_comes_while_the_reviewer_starts_stops_it_once_ao_holds_it
     with pytest.raises(cli.ReviewRunStopped):
         cli._run_reviewer(project["root"], [sys.executable, "-c", "import time; time.sleep(120)"], 60)
 
-    (proc,) = started
+    proc = started[0]                      # on Windows, stopping it starts taskkill as well
+    assert proc.args[0] == sys.executable
     assert _until(lambda: proc.poll() is not None, 30)
     assert signal.getsignal(signal.SIGTERM) is before
 
@@ -315,7 +316,8 @@ def test_an_acp_session_that_fails_to_start_after_its_agent_did_stops_it_and_hol
     attempt = cli._run_acp_reviewer(project["root"], [sys.executable, "-c", "import time; time.sleep(120)"],
                                     "acp-test", "review this", 60, "acp-test")
 
-    (proc,) = started
+    proc = started[0]                      # on Windows, stopping it starts taskkill as well
+    assert proc.args[0] == sys.executable
     assert attempt["kind"] == "spawn-unknown" and "RuntimeError" in attempt["reason"]
     assert _until(lambda: proc.poll() is not None, 30)
     assert signal.getsignal(signal.SIGTERM) is before

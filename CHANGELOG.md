@@ -102,6 +102,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Under the hood
 
+- Two of the reviewer-orphan tests take the reviewer as the first process started, as on Windows stopping it starts taskkill as well, which they counted as a second reviewer (WINDOWS-TESTS-6).
 - The README's adapter table, in both languages, names each adapter as its adapter declares it, as `ao adapters` lists them: it still named codex and qoder untested and left out twelve adapters, and a test now holds the two to each other (README-ADAPTERS).
 - Tests that Windows runs failed for how they were written, not for what they test: a stand-in that appended in text mode wrote CRLF (WINDOWS-TESTS-3), the API reviewer's end-to-end tests had no home there (WINDOWS-TESTS-4), and a file address built from a Windows path, a url rule written with mixed separators and a git config file holding an unescaped Windows path (WINDOWS-TESTS-5).
 - The pre-push hook runs the tests the pushed commits touch first, then the whole suite in four processes where pytest-xdist (now in the `dev` extra) is installed - `AO_PREPUSH_WORKERS` sets how many, 0 keeps one - so a push waits about 6 minutes rather than half an hour (PREPUSH-PARALLEL).
