@@ -1271,11 +1271,16 @@ def _run_acp_reviewer(root, argv, adapter_id, prompt, timeout, label, fallback=F
           + C["reset"])
     # A call ao refused that the agent ran all the same is no read, whatever its kind - `other`, `fetch`, or
     # none, which ACP reads as other - so it voids the review as a call that changes something does
-    # (ACP-REVIEWER-3). Its id is matched as given: a refused call with an empty id or none passed (ACP-REVIEWER-4).
-    refused_ids = {decision.get("id") for decision in session.decisions if decision.get("decision") != "allow_once"}
-    wrote = sorted({str(call.get("kind") or "other") for call in turn["tool_calls"]
-                    if call.get("status") == "completed"
-                    and (call.get("kind") in allowlist.WRITING_TOOL_KINDS or call.get("id") in refused_ids)})
+    # (ACP-REVIEWER-3). A refused call with an empty id, or none, is tied to no report of it: every call without
+    # an id shares one key, where a later call's report replaces the one that said it ran, and an empty id and none
+    # are two keys. ao cannot see that it did not run, so it is taken to have run (ACP-REVIEWER-5).
+    refusals = [decision for decision in session.decisions if decision.get("decision") != "allow_once"]
+    refused_ids = {decision["id"] for decision in refusals if decision.get("id")}
+    wrote = sorted({str(decision.get("kind") or "other") for decision in refusals if not decision.get("id")}
+                   | {str(kind or "other") for call in turn["tool_calls"]
+                      if call.get("completed") or call.get("status") == "completed"
+                      for kind in (call.get("kinds") or [call.get("kind")])
+                      if kind in allowlist.WRITING_TOOL_KINDS or call.get("id") in refused_ids})
     if wrote:
         _reviewer_terminal_output(text, "")
         return failed("wrote", f"it ran a tool that changes something or that ao refused ({', '.join(wrote)}) "

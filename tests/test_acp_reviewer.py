@@ -52,15 +52,26 @@ while True:
         if turn == "ask":
             ask(session, "read")
             ask(session, "edit")
-        if turn in ("ignored", "ignored-empty"):
-            call = "" if turn == "ignored-empty" else "o"
+        if turn in ("ignored", "ignored-empty", "ignored-empty-overwritten", "ignored-unnamed"):
+            call = "o" if turn == "ignored" else ""
             say({"jsonrpc": "2.0", "id": "perm-o", "method": "session/request_permission",
                  "params": {"sessionId": session, "toolCall": {"toolCallId": call, "title": "o", "kind": "other"},
                             "options": [{"optionId": "once", "name": "Allow", "kind": "allow_once"},
                                         {"optionId": "no", "name": "Reject", "kind": "reject_once"}]}})
             receive()
-            update(session, {"sessionUpdate": "tool_call", "toolCallId": call, "title": "o", "kind": "other",
-                             "status": "completed"})
+            ran = {"sessionUpdate": "tool_call", "toolCallId": call, "title": "o", "kind": "other", "status": "completed"}
+            if turn == "ignored-unnamed":
+                del ran["toolCallId"]                   # the run is reported with no id, where it was refused under ""
+            update(session, ran)
+            if turn == "ignored-empty-overwritten":
+                # A read ao lets run, under the same empty id, that fails: its report replaces the one of the run.
+                say({"jsonrpc": "2.0", "id": "perm-r", "method": "session/request_permission",
+                     "params": {"sessionId": session, "toolCall": {"toolCallId": call, "title": "r", "kind": "read"},
+                                "options": [{"optionId": "once", "name": "Allow", "kind": "allow_once"},
+                                            {"optionId": "no", "name": "Reject", "kind": "reject_once"}]}})
+                receive()
+                update(session, {"sessionUpdate": "tool_call", "toolCallId": call, "title": "r", "kind": "read",
+                                 "status": "failed"})
         if turn == "wrote":
             update(session, {"sessionUpdate": "tool_call", "toolCallId": "w", "title": "Edit a.py", "kind": "edit",
                              "status": "completed"})
@@ -137,6 +148,16 @@ def test_a_refused_call_with_an_empty_id_that_ran_is_no_review_either(project, m
     assert not attempt["ok"] and attempt["kind"] == "wrote" and "(other)" in attempt["reason"]
 
 
+def test_a_refused_call_without_an_id_is_taken_to_have_run_whatever_is_reported_after_it(project, monkeypatch):
+    """ACP-REVIEWER-5: a refused call without an id was matched by that id, so a later call's report under the same
+    empty id replaced the one that said it ran, and a run reported with no id at all did not match the empty one."""
+    overwritten = _review(project, monkeypatch, "ignored-empty-overwritten")
+    unnamed = _review(project, monkeypatch, "ignored-unnamed")
+
+    for attempt in (overwritten, unnamed):
+        assert not attempt["ok"] and attempt["kind"] == "wrote" and "(other)" in attempt["reason"], attempt
+
+
 def test_a_turn_past_its_time_is_cancelled_and_is_a_timeout(project, monkeypatch):
     attempt = _review(project, monkeypatch, "slow", timeout=3)
 
@@ -201,3 +222,105 @@ def test_a_review_through_acp_records_its_transport(project):
     assert spawned == {} and cli._acp_review_lines(spawned) == []
     assert cli._acp_review_lines(evidence) == ["- transport: `acp`  adapter: `qoder`  agent: `fake 1.0`"]
     assert S.default("review.transport") == "spawn"
+
+
+# ---- a later report under the same id takes back neither a kind nor a completion (ACP-REVIEWER-5) ---------------
+
+import pytest  # noqa: E402
+
+# A scripted agent: AO_TEST_STEPS lists its steps, each a permission it asks for and waits on ({"ask": toolCall}) or
+# a session update it sends ({"report": update}); then it answers APPROVED and ends its turn.
+STEPS_AGENT = r"""
+import json, os, sys
+steps = json.loads(os.environ["AO_TEST_STEPS"])
+
+def say(message):
+    print(json.dumps(message), flush=True)
+
+def receive():
+    line = sys.stdin.readline()
+    if not line:
+        sys.exit(0)
+    return json.loads(line)
+
+while True:
+    message = receive()
+    method, mid = message.get("method"), message.get("id")
+    if method == "initialize":
+        say({"jsonrpc": "2.0", "id": mid, "result": {"protocolVersion": 1, "agentCapabilities": {},
+                                                     "agentInfo": {"name": "fake-reviewer", "version": "1.0"}}})
+    elif method == "session/new":
+        say({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "sess-1"}})
+    elif method == "session/prompt":
+        session = message["params"]["sessionId"]
+        for n, step in enumerate(steps):
+            if "ask" in step:
+                say({"jsonrpc": "2.0", "id": "perm-%d" % n, "method": "session/request_permission",
+                     "params": {"sessionId": session, "toolCall": step["ask"],
+                                "options": [{"optionId": "once", "name": "Allow", "kind": "allow_once"},
+                                            {"optionId": "no", "name": "Reject", "kind": "reject_once"}]}})
+                receive()
+            else:
+                say({"jsonrpc": "2.0", "method": "session/update",
+                     "params": {"sessionId": session, "update": step["report"]}})
+        say({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": session, "update": {
+            "sessionUpdate": "agent_message_chunk",
+            "content": {"type": "text", "text": "VERDICT: APPROVED\nBLOCKER: 0\nHIGH: 0\nMEDIUM: 0\nLOW: 0\n"}}}})
+        say({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
+"""
+ABSENT = object()
+
+
+def _call(kind, call_id, status=None, variant="tool_call"):
+    body = {"sessionUpdate": variant, "title": kind or "t"}
+    if kind is not None:
+        body["kind"] = kind
+    if call_id is not ABSENT:
+        body["toolCallId"] = call_id
+    if status:
+        body["status"] = status
+    return body
+
+
+def _ask(kind, call_id):
+    body = {"title": kind, "kind": kind}
+    if call_id is not ABSENT:
+        body["toolCallId"] = call_id
+    return {"ask": body}
+
+
+def _rep(*args, **kw):
+    return {"report": _call(*args, **kw)}
+
+
+RAN_ALL_THE_SAME = {
+    "refused under an empty id, run under it": [_ask("other", ""), _rep("other", "", "completed")],
+    "then a read let run under that id fails": [
+        _ask("other", ""), _rep("other", "", "completed"), _ask("read", ""), _rep("read", "", "failed")],
+    "refused under an empty id, run with none": [_ask("other", ""), _rep("other", ABSENT, "completed")],
+    "refused with no id, run under an empty one": [_ask("other", ABSENT), _rep("other", "", "completed")],
+    "refused and run with no id": [_ask("other", ABSENT), _rep("other", ABSENT, "completed")],
+    "refused and run with no id, then a read fails": [
+        _ask("other", ABSENT), _rep("other", ABSENT, "completed"), _ask("read", ABSENT), _rep("read", ABSENT, "failed")],
+    "refused and run under an id, then reported failed": [
+        _ask("other", "x"), _rep("other", "x", "completed"), _rep(None, "x", "failed", variant="tool_call_update")],
+    "an edit run unasked, then reported a failed read": [
+        _rep("edit", "w", "completed"), _rep("read", "w", "failed", variant="tool_call_update")],
+    "an edit run unasked under an empty id, then a read fails": [
+        _rep("edit", "", "completed"), _ask("read", ""), _rep("read", "", "failed")],
+    "an edit pending, a read completed under its id, then the edit's completion": [
+        _rep("edit", "z", "pending"), _ask("read", "z"), _rep("read", "z", "completed"),
+        _rep(None, "z", "completed", variant="tool_call_update")],
+}
+
+
+@pytest.mark.parametrize("name", list(RAN_ALL_THE_SAME))
+def test_a_review_whose_agent_ran_what_it_should_not_is_not_accepted(project, monkeypatch, name):
+    """A call's record kept only its last report: a later report under the same id - its own, or another call's that
+    shares the id - took back the kind it was run as, or that it completed, and the review was accepted."""
+    monkeypatch.setenv("AO_TEST_STEPS", json.dumps(RAN_ALL_THE_SAME[name]))
+
+    attempt = cli._run_acp_reviewer(project["root"], [sys.executable, "-c", STEPS_AGENT], "qoder", "review this", 30,
+                                    "qoder-reviewer")
+
+    assert not attempt["ok"] and attempt["kind"] == "wrote", (name, attempt)

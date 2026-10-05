@@ -284,6 +284,12 @@ class Session:
                 call_id = update.get("toolCallId")
                 call = self._turn["tool_calls"].setdefault(call_id, {"id": call_id})
                 call.update({key: update[key] for key in ("title", "kind", "status") if key in update})
+                # A later report under the same id - the call's own, or another call's that shares it - takes back
+                # neither a kind it was reported as nor that it completed (ACP-REVIEWER-5).
+                if update.get("kind") is not None and update["kind"] not in call.setdefault("kinds", []):
+                    call["kinds"].append(update["kind"])
+                if update.get("status") == "completed":
+                    call["completed"] = True
             return
         if "id" not in message:
             return                                          # another notification: nothing to do

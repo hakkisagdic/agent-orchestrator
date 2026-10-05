@@ -413,8 +413,9 @@ not answer within `--timeout` seconds, or ends first, is said not to, and the co
 *In ao since slice ACP-CLIENT: `ao.acp.Session`, which holds one session with a harness and runs one prompt
 turn in it. `ao review` is the first command to drive a harness through it, where a project sets
 `review.transport` to `acp` (ACP-REVIEWER, below).* The turn's
-answer is the agent's message chunks joined in the order they came, and its tool calls are kept with their
-last status. Each `session/request_permission` is decided by a policy the caller gives, which picks an option
+answer is the agent's message chunks joined in the order they came, with a line break where a tool call
+fell between two, and its tool calls are kept with their last status, every kind they were reported as, and
+whether any report said they completed. Each `session/request_permission` is decided by a policy the caller gives, which picks an option
 the agent offered; the default allows nothing, and a policy that fails or names no offered option allows
 nothing either, answering with the agent's reject option or, where it offers none, `cancelled`. Every
 decision is kept with the tool call it was about. A request for a client method ao does not provide - files,
@@ -437,7 +438,8 @@ mode - is refused; an option that allows a tool always is never picked, since it
 rule in the harness's own settings. What a harness runs without asking is its own, so a turn in which a
 tool of kind `edit`, `delete`, `move` or `execute` is seen to have completed is no review, whatever it
 answered, and neither is one in which a call ao refused is seen to have completed, whatever its kind
-(ACP-REVIEWER-3). The whole exchange has `review_timeout`: a turn past it is cancelled and is a timeout, as a
+(ACP-REVIEWER-3). A later report under the same id takes back neither, and a refused call without an id,
+which no report can be tied to, is taken to have run (ACP-REVIEWER-5). The whole exchange has `review_timeout`: a turn past it is cancelled and is a timeout, as a
 spawned reviewer killed at its timeout is. A route whose adapter declares no ACP command, or whose adapter
 may not review (no `options.trust_none`), and a route that names a model, which the declared command
 cannot carry, are spawned as before, each with a line saying why; so is a tool reviewer. What else a

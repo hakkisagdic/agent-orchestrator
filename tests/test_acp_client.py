@@ -113,7 +113,8 @@ def test_a_permission_is_rejected_by_default_and_the_tool_call_is_kept(agent, tm
 
     result, decisions = _turn(argv, tmp_path, monkeypatch, "tool")
 
-    assert result["tool_calls"] == [{"id": "t1", "title": "Run git commit", "kind": "execute", "status": "failed"}]
+    assert result["tool_calls"] == [{"id": "t1", "title": "Run git commit", "kind": "execute", "status": "failed",
+                                     "kinds": ["execute"]}]
     assert decisions == [{"id": "t1", "tool": "Run git commit", "kind": "execute", "decision": "reject_once"}]
     replies = [m for m in sent() if m.get("id") == "perm-1"]
     assert replies == [{"jsonrpc": "2.0", "id": "perm-1", "result": {"outcome": {"outcome": "selected",
