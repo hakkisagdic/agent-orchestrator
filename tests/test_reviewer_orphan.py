@@ -253,3 +253,43 @@ def test_a_review_in_the_foreground_stopped_by_a_signal_stops_its_reviewer(proje
         assert run.returncode != 0
     finally:
         _stop_leftovers(reviewer, run.pid if run.poll() is None else None)
+
+
+def _signalled_while_starting(started, real):
+    """`real`, a reviewer's start, with the stop signal's handler run after the child is made and before the start
+    returns, as Python runs it when the signal arrives there."""
+    def start(*args, **kw):
+        made = real(*args, **kw)
+        started.append(made)
+        signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+        return made
+    return start
+
+
+def test_a_signal_that_comes_while_the_reviewer_starts_stops_it_once_ao_holds_it(project, monkeypatch):
+    """REVIEWER-ORPHAN-4: a stop raised inside the reviewer's start, after its child was made, escaped before ao
+    held the child, and the reviewer - leading a session of its own - worked on for nobody."""
+    started, before = [], signal.getsignal(signal.SIGTERM)
+    monkeypatch.setattr(cli.subprocess, "Popen", _signalled_while_starting(started, cli.subprocess.Popen))
+
+    with pytest.raises(cli.ReviewRunStopped):
+        cli._run_reviewer(project["root"], [sys.executable, "-c", "import time; time.sleep(120)"], 60)
+
+    (proc,) = started
+    assert _until(lambda: proc.poll() is not None, 30)
+    assert signal.getsignal(signal.SIGTERM) is before
+
+
+def test_a_signal_that_comes_while_an_acp_reviewer_starts_stops_it_once_ao_holds_it(project, monkeypatch):
+    """REVIEWER-ORPHAN-4: the same, for a reviewer ao reaches through ACP."""
+    from ao import acp
+    started, before = [], signal.getsignal(signal.SIGTERM)
+    monkeypatch.setattr(acp, "Session", _signalled_while_starting(started, acp.Session))
+
+    with pytest.raises(cli.ReviewRunStopped):
+        cli._run_acp_reviewer(project["root"], [sys.executable, "-c", "import time; time.sleep(120)"], "acp-test",
+                              "review this", 60, "acp-test")
+
+    (session,) = started
+    assert _until(lambda: session.proc.poll() is not None, 30)
+    assert signal.getsignal(signal.SIGTERM) is before

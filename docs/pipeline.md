@@ -61,7 +61,9 @@ works, with the process's start, and `ao reviews` says of such a lost run that i
 that `ao review cancel` stops it. `ao review cancel` asks the run first, with SIGTERM; a run that is gone,
 or has not ended ten seconds later, is stopped outright, and the reviewer after it, while that pid is
 still the process the run started. A review in the foreground - `ao review`, and each review
-`ao catchup` starts - stops its reviewer on the same signals (REVIEWER-ORPHAN-3).*
+`ao catchup` starts - stops its reviewer on the same signals (REVIEWER-ORPHAN-3). A signal that comes
+while the reviewer is being started waits until ao holds the reviewer, and stops it then; raised inside
+the start, it left a reviewer that had already begun with nobody to stop it (REVIEWER-ORPHAN-4).*
 
 ```bash
 ao review submit --boundary '…'      # returns R-1788… immediately

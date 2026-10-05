@@ -655,8 +655,9 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
             after.callback(A.release_prompt, given)
             argv, stdin = given["argv"], ({"stdin": given["stdin"]} if given["stdin"] is not None else {})
         # A review in the foreground stopped by a signal stops its reviewer too, as a detached run does: the
-        # reviewer leads a session of its own and hears nothing sent to this process (REVIEWER-ORPHAN-3).
-        handlers_back = _stop_on_signals()
+        # reviewer leads a session of its own and hears nothing sent to this process (REVIEWER-ORPHAN-3). A
+        # signal that comes while it starts waits until ao holds its pid, and stops it then (REVIEWER-ORPHAN-4).
+        handlers_back = _stop_on_signals(held=True)
         try:
             proc = subprocess.Popen(
                 argv, cwd=fresh, env=env,
@@ -666,9 +667,11 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
             )
         except OSError as exc:
             handlers_back()
+            handlers_back.release()
             return _reviewer_os_failure(exc, "could not start")
         except Exception as exc:
             handlers_back()
+            handlers_back.release()
             return {
                 "ok": False, "out": "",
                 "reason": f"could not start ({type(exc).__name__})",
@@ -677,6 +680,7 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
             }
 
         try:
+            handlers_back.release()
             A.helper_register(root, proc.pid, "reviewer")
             _review_reviewer(proc.pid)
             _review_phase("running", f"{label}, pid {proc.pid}")
@@ -1248,12 +1252,13 @@ def _run_acp_reviewer(root, argv, adapter_id, prompt, timeout, label, fallback=F
                   f"unpacked{C['reset']}")
         started = time.monotonic()
         deadline = started + float(timeout)
-        handlers_back = _stop_on_signals()                  # as a spawned reviewer is (REVIEWER-ORPHAN-3)
+        handlers_back = _stop_on_signals(held=True)         # as a spawned reviewer is (REVIEWER-ORPHAN-3, -4)
         try:
             session = acp.Session(argv, fresh, env=_reviewer_environment(fresh),
                                   permission=_acp_reviewer_permission)
         except acp.ProbeError as exc:
             handlers_back()
+            handlers_back.release()
             if isinstance(exc.__cause__, OSError):
                 return _reviewer_os_failure(exc.__cause__, "could not start")
             return failed("spawn-unknown", "could not start (ProbeError)")
@@ -1267,6 +1272,7 @@ def _run_acp_reviewer(root, argv, adapter_id, prompt, timeout, label, fallback=F
         guard = threading.Timer(float(timeout) + REVIEW_KILL_DRAIN_SECONDS, expire)
         guard.daemon = True
         try:
+            handlers_back.release()
             A.helper_register(root, pid, "reviewer")
             _review_reviewer(pid)
             _review_phase("running", f"{label} through ACP, pid {pid}")
@@ -2701,19 +2707,29 @@ class ReviewRunStopped(KeyboardInterrupt):
         self.signum = signum
 
 
-def _stop_on_signals():
+def _stop_on_signals(held=False):
     """Have SIGTERM, SIGHUP and SIGINT stop the detached run as ReviewRunStopped; returns what puts them back.
 
     The first one raises and any after it are let go, so a second signal cannot cut short the
-    stopping of the reviewer that the first one began.
+    stopping of the reviewer that the first one began. `held` keeps the first one waiting until
+    `release()` on what is returned raises it. A reviewer leads a session of its own, and a stop
+    raised while it was being started, before ao held its pid, left it running with nobody to stop
+    it (REVIEWER-ORPHAN-4).
     """
-    fired = []
+    fired, waiting = [], [held]
 
     def stop(signum, frame):
         if fired:
             return
         fired.append(signum)
-        raise ReviewRunStopped(signum)
+        if not waiting[0]:
+            raise ReviewRunStopped(signum)
+
+    def release():
+        if waiting[0]:
+            waiting[0] = False
+            if fired:
+                raise ReviewRunStopped(fired[0])
 
     before = {}
     for name in ("SIGTERM", "SIGHUP", "SIGINT"):
@@ -2731,6 +2747,7 @@ def _stop_on_signals():
                 signal.signal(signum, handler)
             except (OSError, ValueError):
                 pass
+    put_back.release = release
     return put_back
 
 
