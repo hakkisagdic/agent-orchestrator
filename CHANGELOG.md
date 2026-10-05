@@ -61,6 +61,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Security
 
+- The product's own remote includes an origin kept in `~/.gitconfig`, which `git remote get-url` does not know and `git push origin` reaches, where mail to it was pushed; and a refusal names where git would push a target, a pushInsteadOf before an insteadOf (MAIL-SYNC-5).
 - A filter hook argument that is a bare file address naming no root (`file:x/y`) is refused, where ao took it under the project while a URL reader takes it from the root (FILTER-EXCLUSIONS-7).
 - A part is run from the parts folder beside the module that loads it, the folder the move proof reads, where every load ran lib.py's own `parts/`: a module in another folder that split code out passed the proof as a pure move and then failed to import, or silently ran an older part of the same name, and catchup closed its waiver with no reviewer. ao's own modules load the same files as before ([slices.md](docs/slices.md)) (SPLIT-CHECK-4).
 - A filter hook argument that is a file address holding a query, a fragment, a backslash or a tab, CR or LF is refused: programs read such an address differently - Node and Rust's url drop the query and fragment, read `\` as `/` and drop the control characters, and Python's url2pathname kept or dropped them by version - so `filter.toml#/../../..` or `x?/../repo/.ao/filter.toml` was judged outside the project where a program opened the project's file (FILTER-EXCLUSIONS-6).

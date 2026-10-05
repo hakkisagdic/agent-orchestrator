@@ -361,3 +361,29 @@ def test_every_url_origin_pushes_to_is_the_products_own_remote(project, tmp_path
     with pytest.raises(RuntimeError, match="this product's own remote"):
         A.sync_mail(root, cfg)
     assert _mail_refs(mirror) == []
+
+
+def test_an_origin_kept_in_the_global_config_is_the_products_own_remote(project, tmp_path, monkeypatch):
+    """MAIL-SYNC-5: `git remote get-url origin` knows only the repository's own remotes; an origin kept in ~/.gitconfig
+    is still where `git push origin` goes, and the mail went to it."""
+    product = _bare(tmp_path)
+    root, cfg = _store(project, str(product))
+    global_config = tmp_path / "gitconfig"
+    global_config.write_text(f'[remote "origin"]\n\turl = {product}\n', encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
+    _never_pushed(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="this product's own remote"):
+        A.sync_mail(root, cfg)
+
+
+def test_a_refusal_names_where_git_pushes_not_where_it_fetches(project, tmp_path, monkeypatch):
+    """MAIL-SYNC-5: with an insteadOf and a pushInsteadOf on one URL, the refusal named the fetch rewrite, a place git
+    would not push."""
+    root, cfg = _store(project, "mailbox")
+    for key, value in (("url./elsewhere/fetched.insteadOf", "mailbox"), ("url./elsewhere/pushed.pushInsteadOf", "mailbox")):
+        subprocess.run(["git", "config", key, value], cwd=root, check=True)
+    _never_pushed(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="pushed"):
+        A.sync_mail(root, cfg)

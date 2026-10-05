@@ -1043,6 +1043,12 @@ def _git_reads_otherwise(root, url):
     `origin` was pushed to as the remote origin, and a remote kept in ~/.gitconfig, which
     `git remote get-url` does not know, was taken for a directory.
     """
+    entries = _git_config_entries(root, r"^(remote\..+\.[^.]+|url\..+\.pushinsteadof)$")
+    # What git pushes to is said before what it fetches from: a pushInsteadOf wins over an insteadOf when git
+    # pushes, and the refusal named the fetch's rewrite, a place git would not push (MAIL-SYNC-5).
+    for key, value in entries:
+        if key.startswith("url.") and url.startswith(value):
+            return f"git pushes {url} to {key[4:key.rindex('.')]}{url[len(value):]} ({key} = {value})"
     seen = _git_output(root, "ls-remote", "--get-url", url).decode(UTF8, "replace").strip()
 
     def spelled(text):                           # a path git prints with its own separators is the same path
@@ -1050,12 +1056,9 @@ def _git_reads_otherwise(root, url):
         return text.lower() if os.name == "nt" else text
     if spelled(seen) != spelled(url):
         return f"git reads {url} as {seen}"     # a remote of that name, from any config file, or an insteadOf
-    for key, value in _git_config_entries(root, r"^(remote\..+\.[^.]+|url\..+\.pushinsteadof)$"):
-        name = key[key.index(".") + 1:key.rindex(".")]
-        if key.startswith("remote.") and name == url:
+    for key, _ in entries:
+        if key.startswith("remote.") and key[7:key.rindex(".")] == url:
             return f"{url} is also the name of a remote ({key})"
-        if key.startswith("url.") and url.startswith(value):
-            return f"git pushes {url} to {name}{url[len(value):]} ({key} = {value})"
     return None
 
 
@@ -1188,6 +1191,9 @@ def sync_mail(root, cfg):
     # fetches and where it pushes (MAIL-SYNC-3), every URL of each: `git push origin` reaches them all (MAIL-SYNC-4).
     origins = {line.strip() for line in (git_text(root, "remote", "get-url", "--all", "origin").splitlines()
                                          + git_text(root, "remote", "get-url", "--push", "--all", "origin").splitlines())}
+    # `git remote get-url` knows only the repository's own remotes; an origin kept in ~/.gitconfig is still where
+    # `git push origin` goes (MAIL-SYNC-5).
+    origins |= {value.strip() for _, value in _git_config_entries(root, r"^remote\.origin\.(url|pushurl)$")}
     same = any(origin and (target.rstrip("/").removesuffix(".git") == origin.rstrip("/").removesuffix(".git")
                            or _remote_identity(target) is not None and _remote_identity(target) == _remote_identity(origin))
                for origin in origins)
