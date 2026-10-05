@@ -278,6 +278,8 @@ _PATH_WORD = re.compile(r"[/\\]")
 _FILE_WORD = re.compile(r"[\w.-]*\.[A-Za-z]\w*")
 # An address on another host names no file here; a file: URL names the path after it.
 _URL_WORD = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
+# A file address with no authority, `file:/C:/x` or `file:x`, which Node and Rust read as a path (FILTER-EXCLUSIONS-5).
+_FILE_URL_BARE = re.compile(r"file:(?!//)", re.I)
 
 
 def _probe_program(argv, root, programs, search_path):
@@ -304,8 +306,8 @@ def _probe_program(argv, root, programs, search_path):
         return None, f"{found} is a batch file, which only a shell runs"
     for word in [found, *argv[1:]]:
         for piece in {word, word.split("=", 1)[-1]}:
-            url = _URL_WORD.match(piece)
-            if url and piece[:url.end()].lower() != "file://":
+            url = _URL_WORD.match(piece) or _FILE_URL_BARE.match(piece)
+            if url and piece[:url.end()].lower() not in ("file://", "file:"):
                 continue
             if url:
                 # The path a file address names, as a program opening it reads it: percent-decoded, and on
@@ -332,7 +334,17 @@ def _probe_program(argv, root, programs, search_path):
             # option is read by its program, not opened: its value after `=` is the piece that can name a file.
             looks = not piece.startswith("-") and bool(_PATH_WORD.search(piece) or _FILE_WORD.fullmatch(piece))
             named = os.path.isabs(piece) or os.path.lexists(candidate) or looks
-            if piece and named and _within(candidate, root):
+            if not (piece and named):
+                continue
+            # A path that cannot be followed to an absolute one is not known to lie outside: Windows' realpath of
+            # `f::$DATA`, the stream of a file not yet written, came back relative to the drive (FILTER-EXCLUSIONS-5).
+            try:
+                followed = os.path.realpath(candidate)
+            except (OSError, ValueError):
+                followed = None
+            if not followed or not os.path.isabs(followed):
+                return None, f"{piece} names a path ao cannot follow to where it lies"
+            if _within(candidate, root):
                 return None, f"{piece} lies inside the project, where the agents ao governs can write"
     return [found, *argv[1:]], None
 

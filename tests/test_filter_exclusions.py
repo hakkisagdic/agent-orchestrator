@@ -242,3 +242,26 @@ def test_an_answer_is_read_as_the_harness_reads_it():
     assert answer(err="blocked", code=2) == ("blocks", "is blocked (blocked)")
     assert answer("{not json}") == ("unreadable", "its answer is not JSON")
     assert answer(code=1) == ("unreadable", "it exited 1")
+
+
+def test_a_file_address_without_its_slashes_is_read_as_the_path_it_names(monkeypatch):
+    """FILTER-EXCLUSIONS-5: `file:/C:/x` is an address with no authority, which Node reads as C:\\x; ao took it for a
+    relative path under the project, which on Windows its realpath could not follow, and the hook ran."""
+    _on_windows(monkeypatch)
+    why = A._probe_program(["rtk", "file:/C:/repo/.ao/filter.toml"], "C:\\repo", {"rtk"}, "")[1]
+    assert why and "C:\\repo\\.ao\\filter.toml lies inside the project" in why
+    assert A._probe_program(["rtk", "--config=file:/C:/elsewhere/filter.toml"], "C:\\repo", {"rtk"}, "")[1] is None
+
+
+def test_a_path_that_cannot_be_followed_to_where_it_lies_is_refused(monkeypatch):
+    """FILTER-EXCLUSIONS-5: Windows' realpath of `C:\\repo\\f::$DATA`, the stream of a file not yet written, came back
+    relative to the drive, and `_within` judged it outside the project."""
+    import ntpath
+    _on_windows(monkeypatch)
+    real = ntpath.realpath
+    monkeypatch.setattr(ntpath, "realpath", lambda path, *a, **k: "f::$DATA" if str(path).endswith("::$DATA")
+                        else real(path, *a, **k))
+
+    why = A._probe_program(["rtk", "C:\\repo\\.ao\\f::$DATA"], "C:\\repo", {"rtk"}, "")[1]
+
+    assert why and "cannot follow" in why
