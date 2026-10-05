@@ -181,6 +181,48 @@ def test_a_file_address_is_judged_by_the_path_it_decodes_to(project):
         assert why and "lies inside the project" in why, word
 
 
+def _on_windows(monkeypatch):
+    """ao's path rules as Windows has them, on every platform: ntpath, and the file-address decoder Windows uses."""
+    import ntpath
+    import shutil
+    import urllib.request
+    import warnings
+    from tests.test_windows_followups import _Instead
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        import nturl2path               # urllib.request's url2pathname on Windows; deprecated from 3.14, still there
+    monkeypatch.setattr(A, "os", _Instead(os, name="nt", sep="\\", altsep="/", path=ntpath))
+    monkeypatch.setattr(urllib.request, "url2pathname", nturl2path.url2pathname)
+    monkeypatch.setattr(shutil, "which", lambda name, mode=None, path=None: "C:\\tools\\rtk.exe")
+
+
+def test_a_file_address_whose_drive_colon_is_encoded_names_that_drive(monkeypatch):
+    """FILTER-EXCLUSIONS-4: url2pathname looks for a drive before it decodes, so `/C%3A/x` was `\\C:\\x` to ao,
+    outside C:\\repo, and C:\\x to Node's fileURLToPath and Rust's url, which decode first."""
+    _on_windows(monkeypatch)
+    for word in ("file:///C%3A/repo/.ao/filter.toml", "file:///c%3a/repo/.ao/filter.toml",
+                 "file:///%43%3A/repo/.ao/filter.toml", "--config=file:///C%3A/repo/.ao/filter.toml",
+                 "file://localhost/C%3A/repo/.ao/filter.toml"):
+        why = A._probe_program(["rtk", word], "C:\\repo", {"rtk"}, "")[1]
+        assert why and "lies inside the project" in why, word
+    assert A._probe_program(["rtk", "file:///C%3A/elsewhere/filter.toml"], "C:\\repo", {"rtk"}, "")[1] is None
+
+
+def test_a_file_address_holding_a_nul_is_refused(project):
+    """FILTER-EXCLUSIONS-4: a decoded NUL raised out of realpath (POSIX, Python 3.10 on) and stopped the whole
+    probe; where realpath let it through, `filter.toml%00/../../..` was judged above the project, though a
+    program that ends the path at the NUL opens the project's filter.toml."""
+    import pathlib
+    root = project["root"]
+    allowed = [A._program_name(sys.executable)]
+    uri = pathlib.Path(root, ".ao", "filter.toml").as_uri()
+
+    for word in (uri.replace("filter.toml", "%00filter.toml"), uri + "%00/../../..",
+                 "--config=" + uri + "%00/../../.."):
+        why = A._probe_program([sys.executable, word], root, allowed, os.environ.get("PATH", ""))[1]
+        assert why and "cannot read as a path" in why, word
+
+
 def test_an_answer_is_read_as_the_harness_reads_it():
     def answer(output="", code=0, err=""):
         return A._hook_answer("git diff", code, output.encode(), err.encode())

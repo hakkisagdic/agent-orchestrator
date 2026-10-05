@@ -312,9 +312,19 @@ def _probe_program(argv, root, programs, search_path):
                 # Windows `/C:/x` as `C:\x`; the text after the scheme alone let an encoded project path pass
                 # (FILTER-EXCLUSIONS-3).
                 from urllib.request import url2pathname
+                address = piece[url.end():]
+                if address[:10].lower() == "localhost/":
+                    address = address[9:]           # this machine, as a program reads it: no directory of the path
                 try:
-                    piece = url2pathname(piece[url.end():])
+                    piece = url2pathname(address)
                 except (OSError, ValueError):
+                    return None, f"{word} is a file address ao cannot read as a path"
+                # url2pathname looks for a drive before it decodes: `/C%3A/x` is `\C:\x` to it and C:\x to Node's
+                # fileURLToPath and Rust's url, which decode first. A NUL ends the path a C program opens short of
+                # the one ao would judge (FILTER-EXCLUSIONS-4).
+                if os.name == "nt" and re.match(r"[\\/][A-Za-z]:", piece):
+                    piece = piece[1:]
+                if "\0" in piece:
                     return None, f"{word} is a file address ao cannot read as a path"
             candidate = piece if os.path.isabs(piece) else os.path.join(root, piece)
             # A path inside the project counts whether or not it exists yet: an agent could write it between this
