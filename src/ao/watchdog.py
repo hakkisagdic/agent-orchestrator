@@ -2471,6 +2471,17 @@ def _cycle_impl(args, root):
         state = A.session_state(cfg, "implementer") or {}
         print(f"the implementer's session is {state['how']}: {state['why']}; nothing to watch"
               if not state.get("session") and state.get("why") else "no transcript; nothing to watch")
+        # A slice parked on its session's limit waits for that session: with its transcript gone - a harness
+        # deletes old ones - nothing can resume it, and the cycle ended here before the park's alarm, so it
+        # waited on unseen (JOURNAL-6). The alarm stands and says why.
+        st = load_state(root)
+        park = st.get("quota_park") if isinstance(st.get("quota_park"), dict) else None
+        if park and park.get("items") and not args.dry_run:
+            touch_quota_park(root, st, cfg)
+            notify(f"{A.project_key(root)}: a parked slice cannot resume",
+                   f"{', '.join(park['items'])} waits for the implementer's session, and its transcript is gone, so "
+                   "nothing resumes it when the limit resets - pin a session the store still holds, or move the "
+                   "slice on by hand", root, key="park-transcript-gone", window=6 * 3600, audience="human")
         return 0
 
     # The implementer's silence ends at its last write, a subagent's included: a session whose transcript is

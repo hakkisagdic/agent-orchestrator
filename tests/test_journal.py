@@ -141,6 +141,52 @@ def test_a_wake_started_after_a_deferral_closes_it_in_the_next_cycle(world):
     assert A.deferred_open(world.root) == []
 
 
+# ---- a hold stops what a cycle started as it was placed, and a park whose transcript went is told (JOURNAL-6) -----
+
+def test_a_turn_a_cycle_starts_while_a_hold_is_placed_is_stopped_with_the_rest(project, monkeypatch):
+    """`ao hold` counted the turns and then wrote the hold: a turn the watchdog started between the two read no
+    hold and ran on under it."""
+    from types import SimpleNamespace
+    from ao import cli
+    from ao.storage import _exclusive_lock
+    root = project["root"]
+    running, stopped = [], []
+    monkeypatch.setattr(A, "agent_pids", lambda root_, adapter, headless_only=False: list(running))
+    monkeypatch.setattr(A, "orphans", lambda root_, adapter, table=None: [])
+    monkeypatch.setattr(A, "unplaced_agent_pids", lambda root_, adapter: [])
+    monkeypatch.setattr(A, "kill_turn", lambda pid, sig: stopped.append(pid))
+    monkeypatch.setattr(cli, "_alive", lambda pid: False)
+    lock = os.path.join(W.STATE_DIR, W.CYCLE_LOCK.format(key=A.project_key(root)))
+    holding = threading.Event()
+
+    def cycle():                              # a cycle past its reading of the hold, about to start a turn
+        with _exclusive_lock(lock, timeout=5):
+            holding.set()
+            time.sleep(0.5)
+            running.append(4242)
+    thread = threading.Thread(target=cycle)
+    thread.start()
+    holding.wait(5)
+
+    assert cli.cmd_hold(project, SimpleNamespace(action="hold", by="a person", reason="test", grace=1, note=None)) == 0
+    thread.join()
+
+    assert stopped == [4242] and A.hold_state(root)["stopped"] == [4242]
+
+
+def test_a_park_whose_transcript_is_gone_is_told_and_its_alarm_stands(world):
+    """The cycle ended on a missing transcript before the park's alarm, and the parked slice waited on unseen."""
+    st = W.load_state(world.root)
+    st["quota_park"] = {"items": ["B8"], "at": time.time() - 600, "text": "hit your session limit",
+                        "until": time.time() + 3600, "named": True, "source": "transcript", "since": time.time() - 600}
+    W.save_state(world.root, st)
+    os.remove(world.transcript)
+
+    world.cycle(dry_run=False)
+
+    assert any("a parked slice cannot resume" in title for title, *_ in world.notices)
+
+
 # ---- what the watchdog starts is claimed before it starts (JOURNAL-2) ----------------------------------------------
 
 BLOCKED = "# queue empty\n\n## KARAR GEREKLİ\n"

@@ -1206,11 +1206,22 @@ def cmd_hold(cfg, args):
     # hold — stops unattended turns only. An interactive session has a person in
     # it who did not ask to be stopped; the lock still keeps the watchdog from
     # starting anything new.
-    pids = A.agent_pids(root, adapter, headless_only=True)
+    # The hold stands before anything is counted, and a watchdog cycle already past its own reading of it is
+    # waited for: counted first, a turn a cycle started between the count and the hold read no hold and ran on
+    # under it (JOURNAL-6).
+    from .storage import replace_file_durably, _exclusive_lock
+    from . import watchdog as W
+    hold = {"by": args.by, "reason": args.reason or "manual intervention", "at": int(time.time()), "stopped": []}
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    json.dump({"by": args.by, "reason": args.reason or "manual intervention",
-               "at": int(time.time()), "stopped": pids},
-              open(path, "w", encoding=UTF8), indent=2)
+    replace_file_durably(path, json.dumps(hold, indent=2).encode(UTF8))
+    try:
+        with _exclusive_lock(os.path.join(W.STATE_DIR, W.CYCLE_LOCK.format(key=A.project_key(root))), timeout=60):
+            pass
+    except (OSError, LedgerLockTimeout):
+        print(f"{C['dim']}a watchdog cycle is still running; counting the turns as they stand{C['reset']}")
+    pids = A.agent_pids(root, adapter, headless_only=True)
+    hold["stopped"] = pids
+    replace_file_durably(path, json.dumps(hold, indent=2).encode(UTF8))
     if not pids:
         dead = A.orphans(root, adapter)
         if dead:
