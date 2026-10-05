@@ -57,7 +57,7 @@ machine setting written into a project.
 | `hunter.id` | `hunter` | project | the name a hunt's runs and leads are recorded under |
 | `pr.watch` | `off` | project | on: ao pr watch --once reads this checkout's pull requests through gh and mails the implementer what needs it; off: it reads nothing |
 | `mail.store` | `deletion` | project | deletion: handled mail is deleted; append-only: messages are kept and handling is a record |
-| `mail.sync_repo` | `none` | project | the one private repository the message store is pushed to as refs/mail/<project>; none: not synced |
+| `mail.sync_repo` | `none` | project | the one private repository the message store is pushed to as refs/mail/<project>: a URL, a path or a remote's name, judged by the URL it pushes to; none: not synced |
 | `gates.default_timeout` | `600` | project | seconds a gate may run when its own definition names no timeout |
 | `gates.coverage_min_files` | `5` | project | source files of one toolchain a top-level tree must hold before a gate must exercise it |
 | `watchdog.idle_minutes` | `6.0` | project | minutes of implementer silence before the watchdog acts |

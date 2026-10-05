@@ -794,18 +794,16 @@ def _backup_ref(root, manifest):
 
 
 def remote_is_private(root, remote):
-    """True only when the host says the remote's repository is private; None when it cannot say (#46, #83)."""
-    import shutil
-    url = git_text(root, "remote", "get-url", remote)
-    found = re.search(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?$", url or "")
-    if not found or not shutil.which("gh"):
-        return None
+    """True only when the host says the remote's repository is private; None when it cannot say (#46, #83).
+
+    The remote is judged by the URL `git push` reaches, its pushurl where one is set, and GitHub is asked
+    only about a repository on github.com itself (MAIL-SYNC-3).
+    """
     try:
-        answer = subprocess.run(["gh", "api", f"repos/{found.group(1)}/{found.group(2)}", "--jq", ".private"],
-                                capture_output=True, text=True, encoding=UTF8, errors="replace", timeout=30)
-    except (OSError, subprocess.TimeoutExpired):
+        url = _push_url(root, remote)
+    except RuntimeError:
         return None
-    return {"true": True, "false": False}.get(answer.stdout.strip())
+    return _github_says_private(url)
 
 
 def _backup_path(base, rel):

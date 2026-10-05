@@ -1007,13 +1007,55 @@ def _remote_identity(url):
         found = re.match(r"^(?:[^@]+@)?([^:]+):(.+)$", url)
     if not found:
         return None
-    return found.group(1).lower(), found.group(2).strip("/").removesuffix(".git").lower()
+    return found.group(1).lower(), found.group(2).strip("/").lower().removesuffix(".git")    # .GIT too (MAIL-SYNC-3)
 
 
 def _scp_like(url):
     """Whether git reads `url` as host:path over SSH: a colon before any slash, with or without a user (MAIL-SYNC-2)."""
     colon, slash = url.find(":"), url.find("/")
     return colon > 0 and not 0 <= slash < colon and not (os.name == "nt" and re.match(r"^[A-Za-z]:", url))
+
+
+def _push_url(root, target):
+    """The one URL `git push target` reaches: the push URL of the remote `target` names, else `target` (MAIL-SYNC-3).
+
+    git takes a configured remote's name before a directory of that name, and pushes to its pushurl
+    where one is set: `origin` was judged as a directory - private, no host asked, never compared with
+    the product's remote - and `git push origin` took the mail to the product. A name is judged, read
+    and pushed as the URL it names. A word that begins with `-` is an option to git, not a repository:
+    `--upload-pack=<command>` ran the command on every `ao doctor`, and it is refused before git sees it.
+    """
+    if str(target or "").startswith("-"):
+        raise RuntimeError(f"{target!r} is an option to git, not a repository")
+    try:
+        urls = _git_output(root, "remote", "get-url", "--push", "--all", target).decode(UTF8, "replace")
+    except RuntimeError:
+        return target                            # no remote of that name: git reads it as a URL or a path
+    urls = [url.strip() for url in urls.splitlines() if url.strip()]
+    if len(urls) != 1:
+        raise RuntimeError(f"the remote {target} pushes to {len(urls)} URLs; name one repository")
+    if urls[0].startswith("-"):
+        raise RuntimeError(f"the remote {target} names {urls[0]!r}, an option to git, not a repository")
+    return urls[0]
+
+
+def _github_says_private(url):
+    """True or False as GitHub answers for a repository on github.com itself; None for any other host, or no answer.
+
+    The host is the one git reaches: `github.com/<owner>/<repo>` matched anywhere in the URL let GitHub's
+    answer for an unrelated repository send mail and governance to another host (MAIL-SYNC-3).
+    """
+    import shutil
+    identity = _remote_identity(url)
+    found = identity and identity[0] == "github.com" and re.fullmatch(r"([^/]+)/([^/]+)", identity[1])
+    if not found or not shutil.which("gh"):
+        return None
+    try:
+        answer = subprocess.run(["gh", "api", f"repos/{found.group(1)}/{found.group(2)}", "--jq", ".private"],
+                                capture_output=True, text=True, encoding=UTF8, errors="replace", timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return {"true": True, "false": False}.get(answer.stdout.strip())
 
 
 def _url_is_private(root, url):
@@ -1023,19 +1065,10 @@ def _url_is_private(root, url):
     from ~/.ssh/config and `HTTPS://...` were taken for directories on this machine, and mail was
     pushed with no host asked. A host ao cannot ask - an alias, another server - is not confirmed.
     """
-    import shutil
     url = url or ""
     if url and not re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", url) and not _scp_like(url):
         return True                              # a directory on this machine publishes nothing
-    found = re.search(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?$", url, re.I)
-    if not found or not shutil.which("gh"):
-        return None
-    try:
-        answer = subprocess.run(["gh", "api", f"repos/{found.group(1)}/{found.group(2)}", "--jq", ".private"],
-                                capture_output=True, text=True, encoding=UTF8, errors="replace", timeout=30)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    return {"true": True, "false": False}.get(answer.stdout.strip())
+    return _github_says_private(url)
 
 
 def mail_ref_commit(root):
@@ -1100,10 +1133,13 @@ def sync_mail(root, cfg):
     target = (settings.get(cfg, "mail.sync_repo") or "").strip()
     if not target:
         raise RuntimeError("no mail.sync_repo is named; syncing is opt-in per project")
-    origin = git_text(root, "remote", "get-url", "origin")
-    # The product's remote in any of its forms: https and git@ name one repository (MAIL-SYNC-2).
-    same = origin and (target.rstrip("/").removesuffix(".git") == origin.rstrip("/").removesuffix(".git")
-                       or _remote_identity(target) is not None and _remote_identity(target) == _remote_identity(origin))
+    target = _push_url(root, target)
+    # The product's remote in any of its forms - https and git@ name one repository (MAIL-SYNC-2) - where it
+    # fetches and where it pushes (MAIL-SYNC-3).
+    origins = {git_text(root, "remote", "get-url", "origin"), git_text(root, "remote", "get-url", "--push", "origin")}
+    same = any(origin and (target.rstrip("/").removesuffix(".git") == origin.rstrip("/").removesuffix(".git")
+                           or _remote_identity(target) is not None and _remote_identity(target) == _remote_identity(origin))
+               for origin in origins)
     if same:
         raise RuntimeError("mail.sync_repo is this product's own remote; mail never goes there")
     private = _url_is_private(root, target)
@@ -1140,6 +1176,10 @@ def mail_sync_state(root, cfg):
         except RuntimeError:
             copy = None
     local = synced if now is None or copy == now else "unsynced"
+    try:
+        target = _push_url(root, target)         # read where a sync would push (MAIL-SYNC-3)
+    except RuntimeError as exc:
+        return local, None, f"mail.sync_repo cannot be synced to: {exc}"
     try:
         remote = (_git_output(root, "ls-remote", target, f"refs/mail/{project_key(root)}", timeout=60)
                   .decode(UTF8, "replace").split() or [None])[0]
