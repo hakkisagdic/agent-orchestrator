@@ -265,3 +265,42 @@ def test_a_path_that_cannot_be_followed_to_where_it_lies_is_refused(monkeypatch)
     why = A._probe_program(["rtk", "C:\\repo\\.ao\\f::$DATA"], "C:\\repo", {"rtk"}, "")[1]
 
     assert why and "cannot follow" in why
+
+
+def test_a_file_address_with_a_query_or_fragment_is_refused(project, monkeypatch):
+    """FILTER-EXCLUSIONS-6: url2pathname kept a query and a fragment as path before Python 3.14, so
+    `filter.toml#/../../..` was judged above the project, where Node's fileURLToPath drops the fragment and opens
+    the project's filter.toml; from 3.14 it drops them, so `x?/../repo/.ao/filter.toml` was judged outside, where a
+    program decoding all the text after the scheme opens the project's file."""
+    import pathlib
+    root = os.path.realpath(project["root"])
+    allowed = [A._program_name(sys.executable)]
+    uri = pathlib.Path(root, ".ao", "filter.toml").as_uri()
+    beside = pathlib.Path(os.path.dirname(root), "x").as_uri() + "?/../" + os.path.basename(root) + "/.ao/filter.toml"
+    for word in (uri + "#/../../..", uri + "?x=/../../..", "--config=" + uri + "#/../../..", beside):
+        why = A._probe_program([sys.executable, word], root, allowed, os.environ.get("PATH", ""))[1]
+        assert why and "query or fragment" in why, word
+
+    _on_windows(monkeypatch)
+    for word in ("file:///C%3A/repo/.ao/filter.toml?../../../../..", "file:///C:/repo/.ao/filter.toml#/../../..",
+                 "file:/C:/repo/.ao/filter.toml?x=/../../..", "file://localhost/C%3A/repo/.ao/filter.toml#/../../..",
+                 "file:///C:/elsewhere/x?/../../repo/.ao/filter.toml"):
+        why = A._probe_program(["rtk", word], "C:\\repo", {"rtk"}, "")[1]
+        assert why and "query or fragment" in why, word
+    # A percent-encoded ? or # is a character of the path, which every program reads alike.
+    assert A._probe_program(["rtk", "file:///C:/elsewhere/a%23b%3Fc.toml"], "C:\\repo", {"rtk"}, "")[1] is None
+
+
+def test_a_file_address_with_a_backslash_or_a_control_character_is_refused(project):
+    """FILTER-EXCLUSIONS-6: Node and Rust's url read a `\\` in a file address as `/` and drop a tab, CR or LF, so
+    `x\\..\\repo/.ao/filter.toml` and `x/.<TAB>./repo/.ao/filter.toml` open the project's file where ao judged
+    another path."""
+    import pathlib
+    root = os.path.realpath(project["root"])
+    base, name = pathlib.Path(root).parent.as_uri(), os.path.basename(root)
+    allowed = [A._program_name(sys.executable)]
+
+    for word in (f"{base}/x\\..\\{name}/.ao/filter.toml", f"{base}/x/.\t./{name}/.ao/filter.toml",
+                 f"{base}/x/.\n./{name}/.ao/filter.toml", f"--config={base}/x/.\r./{name}/.ao/filter.toml"):
+        why = A._probe_program([sys.executable, word], root, allowed, os.environ.get("PATH", ""))[1]
+        assert why and "read differently" in why, repr(word)
