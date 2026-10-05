@@ -161,6 +161,7 @@ def test_a_review_through_the_api_reviewer_is_read_and_recorded(project, monkeyp
     (home / ".ao" / "settings.json").write_text(json.dumps(
         {"review": {"api_providers": [f"local {served.url} AO_TEST_API_KEY"]}}), encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))                    # the tool reads the machine's settings as ao does
+    monkeypatch.setenv("USERPROFILE", str(home))             # where Windows finds the home
     monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
     client = cli._tool_beside_interpreter("ao-api-review")
     if client is None:
@@ -188,6 +189,7 @@ def test_a_prompt_past_one_argument_reaches_the_client_on_its_standard_input(pro
     (home / ".ao" / "settings.json").write_text(json.dumps(
         {"review": {"api_providers": [f"local {served.url} AO_TEST_API_KEY"]}}), encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
     client = cli._tool_beside_interpreter("ao-api-review")
     if client is None:
