@@ -412,6 +412,35 @@ def test_a_notice_still_rings_while_the_alarm_store_is_busy(project, monkeypatch
     assert "proj:disk" not in A.load_alarms()               # its record is left for the next raise
 
 
+
+def test_a_mail_whose_mark_the_busy_store_could_not_take_goes_once_more(project, monkeypatch, capsys):
+    """JOURNAL-7-3: a mark that a notice went is never written blind and is not kept, so the next cycle mails the red
+    once more and records it - told twice, never not at all, and not a third time."""
+    from ao import email, storage, telegram
+    real = storage._exclusive_lock
+    monkeypatch.setattr(storage, "_exclusive_lock", lambda path, timeout=10.0: real(path, timeout=min(timeout, 0.2)))
+    mails = []
+    monkeypatch.setattr(email, "send", lambda subject, body, root=None, opener=None: mails.append(subject) or True)
+    monkeypatch.setattr(telegram, "send", lambda text, root=None, keyboard=None: 1)
+    monkeypatch.setattr(W, "desktop_notify", lambda title, msg, cfg=None: True)
+    mailed = A.alarm_mailed
+
+    def stalled(*a, **k):                                 # a writer stalls on the store as the mail's mark is written
+        with real(A.alarms_path() + ".lock", timeout=1):
+            return mailed(*a, **k)
+
+    def raise_disk():
+        W.notify("proj: disk", "the disk is full", project["root"], key="disk", audience="human",
+                 level="red", what="disk full")
+    monkeypatch.setattr(A, "alarm_mailed", stalled)
+    raise_disk()
+    assert mails == ["proj: disk"] and A.load_alarms()["proj:disk"].get("red_sent") is None   # not written blind
+    assert "alarm_mailed was not written" in capsys.readouterr().err
+    monkeypatch.setattr(A, "alarm_mailed", mailed)
+    raise_disk()                                          # the next cycle tells it once more...
+    raise_disk()                                          # ...and records it: no third mail
+    assert mails == ["proj: disk", "proj: disk"] and A.load_alarms()["proj:disk"]["red_sent"] is not None
+
 LEASE_CONTENDER = """
 import os, sys, time
 sys.path.insert(0, {src!r})

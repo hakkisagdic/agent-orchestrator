@@ -52,6 +52,10 @@ def _alarm_store_locked(when_busy):
     for about a millisecond; one that cannot have it in ten seconds stands behind a stalled writer,
     whose stale copy would overwrite whatever was written past it. Nothing is written without the
     lock: `when_busy(change, *args, **kwargs)` is what the caller gets instead, and None raises.
+
+    What is not written is not kept: a raise is recorded by the next raise and an expiry by the next
+    cycle, but a mark that a notice went is lost, and the next raise may send that notice again
+    (JOURNAL-7-3).
     """
     import contextlib
     import functools
@@ -66,8 +70,8 @@ def _alarm_store_locked(when_busy):
             except LedgerLockTimeout:
                 if when_busy is None:
                     raise
-                print(f"ao: the alarm store was held past ten seconds; {change.__name__} is left for the "
-                      "next cycle", file=sys.stderr)
+                print(f"ao: the alarm store was held past ten seconds; {change.__name__} was not written, and "
+                      "the next cycle reckons from the store as it stands", file=sys.stderr)
                 return when_busy(change, *args, **kwargs)
             with held:
                 return change(*args, **kwargs)
@@ -76,11 +80,21 @@ def _alarm_store_locked(when_busy):
 
 
 def _as_preview(change, *args, **kwargs):
-    """A raise reckoned from the episodes as they stand and not written: the notice still goes (JOURNAL-7)."""
+    """A raise reckoned from the episodes as they stand and not written: the notice still goes (JOURNAL-7).
+
+    Until the next raise records it, a mark made for a new episode has no episode to go on, and is lost as a
+    busy one is (JOURNAL-7-3).
+    """
     return change(*args, **dict(kwargs, persist=False))
 
 
-def _left_for_next_cycle(change, *args, **kwargs):
+def _not_kept(change, *args, **kwargs):
+    """A mark that a notice went - mailed, rang, named - is not written and not kept (JOURNAL-7-3).
+
+    The next raise finds the episode untold and may tell it again: a red is mailed at the next cycle, a ring
+    goes again once its window has passed, a red a resume notice named is mailed at its next raise. Told
+    twice is the price of never writing blind.
+    """
     return None
 
 
@@ -195,7 +209,7 @@ def alarm_touch(project, key, level, now=None, red_after=ALARM_RED_AFTER, title=
     return ring, dict(e, news=news)
 
 
-@_alarm_store_locked(_left_for_next_cycle)
+@_alarm_store_locked(_not_kept)
 def alarm_mailed(project, key, now=None, what=None):
     d = load_alarms()
     k = f"{project}:{key}"
@@ -207,7 +221,7 @@ def alarm_mailed(project, key, now=None, what=None):
         save_alarms(d)
 
 
-@_alarm_store_locked(_left_for_next_cycle)
+@_alarm_store_locked(_not_kept)
 def alarm_rang(project, key, now=None, what=None):
     """Record that the orange channels told this episode, and what they told (NOTICE-NOISE).
 
@@ -224,7 +238,7 @@ def alarm_rang(project, key, now=None, what=None):
         save_alarms(d)
 
 
-@_alarm_store_locked(_left_for_next_cycle)
+@_alarm_store_locked(_not_kept)
 def alarm_named(project, key, now=None):
     """Record that a resume notice named a red episode instead of mailing it (RESUME-QUIET).
 
