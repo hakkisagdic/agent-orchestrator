@@ -111,3 +111,32 @@ def test_a_reviewer_whose_provider_failed_to_answer_is_a_temporary_exit_retried(
 
     assert attempt["kind"] == "temporary-exit" and attempt["retryable"] is True
     assert "failed to generate a response" in attempt["reason"]
+
+
+# ---- a turn that ran and ended on no message is asked once more (REVIEW-EMPTY-TURN) ---------------------------
+
+EMPTY_TURN = "\n".join([
+    json.dumps({"type": "runStarted", "data": {"payloadSchema": "acp", "acpProtocolVersion": 1, "engine": "v2"}}),
+    _record(TOOL), _record(DONE),
+    json.dumps({"type": "runFinished", "data": {"sessionId": "s1", "status": "success", "stopReason": "end_turn",
+                                                "finalText": "", "finalTextTruncated": False}}),
+])
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the stand-in harness is a script its shebang runs")
+def test_a_turn_that_ran_and_ended_on_no_message_is_asked_once_more(project, tmp_path):
+    """Measured on kiro-cli 2.27.1 on 2026-10-05: Sol ended three of twelve reviews on an empty message after minutes
+    of reading, and exited 0. The review was UNAVAILABLE and not retried, as a reviewer that writes nothing is."""
+    harness = tmp_path / "kiro-cli"
+    harness.write_text(f"#!{sys.executable}\nprint({EMPTY_TURN!r})\n", encoding="utf-8")
+    harness.chmod(0o755)
+    argv = [str(harness)] + A.pinned_argv(KIRO, "reviewer")[0][1:]
+
+    attempt = cli._run_reviewer(project["root"], [part.replace("{prompt}", "review this") for part in argv], 30)
+
+    assert attempt["kind"] == "silence" and attempt["retryable"] is True and "empty message" in attempt["reason"]
+    # a reviewer that writes text and wrote none shows no turn, and is not asked again
+    quiet = tmp_path / "quiet"
+    quiet.write_text(f"#!{sys.executable}\n", encoding="utf-8")
+    quiet.chmod(0o755)
+    assert cli._run_reviewer(project["root"], [str(quiet), "review this"], 30)["retryable"] is False

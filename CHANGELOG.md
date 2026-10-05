@@ -20,6 +20,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- A reviewer whose turn ran and ended on an empty message - it wrote session updates, or answered over ACP - is retried once as a passing failure, where it was UNAVAILABLE and not retried; Sol through kiro-cli ended three of twelve reviews so after minutes of reading ([adapters.md](docs/adapters.md)) (REVIEW-EMPTY-TURN).
 - A signal that stops a review while its reviewer is being started waits until ao holds the reviewer, and stops it then, where it was raised inside the start and left a reviewer that had already begun working for nobody ([pipeline.md](docs/pipeline.md)) (REVIEWER-ORPHAN-4).
 - A watchdog journal that cannot be written starts the step even where the alarm about it cannot be raised, where a failing alarm made the claim fail with it; and an architect run through a runtime (`node /opt/claude-code/cli.js`) is known by the program it runs, where `node` alone let any node process naming its session hold every wake (JOURNAL-2-3).
 - A nudge's turn is on record the moment it starts, and the watchdog leaves the nudge log whole while any unattended turn runs in the tree, where the turn was recorded only after a twelve-second probe and a cycle cut off in it left a turn no state named, whose log the next cycle cut under it (JOURNAL-3-3).

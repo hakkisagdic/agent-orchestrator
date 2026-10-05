@@ -560,10 +560,17 @@ def _answer_stream(argv, stdout):
     break where a tool call fell. Anything else, and a stream that holds no update, is read as written.
     """
     from . import acp
+    updates = _stream_updates(argv, stdout)
+    return acp.answer_text(updates) if updates else stdout
+
+
+def _stream_updates(argv, stdout):
+    """The session updates a reviewer wrote, when its adapter declares it answers in them and the command carries
+    the flags that make it; else None."""
     adapter = A.command_adapter(argv)
     flags = (((adapter or {}).get("options") or {}).get("answer_stream") or {}).get("argv")
     if not flags or any(A._named(argv, flag) != (True, value) for flag, value in A._flag_pairs(flags)):
-        return stdout
+        return None
     updates = []
     for line in (stdout or "").splitlines():
         try:
@@ -573,7 +580,7 @@ def _answer_stream(argv, stdout):
         data = record.get("data") if isinstance(record, dict) and isinstance(record.get("data"), dict) else {}
         if record.get("type") == "sessionUpdate" and isinstance(data.get("update"), dict):
             updates.append(data["update"])
-    return acp.answer_text(updates) if updates else stdout
+    return updates
 
 
 def _stream_error(argv, stdout):
@@ -730,6 +737,7 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
         print(f"{C['dim']}reviewer {label} exited {proc.returncode} after "
               f"{_elapsed(time.monotonic() - started)}{C['reset']}")
         passing = _stream_error(argv, stdout) if proc.returncode != 0 else None
+        ran = bool(_stream_updates(argv, stdout))
         stdout = _answer_stream(argv, stdout)
         out = (stdout if (stdout or "").strip() else stderr or "").strip()
         if proc.returncode != 0:
@@ -744,10 +752,14 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
         if tool is not None:
             return _tool_answer(fresh, tool, handoff, stdout, stderr)
         if not out:
+            # A turn that ran - it wrote session updates - and ended on no message is its provider's passing failure:
+            # Sol through kiro-cli 2.27.1 ended three of twelve reviews so on 2026-10-05, after minutes of reading,
+            # and exited 0. A reviewer that writes text and wrote none shows no turn, and is not asked again
+            # (REVIEW-EMPTY-TURN).
             return {
                 "ok": False, "out": "",
-                "reason": "produced nothing (exit 0)", "returncode": 0,
-                "kind": "silence", "retryable": False,
+                "reason": "produced nothing (exit 0)" + ("; its turn ended on an empty message" if ran else ""),
+                "returncode": 0, "kind": "silence", "retryable": ran,
             }
         return {
             "ok": True, "out": out, "reason": "", "returncode": 0,
@@ -1347,7 +1359,8 @@ def _run_acp_reviewer(root, argv, adapter_id, prompt, timeout, label, fallback=F
         _reviewer_terminal_output(text, "")
         return failed("acp-error", f"ACP: its turn ended {ended or 'with a stop reason ACP does not name'}")
     if not text:
-        return failed("silence", f"produced nothing ({acp.END_TURN})")
+        # A turn that ended with no message, as a spawned one that wrote session updates (REVIEW-EMPTY-TURN).
+        return failed("silence", f"produced nothing ({acp.END_TURN})", retryable=True)
     return {"ok": True, "out": text, "reason": "", "returncode": None, "kind": "success", "retryable": False,
             "transport": "acp", "acp": {"adapter": adapter_id, "agent": _acp_agent_name(agent)}}
 

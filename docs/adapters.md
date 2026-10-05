@@ -61,7 +61,10 @@ in `options.answer_stream` and pins them for a reviewer (`--output-format stream
 ao reads the answer from those updates with a line break where a tool call fell. A review over ACP
 is read the same way. A run that ends on an error the adapter names passing in
 `options.answer_stream.transient` - Kiro's `failed to generate a response` - is a temporary
-failure, retried once as a reviewer that exits 75 is, not a reviewer that cannot run.
+failure, retried once as a reviewer that exits 75 is, not a reviewer that cannot run. So is a run
+that wrote session updates and ended on no message, as Sol through kiro-cli did in three of twelve
+reviews, and a turn over ACP that ended with nothing said; a reviewer that writes text and wrote
+none shows no turn, and is not asked again (REVIEW-EMPTY-TURN).
 
 ## A turn's grant is declared, and so is every flag that turns approvals off
 

@@ -169,7 +169,7 @@ def test_a_turn_that_did_not_end_its_answer_or_said_nothing_is_no_review(project
     silent = _review(project, monkeypatch, "silent")
 
     assert limited["kind"] == "acp-error" and "max_tokens" in limited["reason"]
-    assert silent["kind"] == "silence" and not silent["ok"]
+    assert silent["kind"] == "silence" and not silent["ok"] and silent["retryable"]  # REVIEW-EMPTY-TURN
 
 
 def test_the_transport_decides_whether_a_route_answers_through_acp(project, monkeypatch, capsys):
