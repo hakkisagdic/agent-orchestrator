@@ -26,14 +26,28 @@ from . import language  # noqa: E402  (what ao writes into a project, in its lan
 _PARTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "parts")
 
 
+def _parts_folder(folder, path=os.path):
+    """Where a module in `folder` keeps its parts: parts/ beside it, or `folder` itself when it is a parts
+    folder, as a part that loads one is. `_part` runs a part from here and `ao split-check` takes the moved
+    definitions to be here, by this one rule, so the proof never reads a file the loader does not run
+    (SPLIT-CHECK-4)."""
+    return folder if path.basename(folder) == "parts" else path.join(folder, "parts")
+
+
 def _part(name, namespace):
     """Run the part `name` in `namespace` - the globals of the module it was moved out of.
+
+    The part is read from the parts folder beside that module, `namespace["__file__"]`: a module
+    in any folder runs the file the move proof read, where every call read lib.py's own parts/
+    (SPLIT-CHECK-4). A namespace that names no file reads _PARTS_DIR.
 
     Compiled through the import system's own loader, so a part's bytecode is cached like
     any module's and an `ao` hook does not recompile thousands of lines on every run.
     """
     from importlib.machinery import SourceFileLoader
-    path = os.path.join(_PARTS_DIR, f"{name}.py")
+    module = namespace.get("__file__")
+    folder = _parts_folder(os.path.dirname(os.path.abspath(module))) if module else _PARTS_DIR
+    path = os.path.join(folder, f"{name}.py")
     exec(SourceFileLoader(f"ao.parts.{name}", path).get_code(f"ao.parts.{name}"), namespace)
 
 
@@ -511,11 +525,9 @@ def top_level_statements(source, filename="<source>"):
 
 def _part_file(module, name):
     """The file `_part(name, globals())` in `module` runs: parts/<name>.py beside the module, or beside a part
-    that loads one - where _PARTS_DIR is for every module of ao's that loads a part (SPLIT-CHECK-3)."""
+    that loads one: `_parts_folder`, the rule `_part` itself reads by (SPLIT-CHECK-4)."""
     import posixpath
-    folder = posixpath.dirname(module)
-    return posixpath.join(folder if posixpath.basename(folder) == "parts" else posixpath.join(folder, "parts"),
-                          f"{name}.py")
+    return posixpath.join(_parts_folder(posixpath.dirname(module), posixpath), f"{name}.py")
 
 
 def split_moves(root, start=None, end=None):

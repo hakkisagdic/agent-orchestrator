@@ -282,3 +282,42 @@ def test_a_definition_reordered_against_a_statement_is_no_move(project):
     _write_files(root, {"mod.py": _split_b().replace("import os\n", "import os\n" + swapped), "parts/mod_b.py": B})
 
     assert any(p.startswith("mod.py ") for p in A.split_moves(root)["problems"])
+
+
+# ---- the proof reads the file `_part` runs (SPLIT-CHECK-4) -------------------------------------------------------
+
+def test_a_split_the_proof_passes_runs_the_part_the_proof_read(project):
+    """The proof took parts/ beside the module, and `_part` read lib.py's own parts/ whatever module called it: a
+    module in another folder passed as a pure move, and its import then failed, or ran another module's part."""
+    import importlib.util
+    root = project["root"]
+    old = LIB.replace("import os\n", "import os\nfrom ao import lib as A\n")
+    _write_files(root, {"sub/mod.py": old}, commit="sub")
+    _write_files(root, {"sub/mod.py": old.replace(B + '\n\n', 'A._part("mod_b", globals())\n\n\n'),
+                        "sub/parts/mod_b.py": B})
+    assert A.split_moves(root) == {"moved": [("b", "sub/mod.py", "sub/parts/mod_b.py")], "problems": []}
+
+    spec = importlib.util.spec_from_file_location("split_sub_mod", os.path.join(root, "sub", "mod.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.c() == 2
+    assert os.path.samefile(module.b.__code__.co_filename, os.path.join(root, "sub", "parts", "mod_b.py"))
+
+
+def test_a_part_runs_from_the_parts_folder_beside_the_module_that_loads_it(tmp_path, monkeypatch):
+    (tmp_path / "sub" / "parts").mkdir(parents=True)
+    (tmp_path / "sub" / "parts" / "mod_b.py").write_text(B, encoding="utf-8")
+    (tmp_path / "lib_parts").mkdir()
+    (tmp_path / "lib_parts" / "mod_b.py").write_text("def b(n):\n    return n * 100\n", encoding="utf-8")
+    monkeypatch.setattr(A, "_PARTS_DIR", str(tmp_path / "lib_parts"))
+    namespace = {"__file__": str(tmp_path / "sub" / "mod.py")}
+
+    A._part("mod_b", namespace)
+
+    assert namespace["b"](1) == 2
+
+
+def test_ao_s_own_modules_read_their_parts_where_they_always_did():
+    for module in (A, cli):
+        assert A._parts_folder(os.path.dirname(os.path.abspath(module.__file__))) == A._PARTS_DIR
