@@ -174,7 +174,9 @@ def test_a_turn_that_did_not_end_its_answer_or_said_nothing_is_no_review(project
 
 def test_the_transport_decides_whether_a_route_answers_through_acp(project, monkeypatch, capsys):
     root = project["root"]
-    route = {"id": "qoder-reviewer", "adapter": "qoder", "argv": ["qodercli", "-p", "{prompt}"]}
+    route = {"id": "qoder-reviewer", "adapter": "qoder",
+             "argv": ["qodercli", "-p", "{prompt}", "--tools", "Read,Grep,Glob", "--permission-mode", "dont_ask",
+                      "--strict-mcp-config"]}
     through, spawned = [], []
     monkeypatch.setattr(cli, "_reviewer_resolve_binary", lambda root, name: (f"/agents/{name}", "1.0"))
     monkeypatch.setattr(cli, "_run_acp_reviewer", lambda root, argv, adapter, prompt, timeout, label, **kw:
@@ -191,7 +193,8 @@ def test_the_transport_decides_whether_a_route_answers_through_acp(project, monk
     _, _, _, attempt = cli._reviewer_route_invocation(root, route, "review this", 60, False, route)
     assert attempt["ok"] and through == [(["/agents/qodercli", "--acp"], "qoder")] and len(spawned) == 1
 
-    claude = {"id": "claude-reviewer", "adapter": "claude-code", "argv": ["claude", "-p", "{prompt}", "--strict-mcp-config"]}
+    claude = {"id": "claude-reviewer", "adapter": "claude-code",
+              "argv": ["claude", "-p", "{prompt}", "--allowedTools", "Read,Grep,Glob", "--strict-mcp-config"]}
     cli._reviewer_route_invocation(root, claude, "review this", 60, False, claude)
     assert len(spawned) == 2
     assert "claude-reviewer is spawned, not run through ACP: adapter claude-code declares no ACP command" \

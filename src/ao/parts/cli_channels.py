@@ -512,19 +512,10 @@ def _hunter_reading_problems(argv):
     those flags; a hunter's command is written by hand. `reviewer_problems` passed a program no
     adapter declares - `sh -c` rewrote a file - and a harness in a writing mode, such as
     `codex exec -s workspace-write`. So the command must run a harness ao ships, one able to
-    review, with every flag its `options.trust_none` names.
+    review, with every flag its `options.trust_none` names (`A.reading_problems`), as a reviewer's
+    route must where a review starts it (REVIEWER-REACH-2).
     """
-    adapter = A.command_adapter(argv)
-    if not adapter:
-        return ["ao ships no adapter for its command, so nothing declares how it runs without tools"]
-    eligible, why = A.reviewer_eligibility(adapter)
-    if not eligible:
-        return [f"{adapter.get('id')} cannot review: {why}"]
-    if A.tool_review_contract(adapter) is not None:
-        return [f"{adapter.get('id')} is a tool reviewer, which reads a file ao writes for it, not a tree"]
-    missing = [token for token in dict.fromkeys(adapter["options"]["trust_none"]) if token not in argv]
-    return [f"its command lacks {' '.join(missing)}, which {adapter.get('id')} declares leaves it only reading"] \
-        if missing else []
+    return A.reading_problems(argv)
 
 
 def cmd_hunt(cfg, args):

@@ -48,7 +48,10 @@ for a reviewer (below): `claude-code`'s `trust_none` carries `--tools Read,Grep,
 `--permission-mode dontAsk`, so no setting of the person's widens it. A route whose own command
 could still write - a wider mode than its adapter pins, every tool granted, a flag that approves
 for it, or MCP servers its adapter isolates - is refused where a review starts it, as the bug
-hunter and an ACP command are, not only named by `ao doctor`.
+hunter and an ACP command are, not only named by `ao doctor`. So is one that runs a harness ao
+ships without every flag of its adapter's `trust_none`, as the bug hunter's command is: only
+`claude-code` and `codex` pin their mode, and `pi -p`, `omp -p` or `hermes -z` with none of those
+flags edits and runs commands.
 
 A reviewer's verdict is read only where it stands at the start of a line. `kiro-cli`'s text output
 runs a turn's messages together where a tool call came between them, so a verdict written after a

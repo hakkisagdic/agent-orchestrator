@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 from types import SimpleNamespace
 
 from ao import allowlist as AL, cli
@@ -110,3 +111,95 @@ def test_a_second_sandbox_flag_after_the_pinned_one_is_named():
     composed = A.compose_reviewer("codex", model="m")["argv"]
     assert AL.reviewer_problems(composed + ["--sandbox", "danger-full-access"]) == \
         ["it runs with --sandbox danger-full-access, where ao pins read-only"]
+
+
+# ---- a route without the flags its adapter declares leave it only reading is refused too (REVIEWER-REACH-2) ----
+
+# Each runs a reviewer-eligible adapter's command without its `options.trust_none` and names nothing
+# `reviewer_problems` reads: no grant of every tool, no allowlist, no pinned flag, no bypass spelling.
+WITHOUT_TRUST_NONE = {
+    "kiro": ["kiro-cli", "chat", "--no-interactive", "{prompt}"],
+    "kiro trusting the shell": ["kiro-cli", "chat", "--no-interactive", "--trust-tools=fs_write,execute_bash",
+                                "{prompt}"],
+    "qoder": ["qodercli", "-p", "{prompt}"],
+    "qoder accept_edits": ["qodercli", "-p", "{prompt}", "--permission-mode", "accept_edits"],
+    "qwen": ["qwen", "-p", "{prompt}"],
+    "qwen auto-edit": ["qwen", "-p", "{prompt}", "--approval-mode", "auto-edit"],
+    "hermes": ["hermes", "-z", "{prompt}"],
+    "kilocode": ["kilo", "run", "{prompt}"],
+    "omp": ["omp", "-p", "{prompt}"],
+    "pi": ["pi", "-p", "{prompt}"],
+    "reasonix": ["reasonix", "-p", "{prompt}"],
+    "reasonix workspace-write": ["reasonix", "-p", "{prompt}", "--permission-mode=workspace-write"],
+    "codex without --ignore-rules": CODEX,
+}
+ELIGIBLE = ("claude-code", "codex", "hermes", "kilocode", "kiro", "omp", "pi", "qoder", "qwen", "reasonix")
+
+
+def _spawned(monkeypatch):
+    started = []
+    monkeypatch.setattr(cli, "_reviewer_resolve_binary", lambda root, name: (f"/agents/{name}", "1.0.0"))
+    monkeypatch.setattr(cli, "_run_reviewer", lambda root, argv, timeout, fallback=False, **kw:
+                        started.append(argv) or {"ok": True, "out": "VERDICT: APPROVED"})
+    return started
+
+
+@pytest.mark.parametrize("argv", list(WITHOUT_TRUST_NONE.values()), ids=list(WITHOUT_TRUST_NONE))
+def test_a_route_without_its_adapters_trust_none_is_refused_not_started(project, monkeypatch, argv):
+    """`pi -p` and `omp -p` edit and run commands with none of it; only a pin was asked of a route."""
+    started = _spawned(monkeypatch)
+    route = {"id": "rv", "argv": argv}
+
+    _, _, _, attempt = cli._reviewer_route_invocation(project["root"], route, "review this", 60, False, route)
+
+    assert started == []
+    assert attempt["kind"] == "configuration-error" and attempt["retryable"] is False
+    assert attempt["reason"].startswith("a reviewer must not be able to write: ")
+
+
+@pytest.mark.parametrize("ident", ELIGIBLE)
+def test_a_composed_route_of_every_eligible_adapter_still_runs(project, monkeypatch, ident):
+    started = _spawned(monkeypatch)
+    route = A.compose_reviewer(ident, model="m")
+
+    _, _, _, attempt = cli._reviewer_route_invocation(project["root"], route, "review this", 60, False, route)
+
+    assert attempt["ok"] and len(started) == 1
+
+
+def test_a_route_of_a_program_no_adapter_runs_is_still_its_own(project, monkeypatch):
+    started = _spawned(monkeypatch)
+    route = {"id": "rv", "argv": [sys.executable, "-c", "print('VERDICT: APPROVED')", "{prompt}"]}
+
+    _, _, _, attempt = cli._reviewer_route_invocation(project["root"], route, "review this", 60, False, route)
+
+    assert attempt["ok"] and len(started) == 1
+
+
+# A flag of trust_none given again with another value, which a harness that takes the last of two runs with.
+OVERRIDDEN = {
+    "kiro": ["kiro-cli", "chat", "--no-interactive", "--trust-tools=", "--trust-tools=fs_write,execute_bash",
+             "{prompt}"],
+    "qwen": ["qwen", "-p", "{prompt}", "--approval-mode", "plan", "--approval-mode", "auto-edit"],
+    "kilocode": ["kilo", "run", "{prompt}", "--agent", "ask", "--agent", "code"],
+    "hermes": ["hermes", "-z", "{prompt}", "--toolsets", "safe", "--toolsets", "terminal"],
+    "pi": ["pi", "-p", "{prompt}", "--tools", "read,grep,find,ls", "--tools", "bash"],
+    "reasonix": ["reasonix", "-p", "{prompt}", "--permission-mode=read-only", "--permission-mode=workspace-write"],
+    "qoder": ["qodercli", "-p", "{prompt}", "--tools", "Read,Grep,Glob", "--permission-mode", "dont_ask",
+              "--strict-mcp-config", "--permission-mode", "accept_edits"],
+}
+
+
+@pytest.mark.parametrize("argv", list(OVERRIDDEN.values()), ids=list(OVERRIDDEN))
+def test_a_trust_none_flag_given_again_with_another_value_is_refused(project, monkeypatch, argv):
+    started = _spawned(monkeypatch)
+    route = {"id": "rv", "argv": argv}
+
+    _, _, _, attempt = cli._reviewer_route_invocation(project["root"], route, "review this", 60, False, route)
+
+    assert started == [] and attempt["kind"] == "configuration-error"
+    assert "leaves it only reading" in attempt["reason"]
+
+
+def test_a_narrower_list_than_trust_none_names_is_no_override():
+    assert A.reading_problems(["pi", "-p", "{prompt}", "--tools", "read,grep,find,ls", "--tools", "read"]) == []

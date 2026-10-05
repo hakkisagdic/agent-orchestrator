@@ -1002,6 +1002,12 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, can
         # named by `ao doctor` (REVIEWER-REACH).
         from . import allowlist
         reach = allowlist.reviewer_problems(argv)
+        # So is one that runs a harness ao ships without every flag its adapter declares leaves it only reading,
+        # as the hunter's is: a pin is what a setting must not widen, and only claude-code and codex pin their mode,
+        # so a qwen, qoder, pi, omp, hermes, kilo, reasonix or kiro route without them could write (REVIEWER-REACH-2).
+        # A program no adapter runs stays a hand-written route's own (docs/adapters.md).
+        if A.command_adapter(argv) is not None:
+            reach += A.reading_problems(argv)
         if reach:
             return label, None, None, {
                 "ok": False, "out": "", "reason": "a reviewer must not be able to write: " + "; ".join(reach),

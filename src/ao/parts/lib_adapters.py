@@ -463,6 +463,54 @@ def compose_reviewer(adapter_id, model=None, effort=None, root=None, family=None
     return route
 
 
+def reading_problems(argv):
+    """What keeps a command from one that only reads, by the rule a reviewer's and the hunter's meet
+    (BUG-HUNTER-2, REVIEWER-REACH-2).
+
+    A reviewer is composed with the flags its adapter declares leave it only reading; a route written by
+    hand, an older one, or an implementer's reassigned to review carries what it carries. `reviewer_problems`
+    names a flag that widens; with none of these, `pi -p`, `omp -p` and `hermes -z` edit and run commands,
+    `kilo run` edits, and qwen, qoder, reasonix and kiro run in whatever mode a person's settings or another
+    flag names. So the command must run a harness ao ships, one able to review, with every flag its
+    `options.trust_none` names.
+    """
+    adapter = command_adapter(argv)
+    if not adapter:
+        return ["ao ships no adapter for its command, so nothing declares how it runs without tools"]
+    eligible, why = reviewer_eligibility(adapter)
+    if not eligible:
+        return [f"{adapter.get('id')} cannot review: {why}"]
+    if tool_review_contract(adapter) is not None:
+        return [f"{adapter.get('id')} is a tool reviewer, which reads a file ao writes for it, not a tree"]
+    args = [str(arg) for arg in argv or []]
+    declared = adapter["options"]["trust_none"]
+    missing = [token for token in dict.fromkeys(declared) if token not in args]
+    if missing:
+        return [f"its command lacks {' '.join(missing)}, which {adapter.get('id')} declares leaves it only reading"]
+    # A flag of them given again with another value is asked too, as a pinned flag is: a harness that takes
+    # the last of two runs with it (`--trust-tools= --trust-tools=fs_write`, or `--approval-mode plan`
+    # then `--approval-mode auto-edit`).
+    found = []
+    for flag, value in _flag_pairs(part for token in declared
+                                   for part in (token.split("=", 1) if token.startswith("--") and "=" in token
+                                                else [token])):
+        if value is None:
+            continue
+        for at, arg in enumerate(args):
+            if arg == flag:
+                given = args[at + 1] if at + 1 < len(args) and not args[at + 1].startswith("-") else None
+            elif arg.startswith(flag + "="):
+                given = arg.split("=", 1)[1]
+            else:
+                continue
+            if given == value or (given is not None and "," in value
+                                  and set(filter(None, given.split(","))) <= set(value.split(","))):
+                continue
+            found.append(f"it runs with {flag} {given if given is not None else '(no value)'}, where "
+                         f"{adapter.get('id')} declares {flag} {value or '(empty)'} leaves it only reading")
+    return found
+
+
 # ---- a turn holds the grant ao composes, never a person's default or an unnamed bypass (GRANTS-PINNED) ----
 
 # The flags a harness takes its allowlist after, as comma-separated rules in its own syntax (#58).
