@@ -1,10 +1,12 @@
-"""A review is judged against the project's threat model, as its last commit holds it (REVIEW-THREAT-MODEL).
+"""A review is judged against the project's threat model, as it stood before the change (REVIEW-THREAT-MODEL).
 
 Catchup reviews kept finding new edge cases: each needed an attacker to have landed malicious code through an
 earlier review, or the interpreter to fail at one chosen line. Without a model of who the attacker is, a reviewer
 had no line between a blocker and a hardening note. ao puts the project's model - THREAT_MODEL.md or
 docs/threat-model.md, read from HEAD - in every review prompt, so a candidate cannot loosen the model it is judged
-under, and no setting the implementer can write points it elsewhere (REVIEW-THREAT-MODEL-2).
+under, and no setting the implementer can write points it elsewhere (REVIEW-THREAT-MODEL-2). A landed range is
+judged under the model from before it, and a change to the model that landed under a waiver still open judges no
+review until it is reviewed itself (REVIEW-THREAT-MODEL-3).
 """
 import json
 from types import SimpleNamespace
@@ -13,6 +15,7 @@ from ao import cli, language, lib as A, storage
 from tests.test_review_context import _args, _git, _package, _review_file, _reviewer, _stage_test, _write
 
 MODEL = "# Threat model\n\nIn scope: the implementer agent, MODEL-AS-COMMITTED.\n"
+LOOSENED = MODEL.replace("MODEL-AS-COMMITTED", "everything out of scope, LOOSENED")
 
 
 def _model_between(prompt):
@@ -140,3 +143,75 @@ def test_no_setting_names_the_threat_model():
     from ao import settings as S
     assert "review.threat_model" not in S.SETTINGS
     assert json.dumps(cli.THREAT_MODEL_PATHS) == '["THREAT_MODEL.md", "docs/threat-model.md"]'
+
+
+def test_a_landed_range_is_judged_under_the_model_from_before_it(project, tmp_path):
+    """REVIEW-THREAT-MODEL-3: a retrospective review read the model from HEAD, which held the range's own, so a range a
+    person waived chose the model catch-up reviewed it under."""
+    root = _package(project)
+    _commit(root, "docs/threat-model.md", MODEL)
+    base = _git(root, "rev-parse", "HEAD")
+    _commit(root, "docs/threat-model.md", LOOSENED)
+    _stage_test(root)
+    _git(root, "commit", "-q", "-m", "test only")
+    cfg, capture = _reviewer(project, tmp_path)
+
+    assert cli.cmd_review(cfg, _args(commits=f"{base}..HEAD")) == 0
+
+    model = _model_between(capture.read_text(encoding="utf-8"))
+    assert "MODEL-AS-COMMITTED" in model and "LOOSENED" not in model
+
+
+def test_a_model_changed_under_a_waiver_still_open_judges_no_later_review(project, monkeypatch, capsys, tmp_path):
+    """REVIEW-THREAT-MODEL-3: a change to the model a person waived set the model of every later review - staged, or a
+    later waived range's - before anyone had reviewed the change."""
+    from tests.test_switches_and_bypass import _allow_candidate_verification
+    from tests.test_waiver_bounds import _commit_ok, _running
+    root = _package(project)
+    _commit(root, "docs/threat-model.md", MODEL)
+    _running(root, "B7")
+    _write(root, "docs/threat-model.md", LOOSENED)
+    _git(root, "add", "docs/threat-model.md")
+    _allow_candidate_verification(monkeypatch, A.index_candidate(root))
+    A.waive(root, "review", "B7", "quota", by="alice (owner)")
+    assert _commit_ok(project, capsys)[0] == 0
+    _git(root, "commit", "-q", "-m", "the model, waived")
+    later = _git(root, "rev-parse", "HEAD")
+    _commit(root, "src/pkg/other.py", "X = 1\n")
+    cfg, capture = _reviewer(project, tmp_path)
+    _stage_test(root)
+
+    assert cli.cmd_review(cfg, _args()) == 0
+    assert "MODEL-AS-COMMITTED" in _model_between(capture.read_text(encoding="utf-8"))
+    _git(root, "commit", "-q", "-m", "test only")
+    assert cli.cmd_review(cfg, _args(commits=f"{later}..HEAD")) == 0
+    model = _model_between(capture.read_text(encoding="utf-8"))
+    assert "MODEL-AS-COMMITTED" in model and "LOOSENED" not in model
+
+
+def test_a_review_runs_without_a_model_when_ao_cannot_tell_which_applies(project, monkeypatch, capsys, tmp_path):
+    """REVIEW-THREAT-MODEL-3: an open waiver whose range ao cannot place could have changed the model, and a review
+    without a model judges every finding by its severity."""
+    root = _package(project)
+    _commit(root, "docs/threat-model.md", MODEL)
+    monkeypatch.setattr(A, "review_waiver_ranges", lambda root: [{"problem": "UNRESOLVED", "landed": 0}])
+    _stage_test(root)
+    cfg, capture = _reviewer(project, tmp_path)
+
+    assert cli.cmd_review(cfg, _args()) == 0
+
+    assert "THREAT MODEL" not in capture.read_text(encoding="utf-8")
+    assert "cannot tell which threat model" in capsys.readouterr().out
+
+
+def test_a_range_s_base_is_the_commit_git_diffs_it_from(project):
+    root = _package(project)
+    first = _git(root, "rev-parse", "HEAD")
+    _commit(root, "a.txt", "a\n")
+    second = _git(root, "rev-parse", "HEAD")
+
+    assert cli._range_base(root, f"{first}..{second}") == first
+    assert cli._range_base(root, f"{first}...{second}") == first           # their merge base
+    assert cli._range_base(root, second) == second                         # `git diff X` diffs X against the tree
+    assert cli._range_base(root, f"{second}^!") == first
+    assert cli._range_base(root, "no-such-commit..HEAD") is None

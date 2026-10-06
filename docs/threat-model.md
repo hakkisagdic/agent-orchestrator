@@ -2,8 +2,11 @@
 
 What ao protects, from whom, and what it does not claim to. Every review of this repository is
 judged against this page: ao reads a project's threat model from `THREAT_MODEL.md` or
-`docs/threat-model.md` as its last commit holds it, and puts it in each review prompt above the
-candidate. There is no setting to point it elsewhere, since the implementer can write the
+`docs/threat-model.md` as it stood before the change under review - the last commit for a staged
+candidate, the commit a landed range starts from for catch-up - and puts it in each review prompt
+above the candidate. A change to the model that landed under a review waiver still open judges no
+review until it is reviewed itself, and where ao cannot tell which model applies, a review runs
+without one. There is no setting to point it elsewhere, since the implementer can write the
 project's configuration; a person's review and a carried stand-in answer record the model they were
 given, which for a person is none.
 
@@ -53,5 +56,5 @@ A finding that needs one of these assumptions is a hardening note, not a blocker
   security findings only.
 - A reviewer that cannot tell writes the finding, and names the assumption it needs.
 
-A candidate that changes this page is judged against the version in the last commit: a change cannot
-loosen the model it is reviewed under.
+A candidate that changes this page is judged against the version from before it: a change cannot
+loosen the model it is reviewed under, nor, waived, the model of the reviews after it.

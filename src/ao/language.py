@@ -389,12 +389,12 @@ LOW: <n>
     },
     # the project's threat model, ahead of the candidate (REVIEW-THREAT-MODEL); {path}: where it is kept, {model}: its text
     "prompt.review-threat-model": {
-        "en": ("--- THREAT MODEL: the project's, from `{path}` as its last commit holds it. Judge a security finding "
+        "en": ("--- THREAT MODEL: the project's, from `{path}` as it stood before this change. Judge a security finding "
                "against it: BLOCKER or HIGH only when \"How it breaks\" names an actor it puts in scope, the capability "
                "they use and a concrete outcome. A finding that needs an assumption it puts out of scope goes under "
                "\"## Notes\" as `hardening: <the assumption>`, with no severity, and is not counted. A correctness "
                "finding is judged as before. ---\n{model}\n--- END OF THREAT MODEL ---"),
-        "tr": ("--- TEHDİT MODELİ: projenin, son commit'inde `{path}` dosyasında olduğu gibi. Bir güvenlik bulgusunu "
+        "tr": ("--- TEHDİT MODELİ: projenin, bu değişiklikten önce `{path}` dosyasında olduğu gibi. Bir güvenlik bulgusunu "
                "ona göre yargıla: BLOCKER ya da HIGH yalnızca \"Nasıl bozulur\" onun kapsama aldığı bir aktörü, "
                "kullandığı yeteneği ve somut bir sonucu adlandırdığında. Kapsam dışı saydığı bir varsayım gerektiren "
                "bulgu, o varsayımla birlikte \"## Notlar\" altına `hardening: <...>` olarak yazılır, önem derecesi "

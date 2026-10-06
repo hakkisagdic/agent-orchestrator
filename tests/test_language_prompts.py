@@ -42,7 +42,7 @@ TURKISH = {
     "prompt.review-range-tree": "8b0ad848e9123485f1c3827e19175a474f26693786fb685e2abe99109aa48cf2",       # REVIEW-RANGE-TREE
     # Added by CRITERIA-VERDICTS, after the tree's note: a boundary that lists criteria is asked about each.
     "prompt.review-criteria": "6c45e0b98838460856ce9c6054e9686cb6f8c4427e454486d15610b2149beb8a",
-    "prompt.review-threat-model": "cd17d0b4a979a2398c2c80f65473ae5926d03399600f7018be799d3dbde76b99",
+    "prompt.review-threat-model": "dafd320aebf4702a38a9ad5a670ae7eebec4d0bf3cbcdcb275b84edc4fa7891a",
     # Added by REVIEW-REASK: the note a reviewer is asked again with when ao could not read its answer.
     "prompt.review-reask": "efe205b3487739b4e973da8223710cc762a1daa0db032c14c4fe0d00bb3d331d",
     "prompt.review-section": "8063a940247fdbf8be4db5d8445f9945c817b3a0970c601e8bfb39155dc6ce60",

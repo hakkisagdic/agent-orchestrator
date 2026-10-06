@@ -591,23 +591,104 @@ def _stream_error(argv, stdout):
     return None
 
 
-# Where a project keeps its threat model, as its last commit holds it: the first that is there (REVIEW-THREAT-MODEL-2).
+# Where a project keeps its threat model: the first that is there, before the change under review (REVIEW-THREAT-MODEL-2).
 THREAT_MODEL_PATHS = ("THREAT_MODEL.md", "docs/threat-model.md")
 # The most of a threat model a review prompt carries: a page a project keeps beside its code (REVIEW-THREAT-MODEL).
 REVIEW_THREAT_MODEL_BYTES = 32_000
 
 
-def _review_threat_model(root):
-    """(path, text) of the project's threat model as the last commit holds it, at THREAT_MODEL_PATHS; (None, None).
+def _range_base(root, commits):
+    """The commit a retrospective review's range is diffed from - `A` of `A..B`, the merge base of `A...B`, `X` of a
+    lone `X` - or None when git names no single one (REVIEW-THREAT-MODEL-3)."""
+    try:
+        revisions = A._git_output(root, "rev-parse", "--revs-only", str(commits), timeout=30).decode("ascii").split()
+    except (RuntimeError, UnicodeError):
+        return None
+    excluded = [revision[1:] for revision in revisions if revision.startswith("^")]
+    if len(excluded) == 1:
+        return excluded[0]
+    return revisions[0] if len(revisions) == 1 and not excluded else None
+
+
+def _in_waived_range(root, commit, start, end):
+    """Whether `commit` is one of the commits `start..end` landed."""
+    if commit == start:
+        return False
+    for older, newer in ((start, commit), (commit, end)):
+        try:
+            answer = subprocess.run([A.git_binary(), "merge-base", "--is-ancestor", older, newer], cwd=root,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60).returncode
+        except (OSError, subprocess.TimeoutExpired):
+            answer = 2
+        if answer == 1:
+            return False
+        if answer:
+            raise RuntimeError("git cannot compare a commit with a waived range")
+    return True
+
+
+def _threat_model_commit(root, at):
+    """(commit, None): the commit whose threat model a review from `at` is judged under; (None, why) when ao cannot tell.
+
+    `at`, unless the model's last change on its line landed under a review waiver still open: nobody has reviewed that
+    change, and an implementer whose change a person waived would set the model every later review is judged under.
+    Then the model is the one from before that waived range, and so on back. A waived range ao cannot place could have
+    changed it, so none is read then (REVIEW-THREAT-MODEL-3).
+    """
+    try:
+        ranges = A.review_waiver_ranges(root)
+    except Exception:                               # the waiver ledger is unreadable: no range can be trusted
+        return None, "the review waivers cannot be read"
+    if any(item.get("problem") for item in ranges):
+        return None, "an open review waiver's range cannot be placed"
+    waived = [(item["start"], item["end"]) for item in ranges if item.get("landed")]
+    point = at
+    for _ in range(len(waived) + 1):
+        try:
+            changed = A._git_output(root, "log", "-1", "--format=%H", point, "--", *THREAT_MODEL_PATHS,
+                                    timeout=30).decode("ascii").strip()
+            owner = next((start for start, end in waived if changed and _in_waived_range(root, changed, start, end)),
+                         None)
+        except (RuntimeError, UnicodeError):
+            return None, "git cannot say where the threat model last changed"
+        if owner is None:
+            return point, None
+        point = owner
+    return None, "the threat model's waived changes do not end"
+
+
+def _review_threat_model(root, commits=None):
+    """(path, text) of the project's threat model as it stood before the change under review, at THREAT_MODEL_PATHS;
+    (None, None).
 
     A fixed place, and no setting: `.ao/config.json` is a file the implementer can write, and a setting there could
     point a review at any committed text that puts everything out of scope (REVIEW-THREAT-MODEL-2). It is read from
-    HEAD and never from the candidate, so a change to the model is judged against the one it would replace. A file
-    past REVIEW_THREAT_MODEL_BYTES is said on the terminal, and the review runs without a model (REVIEW-THREAT-MODEL).
+    HEAD for a staged candidate, and never from the candidate, so a change to the model is judged against the one it
+    would replace. A landed range's review read it from HEAD too, which held the range's own model, so a range a
+    person waived chose the model it was reviewed under: it is read from the commit the range starts from, and before
+    any change to it that landed under a waiver still open (REVIEW-THREAT-MODEL-3). A file past
+    REVIEW_THREAT_MODEL_BYTES is said on the terminal, and the review runs without a model (REVIEW-THREAT-MODEL).
+    Where ao cannot tell which model applies the review runs without one, which judges every finding by its severity.
     """
+    base = "HEAD" if commits is None else _range_base(root, commits)
+    try:
+        at = A._git_output(root, "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}",
+                           timeout=30).decode("ascii").strip() if base else None
+    except (RuntimeError, UnicodeError):
+        at = None
+    if not at:
+        if commits is not None:
+            print(f"{C['dim']}{commits} starts from no single commit, so no threat model stood before it; the review "
+                  f"runs without one{C['reset']}")
+        return None, None
+    point, why = _threat_model_commit(root, at)
+    if point is None:
+        print(f"{C['dim']}ao cannot tell which threat model this review is judged under ({why}); it runs without "
+              f"one{C['reset']}")
+        return None, None
     for path in THREAT_MODEL_PATHS:
         try:
-            data = A._git_output(root, "show", f"HEAD:{path}", timeout=30)
+            data = A._git_output(root, "show", f"{point}:{path}", timeout=30)
         except RuntimeError:
             continue
         if len(data) > REVIEW_THREAT_MODEL_BYTES:
@@ -3430,12 +3511,14 @@ def cmd_review(cfg, args):
     wanted = bool(args.commits and getattr(args, "claims", False))
     candidate_marker = language.text(cfg, "prompt.review-candidate")
     section_marker = language.text(cfg, "prompt.review-section")
-    # The project's threat model, as its last commit holds it, stands above the candidate, and the review records
+    # The project's threat model, as it stood before the change, stands above the candidate, and the review records
     # which one it was judged against (REVIEW-THREAT-MODEL).
     # A person is shown the diff and the boundary, not the model, so a person's verdict is recorded under none; a
     # carried answer was given under the model its request's prompt carried, which the request names
     # (REVIEW-THREAT-MODEL-2).
-    threat_path, threat = (None, None) if person or carried else _review_threat_model(root)
+    # A landed range's model is the one from before it, as a staged candidate's is HEAD's (REVIEW-THREAT-MODEL-3).
+    threat_path, threat = (None, None) if person or carried else _review_threat_model(
+        root, str(args.commits) if args.commits else None)
     threat_note = "" if not threat else "\n\n" + language.text(cfg, "prompt.review-threat-model",
                                                                 path=threat_path, model=threat)
     if threat:
