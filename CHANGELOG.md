@@ -26,6 +26,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 - A kiro reviewer reached over ACP runs as ao's read-only agent too, where `review.transport` acp started `kiro-cli acp` with no agent of ao's; measured, the ACP session ran as the agent ao wrote ([adapters.md](docs/adapters.md)) (KIRO-READONLY-2).
 - `ao-api-review` says every failure of its exchange with the key taken out, as written and as Python escapes it, where http.client's protocol errors went uncaught and a provider that put the key in a malformed status line had it printed in the traceback (API-REVIEWER-3).
 
+### Under the hood
+
+- The READMEs, in both languages, lead with what ao guarantees, why, and the five commands of every change after a five-minute setup; the command reference, with the hook's status details and the test matrix, moves to docs/commands.md and docs/commands.tr.md (README-QUICKSTART).
+
 ## [0.5.0] - 2026-10-05
 
 Everything that landed on main after v0.4.0, each line naming the slice that landed it or the
