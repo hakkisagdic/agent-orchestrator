@@ -41,14 +41,23 @@ def _part(name, namespace):
     part that loads one - as it was compiled: a module in any folder runs the file the move proof read,
     where every call read lib.py's own parts/ (SPLIT-CHECK-4). It was read beside `namespace["__file__"]`,
     which the module's own code - an earlier part, an import alias, `globals().update` - could bind to
-    another place than the proof read (SPLIT-CHECK-6). Code compiled from no file reads _PARTS_DIR.
+    another place than the proof read (SPLIT-CHECK-6). Only the module's own code loads its parts: a
+    caller whose globals are not `namespace` - a forwarding loader in another module - is refused, and so
+    is code compiled from no file, which read lib.py's parts/ in place of the proved one (SPLIT-CHECK-7).
 
     Compiled through the import system's own loader, so a part's bytecode is cached like
     any module's and an `ao` hook does not recompile thousands of lines on every run.
     """
     from importlib.machinery import SourceFileLoader
-    caller = sys._getframe(1).f_code.co_filename
-    folder = _parts_folder(os.path.dirname(os.path.abspath(caller))) if os.path.isfile(caller) else _PARTS_DIR
+    frame = sys._getframe(1)
+    if frame.f_globals is not namespace:
+        raise RuntimeError(f"_part({name!r}) is called from code outside the module it loads into; a module loads "
+                           "its own parts")
+    caller = frame.f_code.co_filename
+    if not caller or caller.startswith("<"):
+        raise RuntimeError(f"_part({name!r}) is called from code compiled from no file ({caller}); a part is read "
+                           "beside the file that loads it")
+    folder = _parts_folder(os.path.dirname(os.path.abspath(caller)))
     path = os.path.join(folder, f"{name}.py")
     exec(SourceFileLoader(f"ao.parts.{name}", path).get_code(f"ao.parts.{name}"), namespace)
 
@@ -532,6 +541,77 @@ def _part_file(module, name):
     return posixpath.join(_parts_folder(posixpath.dirname(module), posixpath), f"{name}.py")
 
 
+def _module_level(nodes):
+    """The nodes of a module's own namespace: its statements and what they hold, not the bodies of its functions,
+    classes and comprehensions, which bind names of their own."""
+    import ast
+    stack = list(nodes)
+    while stack:
+        node = stack.pop()
+        yield node
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda, ast.ListComp,
+                             ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            continue
+        stack.extend(ast.iter_child_nodes(node))
+
+
+def _loader_rebound(source, path):
+    """The names a module's `_part` loads call through - `_part`, or `A` in `A._part` - that it binds to anything but
+    ao's own loader (SPLIT-CHECK-7).
+
+    The move proof takes a module's loads to run ao's `_part`. One that imported `_part` from a module of its own,
+    or bound `A` to one, ran a loader the proof never read. The bindings allowed are `from . import lib as A`,
+    `from ao import lib as A`, `import ao.lib as A`, `from .lib import _part`, `from ao.lib import _part`, and
+    ao's lib defining `_part` itself; a function's own variable binds nothing of the module's.
+    """
+    import ast
+    tree = ast.parse(source)
+    called = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name) and func.id == "_part":
+                called.add("_part")
+            elif isinstance(func, ast.Attribute) and func.attr == "_part" and isinstance(func.value, ast.Name):
+                called.add(func.value.id)
+    if not called:
+        return []
+    own_lib = path.replace("\\", "/").endswith("ao/lib.py")
+    rebound = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            rebound.update(called & set(node.names))
+        elif isinstance(node, ast.Attribute) and node.attr == "_part" and isinstance(node.ctx, (ast.Store, ast.Del)):
+            rebound.add("_part")
+    for node in _module_level(tree.body):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if node.name in called and not (own_lib and node.name == "_part" and isinstance(node, ast.FunctionDef)):
+                rebound.add(node.name)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)) and node.id in called:
+            rebound.add(node.id)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                bound = alias.asname or alias.name.split(".")[0]
+                if bound in called and not (alias.name == "ao.lib" and alias.asname == bound):
+                    rebound.add(bound)
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name == "*":
+                    rebound.update(called & {"_part"})       # a star import may bind it from anywhere
+                    continue
+                bound = alias.asname or alias.name
+                ours = ((node.module, node.level) in ((None, 1), ("ao", 0)) and alias.name == "lib"
+                        or (node.module, node.level) in (("lib", 1), ("ao.lib", 0)) and alias.name == "_part")
+                if bound in called and not ours:
+                    rebound.add(bound)
+        elif not isinstance(node, ast.alias):
+            for field in ("name", "rest"):                   # `except E as A`, a match pattern's capture
+                value = getattr(node, field, None)
+                if isinstance(value, str) and value in called:
+                    rebound.add(value)
+    return sorted(rebound)
+
+
 def split_moves(root, start=None, end=None):
     """What the staged candidate moves between Python files, and everything that is not a pure move (#44).
 
@@ -560,7 +640,7 @@ def split_moves(root, start=None, end=None):
     old, new = {}, {}
     # Statements and loads are kept by file: one moved between files changed both (SPLIT-CHECK-2).
     other, loads, parts, present = {"old": {}, "new": {}}, {"old": {}, "new": {}}, [], {}
-    order = {"old": {}, "new": {}}
+    order, rebinders = {"old": {}, "new": {}}, []
     for path in paths:
         for side, spec, defs in (("old", f"{before}:{path}", old), ("new", f"{after}:{path}", new)):
             text = read(spec)
@@ -578,7 +658,11 @@ def split_moves(root, start=None, end=None):
             present.setdefault(path, {})[side] = bool(definitions or others or loaded)
             if side == "new" and "/parts/" in f"/{path}" and read(f"{before}:{path}") is None:
                 parts.append(path)
-    moved, problems = [], []
+            if side == "new" and loaded:
+                rebinders.extend((path, name) for name in _loader_rebound(text, path))
+    # A load runs ao's loader only through a name the module binds to it (SPLIT-CHECK-7).
+    moved, problems = [], [f"{path} binds {name}, which its _part loads call through, to something else than "
+                           "ao's loader" for path, name in rebinders]
     for name in sorted(set(old) | set(new)):
         before, after = old.get(name, []), new.get(name, [])
         if not after:

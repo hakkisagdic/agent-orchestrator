@@ -127,13 +127,14 @@ def test_a_statement_moved_between_files_is_no_move(project):
     assert "a top-level statement that is not a definition changed in mod.py" in A.split_moves(root)["problems"]
 
 
-def test_a_part_runs_in_the_namespace_of_the_module_it_came_from(tmp_path, monkeypatch):
-    (tmp_path / "shared.py").write_text("def twice():\n    return helper() * 2\n", encoding="utf-8")
-    monkeypatch.setattr(A, "_PARTS_DIR", str(tmp_path))
-    namespace = {"helper": lambda: 21}
+def test_a_part_runs_in_the_namespace_of_the_module_it_came_from(tmp_path):
+    (tmp_path / "parts").mkdir()
+    (tmp_path / "parts" / "shared.py").write_text("def twice():\n    return helper() * 2\n", encoding="utf-8")
+    module = tmp_path / "mod.py"
+    module.write_text('_part("shared", globals())\n', encoding="utf-8")
+    namespace = {"_part": A._part, "helper": lambda: 21}
 
-    # called from code compiled from no file, as `_part` reads _PARTS_DIR for
-    exec(compile('_part("shared", namespace)', "<no file>", "exec"), {"_part": A._part, "namespace": namespace})
+    exec(compile(module.read_text(encoding="utf-8"), str(module), "exec"), namespace)
 
     assert namespace["twice"]() == 42 and namespace["twice"].__globals__ is namespace
     namespace["helper"] = lambda: 5
@@ -363,3 +364,61 @@ def test_a_module_that_rebinds_its_file_still_runs_its_parts_beside_it(tmp_path,
     exec(compile(module.read_text(encoding="utf-8"), str(module), "exec"), namespace)
 
     assert namespace["b"]() == "beside the module"
+
+
+def test_only_the_module_s_own_code_loads_its_parts(tmp_path):
+    """SPLIT-CHECK-7: a forwarding loader in another module read parts beside its own file, and code compiled from no
+    file read lib.py's parts/, where the proof read the parts beside the module that loads them."""
+    (tmp_path / "parts").mkdir()
+    (tmp_path / "parts" / "mod_b.py").write_text("def b():\n    return 'proved'\n", encoding="utf-8")
+    forward = {"_part": A._part}
+    exec(compile("def load(name, namespace):\n    return _part(name, namespace)\n", str(tmp_path / "helpers.py"),
+                 "exec"), forward)
+    module = tmp_path / "mod.py"
+    module.write_text('load("mod_b", globals())\n', encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="outside the module it loads into"):
+        exec(compile(module.read_text(encoding="utf-8"), str(module), "exec"), {"load": forward["load"]})
+    with pytest.raises(RuntimeError, match="compiled from no file"):
+        namespace = {"_part": A._part}
+        exec(compile('_part("mod_b", globals())', "<string>", "exec"), namespace)
+
+
+def test_a_module_whose_source_is_gone_reads_its_parts_where_it_was_compiled(tmp_path):
+    """SPLIT-CHECK-7: a module that removed its own file before the load read lib.py's parts/, by the file's absence."""
+    (tmp_path / "parts").mkdir()
+    (tmp_path / "parts" / "mod_b.py").write_text("def b():\n    return 'proved'\n", encoding="utf-8")
+    module = tmp_path / "mod.py"
+    module.write_text('import os\nos.unlink(__file__)\n_part("mod_b", globals())\n', encoding="utf-8")
+    namespace = {"_part": A._part, "__file__": str(module)}
+
+    exec(compile(module.read_text(encoding="utf-8"), str(module), "exec"), namespace)
+
+    assert namespace["b"]() == "proved" and not module.exists()
+
+
+@pytest.mark.parametrize("binding", [
+    "from helpers.load import _part\n",
+    "from helpers import load as _part\n",
+    "_part = print\n",
+])
+def test_a_module_that_binds_its_loader_elsewhere_proves_no_move(project, binding):
+    """SPLIT-CHECK-7: `from helpers.load import _part` ran a loader the proof never read."""
+    root = project["root"]
+    _repo(root)
+    _write_files(root, {"mod.py": LIB.replace('"""a module"""\n', '"""a module"""\n' + binding)}, commit="binds")
+    _write_files(root, {"mod.py": _split_b().replace('"""a module"""\n', '"""a module"""\n' + binding),
+                        "parts/mod_b.py": B})
+
+    assert any("binds _part" in problem for problem in A.split_moves(root)["problems"])
+
+
+def test_ao_s_loaders_and_a_function_s_own_names_bind_nothing_elsewhere():
+    """SPLIT-CHECK-7: the bindings ao's modules use are its loader's, and a local `A` binds nothing of the module's."""
+    for path in ("src/ao/lib.py", "src/ao/cli.py"):
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), path),
+                  encoding="utf-8") as fh:
+            assert A._loader_rebound(fh.read(), path) == [], path
+    local = 'from . import lib as A\n\n\ndef f():\n    A = 1\n    return A\n\n\nA._part("x", globals())\n'
+    assert A._loader_rebound(local, "pkg/mod.py") == []
+    assert A._loader_rebound(local.replace("    A = 1\n", "    global A\n    A = 1\n"), "pkg/mod.py") == ["A"]
