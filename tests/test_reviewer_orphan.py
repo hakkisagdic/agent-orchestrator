@@ -338,3 +338,22 @@ def test_a_start_ended_by_what_is_no_error_puts_the_handlers_back(project, monke
         cli._run_reviewer(project["root"], [sys.executable, "-c", "pass"], 60)
 
     assert signal.getsignal(signal.SIGTERM) is before
+
+
+def test_a_session_whose_own_state_cannot_be_made_starts_no_agent(project, monkeypatch):
+    """REVIEWER-ORPHAN-6: the session's queue was made after its agent started, outside the guard that stops it."""
+    from ao import acp
+    started, real = [], acp.subprocess.Popen
+    monkeypatch.setattr(acp.subprocess, "Popen", lambda *a, **kw: started.append(real(*a, **kw)) or started[-1])
+
+    def no_queue():
+        raise MemoryError("no room for a queue")
+
+    monkeypatch.setattr(acp, "queue", SimpleNamespace(Queue=no_queue, Empty=Exception))
+    before = signal.getsignal(signal.SIGTERM)
+
+    attempt = cli._run_acp_reviewer(project["root"], [sys.executable, "-c", "import time; time.sleep(120)"],
+                                    "acp-test", "review this", 60, "acp-test")
+
+    assert started == [] and attempt["kind"] == "spawn-unknown" and "MemoryError" in attempt["reason"]
+    assert signal.getsignal(signal.SIGTERM) is before

@@ -209,13 +209,15 @@ class Session:
         self.cwd = cwd
         self.permission = permission or reject_everything
         self.decisions, self.session_id, self._next = [], None, 0
+        # What the session holds is made before its agent starts, so nothing but the reader stands between the start
+        # and the guard below (REVIEWER-ORPHAN-6).
+        self.lines, self._turn = queue.Queue(), None
         try:
             self.proc = subprocess.Popen(list(argv), cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                          stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
                                          **_group())
         except OSError as exc:
             raise ProbeError(f"could not start {argv[0]}: {exc}") from exc
-        self.lines = queue.Queue()
         # A session that fails to start after its agent did - no thread left for the reader - stops the agent: nobody
         # holds a session to close (REVIEWER-ORPHAN-5).
         try:
@@ -223,7 +225,6 @@ class Session:
         except BaseException:
             _stop(self.proc)
             raise
-        self._turn = None
 
     def __enter__(self):
         return self
