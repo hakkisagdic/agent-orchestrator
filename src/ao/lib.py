@@ -577,12 +577,16 @@ def _loader_rebound(source, path):
     if not called:
         return []
     own_lib = path.replace("\\", "/").endswith("ao/lib.py")
+    # A relative `lib` is ao's only in ao's own package: `from .lib import _part` in another package imports
+    # that package's lib (SPLIT-CHECK-8).
+    in_ao = path.replace("\\", "/").rpartition("/")[0].endswith("src/ao")
     rebound = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.Global, ast.Nonlocal)):
             rebound.update(called & set(node.names))
-        elif isinstance(node, ast.Attribute) and node.attr == "_part" and isinstance(node.ctx, (ast.Store, ast.Del)):
-            rebound.add("_part")
+        elif isinstance(node, ast.Attribute) and node.attr == "_part" and isinstance(node.ctx, (ast.Store, ast.Del)) \
+                and isinstance(node.value, ast.Name) and node.value.id in called:
+            rebound.add(node.value.id)              # `A._part = ...`: another object's `_part` is not the loader
     for node in _module_level(tree.body):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             if node.name in called and not (own_lib and node.name == "_part" and isinstance(node, ast.FunctionDef)):
@@ -600,8 +604,10 @@ def _loader_rebound(source, path):
                     rebound.update(called & {"_part"})       # a star import may bind it from anywhere
                     continue
                 bound = alias.asname or alias.name
-                ours = ((node.module, node.level) in ((None, 1), ("ao", 0)) and alias.name == "lib"
-                        or (node.module, node.level) in (("lib", 1), ("ao.lib", 0)) and alias.name == "_part")
+                ours = (((node.module, node.level) == ("ao", 0) or in_ao and (node.module, node.level) == (None, 1))
+                        and alias.name == "lib"
+                        or ((node.module, node.level) == ("ao.lib", 0) or in_ao and (node.module, node.level) == ("lib", 1))
+                        and alias.name == "_part")
                 if bound in called and not ours:
                     rebound.add(bound)
         elif not isinstance(node, ast.alias):

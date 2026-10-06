@@ -420,5 +420,21 @@ def test_ao_s_loaders_and_a_function_s_own_names_bind_nothing_elsewhere():
                   encoding="utf-8") as fh:
             assert A._loader_rebound(fh.read(), path) == [], path
     local = 'from . import lib as A\n\n\ndef f():\n    A = 1\n    return A\n\n\nA._part("x", globals())\n'
-    assert A._loader_rebound(local, "pkg/mod.py") == []
-    assert A._loader_rebound(local.replace("    A = 1\n", "    global A\n    A = 1\n"), "pkg/mod.py") == ["A"]
+    assert A._loader_rebound(local, "src/ao/mod.py") == []          # a relative lib is ao's in ao's package
+    assert A._loader_rebound(local.replace("    A = 1\n", "    global A\n    A = 1\n"), "src/ao/mod.py") == ["A"]
+
+
+def test_a_relative_lib_is_ao_s_loader_only_inside_ao_s_package():
+    """SPLIT-CHECK-8: `from .lib import _part` in another package imports that package's lib, not ao's."""
+    load = '_part("x", globals())\n'
+    assert A._loader_rebound("from .lib import _part\n" + load, "pkg/mod.py") == ["_part"]
+    assert A._loader_rebound("from .lib import _part\n" + load, "src/ao/mod.py") == []
+    assert A._loader_rebound("from ao.lib import _part\n" + load, "pkg/mod.py") == []
+
+
+def test_another_object_s_part_attribute_binds_nothing_of_the_loader():
+    """SPLIT-CHECK-8: `plugin._part = value` was taken for rebinding the loader, and a sound split refused."""
+    source = 'from ao import lib as A\n\n\ndef configure(plugin):\n    plugin._part = 1\n\n\nA._part("x", globals())\n'
+
+    assert A._loader_rebound(source, "pkg/mod.py") == []
+    assert A._loader_rebound(source + "A._part = print\n", "pkg/mod.py") == ["A"]
