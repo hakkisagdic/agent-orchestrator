@@ -555,23 +555,16 @@ def _module_level(nodes):
         stack.extend(ast.iter_child_nodes(node))
 
 
-def _own_names(scope):
-    """The names a function or class body binds as its own: its parameters and what it assigns, less what it declares
-    global or nonlocal (SPLIT-CHECK-9)."""
-    import ast
-    names, declared = set(), set()
-    if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
-        args = scope.args
-        names |= {arg.arg for arg in args.posonlyargs + args.args + args.kwonlyargs}
-        names |= {arg.arg for arg in (args.vararg, args.kwarg) if arg}
-    for node in _module_level(scope.body):
-        if isinstance(node, (ast.Global, ast.Nonlocal)):
-            declared.update(node.names)
-        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
-            names.add(node.id)
-        elif isinstance(node, (ast.Import, ast.ImportFrom)):
-            names.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
-    return names - declared
+def _scope_tables(top):
+    """{(line, name): table} of each function and class body under the module's symbol table `top`: the compiler's own
+    reading of which names a body binds, and which it reads from the module (SPLIT-CHECK-10)."""
+    tables, stack = {}, [top]
+    while stack:
+        table = stack.pop()
+        if table.get_type() in ("function", "class"):
+            tables[(table.get_lineno(), table.get_name())] = table
+        stack.extend(table.get_children())
+    return tables
 
 
 def _loader_rebound(source, path):
@@ -582,8 +575,14 @@ def _loader_rebound(source, path):
     or bound `A` to one, ran a loader the proof never read. The bindings allowed are `from . import lib as A`,
     `from ao import lib as A`, `import ao.lib as A`, `from .lib import _part`, `from ao.lib import _part`, and
     ao's lib defining `_part` itself; a function's own variable binds nothing of the module's.
+
+    Which names a body binds is the compiler's answer, from `symtable`, not a list of the statements that bind: the
+    list missed a nested def, an `except` name, a pattern's capture, a closure's name and a walrus in a default, and
+    read a class body as a function's, where a class body reads the module's name until it binds its own
+    (SPLIT-CHECK-10).
     """
     import ast
+    import symtable
     tree = ast.parse(source)
     called = set()
     for node in ast.walk(tree):
@@ -595,25 +594,58 @@ def _loader_rebound(source, path):
                 called.add(func.value.id)
     if not called:
         return []
-    own_lib = path.replace("\\", "/").endswith("ao/lib.py")
+    where = path.replace("\\", "/")
     # A relative `lib` is ao's only in ao's own package: `from .lib import _part` in another package imports
     # that package's lib (SPLIT-CHECK-8).
     # ao's own package is src/ao itself, not a folder that ends so - vendor/src/ao holds another package's lib
-    # (SPLIT-CHECK-9).
-    in_ao = path.replace("\\", "/").rpartition("/")[0] == "src/ao"
+    # (SPLIT-CHECK-9), and the `_part` that lib defines is no loader of ao's (SPLIT-CHECK-10).
+    in_ao = where.rpartition("/")[0] == "src/ao"
+    own_lib = where == "src/ao/lib.py"
+    top = symtable.symtable(source, path, "exec")
     rebound = set()
+    # `nonlocal` names an enclosing function's variable, never the module's.
     for node in ast.walk(tree):
-        if isinstance(node, (ast.Global, ast.Nonlocal)):
+        if isinstance(node, ast.Global):
             rebound.update(called & set(node.names))
-    # `A._part = ...` sets the loader's attribute wherever `A` is the module's name for it: at module level, and in a
-    # function or class body that does not bind an `A` of its own; a parameter `A` is another object (SPLIT-CHECK-9).
-    scopes = [(tree.body, set())] + [(node.body, _own_names(node)) for node in ast.walk(tree)
-                                     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]
-    for body, own in scopes:
-        for node in _module_level(body):
-            if isinstance(node, ast.Attribute) and node.attr == "_part" and isinstance(node.ctx, (ast.Store, ast.Del)) \
-                    and isinstance(node.value, ast.Name) and node.value.id in called - own:
-                rebound.add(node.value.id)
+    # Anything but an import that binds the name in the module's namespace - a statement, or a walrus in a default or
+    # a comprehension - binds it to something else; the compiler marks the comprehension's as declared global. ao's lib
+    # defining `_part` is read by its statements below, and a walrus anywhere that names `_part` there is taken for one
+    # at module level.
+    for name in called:
+        try:
+            symbol = top.lookup(name)
+        except KeyError:
+            continue
+        assigned = symbol.is_assigned() or symbol.is_declared_global()
+        if assigned and not (own_lib and name == "_part"):
+            rebound.add(name)
+    if own_lib and any(isinstance(node, ast.NamedExpr) and node.target.id == "_part" for node in ast.walk(tree)):
+        rebound.add("_part")
+    # `A._part = ...` sets the loader's attribute wherever `A` is the module's name for it. A function's own `A` - a
+    # parameter, a nested def or class, an `except` name, a capture, or one it closes over - is another object,
+    # unless an import bound it, which may be ao's lib; a class body reads the module's `A` until it binds its own,
+    # so there only one it closes over is another (SPLIT-CHECK-9, SPLIT-CHECK-10).
+    tables = _scope_tables(top)
+    imported = {alias.asname or alias.name.split(".")[0]
+                for scope in ast.walk(tree) if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                for node in _module_level(scope.body) if isinstance(node, (ast.Import, ast.ImportFrom))
+                for alias in node.names}
+    scopes = [(tree, None)] + [(node, tables.get((node.lineno, node.name))) for node in ast.walk(tree)
+                               if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]
+    for scope, table in scopes:
+        for node in _module_level(scope.body):
+            if not (isinstance(node, ast.Attribute) and node.attr == "_part" and isinstance(node.ctx, (ast.Store, ast.Del))
+                    and isinstance(node.value, ast.Name) and node.value.id in called):
+                continue
+            name = node.value.id
+            try:
+                symbol = table.lookup(name) if table is not None else None
+            except KeyError:
+                symbol = None
+            own = symbol is not None and not symbol.is_global() and name not in imported \
+                and (symbol.is_free() or table.get_type() == "function")
+            if not own:
+                rebound.add(name)
     for node in _module_level(tree.body):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             if node.name in called and not (own_lib and node.name == "_part" and isinstance(node, ast.FunctionDef)):
@@ -628,7 +660,8 @@ def _loader_rebound(source, path):
         elif isinstance(node, ast.ImportFrom):
             for alias in node.names:
                 if alias.name == "*":
-                    rebound.update(called & {"_part"})       # a star import may bind it from anywhere
+                    # A star import may bind any of them from anywhere: `A` as a public name, `_part` by `__all__`.
+                    rebound.update(called)
                     continue
                 bound = alias.asname or alias.name
                 ours = (((node.module, node.level) == ("ao", 0) or in_ao and (node.module, node.level) == (None, 1))

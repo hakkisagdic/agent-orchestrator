@@ -14,6 +14,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- The move proof reads which names a module, a function and a class body bind from the compiler's own symbol tables: a vendored lib's `_part` passed for ao's loader, a class body's write before its own `A` and a walrus in a default or a comprehension went unseen, and a nested def, an `except` name, a capture or a closure's `A` refused a sound split (SPLIT-CHECK-10).
 - The move proof takes ao's package to be src/ao itself, where a folder that only ended so, vendor/src/ao, had its own lib taken for ao's loader; and it reads `A._part = ...` by scope, where a function's own parameter `A` refused a sound split (SPLIT-CHECK-9).
 - The move proof takes a relative `lib` for ao's loader only inside ao's own package, where `from .lib import _part` in any package was trusted; and it refuses only the loader's own `_part` being assigned, where another object's `plugin._part = value` refused a sound split (SPLIT-CHECK-8).
 - Architect presence knows a runtime's architect by the program it runs as wake-holding does, where it worked out the names a second time without the runtime; a version-named interpreter (`python3.12`) is a runtime; and an architect whose program has no name, code given inline, is proven by no process, where the runtime alone matched every one of it (JOURNAL-2-5).

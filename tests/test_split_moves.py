@@ -1,5 +1,6 @@
 import os
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -455,3 +456,51 @@ def test_the_loader_s_part_is_set_wherever_its_name_is_the_module_s():
     assert A._loader_rebound(head + "def configure(A):\n    A._part = 1" + load, "pkg/mod.py") == []
     assert A._loader_rebound(head + "def setup():\n    A._part = print" + load, "pkg/mod.py") == ["A"]
     assert A._loader_rebound(head + "class C:\n    A._part = print" + load, "pkg/mod.py") == ["A"]
+
+
+def test_a_vendored_lib_s_own_part_is_no_loader_of_ao_s():
+    """SPLIT-CHECK-10: any path ending in ao/lib.py was taken for ao's lib, so the `_part` vendor/src/ao/lib.py defines
+    passed for ao's loader."""
+    source = 'def _part(name, namespace):\n    pass\n\n\n_part("x", globals())\n'
+
+    assert A._loader_rebound(source, "vendor/src/ao/lib.py") == ["_part"]
+    assert A._loader_rebound(source, "src/ao/lib.py") == []
+    assert A._loader_rebound(source + "f = lambda x=(_part := print): x\n", "src/ao/lib.py") == ["_part"]
+
+
+_HEAD, _LOAD = "from ao import lib as A\n\n\n", '\n\n\nA._part("x", globals())\n'
+
+
+def test_a_class_body_sets_the_module_s_loader_until_it_binds_its_own():
+    """SPLIT-CHECK-10: a class body's `A = ...` was read as a function's local, which hid the write to the module's
+    `A._part` before it; a class body in a function still closes over the function's `A`."""
+    assert A._loader_rebound(_HEAD + "class C:\n    A._part = print\n    A = object()" + _LOAD, "pkg/mod.py") == ["A"]
+    assert A._loader_rebound(_HEAD + "def f(A):\n    class C:\n        A._part = 1\n    return C" + _LOAD,
+                             "pkg/mod.py") == []
+
+
+@pytest.mark.parametrize("body", [
+    "    def A():\n        pass\n    A._part = 1\n",
+    "    class A:\n        pass\n    A._part = 1\n",
+    "    try:\n        pass\n    except Exception as A:\n        A._part = 1\n",
+    pytest.param("    match x:\n        case [*A]:\n            A._part = 1\n",
+                 marks=pytest.mark.skipif(sys.version_info < (3, 10), reason="match is Python 3.10")),
+    "    A = 1\n    def inner():\n        A._part = 1\n    return inner\n",
+    "    A = 1\n    def inner():\n        nonlocal A\n        A._part = 1\n    return inner\n",
+])
+def test_a_function_s_own_bindings_and_its_closures_are_other_objects(body):
+    """SPLIT-CHECK-10: a nested def or class, an `except` name and a pattern's capture are a function's own `A`, and a
+    closure's `A` is its enclosing function's; each was taken for the module's, and a sound split refused."""
+    assert A._loader_rebound(_HEAD + "def configure(x):\n" + body + _LOAD, "pkg/mod.py") == []
+
+
+@pytest.mark.parametrize("source", [
+    _HEAD + "def setup():\n    from ao import lib as A\n    A._part = print" + _LOAD,
+    _HEAD + "def setup(x=(A := print)):\n    return x" + _LOAD,
+    _HEAD + "B = [(A := print) for _ in (0,)]" + _LOAD,
+    "from helpers import *\n" + _HEAD + _LOAD,
+])
+def test_what_binds_the_module_s_name_wherever_it_is_written_is_found(source):
+    """SPLIT-CHECK-10: an `A` a function imports may be ao's lib itself; a walrus in a default or a comprehension binds
+    the module's `A`; and a star import binds a public `A` as surely as `_part` through `__all__`."""
+    assert A._loader_rebound(source, "pkg/mod.py") == ["A"]
