@@ -261,3 +261,34 @@ def test_the_doctor_finds_the_client_where_a_review_finds_it(project, monkeypatc
 
     client.unlink()
     assert A.absent_adapter_binaries(cfg) == [("dev", "openai-api", ["ao-api-review"])]
+
+
+def test_a_protocol_error_that_echoes_the_key_never_shows_it(monkeypatch, tmp_path, capsys):
+    """API-REVIEWER-3: a provider that answered with the key in a malformed status line raised BadStatusLine, which
+    the client did not catch, and its traceback carried the key."""
+    class Echo(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            key = self.headers.get("Authorization", "").split()[-1]
+            self.wfile.write(f"HTTP/1.1 {key} is no status\r\n\r\n".encode())
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Echo)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        _providers(monkeypatch, tmp_path, f"local http://127.0.0.1:{server.server_address[1]}/v1 AO_TEST_API_KEY")
+        monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
+        code, answer = _run(tmp_path, "local/m")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    said = capsys.readouterr()
+    assert code == 1 and answer is None
+    assert "a-key-for-this-test" not in said.err + said.out and "<key>" in said.err
+
+
+def test_the_key_is_taken_out_as_written_and_as_python_escapes_it():
+    assert api_review._scrub("got 'k\\\\ey' and k\\ey", "k\\ey") == "got '<key>' and <key>"

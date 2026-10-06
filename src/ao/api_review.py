@@ -52,6 +52,14 @@ def providers(entries):
     return table
 
 
+def _scrub(text, key):
+    """`text` with the key taken out, as written and as Python escapes it in a repr (API-REVIEWER-3)."""
+    for form in sorted({key, repr(key)[1:-1], key.encode("unicode_escape").decode("ascii")}, key=len, reverse=True):
+        if form:
+            text = text.replace(form, "<key>")
+    return text
+
+
 def _content(answer):
     """The text of the first choice's message: a string, or the text parts of a list of them."""
     try:
@@ -115,11 +123,16 @@ def main(argv=None):
         with opener.open(request, timeout=args.timeout) as response:
             answer = json.loads(response.read().decode(UTF8, "replace"))
     except urllib.error.HTTPError as exc:
-        said = exc.read(300).decode(UTF8, "replace").replace(key, "<key>") if exc.fp else ""
+        try:
+            said = _scrub(exc.read(300).decode(UTF8, "replace"), key) if exc.fp else ""
+        except Exception:                           # a body cut short is no reason to say less than the status
+            said = ""
         return refuse(f"{provider} answered HTTP {exc.code}" + (f": {' '.join(said.split())}" if said else ""), FAILED)
-    except (urllib.error.URLError, OSError, ValueError) as exc:
-        said = str(exc).replace(key, "<key>")
-        return refuse(f"{provider} could not be asked ({type(exc).__name__}: {said})", FAILED)
+    except Exception as exc:
+        # Every failure of the exchange is said with the key taken out: http.client's protocol errors are none of
+        # URLError, OSError or ValueError, and a provider that put the key in a malformed status line had it printed
+        # in the traceback (API-REVIEWER-3).
+        return refuse(f"{provider} could not be asked ({type(exc).__name__}: {_scrub(str(exc), key)})", FAILED)
     text = _content(answer)
     if not text.strip():
         return refuse(f"{provider} gave no answer for {model}", FAILED)

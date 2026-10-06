@@ -16,6 +16,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 - An ACP reviewer's session makes what it holds before its agent starts, so nothing but its reader stands between the start and the guard that stops the agent, where a queue that could not be made left the agent running (REVIEWER-ORPHAN-6).
 
+### Security
+
+- `ao-api-review` says every failure of its exchange with the key taken out, as written and as Python escapes it, where http.client's protocol errors went uncaught and a provider that put the key in a malformed status line had it printed in the traceback (API-REVIEWER-3).
+
 ## [0.5.0] - 2026-10-05
 
 Everything that landed on main after v0.4.0, each line naming the slice that landed it or the
