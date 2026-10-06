@@ -78,3 +78,16 @@ koruyabilir, push-window hook'unun kullanılamadığını söyleyebilir ve 1 dö
 hedeflerden biri paylaşılan, harici ya da global/system config ile seçilmişse
 install, uninstall ve remove işlemlerinin tamamı açık `--allow-shared-hooks`
 olmadan reddedilir.
+
+## Testler
+
+Barındırılan `tests` iş akışı, main'e her push'ta ve her pull request'te paketi Ubuntu'da Python 3.9
+(destek tabanı) ve 3.12 ile koşturur; macOS ve Windows her hafta ve istek üzerine koşar
+(`gh workflow run tests -f os=windows-latest -f python=3.12`). Depo public olduğu için barındırılan
+koşucular ücretsizdir; pre-push hook'u da push'tan önce paketi yerelde koşturur: önce push edilen
+commit'lerin dokunduğu testleri, sonra bütün paketi, pytest-xdist (`dev` ekstrası) kuruluysa dört
+süreçte - `AO_PREPUSH_WORKERS` kaç süreç olacağını belirler, 0 tek süreçte tutar. Bir sürüm etiketi,
+yayımlamadan önce paketi yeniden koşturur. Barındırılan koşular, gerçek alt süreçler ve geçici yollarla
+işletim sistemi API davranışını ve belirleyici süreç çökmelerini kapsar. Fiziksel güç kaybının,
+depolama denetleyicisinin ya da dosya sisteminin - desteklenmeyen ve ağ dosya sistemleri dahil -
+yeterlilik sınaması değildir.

@@ -2,8 +2,9 @@
 
 # agent-orchestrator
 
-**Nothing your AI agents write is committed until a model of another family has reviewed it -
-enforced at `git commit`, recorded in a ledger.**
+**Your AI agents' commits are reviewed before they land.** By default a model of another family
+reviews the exact change an agent staged, a git hook refuses anything else at `git commit`, and a
+ledger records every decision - a review a person chose to waive included, which ao reviews after.
 
 Keep the coding agents you already use: Claude Code, Codex, Kiro, Qoder, OpenCode and the others
 in the table below. `ao` sits above them. It runs your gates on the exact change an agent staged,
