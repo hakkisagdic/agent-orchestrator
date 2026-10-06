@@ -76,6 +76,28 @@ def _content(answer):
     return content if isinstance(content, str) else ""
 
 
+def _no_answer(provider, model, answer):
+    """Why an answer holds no text (API-REVIEWER-5).
+
+    A reasoning model that spends the whole answer its provider allows on reasoning stops before it writes a verdict:
+    EVREN allows 16,384 tokens, and on a review prompt of about 28 KB GLM-5.3, DeepSeek V4.1 Flash, Qwen3.8 Flash and
+    MiMo V2.6 Pro each spent all of them so on 2026-10-06. "Gave no answer" sent a person looking for a fault at the
+    provider. Only ao's own words and a whole number from the answer are said: the provider's text is not printed.
+    """
+    try:
+        choice = answer["choices"][0]
+        finish = choice.get("finish_reason")
+        details = (answer.get("usage") or {}).get("completion_tokens_details")
+    except (KeyError, IndexError, TypeError, AttributeError):
+        return f"{provider} gave no answer for {model}"
+    if finish != "length":
+        return f"{provider} gave no answer for {model}"
+    spent = details.get("reasoning_tokens") if isinstance(details, dict) else None
+    spent = f" ({spent} tokens of reasoning)" if isinstance(spent, int) and not isinstance(spent, bool) else ""
+    return (f"{model} on {provider} spent the whole answer it may give{spent} before it wrote one; a smaller "
+            "candidate, or a model that reasons less, gives a verdict")
+
+
 def main(argv=None):
     A.utf8_streams()
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
@@ -140,7 +162,7 @@ def main(argv=None):
         return refuse(f"{provider} could not be asked ({type(exc).__name__}: {_scrub(str(exc), key)})", FAILED)
     text = _content(answer)
     if not text.strip():
-        return refuse(f"{provider} gave no answer for {model}", FAILED)
+        return refuse(_no_answer(provider, model, answer), FAILED)
     with open(args.output, "w", encoding=UTF8, newline="\n") as fh:
         fh.write(text)
     return 0

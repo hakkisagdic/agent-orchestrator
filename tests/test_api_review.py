@@ -20,7 +20,7 @@ APPROVED = "VERDICT: APPROVED\nBLOCKER: 0\nHIGH: 0\nMEDIUM: 0\nLOW: 0\n\n## Find
 class _Endpoint:
     """A chat-completions stand-in on 127.0.0.1: it keeps each request and answers as it is told."""
 
-    def __init__(self, answer=APPROVED, status=200, location=None):
+    def __init__(self, answer=APPROVED, status=200, location=None, reply=None):
         self.requests, endpoint = [], self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -33,12 +33,13 @@ class _Endpoint:
                     self.send_header("Location", location)
                     self.end_headers()
                     return
-                reply = json.dumps({"choices": [{"message": {"role": "assistant", "content": answer}}]}).encode()
+                body = reply if reply is not None else {"choices": [{"message": {"role": "assistant", "content": answer}}]}
+                encoded = json.dumps(body).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(reply)))
+                self.send_header("Content-Length", str(len(encoded)))
                 self.end_headers()
-                self.wfile.write(reply)
+                self.wfile.write(encoded)
 
             def log_message(self, *args):
                 pass
@@ -298,3 +299,30 @@ def test_a_key_spelled_like_the_mark_is_taken_out_all_the_same():
     """API-REVIEWER-4: a key spelled `<key>` was replaced by the mark `<key>`, itself."""
     assert api_review._scrub("got <key> back", "<key>") == "got <redacted> back"
     assert api_review._scrub("the key e", "e") == "th*** k***y ***"          # a mark holding no part of the key
+
+
+def test_a_model_that_spent_its_answer_reasoning_is_said_so(monkeypatch, tmp_path, endpoint, capsys):
+    """API-REVIEWER-5: EVREN's reasoning models spent all 16,384 tokens it allows on a 28 KB review prompt, and the
+    client said only that the provider gave no answer."""
+    served = endpoint(reply={"choices": [{"message": {"role": "assistant", "content": None,
+                                                      "reasoning_content": "a-key-for-this-test " * 3},
+                                          "finish_reason": "length"}],
+                             "usage": {"completion_tokens": 16384,
+                                       "completion_tokens_details": {"reasoning_tokens": 16384}}})
+    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
+    monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
+
+    code, answer = _run(tmp_path, "local/glm-5.3")
+
+    said = capsys.readouterr().err
+    assert code == 1 and answer is None
+    assert "glm-5.3 on local spent the whole answer it may give (16384 tokens of reasoning)" in said
+    assert "a-key-for-this-test" not in said
+
+
+def test_an_empty_answer_that_did_not_run_out_is_still_no_answer(monkeypatch, tmp_path, endpoint, capsys):
+    served = endpoint(reply={"choices": [{"message": {"role": "assistant", "content": ""}, "finish_reason": "stop"}]})
+    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
+    monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
+
+    assert _run(tmp_path, "local/m")[0] == 1 and "local gave no answer for m" in capsys.readouterr().err

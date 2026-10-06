@@ -222,7 +222,11 @@ to this machine with no proxy between - and is never carried through a redirect;
 could leave unprotected, or whose variable is unset or holds what no header carries, is said, the
 key's value never, and nothing is sent. `ao doctor` finds the client where a review does, in a
 Windows interpreter's Scripts directory too. A prompt past one argument
-reaches it on its standard input. A gateway that serves several model families through one key
+reaches it on its standard input. A reasoning model can spend the whole answer its provider allows
+on reasoning and write no verdict: EVREN allows 16,384 tokens, and on 2026-10-06 its reasoning
+models spent them so on a review prompt of about 28 KB, where DeepSeek V4.1 Flash reviewed a 10 KB
+one in a minute and a half. The client says so, with the tokens spent, and the review is
+UNAVAILABLE rather than answered (API-REVIEWER-5). A gateway that serves several model families through one key
 reviews with whichever the route names, so the family is named as for any tool:
 
 ```bash
