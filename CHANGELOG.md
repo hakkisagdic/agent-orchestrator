@@ -31,6 +31,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Under the hood
 
+- The READMEs' headline says what ao enforces: an agent commits only a reviewed change or one a person chose to waive, which ao reviews after it lands, and a commit made around the hook is reported, where it promised a review before every commit (README-QUICKSTART-3).
 - The READMEs' promise says what ao enforces with its exceptions: a model of another family reviews by default, and a review a person chose to waive is recorded and reviewed after, where it promised another family's review before every commit; and the Turkish command reference has the test matrix the English one has (README-QUICKSTART-2).
 - The READMEs, in both languages, lead with what ao guarantees, why, and the five commands of every change after a five-minute setup; the command reference, with the hook's status details and the test matrix, moves to docs/commands.md and docs/commands.tr.md (README-QUICKSTART).
 

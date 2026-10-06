@@ -2,10 +2,11 @@
 
 # agent-orchestrator
 
-**Yapay zekâ ajanlarının commit'leri inmeden önce gözden geçirilir.** Varsayılan olarak başka bir
-model ailesi, ajanın stage ettiği değişikliğin tam kendisini gözden geçirir; git hook'u gerisini
-`git commit` anında reddeder ve bir defter her kararı kaydeder - bir kişinin atlamayı seçtiği gözden
-geçirme de, ao onu sonradan gözden geçirir.
+**Yapay zekâ ajanların yalnızca gözden geçirilmiş bir değişikliği ya da bir kişinin gözden
+geçirmesini atlamayı seçtiği birini commit eder.** Varsayılan olarak başka bir model ailesi,
+ajanın stage ettiği değişikliğin tam kendisini gözden geçirir; git hook'u gerisini `git commit`
+anında reddeder. Bir defter her kararı kaydeder; ao atlanan bir değişikliği indikten sonra gözden
+geçirir ve hook'un etrafından dolaşan bir commit'i bildirir.
 
 Zaten kullandığın kodlama ajanlarını bırakmazsın: Claude Code, Codex, Kiro, Qoder, OpenCode ve
 aşağıdaki tablodaki diğerleri. `ao` onların üstünde durur. Bir ajanın stage ettiği değişikliğin
