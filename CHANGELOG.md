@@ -12,10 +12,6 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ## [Unreleased]
 
-### New commands
-
-- `ao config set review.threat_model <path>` names a file in the repository whose threat model every review is judged against: ao puts it in each review prompt, read from the last commit so a candidate cannot loosen the model it is reviewed under, a finding that needs an assumption the model puts out of scope is a hardening note and not a blocker, and the review records the model's digest; ao's own is docs/threat-model.md ([threat model](docs/threat-model.md)) (REVIEW-THREAT-MODEL).
-
 ### Fixes
 
 - The move proof takes ao's package to be src/ao itself, where a folder that only ended so, vendor/src/ao, had its own lib taken for ao's loader; and it reads `A._part = ...` by scope, where a function's own parameter `A` refused a sound split (SPLIT-CHECK-9).
@@ -26,6 +22,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Security
 
+- Every review is judged against the project's threat model, `THREAT_MODEL.md` or `docs/threat-model.md` as its last commit holds it, put in the prompt above the candidate: a finding that needs an assumption the model puts out of scope is a hardening note and not a blocker, and the review records the model's digest. The model is read from a fixed place and never from a setting, which the implementer could point at any committed text; a candidate cannot loosen the model it is reviewed under; a person's review records none, and a carried stand-in answer the one its request's prompt carried ([threat model](docs/threat-model.md)) (REVIEW-THREAT-MODEL, REVIEW-THREAT-MODEL-2).
 - `ao-api-review` takes the key out with a mark that holds no part of it, where a key spelled `<key>` was replaced by the mark `<key>`, itself (API-REVIEWER-4).
 - A part is loaded only by the module's own code: a forwarding loader in another module and code compiled from no file are refused, where the first read parts beside its own file and the second, as a module that removed its own source did, read lib.py's parts in place of the proved ones; and the move proof refuses a module that binds the name its loads call through - `_part`, or `A` in `A._part` - to anything but ao's loader (SPLIT-CHECK-7).
 - A kiro reviewer reached over ACP runs as ao's read-only agent too, where `review.transport` acp started `kiro-cli acp` with no agent of ao's; measured, the ACP session ran as the agent ao wrote ([adapters.md](docs/adapters.md)) (KIRO-READONLY-2).

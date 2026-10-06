@@ -2,10 +2,14 @@
 
 Catchup reviews kept finding new edge cases: each needed an attacker to have landed malicious code through an
 earlier review, or the interpreter to fail at one chosen line. Without a model of who the attacker is, a reviewer
-had no line between a blocker and a hardening note. `review.threat_model` names the project's model; ao puts it in
-every review prompt, read from HEAD, so a candidate cannot loosen the model it is judged under.
+had no line between a blocker and a hardening note. ao puts the project's model - THREAT_MODEL.md or
+docs/threat-model.md, read from HEAD - in every review prompt, so a candidate cannot loosen the model it is judged
+under, and no setting the implementer can write points it elsewhere (REVIEW-THREAT-MODEL-2).
 """
-from ao import cli, language, settings as S
+import json
+from types import SimpleNamespace
+
+from ao import cli, language, lib as A, storage
 from tests.test_review_context import _args, _git, _package, _review_file, _reviewer, _stage_test, _write
 
 MODEL = "# Threat model\n\nIn scope: the implementer agent, MODEL-AS-COMMITTED.\n"
@@ -16,22 +20,22 @@ def _model_between(prompt):
     return prompt[start:prompt.index("--- END OF THREAT MODEL ---", start)]
 
 
-def _with_model(cfg, path="docs/threat-model.md"):
-    return dict(cfg, review=dict(cfg.get("review") or {}, threat_model=path))
+def _commit(root, path, text):
+    _write(root, path, text)
+    _git(root, "add", path)
+    _git(root, "commit", "-q", "-m", path)
 
 
 def test_a_review_is_judged_against_the_threat_model_the_last_commit_holds(project, tmp_path):
     root = _package(project)
-    _write(root, "docs/threat-model.md", MODEL)
-    _git(root, "add", "docs/threat-model.md")
-    _git(root, "commit", "-q", "-m", "threat model")
+    _commit(root, "docs/threat-model.md", MODEL)
     # the candidate loosens the model it would be reviewed under
     _write(root, "docs/threat-model.md", MODEL.replace("MODEL-AS-COMMITTED", "everything out of scope, LOOSENED"))
     _git(root, "add", "docs/threat-model.md")
     _stage_test(root)
     cfg, capture = _reviewer(project, tmp_path)
 
-    assert cli.cmd_review(_with_model(cfg), _args()) == 0
+    assert cli.cmd_review(cfg, _args()) == 0
 
     prompt = capture.read_text(encoding="utf-8")
     model = _model_between(prompt)
@@ -39,6 +43,23 @@ def test_a_review_is_judged_against_the_threat_model_the_last_commit_holds(proje
     candidate = "\n\n" + language.text(project, "prompt.review-candidate") + "\n"
     assert prompt.index("--- THREAT MODEL:") < prompt.index(candidate)
     assert "- threat model: docs/threat-model.md `sha256:" in _review_file(project)
+
+
+def test_the_model_at_the_root_is_read_first_and_no_setting_points_elsewhere(project, tmp_path):
+    """REVIEW-THREAT-MODEL-2: `review.threat_model` was a setting in `.ao/config.json`, a file the implementer can
+    write, and could point a review at any committed text that put everything out of scope."""
+    root = _package(project)
+    _commit(root, "THREAT_MODEL.md", MODEL.replace("MODEL-AS-COMMITTED", "AT-THE-ROOT"))
+    _commit(root, "docs/threat-model.md", MODEL)
+    _commit(root, "docs/permissive.md", "# Threat model\n\nEverything is out of scope.\n")
+    _stage_test(root)
+    cfg, capture = _reviewer(project, tmp_path)
+    cfg = dict(cfg, review=dict(cfg.get("review") or {}, threat_model="docs/permissive.md"))
+
+    assert cli.cmd_review(cfg, _args()) == 0
+
+    model = _model_between(capture.read_text(encoding="utf-8"))
+    assert "AT-THE-ROOT" in model and "Everything is out of scope" not in model
 
 
 def test_without_a_threat_model_a_review_carries_none(project, tmp_path):
@@ -52,15 +73,54 @@ def test_without_a_threat_model_a_review_carries_none(project, tmp_path):
     assert "- threat model:" not in _review_file(project)
 
 
-def test_a_threat_model_the_last_commit_does_not_hold_is_said_and_left_out(project, tmp_path, capsys):
+def test_a_model_the_candidate_brings_is_not_the_one_it_is_judged_under(project, tmp_path):
     root = _package(project)
+    _write(root, "THREAT_MODEL.md", MODEL)                 # staged with the candidate, not in the last commit
+    _git(root, "add", "THREAT_MODEL.md")
     _stage_test(root)
     cfg, capture = _reviewer(project, tmp_path)
 
-    assert cli.cmd_review(_with_model(cfg, "docs/no-such-model.md"), _args()) == 0
+    assert cli.cmd_review(cfg, _args()) == 0
 
-    assert "THREAT MODEL" not in capture.read_text(encoding="utf-8")
-    assert "which the last commit does not hold" in capsys.readouterr().out
+    assert "--- THREAT MODEL:" not in capture.read_text(encoding="utf-8")
+
+
+def test_a_persons_review_is_recorded_under_no_model(project, capsys):
+    """REVIEW-THREAT-MODEL-2: a person is shown the diff and the boundary, not the model, and the record claimed the
+    model's digest for the person's verdict."""
+    from tests.test_review_tiers import _artefact, _digest, _person, _rows
+    root = _package(project)
+    _commit(root, "docs/threat-model.md", MODEL)
+    _stage_test(root)
+    cfg = dict(project, implementer={"adapter": "claude-code", "session": "s1", "name": "claude", "model": "model-a"})
+
+    code, shown = _person(cfg, capsys)
+    assert code == 0 and "THREAT MODEL" not in shown
+    assert _person(cfg, capsys, verdict="APPROVED", digest=_digest(shown))[0] == 0
+
+    (row,) = _rows(root)
+    assert "- threat model:" not in _artefact(cfg, row)
+
+
+def test_a_carried_answer_is_recorded_under_the_model_its_request_carried(project, monkeypatch, tmp_path):
+    """REVIEW-THREAT-MODEL-2: a stand-in answer was attributed to the model at collection, where the person answered
+    the prompt the request was written with."""
+    root = _package(project)
+    _stage_test(root)
+    asked = {"path": "docs/threat-model.md", "digest": "sha256:" + "1" * 64}
+    request = A.write_review_request(root, project, A.index_candidate(root), {"kind": "staged", "digest": "d"}, "dd",
+                                     "b", None, None, "the prompt", threat_model=asked)
+    assert A.review_request(root, request["nonce"])["threat_model"] == asked
+    response = tmp_path / "answer.md"
+    response.write_text(f"NONCE: {request['nonce']}\nVERDICT: APPROVED\nBLOCKER: 0\nHIGH: 0\nMEDIUM: 0\nLOW: 0\n",
+                        encoding="utf-8")
+    carried = []
+    monkeypatch.setattr(cli, "cmd_review", lambda cfg, args: carried.append(args.carried) or 0)
+
+    cli._collect_review(project, SimpleNamespace(nonce=request["nonce"], response=str(response)), root, "Alice",
+                        "some-model", storage.read_chained_jsonl)
+
+    assert carried and carried[0]["evidence"]["threat_model"] == asked
 
 
 def test_a_section_answered_under_another_threat_model_is_no_answer_under_this_one(project):
@@ -76,8 +136,7 @@ def test_a_section_answered_under_another_threat_model_is_no_answer_under_this_o
     assert len({without, under, other}) == 3
 
 
-def test_the_threat_model_is_a_path_inside_the_repository():
-    assert S.usable("review.threat_model", "docs/threat-model.md")
-    for value in ("/etc/model.md", "../model.md", "docs/../model.md", "docs\\model.md", "-model.md", "C:model.md",
-                  "docs//model.md"):
-        assert not S.usable("review.threat_model", value), value
+def test_no_setting_names_the_threat_model():
+    from ao import settings as S
+    assert "review.threat_model" not in S.SETTINGS
+    assert json.dumps(cli.THREAT_MODEL_PATHS) == '["THREAT_MODEL.md", "docs/threat-model.md"]'

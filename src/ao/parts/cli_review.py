@@ -591,32 +591,32 @@ def _stream_error(argv, stdout):
     return None
 
 
+# Where a project keeps its threat model, as its last commit holds it: the first that is there (REVIEW-THREAT-MODEL-2).
+THREAT_MODEL_PATHS = ("THREAT_MODEL.md", "docs/threat-model.md")
 # The most of a threat model a review prompt carries: a page a project keeps beside its code (REVIEW-THREAT-MODEL).
 REVIEW_THREAT_MODEL_BYTES = 32_000
 
 
-def _review_threat_model(root, cfg):
-    """(path, text) of the threat model `review.threat_model` names, as the last commit holds it; (None, None) for none.
+def _review_threat_model(root):
+    """(path, text) of the project's threat model as the last commit holds it, at THREAT_MODEL_PATHS; (None, None).
 
-    It is read from HEAD and never from the candidate: a change to the model is judged against the one it would
-    replace, so a candidate cannot loosen what it is reviewed under. A path the last commit does not hold, or a file
-    past REVIEW_THREAT_MODEL_BYTES, is said on the terminal, and the review runs without a model (REVIEW-THREAT-MODEL).
+    A fixed place, and no setting: `.ao/config.json` is a file the implementer can write, and a setting there could
+    point a review at any committed text that puts everything out of scope (REVIEW-THREAT-MODEL-2). It is read from
+    HEAD and never from the candidate, so a change to the model is judged against the one it would replace. A file
+    past REVIEW_THREAT_MODEL_BYTES is said on the terminal, and the review runs without a model (REVIEW-THREAT-MODEL).
     """
-    path = S.get(cfg, "review.threat_model")
-    if not path:
-        return None, None
-    try:
-        data = A._git_output(root, "show", f"HEAD:{path}", timeout=30)
-    except RuntimeError:
-        print(f"{C['dim']}review.threat_model names {path}, which the last commit does not hold; the review runs "
-              f"without a threat model{C['reset']}")
-        return None, None
-    if len(data) > REVIEW_THREAT_MODEL_BYTES:
-        print(f"{C['dim']}{path} is {len(data)} bytes, past the {REVIEW_THREAT_MODEL_BYTES} a review prompt carries "
-              f"of a threat model; the review runs without one{C['reset']}")
-        return None, None
-    text = data.decode(UTF8, "replace").strip()
-    return (path, text) if text else (None, None)
+    for path in THREAT_MODEL_PATHS:
+        try:
+            data = A._git_output(root, "show", f"HEAD:{path}", timeout=30)
+        except RuntimeError:
+            continue
+        if len(data) > REVIEW_THREAT_MODEL_BYTES:
+            print(f"{C['dim']}{path} is {len(data)} bytes, past the {REVIEW_THREAT_MODEL_BYTES} a review prompt "
+                  f"carries of a threat model; the review runs without one{C['reset']}")
+            return None, None
+        text = data.decode(UTF8, "replace").strip()
+        return (path, text) if text else (None, None)
+    return None, None
 
 
 def _reviewer_agent(fresh, argv):
@@ -2345,6 +2345,8 @@ def _collect_review(cfg, args, root, by, model, read_chained_jsonl):
     carried = {"route": route, "out": out, "criteria": criteria, "evidence": {
         "transport": "human-carried", "collected_by": by, "nonce": request["nonce"],
         "limits": list(A.STANDIN_LIMITS)}}
+    if isinstance(request.get("threat_model"), dict):
+        carried["evidence"]["threat_model"] = request["threat_model"]   # the one its prompt carried
     before = A.review_row_count(root)
     code = cmd_review(cfg, SimpleNamespace(boundary=request.get("boundary"), paths=request.get("paths"),
                                            commits=None, carried=carried))
@@ -3430,7 +3432,10 @@ def cmd_review(cfg, args):
     section_marker = language.text(cfg, "prompt.review-section")
     # The project's threat model, as its last commit holds it, stands above the candidate, and the review records
     # which one it was judged against (REVIEW-THREAT-MODEL).
-    threat_path, threat = _review_threat_model(root, cfg)
+    # A person is shown the diff and the boundary, not the model, so a person's verdict is recorded under none; a
+    # carried answer was given under the model its request's prompt carried, which the request names
+    # (REVIEW-THREAT-MODEL-2).
+    threat_path, threat = (None, None) if person or carried else _review_threat_model(root)
     threat_note = "" if not threat else "\n\n" + language.text(cfg, "prompt.review-threat-model",
                                                                 path=threat_path, model=threat)
     if threat:
@@ -3596,7 +3601,8 @@ def cmd_review(cfg, args):
             try:
                 request = A.write_review_request(
                     root, cfg, candidate, scope, evidence.get("diff_digest"), boundary,
-                    evidence.get("slice"), args.paths, treeless, criteria=criteria)
+                    evidence.get("slice"), args.paths, treeless, criteria=criteria,
+                    threat_model=evidence.get("threat_model"))
             except OSError as exc:
                 request = None
                 print(f"{C['dim']}no stand-in request was written: {exc}{C['reset']}")

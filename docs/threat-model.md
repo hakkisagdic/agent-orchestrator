@@ -1,8 +1,11 @@
 # Threat model
 
 What ao protects, from whom, and what it does not claim to. Every review of this repository is
-judged against this page: `review.threat_model` names it, and ao puts it in each review prompt,
-read from the last commit ([configuration](configuration.md)).
+judged against this page: ao reads a project's threat model from `THREAT_MODEL.md` or
+`docs/threat-model.md` as its last commit holds it, and puts it in each review prompt above the
+candidate. There is no setting to point it elsewhere, since the implementer can write the
+project's configuration; a person's review and a carried stand-in answer record the model they were
+given, which for a person is none.
 
 ## What ao protects
 

@@ -23,11 +23,6 @@ class Location(str):
     """The kind of a setting that names a repository by URL or path, so separators are allowed."""
 
 
-class RepoPath(str):
-    """The kind of a setting that names a file inside the repository: relative, with `/` between its parts and no
-    `..`, as `git show HEAD:<path>` reads it (REVIEW-THREAT-MODEL)."""
-
-
 # scope: "project" settings are read from the project first; "machine" settings
 # govern state shared by every project on the machine and are read from there only.
 SETTINGS = {
@@ -94,10 +89,6 @@ SETTINGS = {
     "review.stall_minutes": Setting(
         10, int, 1, None, "project",
         "minutes a reviewer may spend no CPU before it is killed as stalled, its partial answer kept"),
-    "review.threat_model": Setting(
-        None, RepoPath, None, None, "project",
-        "a file in the repository, read from its last commit, whose threat model every review is judged against: "
-        "a finding that needs an assumption it puts out of scope is a hardening note; none: no threat model"),
     "review.context_bytes": Setting(
         100_000, int, 0, None, "project",
         "bytes of commit-message claims and read-only context a review prompt may carry beside its diff, "
@@ -330,10 +321,6 @@ def usable(key, value):
         return isinstance(value, str) and bool(value.strip()) and "/" not in value and "\\" not in value
     elif spec.kind is Location:
         return isinstance(value, str) and bool(value.strip())
-    elif spec.kind is RepoPath:
-        parts = value.split("/") if isinstance(value, str) else []
-        return bool(parts) and all(part.strip() and part not in (".", "..") for part in parts) \
-            and "\\" not in value and not value.startswith("-") and ":" not in value
     elif spec.kind is list:
         return isinstance(value, list) and all(isinstance(item, str) and item.strip() for item in value)
     if spec.minimum is not None and value < spec.minimum:
@@ -351,8 +338,6 @@ def expected(key):
         return "a list of non-empty strings"
     if spec.kind is Location:
         return "a repository URL or path"
-    if spec.kind is RepoPath:
-        return "a relative path inside the repository, its parts separated by /"
     if spec.kind is str:
         return "a name with no path separator"
     words = {int: "a whole number", float: "a number"}[spec.kind]

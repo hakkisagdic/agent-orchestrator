@@ -1479,7 +1479,7 @@ STANDIN_LIMITS = (
 
 
 def write_review_request(root, cfg, candidate, scope, diff_digest, boundary, slice_id, paths, prompt,
-                         criteria=None):
+                         criteria=None, threat_model=None):
     """A review request a person can carry to a session ao cannot reach (#75).
 
     Written when no reviewer could be reached for a staged candidate: the prompt the
@@ -1500,6 +1500,8 @@ def write_review_request(root, cfg, candidate, scope, diff_digest, boundary, sli
             "boundary": boundary, "slice": slice_id, "paths": paths, "collected": None}
     if criteria:
         meta["criteria"] = criteria
+    if threat_model:
+        meta["threat_model"] = threat_model     # the one its prompt carries, which an answer is judged under
     path = os.path.join(directory, f"{nonce}.md")
     replace_file_durably(os.path.join(directory, f"{nonce}.json"),
                          json.dumps(meta, indent=1, sort_keys=True).encode(UTF8))
