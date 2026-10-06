@@ -1436,10 +1436,12 @@ def _architect_names(architect):
     """The program names the configured architect runs as: its command and that adapter's other names (#76)."""
     configured = (architect or {}).get("argv") or []
     command = _program_name(configured[0]) if configured else ""
-    if command in AGENT_RUNTIMES and len(configured) > 1 and "{" not in str(configured[1]):
+    program = runtime_program_word(configured) if command in AGENT_RUNTIMES else None
+    if program and "{" not in program:
         # A runtime runs many programs: an architect run as `node /opt/claude-code/cli.js` is that program, where
-        # `node` alone let any node process naming the session hold every wake (JOURNAL-2-3).
-        command = _program_name(configured[1])
+        # `node` alone let any node process naming the session hold every wake (JOURNAL-2-3), and `python -m claude`
+        # is claude, where its second word, `-m`, was taken for the program (JOURNAL-2-4).
+        command = _program_name(program)
     names = {command} if command else set()
     for ident, adapter in package_adapters().items():
         known = {_program_name(name) for name in [ident, *adapter_binaries(adapter),

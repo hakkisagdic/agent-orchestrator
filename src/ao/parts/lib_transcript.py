@@ -2673,6 +2673,49 @@ def _is_agent_process(pid, names, argv=None):
 
 # Programs that run another program an agent is: its identity is the program they run (JOURNAL-2-3).
 AGENT_RUNTIMES = frozenset({"node", "bun", "deno", "python", "python3"})
+# What each runtime takes before the program it runs: options whose value is the next word, subcommands that name no
+# program, and options that run code given inline, which name none (JOURNAL-2-4).
+_RUNTIME_VALUE_OPTIONS = {
+    "python": {"-W", "-X", "--check-hash-based-pycs"},
+    "node": {"-r", "--require", "--import", "--loader", "--experimental-loader", "-C", "--conditions",
+             "--env-file", "--title", "--input-type", "--inspect-port", "--stack-size"},
+    "bun": {"-r", "--preload", "--cwd", "-c", "--config", "--env-file", "--tsconfig-override"},
+    "deno": {"-c", "--config", "--import-map", "--lock", "--cert", "--location", "--seed", "--v8-flags",
+             "--env-file", "--ext"},
+}
+_RUNTIME_SUBCOMMANDS = {"bun": {"run", "x", "exec"}, "deno": {"run", "x"}}
+_RUNTIME_INLINE = {"python": {"-c"}, "node": {"-e", "--eval", "-p", "--print"}, "bun": {"-e", "--eval", "-p", "--print"},
+                   "deno": {"eval"}}
+
+
+def runtime_program_word(argv):
+    """The word naming the program a runtime's command line runs, or None (JOURNAL-2-4).
+
+    `python -m claude` runs claude and `node --require x /opt/claude-code/cli.js` cli.js: the program is the module
+    after `-m`, or the first word that is no option, no option's value and no subcommand. The second word was taken
+    for it, so `python -m claude` named `-m`, and any `python -m` process carrying the session held every wake. Code
+    given inline names no program.
+    """
+    if not argv:
+        return None
+    runtime = _program_name(argv[0])
+    family = "python" if runtime.startswith("python") else runtime
+    if family not in _RUNTIME_VALUE_OPTIONS:
+        return None
+    words, at = [str(word) for word in argv[1:]], 0
+    while at < len(words):
+        word = words[at]
+        if family == "python" and word.startswith("-m"):
+            return (word[2:] or (words[at + 1] if at + 1 < len(words) else "")) or None
+        if word in _RUNTIME_INLINE[family] or family == "python" and word.startswith("-c"):
+            return None
+        if word in _RUNTIME_VALUE_OPTIONS[family]:
+            at += 2
+        elif word.startswith("-") or word in _RUNTIME_SUBCOMMANDS.get(family, ()):
+            at += 1
+        else:
+            return word
+    return None
 
 
 def _is_configured_agent_process(names, argv):
@@ -2689,15 +2732,11 @@ def _is_configured_agent_process(names, argv):
         return True
     if _program_name(argv[0]) not in AGENT_RUNTIMES:
         return False
-    for token in argv[:3]:
-        components = {
-            _program_name(component)
-            for component in str(token).replace("\\", "/").split("/")
-            if component
-        }
-        if components & wanted:
-            return True
-    return False
+    # A runtime is the program it runs, named by that word alone: an option before it, `-m` among them, named
+    # no program, and matched one (JOURNAL-2-4).
+    word = runtime_program_word(argv)
+    components = {_program_name(part) for part in str(word or "").replace("\\", "/").split("/") if part}
+    return bool(components & wanted)
 
 
 def _is_headless(pid):

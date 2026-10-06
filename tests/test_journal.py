@@ -1131,3 +1131,21 @@ def test_an_architect_a_runtime_runs_is_known_by_the_program_it_runs(monkeypatch
     monkeypatch.setattr(procs, "argv", lambda pid: table.get(pid))
 
     assert A.session_in_use(SID, arch) == [4243]
+
+
+def test_an_architect_run_as_a_module_or_after_options_is_known_by_that_program(monkeypatch):
+    """JOURNAL-2-4: the word after the runtime was taken for the program, so `python -m claude` named `-m`, and any
+    `python -m` process carrying the session held every wake."""
+    from ao import procs
+    arch = {"argv": ["python", "-m", "claude", "--resume", "{session}"]}
+    table = {5151: ["python", "-m", "worker", SID], 5152: ["python3", "-X", "utf8", "-m", "claude", "--resume", SID],
+             5153: ["python", "-c", "print(1)", SID]}
+    monkeypatch.setattr(procs, "all_pids", lambda: list(table))
+    monkeypatch.setattr(procs, "argv", lambda pid: table.get(pid))
+
+    assert A.session_in_use(SID, arch) == [5152]
+    assert A.runtime_program_word(["node", "--require", "/x/pre.js", "/opt/claude-code/cli.js"]) == \
+        "/opt/claude-code/cli.js"
+    assert A.runtime_program_word(["bun", "run", "/opt/x/cli.ts"]) == "/opt/x/cli.ts"
+    assert A.runtime_program_word(["python", "-mclaude"]) == "claude"
+    assert A.runtime_program_word(["node", "-e", "1"]) is None and A.runtime_program_word(["python"]) is None

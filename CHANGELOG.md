@@ -14,6 +14,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- An architect a runtime runs is known by the program it runs past the runtime's own options - `python -m claude` as claude, `node --require x cli.js` as cli.js - where the word after the runtime was taken for it, so `-m` named the architect and any `python -m` process carrying the session held every wake (JOURNAL-2-4).
 - An ACP reviewer's session makes what it holds before its agent starts, so nothing but its reader stands between the start and the guard that stops the agent, where a queue that could not be made left the agent running (REVIEWER-ORPHAN-6).
 
 ### Security
