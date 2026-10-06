@@ -29,6 +29,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 - A kiro reviewer reached over ACP runs as ao's read-only agent too, where `review.transport` acp started `kiro-cli acp` with no agent of ao's; measured, the ACP session ran as the agent ao wrote ([adapters.md](docs/adapters.md)) (KIRO-READONLY-2).
 - `ao-api-review` says every failure of its exchange with the key taken out, as written and as Python escapes it, where http.client's protocol errors went uncaught and a provider that put the key in a malformed status line had it printed in the traceback (API-REVIEWER-3).
 
+### Adapters
+
+- agy can review: it runs as an agent of ao's whose tools only read, written as `.agents/agents/<name>.md` for each run, and its answer is read from the JSON record it prints. Measured on agy 1.3.0, which keeps the person's MCP servers attached to every agent, so ao refuses an agy reviewer while the person's agy settings allow anything beyond reading ([adapters](docs/adapters.md)) (AGY-REVIEWER).
+
 ### Under the hood
 
 - The READMEs' headline says what ao enforces: every commit an agent makes is reviewed first, waived by a person - which ao reviews after it lands - or flagged by `ao doctor` and the watchdog when it went around the hook, where it promised a review before every commit (README-QUICKSTART-3, README-QUICKSTART-4).

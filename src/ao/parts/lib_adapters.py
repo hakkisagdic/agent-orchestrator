@@ -428,6 +428,10 @@ def reviewer_eligibility(adapter):
     options = (adapter or {}).get("options") or {}
     if "trust_none" not in options:
         return False, "it does not declare how to run without tools (options.trust_none)"
+    # A harness no flag leaves reading runs as an agent of ao's own whose tools only read (AGY-REVIEWER).
+    if options["trust_none"] == [] and options.get("reviewer_agent") is not None:
+        problems = reviewer_agent_problems(adapter)
+        return (False, "its reviewer agent is not sound: " + "; ".join(problems)) if problems else (True, None)
     if options["trust_none"] == [] and (adapter or {}).get("review") is not None:
         problems = tool_review_problems(adapter)
         return (False, "its review contract is not sound: " + "; ".join(problems)) if problems else (True, None)
@@ -515,7 +519,8 @@ def reading_problems(argv, prompt=None):
     # A harness ao runs as a reviewer agent of its own takes no other: one a command names could hold any tool
     # (KIRO-READONLY).
     agent = adapter["options"].get("reviewer_agent")
-    flag = agent["argv"][0] if isinstance(agent, dict) and agent.get("argv") else None
+    # The flag's name: agy's `--agent={agent}` names it with its value (AGY-REVIEWER).
+    flag = str(agent["argv"][0]).split("=", 1)[0] if isinstance(agent, dict) and agent.get("argv") else None
     if flag and any(arg == flag or arg.startswith(flag + "=") for arg in args):
         return [f"it names {flag}, where ao runs {adapter.get('id')} as an agent of its own that only reads"]
     # A flag of them given again with another value is asked too, as a pinned flag is: a harness that takes
@@ -1035,6 +1040,19 @@ def reviewer_agent_problems(adapter):
         problems.append("`options.reviewer_agent.path` must be a path within the reviewer's directory, carrying {agent}")
     if not (isinstance(config, dict) and isinstance(config.get("tools"), list)):
         problems.append("`options.reviewer_agent.config` must be an object that names its `tools`")
+    # An agent file is JSON, or a markdown body under the config as front matter (AGY-REVIEWER).
+    if agent.get("format", "json") not in ("json", "frontmatter"):
+        problems.append("`options.reviewer_agent.format` must be json or frontmatter")
+    if agent.get("format") == "frontmatter" and not isinstance(agent.get("body"), str):
+        problems.append("`options.reviewer_agent.body` must be the text under the front matter")
+    settings = agent.get("settings")
+    if settings is not None and not (
+            isinstance(settings, dict) and isinstance(settings.get("path"), str) and settings["path"].startswith("~/")
+            and isinstance(settings.get("allow"), list) and settings["allow"]
+            and all(isinstance(key, str) for key in settings["allow"])
+            and isinstance(settings.get("reads"), list) and all(isinstance(rule, str) for rule in settings["reads"])):
+        problems.append("`options.reviewer_agent.settings` must name a file under the home folder, the keys of its "
+                        "allow rules, and the rules that only read")
     return problems
 
 

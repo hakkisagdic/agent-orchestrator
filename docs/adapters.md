@@ -43,9 +43,21 @@ that holds `.kiro` or `.kiro/agents` as a file is refused rather than written th
 none of a tree's links - and a reviewer's or the hunter's command that names `--agent` itself is
 refused (KIRO-READONLY, KIRO-READONLY-2).
 
+No flag leaves agy reading either, so it reviews the same way: as an agent of ao's whose tools are
+`view_file`, `grep_search`, `find_by_name` and `list_dir`, written as `.agents/agents/<name>.md` and
+named with `--agent=<name>`. Measured on agy 1.3.0: a print run denies a write or a command it cannot
+ask about and ends on an empty response; run as that agent, agy read the file it was asked to and
+had no tool to write a file or run a command. The person's MCP servers stay attached to every agent,
+Linear's writing tools among them, and a call to one was denied only because no rule in the
+person's settings allowed it - so ao refuses an agy reviewer while
+`~/.gemini/antigravity-cli/settings.json` allows anything beyond `read_file(...)`, or cannot be read.
+Its answer is the `response` of the one JSON record it prints, and a tool its run was denied is
+named in the reason the review gives (AGY-REVIEWER).
+
 ```bash
 ao role set reviewer claude-code --model claude-opus-5
 ao role set reviewer kiro --model <model> --effort high
+ao role set reviewer antigravity --model gemini-3.1-pro-high --family google
 ao role set reviewer codex --model <model> --effort high --family openai
 ```
 
@@ -517,7 +529,7 @@ the adapter says so in its `disclaimer`. **Reviewer** is whether the adapter can
 | `omp` | `omp` | untested | eligible | oh-my-pi |
 | `huggingface` | — | — | — | no adapter: a model hub and inference provider reached through a harness, not a harness |
 | `reasonix` | `reasonix` | untested | eligible | Reasonix |
-| `antigravity` | `antigravity` | full | ineligible | Antigravity CLI (agy) |
+| `antigravity` | `antigravity` | full | eligible | Antigravity CLI (agy) |
 | `aider` | `aider` | untested | ineligible | Aider |
 | `amazon-q` | `amazon-q` | untested | ineligible | Amazon Q Developer CLI |
 | `command-code` | `command-code` | partial | ineligible | Command Code (cmd) |

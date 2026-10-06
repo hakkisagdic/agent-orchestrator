@@ -566,6 +566,34 @@ def _stream_updates(argv, stdout):
     return updates
 
 
+def _answer_record(argv, stdout):
+    """(answer, denied) from the result record a reviewer printed, when its adapter declares it answers in one and the
+    command carries the flags that make it; else None (AGY-REVIEWER).
+
+    agy prints, with `--output-format=json`, one JSON record whose `response` is the answer; read as text, the verdict
+    was inside a JSON string. A tool its print run could not ask anybody about is denied and named in the record, and
+    the run ends on an empty response with exit 0.
+    """
+    adapter = A.command_adapter(argv)
+    spec = ((adapter or {}).get("options") or {}).get("answer_record") or {}
+    flags = spec.get("argv")
+    if not flags or any(A._named(argv, flag) != (True, value) for flag, value in A._flag_pairs(flags)):
+        return None
+    for line in reversed((stdout or "").splitlines()):
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        text = record.get(spec.get("text") or "response")
+        denied = record.get(spec["denied"]) if spec.get("denied") else None
+        actions = [str(item.get("action")) for item in denied if isinstance(item, dict)] if isinstance(denied, list) \
+            else []
+        return (text if isinstance(text, str) else ""), actions
+    return None
+
+
 def _stream_error(argv, stdout):
     """The runError message a reviewer's session updates end on, when its adapter declares it passing; else None.
 
@@ -724,6 +752,9 @@ def _reviewer_agent(fresh, argv):
     problems = A.reviewer_agent_problems(adapter)
     if problems:
         return argv, f"{adapter.get('id')}'s reviewer agent cannot be written: " + "; ".join(problems)
+    beyond = _settings_beyond_reads(agent.get("settings"))
+    if beyond:
+        return argv, f"{adapter.get('id')} would not only read as a reviewer: {beyond}"
     name = "ao-reviewer-" + secrets.token_hex(8)
     parts = agent["path"].replace("{agent}", name).split("/")
     folder = fresh
@@ -741,8 +772,44 @@ def _reviewer_agent(fresh, argv):
     except OSError as exc:
         return argv, f"the agent the reviewer runs as could not be written ({type(exc).__name__})"
     with os.fdopen(fd, "w", encoding=UTF8) as fh:
-        json.dump(config, fh, indent=2)
+        if agent.get("format") == "frontmatter":
+            # JSON values are YAML too: each line of the front matter is a key and its value as JSON (AGY-REVIEWER).
+            fh.write("---\n" + "".join(f"{key}: {json.dumps(value)}\n" for key, value in config.items())
+                     + "---\n\n" + agent["body"].rstrip("\n") + "\n")
+        else:
+            json.dump(config, fh, indent=2)
     return list(argv) + [part.replace("{agent}", name) for part in agent["argv"]], None
+
+
+def _settings_beyond_reads(spec):
+    """What a person's own settings for a reviewer's harness allow beyond reading, or why they cannot be read; None
+    when they allow nothing more (AGY-REVIEWER).
+
+    agy 1.3.0 gives an agent its tools and also every MCP server the person attached, Linear's writing tools among
+    them. A print run asks nobody, so it denies a call no rule in the person's settings allows; a rule they keep for
+    their own runs would let the reviewer make that call, and the agent file cannot take it away.
+    """
+    if not spec:
+        return None
+    try:
+        with open(os.path.expanduser(spec["path"]), encoding=UTF8) as fh:
+            settings = json.load(fh)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        return f"{spec['path']} cannot be read ({type(exc).__name__}), and it may allow more"
+    rules = settings
+    for key in spec["allow"]:
+        rules = rules.get(key) if isinstance(rules, dict) else None
+    if rules is None:
+        return None
+    if not isinstance(rules, list):
+        return f"{spec['path']} holds {'.'.join(spec['allow'])} as something other than a list of rules"
+    beyond = [rule for rule in rules if not (isinstance(rule, str) and rule.startswith(tuple(spec["reads"])))]
+    if not beyond:
+        return None
+    shown = ", ".join(json.dumps(rule) for rule in beyond[:3]) + (" and more" if len(beyond) > 3 else "")
+    return f"{spec['path']} allows {shown} under {'.'.join(spec['allow'])}; {spec.get('why') or 'a reviewer only reads'}"
 
 
 def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, channel=None, tree=None):
@@ -887,6 +954,10 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
         passing = _stream_error(argv, stdout) if proc.returncode != 0 else None
         ran = bool(_stream_updates(argv, stdout))
         stdout = _answer_stream(argv, stdout)
+        record, denied = _answer_record(argv, stdout), []
+        if record is not None:
+            # A record is a turn that ran: its answer is its response alone, and stderr is diagnostics (AGY-REVIEWER).
+            ran, (stdout, denied) = True, record
         # A run that answers in session updates answers there alone: its stderr is diagnostics, and a warning there
         # was read as the answer of a turn that ended on no message (REVIEW-EMPTY-TURN-2).
         out = (stdout if (stdout or "").strip() else "" if ran else stderr or "").strip()
@@ -910,7 +981,8 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
             # (REVIEW-EMPTY-TURN).
             return {
                 "ok": False, "out": "",
-                "reason": "produced nothing (exit 0)" + ("; its turn ended on an empty message" if ran else ""),
+                "reason": "produced nothing (exit 0)" + ("; its turn ended on an empty message" if ran else "")
+                          + (f"; its harness denied it {', '.join(denied)}" if denied else ""),
                 "returncode": 0, "kind": "silence", "retryable": ran,
             }
         return {

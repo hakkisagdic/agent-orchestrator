@@ -9,7 +9,7 @@ interface, the two observation modes and the support matrix.
 | File | Status | Verified against |
 |---|---|---|
 | `kiro.json` | **full** | kiro-cli / Kiro IDE 1.0.411 — reference adapter, multi-week production use |
-| `antigravity.json` | **full** | agy 1.1.19 — call-return mode, token accounting verified |
+| `antigravity.json` | **full** | agy 1.1.19, measured again on 1.3.0 — call-return mode, token accounting verified; reviews as an agent that only reads |
 | `claude-code.json` | **full** | Claude Code |
 | `opencode.json` | partial | storage path verified, flags from docs |
 | `codex.json` | partial | codex-cli 0.160.0 — the reviewer's command measured; the session store not |

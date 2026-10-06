@@ -2,9 +2,9 @@
   "id": "antigravity",
   "name": "Antigravity CLI (agy)",
   "verified": "full",
-  "verified_version": "agy 1.1.19",
+  "verified_version": "agy 1.3.0",
   "observation_mode": "call-return",
-  "notes": "Verified against a running install. Keeps no local transcript we could find; instead every print-mode call returns a complete JSON record including the conversation id and full token accounting. The orchestrator persists that record itself, so observation and telemetry are better here than with a passive store — at the cost of only seeing turns it started.",
+  "notes": "Verified against a running install, agy 1.1.19; print, the result record and a resume by conversation id measured again on agy 1.3.0 on 2026-10-06. Keeps no local transcript we could find; instead every print-mode call returns a complete JSON record including the conversation id and full token accounting. The orchestrator persists that record itself, so observation and telemetry are better here than with a passive store — at the cost of only seeing turns it started.",
 
   "syntax_warning": "Go-style flags: the prompt must be ATTACHED to the flag. `agy --print='...'` works; `agy -p '...'` silently takes the next argument as the flag value and drops the prompt. A space-separated form fails without writing anything, which looks exactly like the agent doing nothing.",
 
@@ -20,14 +20,42 @@
   },
 
   "options": {
-    "trust_none": null,
-    "trust_none_why": "no documented flag denies tools; --dangerously-skip-permissions only widens them",
+    "trust_none": [],
+    "trust_none_why": "no flag denies tools - --dangerously-skip-permissions only widens them - so a reviewer runs as an agent of ao's own that only reads, options.reviewer_agent",
+    "reviewer_agent": {
+      "argv": ["--agent={agent}"],
+      "path": ".agents/agents/{agent}.md",
+      "format": "frontmatter",
+      "config": {
+        "name": "{agent}",
+        "description": "ao's reviewer: it reads, and has no tool that writes or runs a command",
+        "mainAgent": true,
+        "subagent": false,
+        "commandExecutionPolicy": "off",
+        "mcpServers": [],
+        "tools": ["view_file", "grep_search", "find_by_name", "list_dir"]
+      },
+      "body": "You review what the prompt hands you. You read files and write nothing, and you run nothing.",
+      "settings": {
+        "path": "~/.gemini/antigravity-cli/settings.json",
+        "allow": ["permissions", "allow"],
+        "reads": ["read_file("],
+        "why": "an agent's tools leave out the servers the person's own MCP settings attach, and a print run denies a call to one only because no rule allows it"
+      },
+      "note": "Measured on agy 1.3.0, 2026-10-06. A print run denies every write and command it cannot ask about, and ends with an empty response and the action in denied_actions. Run as this agent it read the file it was asked to and had no tool to write a file or run a command, and wrote nothing. The person's MCP servers stay attached, Linear's writing tools among them, and a call to one was denied only by that headless rule; excludeDefaultComponents took them away but denied every read too, and --mode=plan changed neither. So ao refuses the reviewer while the person's settings allow more than reading."
+    },
     "model": ["--model={model}"],
     "effort": ["--effort={effort}"],
-    "effort_values": ["low", "medium", "high"],
+    "effort_values": ["low", "medium", "high", "xhigh", "max"],
     "agent_profile": ["--agent={agent}"],
     "output_json": ["--output-format=json"],
     "output_stream": ["--output-format=stream-json"],
+    "answer_record": {
+      "argv": ["--output-format", "json"],
+      "text": "response",
+      "denied": "denied_actions",
+      "note": "One JSON record on stdout; its response is the answer. A tool the run was denied ends it on an empty response, named in denied_actions, with exit 0 and a notice on stderr (agy 1.3.0)."
+    },
     "structured_output": ["--json-schema={schema}"],
     "mode": ["--mode={mode}"],
     "mode_values": ["accept-edits", "plan"],
@@ -36,7 +64,7 @@
     "trust_all": ["--dangerously-skip-permissions"],
     "bypass": {
       "--dangerously-skip-permissions": { "roles": ["implementer"],
-        "why": "Kept: without it a print run writes files in the workspace and soft-denies every shell command, and the rules that allow a command (permissions.allow) live only in the person's own settings file, which ao does not write; --sandbox isolates commands but runs them unprompted only under a setting too. Read on 2026-09-17 from antigravity.google/docs/cli/headless, antigravity.google/docs/cli/permissions and antigravity.google/docs/cli/sandbox." }
+        "why": "Kept: without it a print run of agy 1.3.0 denies every write and every shell command it cannot ask about (1.1.19 wrote files and soft-denied commands), and the rules that allow a command (permissions.allow) live only in the person's own settings file, which ao does not write; --sandbox isolates commands but runs them unprompted only under a setting too. Read on 2026-09-17 from antigravity.google/docs/cli/headless, antigravity.google/docs/cli/permissions and antigravity.google/docs/cli/sandbox." }
     },
     "timeout": ["--print-timeout={timeout}"]
   },
