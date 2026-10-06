@@ -292,3 +292,9 @@ def test_a_protocol_error_that_echoes_the_key_never_shows_it(monkeypatch, tmp_pa
 
 def test_the_key_is_taken_out_as_written_and_as_python_escapes_it():
     assert api_review._scrub("got 'k\\\\ey' and k\\ey", "k\\ey") == "got '<key>' and <key>"
+
+
+def test_a_key_spelled_like_the_mark_is_taken_out_all_the_same():
+    """API-REVIEWER-4: a key spelled `<key>` was replaced by the mark `<key>`, itself."""
+    assert api_review._scrub("got <key> back", "<key>") == "got <redacted> back"
+    assert api_review._scrub("the key e", "e") == "th*** k***y ***"          # a mark holding no part of the key

@@ -53,10 +53,15 @@ def providers(entries):
 
 
 def _scrub(text, key):
-    """`text` with the key taken out, as written and as Python escapes it in a repr (API-REVIEWER-3)."""
-    for form in sorted({key, repr(key)[1:-1], key.encode("unicode_escape").decode("ascii")}, key=len, reverse=True):
-        if form:
-            text = text.replace(form, "<key>")
+    """`text` with the key taken out, as written and as Python escapes it in a repr (API-REVIEWER-3).
+
+    It is put in place by a mark that does not hold the key: a key spelled `<key>` was replaced by itself
+    (API-REVIEWER-4).
+    """
+    forms = {key, repr(key)[1:-1], key.encode("unicode_escape").decode("ascii")} - {""}
+    mark = next(mark for mark in ("<key>", "<redacted>", "***", "#") if not any(form in mark for form in forms))
+    for form in sorted(forms, key=len, reverse=True):
+        text = text.replace(form, mark)
     return text
 
 

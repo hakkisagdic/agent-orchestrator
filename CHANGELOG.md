@@ -19,6 +19,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Security
 
+- `ao-api-review` takes the key out with a mark that holds no part of it, where a key spelled `<key>` was replaced by the mark `<key>`, itself (API-REVIEWER-4).
 - A part is loaded only by the module's own code: a forwarding loader in another module and code compiled from no file are refused, where the first read parts beside its own file and the second, as a module that removed its own source did, read lib.py's parts in place of the proved ones; and the move proof refuses a module that binds the name its loads call through - `_part`, or `A` in `A._part` - to anything but ao's loader (SPLIT-CHECK-7).
 - A kiro reviewer reached over ACP runs as ao's read-only agent too, where `review.transport` acp started `kiro-cli acp` with no agent of ao's; measured, the ACP session ran as the agent ao wrote ([adapters.md](docs/adapters.md)) (KIRO-READONLY-2).
 - `ao-api-review` says every failure of its exchange with the key taken out, as written and as Python escapes it, where http.client's protocol errors went uncaught and a provider that put the key in a malformed status line had it printed in the traceback (API-REVIEWER-3).
