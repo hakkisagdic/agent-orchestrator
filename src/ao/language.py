@@ -387,6 +387,20 @@ LOW: <n>
                "(dosya:satır ya da bir test), ya da `CRITERION <n>: NOT MET` ve ardından eksik olan. Kanıtsız bir "
                "MET satırı hüküm değildir. ---\n{criteria}"),
     },
+    # the project's threat model, ahead of the candidate (REVIEW-THREAT-MODEL); {path}: where it is kept, {model}: its text
+    "prompt.review-threat-model": {
+        "en": ("--- THREAT MODEL: the project's, from `{path}` as its last commit holds it. Judge a security finding "
+               "against it: BLOCKER or HIGH only when \"How it breaks\" names an actor it puts in scope, the capability "
+               "they use and a concrete outcome. A finding that needs an assumption it puts out of scope goes under "
+               "\"## Notes\" as `hardening: <the assumption>`, with no severity, and is not counted. A correctness "
+               "finding is judged as before. ---\n{model}\n--- END OF THREAT MODEL ---"),
+        "tr": ("--- TEHDİT MODELİ: projenin, son commit'inde `{path}` dosyasında olduğu gibi. Bir güvenlik bulgusunu "
+               "ona göre yargıla: BLOCKER ya da HIGH yalnızca \"Nasıl bozulur\" onun kapsama aldığı bir aktörü, "
+               "kullandığı yeteneği ve somut bir sonucu adlandırdığında. Kapsam dışı saydığı bir varsayım gerektiren "
+               "bulgu, o varsayımla birlikte \"## Notlar\" altına `hardening: <...>` olarak yazılır, önem derecesi "
+               "olmadan, ve sayılmaz. "
+               "Bir doğruluk bulgusu eskisi gibi yargılanır. ---\n{model}\n--- TEHDİT MODELİ SONU ---"),
+    },
     # the line above the prompt in a stand-in review request (#75); {nonce}: the request's, which the answer leads with
     "prompt.review-request": {"en": "The FIRST line of your answer must be exactly: NONCE: {nonce}",
                               "tr": "Cevabının İLK satırı tam olarak şu olsun: NONCE: {nonce}"},

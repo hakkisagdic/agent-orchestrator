@@ -12,6 +12,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ## [Unreleased]
 
+### New commands
+
+- `ao config set review.threat_model <path>` names a file in the repository whose threat model every review is judged against: ao puts it in each review prompt, read from the last commit so a candidate cannot loosen the model it is reviewed under, a finding that needs an assumption the model puts out of scope is a hardening note and not a blocker, and the review records the model's digest; ao's own is docs/threat-model.md ([threat model](docs/threat-model.md)) (REVIEW-THREAT-MODEL).
+
 ### Fixes
 
 - The move proof takes a relative `lib` for ao's loader only inside ao's own package, where `from .lib import _part` in any package was trusted; and it refuses only the loader's own `_part` being assigned, where another object's `plugin._part = value` refused a sound split (SPLIT-CHECK-8).

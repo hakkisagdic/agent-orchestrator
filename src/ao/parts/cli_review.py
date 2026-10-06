@@ -591,6 +591,34 @@ def _stream_error(argv, stdout):
     return None
 
 
+# The most of a threat model a review prompt carries: a page a project keeps beside its code (REVIEW-THREAT-MODEL).
+REVIEW_THREAT_MODEL_BYTES = 32_000
+
+
+def _review_threat_model(root, cfg):
+    """(path, text) of the threat model `review.threat_model` names, as the last commit holds it; (None, None) for none.
+
+    It is read from HEAD and never from the candidate: a change to the model is judged against the one it would
+    replace, so a candidate cannot loosen what it is reviewed under. A path the last commit does not hold, or a file
+    past REVIEW_THREAT_MODEL_BYTES, is said on the terminal, and the review runs without a model (REVIEW-THREAT-MODEL).
+    """
+    path = S.get(cfg, "review.threat_model")
+    if not path:
+        return None, None
+    try:
+        data = A._git_output(root, "show", f"HEAD:{path}", timeout=30)
+    except RuntimeError:
+        print(f"{C['dim']}review.threat_model names {path}, which the last commit does not hold; the review runs "
+              f"without a threat model{C['reset']}")
+        return None, None
+    if len(data) > REVIEW_THREAT_MODEL_BYTES:
+        print(f"{C['dim']}{path} is {len(data)} bytes, past the {REVIEW_THREAT_MODEL_BYTES} a review prompt carries "
+              f"of a threat model; the review runs without one{C['reset']}")
+        return None, None
+    text = data.decode(UTF8, "replace").strip()
+    return (path, text) if text else (None, None)
+
+
 def _reviewer_agent(fresh, argv):
     """argv naming the reviewer agent its adapter declares, written into the reviewer's own directory; (argv, None),
     or (argv, why) when it cannot be written there (KIRO-READONLY).
@@ -1541,6 +1569,9 @@ def _section_journal(root, evidence, boundary, sections, chain):
     if evidence.get("claims"):
         # A section answered against other claims, or none, is no answer about these.
         keyed.append(evidence["claims"].get("digest"))
+    if evidence.get("threat_model"):
+        # Nor is one judged under another threat model, or none (REVIEW-THREAT-MODEL).
+        keyed.append(evidence["threat_model"].get("digest"))
     key = A.hashlib.sha256(json.dumps(keyed, sort_keys=True).encode(UTF8)).hexdigest()[:24]
     return os.path.join(root, ".ao", "reviews", "sections", f"{key}.jsonl")
 
@@ -3397,8 +3428,16 @@ def cmd_review(cfg, args):
     wanted = bool(args.commits and getattr(args, "claims", False))
     candidate_marker = language.text(cfg, "prompt.review-candidate")
     section_marker = language.text(cfg, "prompt.review-section")
+    # The project's threat model, as its last commit holds it, stands above the candidate, and the review records
+    # which one it was judged against (REVIEW-THREAT-MODEL).
+    threat_path, threat = _review_threat_model(root, cfg)
+    threat_note = "" if not threat else "\n\n" + language.text(cfg, "prompt.review-threat-model",
+                                                                path=threat_path, model=threat)
+    if threat:
+        evidence["threat_model"] = {"path": threat_path,
+                                    "digest": "sha256:" + A.hashlib.sha256(threat.encode(UTF8)).hexdigest()}
     smallest = language.text(cfg, "prompt.review", boundary=_claims_statement(statement, "") if wanted else statement) \
-        + size_note + f"\n\n{candidate_marker}\n" + diff
+        + threat_note + size_note + f"\n\n{candidate_marker}\n" + diff
     # The criteria are asked in a note after the context and the tree's, where a section's question
     # follows too, so the note is measured with the question; a boundary with none adds nothing.
     criteria_note = "" if not criteria else "\n\n" + language.text(
@@ -3421,7 +3460,7 @@ def cmd_review(cfg, args):
             share -= len(claims["text"].encode(UTF8))
             evidence["claims"] = {key: claims[key] for key in ("commits", "inlined", "redacted", "digest")}
     prompt = language.text(cfg, "prompt.review", boundary=statement) \
-        + size_note + f"\n\n{candidate_marker}\n" + diff
+        + threat_note + size_note + f"\n\n{candidate_marker}\n" + diff
     budget = _review_context_budget(prompt, bound, share)
     if person:
         context = None                          # a person reads the candidate, and what else they choose
@@ -3658,6 +3697,9 @@ def cmd_review(cfg, args):
             header.append(f"- commits: {A.review_header_value(args.commits)}")
         if claims is not None:
             header.append(A.review_claims_line(claims))
+        if evidence.get("threat_model"):
+            header.append(f"- threat model: {A.review_header_value(evidence['threat_model']['path'])} "
+                          f"`{evidence['threat_model']['digest']}`")
         if author is not None:
             header.append(f"- author's family: {A.review_header_value(_author_line(author))}")
         if args.paths:
@@ -3793,6 +3835,9 @@ def cmd_review(cfg, args):
         header.append(f"- commits: {A.review_header_value(args.commits)}")
     if claims is not None:
         header.append(A.review_claims_line(claims))
+    if evidence.get("threat_model"):
+        header.append(f"- threat model: {A.review_header_value(evidence['threat_model']['path'])} "
+                      f"`{evidence['threat_model']['digest']}`")
     if author is not None:
         header.append(f"- author's family: {A.review_header_value(_author_line(author))}")
     if args.paths:

@@ -46,6 +46,7 @@ machine setting written into a project.
 | `repository.kind` | `product` | project | product: the architect does not implement beyond a named hotfix; tool: roles may rotate per slice |
 | `review.lenses` | `declared` | project | declared: lenses only where a slice names them; auto: defaults from what the candidate touches; off: none |
 | `review.stall_minutes` | `10` | project | minutes a reviewer may spend no CPU before it is killed as stalled, its partial answer kept |
+| `review.threat_model` | `none` | project | a file in the repository, read from its last commit, whose threat model every review is judged against: a finding that needs an assumption it puts out of scope is a hardening note, not a blocker ([threat model](threat-model.md)) |
 | `review.context_bytes` | `100000` | project | bytes of commit-message claims and read-only context a review prompt may carry beside its diff, where no reviewer route holds it to one argument |
 | `review.transport` | `spawn` | project | spawn: each reviewer route runs as its command; acp: a route whose adapter declares acp.argv answers through ACP, and any other is spawned with a line saying why |
 | `review.same_family` | `refused` | project | refused: a reviewer of the implementer's model family is refused; labeled: another model of that family may review, labeled weaker independence, once a person opts in with --by, on the record |

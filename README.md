@@ -136,7 +136,7 @@ locally before every push ([commands](docs/commands.md#tests)).
 ## Documentation
 
 **[getting started](docs/getting-started.md)** · **[commands](docs/commands.md)** ·
-[protocol](docs/protocol.md) · [safety](docs/safety.md) · [roles](docs/roles.md) ·
+[protocol](docs/protocol.md) · [safety](docs/safety.md) · [threat model](docs/threat-model.md) · [roles](docs/roles.md) ·
 [privacy](docs/privacy.md) · [security policy](SECURITY.md) ·
 [capability matrix](docs/capability-matrix.md) ·
 [architecture decisions](docs/adr/README.md) ·
