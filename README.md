@@ -2,10 +2,10 @@
 
 # agent-orchestrator
 
-**Your AI agents commit only a reviewed change, or one a person chose to waive.** By default a
-model of another family reviews the exact change an agent staged, and a git hook refuses anything
-else at `git commit`. A ledger records every decision; ao reviews a waived change after it lands,
-and reports a commit made around the hook.
+**Every commit your AI agents make is reviewed first, waived by a person, or flagged by ao.** By
+default a model of another family reviews the exact change an agent staged, and a git hook refuses
+anything else at `git commit`. A ledger records every decision; ao reviews a waived change after it
+lands, and `ao doctor` and the watchdog flag a commit made around the hook.
 
 Keep the coding agents you already use: Claude Code, Codex, Kiro, Qoder, OpenCode and the others
 in the table below. `ao` sits above them. It runs your gates on the exact change an agent staged,
