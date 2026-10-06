@@ -90,3 +90,63 @@ for line in ("VERDICT: APPROVED", "BLOCKER: 0", "HIGH: 0", "MEDIUM: 0", "LOW: 0"
     attempt = cli._run_reviewer(project["root"], argv, 30)
 
     assert attempt["ok"] and attempt["out"].startswith("VERDICT: APPROVED"), attempt
+
+
+def test_a_kiro_reviewer_over_acp_runs_as_the_agent_too(project, monkeypatch):
+    """KIRO-READONLY-2: with `review.transport` acp, a kiro reviewer ran `kiro-cli acp` with no agent of ao's."""
+    from ao import acp
+    seen = {}
+
+    class Recording:
+        def __init__(self, argv, cwd, env=None, permission=None):
+            name = argv[argv.index("--agent") + 1]
+            with open(os.path.join(cwd, ".kiro", "agents", f"{name}.json"), encoding="utf-8") as fh:
+                seen.update(argv=list(argv), tools=json.load(fh)["tools"])
+            raise acp.ProbeError("stopped here: the test reads what the session was started with")
+
+    monkeypatch.setattr(acp, "Session", Recording)
+
+    cli._run_acp_reviewer(project["root"], ["kiro-cli", "acp"], "kiro", "review this", 60, "kiro")
+
+    assert seen["argv"][:3] == ["kiro-cli", "acp", "--agent"] and seen["tools"] == ["read", "grep", "glob"]
+
+
+def _tree_with(tmp_path, name, make):
+    """A git tree holding `name`, as `make(path)` writes it."""
+    import subprocess
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for args in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
+        subprocess.run(["git", *args], cwd=repo, check=True)
+    (repo / "x.py").write_text("x = 1\n", encoding="utf-8")
+    make(repo / name)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "c"], cwd=repo, check=True)
+    tree = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=repo, check=True, capture_output=True,
+                          text=True).stdout.strip()
+    return str(repo), tree
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a link needs a privilege on Windows")
+def test_a_tree_that_commits_the_agents_folder_as_a_link_unpacks_no_link(tmp_path):
+    """KIRO-READONLY-2: the candidate's links are not unpacked, so ao's agent is written in a folder of its own."""
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    repo, tree = _tree_with(tmp_path, ".kiro", lambda path: os.symlink(elsewhere, path))
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+
+    assert cli._unpack_candidate(repo, tree, str(fresh)) == str(fresh)
+    argv, why = cli._reviewer_agent(str(fresh), KIRO)
+
+    assert why is None and not os.path.islink(fresh / ".kiro") and (fresh / ".kiro" / "agents").is_dir()
+    assert list(elsewhere.iterdir()) == []
+
+
+def test_a_tree_that_commits_the_agents_folder_as_a_file_is_refused(tmp_path):
+    repo, tree = _tree_with(tmp_path, ".kiro", lambda path: path.write_text("not a folder\n", encoding="utf-8"))
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+
+    assert cli._unpack_candidate(repo, tree, str(fresh)) == str(fresh)
+    assert "as a link or a file" in cli._reviewer_agent(str(fresh), KIRO)[1]

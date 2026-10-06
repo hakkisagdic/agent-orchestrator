@@ -18,6 +18,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Security
 
+- A kiro reviewer reached over ACP runs as ao's read-only agent too, where `review.transport` acp started `kiro-cli acp` with no agent of ao's; measured, the ACP session ran as the agent ao wrote ([adapters.md](docs/adapters.md)) (KIRO-READONLY-2).
 - `ao-api-review` says every failure of its exchange with the key taken out, as written and as Python escapes it, where http.client's protocol errors went uncaught and a provider that put the key in a malformed status line had it printed in the traceback (API-REVIEWER-3).
 
 ## [0.5.0] - 2026-10-05

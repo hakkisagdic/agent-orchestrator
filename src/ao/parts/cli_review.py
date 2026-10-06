@@ -598,8 +598,10 @@ def _reviewer_agent(fresh, argv):
     kiro-cli 2.27.1 runs a tool `--trust-tools=` leaves untrusted when nobody is there to ask: reviewers ran tests,
     built virtual environments and installed packages. An adapter whose harness reads an agent file names one whose
     tools only read, in `options.reviewer_agent`. ao writes it after the candidate's tree, under a name the tree
-    cannot know, so no agent of the tree's own stands in for it; a folder on its way that the tree holds as a link
-    or a file is refused, as the agent would be written somewhere else.
+    cannot know, so no agent of the tree's own stands in for it. A folder on its way that the tree holds as a file
+    is refused; the tree's links are not unpacked at all (`_unpack_candidate`), and one found there all the same
+    is refused, as the agent would be written somewhere else. A reviewer reached over ACP runs as it too
+    (KIRO-READONLY-2).
     """
     import secrets
     adapter = A.command_adapter(argv)
@@ -1299,6 +1301,11 @@ def _run_acp_reviewer(root, argv, adapter_id, prompt, timeout, label, fallback=F
         if tree and _unpack_candidate(root, tree, fresh) is None:
             print(f"{C['dim']}{label} reads what the prompt carries: the candidate's tree could not be "
                   f"unpacked{C['reset']}")
+        # Over ACP as when spawned, a harness that runs untrusted tools all the same runs as an agent that only reads
+        # (KIRO-READONLY-2).
+        argv, refused = _reviewer_agent(fresh, argv)
+        if refused:
+            return failed("isolation-error", refused)
         started = time.monotonic()
         deadline = started + float(timeout)
         handlers_back = _stop_on_signals(held=True)         # as a spawned reviewer is (REVIEWER-ORPHAN-3, -4)

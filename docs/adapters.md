@@ -37,10 +37,11 @@ it leaves untrusted runs all the same, since nobody is there to ask: a `touch` m
 reviewers ran tests, built virtual environments under /tmp and installed packages. So kiro declares
 `options.reviewer_agent`, a Kiro agent whose tools are `read`, `grep` and `glob` alone, with no MCP
 server. For each run ao writes it into the reviewer's own directory, after the candidate's tree and
-under a name the tree cannot know, and names it with `--agent`; run so, kiro read the file it was
-asked to and had no tool to write with. A tree that holds `.kiro` or `.kiro/agents` as a link or a
-file is refused rather than written through, and a reviewer's or the hunter's command that names
-`--agent` itself is refused (KIRO-READONLY).
+under a name the tree cannot know, and names it with `--agent`, whether it spawns the reviewer or
+reaches it over ACP; run so, kiro read the file it was asked to and had no tool to write with. A tree
+that holds `.kiro` or `.kiro/agents` as a file is refused rather than written through - ao unpacks
+none of a tree's links - and a reviewer's or the hunter's command that names `--agent` itself is
+refused (KIRO-READONLY, KIRO-READONLY-2).
 
 ```bash
 ao role set reviewer claude-code --model claude-opus-5
