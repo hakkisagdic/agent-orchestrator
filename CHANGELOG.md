@@ -18,6 +18,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- The move proof takes ao's package to be src/ao itself, where a folder that only ended so, vendor/src/ao, had its own lib taken for ao's loader; and it reads `A._part = ...` by scope, where a function's own parameter `A` refused a sound split (SPLIT-CHECK-9).
 - The move proof takes a relative `lib` for ao's loader only inside ao's own package, where `from .lib import _part` in any package was trusted; and it refuses only the loader's own `_part` being assigned, where another object's `plugin._part = value` refused a sound split (SPLIT-CHECK-8).
 - Architect presence knows a runtime's architect by the program it runs as wake-holding does, where it worked out the names a second time without the runtime; a version-named interpreter (`python3.12`) is a runtime; and an architect whose program has no name, code given inline, is proven by no process, where the runtime alone matched every one of it (JOURNAL-2-5).
 - An architect a runtime runs is known by the program it runs past the runtime's own options - `python -m claude` as claude, `node --require x cli.js` as cli.js - where the word after the runtime was taken for it, so `-m` named the architect and any `python -m` process carrying the session held every wake (JOURNAL-2-4).

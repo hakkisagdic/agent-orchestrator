@@ -438,3 +438,20 @@ def test_another_object_s_part_attribute_binds_nothing_of_the_loader():
 
     assert A._loader_rebound(source, "pkg/mod.py") == []
     assert A._loader_rebound(source + "A._part = print\n", "pkg/mod.py") == ["A"]
+
+
+def test_ao_s_package_is_src_ao_itself_not_a_folder_that_ends_so():
+    """SPLIT-CHECK-9: `vendor/src/ao/mod.py` was taken for ao's package, and its own `.lib` for ao's loader."""
+    load = 'from .lib import _part\n_part("x", globals())\n'
+    assert A._loader_rebound(load, "vendor/src/ao/mod.py") == ["_part"]
+    assert A._loader_rebound(load, "src/ao/mod.py") == []
+
+
+def test_the_loader_s_part_is_set_wherever_its_name_is_the_module_s():
+    """SPLIT-CHECK-9: a function parameter named `A` is another object, and a function that sets `A._part` with no
+    `A` of its own sets the loader's."""
+    head, load = "from ao import lib as A\n\n\n", '\n\n\nA._part("x", globals())\n'
+
+    assert A._loader_rebound(head + "def configure(A):\n    A._part = 1" + load, "pkg/mod.py") == []
+    assert A._loader_rebound(head + "def setup():\n    A._part = print" + load, "pkg/mod.py") == ["A"]
+    assert A._loader_rebound(head + "class C:\n    A._part = print" + load, "pkg/mod.py") == ["A"]

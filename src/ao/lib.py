@@ -555,6 +555,25 @@ def _module_level(nodes):
         stack.extend(ast.iter_child_nodes(node))
 
 
+def _own_names(scope):
+    """The names a function or class body binds as its own: its parameters and what it assigns, less what it declares
+    global or nonlocal (SPLIT-CHECK-9)."""
+    import ast
+    names, declared = set(), set()
+    if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        args = scope.args
+        names |= {arg.arg for arg in args.posonlyargs + args.args + args.kwonlyargs}
+        names |= {arg.arg for arg in (args.vararg, args.kwarg) if arg}
+    for node in _module_level(scope.body):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            declared.update(node.names)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            names.add(node.id)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            names.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
+    return names - declared
+
+
 def _loader_rebound(source, path):
     """The names a module's `_part` loads call through - `_part`, or `A` in `A._part` - that it binds to anything but
     ao's own loader (SPLIT-CHECK-7).
@@ -579,14 +598,22 @@ def _loader_rebound(source, path):
     own_lib = path.replace("\\", "/").endswith("ao/lib.py")
     # A relative `lib` is ao's only in ao's own package: `from .lib import _part` in another package imports
     # that package's lib (SPLIT-CHECK-8).
-    in_ao = path.replace("\\", "/").rpartition("/")[0].endswith("src/ao")
+    # ao's own package is src/ao itself, not a folder that ends so - vendor/src/ao holds another package's lib
+    # (SPLIT-CHECK-9).
+    in_ao = path.replace("\\", "/").rpartition("/")[0] == "src/ao"
     rebound = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.Global, ast.Nonlocal)):
             rebound.update(called & set(node.names))
-        elif isinstance(node, ast.Attribute) and node.attr == "_part" and isinstance(node.ctx, (ast.Store, ast.Del)) \
-                and isinstance(node.value, ast.Name) and node.value.id in called:
-            rebound.add(node.value.id)              # `A._part = ...`: another object's `_part` is not the loader
+    # `A._part = ...` sets the loader's attribute wherever `A` is the module's name for it: at module level, and in a
+    # function or class body that does not bind an `A` of its own; a parameter `A` is another object (SPLIT-CHECK-9).
+    scopes = [(tree.body, set())] + [(node.body, _own_names(node)) for node in ast.walk(tree)
+                                     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]
+    for body, own in scopes:
+        for node in _module_level(body):
+            if isinstance(node, ast.Attribute) and node.attr == "_part" and isinstance(node.ctx, (ast.Store, ast.Del)) \
+                    and isinstance(node.value, ast.Name) and node.value.id in called - own:
+                rebound.add(node.value.id)
     for node in _module_level(tree.body):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             if node.name in called and not (own_lib and node.name == "_part" and isinstance(node, ast.FunctionDef)):
