@@ -1149,3 +1149,16 @@ def test_an_architect_run_as_a_module_or_after_options_is_known_by_that_program(
     assert A.runtime_program_word(["bun", "run", "/opt/x/cli.ts"]) == "/opt/x/cli.ts"
     assert A.runtime_program_word(["python", "-mclaude"]) == "claude"
     assert A.runtime_program_word(["node", "-e", "1"]) is None and A.runtime_program_word(["python"]) is None
+
+
+def test_a_version_named_python_or_inline_code_names_the_architect_by_its_program(monkeypatch):
+    """JOURNAL-2-5: `python3.12` was no runtime by the exact list, and was taken for the architect itself; and code
+    given inline left the runtime as the architect, matching every process of it."""
+    from ao import procs
+    table = {6161: ["/usr/local/bin/python3.12", "-m", "worker", SID], 6162: ["node", "worker.js", SID]}
+    monkeypatch.setattr(procs, "all_pids", lambda: list(table))
+    monkeypatch.setattr(procs, "argv", lambda pid: table.get(pid))
+
+    assert A.session_in_use(SID, {"argv": ["/usr/local/bin/python3.12", "-m", "claude", "--resume", "{session}"]}) == []
+    assert A.session_in_use(SID, {"argv": ["node", "-e", "code", "{session}"]}) == []
+    assert A.runtime_family("python3.12") == "python" and A.runtime_family("pythonista") is None

@@ -2673,6 +2673,14 @@ def _is_agent_process(pid, names, argv=None):
 
 # Programs that run another program an agent is: its identity is the program they run (JOURNAL-2-3).
 AGENT_RUNTIMES = frozenset({"node", "bun", "deno", "python", "python3"})
+
+
+def runtime_family(name):
+    """The runtime a program name is - python for `python3.12` too - or None (JOURNAL-2-5)."""
+    name = _program_name(name)
+    if re.fullmatch(r"python(\d+(\.\d+)*t?)?", name):
+        return "python"
+    return name if name in AGENT_RUNTIMES else None
 # What each runtime takes before the program it runs: options whose value is the next word, subcommands that name no
 # program, and options that run code given inline, which name none (JOURNAL-2-4).
 _RUNTIME_VALUE_OPTIONS = {
@@ -2698,8 +2706,7 @@ def runtime_program_word(argv):
     """
     if not argv:
         return None
-    runtime = _program_name(argv[0])
-    family = "python" if runtime.startswith("python") else runtime
+    family = runtime_family(argv[0])
     if family not in _RUNTIME_VALUE_OPTIONS:
         return None
     words, at = [str(word) for word in argv[1:]], 0
@@ -2730,7 +2737,7 @@ def _is_configured_agent_process(names, argv):
     wanted = {_program_name(name) for name in names if name}
     if _program_name(argv[0]) in wanted:
         return True
-    if _program_name(argv[0]) not in AGENT_RUNTIMES:
+    if runtime_family(argv[0]) is None:
         return False
     # A runtime is the program it runs, named by that word alone: an option before it, `-m` among them, named
     # no program, and matched one (JOURNAL-2-4).

@@ -1432,16 +1432,22 @@ def discover_architect(cwd):
             "adapter": best["adapter"], "sessions": [row["session"] for row in found]}
 
 
+# The name of a program no process has: an architect whose program cannot be named is proven by none (JOURNAL-2-5).
+_NO_PROGRAM = "<no program>"
+
+
 def _architect_names(architect):
     """The program names the configured architect runs as: its command and that adapter's other names (#76)."""
     configured = (architect or {}).get("argv") or []
     command = _program_name(configured[0]) if configured else ""
-    program = runtime_program_word(configured) if command in AGENT_RUNTIMES else None
-    if program and "{" not in program:
+    if runtime_family(command):
         # A runtime runs many programs: an architect run as `node /opt/claude-code/cli.js` is that program, where
         # `node` alone let any node process naming the session hold every wake (JOURNAL-2-3), and `python -m claude`
-        # is claude, where its second word, `-m`, was taken for the program (JOURNAL-2-4).
-        command = _program_name(program)
+        # is claude, where its second word, `-m`, was taken for the program (JOURNAL-2-4). One whose program has no
+        # name - code given inline - is proven by no process, where the runtime alone matched every one of it
+        # (JOURNAL-2-5).
+        program = runtime_program_word(configured)
+        command = _program_name(program) if program and "{" not in program else _NO_PROGRAM
     names = {command} if command else set()
     for ident, adapter in package_adapters().items():
         known = {_program_name(name) for name in [ident, *adapter_binaries(adapter),
@@ -1465,18 +1471,12 @@ def _architect_process_roots(root, architect=None, helper_only=False):
     if not configured:
         return []
 
-    command = _program_name(configured[0])
-    names = {command} if command else set()
-    # CLI launchers commonly exec a runtime under the package's other public
-    # name. These are aliases of the configured command, not a generic list of
-    # agents: an implementer on one harness must not become an architect on
-    # another merely because both are interactive in the same tree. The names
-    # that are one agent's are its adapter's id, binaries and processes (#76).
-    for ident, adapter in package_adapters().items():
-        known = {_program_name(name) for name in [ident, *adapter_binaries(adapter),
-                                                  *((adapter.get("detect") or {}).get("processes") or [])] if name}
-        if command in known:
-            names.update(known)
+    # The architect's names are its command's and that adapter's other names - an implementer on one harness
+    # must not become an architect on another merely because both are interactive in the same tree (#76) - and
+    # a runtime's architect is the program it runs. They were worked out here a second time, without the
+    # runtime, so any `python` process in the tree was the architect of one run as `python -m claude`
+    # (JOURNAL-2-5).
+    names = _architect_names(architect)
     if not names:
         return []
 

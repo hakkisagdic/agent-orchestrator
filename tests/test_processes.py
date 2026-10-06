@@ -244,3 +244,18 @@ def test_helper_registration_refreshes_a_warm_process_snapshot(monkeypatch, tmp_
 
     assert fresh["value"]
     assert A.helper_pids("/repo", "architect") == {310}
+
+
+def test_an_architect_a_runtime_runs_is_present_as_its_program_alone(monkeypatch):
+    """JOURNAL-2-5: architect presence worked out the architect's names a second time, without the runtime, so any
+    interactive `python` process in the tree was the architect of one run as `python -m claude`."""
+    vectors = {301: ["/usr/local/bin/python3.12", "-m", "worker"]}
+    _architect_process_table(monkeypatch, vectors, {301: "/repo"})
+
+    assert not A.architect_present("/repo", {"argv": ["/usr/local/bin/python3.12", "-m", "claude"]})
+
+    vectors[302] = ["/usr/local/bin/python3.12", "-X", "utf8", "-m", "claude"]
+    _architect_process_table(monkeypatch, vectors, {301: "/repo", 302: "/repo"})
+    assert A.architect_present("/repo", {"argv": ["/usr/local/bin/python3.12", "-m", "claude"]})
+    # an architect whose program has no name is proven by no process of its runtime
+    assert not A.architect_present("/repo", {"argv": ["python3", "-c", "print(1)"]})
