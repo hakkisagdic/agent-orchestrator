@@ -215,3 +215,30 @@ def test_a_range_s_base_is_the_commit_git_diffs_it_from(project):
     assert cli._range_base(root, second) == second                         # `git diff X` diffs X against the tree
     assert cli._range_base(root, f"{second}^!") == first
     assert cli._range_base(root, "no-such-commit..HEAD") is None
+
+
+def test_a_model_a_waived_merge_brought_from_a_side_branch_judges_no_later_review(project, monkeypatch, capsys,
+                                                                                  tmp_path):
+    """REVIEW-THREAT-MODEL-4: a commit was taken to be in a waived range only when it descended from the range's start,
+    and a waived merge brings in commits that do not: the side branch's model judged every later review."""
+    from tests.test_switches_and_bypass import _allow_candidate_verification
+    from tests.test_waiver_bounds import _commit_ok, _running
+    root = _package(project)
+    _commit(root, "docs/threat-model.md", MODEL)
+    _git(root, "checkout", "-q", "-b", "side")
+    _commit(root, "docs/threat-model.md", LOOSENED)
+    _git(root, "checkout", "-q", "-")
+    _commit(root, "src/pkg/other.py", "X = 1\n")
+    _running(root, "B7")
+    _git(root, "merge", "-q", "--no-ff", "--no-commit", "side")
+    _allow_candidate_verification(monkeypatch, A.index_candidate(root))
+    A.waive(root, "review", "B7", "quota", by="alice (owner)")
+    assert _commit_ok(project, capsys)[0] == 0
+    _git(root, "commit", "-q", "-m", "merge side, waived")
+    cfg, capture = _reviewer(project, tmp_path)
+    _stage_test(root)
+
+    assert cli.cmd_review(cfg, _args()) == 0
+
+    model = _model_between(capture.read_text(encoding="utf-8"))
+    assert "MODEL-AS-COMMITTED" in model and "LOOSENED" not in model

@@ -611,20 +611,24 @@ def _range_base(root, commits):
 
 
 def _in_waived_range(root, commit, start, end):
-    """Whether `commit` is one of the commits `start..end` landed."""
-    if commit == start:
-        return False
-    for older, newer in ((start, commit), (commit, end)):
+    """Whether `commit` is one of the commits `start..end` landed: reachable from `end` and not from `start`, as
+    `git rev-list start..end` lists them.
+
+    It was taken to be one that descends from `start`, and a waived merge brings in commits that do not: a side branch
+    cut before `start` changed the model, and the merge that landed it under the waiver set the model of every later
+    review (REVIEW-THREAT-MODEL-4).
+    """
+    reached = []
+    for tip in (end, start):
         try:
-            answer = subprocess.run([A.git_binary(), "merge-base", "--is-ancestor", older, newer], cwd=root,
+            answer = subprocess.run([A.git_binary(), "merge-base", "--is-ancestor", commit, tip], cwd=root,
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60).returncode
         except (OSError, subprocess.TimeoutExpired):
             answer = 2
-        if answer == 1:
-            return False
-        if answer:
+        if answer not in (0, 1):
             raise RuntimeError("git cannot compare a commit with a waived range")
-    return True
+        reached.append(answer == 0)
+    return reached == [True, False]
 
 
 def _threat_model_commit(root, at):
