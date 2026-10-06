@@ -504,3 +504,37 @@ def test_what_binds_the_module_s_name_wherever_it_is_written_is_found(source):
     """SPLIT-CHECK-10: an `A` a function imports may be ao's lib itself; a walrus in a default or a comprehension binds
     the module's `A`; and a star import binds a public `A` as surely as `_part` through `__all__`."""
     assert A._loader_rebound(source, "pkg/mod.py") == ["A"]
+
+
+@pytest.mark.parametrize("source", [
+    _HEAD + "class C:\n    A = type('X', (), {})\n    A._part = print" + _LOAD,
+    _HEAD + "class C:\n    def A(self):\n        pass\n    A._part = 1" + _LOAD,
+    _HEAD + "def f(A):\n    A._part = 1\n\n\ndef g():\n    import json as A\n    return A" + _LOAD,
+    _HEAD + "def f():\n    import json as B\n    A = 1\n    def inner():\n        A._part = 1\n    return inner, B" + _LOAD,
+])
+def test_a_body_s_own_name_is_its_own_where_it_surely_binds_it(source):
+    """SPLIT-CHECK-11: a class body that bound its own `A` first, and a function whose `A` no import of its own binds -
+    though another function imports one - were taken for the module's, and a sound split refused."""
+    assert A._loader_rebound(source, "pkg/mod.py") == []
+
+
+@pytest.mark.parametrize("source", [
+    _HEAD + "class C:\n    A = A\n    A._part = print" + _LOAD,
+    _HEAD + "class C:\n    if len(__name__):\n        A = object()\n    A._part = print" + _LOAD,
+    _HEAD + "class C:\n    A = object()\n    del A\n    A._part = print" + _LOAD,
+    _HEAD + "def f():\n    from ao import lib as A\n    def inner():\n        A._part = print\n    return inner" + _LOAD,
+])
+def test_a_body_whose_own_name_may_still_be_the_module_s_sets_the_loader(source):
+    """SPLIT-CHECK-11: a class body's `A = A` binds the module's object, a binding that may not run or is deleted leaves
+    the module's, and a closure over a function that imports `A` may hold ao's lib."""
+    assert A._loader_rebound(source, "pkg/mod.py") == ["A"]
+
+
+def test_a_walrus_in_ao_s_lib_binds_the_loader_only_in_the_module_s_own_namespace():
+    """SPLIT-CHECK-11: a walrus in a function's body binds that function's `_part`, and was taken for the module's."""
+    head = 'def _part(name, namespace):\n    pass\n\n\n'
+    load = '\n\n\n_part("x", globals())\n'
+
+    assert A._loader_rebound(head + "def helper():\n    (_part := print)\n    return _part" + load, "src/ao/lib.py") == []
+    assert A._loader_rebound(head + "def helper(x=(_part := print)):\n    return x" + load, "src/ao/lib.py") == ["_part"]
+    assert A._loader_rebound(head + "class K((_part := object)):\n    pass" + load, "src/ao/lib.py") == ["_part"]

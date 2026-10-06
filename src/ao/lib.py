@@ -556,15 +556,82 @@ def _module_level(nodes):
 
 
 def _scope_tables(top):
-    """{(line, name): table} of each function and class body under the module's symbol table `top`: the compiler's own
-    reading of which names a body binds, and which it reads from the module (SPLIT-CHECK-10)."""
-    tables, stack = {}, [top]
+    """({(line, name): table} of each function and class body under the module's symbol table `top`, {id(table): the
+    table it is nested in}): the compiler's own reading of which names a body binds, and which it reads from the module
+    (SPLIT-CHECK-10), and where a name a body closes over is bound (SPLIT-CHECK-11)."""
+    tables, parents, stack = {}, {}, [top]
     while stack:
         table = stack.pop()
         if table.get_type() in ("function", "class"):
             tables[(table.get_lineno(), table.get_name())] = table
-        stack.extend(table.get_children())
-    return tables
+        for child in table.get_children():
+            parents[id(child)] = table
+            stack.append(child)
+    return tables, parents
+
+
+def _closure_binding(table, name, parents):
+    """The symbol of the function body that binds `name`, which `table` closes over; None when none does: a class
+    body's names are no function's to close over (SPLIT-CHECK-11)."""
+    scope = parents.get(id(table))
+    while scope is not None and scope.get_type() != "module":
+        if scope.get_type() == "function":
+            try:
+                symbol = scope.lookup(name)
+            except KeyError:
+                symbol = None
+            if symbol is not None and not symbol.is_free() and not symbol.is_global():
+                return symbol
+        scope = parents.get(id(scope))
+    return None
+
+
+def _class_binds_first(scope, name, write):
+    """Whether a class body binds `name` of its own before the statement that holds `write` runs, whatever runs: a def
+    or class at its own level with no decorator or keyword, or an assignment there whose value does not read the name,
+    and no `del` of it anywhere in the body (SPLIT-CHECK-11). A class body reads the module's name until it binds its
+    own, so a write before that, or after a binding that may not run, sets the module's."""
+    import ast
+    if any(isinstance(node, ast.Name) and node.id == name and isinstance(node.ctx, ast.Del) for node in ast.walk(scope)):
+        return False
+    for statement in scope.body:
+        if any(node is write for node in ast.walk(statement)):
+            return False
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and statement.name == name:
+            if not statement.decorator_list and not getattr(statement, "keywords", None):
+                return True
+        elif isinstance(statement, (ast.Assign, ast.AnnAssign)) and statement.value is not None:
+            targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+            stored = any(isinstance(node, ast.Name) and node.id == name and isinstance(node.ctx, ast.Store)
+                         for target in targets for node in ast.walk(target))
+            if stored and not any(isinstance(node, ast.Name) and node.id == name for node in ast.walk(statement.value)):
+                return True
+    return False
+
+
+def _module_walruses(tree):
+    """The names a walrus binds in the module's own namespace: one at module level, in a comprehension there, or in a
+    default, decorator, annotation or base the module evaluates - not in a function's, a lambda's or a class's body,
+    whose walrus binds a name of its own (SPLIT-CHECK-11)."""
+    import ast
+    names, stack = set(), list(tree.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.NamedExpr):
+            names.add(node.target.id)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            arguments = node.args
+            stack.extend(arguments.defaults + [default for default in arguments.kw_defaults if default is not None])
+            if not isinstance(node, ast.Lambda):
+                stack.extend(node.decorator_list + ([node.returns] if node.returns else []))
+                stack.extend(arg.annotation for arg in arguments.posonlyargs + arguments.args + arguments.kwonlyargs
+                             + [arg for arg in (arguments.vararg, arguments.kwarg) if arg] if arg.annotation)
+            continue
+        if isinstance(node, ast.ClassDef):
+            stack.extend(node.decorator_list + node.bases + [keyword.value for keyword in node.keywords])
+            continue
+        stack.extend(ast.iter_child_nodes(node))
+    return names
 
 
 def _loader_rebound(source, path):
@@ -619,17 +686,15 @@ def _loader_rebound(source, path):
         assigned = symbol.is_assigned() or symbol.is_declared_global()
         if assigned and not (own_lib and name == "_part"):
             rebound.add(name)
-    if own_lib and any(isinstance(node, ast.NamedExpr) and node.target.id == "_part" for node in ast.walk(tree)):
+    if own_lib and "_part" in _module_walruses(tree):
         rebound.add("_part")
     # `A._part = ...` sets the loader's attribute wherever `A` is the module's name for it. A function's own `A` - a
     # parameter, a nested def or class, an `except` name, a capture, or one it closes over - is another object,
-    # unless an import bound it, which may be ao's lib; a class body reads the module's `A` until it binds its own,
-    # so there only one it closes over is another (SPLIT-CHECK-9, SPLIT-CHECK-10).
-    tables = _scope_tables(top)
-    imported = {alias.asname or alias.name.split(".")[0]
-                for scope in ast.walk(tree) if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-                for node in _module_level(scope.body) if isinstance(node, (ast.Import, ast.ImportFrom))
-                for alias in node.names}
+    # unless an import bound it, which may be ao's lib; a class body reads the module's `A` until it binds its own
+    # (SPLIT-CHECK-9, SPLIT-CHECK-10). Whether an import bound it is asked of the body that binds it, where an import in
+    # any function counted for every one, and a class body's own `A` counts from the statement that surely binds it
+    # (SPLIT-CHECK-11).
+    tables, parents = _scope_tables(top)
     scopes = [(tree, None)] + [(node, tables.get((node.lineno, node.name))) for node in ast.walk(tree)
                                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]
     for scope, table in scopes:
@@ -642,8 +707,15 @@ def _loader_rebound(source, path):
                 symbol = table.lookup(name) if table is not None else None
             except KeyError:
                 symbol = None
-            own = symbol is not None and not symbol.is_global() and name not in imported \
-                and (symbol.is_free() or table.get_type() == "function")
+            if symbol is None or symbol.is_global():
+                own = False
+            elif symbol.is_free():
+                binding = _closure_binding(table, name, parents)
+                own = binding is not None and not binding.is_imported()
+            elif table.get_type() == "function":
+                own = not symbol.is_imported()
+            else:
+                own = not symbol.is_imported() and _class_binds_first(scope, name, node)
             if not own:
                 rebound.add(name)
     for node in _module_level(tree.body):
