@@ -986,6 +986,10 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
         if record is not None:
             # A record is a turn that ran: its answer is its response alone, and stderr is diagnostics (AGY-REVIEWER).
             ran, (stdout, denied) = True, record
+        elif ((A.command_adapter(argv) or {}).get("options") or {}).get("progress_on_stderr"):
+            # A harness that prints its progress on stderr answers on stdout alone: its tool calls are no answer
+            # (OPENCODE-REVIEWER).
+            ran = True
         # A run that answers in session updates answers there alone: its stderr is diagnostics, and a warning there
         # was read as the answer of a turn that ended on no message (REVIEW-EMPTY-TURN-2).
         out = (stdout if (stdout or "").strip() else "" if ran else stderr or "").strip()

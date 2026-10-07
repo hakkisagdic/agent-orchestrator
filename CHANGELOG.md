@@ -34,6 +34,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Adapters
 
+- opencode can review: it runs with `--pure` as an agent of ao's whose permission denies every tool but read, grep, glob and list, written as `.opencode/agents/<name>.md` for each run, on the 1.18 release it was measured on; its answer is what it prints on stdout, its progress on stderr is not. A provider in the person's opencode configuration, such as EVREN, reviews with whichever model the route names ([adapters](docs/adapters.md)) (OPENCODE-REVIEWER).
 - An agy reviewer runs only on the release its agent was measured on, 1.3 and its patches, as a tool reviewer's contract does: agy 1.1.19 wrote files in a print run, and a release nobody measured may hold the agent to nothing (AGY-REVIEWER-2).
 - agy can review: it runs as an agent of ao's whose tools only read, written as `.agents/agents/<name>.md` for each run, and its answer is read from the JSON record it prints. Measured on agy 1.3.0, which keeps the person's MCP servers attached to every agent, so ao refuses an agy reviewer while the person's agy settings allow anything beyond reading ([adapters](docs/adapters.md)) (AGY-REVIEWER).
 

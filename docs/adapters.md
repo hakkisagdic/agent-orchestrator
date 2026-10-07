@@ -53,6 +53,16 @@ person's settings allowed it - so ao refuses an agy reviewer while
 `~/.gemini/antigravity-cli/settings.json` allows anything beyond `read_file(...)`, or cannot be read.
 It reviews only on the release the agent was measured on, 1.3 and its patches: agy 1.1.19 wrote
 files in a print run, and a release nobody measured may hold the agent to nothing (AGY-REVIEWER-2).
+
+opencode has no flag that denies a tool either - `--auto` only approves, and a reviewer's command
+that carries it is refused - so it reviews as an agent of ao's too, `.opencode/agents/<name>.md`,
+whose permission denies `*` and allows `read`, `grep`, `glob` and `list`, run with `--pure` and
+`--agent <name>`. Measured on opencode 1.18.27 with EVREN's DeepSeek V4 Flash: it offered the model
+read, grep and glob alone, and asked to write a file, run a command or fetch a page it had no tool
+to; a project's permission of allow for every tool did not widen it. It prints its progress on
+stderr and the model's text alone on stdout, which is the answer. It reviews on 1.18 alone, and the
+person's own providers reach it as they reach their own runs: one in its configuration, such as an
+OpenAI-compatible gateway, reviews with whichever model the route names (OPENCODE-REVIEWER).
 Its answer is the `response` of the one JSON record it prints, and a tool its run was denied is
 named in the reason the review gives (AGY-REVIEWER). An agent file holds none of a project's hooks,
 and agy runs `.agents/hooks.json` from the folder it starts in: like every reviewer, it reads the
@@ -62,6 +72,7 @@ candidate's tree in `candidate/`, less what any harness reads from a project (RE
 ao role set reviewer claude-code --model claude-opus-5
 ao role set reviewer kiro --model <model> --effort high
 ao role set reviewer antigravity --model gemini-3.1-pro-high --family google
+ao role set reviewer opencode --model <provider>/<model> --family <family>
 ao role set reviewer codex --model <model> --effort high --family openai
 ```
 
@@ -519,7 +530,7 @@ the adapter says so in its `disclaimer`. **Reviewer** is whether the adapter can
 |---|---|---|---|---|
 | `claude` | `claude-code` | full | eligible | Claude Code |
 | `codex` | `codex` | partial | eligible | OpenAI Codex CLI |
-| `opencode` | `opencode` | partial | ineligible | opencode |
+| `opencode` | `opencode` | partial | eligible | opencode |
 | `traycer` | — | — | — | no adapter: an orchestrator of agents, as ao is, not an agent ao drives |
 | `cursor` | `cursor-agent` | documented | ineligible | Cursor Agent CLI |
 | `grok` | `grok` | untested | ineligible | Grok CLI (superagent-ai) |

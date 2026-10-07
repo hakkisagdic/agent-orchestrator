@@ -1079,8 +1079,9 @@ def reviewer_agent_problems(adapter):
     if not (isinstance(path, str) and "{agent}" in path and not path.startswith("/") and "\\" not in path
             and ".." not in path.split("/")):
         problems.append("`options.reviewer_agent.path` must be a path within the reviewer's directory, carrying {agent}")
-    if not (isinstance(config, dict) and isinstance(config.get("tools"), list)):
-        problems.append("`options.reviewer_agent.config` must be an object that names its `tools`")
+    # A harness names an agent's tools as a list, or as permissions by tool, as opencode does (OPENCODE-REVIEWER).
+    if not (isinstance(config, dict) and (isinstance(config.get("tools"), list) or isinstance(config.get("permission"), dict))):
+        problems.append("`options.reviewer_agent.config` must be an object that names its `tools` or its `permission`")
     # An agent file is JSON, or a markdown body under the config as front matter (AGY-REVIEWER).
     if agent.get("format", "json") not in ("json", "frontmatter"):
         problems.append("`options.reviewer_agent.format` must be json or frontmatter")

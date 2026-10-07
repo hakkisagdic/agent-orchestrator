@@ -21,8 +21,22 @@
     "note": "Verified against `opencode run --help` on 1.18.27: -s/--session names the session, -c/--continue takes the most recent, --fork branches it instead of resuming it in place, and --agent <name> and --variant <reasoning effort> are separate flags. A run started by ao should pin its permission mode: --auto approves tool calls, and it is the only such flag opencode offers, so it is a widening rather than the scoped grant a claude-code wake carries."
   },
   "options": {
-    "trust_none": null,
-    "trust_none_why": "no flag denies tools: --auto is the only permission flag `run` takes, and it approves rather than withholds, so a read-only reviewer cannot be composed from the command line",
+    "trust_none": ["--pure"],
+    "trust_none_note": "No flag denies tools - --auto only approves - so a reviewer runs as an agent of ao's whose permission denies every tool but read, grep, glob and list, options.reviewer_agent; --pure leaves out the plugins the person's configuration names to install.",
+    "reviewer_agent": {
+      "argv": ["--agent", "{agent}"],
+      "release": "1.18",
+      "path": ".opencode/agents/{agent}.md",
+      "format": "frontmatter",
+      "config": {
+        "description": "ao's reviewer: it reads, and has no tool that writes, runs a command or reaches a server",
+        "mode": "primary",
+        "permission": {"*": "deny", "read": "allow", "grep": "allow", "glob": "allow", "list": "allow"}
+      },
+      "body": "You review what the prompt hands you. You read files and write nothing, and you run nothing.",
+      "note": "Measured on opencode 1.18.27, 2026-10-07, with EVREN's DeepSeek V4 Flash: run as this agent with --pure, opencode offered the model read, grep and glob alone, and asked to write a file, run a command or fetch a page it had no tool to; nothing was written. A project's permission of allow for every tool did not widen it. The agent's name is its file's. A plugin under .opencode/plugin and an MCP server in opencode.json ran from the folder opencode started in even with --pure, so the candidate's tree reaches it in candidate/, less every harness's project configuration (REVIEW-TREE-3)."
+    },
+    "progress_on_stderr": "opencode run prints the turn's progress - the agent, each tool call - on stderr, and the model's text alone on stdout; the answer is stdout, and a run that wrote none answered nothing.",
     "model": ["--model", "{model}"],
     "model_format": "provider/model",
     "effort": ["--variant", "{effort}"],
