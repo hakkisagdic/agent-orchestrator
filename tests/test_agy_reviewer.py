@@ -21,10 +21,12 @@ READS = ["view_file", "grep_search", "find_by_name", "list_dir"]
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
-    """A home of the test's own, so the person's real agy settings decide nothing here."""
+    """A home of the test's own, so the person's real agy settings decide nothing here. Windows' expanduser reads
+    USERPROFILE and not HOME, so both are set."""
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)                    # the project fixture may have made it already
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     return home
 
 
