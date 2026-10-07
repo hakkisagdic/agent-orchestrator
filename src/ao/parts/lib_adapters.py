@@ -1086,6 +1086,9 @@ def reviewer_agent_problems(adapter):
         problems.append("`options.reviewer_agent.format` must be json or frontmatter")
     if agent.get("format") == "frontmatter" and not isinstance(agent.get("body"), str):
         problems.append("`options.reviewer_agent.body` must be the text under the front matter")
+    release = agent.get("release")
+    if release is not None and not (isinstance(release, str) and re.fullmatch(r"\d+(\.\d+)*", release)):
+        problems.append("`options.reviewer_agent.release` must be the release the agent was measured on, as 1.3")
     settings = agent.get("settings")
     if settings is not None and not (
             isinstance(settings, dict) and isinstance(settings.get("path"), str) and settings["path"].startswith("~/")

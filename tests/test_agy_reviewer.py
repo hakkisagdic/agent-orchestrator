@@ -133,3 +133,33 @@ def test_a_review_its_harness_denied_a_tool_says_so_and_is_asked_again(project, 
 
     assert not attempt["ok"] and attempt["kind"] == "silence" and attempt["retryable"], attempt
     assert "its harness denied it mcp" in attempt["reason"]
+
+
+@pytest.mark.parametrize("version, refused", [("1.3.0", False), ("1.3.1", False), ("1.1.19", True), ("1.4.0", True),
+                                              ("", True)])
+def test_an_agy_reviewer_runs_only_on_the_release_its_agent_was_measured_on(version, refused):
+    """AGY-REVIEWER-2: agy 1.1.19 wrote files in a print run, and the agent that holds agy to reading was measured on
+    1.3.0 alone; a release nobody measured may hold it to nothing."""
+    attempt = cli._measured_release_problem(A.load_adapter("antigravity"), "/opt/agy", version)
+
+    assert (attempt is not None) == refused
+    if refused:
+        assert attempt["kind"] == "missing-binary" and "the 1.3 release its reviewer agent was measured on" in \
+            attempt["reason"]
+
+
+def test_a_route_through_an_agy_nobody_measured_is_not_started(project, monkeypatch):
+    monkeypatch.setattr(cli, "_reviewer_resolve_binary", lambda root, name: ("/opt/agy", "1.1.19"))
+    started = []
+    monkeypatch.setattr(cli, "_run_reviewer", lambda *args, **kwargs: started.append(args) or {"ok": True})
+    route = A.compose_reviewer("antigravity", model="gemini-3.1-pro-high", family="google")
+
+    attempt = cli._reviewer_route_invocation(project["root"], route, "review this", 30, False, route)[3]
+
+    assert not started and attempt["kind"] == "missing-binary" and "/opt/agy is 1.1.19" in attempt["reason"]
+
+
+def test_a_release_that_is_no_version_is_named():
+    agent = dict(A.load_adapter("antigravity")["options"]["reviewer_agent"], release="latest")
+
+    assert any("release" in problem for problem in A.reviewer_agent_problems({"options": {"reviewer_agent": agent}}))

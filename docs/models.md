@@ -60,7 +60,7 @@ the one that wrote the code catches failure modes a self-review shares and misse
 |---|---|---|
 | Kiro CLI | `--model` | `--effort` (low…max) |
 | Claude Code | `--model` | — |
-| Antigravity | `--model` | `--effort` (low/medium/high) |
+| Antigravity | `--model` | `--effort` (low…max) |
 | Codex | `--model` | `-c model_reasoning_effort=` |
 | Aider | `--model` | `--reasoning-effort`, `--thinking-tokens` |
 | opencode | `--model provider/model` | — |

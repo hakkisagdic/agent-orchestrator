@@ -51,6 +51,8 @@ had no tool to write a file or run a command. The person's MCP servers stay atta
 Linear's writing tools among them, and a call to one was denied only because no rule in the
 person's settings allowed it - so ao refuses an agy reviewer while
 `~/.gemini/antigravity-cli/settings.json` allows anything beyond `read_file(...)`, or cannot be read.
+It reviews only on the release the agent was measured on, 1.3 and its patches: agy 1.1.19 wrote
+files in a print run, and a release nobody measured may hold the agent to nothing (AGY-REVIEWER-2).
 Its answer is the `response` of the one JSON record it prints, and a tool its run was denied is
 named in the reason the review gives (AGY-REVIEWER). An agent file holds none of a project's hooks,
 and agy runs `.agents/hooks.json` from the folder it starts in: like every reviewer, it reads the

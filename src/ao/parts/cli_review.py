@@ -1339,6 +1339,10 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, can
                                                                        else ""),
             "returncode": None, "kind": "missing-binary", "retryable": False,
         }
+    unmeasured = _measured_release_problem(A.command_adapter([declared_binary]), exe, version) if tool is None \
+        else None
+    if unmeasured:
+        return label, declared_binary, version, unmeasured
     argv[0] = exe
     if os.name == "nt" and exe.lower().endswith((".cmd", ".bat")):
         return label, declared_binary, version, {
@@ -1418,6 +1422,25 @@ def _acp_reviewer_command(root, route, strict):
     return {"argv": argv, "adapter": ident}, None
 
 
+def _measured_release_problem(adapter, exe, version):
+    """The attempt that refuses a reviewer whose agent was measured on another release than the one installed; else
+    None (AGY-REVIEWER-2).
+
+    agy runs as an agent that only reads because an agent's tools list held agy 1.3.0 to them, and a print run of 1.3.0
+    denied what nobody could be asked about; agy 1.1.19 wrote files in a print run. A release no one measured may hold
+    the agent to nothing, so an adapter whose reviewer agent names the release it was measured on, `release`, runs as a
+    reviewer only there, as a tool reviewer's contract does (REVIEWER-TOOL-3); a later patch of it is the same release.
+    """
+    agent = ((adapter or {}).get("options") or {}).get("reviewer_agent")
+    release = str(agent.get("release") or "") if isinstance(agent, dict) else ""
+    if not release or _reviewer_version_key(version)[:len(release.split("."))] == _reviewer_version_key(release):
+        return None
+    return {"ok": False, "out": "", "binary": exe,
+            "reason": (f"{exe} is {version or 'of a version it does not state'}, not the {release} release its "
+                       "reviewer agent was measured on, and what another one lets the agent do is unmeasured"),
+            "returncode": None, "kind": "missing-binary", "retryable": False}
+
+
 def _acp_route_invocation(root, label, fallback, through, prompt, timeout, tree=None):
     """Resolve and run a route's ACP command: (label, binary, version, attempt), as for a spawned route (ACP-REVIEWER).
 
@@ -1440,6 +1463,9 @@ def _acp_route_invocation(root, label, fallback, through, prompt, timeout, tree=
             "ok": False, "out": "", "binary": declared_binary, "reason": "not installed",
             "returncode": None, "kind": "missing-binary", "retryable": False,
         }
+    unmeasured = _measured_release_problem(A.package_adapters().get(through["adapter"]), exe, version)
+    if unmeasured:
+        return label, declared_binary, version, unmeasured
     try:
         attempt = _run_acp_reviewer(root, [exe] + argv[1:], through["adapter"], prompt, timeout, label,
                                     fallback=fallback, tree=tree)

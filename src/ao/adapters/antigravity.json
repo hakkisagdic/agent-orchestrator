@@ -25,6 +25,7 @@
     "trust_none_why": "no flag denies tools - --dangerously-skip-permissions only widens them - so a reviewer runs as an agent of ao's own that only reads, options.reviewer_agent",
     "reviewer_agent": {
       "argv": ["--agent={agent}"],
+      "release": "1.3",
       "path": ".agents/agents/{agent}.md",
       "format": "frontmatter",
       "config": {
