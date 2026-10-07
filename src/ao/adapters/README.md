@@ -82,6 +82,12 @@ pull request. Include the CLI version you tested against.
 - **Name it in `vendors.json`.** Every shipped adapter is named by one vendor there, and a vendor
   with no adapter says why; a test fails when the list and the files disagree (#89). If the
   command it runs is not `send.argv[0]`, declare it in `detect.binaries`.
+- **Declare what the harness reads from a project.** `project_config` lists the files and folders it
+  reads from the folder it starts in as its configuration - hooks, plugins, MCP servers, agents,
+  settings - and `directives.steering_files` the instruction files. ao withholds every adapter's
+  names from the tree a reviewer reads, wherever they are, and unpacks that tree into a folder of
+  its own: a harness started where the candidate's tree was ran the candidate's hooks, plugins and
+  MCP servers (REVIEW-TREE-3). A test fails when an adapter that can review a tree declares none.
 - **Declare how an unattended turn looks.** `detect.headless` lists the arguments of the
   non-interactive form (`-p`, `--print`, a subcommand such as `exec`). `ao hold` and the
   watchdog's reap stop only a process holding one its own harness declares, and a test fails

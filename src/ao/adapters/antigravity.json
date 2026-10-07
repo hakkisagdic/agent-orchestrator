@@ -1,6 +1,7 @@
 {
   "id": "antigravity",
   "name": "Antigravity CLI (agy)",
+  "project_config": [".agents", ".gemini", "AGENTS.md", "GEMINI.md"],
   "verified": "full",
   "verified_version": "agy 1.3.0",
   "observation_mode": "call-return",

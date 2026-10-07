@@ -173,7 +173,7 @@ def test_each_criterion_is_asked_after_the_prompt_and_what_the_review_found_of_i
 
     (prompt,) = handed()
     note = _note(cfg, ["the store is durable", "a restart replays it", "a duplicate is refused"])
-    assert prompt.endswith(f"\n\n{language.text(cfg, 'prompt.review-tree')}\n" + note)
+    assert prompt.endswith(f"\n\n{cli._tree_note(cfg, True)}\n" + note)
     body = _newest(root)
     evidence = A.review_evidence(body)
     assert evidence["verdict"] == "APPROVED" and evidence["criteria"] == [
@@ -243,7 +243,7 @@ def test_a_single_sentence_boundary_is_reviewed_recorded_and_granted_as_before(p
     assert cli.cmd_review(cfg, _args(boundary=None)) == 0
 
     (prompt,) = handed()
-    assert prompt.endswith(f"\n\n{language.text(cfg, 'prompt.review-tree')}\n") and "CRITERION" not in prompt
+    assert prompt.endswith(f"\n\n{cli._tree_note(cfg, True)}\n") and "CRITERION" not in prompt
     body = _newest(root)
     assert "criteria" not in A.review_evidence(body) and "- criterion" not in body
     code, out = _commit_ok(cfg, monkeypatch, capsys)

@@ -1,6 +1,7 @@
 {
   "id": "kiro",
   "name": "Kiro CLI",
+  "project_config": [".kiro", "AGENTS.md"],
   "verified": "full",
   "actor_name": "kiro",
   "verified_version": "kiro-cli (Kiro CLI), IDE 1.0.411",

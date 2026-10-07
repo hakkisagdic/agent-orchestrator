@@ -1,4 +1,5 @@
 {
+  "project_config": [".kilocode", ".kilo", "kilo.json", "kilo.jsonc", "AGENT.md", "AGENTS.md"],
   "id": "kilocode", "name": "Kilo Code CLI", "contract": 1, "verified": "untested",
   "disclaimer": "Written from the documented interface, not verified against an install. Flags drift; correct and open a PR.",
   "notes": "An opencode fork (Kilo-Org/kilocode, npm @kilocode/cli). The command is kilo, with kilocode as an alias.",

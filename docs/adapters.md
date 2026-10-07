@@ -52,7 +52,9 @@ Linear's writing tools among them, and a call to one was denied only because no 
 person's settings allowed it - so ao refuses an agy reviewer while
 `~/.gemini/antigravity-cli/settings.json` allows anything beyond `read_file(...)`, or cannot be read.
 Its answer is the `response` of the one JSON record it prints, and a tool its run was denied is
-named in the reason the review gives (AGY-REVIEWER).
+named in the reason the review gives (AGY-REVIEWER). An agent file holds none of a project's hooks,
+and agy runs `.agents/hooks.json` from the folder it starts in: like every reviewer, it reads the
+candidate's tree in `candidate/`, less what any harness reads from a project (REVIEW-TREE-3).
 
 ```bash
 ao role set reviewer claude-code --model claude-opus-5

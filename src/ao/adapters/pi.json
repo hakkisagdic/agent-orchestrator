@@ -1,4 +1,5 @@
 {
+  "project_config": [".pi", "AGENTS.md", "CLAUDE.md"],
   "id": "pi", "name": "pi coding agent", "contract": 1, "verified": "untested",
   "disclaimer": "Written from the documented interface, not verified against an install. Flags drift; correct and open a PR.",
   "notes": "badlogic/pi-mono now redirects to earendil-works/pi (npm @earendil-works/pi-coding-agent). pi has no permission prompts by design. -p is a switch and the prompt is positional.",

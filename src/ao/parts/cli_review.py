@@ -62,7 +62,7 @@ def _review_prompt_bound(chain, fixed, asked, share, diff_bytes, cfg=None):
     each section's prompt is measured with its question, and `cfg` the project whose context marker
     the prompt would carry, in its language (LANGUAGE-PROMPTS).
     """
-    note = len(f"\n\n{language.text(cfg, 'prompt.review-tree')}\n".encode(UTF8))
+    note = max(len(f"\n\n{_tree_note(cfg, candidate)}\n".encode(UTF8)) for candidate in (True, False))
     carried = [route for route in chain if not _reviewer_prompt_plan(route, "x" * (fixed + asked))[1]]
     widest = fixed + asked + min(share, max(0, REVIEW_DIFF_BYTES - diff_bytes)) \
         + len(f"\n\n{language.text(cfg, 'prompt.review-context')}\n".encode(UTF8)) \
@@ -471,8 +471,14 @@ def _lands_inside(home, name, path=os.path):
     return path.realpath(path.join(root, name)).startswith(root.rstrip(path.sep) + path.sep)
 
 
+# The folder in a reviewer's working directory that holds the candidate's tree: one of its own, so the directory's root,
+# where a harness reads its project's hooks, plugins, MCP servers and instructions, holds what ao writes and nothing the
+# candidate does (REVIEW-TREE-3).
+REVIEW_TREE_DIR = "candidate"
+
+
 def _unpack_candidate(root, tree, into):
-    """Write the pinned candidate tree into `into`, so a reviewer can read the code it judges.
+    """Write the pinned candidate tree into `candidate/` in `into`, so a reviewer can read the code it judges.
 
     A reviewer runs outside the repository on purpose: what it judges is the candidate, never a
     working tree an agent can still edit. Handing it the diff alone left it blind to the rest of the
@@ -489,6 +495,15 @@ def _unpack_candidate(root, tree, into):
     reserves - can stop the extraction after the members before it were written, and those are
     removed again. So that everything in the directory after a failure is what this call wrote, only
     an empty one is written into: the one ao just made for the reviewer.
+
+    The tree was written into the working directory itself, and a harness started there ran what the candidate put in
+    it: Claude Code a SessionStart hook from its .claude/settings.json before it had even signed in, agy the commands of
+    its .agents/hooks.json around every turn, OpenCode a plugin from .opencode/plugin and an MCP server from
+    opencode.json - each though the reviewer's own tools only read. An implementer could so run commands of its choice
+    as the person, outside its own sandbox, by staging them. The tree now goes into a folder of its own, so the root a
+    harness reads its project from holds only what ao writes, whatever the harness reads and however it spells it; and
+    what any adapter declares its harness reads from a project - `project_config` and its steering files - is not
+    unpacked at all, wherever it is, for a harness that reads deeper (REVIEW-TREE-3). The diff shows a change to one.
     """
     if not tree:
         return None
@@ -498,6 +513,7 @@ def _unpack_candidate(root, tree, into):
             return None
     except OSError:
         return None
+    target = os.path.join(home, REVIEW_TREE_DIR)
     try:
         archive = subprocess.run([A.git_binary(), "archive", "--format=tar", str(tree)], cwd=root,
                                  capture_output=True, timeout=120)
@@ -505,15 +521,27 @@ def _unpack_candidate(root, tree, into):
             return None
         import io
         import tarfile
+        names = A.project_config_names()
         with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
             safe = [member for member in tar.getmembers()
-                    if (member.isfile() or member.isdir()) and _lands_inside(home, member.name)]
+                    if (member.isfile() or member.isdir()) and _lands_inside(target, member.name)
+                    and A.project_config_member(member.name, names) is None]
+            os.mkdir(target)
             extra = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
-            tar.extractall(home, members=safe, **extra)
+            tar.extractall(target, members=safe, **extra)
     except Exception:
         _remove_everything_in(home)
         return None
     return into
+
+
+def _tree_note(cfg, candidate):
+    """The note that tells a reviewer where the candidate's tree is and what of it ao withholds (REVIEW-TREE-3)."""
+    names = sorted(set(A.project_config_names().values()), key=str.casefold)
+    shown = [name for name in names
+             if not any(name.casefold().startswith(other.casefold() + "/") for other in names if other != name)]
+    return language.text(cfg, "prompt.review-tree" if candidate else "prompt.review-range-tree",
+                         folder=REVIEW_TREE_DIR, withheld=", ".join(shown))
 
 
 def _remove_everything_in(home):
@@ -3647,7 +3675,7 @@ def cmd_review(cfg, args):
     review_tree = (candidate or {}).get("index_tree") or (A.range_end_tree(root, args.commits)
                                                           if args.commits and not person else None)
     if review_tree:
-        prompt += f"\n\n{language.text(cfg, 'prompt.review-tree' if candidate else 'prompt.review-range-tree')}\n"
+        prompt += f"\n\n{_tree_note(cfg, candidate)}\n"
     # Every route is asked the criteria, a tool and a stand-in session too: their answers are read
     # against them as well (CRITERIA-VERDICTS).
     prompt += criteria_note

@@ -1,4 +1,5 @@
 {
+  "project_config": [".gemini", "GEMINI.md"],
   "id": "gemini", "name": "Google Gemini CLI", "verified": "untested",
   "disclaimer": "Written from documented interface, not verified against an install.",
   "detect": { "headless": ["--prompt", "-p"] },

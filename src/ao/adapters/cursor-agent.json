@@ -1,4 +1,5 @@
 {
+  "project_config": [".cursor", ".cursorrules", "AGENTS.md"],
   "id": "cursor-agent", "name": "Cursor Agent CLI", "verified": "documented",
   "verified_source": "cursor.com/docs/cli (headless + using), Aug 2026 changelog",
   "detect": { "binaries": ["agent", "cursor-agent"], "processes": ["cursor-agent"], "headless": ["-p", "--print"] },

@@ -1,4 +1,5 @@
 {
+  "project_config": [".github/copilot-instructions.md", ".github/instructions", ".github/hooks", "AGENTS.md"],
   "id": "copilot", "name": "GitHub Copilot CLI", "verified": "untested",
   "disclaimer": "Written from documented interface, not verified against an install.",
   "detect": { "headless": ["-p"] },

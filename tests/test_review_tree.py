@@ -53,8 +53,10 @@ def test_the_pinned_tree_is_written_whole_into_a_directory_of_its_own(tmp_path):
     written = cli._unpack_candidate(A.REPO, _tree_of_head(), str(tmp_path))
 
     assert written == str(tmp_path)
-    assert (tmp_path / "pyproject.toml").is_file() and (tmp_path / "src" / "ao" / "lib.py").is_file()
-    assert not (tmp_path / ".git").exists()          # a copy of the tree, never the repository itself
+    tree = tmp_path / cli.REVIEW_TREE_DIR
+    assert (tree / "pyproject.toml").is_file() and (tree / "src" / "ao" / "lib.py").is_file()
+    assert not (tree / ".git").exists()              # a copy of the tree, never the repository itself
+    assert [path.name for path in tmp_path.iterdir()] == [cli.REVIEW_TREE_DIR]      # REVIEW-TREE-3
 
 
 def test_a_tree_that_is_no_tree_leaves_the_directory_as_it_was(tmp_path):
@@ -70,7 +72,7 @@ def test_the_reviewer_runs_where_that_tree_is(project):
     itself under ~/.ao while it runs.
     """
     root = project["root"]
-    look = "import os, sys; sys.stdout.write(str(os.path.isfile('.ao-project')))"
+    look = "import os, sys; sys.stdout.write(str(os.path.isfile(os.path.join('candidate', '.ao-project'))))"
 
     with_tree = cli._run_reviewer(root, [sys.executable, "-c", look], 120, tree=_tree_of_head(root))
     without = cli._run_reviewer(root, [sys.executable, "-c", look], 120)
@@ -88,7 +90,8 @@ def test_a_range_is_reviewed_in_the_tree_it_ends_on(project, tmp_path):
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-am", "b"], cwd=root,
                    check=True)
     seen = tmp_path / "seen.txt"
-    look = (f"import os, sys; open({str(seen)!r}, 'w', encoding='utf-8').write(str(os.path.isfile('.ao-project')) "
+    look = (f"import os, sys; open({str(seen)!r}, 'w', encoding='utf-8').write(str(os.path.isfile("
+            "os.path.join('candidate', '.ao-project'))) "
             "+ chr(10) + sys.argv[1]); print('BLOCKER: 0'); print('HIGH: 0'); print('MEDIUM: 0'); print('LOW: 0'); "
             "print('VERDICT: APPROVED')")
     cfg = dict(project, reviewer={"id": "r1", "family": "x", "argv": [sys.executable, "-c", look, "{prompt}"]})
@@ -97,7 +100,7 @@ def test_a_range_is_reviewed_in_the_tree_it_ends_on(project, tmp_path):
 
     found, prompt = seen.read_text(encoding="utf-8").split("\n", 1)
     assert found == "True"
-    assert "--- TREE: ao unpacks the whole tree this range ends on into your working directory" in prompt
+    assert "--- TREE: ao unpacks the whole tree this range ends on into `candidate/` in your working directory" in prompt
     assert A.range_end_tree(root, "HEAD~1..HEAD") == subprocess.run(
         ["git", "rev-parse", "HEAD^{tree}"], cwd=root, capture_output=True, text=True, check=True).stdout.strip()
     assert A.range_end_tree(root, "HEAD") is None and A.range_end_tree(root, "HEAD~1..--all") is None
@@ -143,7 +146,7 @@ def test_a_request_a_person_carries_holds_no_note_about_a_tree_it_does_not_have(
 
     assert cli.cmd_review(dict(project, reviewer={"id": "r1", "family": "x", "argv": down}), _args()) == 3
 
-    note = language.text(project, "prompt.review-tree")
+    note = cli._tree_note(project, True)
     (request,) = Path(A.review_requests_dir(root)).glob("*.md")
     text = request.read_text(encoding="utf-8")
     assert note in handed.read_text(encoding="utf-8")        # ao's own reviewer was told where its tree is
@@ -187,7 +190,7 @@ def test_a_tool_reviewer_is_handed_its_own_files_and_neither_the_tree_nor_a_note
     assert seen["seen"] == evidence["diff_digest"] == evidence["tool"]["handed"]
     assert "SEEN: " + evidence["diff_digest"] in body         # the tool's own answer, not a file the tree held
     assert language.text(project, "prompt.review-candidate") in seen["question"]
-    assert language.text(project, "prompt.review-tree") not in seen["question"]
+    assert cli._tree_note(project, True) not in seen["question"]
 
 
 # ---- an unpacking that fails partway leaves the directory empty (REVIEW-TREE-2) -------------------

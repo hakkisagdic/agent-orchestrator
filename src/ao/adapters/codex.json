@@ -1,4 +1,5 @@
 {
+  "project_config": [".codex", "AGENTS.md", "AGENTS.override.md"],
   "id": "codex", "name": "OpenAI Codex CLI", "verified": "partial",
   "disclaimer": "The reviewer's command - exec with its prompt, --model, -c model_reasoning_effort and options.trust_none - was run against codex-cli 0.160.0 on 2026-10-05; the rest is written from the documented interface and not verified against an install. Flags drift; correct and open a PR.",
   "send":   { "argv": ["codex", "exec", "{prompt}"],

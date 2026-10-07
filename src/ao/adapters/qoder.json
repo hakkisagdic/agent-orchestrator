@@ -1,6 +1,7 @@
 {
   "id": "qoder",
   "name": "Qoder",
+  "project_config": [".qoder", ".mcp.json", "AGENTS.md"],
   "verified": "partial",
   "verified_version": "qodercli 1.1.59",
   "disclaimer": "The command surface (send, resume, options, output formats, models, permissions) and the read-only tool set were measured by running qodercli 1.1.59 on 2026-09-21; ao can now both watch a Qoder agent and wake one. What was not run stays marked: trust_all (--dangerously-skip-permissions), --list-sessions and --reasoning-effort and the model names they take, and the names of MCP tools inside the agent, `--strict-mcp-config` beside them, and the `mcp add` that registers ao: each is declared from the CLI's own help, not from a run. The standard-input prompt channel was measured on 2026-09-26, as was what one argument carries. The transcript, sessions, busy and telemetry readings are from a running Qoder 1.1.57 store, unchanged: two session transcripts (985 records) and three subagent transcripts beside them. Qoder is primarily an IDE (see docs/ide-extensions.md) with a companion CLI.",

@@ -136,6 +136,23 @@ added, never one with the note taken back out. An unpacking that fails partway, 
 the file system takes or one Windows reserves, leaves the directory empty again, which is what the note
 tells the reviewer an empty one means, and the terminal says the tree could not be unpacked.*
 
+*In ao since slice REVIEW-TREE-3: the tree goes into `candidate/` in the reviewer's working directory,
+not the directory itself, and what any coding agent reads from a project as its configuration or
+instructions is not unpacked at all, wherever it is. A harness started in a folder reads its hooks,
+plugins, MCP servers and instructions from there. Measured on 2026-10-07 with the tree in the
+working directory, Claude Code ran a SessionStart hook from the candidate's `.claude/settings.json`
+before it had even signed in, agy 1.3.0 ran the hooks of its `.agents/hooks.json` around every turn,
+and OpenCode 1.18.27 loaded a plugin from `.opencode/plugin` and started an MCP server from
+`opencode.json` - each though the reviewer's own tools only read. An implementer could so run
+commands of its choice as the person, outside its own sandbox, by staging them. With the tree in its
+own folder the root a harness reads its project from holds only what ao writes, whatever a harness
+reads and however it spells it; the names every adapter declares, `project_config` and its project
+steering files, are withheld besides, matched as a file system that ignores case, a trailing dot or
+space, or an NTFS stream would open them, for a harness that reads deeper. Run again over a tree
+holding all four at its root and in a subfolder, agy reviewed and none ran, nor Claude Code's hook
+before its sign-in failed. The note tells the reviewer where the tree is and what is withheld, and
+the diff shows any change to those files.*
+
 A review of eight scenarios is eight questions, not one. ao splits the prompt into
 **sections** — from the numbered scenarios in the boundary, or failing that from the
 candidate's file groups — and runs them as separate bounded calls, appending each result

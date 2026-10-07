@@ -643,6 +643,47 @@ def command_adapter(argv):
     return found[0] if len(found) == 1 else None
 
 
+def _config_part(part):
+    """A path component as a file system that ignores case, a trailing dot or space, or an NTFS stream names it."""
+    return part.split(":", 1)[0].rstrip(". ").casefold()
+
+
+def project_config_names():
+    """{(component, ...): the name as declared} of every file and folder an adapter ao ships says its harness reads from
+    a project as configuration or instructions, in `project_config` (REVIEW-TREE-3).
+
+    A harness started in a folder reads its hooks, plugins, MCP servers and instructions from there: Claude Code ran a
+    SessionStart hook from the candidate's .claude/settings.json, agy its .agents/hooks.json, and OpenCode a plugin and
+    an MCP server from its .opencode/ and opencode.json, each before or while it reviewed. Every adapter's names are
+    withheld from every reviewer, since a harness reads others' too - OpenCode reads CLAUDE.md and .claude/skills. Read
+    from the package's adapters alone, as `command_adapter` is: a layer an agent can write must not say what its
+    reviewer is handed.
+    """
+    names = {}
+    for adapter in package_adapters().values():
+        # The instruction files it reads from a project, `directives.steering_files`, are among them; its own home's
+        # are no tree's.
+        steering = [name for name in (adapter.get("directives") or {}).get("steering_files") or []
+                    if isinstance(name, str) and not name.startswith(("~", "/"))]
+        for declared in list(adapter.get("project_config") or []) + steering:
+            parts = tuple(_config_part(part) for part in str(declared).split("/") if part)
+            if parts and all(parts):
+                names.setdefault(parts, str(declared))
+    return names
+
+
+def project_config_member(path, names=None):
+    """The `project_config` name a tree member's path holds or falls under, wherever in the tree it is; else None
+    (REVIEW-TREE-3)."""
+    names = project_config_names() if names is None else names
+    parts = [_config_part(part) for part in str(path).replace("\\", "/").split("/") if part not in ("", ".")]
+    for entry, declared in names.items():
+        width = len(entry)
+        if any(tuple(parts[at:at + width]) == entry for at in range(len(parts) - width + 1)):
+            return declared
+    return None
+
+
 def role_pin(argv, role, adapter=None):
     """[(flag, value)] an adapter pins on every turn ao starts in `role` (`options.pin`); a hunter holds the reviewer's."""
     adapter = command_adapter(argv) if adapter is None else adapter
@@ -1066,6 +1107,12 @@ def validate_adapter(adapter):
             problems.append(f"`{field}` is missing")
     if adapter.get("verified") and adapter["verified"] not in ADAPTER_VERIFIED:
         problems.append(f"`verified` is {adapter['verified']!r}; one of {', '.join(ADAPTER_VERIFIED)}")
+    config = adapter.get("project_config")
+    if config is not None and not (isinstance(config, list) and all(
+            isinstance(name, str) and name.strip() and not name.startswith("/") and "\\" not in name
+            and ".." not in name.split("/") for name in config)):
+        problems.append("`project_config` must list the files and folders its harness reads from a project, each a "
+                        "path within it")
     if "contract" not in adapter:
         problems.append(f"`contract` is missing; this ao implements contract {ADAPTER_CONTRACT}")
     elif adapter["contract"] != ADAPTER_CONTRACT:

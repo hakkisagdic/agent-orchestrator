@@ -143,10 +143,15 @@ def test_a_tree_that_commits_the_agents_folder_as_a_link_unpacks_no_link(tmp_pat
     assert list(elsewhere.iterdir()) == []
 
 
-def test_a_tree_that_commits_the_agents_folder_as_a_file_is_refused(tmp_path):
+def test_a_tree_that_commits_the_agents_folder_as_a_file_is_withheld_and_the_agent_written_beside_it(tmp_path):
+    """REVIEW-TREE-3: the tree is unpacked into a folder of its own and its .kiro is withheld, so a tree that commits
+    .kiro as a file stands in no agent's way, where it was refused."""
     repo, tree = _tree_with(tmp_path, ".kiro", lambda path: path.write_text("not a folder\n", encoding="utf-8"))
     fresh = tmp_path / "fresh"
     fresh.mkdir()
 
     assert cli._unpack_candidate(repo, tree, str(fresh)) == str(fresh)
-    assert "as a link or a file" in cli._reviewer_agent(str(fresh), KIRO)[1]
+    argv, why = cli._reviewer_agent(str(fresh), KIRO)
+
+    assert why is None and (fresh / ".kiro" / "agents" / f"{argv[-1]}.json").is_file()
+    assert (fresh / "candidate" / "x.py").is_file() and not (fresh / "candidate" / ".kiro").exists()

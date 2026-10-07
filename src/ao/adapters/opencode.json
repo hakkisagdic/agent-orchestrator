@@ -1,4 +1,5 @@
 {
+  "project_config": [".opencode", "opencode.json", "opencode.jsonc", "AGENTS.md", "CLAUDE.md"],
   "id": "opencode",
   "name": "opencode",
   "verified": "partial",

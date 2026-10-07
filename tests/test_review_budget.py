@@ -19,7 +19,7 @@ from ao import cli, language, lib as A, watchdog as W
 from tests.test_prompt_channel import _declare, _git, _linux, _route
 
 # What the tree note adds to a prompt held to one argument (REVIEW-TREE): the bound leaves room for it.
-NOTE = len(f"\n\n{language.text(None, 'prompt.review-tree')}\n".encode("utf-8"))
+NOTE = max(len(f"\n\n{cli._tree_note(None, candidate)}\n".encode("utf-8")) for candidate in (True, False))
 
 PIPED = {"argv": ["piped", "{prompt}"], "stdin": {"replaces": ["{prompt}"], "with": ["--from-stdin"]}}
 BARE = {"argv": ["bare", "{prompt}"]}
@@ -61,13 +61,14 @@ def _evidence(root):
 
 
 def _claims_as_one_argument_held_them(root, commits):
-    """The claims a range was given when one argument's worth held them, as review had always measured."""
+    """The claims a range was given when one argument's worth held them, as review had always measured, less the tree
+    note the bound leaves room for: a note long enough to matter, REVIEW-TREE-3's, showed the measure left it out."""
     diff = A._git_output(root, "diff", "--binary", "--full-index", "--no-ext-diff", commits, "--").decode(
         "utf-8", "replace")
     cfg = A.load_config(root)
     smallest = language.text(cfg, "prompt.review", boundary=cli._claims_statement(BOUNDARY, "")) \
         + f"\n\n{language.text(cfg, 'prompt.review-candidate')}\n" + diff
-    room = max(0, min(A.REVIEW_CONTEXT_BUDGET, cli.REVIEW_PROMPT_ARG_BYTES - len(smallest.encode("utf-8")) - 200))
+    room = max(0, min(A.REVIEW_CONTEXT_BUDGET, cli.REVIEW_PROMPT_ARG_BYTES - NOTE - len(smallest.encode("utf-8")) - 200))
     return A.review_range_claims(root, commits, room)
 
 

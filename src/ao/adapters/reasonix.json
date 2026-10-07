@@ -1,4 +1,5 @@
 {
+  "project_config": [".reasonix", "REASONIX.md", "AGENTS.md", "CLAUDE.md"],
   "id": "reasonix", "name": "Reasonix", "contract": 1, "verified": "untested",
   "disclaimer": "Written from the documented interface and, for -p, the source; not verified against an install. Flags drift; correct and open a PR.",
   "notes": "esengine/DeepSeek-Reasonix, default branch main-v2, npm reasonix. -p as a switch with a positional prompt is read from internal/cli/cli_flags.go. --auto and -y are not full approval: they equal the default, workspace-write.",

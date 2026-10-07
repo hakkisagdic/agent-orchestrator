@@ -1,6 +1,7 @@
 {
   "id": "claude-code",
   "name": "Claude Code",
+  "project_config": [".claude", ".mcp.json", "CLAUDE.md", "CLAUDE.local.md"],
   "verified": "full",
   "actor_name": "claude",
   "family": "anthropic",

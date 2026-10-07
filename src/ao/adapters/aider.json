@@ -1,4 +1,5 @@
 {
+  "project_config": [".aider.conf.yml", ".aider.model.settings.yml", "CONVENTIONS.md"],
   "id": "aider", "name": "Aider", "verified": "untested",
   "disclaimer": "Written from documented interface, not verified against an install.",
   "note": "Unusual and useful: Aider keeps a human-readable transcript in the repo, so observation needs no vendor store.",
