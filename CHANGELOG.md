@@ -12,6 +12,8 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-07
+
 ### Fixes
 
 - An API reviewer whose model spent the whole answer its provider allows on reasoning is said so, with the tokens it spent, where the client said the provider gave no answer; and backlog row 86 is closed by a slice that landed on an ao-recorded review through EVREN (API-REVIEWER-5).
@@ -430,7 +432,8 @@ backlog row it closed.
 
 - The first release: attach to a coding agent already running, watch it, restart it when it stalls, run its gates independently, and decide from that evidence what may be committed (7fb15cf).
 
-[Unreleased]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.2.1...v0.3.0
