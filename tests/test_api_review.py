@@ -316,7 +316,7 @@ def test_a_model_that_spent_its_answer_reasoning_is_said_so(monkeypatch, tmp_pat
 
     said = capsys.readouterr().err
     assert code == 1 and answer is None
-    assert "glm-5.3 on local spent the whole answer it may give (16384 tokens of reasoning)" in said
+    assert "glm-5.3 on local spent the whole answer it may give (16384 tokens of thinking)" in said
     assert "a-key-for-this-test" not in said
 
 

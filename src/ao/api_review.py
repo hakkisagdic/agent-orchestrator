@@ -82,7 +82,8 @@ def _no_answer(provider, model, answer):
     A reasoning model that spends the whole answer its provider allows on reasoning stops before it writes a verdict:
     EVREN allows 16,384 tokens, and on a review prompt of about 28 KB GLM-5.3, DeepSeek V4.1 Flash, Qwen3.8 Flash and
     MiMo V2.6 Pro each spent all of them so on 2026-10-06. "Gave no answer" sent a person looking for a fault at the
-    provider. Only ao's own words and a whole number from the answer are said: the provider's text is not printed.
+    provider. Only ao's own words and a whole number from the answer are said: the provider's text is not printed. They
+    say thinking, since a string in ao's core never names a field of a harness's transcript (API-REVIEWER-6).
     """
     try:
         choice = answer["choices"][0]
@@ -93,7 +94,7 @@ def _no_answer(provider, model, answer):
     if finish != "length":
         return f"{provider} gave no answer for {model}"
     spent = details.get("reasoning_tokens") if isinstance(details, dict) else None
-    spent = f" ({spent} tokens of reasoning)" if isinstance(spent, int) and not isinstance(spent, bool) else ""
+    spent = f" ({spent} tokens of thinking)" if isinstance(spent, int) and not isinstance(spent, bool) else ""
     return (f"{model} on {provider} spent the whole answer it may give{spent} before it wrote one; a smaller "
             "candidate, or a model that reasons less, gives a verdict")
 
