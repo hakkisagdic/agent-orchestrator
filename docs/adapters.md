@@ -496,7 +496,10 @@ asks, and a turn that does not end even so is a timeout; the agent is stopped wi
 *In ao since slice ACP-REVIEWER: a reviewer answers its review through its adapter's `acp.argv` where the
 project sets `review.transport` to `acp`. The three declared commands were seen to answer `initialize`;
 none has yet been measured answering a review, which is why the transport is a project's choice and
-spawning stays the default.* The command is read from the package's adapters alone, as a review contract
+spawning stays the default.* A harness that reviews as an agent of ao's that only reads answers over
+ACP only where its adapter says the agent was measured to hold there: kiro's does (KIRO-READONLY-2),
+and `opencode acp` takes no `--agent`, so its session would be opencode's own agent and an opencode
+reviewer is spawned, with a line saying why (OPENCODE-REVIEWER-2). The command is read from the package's adapters alone, as a review contract
 and a prompt channel are: a layer an agent can write does not choose what its reviewer runs. It is found as
 a spawned reviewer's program is, and it runs where one does - a directory of its own outside the
 repository, holding the candidate's tree, with Git's bindings removed from its environment - where its

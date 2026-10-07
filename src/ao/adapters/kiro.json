@@ -82,6 +82,7 @@
     },
     "reviewer_agent": {
       "argv": ["--agent", "{agent}"],
+      "acp": true,
       "path": ".kiro/agents/{agent}.json",
       "config": {
         "name": "{agent}",

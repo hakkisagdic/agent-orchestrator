@@ -207,8 +207,9 @@ def test_a_route_that_cannot_answer_through_acp_says_why(project):
 
     named = {"adapter": "qoder", "argv": ["qodercli", "-p", "{prompt}"], "model": "some-model"}
     assert "it names a model (some-model)" in cli._acp_reviewer_command(root, named, False)[1]
-    writer = {"adapter": "opencode", "argv": ["opencode", "run", "{prompt}"]}
-    assert "adapter opencode may not review" in cli._acp_reviewer_command(root, writer, False)[1]
+    # OPENCODE-REVIEWER-2: opencode reviews as an agent of ao's, and `opencode acp` takes no --agent.
+    agent = {"adapter": "opencode", "argv": ["opencode", "run", "{prompt}", "--pure"]}
+    assert "nobody measured that its ACP command runs as one" in cli._acp_reviewer_command(root, agent, False)[1]
     tool = {"kind": "tool", "adapter": "pr-agent", "argv": ["pr-agent"]}
     assert "tool reviewer" in cli._acp_reviewer_command(root, tool, False)[1]
     stranger = {"adapter": "no-such-harness", "argv": ["x"]}
@@ -327,3 +328,27 @@ def test_a_review_whose_agent_ran_what_it_should_not_is_not_accepted(project, mo
                                     "qoder-reviewer")
 
     assert not attempt["ok"] and attempt["kind"] == "wrote", (name, attempt)
+
+
+def test_an_adapter_that_may_not_review_is_not_reached_over_acp_either(project, monkeypatch):
+    from ao import lib as A
+    root = project["root"]
+    _transport(project, "acp")
+    writer = {"id": "writer", "acp": {"argv": ["writer", "acp"], "measured": "writer 1.0 answered initialize, 2026-10-07"},
+              "send": {"argv": ["writer", "{prompt}"]}, "options": {"trust_none": None, "trust_none_why": "it writes"}}
+    shipped = dict(A.package_adapters(), writer=writer)
+    monkeypatch.setattr(A, "package_adapters", lambda: shipped)
+
+    assert "adapter writer may not review" in cli._acp_reviewer_command(root, {"adapter": "writer"}, False)[1]
+
+
+def test_a_kiro_reviewer_is_reached_over_acp_as_its_agent_was_measured_to_hold_there(project):
+    """KIRO-READONLY-2 measured kiro-cli acp running as ao's agent; its adapter says so, and opencode's does not."""
+    from ao import lib as A
+    root = project["root"]
+    _transport(project, "acp")
+
+    assert cli._acp_reviewer_command(root, {"adapter": "kiro", "argv": ["kiro-cli", "chat", "{prompt}"]}, False)[0] \
+        == {"argv": ["kiro-cli", "acp"], "adapter": "kiro"}
+    assert A.load_adapter("kiro")["options"]["reviewer_agent"]["acp"] is True
+    assert "acp" not in A.load_adapter("opencode")["options"]["reviewer_agent"]

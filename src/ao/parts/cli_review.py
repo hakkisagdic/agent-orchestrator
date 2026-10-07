@@ -1414,6 +1414,12 @@ def _acp_reviewer_command(root, route, strict):
     eligible, why = A.reviewer_eligibility(adapter)
     if not eligible:
         return None, f"adapter {ident} may not review: {why}"
+    # An agent of ao's holds a harness to reading only where it was measured to: kiro's ACP command runs as one
+    # (KIRO-READONLY-2), and `opencode acp` takes no --agent, so its session would be opencode's own (OPENCODE-REVIEWER-2).
+    agent = (adapter.get("options") or {}).get("reviewer_agent")
+    if isinstance(agent, dict) and agent.get("acp") is not True:
+        return None, (f"adapter {ident} reviews as an agent of ao's that only reads, and nobody measured that its ACP "
+                      "command runs as one")
     model = identity.get("model_argument") if strict else _route_model(route)
     if model:
         return None, (f"it names a model ({model}), and the ACP command adapter {ident} declares names none, so "

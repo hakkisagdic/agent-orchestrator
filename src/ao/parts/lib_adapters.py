@@ -1087,6 +1087,8 @@ def reviewer_agent_problems(adapter):
         problems.append("`options.reviewer_agent.format` must be json or frontmatter")
     if agent.get("format") == "frontmatter" and not isinstance(agent.get("body"), str):
         problems.append("`options.reviewer_agent.body` must be the text under the front matter")
+    if agent.get("acp") not in (None, True, False):
+        problems.append("`options.reviewer_agent.acp` must say whether the agent was measured to hold over ACP too")
     release = agent.get("release")
     if release is not None and not (isinstance(release, str) and re.fullmatch(r"\d+(\.\d+)*", release)):
         problems.append("`options.reviewer_agent.release` must be the release the agent was measured on, as 1.3")
