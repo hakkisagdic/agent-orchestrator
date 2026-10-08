@@ -13,9 +13,12 @@ def test_features_default_on_and_switch(project):
     assert F.switches(project) == {key: key not in ("hunter", "toast") for key in F.ORDER}   # opt-in (#45, #9)
     F.set_switch(root, "review", False)
     cfg = A.load_config(root)
+    assert F.enabled(cfg, "review") is True          # a config alone turns review off nowhere (FEATURE-RECORDED)
+    A.record_opt_in(root, "features.review", False, "Ada")
     assert F.enabled(cfg, "review") is False and sum(F.switches(cfg).values()) == len(F.ORDER) - 3
     for k in F.ORDER:
         F.set_switch(root, k, False)
+    A.record_opt_in(root, "features.inventory_review", False, "Ada")
     assert not any(F.switches(A.load_config(root)).values())
 
 
@@ -83,6 +86,7 @@ def test_waiver_is_honoured_by_commit_ok_and_recorded(project, monkeypatch, caps
 def test_review_feature_off_needs_no_review(project, monkeypatch, capsys):
     root = project["root"]
     F.set_switch(root, "review", False)
+    A.record_opt_in(root, "features.review", False, "Ada")        # off on a person's record (FEATURE-RECORDED)
     cfg = A.load_config(root)
     candidate = _stage_candidate(root)
     _allow_candidate_verification(monkeypatch, candidate)

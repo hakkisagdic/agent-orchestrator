@@ -32,6 +32,7 @@ def _verified_candidate(project, tmp_path, monkeypatch):
     monkeypatch.setattr(A, "hold_state", lambda root: None)
     monkeypatch.setattr(A, "urgent_messages", lambda *args, **kwargs: [])
     F.set_switch(root, "review", False)
+    A.record_opt_in(root, "features.review", False, "a test's person")      # off on a person's record
     cfg = A.load_config(root)
     assert cli.cmd_verify(cfg, SimpleNamespace(profile="quick", wait=0)) == 0
     return cfg

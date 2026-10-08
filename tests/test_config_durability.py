@@ -116,7 +116,7 @@ def test_a_config_ao_cannot_read_is_refused_not_rebuilt(project, capsys):
     root = project["root"]
     open(_config(root), "w", encoding="utf-8").write("")
 
-    assert cli.cmd_features(project, SimpleNamespace(action="off", key="review")) == 1
+    assert cli.cmd_features(project, SimpleNamespace(action="off", key="review", by="Ada")) == 1
     assert "not changed" in capsys.readouterr().out
     with pytest.raises(ValueError, match="config.json"):
         cli._apply_profile(root, SimpleNamespace(**PROFILE))
