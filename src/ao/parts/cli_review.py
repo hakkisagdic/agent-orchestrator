@@ -242,7 +242,35 @@ def _elapsed(seconds):
     return f"{seconds:.1f}s" if seconds < 60 else f"{int(seconds // 60)}m{int(seconds % 60):02d}s"
 
 
-def _reviewer_communicate(proc, timeout, label, started, stall=None):
+def _signed_out_spec(argv):
+    """What a reviewer's adapter says its harness prints when it waits for a person to sign in, `options.signed_out`;
+    else None (KIRO-SIGNED-OUT)."""
+    spec = ((A.command_adapter(argv) or {}).get("options") or {}).get("signed_out")
+    return spec if isinstance(spec, dict) and spec.get("patterns") else None
+
+
+def _signed_out_line(spec, text):
+    """The line of a reviewer's output that asks a person to sign in, by its adapter's patterns; else None. Only lines
+    that are no JSON are read: an answer in stream-json lines may quote the very words (KIRO-SIGNED-OUT)."""
+    if not spec:
+        return None
+    for line in (text or "").replace("\r", "\n").splitlines():
+        if line.lstrip().startswith("{"):
+            continue
+        if any(A.re.search(pattern, line) for pattern in spec["patterns"]):
+            return line.strip()[:200]
+    return None
+
+
+def _signed_out_attempt(spec, line):
+    """The attempt a reviewer whose harness waits for a person to sign in ends in: not retried, and saying how."""
+    signin = spec.get("signin")
+    return {"ok": False, "out": "", "returncode": None, "kind": "signed-out", "retryable": False,
+            "reason": f"its harness is signed out and asks a person to sign in ({line})"
+                      + (f"; a person runs `{signin}` and asks again" if signin else "")}
+
+
+def _reviewer_communicate(proc, timeout, label, started, stall=None, signed_out=None):
     """communicate() in heartbeat-sized waits; TimeoutExpired once `timeout` is spent, or on a stall.
 
     Retrying communicate after a timeout loses no output, so the reviewer's streams
@@ -250,6 +278,12 @@ def _reviewer_communicate(proc, timeout, label, started, stall=None):
     reviewer whose process group has spent no CPU for that long is stalled, not
     thinking, and the TimeoutExpired carries `stalled` (#25). Where CPU cannot be
     read, only `timeout` ends it.
+
+    With `signed_out` - what its adapter says the harness prints when it waits for a person to sign in - a
+    reviewer that printed it by a beat is not waited for, and the TimeoutExpired carries `signed_out`: a Kiro
+    review whose sign-in had expired waited ten minutes for a browser nobody would open (KIRO-SIGNED-OUT).
+    What it printed so far comes with each beat's TimeoutExpired; where a platform reads the streams only once
+    they close, the beat sees nothing and the reviewer's own end says it.
     """
     from . import procs
     remaining = float(timeout)
@@ -258,8 +292,16 @@ def _reviewer_communicate(proc, timeout, label, started, stall=None):
         wait = min(remaining, REVIEW_HEARTBEAT_SECONDS)
         try:
             return proc.communicate(timeout=wait)
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as waited:
             remaining -= wait
+            if signed_out:
+                seen = "".join(part.decode(UTF8, "replace") if isinstance(part, bytes) else str(part)
+                               for part in (waited.output, waited.stderr) if part)
+                line = _signed_out_line(signed_out, seen)
+                if line:
+                    asking = subprocess.TimeoutExpired(proc.args, timeout)
+                    asking.signed_out = line
+                    raise asking
             if remaining <= 0:
                 raise
             if stall:
@@ -970,10 +1012,13 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
             started = time.monotonic()
             try:
                 stdout, stderr = _reviewer_communicate(proc, timeout, label, started,
-                                                       stall=S.get(A.load_config(root), "review.stall_minutes") * 60)
+                                                       stall=S.get(A.load_config(root), "review.stall_minutes") * 60,
+                                                       signed_out=_signed_out_spec(argv))
             except subprocess.TimeoutExpired as expired:
                 stdout, stderr = _reviewer_kill_and_drain(proc)
                 _reviewer_terminal_output(stdout, stderr)
+                if getattr(expired, "signed_out", None):
+                    return _signed_out_attempt(_signed_out_spec(argv), expired.signed_out)
                 stalled = getattr(expired, "stalled", None)
                 if stalled:
                     # Killed for silence, not for thinking long; what it said so far is kept (#25).
@@ -1028,6 +1073,11 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
         # was read as the answer of a turn that ended on no message (REVIEW-EMPTY-TURN-2).
         out = (stdout if (stdout or "").strip() else "" if ran else stderr or "").strip()
         if proc.returncode != 0:
+            # A harness that ended on its sign-in says so, whichever beat it ended before (KIRO-SIGNED-OUT).
+            asked = _signed_out_line(_signed_out_spec(argv), (stdout or "") + "\n" + (stderr or ""))
+            if asked:
+                _reviewer_terminal_output(stdout, stderr)
+                return _signed_out_attempt(_signed_out_spec(argv), asked)
             temporary = proc.returncode == 75 or passing is not None
             _reviewer_terminal_output(stdout, stderr)
             return {

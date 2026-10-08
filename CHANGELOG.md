@@ -14,6 +14,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- A reviewer whose harness waits for a person to sign in is stopped at its next heartbeat and says so, naming the command a person runs - `kiro-cli login` for kiro - where a Kiro review whose sign-in had expired waited ten minutes and ended UNAVAILABLE with no word of why ([adapters](docs/adapters.md)) (KIRO-SIGNED-OUT).
 - An agy reviewer that a network failure ended - a network issue, a refused or reset connection, no route, a timeout, a service unavailable or a rate limit, in its record's error or on stderr - is asked again once, where the review was UNAVAILABLE ([adapters](docs/adapters.md)) (AGY-TRANSIENT).
 
 ## [0.5.2] - 2026-10-08

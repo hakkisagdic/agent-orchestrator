@@ -70,6 +70,11 @@
       "--output-format",
       "stream-json"
     ],
+    "signed_out": {
+      "patterns": ["Opening browser\\.\\.\\.", "Auth portal timed out", "OAuth error"],
+      "signin": "kiro-cli login",
+      "note": "Measured on kiro-cli 2.27.1, 2026-10-07: with its sign-in expired, a review printed 'Opening browser... | Press (^) + C to cancel' on stdout and waited ten minutes for a person before 'error: OAuth error: Auth portal timed out' on stderr and exit 1. Only lines that are no JSON are read for it: the answer itself comes in stream-json lines, which may quote these words."
+    },
     "answer_stream": {
       "argv": ["--output-format", "stream-json"],
       "note": "Measured on kiro-cli 2.27.1, 2026-10-05: the text output ran a turn's messages together where a tool call came between them ('I will read the file now.Done reading.'), and runFinished.finalText does too. stream-json writes each message chunk and each tool call as an ACP session update, {type: sessionUpdate, data: {sessionId, update}}, so a reader can break the text where a tool call fell.",

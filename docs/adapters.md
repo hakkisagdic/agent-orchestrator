@@ -41,7 +41,11 @@ under a name the tree cannot know, and names it with `--agent`, whether it spawn
 reaches it over ACP; run so, kiro read the file it was asked to and had no tool to write with. A tree
 that holds `.kiro` or `.kiro/agents` as a file is refused rather than written through - ao unpacks
 none of a tree's links - and a reviewer's or the hunter's command that names `--agent` itself is
-refused (KIRO-READONLY, KIRO-READONLY-2).
+refused (KIRO-READONLY, KIRO-READONLY-2). A kiro whose sign-in has expired prints `Opening browser...`
+and waits ten minutes for a person; ao reads that line at the reviewer's next heartbeat, stops it,
+and says a person runs `kiro-cli login`, where the review waited the ten minutes and said nothing
+of why. Only lines that are no JSON are read, since the answer comes in stream-json lines that may
+quote the words (KIRO-SIGNED-OUT).
 
 No flag leaves agy reading either, so it reviews the same way: as an agent of ao's whose tools are
 `view_file`, `grep_search`, `find_by_name` and `list_dir`, written as `.agents/agents/<name>.md` and
