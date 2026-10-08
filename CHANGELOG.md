@@ -12,6 +12,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ## [Unreleased]
 
+### Behaviour changes
+
+- The architect is named `architect` in mail where a project names it nothing, and `ao init` writes that name, where both gave it a model's name, `fable`. Mail a project that names no architect wrote to `fable` stays the architect's there - read, routed and folded into as before - so nothing is moved or deleted; a project that names its architect answers to that name alone ([configuration](docs/configuration.md)) (#72).
+
 ### Fixes
 
 - A reviewer whose harness waits for a person to sign in is stopped at its next heartbeat and says so, naming the command a person runs - `kiro-cli login` for kiro - where a Kiro review whose sign-in had expired waited ten minutes and ended UNAVAILABLE with no word of why ([adapters](docs/adapters.md)) (KIRO-SIGNED-OUT).

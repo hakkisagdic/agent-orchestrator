@@ -88,9 +88,9 @@ def assignment_problem(actors, roles, repository="tool", hotfix=False):
 
 def role_of(name, cfg):
     """The role a name in a message stands for: architect, implementer, watchdog or human (#31)."""
-    implementer, architect = mail_names(cfg)
+    implementer, _ = mail_names(cfg)
     lowered = str(name or "").strip().lower()
-    if lowered in (architect.lower(), "architect"):
+    if lowered in {arch.lower() for arch in architect_mail_names(cfg)}:
         return "architect"
     if lowered in (implementer.lower(), "implementer"):
         return "implementer"

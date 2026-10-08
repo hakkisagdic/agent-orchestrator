@@ -565,16 +565,30 @@ def mail_names(cfg):
     return impl, arch
 
 
+# The architect's name in mail was a model's, "fable", by default (#72). A project that never named its architect
+# wrote its mail to that name, so there it is still the architect's.
+LEGACY_ARCHITECT_NAMES = ("fable",)
+
+
+def architect_mail_names(cfg):
+    """Every name a message may address the architect by: its own, the role's, and - where no project or machine
+    names one - the name the default used to be (#72)."""
+    impl, arch = mail_names(cfg)
+    names = {arch, "architect"}
+    if settings.resolve(cfg, "architect.name")[1] == "default":
+        # never the implementer's own name: its mail stays its own
+        names.update(legacy for legacy in LEGACY_ARCHITECT_NAMES if legacy != impl.lower())
+    return names
+
+
 def to_architect(name, cfg):
-    _, arch = mail_names(cfg)
-    return f"-to-{arch}-" in name or "-to-architect-" in name
+    return any(f"-to-{arch}-" in name for arch in architect_mail_names(cfg))
 
 
 def from_architect(name, cfg):
     """Whether a mail was written by the architect, read from its sender field (#18)."""
-    _, arch = mail_names(cfg)
     found = re.match(r"^\d{8}-\d{4}-(.+?)-to-", name)
-    return bool(found) and found.group(1).lower() in {arch.lower(), "architect"}
+    return bool(found) and found.group(1).lower() in {arch.lower() for arch in architect_mail_names(cfg)}
 
 
 def notice_recently_recorded(root, key, window):

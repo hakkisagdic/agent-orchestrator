@@ -173,8 +173,8 @@ SETTINGS = {
         None, str, None, None, "project",
         "the implementer's name in mail file names; none: its adapter's actor name"),
     "architect.name": Setting(
-        "fable", str, None, None, "project",
-        "the architect's name in mail file names"),
+        "architect", str, None, None, "project",
+        "the architect's name in mail file names: its role's, never a model's (#72)"),
     "language": Setting(
         "en", str, None, None, "project",
         "en: the files ao init writes and the markers ao writes into mail are English; tr: Turkish. "

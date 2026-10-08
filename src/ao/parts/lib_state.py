@@ -1062,7 +1062,9 @@ def write_report(root, cfg, kind, facts, key=None):
         _, arch = mail_names(cfg)
         name = f"watchdog-to-{arch}-ANOMALY-{kind}{src}.md"
         path = os.path.join(box, name)
-        if os.path.exists(path):
+        # one standing anomaly of a kind, whichever name the architect's mail had when it was written (#72)
+        if any(os.path.exists(os.path.join(box, f"watchdog-to-{other}-ANOMALY-{kind}{src}.md"))
+               for other in architect_mail_names(cfg)):
             return None
         text = (f"# ANOMALY — {kind}\n\n"
                 f"Watchdog observation at {time.strftime('%Y-%m-%d %H:%M:%S')}. "

@@ -72,7 +72,7 @@ machine setting written into a project.
 | `fanout.per_agent_tokens` | `50000` | project | the token budget each fanned-out agent is given |
 | `fanout.window_reserve_pct` | `30` | project | percent of the provider window a fan-out must leave unused |
 | `implementer.name` | `none` | project | the implementer's name in mail file names; none: its adapter's actor name |
-| `architect.name` | `fable` | project | the architect's name in mail file names |
+| `architect.name` | `architect` | project | the architect's name in mail file names: its role's, never a model's (#72) |
 | `language` | `en` | project | en: the files ao init writes and the markers ao writes into mail are English; tr: Turkish. The markers of both are read in every project |
 | `lane.link_paths` | `none` | project | paths ao lane start links into a new lane from the main checkout, such as untracked dependency directories; none: nothing is linked |
 | `lane.env` | `none` | project | NAME=value lines ao lane start writes into a new lane's lane.env_file and gives its post-create command; {item}, {lane} and {path} stand for the lane's own |

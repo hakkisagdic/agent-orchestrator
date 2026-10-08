@@ -292,7 +292,7 @@ def _profile_config(root, args, base):
         added.append("reviewer")
     if "architect" not in cfg:
         architect = roles.get("architect")
-        cfg["architect"] = {"adapter": architect, "session": "auto", "cwd": root, "name": "fable",
+        cfg["architect"] = {"adapter": architect, "session": "auto", "cwd": root, "name": "architect",
                             "argv": _architect_argv(architect),
                             "_why": "resumable and woken only into absence; read-only tools plus ao"}
         added.append("architect")

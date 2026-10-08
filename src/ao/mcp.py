@@ -320,10 +320,12 @@ def call(name, args, cfg, allow_verify, role=None):
         # anomaly and a fresh wake. Fold a repeat into the standing report and
         # keep that file's age — the age is the fact the architect needs.
         impl, arch = A.mail_names(cfg)
-        marker = f"-{impl}-to-{arch}-{kind.upper()}-"
+        # the standing report may be addressed by a name the architect's mail had before (#72)
+        markers = [f"-{impl}-to-{name}-{kind.upper()}-" for name in A.architect_mail_names(cfg)]
         dup = None
         for m in A.mailbox(root, box):
-            if marker in m and A._report_summary(os.path.join(root, box, m)) == args["summary"].strip():
+            if any(marker in m for marker in markers) and \
+                    A._report_summary(os.path.join(root, box, m)) == args["summary"].strip():
                 dup = m
         if dup:
             n = A.bump_repeat(os.path.join(root, box, dup), cfg)
