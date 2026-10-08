@@ -57,6 +57,14 @@ def _init_args(**overrides):
     return SimpleNamespace(**values)
 
 
+def _git_init(root):
+    """A repository whose state a test snapshots: git's automatic maintenance, which a commit starts in the background,
+    made and removed .git/objects/maintenance while the snapshot walked the tree, and the walk failed on macOS."""
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    for key, value in (("maintenance.auto", "false"), ("gc.auto", "0")):
+        subprocess.run(["git", "config", key, value], cwd=root, check=True)
+
+
 def _tree_state(root):
     """Byte/type/mode snapshot, including empty directories and Git state."""
     root = Path(root)
@@ -83,7 +91,7 @@ def test_init_plans_profile_and_failed_reviewer_probe_has_no_side_effects(
 ):
     root = tmp_path / "fresh-init"
     root.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    _git_init(root)
     (root / ".gitignore").write_text("owner-rule\n", encoding="utf-8")
     before = _tree_state(root)
     seen = []
@@ -166,7 +174,7 @@ def test_init_rejects_oversized_planned_profile_before_probe_or_write(
 ):
     root = tmp_path / "oversized-planned-profile"
     root.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    _git_init(root)
     before = _tree_state(root)
     real_profile_config = cli._profile_config
     probed = []
@@ -206,7 +214,7 @@ def test_init_real_failed_probe_contains_version_discovery_side_effects(
 ):
     root = tmp_path / "real-probe-init"
     root.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    _git_init(root)
     tracked = root / "tracked.txt"
     tracked.write_text("committed\n", encoding="utf-8")
     subprocess.run(["git", "add", "tracked.txt"], cwd=root, check=True)
@@ -271,7 +279,7 @@ def test_init_revalidates_marker_and_config_after_successful_probe(
     for changed in ("marker", "config"):
         root = tmp_path / ("probe-race-" + changed)
         root.mkdir()
-        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        _git_init(root)
 
         def successful_probe(_cfg, timeout=cli.REVIEW_PROBE_TIMEOUT):
             if changed == "marker":
