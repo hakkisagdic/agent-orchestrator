@@ -53,6 +53,8 @@ person's settings allowed it - so ao refuses an agy reviewer while
 `~/.gemini/antigravity-cli/settings.json` allows anything beyond `read_file(...)`, or cannot be read.
 It reviews only on the release the agent was measured on, 1.3 and its patches: agy 1.1.19 wrote
 files in a print run, and a release nobody measured may hold the agent to nothing (AGY-REVIEWER-2).
+A run agy ends on a network failure - its record's `error`, or its stderr, says so - is asked again
+once, as a Kiro review whose provider failed to answer is (AGY-TRANSIENT).
 
 opencode has no flag that denies a tool either - `--auto` only approves, and a reviewer's command
 that carries it is refused - so it reviews as an agent of ao's too, `.opencode/agents/<name>.md`,

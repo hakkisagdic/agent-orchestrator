@@ -165,3 +165,38 @@ def test_a_release_that_is_no_version_is_named():
     agent = dict(A.load_adapter("antigravity")["options"]["reviewer_agent"], release="latest")
 
     assert any("release" in problem for problem in A.reviewer_agent_problems({"options": {"reviewer_agent": agent}}))
+
+
+def _failing(tmp_path, record, code, notice=""):
+    """A stand-in agy that fails as agy 1.3 does: a record with status ERROR, a notice on stderr, a non-zero exit."""
+    harness = tmp_path / "agy"
+    harness.write_text(f"""#!{sys.executable}
+import sys
+sys.stderr.write({notice!r})
+print({json.dumps(record)!r})
+sys.exit({code})
+""", encoding="utf-8")
+    harness.chmod(0o755)
+    return [str(harness), "--print=review this", "--output-format=json"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the stand-in harness is a script its shebang runs")
+def test_a_review_agy_could_not_send_for_the_network_is_asked_again(project, tmp_path, home):
+    """AGY-TRANSIENT: agy 1.3 ended a review with exit 3 on a network issue, and the review was UNAVAILABLE and not
+    asked again, where the same review asked again answered."""
+    said = "There was a network issue connecting to the server, please try again."
+    argv = _failing(tmp_path, {"status": "ERROR", "response": "", "error": said}, 3, notice=f"error: {said}\n")
+
+    attempt = cli._run_reviewer(project["root"], argv, 30)
+
+    assert attempt["kind"] == "temporary-exit" and attempt["retryable"] and said in attempt["reason"], attempt
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the stand-in harness is a script its shebang runs")
+def test_a_failure_agy_names_that_is_not_passing_is_not_asked_again(project, tmp_path, home):
+    said = "model gemini-9 is not available to this account"
+    argv = _failing(tmp_path, {"status": "ERROR", "response": "", "error": said}, 1, notice=f"error: {said}\n")
+
+    attempt = cli._run_reviewer(project["root"], argv, 30)
+
+    assert attempt["kind"] == "nonzero-exit" and not attempt["retryable"], attempt

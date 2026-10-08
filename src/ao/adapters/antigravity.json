@@ -56,7 +56,9 @@
       "argv": ["--output-format", "json"],
       "text": "response",
       "denied": "denied_actions",
-      "note": "One JSON record on stdout; its response is the answer. A tool the run was denied ends it on an empty response, named in denied_actions, with exit 0 and a notice on stderr (agy 1.3.0)."
+      "error": "error",
+      "transient": ["(?i)network issue", "(?i)connection (refused|reset)", "(?i)no route to host", "(?i)i/o timeout|TLS handshake timeout|context deadline exceeded", "(?i)temporarily unavailable|service unavailable|\\b50[234]\\b", "(?i)rate.?limit"],
+      "note": "One JSON record on stdout; its response is the answer. A tool the run was denied ends it on an empty response, named in denied_actions, with exit 0 and a notice on stderr (agy 1.3.0). A run that failed says why in the record's error and on stderr, with status ERROR: agy 1.3 ended a review with exit 3 on 'There was a network issue connecting to the server, please try again.', and with exit 1 on 'Eligibility check failed: ... connection refused' where it could not reach its service; those transient are asked again once."
     },
     "structured_output": ["--json-schema={schema}"],
     "mode": ["--mode={mode}"],

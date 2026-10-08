@@ -622,6 +622,39 @@ def _answer_record(argv, stdout):
     return None
 
 
+def _record_transient(argv, stdout, stderr):
+    """The failure a reviewer's result record or stderr names that its adapter declares passing, where the reviewer
+    exited non-zero; else None (AGY-TRANSIENT).
+
+    agy 1.3 ended a review with exit 3 on "There was a network issue connecting to the server, please try again.",
+    and the review was UNAVAILABLE and not asked again, where a review asked again half a minute later answered. An
+    adapter that answers in a result record names such failures in `options.answer_record.transient`, as one that
+    answers in session updates does (KIRO-TRANSIENT).
+    """
+    adapter = A.command_adapter(argv)
+    spec = ((adapter or {}).get("options") or {}).get("answer_record") or {}
+    patterns, flags = spec.get("transient") or [], spec.get("argv")
+    if not patterns or not flags or any(A._named(argv, flag) != (True, value) for flag, value in A._flag_pairs(flags)):
+        return None
+    said = []
+    for line in reversed((stdout or "").splitlines()):
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(record, dict):
+            message = record.get(spec.get("error") or "error")
+            if isinstance(message, str):
+                said.append(message)
+            break
+    said.append(stderr or "")
+    for text in said:
+        for line in text.splitlines():
+            if any(A.re.search(pattern, line) for pattern in patterns):
+                return line.strip()[:240]
+    return None
+
+
 def _stream_error(argv, stdout):
     """The runError message a reviewer's session updates end on, when its adapter declares it passing; else None.
 
@@ -979,7 +1012,8 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
 
         print(f"{C['dim']}reviewer {label} exited {proc.returncode} after "
               f"{_elapsed(time.monotonic() - started)}{C['reset']}")
-        passing = _stream_error(argv, stdout) if proc.returncode != 0 else None
+        passing = (_stream_error(argv, stdout) or _record_transient(argv, stdout, stderr)) if proc.returncode != 0 \
+            else None
         ran = bool(_stream_updates(argv, stdout))
         stdout = _answer_stream(argv, stdout)
         record, denied = _answer_record(argv, stdout), []
