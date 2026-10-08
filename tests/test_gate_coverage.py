@@ -3,7 +3,7 @@ import os
 import subprocess
 
 from ao import cli, lib as A
-from tests.test_profiles import _init_args, _tree_state
+from tests.test_profiles import _git_init, _init_args, _tree_state
 
 
 def _files(root, tree, ext, n=6):
@@ -55,7 +55,7 @@ def test_every_detected_toolchain_gets_gates(tmp_path):
 def test_init_refuses_quick_gates_that_exercise_nothing_unless_told(tmp_path, capsys):
     root = tmp_path / "dotnet-without-a-solution"
     root.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    _git_init(root)
     _files(str(root), "backend", ".cs")
     before = _tree_state(root)
 
