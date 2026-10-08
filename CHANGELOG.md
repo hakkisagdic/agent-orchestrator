@@ -12,12 +12,11 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-10-08
+
 ### Security
 
 - Review is switched off only by a person, on the record: `ao features off review --by <name>` appends who did it to `.ao/ledger/opt-ins.jsonl`, as a waiver does, and `inventory_review` likewise. The switch was read from `.ao/config.json` alone, a file the implementer can write, so an implementer that wrote `"features": {"review": false}` was granted on verification alone and its commit was not flagged; a switch the config turns off with no person's record now stays on, and `ao features`, `ao commit-ok` and `ao doctor` say so. The READMEs say how a person turns review off ([features](docs/features.md)) (FEATURE-RECORDED).
-
-### Under the hood
-
 
 ## [0.5.1] - 2026-10-07
 
@@ -439,7 +438,8 @@ backlog row it closed.
 
 - The first release: attach to a coding agent already running, watch it, restart it when it stalls, run its gates independently, and decide from that evidence what may be committed (7fb15cf).
 
-[Unreleased]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.3.0...v0.4.0

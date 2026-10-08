@@ -4,4 +4,4 @@ Standard library only, deliberately. This tool watches agents on machines it doe
 not control, and a dependency is a thing that can be missing exactly there.
 """
 # The one place the version is written: pyproject.toml reads it, and so does `ao --version`.
-__version__ = "0.5.1"
+__version__ = "0.5.2"
