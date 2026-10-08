@@ -420,3 +420,11 @@ def _repo_untouched(request):
     yield
     after = _repo_state()
     assert after == before, f"{request.node.nodeid} changed the repository it runs in: {before} -> {after}"
+
+
+def review_off(cfg):
+    """`cfg` with review switched off as a person switches it, on the record: a config alone turns it off nowhere
+    (FEATURE-RECORDED)."""
+    from ao import lib as A
+    A.record_opt_in(cfg["root"], "features.review", False, "a test's person")
+    return dict(cfg, features=dict(cfg.get("features") or {}, review=False))

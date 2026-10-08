@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from ao import cli, lib as A, matrix as M
+from tests.conftest import review_off
 
 
 APPROVED_SCRIPT = (
@@ -510,7 +511,7 @@ def test_review_off_still_requires_matrix_but_can_grant_without_reviewer(
     cfg = _strict_config(
         project, primary_family="writer-family", fallback_family="writer-family"
     )
-    cfg["features"] = {"review": False}
+    cfg = review_off(cfg)
     _stage_change(cfg["root"])
     _persist_verification(cfg)
     _quiet_authority_environment(monkeypatch)

@@ -7,7 +7,8 @@ geçirmesini atlar ya da ao onu işaretler.** Varsayılan olarak başka bir mode
 ettiği değişikliğin tam kendisini gözden geçirir; git hook'u gerisini `git commit` anında reddeder.
 Bir defter her kararı kaydeder; ao atlanan bir değişikliği indikten sonra gözden geçirir, içeriğine
 hiçbir gözden geçirmenin ya da atlamanın izin vermediği bir commit'i de `ao doctor` ve watchdog
-işaretler.
+işaretler. Bir kişi bir projede gözden geçirmeyi kayda geçerek kapatabilir, `ao features off review --by
+<ad>`; o projenin commit'leri o zaman yalnızca doğrulamayla iner.
 
 Zaten kullandığın kodlama ajanlarını bırakmazsın: Claude Code, Codex, Kiro, Qoder, OpenCode ve
 aşağıdaki tablodaki diğerleri. `ao` onların üstünde durur. Bir ajanın stage ettiği değişikliğin

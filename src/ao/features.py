@@ -34,10 +34,45 @@ FEATURES = {
 ORDER = list(FEATURES)
 
 
-def switches(cfg):
-    """{key: bool} for this project: config overrides, defaults otherwise."""
+# A switch that weakens a guarantee is off only on a person's record, as a recorded setting is (REVIEW-TIERS):
+# `.ao/config.json` is a file the implementer can write, and review turned off there let `ao commit-ok` grant on
+# verification alone, so an unreviewed commit landed (FEATURE-RECORDED).
+RECORDED = ("review", "inventory_review")
+
+
+def recorded_off(cfg, key):
+    """Whether a person's record turns `key` off on this project: the newest row the opt-in ledger holds for the switch
+    says off and names who. A project with no root, and a ledger that cannot be read, record nobody."""
+    root = cfg.get("root")
+    if not root:
+        return False
+    from . import lib as A
+    try:
+        row = A.recorded_opt_in(root, f"features.{key}")
+    except Exception:
+        return False
+    return isinstance(row, dict) and row.get("value") is False and bool(str(row.get("by") or "").strip())
+
+
+def configured(cfg):
+    """{key: bool} as the project's config writes it, defaults otherwise, record or none."""
     conf = cfg.get("features") or {}
     return {k: bool(conf.get(k, FEATURES[k][1])) for k in ORDER}
+
+
+def unrecorded(cfg):
+    """The recorded switches the config turns off with no person's record behind it: they stay on."""
+    written = configured(cfg)
+    return [key for key in RECORDED if not written[key] and not recorded_off(cfg, key)]
+
+
+def switches(cfg):
+    """{key: bool} for this project: config overrides, defaults otherwise; a recorded switch is off only where a
+    person's record says so too (FEATURE-RECORDED)."""
+    on = configured(cfg)
+    for key in unrecorded(cfg):
+        on[key] = True
+    return on
 
 
 def enabled(cfg, key):

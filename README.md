@@ -6,6 +6,8 @@
 default a model of another family reviews the exact change an agent staged, and a git hook refuses
 anything else at `git commit`. A ledger records every decision; ao reviews a waived change after it
 lands, and `ao doctor` and the watchdog flag a commit whose content no review or waiver granted.
+A person can turn review off for a project, on the record, `ao features off review --by <name>`;
+its commits then land on verification alone.
 
 Keep the coding agents you already use: Claude Code, Codex, Kiro, Qoder, OpenCode and the others
 in the table below. `ao` sits above them. It runs your gates on the exact change an agent staged,

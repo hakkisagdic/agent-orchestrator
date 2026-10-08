@@ -161,6 +161,12 @@ def doctor_problems(cfg):
                     "capability matrix reviewer chain has no binding outside the implementer binding and model family",
                 ))
     out.extend(_active_review_tier(cfg)[1])
+    # A review switch the config turns off with no person's record stays on, and says so (FEATURE-RECORDED).
+    from . import features as F
+    for switch in F.unrecorded(cfg):
+        out.append((f"unrecorded-switch:{switch}",
+                    f"{switch} is off in .ao/config.json with no person's record, so it stays on - "
+                    f"ao features off {switch} --by <name>, or remove it"))
     hb = A.heartbeat_age(root)
     if hb is not None and hb > WATCHDOG_SILENT_AFTER:
         out.append(("watchdog-dead", f"watchdog silent for {hb // 60}m — launchctl / ao watchdog status"))
@@ -935,13 +941,38 @@ def cmd_features(cfg, args):
     if args.action in ("on", "off"):
         if args.key not in F.FEATURES:
             print(f"unknown feature {args.key}; one of {', '.join(F.ORDER)}"); return 2
+        # A switch that weakens a guarantee is turned off by a person, on the record (FEATURE-RECORDED).
+        by = (getattr(args, "by", None) or "").strip()
+        if args.key in F.RECORDED and args.action == "off":
+            if not by or not by.isprintable() or len(by) > 80:
+                print(f"--by is required: turning {args.key} off lets a commit land without that review, and a person "
+                      "does it on the record, in one line of at most 80 characters")
+                return 2
+            if by.lower() in _agent_names(cfg):
+                print(f"--by names an agent or a role ({by}); turning {args.key} off is a person's act")
+                return 2
+        elif by and args.key not in F.RECORDED:
+            print(f"--by records who turned off a switch that weakens a guarantee ({', '.join(F.RECORDED)}); "
+                  f"{args.key} is not one")
+            return 2
         try:
             F.set_switch(root, args.key, args.action == "on")
         except (OSError, ValueError) as exc:
             print(f"{C['red']}not changed{C['reset']}: {exc}")
             return 1
-        cfg = A.load_config(root)
+        if args.key in F.RECORDED:
+            # Written after the config, and on as well as off: a value with no record is not in force, and an
+            # earlier off is never one a later hand edit can stand on.
+            try:
+                A.record_opt_in(root, f"features.{args.key}", args.action == "on", by)
+            except Exception as exc:
+                print(f"{C['red']}not recorded{C['reset']}: {exc}; {args.key} stays on until it is")
+                return 1
+        cfg = dict(A.load_config(root), root=root)
     on = F.switches(cfg)
+    for key in F.unrecorded(cfg):
+        print(f"{C['yellow']}{key} is off in .ao/config.json with no person's record, so it stays on{C['reset']}: "
+              f"ao features off {key} --by <name>")
     try:
         measured = A.feature_costs(cfg, since=time.time() - 7 * 86400)
     except Exception:

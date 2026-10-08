@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from ao import cli, lib as A, storage
+from tests.conftest import review_off
 
 CHAIN = "test-atomic-chain-v1"
 
@@ -120,7 +121,7 @@ def test_commit_ok_refuses_when_plan_baselines_cannot_be_read(project, monkeypat
     monkeypatch.setattr(A, "urgent_messages", lambda *args, **kwargs: [])
     capsys.readouterr()
 
-    assert cli.cmd_commit_ok(dict(project, features={"review": False}),
+    assert cli.cmd_commit_ok(review_off(project),
                              SimpleNamespace(verify=False, profile=None)) == 1
     assert "plan baselines cannot be read" in capsys.readouterr().out
 

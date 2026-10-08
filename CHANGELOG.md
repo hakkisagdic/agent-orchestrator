@@ -12,6 +12,13 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ## [Unreleased]
 
+### Security
+
+- Review is switched off only by a person, on the record: `ao features off review --by <name>` appends who did it to `.ao/ledger/opt-ins.jsonl`, as a waiver does, and `inventory_review` likewise. The switch was read from `.ao/config.json` alone, a file the implementer can write, so an implementer that wrote `"features": {"review": false}` was granted on verification alone and its commit was not flagged; a switch the config turns off with no person's record now stays on, and `ao features`, `ao commit-ok` and `ao doctor` say so. The READMEs say how a person turns review off ([features](docs/features.md)) (FEATURE-RECORDED).
+
+### Under the hood
+
+
 ## [0.5.1] - 2026-10-07
 
 ### Fixes

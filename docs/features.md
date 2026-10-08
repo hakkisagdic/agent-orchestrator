@@ -27,7 +27,7 @@ turn class, `ao watchdog explain` the guard.
 ```bash
 ao features                      # the switches, and what each spent in the last 7 days
 ao cost --features --since 30d   # the same, over a window you choose
-ao features off review           # candidate-bound gates still decide; review is skipped
+ao features off review --by Ada  # a person's act, on the record; gates still decide, review is skipped
 ao features off architect_wake   # anomalies are written and alarmed, nobody is woken
 ```
 
@@ -38,6 +38,16 @@ What each switch changes when off:
   and `ao review` still works when asked.
 - `inventory_review` off — the playbook and backlog rule stop asking for an
   inventory review; the surface inventory itself is still good practice.
+
+*In ao since slice FEATURE-RECORDED: `review` and `inventory_review` weaken a guarantee, so
+they are switched off by a person, on the record, as a waiver is: `ao features off review --by
+<name>` writes the switch and appends the name, the login and whether a terminal was attached to
+`.ao/ledger/opt-ins.jsonl`, and switching one on is recorded too. The switch was read from
+`.ao/config.json` alone - a file the implementer can write - so an implementer that wrote
+`"features": {"review": false}` was granted on verification alone, and the grant bound its
+tree, so neither `ao doctor` nor the watchdog flagged the commit. A switch the config turns off
+with no person's record behind it now stays on: `ao features`, `ao commit-ok` and `ao doctor`
+say so.*
 - `nudge` off — the watchdog measures, alarms and records, but never starts an
   implementer turn; a person starts the implementer.
 - `architect_wake` off — anomaly files and alarms only; a person reads them.

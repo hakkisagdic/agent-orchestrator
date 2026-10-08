@@ -472,6 +472,8 @@ def build_parser(root=None):
     ft = sub.add_parser("features", help="the switches and what each costs; all off = deterministic ao")
     ft.add_argument("action", choices=["list", "on", "off"], nargs="?", default="list")
     ft.add_argument("key", nargs="?")
+    ft.add_argument("--by", help="off, for a switch that weakens a guarantee (review, inventory_review): the person "
+                                 "who turns it off, on the record; required")
     ft.set_defaults(fn=cmd_features)
     wv = sub.add_parser("waive", help="a person bypasses a gate for a slice, on the record")
     wv.add_argument("gate", choices=["review", "inventory", "gates"])

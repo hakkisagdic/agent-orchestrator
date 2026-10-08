@@ -572,6 +572,11 @@ def cmd_commit_ok(cfg, args):
     except Exception as exc:
         waiver, waiver_notes = None, [f"waiver ledger is unreadable: {exc}"]
     review_required = F.enabled(cfg, "review")
+    if "review" in F.unrecorded(cfg):
+        # A config the implementer can write turned review off; it is off only on a person's record (FEATURE-RECORDED).
+        reasons_note = ("review is off in .ao/config.json with no person's record, so it stays required: "
+                        "ao features off review --by <name>")
+        print(f"{C['yellow']}{reasons_note}{C['reset']}")
     try:
         decision = A.candidate_review_decision(root, cfg["reviews"], candidate["digest"])
     except Exception as exc:

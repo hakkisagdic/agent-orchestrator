@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from ao import cli, lib as A
 from tests.test_commit_authority import _allow_commit_prerequisites
+from tests.conftest import review_off
 
 RACE_HOOK = """#!/bin/sh
 # the background job racing the commit: stages a path after the check passed
@@ -21,7 +22,7 @@ def _granted_candidate(project, monkeypatch):
     os.makedirs(os.path.join(root, "src"), exist_ok=True)
     open(os.path.join(root, "src", "a.py"), "w", encoding="utf-8").write("value = 1\n")
     subprocess.run(["git", "add", "src/a.py"], cwd=root, check=True, capture_output=True)
-    cfg = dict(project, features={"review": False})
+    cfg = review_off(project)
     _allow_commit_prerequisites(monkeypatch, A.tree_digest(root, cfg), A.index_candidate(root))
     assert cli.cmd_commit_ok(cfg, SimpleNamespace(verify=False, profile=None)) == 0
     return cfg
