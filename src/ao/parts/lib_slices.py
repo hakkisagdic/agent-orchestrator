@@ -1365,6 +1365,11 @@ def agent_config_findings(root):
 
 # ---- asking the codebase a question is a capability, not a copy (#81) --------------------
 
+# The folder of the copy of the working tree that `ao ask --codebase` runs its provider in, and names {root}
+# (CODEBASE-COPY).
+CODEBASE_TREE_DIR = "tree"
+
+
 def ask_codebase(root, cfg, question, timeout=300):
     """Answer a question about the code through a configured provider, never without citations (#81).
 
@@ -1374,33 +1379,115 @@ def ask_codebase(root, cfg, question, timeout=300):
     [{"file": path, "lines": "a-b"}]}. With none configured, or an answer that cites
     nothing, the question is refused and what would satisfy it is named.
     Returns {"answer", "citations"} or raises ValueError.
+
+    The provider runs in a copy of the working tree, never in the tree itself (CODEBASE-COPY). It ran in the
+    repository, so a provider that is a harness read the tree's own configuration - the hooks, plugins and MCP servers
+    of .claude/settings.json, opencode.json and the like, files an agent writes - and ran them before any review had
+    seen them. The tree as it stands, uncommitted changes and untracked files in and ignored files out, is written into
+    a tree object through an index of the copy's own and unpacked outside the repository, less what any harness reads
+    from a project, as a review's candidate is (REVIEW-TREE-3); {root} names that copy and the provider runs in it.
+    Citations are read against the copy, and the copy is removed whatever happens: an answer, a refusal, an error or
+    a timeout.
     """
+    import shutil
+    import tempfile
     provider = (cfg.get("codebase") or {}).get("provider") or {}
     argv = provider.get("argv") if isinstance(provider, dict) else None
     if not argv:
         raise ValueError("no codebase provider is configured: set codebase.provider.argv to a command that takes "
                          "{question} and {root} and prints {\"answer\", \"citations\"} as JSON (ctxman is the first "
                          "provider documented in docs/upstream.md)")
-    rendered = [str(part).replace("{question}", question).replace("{root}", root) for part in argv]
+    copy = tempfile.mkdtemp(prefix="ao-codebase-")
     try:
-        result = subprocess.run(rendered, cwd=root, capture_output=True, text=True, encoding=UTF8, errors="replace",
-                                timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired) as exc:
+        if _within(copy, root):
+            raise ValueError(f"the temporary directory {os.path.dirname(copy)} lies inside this repository, where a "
+                             "copy of the tree would be read as the repository itself: set TMPDIR to a directory "
+                             "outside it and ask again")
+        try:
+            snapshot = working_tree_snapshot(root, os.path.join(copy, "index"))
+        except RuntimeError as exc:
+            raise ValueError(f"the working tree could not be copied for the provider ({exc}); a provider runs in a "
+                             "copy of the tree, never in the repository") from exc
+        tree = unpack_tree(root, snapshot, os.path.join(copy, CODEBASE_TREE_DIR))
+        if tree is None:
+            raise ValueError("the working tree could not be written out for the provider; a provider runs in a copy "
+                             "of the tree, never in the repository")
+        rendered = [str(part).replace("{question}", question).replace("{root}", tree) for part in argv]
+        code, stdout = _run_codebase_provider(rendered, tree, timeout)
+        try:
+            document = json.loads(stdout)
+        except ValueError as exc:
+            raise ValueError(f"the codebase provider did not answer in JSON (exit {code})") from exc
+        answer = str((document or {}).get("answer") or "").strip() if isinstance(document, dict) else ""
+        citations = [item for item in (document.get("citations") or [])
+                     if isinstance(item, dict) and item.get("file")] if isinstance(document, dict) else []
+        if not answer or not citations:
+            raise ValueError("the provider's answer cites no file and line range; an answer without citations is not "
+                             "an answer ao passes on")
+        cited = [_cited_in_copy(tree, item["file"]) for item in citations]
+        missing = [str(item["file"]) for item, place in zip(citations, cited) if place is None]
+        if missing:
+            withheld = sorted({project_config_member(name) for name in missing} - {None}, key=str.casefold)
+            raise ValueError(f"the answer cites files that are not in this repository: {', '.join(missing[:3])}"
+                             + (f". A provider is handed the tree without what a harness reads from a project as its "
+                                f"configuration or instructions ({', '.join(withheld)}); read those in the repository "
+                                "yourself" if withheld else ""))
+        # The provider was told {root} is the copy; the person reads the repository's paths, the copy being gone.
+        for spelling in sorted({tree, os.path.realpath(tree)}, key=len, reverse=True):
+            answer = answer.replace(spelling, root)
+        return {"answer": scan_evidence(answer)[0],
+                "citations": [dict(item, file=place) for item, place in zip(citations, cited)]}
+    finally:
+        shutil.rmtree(copy, ignore_errors=True)
+
+
+def _cited_in_copy(tree, name):
+    """The path a citation names, relative to the copy of the tree, when the copy holds it; else None (CODEBASE-COPY).
+
+    A provider handed {root} may cite a file under it in full, which is read as the path below it. One that climbs out
+    of the copy, or that the copy does not hold, is no file of this repository's: the copy is all the provider had.
+    """
+    name = str(name)
+    full = os.path.join(tree, name)
+    if not name or not _lands_inside(tree, name) or not os.path.exists(full):
+        return None
+    return os.path.relpath(os.path.realpath(full), os.path.realpath(tree)).replace(os.sep, "/")
+
+
+def _run_codebase_provider(argv, cwd, timeout):
+    """(exit code, standard output) of a codebase provider run in `cwd`; ValueError when it does not start, or does not
+    answer within `timeout` (CODEBASE-COPY).
+
+    It leads a process group of its own and is handed no git variable, as a reviewer is (#65): a timeout stops whatever
+    it started, which would otherwise go on reading the copy - and on Windows keep it from being removed - and a git
+    command it runs finds no repository above the copy.
+    """
+    import signal
+    env = {name: value for name, value in os.environ.items() if not name.upper().startswith("GIT_")}
+    env.update(PWD=cwd, GIT_CEILING_DIRECTORIES=os.path.dirname(cwd))
+    group = ({"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)} if os.name == "nt"
+             else {"start_new_session": True})
+    try:
+        proc = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, encoding=UTF8, errors="replace", **group)
+    except OSError as exc:
         raise ValueError(f"the codebase provider did not run: {exc}") from exc
     try:
-        document = json.loads(result.stdout)
-    except ValueError as exc:
-        raise ValueError(f"the codebase provider did not answer in JSON (exit {result.returncode})") from exc
-    answer = str((document or {}).get("answer") or "").strip() if isinstance(document, dict) else ""
-    citations = [item for item in (document.get("citations") or []) if isinstance(item, dict) and item.get("file")] \
-        if isinstance(document, dict) else []
-    if not answer or not citations:
-        raise ValueError("the provider's answer cites no file and line range; an answer without citations is not "
-                         "an answer ao passes on")
-    missing = [item["file"] for item in citations if not os.path.exists(os.path.join(root, item["file"]))]
-    if missing:
-        raise ValueError(f"the answer cites files that are not in this repository: {', '.join(missing[:3])}")
-    return {"answer": scan_evidence(answer)[0], "citations": citations}
+        stdout, _ = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        kill_turn(proc.pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+        try:
+            proc.kill()
+            proc.communicate(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            for stream in (proc.stdout, proc.stderr):
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+        raise ValueError(f"the codebase provider did not answer within {timeout}s: it was stopped, with whatever it "
+                         "started, and nothing was answered") from None
+    return proc.returncode, stdout
 
 
 def safe_slug(text, fallback="note", limit=40):

@@ -144,6 +144,23 @@ it, and an answer that cites nothing, or cites a file that is not in the reposit
 rather than passed on. The owner's ctxman is the first provider meant for this seam; installing it
 is the owner's step.
 
+The provider runs in a copy of the working tree, never in the repository, and `{root}` names that
+copy. It holds the tree as it stands - committed files, changes staged or not, and untracked files git
+does not ignore - written into a tree object through an index of ao's own, so the index a candidate is
+staged in is not touched, and unpacked outside the repository the way a review's candidate is
+([pipeline](pipeline.md), REVIEW-TREE-3): no history, no links, and none of what a harness reads from
+a project as its configuration or instructions, such as `.claude/`, `opencode.json` or `AGENTS.md`.
+The provider leads a process group of its own and is handed no git variable, a citation is read
+against the copy and given back as the repository's path, and the copy is removed whatever happens -
+an answer, a refusal, an error, or a provider stopped at the timeout with whatever it started.
+
+*In ao since slice CODEBASE-COPY: the provider ran with the repository as its working directory, so a
+provider that is a harness - `codebase.provider.argv` can name any command - read the tree's own
+configuration and ran its hooks, plugins and MCP servers, files an agent writes, before any review had
+seen them (#112). An answer citing a file the copy withholds is refused, naming it; a person reads
+those in the repository. A temporary directory inside the repository is refused too: a copy there
+would be read as the repository itself.*
+
 ## Known false positives of AgentShield (kept out of the port)
 
 - Reversed-text heuristic flags the phrase "backward compatible".

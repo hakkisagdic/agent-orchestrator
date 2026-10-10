@@ -503,16 +503,6 @@ def _tool_review_lines(evidence):
             f"`{A.review_header_value(tool.get('model'))}`  handed: `{A.review_header_value(tool.get('handed'))}`"]
 
 
-def _lands_inside(home, name, path=os.path):
-    """Whether a tar member called `name` lands inside `home` once the platform has read its separators.
-
-    Judged by where the name resolves, never by its spelling: on Windows `..\\x` climbs out of the
-    directory, and a check that splits on '/' reads it as one harmless word.
-    """
-    root = path.realpath(home)
-    return path.realpath(path.join(root, name)).startswith(root.rstrip(path.sep) + path.sep)
-
-
 # The folder in a reviewer's working directory that holds the candidate's tree: one of its own, so the directory's root,
 # where a harness reads its project's hooks, plugins, MCP servers and instructions, holds what ao writes and nothing the
 # candidate does (REVIEW-TREE-3).
@@ -526,17 +516,14 @@ def _unpack_candidate(root, tree, into):
     working tree an agent can still edit. Handing it the diff alone left it blind to the rest of the
     code, and its own reports said so - "the working directory contains no copy of the repository" -
     while a model holding file tools spent its turns hunting for a repository that was not there
-    until its service gave up. `git archive` writes exactly the tree the review pinned, and what
-    lands in `into` is a copy of it: no history, no index, nothing a reviewer does there reaches the
-    repository. A member naming an absolute path or a parent is dropped rather than trusted, since
-    what is unpacked comes from a tree an agent wrote.
+    until its service gave up. `A.unpack_tree` writes exactly the tree the review pinned, less what
+    any harness reads from a project; it was this function's own until `ao ask --codebase` needed the
+    same copy for its provider (CODEBASE-COPY).
 
     Returns `into` once the tree is written whole, else None with `into` left as it was found
     (REVIEW-TREE-2), since the reviewer is told that an empty directory means the unpacking failed.
-    A member the platform cannot write - a name longer than its file system takes, a name Windows
-    reserves - can stop the extraction after the members before it were written, and those are
-    removed again. So that everything in the directory after a failure is what this call wrote, only
-    an empty one is written into: the one ao just made for the reviewer.
+    So that everything in the directory after a failure is what this call wrote, only an empty one
+    is written into: the one ao just made for the reviewer.
 
     The tree was written into the working directory itself, and a harness started there ran what the candidate put in
     it: Claude Code a SessionStart hook from its .claude/settings.json before it had even signed in, agy the commands of
@@ -544,8 +531,8 @@ def _unpack_candidate(root, tree, into):
     opencode.json - each though the reviewer's own tools only read. An implementer could so run commands of its choice
     as the person, outside its own sandbox, by staging them. The tree now goes into a folder of its own, so the root a
     harness reads its project from holds only what ao writes, whatever the harness reads and however it spells it; and
-    what any adapter declares its harness reads from a project - `project_config` and its steering files - is not
-    unpacked at all, wherever it is, for a harness that reads deeper (REVIEW-TREE-3). The diff shows a change to one.
+    what any adapter declares its harness reads from a project is not unpacked at all, wherever it is, for a harness
+    that reads deeper (REVIEW-TREE-3). The diff shows a change to one.
     """
     if not tree:
         return None
@@ -555,23 +542,7 @@ def _unpack_candidate(root, tree, into):
             return None
     except OSError:
         return None
-    target = os.path.join(home, REVIEW_TREE_DIR)
-    try:
-        archive = subprocess.run([A.git_binary(), "archive", "--format=tar", str(tree)], cwd=root,
-                                 capture_output=True, timeout=120)
-        if archive.returncode != 0 or not archive.stdout:
-            return None
-        import io
-        import tarfile
-        names = A.project_config_names()
-        with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
-            safe = [member for member in tar.getmembers()
-                    if (member.isfile() or member.isdir()) and _lands_inside(target, member.name)
-                    and A.project_config_member(member.name, names) is None]
-            os.mkdir(target)
-            extra = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
-            tar.extractall(target, members=safe, **extra)
-    except Exception:
+    if A.unpack_tree(root, tree, os.path.join(home, REVIEW_TREE_DIR)) is None:
         _remove_everything_in(home)
         return None
     return into

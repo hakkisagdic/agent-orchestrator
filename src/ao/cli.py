@@ -155,7 +155,8 @@ def build_parser(root=None):
     ak.add_argument("--context")
     ak.add_argument("--slice")
     ak.add_argument("--codebase", action="store_true",
-                    help="ask the code, through codebase.provider; the answer must cite files and lines")
+                    help="ask the code, through codebase.provider run in a copy of the working tree; the answer must "
+                         "cite files and lines")
     ak.set_defaults(fn=cmd_ask)
     an = sub.add_parser("answer", help="answer a pending decision")
     an.add_argument("id")

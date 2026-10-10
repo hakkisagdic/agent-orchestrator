@@ -122,14 +122,17 @@ def test_the_tree_is_never_written_inside_the_repository():
 
 
 def test_a_member_that_climbs_out_is_refused_by_where_it_lands_on_either_platform():
-    """`..\\..\\x` is one odd word to POSIX and two parent directories to Windows; both are judged right."""
+    """`..\\..\\x` is one odd word to POSIX and two parent directories to Windows; both are judged right.
+
+    The check lives in lib with the unpacking, which `ao ask --codebase` shares (CODEBASE-COPY).
+    """
     import ntpath
     import posixpath
 
-    assert not cli._lands_inside("C:\\tmp\\review", "..\\..\\pwned.txt", path=ntpath)
-    assert not cli._lands_inside("/tmp/review", "../escape.txt", path=posixpath)
-    assert cli._lands_inside("/tmp/review", "..\\..\\name-with-backslashes.txt", path=posixpath)
-    assert cli._lands_inside("C:\\tmp\\review", "src\\ao\\lib.py", path=ntpath)
+    assert not A._lands_inside("C:\\tmp\\review", "..\\..\\pwned.txt", path=ntpath)
+    assert not A._lands_inside("/tmp/review", "../escape.txt", path=posixpath)
+    assert A._lands_inside("/tmp/review", "..\\..\\name-with-backslashes.txt", path=posixpath)
+    assert A._lands_inside("C:\\tmp\\review", "src\\ao\\lib.py", path=ntpath)
 
 
 def test_a_request_a_person_carries_holds_no_note_about_a_tree_it_does_not_have(project, tmp_path):

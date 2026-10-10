@@ -153,6 +153,10 @@ holding all four at its root and in a subfolder, agy reviewed and none ran, nor 
 before its sign-in failed. The note tells the reviewer where the tree is and what is withheld, and
 the diff shows any change to those files.*
 
+*In ao since slice CODEBASE-COPY: `ao ask --codebase` runs its provider in a copy made the same way,
+of the working tree as it stands, since a provider that is a harness ran the tree's own hooks and MCP
+servers when it ran in the repository ([upstream](upstream.md#asking-the-codebase-as-built)).*
+
 A review of eight scenarios is eight questions, not one. ao splits the prompt into
 **sections** — from the numbered scenarios in the boundary, or failing that from the
 candidate's file groups — and runs them as separate bounded calls, appending each result

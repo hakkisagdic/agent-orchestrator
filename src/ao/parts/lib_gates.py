@@ -737,6 +737,90 @@ def index_candidate(root):
     }
 
 
+# ---- a tree written out of the repository, for a reader that must not run what it holds (REVIEW-TREE-3) ------------
+
+def working_tree_snapshot(root, index):
+    """The working tree as it stands, as a git tree object: each tracked file as it is now and each untracked one git
+    does not ignore, written through `index`, a file of the caller's, so the index git commits from is never touched
+    (CODEBASE-COPY).
+
+    A question about the code is about the code as it is, committed or not, and the index can hold a candidate the
+    implementer staged for review. The index's own entries are copied in first, so a tracked file that .gitignore
+    names is kept; `git add -A` then records every change, deletion and untracked file over them. Raises RuntimeError
+    naming the git step that failed.
+    """
+    entries = _git_output(root, "ls-files", "--stage", "-z")
+    env = dict(os.environ, GIT_INDEX_FILE=index)
+    written = b""
+    for args, given in ((("update-index", "-z", "--index-info"), entries), (("add", "-A"), b""),
+                        (("write-tree",), b"")):
+        try:
+            done = subprocess.run([git_binary(), *args], cwd=root, env=env, input=given, capture_output=True,
+                                  timeout=300)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError(f"git {args[0]} could not run: {exc}") from exc
+        if done.returncode:
+            detail = done.stderr.decode(UTF8, "replace").strip()[:240]
+            raise RuntimeError(f"git {args[0]} failed: {detail or 'exit ' + str(done.returncode)}")
+        written = done.stdout.strip()
+    return written.decode("ascii", "strict")
+
+
+def _lands_inside(home, name, path=os.path):
+    """Whether a tar member called `name` lands inside `home` once the platform has read its separators.
+
+    Judged by where the name resolves, never by its spelling: on Windows `..\\x` climbs out of the
+    directory, and a check that splits on '/' reads it as one harmless word.
+    """
+    root = path.realpath(home)
+    return path.realpath(path.join(root, name)).startswith(root.rstrip(path.sep) + path.sep)
+
+
+def unpack_tree(root, tree, target):
+    """Write git tree `tree` of the repository at `root` into `target`, a folder this makes; `target` once the tree is
+    written whole, else None with nothing of `target` left (REVIEW-TREE-3).
+
+    `git archive` writes exactly the tree named, and what lands in `target` is a copy of it: no history, no index,
+    nothing a reader does there reaches the repository. A member naming an absolute path or a parent is dropped rather
+    than trusted, and so is a link, since what is unpacked comes from files an agent wrote. What any adapter declares
+    its harness reads from a project - `project_config` and its steering files - is not unpacked at all, wherever it
+    is: a harness started in a tree reads its hooks, plugins, MCP servers and instructions from there, and Claude Code
+    ran a SessionStart hook from a candidate's .claude/settings.json, agy the commands of its .agents/hooks.json and
+    OpenCode a plugin and an MCP server from .opencode/ and opencode.json, each though it only read. A member the
+    platform cannot write - a name longer than its file system takes, a name Windows reserves - can stop the
+    extraction after the members before it were written; `target` is then removed whole.
+
+    A review unpacks the candidate it pinned where its reviewer runs; `ao ask --codebase` unpacks the working tree
+    where its provider runs, and the unpacking moved here from the review's part so both make the same copy
+    (CODEBASE-COPY).
+    """
+    import shutil
+    if not tree:
+        return None
+    made = False
+    try:
+        archive = subprocess.run([git_binary(), "archive", "--format=tar", str(tree)], cwd=root,
+                                 capture_output=True, timeout=120)
+        if archive.returncode != 0 or not archive.stdout:
+            return None
+        import io
+        import tarfile
+        names = project_config_names()
+        with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
+            safe = [member for member in tar.getmembers()
+                    if (member.isfile() or member.isdir()) and _lands_inside(target, member.name)
+                    and project_config_member(member.name, names) is None]
+            os.mkdir(target)
+            made = True
+            extra = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
+            tar.extractall(target, members=safe, **extra)
+    except Exception:
+        if made:
+            shutil.rmtree(target, ignore_errors=True)
+        return None
+    return target
+
+
 def _normal_scope_paths(paths):
     out = []
     for value in paths or []:
