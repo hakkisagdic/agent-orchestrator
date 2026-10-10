@@ -29,6 +29,8 @@ her karar, kurcalandığını belli eden bir deftere yazılır.
 
 ## İlk gözden geçirilmiş commit'e beş dakika
 
+Önce görmek istersen `ao demo`, bir değişikliği geçici bir projede ao'dan geçirir ([demo](docs/demo.md)).
+
 ```bash
 pip install ao-orchestrator          # ya da: uv tool install ao-orchestrator
 cd deponun-yolu

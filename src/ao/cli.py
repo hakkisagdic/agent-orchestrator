@@ -292,6 +292,10 @@ def build_parser(root=None):
     pv.add_argument("--no-review", action="store_true",
                     help="skip the throwaway slice, which spends one short review")
     pv.set_defaults(fn=cmd_prove)
+    dm = sub.add_parser("demo", help="see the guarantee in about a minute: a change with a bug refused, its fix landed, "
+                                     "on a scratch project with a stand-in reviewer")
+    dm.add_argument("--keep", action="store_true", help="keep the scratch folder and say where it is")
+    dm.set_defaults(fn=cmd_demo)
     de = sub.add_parser("decide", help="record an architect decision durably")
     de.add_argument("decision", nargs="?")
     de.add_argument("--why")

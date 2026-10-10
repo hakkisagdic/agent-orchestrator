@@ -27,6 +27,8 @@ tampering.
 
 ## Five minutes to the first reviewed commit
 
+To see it first, `ao demo` plays one change through ao on a scratch project ([demo](docs/demo.md)).
+
 ```bash
 pip install ao-orchestrator          # or: uv tool install ao-orchestrator
 cd your-repository

@@ -1,5 +1,5 @@
 """Maintenance: remove, prune, notices, the watchdog command, projects, adapters, worktrees, prove,
-backup, doctor.
+demo, backup, doctor.
 
 A part of src/ao/cli.py (#44): moved out byte for byte and run in its namespace by `_part`,
 where it stood; it is not importable on its own.
@@ -1576,6 +1576,18 @@ def _init_then_prove(cfg, args):
         return code
     print(f"\n{C['b']}proving the guarantees{C['reset']}")
     return cmd_prove(A.load_config(cfg["root"]), args)
+
+
+def cmd_demo(cfg, args):
+    """`ao demo [--keep]`: the guarantee played on a project of its own, before anyone adopts ao (DEMO).
+
+    `ao prove` runs the guarantees on a project that has ao; the demo shows them to someone who has
+    none yet, in a scratch folder with a home of its own. It uses nothing of `cfg`, the project the
+    command was run in, which ao loaded before dispatching as it does for every command, and writes
+    nothing outside that folder. The demo is src/ao/demo.py.
+    """
+    from . import demo
+    return demo.run(keep=getattr(args, "keep", False))
 
 
 def _doctor_consistency(cfg, repair=False):

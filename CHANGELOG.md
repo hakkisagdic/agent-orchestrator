@@ -12,6 +12,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ## [Unreleased]
 
+### New commands
+
+- `ao demo [--keep]` shows the guarantee in about a minute before ao is on a repository of yours: on a scratch project with a home of its own and a stand-in reviewer, a change with a bug is refused by review, `ao commit-ok` and the commit hook, and its fix lands with the trailers that name its grant ([demo](docs/demo.md)) (DEMO).
+
 ### Behaviour changes
 
 - The architect is named `architect` in mail where a project names it nothing, and `ao init` writes that name, where both gave it a model's name, `fable`. Mail a project that names no architect wrote to `fable` stays the architect's there - read, routed and folded into as before - so nothing is moved or deleted; a project that names its architect answers to that name alone ([configuration](docs/configuration.md)) (#72).
