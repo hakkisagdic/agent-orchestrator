@@ -646,8 +646,18 @@ def cmd_init(cfg, args):
 # writes only the marker and the hooks, so each of these is refused beside --adopt rather than
 # ignored (INIT-ADOPTION); --agent counts only when it names an agent, and --no-mcp asks for
 # nothing adoption does.
-ADOPT_REFUSES = ("name", "profile", "implementer", "model", "effort", "reviewer_model", "review_tier", "by",
-                 "language", "mcp", "rules", "watchdog", "allow_uncovered_gates", "prove", "no_review")
+def _adopt_refused(args):
+    """The options `--adopt` refuses that were given, as their flags; each read by its name, since the split proof reads
+    no attribute named at run time (#111)."""
+    given = (("name", getattr(args, "name", None)), ("profile", getattr(args, "profile", None)),
+             ("implementer", getattr(args, "implementer", None)), ("model", getattr(args, "model", None)),
+             ("effort", getattr(args, "effort", None)), ("reviewer_model", getattr(args, "reviewer_model", None)),
+             ("review_tier", getattr(args, "review_tier", None)), ("by", getattr(args, "by", None)),
+             ("language", getattr(args, "language", None)), ("mcp", getattr(args, "mcp", None)),
+             ("rules", getattr(args, "rules", None)), ("watchdog", getattr(args, "watchdog", None)),
+             ("allow_uncovered_gates", getattr(args, "allow_uncovered_gates", None)),
+             ("prove", getattr(args, "prove", None)), ("no_review", getattr(args, "no_review", None)))
+    return ["--" + option.replace("_", "-") for option, value in given if value]
 
 
 def _git_on_active_index(root, *args):
@@ -685,7 +695,7 @@ def _adopt_project(cfg, args):
     only makes sure of the hooks. Exits 0 only when Git was seen to run the commit hook.
     """
     root = cfg["root"]
-    given = ["--" + option.replace("_", "-") for option in ADOPT_REFUSES if getattr(args, option, None)]
+    given = _adopt_refused(args)
     if getattr(args, "agent", None) not in (None, "auto"):
         given.append("--agent")
     if given:

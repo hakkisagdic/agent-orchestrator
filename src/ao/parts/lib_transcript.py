@@ -3503,8 +3503,7 @@ def _coordination_dirs(cfg):
     commit authority so one AO command cannot invalidate another command's
     evidence merely by recording its result.
     """
-    defaults = globals().get("COORDINATION_DIRS", (".ao/", "agent-mail/"))
-    values = list(defaults) + list(harness_dirs()) + [
+    values = list(COORDINATION_DIRS) + list(harness_dirs()) + [
         (cfg or {}).get("reviews", "semantic-review"),
         (cfg or {}).get("mailbox", "agent-mail"),
     ]

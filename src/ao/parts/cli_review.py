@@ -3136,8 +3136,7 @@ def _stop_on_signals(held=False):
                 raise ReviewRunStopped(fired[0])
 
     before = {}
-    for name in ("SIGTERM", "SIGHUP", "SIGINT"):
-        signum = getattr(signal, name, None)
+    for signum in (getattr(signal, "SIGTERM", None), getattr(signal, "SIGHUP", None), getattr(signal, "SIGINT", None)):
         if signum is None:
             continue
         try:
@@ -3598,7 +3597,7 @@ def cmd_review(cfg, args):
         evidence = {
             "schema": 2, "kind": "commit-range", "authorizable": False,
             "commits": str(args.commits),
-            "diff_digest": "sha256:" + __import__("hashlib").sha256(diff_bytes).hexdigest(),
+            "diff_digest": "sha256:" + A.hashlib.sha256(diff_bytes).hexdigest(),
         }
     else:
         try:
@@ -3625,7 +3624,7 @@ def cmd_review(cfg, args):
         evidence = {
             "schema": 2, "kind": "index-candidate", "authorizable": True,
             "candidate": candidate, "scope": scope,
-            "diff_digest": "sha256:" + __import__("hashlib").sha256(diff_bytes).hexdigest(),
+            "diff_digest": "sha256:" + A.hashlib.sha256(diff_bytes).hexdigest(),
         }
     if author is not None:
         # The family it was held to, and who said so: the grant's record, or a named person.

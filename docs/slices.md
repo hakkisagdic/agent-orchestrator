@@ -240,7 +240,23 @@ unless `ao split-check` finds a pure move:
   definitions did not run, two statements swapped, or a definition moved across a statement runs
   differently and is no move;
 - every part the candidate adds is loaded by a top-level `_part` call, which a mention of one in a
-  docstring is not; a comment after the call does not hide it.
+  docstring is not; a comment after the call does not hide it;
+- the names a module's loads call through - `_part`, or `A` in `A._part` - are bound to ao's loader
+  alone, in the module's file and in every part it loads, whether the candidate touched it or not;
+  and none of those files reaches a namespace or an object's internals by what names nothing it
+  binds. Reflection there is read as a closed world: `globals()`, `vars()`, `locals()`, `exec`,
+  `eval`, `compile` and `__import__`, on whatever object they are reached from; `getattr` and its
+  kin by a name computed at run time, by one of those names, or handed on; every dunder but the
+  few that reach nothing (`__name__`, `__file__`, `__init__` and the like); a frame, `modules`,
+  `import_module`, `CodeType` or `FunctionType`; and the modules that import by a name, unpickle
+  or evaluate a string (`builtins`, `importlib`, `inspect`, `pickle`, `typing`, `operator` and
+  others). At run time a module whose parts ao loads refuses to rebind a name that holds ao's lib
+  or its loader, however the module is reached.
+
+The proof reads what a candidate changes and what runs where its parts load; it does not judge what
+code does. Code that already landed and runs code of its own choosing by other means - writes a
+part's file before it loads, starts a process - was reviewed when it landed, as
+[the threat model](threat-model.md) has it.
 
 The grant records that proof: the slice that declared the move and how many definitions moved.
 A split that lands under a review waiver with that record is not reviewed afterwards: `ao catchup`

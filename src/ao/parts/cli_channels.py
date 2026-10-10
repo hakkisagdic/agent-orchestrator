@@ -14,8 +14,18 @@ def _serve(module, cfg, extra):
     at. Importing works from both.
     """
     sys.argv = ["ao-" + module, "-C", cfg["root"]] + extra
-    mod = __import__(f"ao.{module}", fromlist=["main"])
-    return mod.main()
+    # Each by an import that names it: the move proof reads a module imported by a string as one that may be any (#111).
+    if module == "mcp":
+        from . import mcp as server
+    elif module == "a2a_mcp":
+        from . import a2a_mcp as server
+    elif module == "a2a":
+        from . import a2a as server
+    elif module == "telegram":
+        from . import telegram as server
+    else:
+        raise ValueError(f"no server module {module}")
+    return server.main()
 
 
 def cmd_mcp(cfg, args):
@@ -619,7 +629,10 @@ def cmd_content(cfg, args):
         return 1 if drift else 0
     source, _, pin = (args.spec or "").rpartition("@")
     # A caller that predates steering and agents hands skills alone.
-    chosen = {kind: [name.strip() for name in (getattr(args, kind, None) or "").split(",") if name.strip()]
+    # Each read by its name: the split proof reads no attribute named at run time (#111).
+    given = {"skills": getattr(args, "skills", None), "steering": getattr(args, "steering", None),
+             "agents": getattr(args, "agents", None)}
+    chosen = {kind: [name.strip() for name in (given.get(kind) or "").split(",") if name.strip()]
               for kind, _ in A.CONTENT_KINDS}
     if not source or not any(chosen.values()):
         print("usage: ao content add <source>@<40-character commit> [--skills a,b] [--steering c,d] [--agents e,f] "

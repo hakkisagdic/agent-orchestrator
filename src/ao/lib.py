@@ -59,7 +59,50 @@ def _part(name, namespace):
                            "beside the file that loads it")
     folder = _parts_folder(os.path.dirname(os.path.abspath(caller)))
     path = os.path.join(folder, f"{name}.py")
+    module = sys.modules.get(namespace.get("__name__"))
+    if type(module) is type(sys) and module.__dict__ is namespace:
+        module.__class__ = _KeepsItsLoader        # what binds its loader is kept from here on (#111)
     exec(SourceFileLoader(f"ao.parts.{name}", path).get_code(f"ao.parts.{name}"), namespace)
+
+
+def _keeper(loader):
+    """The class of a module whose parts `loader` loads: a name of the module that holds ao's lib or its loader is not
+    rebound from outside it (#111).
+
+    The move proof takes a module's loads to run ao's loader. Code that already landed could rebind it through an
+    expression the proof does not read as the name it binds - `globals()["A"]._part = ...`, `setattr(A, "_part", ...)`,
+    a function's `A=A` default, a module reached through `sys.modules` - and every load after that ran another loader.
+    Set or deleted on the module, however it is reached, such a name is refused, and so are the class that refuses it
+    and the module's class itself. What it refuses by is held here, not in a module's names: a check read through
+    the lib's globals was itself a name to rebind (the review of SPLIT-CHECK-12). What writes a namespace without
+    asking its module - `globals()`, `__dict__` - the proof reads instead.
+    """
+    def keep(module, name, how):
+        held = getattr(module, name, None)
+        try:
+            # ao's lib is the module whose `_part` is ao's loader, read off the module itself: an entry in
+            # `sys.modules` can be taken away by any code that runs (the review of SPLIT-CHECK-12).
+            lib = getattr(held, "_part", None) is loader
+        except Exception:                # an object that raises for a missing attribute is no module of ao's
+            lib = False
+        if name == "__class__" or held is loader or held is Keeper or lib:
+            raise AttributeError(f"{module.__name__}.{name} binds ao's loader and is not {how} from outside its "
+                                 "module (#111)")
+
+    class Keeper(type(sys)):
+        def __setattr__(self, name, value):
+            keep(self, name, "set")
+            super().__setattr__(name, value)
+
+        def __delattr__(self, name):
+            keep(self, name, "deleted")
+            super().__delattr__(name)
+
+    Keeper.__qualname__ = Keeper.__name__ = "_KeepsItsLoader"
+    return Keeper
+
+
+_KeepsItsLoader = _keeper(_part)
 
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -112,8 +155,9 @@ def utf8_streams():
     other stream to say so on; nothing here may stop ao from starting.
     """
     import codecs
+    streams = {"stdin": sys.stdin, "stdout": sys.stdout, "stderr": sys.stderr}
     for name, errors in UTF8_MODE_ERRORS:
-        stream = getattr(sys, name, None)
+        stream = streams.get(name)
         try:
             if codecs.lookup(stream.encoding).name != "utf-8":
                 stream.reconfigure(encoding=UTF8, errors=errors)
@@ -634,9 +678,24 @@ def _module_walruses(tree):
     return names
 
 
-def _loader_rebound(source, path):
+def _loader_names(tree):
+    """The names a module's `_part` loads call through: `_part`, or `A` in `A._part`."""
+    import ast
+    called = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name) and func.id == "_part":
+                called.add("_part")
+            elif isinstance(func, ast.Attribute) and func.attr == "_part" and isinstance(func.value, ast.Name):
+                called.add(func.value.id)
+    return called
+
+
+def _loader_rebound(source, path, called=None):
     """The names a module's `_part` loads call through - `_part`, or `A` in `A._part` - that it binds to anything but
-    ao's own loader (SPLIT-CHECK-7).
+    ao's own loader (SPLIT-CHECK-7). A part runs in its module's namespace, so the names its module's loads call
+    through, `called`, are read in it as in the module's own file (#111).
 
     The move proof takes a module's loads to run ao's `_part`. One that imported `_part` from a module of its own,
     or bound `A` to one, ran a loader the proof never read. The bindings allowed are `from . import lib as A`,
@@ -651,14 +710,7 @@ def _loader_rebound(source, path):
     import ast
     import symtable
     tree = ast.parse(source)
-    called = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            func = node.func
-            if isinstance(func, ast.Name) and func.id == "_part":
-                called.add("_part")
-            elif isinstance(func, ast.Attribute) and func.attr == "_part" and isinstance(func.value, ast.Name):
-                called.add(func.value.id)
+    called = _loader_names(tree) | set(called or ())
     if not called:
         return []
     where = path.replace("\\", "/")
@@ -743,11 +795,154 @@ def _loader_rebound(source, path):
                 if bound in called and not ours:
                     rebound.add(bound)
         elif not isinstance(node, ast.alias):
-            for field in ("name", "rest"):                   # `except E as A`, a match pattern's capture
-                value = getattr(node, field, None)
+            for value in (getattr(node, "name", None), getattr(node, "rest", None)):   # `except E as A`, a capture
                 if isinstance(value, str) and value in called:
                     rebound.add(value)
     return sorted(rebound)
+
+
+# What reaches a module's namespace, a frame's or an object's internals other than a statement that names what it binds
+# (#111). The files that run in a module's namespace are read as a closed world for reflection: the builtins that hand a
+# namespace over, run code or import by a name, reached from anything; getattr and its kin by a name the proof cannot
+# read, by one of those names, or handed on; every dunder but the few that reach nothing; the attributes that hold a
+# namespace, a frame or a module table, or make code from bytes or run a file's lines; and the modules that import by a
+# name, unpickle or evaluate a string.
+_NAMESPACE_BUILTINS = ("globals", "vars", "locals", "exec", "eval", "compile", "__import__", "__builtins__",
+                       "breakpoint")
+_REFLECTION = ("getattr", "setattr", "delattr", "hasattr")
+_NAMESPACE_ATTRIBUTES = ("f_globals", "f_locals", "f_builtins", "_getframe", "modules", "import_module",
+                         "load_module", "exec_module", "CodeType", "FunctionType", "LambdaType", "addpackage",
+                         "addsitedir", "load_extension", "enable_load_extension")
+_NAMESPACE_MODULES = ("builtins", "importlib", "inspect", "ctypes", "gc", "pickle", "_pickle", "marshal", "copyreg",
+                      "shelve", "runpy", "code", "codeop", "operator", "string", "typing", "dataclasses", "pydoc",
+                      "pkgutil", "timeit", "doctest", "cProfile", "profile", "pdb", "bdb", "trace", "logging",
+                      "unittest", "multiprocessing", "zipimport")
+# The dunders that reach nothing: a name, the file, a constructor, an exception's links, the protocols a class defines,
+# and a folder name that is data.
+_PLAIN_DUNDERS = ("__name__", "__file__", "__doc__", "__init__", "__main__", "__cause__", "__context__", "__getitem__",
+                  "__version__", "__qualname__", "__module__", "__all__", "__enter__", "__exit__", "__len__",
+                  "__iter__", "__next__", "__contains__", "__eq__", "__hash__", "__repr__", "__str__", "__bool__",
+                  "__slots__", "__tests__")
+# ao's loader and what keeps it reach the namespace by design, and this proof names what it looks for: each is read as
+# the loader is, as ao's own code.
+_NAMESPACE_OWN = ("_part", "_keeper", "_KeepsItsLoader", "_namespace_writes", "_compiles_a_pattern", "_internal",
+                  "_NAMESPACE_BUILTINS", "_REFLECTION", "_NAMESPACE_ATTRIBUTES", "_NAMESPACE_MODULES",
+                  "_PLAIN_DUNDERS")
+
+
+def _internal(name):
+    """Whether a name is a dunder that reaches an object's internals: every one but the few that reach nothing."""
+    return len(name) > 4 and name.startswith("__") and name.endswith("__") and name not in _PLAIN_DUNDERS
+
+
+def _namespace_writes(source, path):
+    """What in one file that runs in a module's namespace can bind a name there that no statement names (#111).
+
+    The move proof reads which names a statement binds. `globals()["A"] = ...`, code that `exec` or `compile` runs -
+    under any file's name - a dict reached through `__dict__`, a function's `__globals__`, a frame or `sys.modules`, or
+    the builtins reached by a name - `getattr(builtins, "globals")`, or a name built at run time - binds one no statement
+    names, so the proof cannot say the module's loads run ao's loader. Reflection is read as a closed world, so a name
+    computed at run time reaches nothing unread: what is refused is listed above. The `globals()` a load hands its part
+    is the namespace it loads into, no write; ao's own loader and what keeps it are ao's code.
+
+    What the proof reads is what a candidate changes and what runs where its parts load; it judges no code by what that
+    code does. Code that already landed and runs code of its own choosing by other means - writes a part's file before
+    it loads, starts a process - was reviewed when it landed, as the threat model has it; the proof is no review."""
+    import ast
+    tree = ast.parse(source)
+    skipped, calls = set(), set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        calls.add(id(node.func))
+        func = node.func
+        if (isinstance(func, ast.Name) and func.id == "_part" or isinstance(func, ast.Attribute) and func.attr == "_part") \
+                and len(node.args) == 2 and isinstance(node.args[1], ast.Call) and not node.args[1].args \
+                and isinstance(node.args[1].func, ast.Name) and node.args[1].func.id == "globals":
+            skipped.update((id(node.args[1]), id(node.args[1].func)))
+    if path.replace("\\", "/") == "src/ao/lib.py":
+        for node in tree.body:
+            names = [node.name] if isinstance(node, (ast.FunctionDef, ast.ClassDef)) else \
+                [target.id for target in getattr(node, "targets", []) if isinstance(target, ast.Name)]
+            if any(name in _NAMESPACE_OWN for name in names):
+                skipped.update(id(inner) for inner in ast.walk(node))
+    found = []
+    for node in ast.walk(tree):
+        if id(node) in skipped:
+            continue
+        line = getattr(node, "lineno", "?")
+        if isinstance(node, ast.Name):
+            if node.id in _NAMESPACE_BUILTINS or _internal(node.id):
+                found.append(f"`{node.id}` at line {line}")
+            elif node.id in _REFLECTION and id(node) not in calls:
+                found.append(f"`{node.id}` handed on at line {line}")
+        elif isinstance(node, ast.Attribute):
+            # on any object: `import sys as s; s.modules`, `importlib.import_module("builtins").globals()`
+            if node.attr in _NAMESPACE_ATTRIBUTES or node.attr in _REFLECTION or _internal(node.attr) \
+                    or node.attr in _NAMESPACE_BUILTINS and not _compiles_a_pattern(node):
+                found.append(f"`.{node.attr}` at line {line}")
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if _internal(node.value) or node.value in _NAMESPACE_ATTRIBUTES:
+                found.append(f"`{node.value!r}` at line {line}")
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _REFLECTION:
+            name = node.args[1] if len(node.args) > 1 else None
+            if not (isinstance(name, ast.Constant) and isinstance(name.value, str)):
+                found.append(f"`{node.func.id}` by a name computed at run time at line {line}")
+            elif name.value in _NAMESPACE_BUILTINS or name.value in _REFLECTION:
+                found.append(f"`{node.func.id}` of {name.value!r} at line {line}")
+        elif isinstance(node, ast.Import):
+            found.extend(f"`import {alias.name}` at line {line}" for alias in node.names
+                         if alias.name.split(".")[0] in _NAMESPACE_MODULES)
+        elif isinstance(node, ast.ImportFrom):
+            top = (node.module or "").split(".")[0] if not node.level else ""
+            if top in _NAMESPACE_MODULES or any(alias.name in _NAMESPACE_BUILTINS + _REFLECTION + _NAMESPACE_ATTRIBUTES
+                                                or _internal(alias.name) or alias.name == "*" and top == "sys"
+                                                for alias in node.names):
+                found.append(f"`from {'.' * node.level}{node.module or ''} import` at line {line}")
+    return found
+
+
+def _compiles_a_pattern(node):
+    """Whether an attribute is `re.compile`, read off the `re` module by its name: `import builtins as re` is found by
+    its import, and `re` bound to another module by what reached it."""
+    import ast
+    base = node.value
+    return node.attr == "compile" and (isinstance(base, ast.Name) and base.id == "re"
+                                       or isinstance(base, ast.Attribute) and base.attr == "re")
+
+
+# The names ao's loads go through, `_part` and lib's `A`: read in a file whose module the proof did not reach.
+_LOADER_NAMES = ("_part", "A")
+
+
+def _namespace_findings(loaders, read, touched=None):
+    """([(path, name)] bound to something else than ao's loader, [(path, what)] that writes the namespace unnamed) of
+    every file that runs where a module's parts load: each module of `loaders`, {path: text}, each part it loads and
+    each part those load, as `read(path)` gives them. Touched by the candidate or not: code that already landed runs
+    there as surely as the candidate's (#111). And every file of `touched`, {path: text}, the candidate changes: a part
+    whose module the candidate leaves alone is read with the names ao's loads go through."""
+    import ast
+    rebound, writes, seen = [], [], set()
+    queue = [(path, text, set()) for path, text in sorted(loaders.items())]
+    queue += [(path, text, set(_LOADER_NAMES)) for path, text in sorted((touched or {}).items())
+              if path not in loaders]
+    while queue:
+        path, text, inherited = queue.pop(0)
+        if path in seen or text is None:
+            continue
+        seen.add(path)
+        try:
+            tree = ast.parse(text)
+        except SyntaxError as exc:
+            writes.append((path, f"code that does not parse ({exc.msg})"))
+            continue
+        names = _loader_names(tree) | inherited
+        rebound.extend((path, name) for name in _loader_rebound(text, path, names))
+        writes.extend((path, what) for what in _namespace_writes(text, path))
+        for part in top_level_statements(text, path)[2]:
+            target = _part_file(path, part)
+            queue.append((target, read(target), names))
+    return rebound, writes
 
 
 def split_moves(root, start=None, end=None):
@@ -778,7 +973,7 @@ def split_moves(root, start=None, end=None):
     old, new = {}, {}
     # Statements and loads are kept by file: one moved between files changed both (SPLIT-CHECK-2).
     other, loads, parts, present = {"old": {}, "new": {}}, {"old": {}, "new": {}}, [], {}
-    order, rebinders = {"old": {}, "new": {}}, []
+    order, loaders, touched = {"old": {}, "new": {}}, {}, {}
     for path in paths:
         for side, spec, defs in (("old", f"{before}:{path}", old), ("new", f"{after}:{path}", new)):
             text = read(spec)
@@ -796,11 +991,17 @@ def split_moves(root, start=None, end=None):
             present.setdefault(path, {})[side] = bool(definitions or others or loaded)
             if side == "new" and "/parts/" in f"/{path}" and read(f"{before}:{path}") is None:
                 parts.append(path)
-            if side == "new" and loaded:
-                rebinders.extend((path, name) for name in _loader_rebound(text, path))
-    # A load runs ao's loader only through a name the module binds to it (SPLIT-CHECK-7).
+            if side == "new":
+                touched[path] = text
+                if loaded:
+                    loaders[path] = text
+    # A load runs ao's loader only through a name the module binds to it (SPLIT-CHECK-7), in its own file and in each
+    # part that runs in its namespace, written by the candidate or landed before it (#111).
+    rebinders, writers = _namespace_findings(loaders, lambda path: read(f"{after}:{path}"), touched)
     moved, problems = [], [f"{path} binds {name}, which its _part loads call through, to something else than "
                            "ao's loader" for path, name in rebinders]
+    problems += [f"{path} can bind a name in the namespace its module's parts load into by {what}, which the move "
+                 "proof cannot read" for path, what in writers]
     for name in sorted(set(old) | set(new)):
         before, after = old.get(name, []), new.get(name, [])
         if not after:

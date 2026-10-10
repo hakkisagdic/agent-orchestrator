@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import types
 from types import SimpleNamespace
 
 import pytest
@@ -538,3 +539,130 @@ def test_a_walrus_in_ao_s_lib_binds_the_loader_only_in_the_module_s_own_namespac
     assert A._loader_rebound(head + "def helper():\n    (_part := print)\n    return _part" + load, "src/ao/lib.py") == []
     assert A._loader_rebound(head + "def helper(x=(_part := print)):\n    return x" + load, "src/ao/lib.py") == ["_part"]
     assert A._loader_rebound(head + "class K((_part := object)):\n    pass" + load, "src/ao/lib.py") == ["_part"]
+
+
+@pytest.mark.parametrize("attempt", [
+    "A._part = print", "setattr(A, '_part', print)", "del A._part", "sys.modules['ao.lib']._part = print",
+    "globals()['A']._part = print", "(lambda A=A: setattr(A, '_part', print))()", "A.__class__ = types.ModuleType",
+    "cli.A = types.SimpleNamespace(_part=print)", "del cli.A", "A._KeepsItsLoader = types.ModuleType",
+    "del A._KeepsItsLoader",
+])
+def test_a_module_s_loader_is_not_rebound_from_outside_it(attempt):
+    """#111: code that already landed could rebind the loader through an expression the proof does not read as a
+    name - `globals()["A"]._part`, a function's `A=A`, `sys.modules` - and every load after it ran another loader."""
+    loader = A._part
+    with pytest.raises(AttributeError, match="binds ao's loader"):
+        exec(attempt, {"A": A, "cli": cli, "sys": sys, "types": types})
+    assert A._part is loader and cli.A is A
+
+
+def test_a_module_s_other_names_are_set_as_before(monkeypatch):
+    monkeypatch.setattr(cli, "REVIEW_HEARTBEAT_SECONDS", 1)
+    monkeypatch.setattr(A, "HOME", "/elsewhere")
+
+    assert cli.REVIEW_HEARTBEAT_SECONDS == 1 and A.HOME == "/elsewhere"
+
+
+@pytest.mark.parametrize("line", [
+    'globals()["A"] = object()', 'exec("A = object()")', 'eval("1")', 'vars()["A"] = 1', 'namespace = locals()',
+    'code = compile("A._part = print", "/elsewhere/cli.py", "exec")', 'import sys\nsys.modules[__name__].A = 1',
+    'from sys import modules', 'import builtins', 'import ctypes', 'def f():\n    return f.__globals__',
+    'def f(x):\n    return getattr(x, "__dict__")', 'import sys\nsys._getframe().f_globals["A"] = 1',
+    'object.__setattr__(A, "_part", print)', 'reach = globals',
+    'import sys as s\ns.modules["ao.lib"] = None', 'import importlib\nimportlib.import_module("builtins").globals()',
+    'def f(o):\n    return getattr(getattr(o, "sys"), "modules")', 'b = __import__("builtins")',
+    'def f(m):\n    return m.exec("A = 1")', 'def f(m):\n    return m.compile("x", "y", "exec")', 'import inspect',
+    'def f(b):\n    return getattr(b, "globals")()', 'def f(b, n):\n    return getattr(b, n)', 'look = getattr',
+    'def f(m):\n    return m.getattr', 'S = ().__class__.__base__.__subclasses__()', 'import typing',
+    'import types\nC = types.CodeType', 'import site\nsite.addpackage(".", "x.pth", set())',
+    'def f(b):\n    return setattr(b, "x" + "y", 1)', 'from builtins import exec as run',
+])
+def test_what_binds_a_name_in_the_namespace_that_no_statement_names_is_found(line):
+    """#111: `compile()` under another file's name, or a write through `globals()`, binds what the proof reads no
+    statement binding."""
+    assert A._namespace_writes(_HEAD + line + _LOAD, "pkg/mod.py"), line
+
+
+def test_the_namespace_a_load_hands_its_part_and_ao_s_own_loader_are_no_writes():
+    assert A._namespace_writes(_HEAD + "X = 1" + _LOAD, "pkg/mod.py") == []
+    assert A._namespace_writes(_HEAD + "import re\nP = re.compile('x')\nQ = A.re.compile('y')" + _LOAD, "pkg/mod.py") == []
+    plain = "class C:\n    __slots__ = ('a',)\n\n    def __init__(self, a):\n        self.a = getattr(a, 'b', None)\n"
+    assert A._namespace_writes(_HEAD + plain + "N = __name__" + _LOAD, "pkg/mod.py") == []
+    loader = 'import sys\n\n\ndef _part(name, namespace):\n    exec("", namespace)\n'
+    assert A._namespace_writes(loader, "src/ao/lib.py") == []
+    assert A._namespace_writes(loader, "vendor/src/ao/lib.py")
+
+
+def test_ao_s_modules_and_every_part_they_load_bind_and_write_nothing_the_proof_cannot_read():
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    read = []
+
+    def reader(path):
+        read.append(path)
+        with open(os.path.join(base, path), encoding="utf-8") as fh:
+            return fh.read()
+
+    assert A._namespace_findings({path: reader(path) for path in ("src/ao/lib.py", "src/ao/cli.py")}, reader) == \
+        ([], [])
+    parts = {f"src/ao/parts/{name}" for name in os.listdir(os.path.join(base, "src", "ao", "parts"))
+             if name.endswith(".py") and name != "__init__.py"}
+    assert parts <= set(read), sorted(parts - set(read))
+
+
+@pytest.mark.parametrize("landed, found", [('globals()["_part"] = print\n', "`globals` at line 1"),
+                                           ('_part = print\n', "binds _part"), ('exec("pass")\n', "`exec` at line 1")])
+def test_a_part_that_landed_before_the_move_is_read_for_what_rebinds_the_loader(project, landed, found):
+    """#111: the proof read the files the candidate touched, and a part that landed before it runs in the module's
+    namespace as surely."""
+    root = project["root"]
+    _repo(root)
+    load = '_part("mod_x", globals())\n'
+    _write_files(root, {"mod.py": LIB + load, "parts/mod_x.py": landed}, commit="landed")
+    _write_files(root, {"mod.py": _split_b() + load, "parts/mod_b.py": B})
+
+    problems = A.split_moves(root)["problems"]
+
+    assert any(problem.startswith("parts/mod_x.py ") and found in problem for problem in problems), problems
+
+
+def test_a_part_that_landed_before_the_move_and_binds_nothing_leaves_it_proven(project):
+    root = project["root"]
+    _repo(root)
+    load = '_part("mod_x", globals())\n'
+    _write_files(root, {"mod.py": LIB + load, "parts/mod_x.py": "Y = 2\n"}, commit="landed")
+    _write_files(root, {"mod.py": _split_b() + load, "parts/mod_b.py": B})
+
+    assert A.split_moves(root)["problems"] == []
+
+
+def test_a_part_the_candidate_touches_is_read_though_its_module_is_not():
+    """#111, from the review of SPLIT-CHECK-12: only touched files that load parts seeded the reading, so a touched part
+    whose module the candidate left alone was not read at all."""
+    part = "def f(x=(_part := print)):\n    return x\n"
+
+    rebound, writes = A._namespace_findings({}, lambda path: None, {"parts/mod_b.py": part})
+
+    assert rebound == [("parts/mod_b.py", "_part")] and writes == []
+    assert A._namespace_findings({}, lambda path: None, {"parts/mod_b.py": "X = globals()\n"})[1]
+
+
+def test_the_loader_is_kept_though_ao_s_lib_is_taken_out_of_the_module_table(monkeypatch):
+    """#111, from the review of SPLIT-CHECK-12: the guard knew ao's lib by its `sys.modules` entry, so code that removed
+    the entry could rebind `cli.A`; it knows the lib by its loader now."""
+    monkeypatch.delitem(sys.modules, "ao.lib")
+
+    with pytest.raises(AttributeError, match="binds ao's loader"):
+        cli.A = types.SimpleNamespace(_part=print)
+    assert cli.A is A
+
+
+def test_the_guard_keeps_what_it_refuses_by():
+    """#111, from the review of SPLIT-CHECK-12: the guard called a function of the lib's, `_keep_loader`, through the
+    lib's names, so `A._keep_loader = lambda *args: None` switched it off; what it refuses by is held in it now."""
+    A._keep_loader = lambda *args: None        # a name of the lib's like any other, which the guard no longer reads
+    try:
+        with pytest.raises(AttributeError, match="binds ao's loader"):
+            A._part = print
+    finally:
+        del A._keep_loader
+    assert type(A).__name__ == "_KeepsItsLoader" and A._part is not print

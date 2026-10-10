@@ -527,8 +527,7 @@ def _hear_stop_signals():
     saved = {}
     if threading.current_thread() is not threading.main_thread():
         return saved
-    for signame in ("SIGTERM", "SIGHUP"):
-        signum = getattr(signal, signame, None)
+    for signum in (getattr(signal, "SIGTERM", None), getattr(signal, "SIGHUP", None)):
         if signum is not None and signal.getsignal(signum) is signal.SIG_DFL:
             saved[signum] = signal.signal(signum, _raise_interrupt)
     return saved
