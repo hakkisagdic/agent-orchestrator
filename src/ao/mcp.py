@@ -196,6 +196,14 @@ def status_payload(cfg):
     tel = A.telemetry(recs, adapter, msgs) if recs else {}
     g = A.git_state(root)
     revs = A.reviews(root, cfg["reviews"], limit=3)
+    # Processes that could not be counted are null, and the reason says why: none were seen is not none run
+    # (WINDOWS-TABLE-CLOSED).
+    from .procs import TableUnreadable
+    unread = None
+    try:
+        processes = len(A.agent_pids(root, adapter)) if impl else 0
+    except TableUnreadable as exc:
+        processes, unread = None, str(exc)
     return {"project": cfg.get("project") or os.path.basename(root), "root": root,
             "adapter": impl.get("adapter"), "state": state, "seconds_since_write": age,
             "doing": desc, "spinning_minutes": A.spinning(root),
@@ -209,7 +217,7 @@ def status_payload(cfg):
             "reviews": [{"file": f, "verdict": v} for f, v in revs],
             "throughput": A.throughput(root, cfg),
             "held": A.hold_state(root),
-            "agent_processes": len(A.agent_pids(root, adapter)) if impl else 0}
+            "agent_processes": processes, "agent_processes_unread": unread}
 
 
 def board_payload(root):

@@ -992,13 +992,20 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
     # architect the watchdog itself spawned, which resumes with this repo as its
     # cwd and would otherwise read as a second turn. The watchdog knows its pid;
     # the detector should not have to guess.
-    pids = [p for p in agent_pids(root, adapter) if p not in set(exclude_pids)]
+    # What a finished turn left behind is not a turn. Orphans are cleared by the
+    # watchdog before it counts; here they are simply not counted.
+    # Where the process table cannot be read no turn is counted here, and none is
+    # guessed: the cycle's writer guard stands down on the same error and says why,
+    # and the other conditions are still reported (WINDOWS-TABLE-CLOSED).
+    from . import procs
+    try:
+        pids = [p for p in agent_pids(root, adapter) if p not in set(exclude_pids)]
+        trees = process_trees([p for p in pids if p not in set(orphans(root, adapter))])
+    except procs.TableUnreadable:
+        pids, trees = [], []
     dirty = len([l for l in _git_text(root, "status", "--porcelain").split("\n") if l.strip()])
     head = _git_text(root, "rev-parse", "--short", "HEAD")
 
-    # What a finished turn left behind is not a turn. Orphans are cleared by the
-    # watchdog before it counts; here they are simply not counted.
-    trees = process_trees([p for p in pids if p not in set(orphans(root, adapter))])
     if len(trees) > 1 and age < idle_seconds:
         out.append({"kind": "several-turns-active", "roots": trees,
                     "facts": [f"{len(trees)} independent process trees with this repo as "
@@ -1330,7 +1337,9 @@ def session_in_use(session, architect=None):
     """Pids whose command line resumes `session`: as an argument of its own, or after `=` (JOURNAL-2).
 
     Only the architect's own harness resumes its session: a `grep`, a `jq --arg` or a tmux named for the id
-    carries it too, and held every wake while it ran.
+    carries it too, and held every wake while it ran. procs.TableUnreadable where the process table cannot
+    be read: a session nobody could be seen holding read as free, and a wake could resume it beside its
+    holder (WINDOWS-TABLE-CLOSED).
     """
     from . import procs
     if not session:
@@ -1356,7 +1365,9 @@ def unplaced_agent_pids(root, adapter):
     adapter's command line names the repository: such a turn in this tree was no
     writer at all, `ao hold` stopped nothing and the watchdog started a second
     turn. The guards that must not miss a writer count these and say why. Where
-    every process's directory can be read this is empty (WINDOWS-CWD-2).
+    every process's directory can be read this is empty (WINDOWS-CWD-2); where the
+    table itself cannot be read it raises procs.TableUnreadable, as agent_pids does
+    (WINDOWS-TABLE-CLOSED).
     """
     if os.name != "nt":
         return []
@@ -1566,7 +1577,9 @@ def architect_present(root, architect=None):
     architect command in its configured cwd, exclude AO helpers and descendants,
     and classify headlessness at the full process-tree root, by the arguments the
     harness it runs as declares (`_headless_argv`). No positive result is cached,
-    so process exit releases presence on the next scan.
+    so process exit releases presence on the next scan. procs.TableUnreadable where
+    the process table cannot be read: absence that was not measured is not absence
+    (WINDOWS-TABLE-CLOSED).
     """
     return any(
         not _headless_argv(argv)
@@ -1579,7 +1592,9 @@ def architect_turn_present(root, architect=None):
 
     This is the duplicate-wake guard. It revalidates the registered helper's
     process-start identity and current process tree; an unrelated same-binary
-    implementer, remembered pid, or lock file cannot postpone a wake.
+    implementer, remembered pid, or lock file cannot postpone a wake. Where the
+    process table cannot be read it raises procs.TableUnreadable, and no wake
+    starts beside one it could not see (WINDOWS-TABLE-CLOSED).
     """
     return bool(_architect_process_roots(root, architect, helper_only=True))
 

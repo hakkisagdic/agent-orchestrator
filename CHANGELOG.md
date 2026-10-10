@@ -29,6 +29,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 - The move proof reads every file that runs where a module's parts load - the module and each part it loads, touched by the candidate or not - for a name its loads call through bound to another loader, and reads reflection there as a closed world: `globals()`, `exec`, `compile` and `__import__` from any object, `getattr` by a name computed at run time, a dunder that reaches an object's internals, the modules that import by a name or evaluate a string; and a module whose parts ao loads refuses at run time to rebind a name that holds ao's lib or its loader, however it is reached. Code that had already landed could make a split's loads run another loader the proof never read ([slices](docs/slices.md)) (SPLIT-CHECK-12, #111).
 
+### Windows
+
+- A process table the platform cannot read stops what decides from it and says which platform and why, where it read as no process at all: on Windows a PowerShell that was missing, failed or did not answer let `ao hold` stop nothing, `ao writers` count none, `ao review cancel` record a review failed while its reviewer ran on, and a watchdog cycle start a turn or wake an architect beside one it never saw. Now the cycle starts, wakes and reaps nothing and raises `process-table-unreadable`; `ao hold`, `ao writers` and `ao review cancel` exit 1; `ao status`, `ao reviews` and the MCP `ao_status` say they could not look; and the macOS, Linux and `ps` readers fail the same way ([windows](docs/windows.md)) (WINDOWS-TABLE-CLOSED, part of #71).
+
 ## [0.5.2] - 2026-10-08
 
 ### Security

@@ -38,7 +38,7 @@ changes nothing, **write** records something in its mailbox, decisions or ledger
 
 | Tool | Access | What it does |
 |---|---|---|
-| `ao_status` | read | The implementer's state, context and cost telemetry, git state, the mailbox and the latest reviews. |
+| `ao_status` | read | The implementer's state, context and cost telemetry, git state, the mailbox and the latest reviews, and the agent processes in the tree, `agent_processes`: null where the process table cannot be read, with `agent_processes_unread` saying why. |
 | `ao_board` | read | Where each pre-authorised work item is, what may start now, and what the board cannot resolve. |
 | `ao_candidate` | read | The candidate staged now and what a review judges it against: the running slice and its boundary, the candidate's digest and paths, and the committed source a test-only candidate exercises. Not the diff. |
 | `ao_notices` | read | Alerts this project raised, and on request the ones the rate limit held back. |

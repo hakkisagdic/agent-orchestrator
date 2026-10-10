@@ -1190,7 +1190,12 @@ def cmd_hold(cfg, args):
         else:
             print(f"{C['red']}HELD{C['reset']} by {C['b']}{st.get('by')}{C['reset']} "
                   f"for {st['minutes']}m: {st.get('reason','')}")
-        pids = A.agent_pids(root, adapter)
+        try:
+            pids = A.agent_pids(root, adapter)
+        except TableUnreadable as exc:
+            # Not counted is not none (WINDOWS-TABLE-CLOSED).
+            print(f"{C['yellow']}agent processes in this tree: unknown{C['reset']} — {exc}")
+            return 0
         print(f"{len(pids)} agent process(es) in this tree" + (f": {pids}" if pids else ""))
         return 0
 
@@ -1232,7 +1237,14 @@ def cmd_hold(cfg, args):
         late = "a watchdog cycle that began before this hold was still running after a minute"
     except OSError as exc:
         late = f"the watchdog's cycle lock could not be taken ({exc})"
-    code = _hold_stop(root, adapter, args, path, hold)
+    try:
+        code = _hold_stop(root, adapter, args, path, hold)
+    except TableUnreadable as exc:
+        # It said no agent turn was running, where it could not see one (WINDOWS-TABLE-CLOSED).
+        print(f"{C['red']}hold set, but {exc}{C['reset']}: a turn in this tree may still be running, and ao "
+              "cannot see it to stop it. The hold keeps the watchdog from starting another; stop a running "
+              "turn by hand, or run `ao hold` again once the table can be read")
+        code = 1
     if late:
         # Counted while that cycle ran: a turn it starts after its last reading of the hold is not counted (JOURNAL-6).
         print(f"{C['yellow']}{late}{C['reset']}: the hold stands, and a cycle reads it again before it starts a "
@@ -1336,8 +1348,17 @@ def cmd_writers(cfg, args):
     root = cfg["root"]
     impl = cfg.get("implementer") or {}
     adapter = A.load_adapter(impl.get("adapter", "")) if impl else {}
-    roots, dead = A.writers(root, adapter)
-    unplaced = A.unplaced_agent_pids(root, adapter)
+    try:
+        roots, dead = A.writers(root, adapter)
+        unplaced = A.unplaced_agent_pids(root, adapter)
+    except TableUnreadable as exc:
+        # A count that could not look must not report none, nor pass a single-writer rule (WINDOWS-TABLE-CLOSED).
+        if args.json:
+            print(json.dumps({"writers": None, "unreadable": str(exc)}, ensure_ascii=False))
+        else:
+            print(f"{C['red']}writers unknown{C['reset']} — {exc}; whoever counts writers must not read "
+                  "this as none: run `ao writers` again once the table can be read")
+        return 1
     if unplaced:
         # A count that cannot see a writer must not report none (#71).
         print(f"{C['red']}writers unknown{C['reset']} — {len(unplaced)} agent process(es) cannot be placed "

@@ -13,7 +13,10 @@ milliseconds where `pgrep -f` plus one `lsof` per pid took seconds.
 
 Every function falls back to the platform's `ps` and `lsof` when the native path is
 unavailable or fails its self-check, so nothing here can make ao blind. No tool here
-is started through a shell.
+is started through a shell. Where the table itself cannot be read - the reader fails,
+does not answer in time, or answers nothing a table can be made of - the readers raise
+TableUnreadable rather than answer an empty one: an empty table reads as no process at
+all, and a guard that asks whether anything runs passed when it could not look.
 """
 import ctypes
 import ctypes.util
@@ -27,22 +30,69 @@ UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise 
 _NATIVE = None          # decided on first use: "darwin" | "linux" | None (ps and lsof fallbacks)
 
 
+class TableUnreadable(Exception):
+    """The process table could not be read on this platform; the message names the platform and why.
+
+    On Windows the table is one PowerShell query, and a PowerShell that was missing, failed or did
+    not answer in time gave an empty table: every caller read that as fact - no agent turn running,
+    no reviewer alive, nothing holding a session - and a guard that asks "is anything running?"
+    passed when it could not look. It is an error its callers see now, and each that decides
+    something from the table refuses or holds; one that only shows it says it could not look
+    (WINDOWS-TABLE-CLOSED).
+    """
+
+    def __init__(self, why, platform=None):
+        self.why = why
+        self.platform = platform or platform_name()
+        super().__init__(f"the process table could not be read on {self.platform}: {why}")
+
+
+def platform_name():
+    """The platform as a person names it, for a message that says where something could not be done."""
+    if sys.platform == "win32":
+        return "Windows"
+    if sys.platform == "darwin":
+        return "macOS"
+    return "Linux" if sys.platform.startswith("linux") else sys.platform
+
+
+class _Unanswered(str):
+    """A tool's empty answer that knows why it is empty: "" to every reader, `why` to the one that asks
+    (WINDOWS-TABLE-CLOSED)."""
+
+    def __new__(cls, why):
+        empty = super().__new__(cls, "")
+        empty.why = why
+        return empty
+
+
 def _run(argv):
-    """A platform tool's standard output, "" when it cannot be run.
+    """A platform tool's standard output; an empty answer that says why when it gives none.
 
     Started without a shell and found where ao finds every program (lib.binary_candidates),
     so a launchd job whose PATH is minimal still finds it; it reads nothing from standard
-    input and its standard error is discarded, as the shell helper this replaced did.
+    input. Every reader takes the answer as text, and "" when the tool could not be run, as
+    the shell helper this replaced gave; its first line of standard error, its exit status or
+    its silence says why, for the reader that must not take nothing for an answer: the process
+    table read an empty PowerShell answer as no process at all (WINDOWS-TABLE-CLOSED).
     """
     from . import lib
     program = lib.runnable_binary(argv[0])
     if program is None:
-        return ""
+        return _Unanswered(f"{argv[0]} was not found")
     try:
-        return subprocess.run([program, *argv[1:]], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                              stderr=subprocess.DEVNULL, text=True, encoding=UTF8, errors="replace", timeout=30).stdout
-    except Exception:
-        return ""
+        done = subprocess.run([program, *argv[1:]], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, text=True, encoding=UTF8, errors="replace", timeout=30)
+    except subprocess.TimeoutExpired:
+        return _Unanswered(f"{argv[0]} did not answer within 30 seconds")
+    except Exception as exc:
+        return _Unanswered(f"{argv[0]} could not be started ({type(exc).__name__}: {exc})")
+    if (done.stdout or "").strip():
+        return done.stdout
+    said = next((line.strip() for line in (getattr(done, "stderr", None) or "").splitlines() if line.strip()), "")
+    status = getattr(done, "returncode", 0)
+    why = f"{argv[0]} exited with status {status}" if status else f"{argv[0]} printed nothing"
+    return _Unanswered(f"{why}: {said[:200]}" if said else why)
 
 
 def _clock_seconds(text):
@@ -135,10 +185,17 @@ class _Darwin:
         return out.value
 
     def all_pids(self):
+        # A failed proc_listpids answers -1, and the slice of the buffer it gave then held no pid: no process at
+        # all, where it could not look (WINDOWS-TABLE-CLOSED).
         n = self.libproc.proc_listpids(self.PROC_ALL_PIDS, 0, None, 0)
+        if n <= 0:
+            raise TableUnreadable(f"proc_listpids answered {n} (errno {ctypes.get_errno()})", "macOS")
         buf = (ctypes.c_int * (n // 4 + 64))()
         n = self.libproc.proc_listpids(self.PROC_ALL_PIDS, 0, buf, ctypes.sizeof(buf))
-        return [p for p in buf[:n // 4] if p > 0]
+        pids = [p for p in buf[:max(n, 0) // 4] if p > 0]
+        if not pids:
+            raise TableUnreadable(f"proc_listpids listed no process (it answered {n})", "macOS")
+        return pids
 
     def argv(self, pid):
         mib = (ctypes.c_int * 3)(self.CTL_KERN, self.KERN_PROCARGS2, pid)
@@ -198,7 +255,13 @@ class _Darwin:
 # ---------------------------------------------------------------- Linux (/proc)
 class _Linux:
     def all_pids(self):
-        return [int(d) for d in os.listdir("/proc") if d.isdigit()]
+        try:
+            pids = [int(d) for d in os.listdir("/proc") if d.isdigit()]
+        except OSError as exc:
+            raise TableUnreadable(f"/proc could not be listed ({exc})", "Linux") from None
+        if not pids:
+            raise TableUnreadable("/proc lists no process", "Linux")      # this one runs (WINDOWS-TABLE-CLOSED)
+        return pids
 
     def argv(self, pid):
         try:
@@ -268,28 +331,37 @@ class _Windows:
         self._cache_at = 0.0
 
     def _snapshot(self):
+        """{pid: Win32_Process row} for every process, kept two seconds; TableUnreadable when there is none.
+
+        A PowerShell that was missing, failed, did not answer in time, or printed something that is
+        not the table gave an empty snapshot, and every reader took that for no process at all: no
+        turn in the tree, no reviewer, no session in use (WINDOWS-TABLE-CLOSED). Only the length of
+        an answer that is not JSON is told, since the command lines in it can hold a secret.
+        """
         import json as _json
         import time as _time
         if self._cache is not None and _time.time() - self._cache_at < 2.0:
             return self._cache
+        query = "PowerShell's Get-CimInstance Win32_Process"
         out = _run(["powershell", "-NoProfile", "-NonInteractive", "-Command", self.SNAPSHOT])
-        rows = []
+        if not out.strip():
+            raise TableUnreadable(getattr(out, "why", None) or f"{query} printed nothing", "Windows")
         try:
-            data = _json.loads(out) if out.strip() else []
-            rows = data if isinstance(data, list) else [data]
+            data = _json.loads(out)
         except ValueError:
-            rows = []
+            raise TableUnreadable(f"{query} printed {len(out)} characters that are not JSON", "Windows") from None
         snap = {}
-        for r in rows:
+        for r in data if isinstance(data, list) else [data]:
             try:
                 pid = int(r.get("ProcessId"))
-            except (TypeError, ValueError):
+            except (AttributeError, TypeError, ValueError):
                 continue
             snap[pid] = r
         # A snapshot that lists no process is no reading - this one runs - so it is not kept for the next
-        # two seconds' readers; the next one asks again (WINDOWS-LANE-4).
-        if snap:
-            self._cache, self._cache_at = snap, _time.time()
+        # two seconds' readers; the next one asks again (WINDOWS-LANE-4), and this one is told it could not look.
+        if not snap:
+            raise TableUnreadable(f"{query} listed no process", "Windows")
+        self._cache, self._cache_at = snap, _time.time()
         return snap
 
     @staticmethod
@@ -459,7 +531,12 @@ class _Windows:
 # ---------------------------------------------------------------- tool fallbacks (ps, lsof)
 class _Shell:
     def all_pids(self):
-        return [int(x) for x in _run(["ps", "-eo", "pid="]).split() if x.isdigit()]
+        out = _run(["ps", "-eo", "pid="])
+        pids = [int(x) for x in out.split() if x.isdigit()]
+        if not pids:
+            # A ps that could not run listed no process, which read as none running (WINDOWS-TABLE-CLOSED).
+            raise TableUnreadable(getattr(out, "why", None) or "ps listed no process")
+        return pids
 
     def argv(self, pid):
         out = _run(["ps", "-o", "args=", "-p", str(pid)]).strip()
@@ -599,11 +676,18 @@ def elapsed(pid):
 
 def table():
     """{pid: (ppid, pgid, tty)} for every process; tty is "??" when there is none,
-    matching the shape the older ps-based code produced."""
+    matching the shape the older ps-based code produced.
+
+    TableUnreadable where the platform lists no process, or lists processes of which none can be
+    read: either is a table it could not read, never one in which nothing runs (WINDOWS-TABLE-CLOSED).
+    """
     out = {}
     b = _backend()
-    for pid in b.all_pids():
+    pids = b.all_pids()
+    for pid in pids:
         i = b.info(pid)
         if i:
             out[pid] = (i["ppid"], i["pgid"], "??" if i["tty"] is None else str(i["tty"]))
+    if pids and not out:
+        raise TableUnreadable(f"it lists {len(pids)} processes and none of them could be read")
     return out

@@ -15,3 +15,4 @@ tests/test_windows_fail_closed.py home-path me a Windows path fixture names a ma
 tests/test_windows_followups.py home-path me Windows path fixtures name a made-up account
 tests/test_windows_lane.py home-path me a Windows path fixture names a made-up account
 tests/test_reviewer_tool.py assigned-secret sha256:1702ac307eac58d6 the made-up provider keys the test sets to show a review tool is handed the keys it needs while every setting from the environment is dropped
+tests/test_windows_table_closed.py assigned-secret sha256:d747f17e7d905b8c a made-up command line shows that an answer which is not the table is told by its length, never its text, since a command line can hold a secret

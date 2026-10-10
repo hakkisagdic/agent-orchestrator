@@ -115,6 +115,16 @@ that it did not fail - it has ended, or has run for fifteen minutes, with no fai
 log - and a retry that fails is not told at all. Rebuilt, a day of 529s sent the phone 95
 "architect woken" lines about an architect nobody woke.
 
+A process table that cannot be read is one alarm, `process-table-unreadable`. Every guard that
+keeps a second turn out of a tree, a second architect out of a session and a person's session out
+of the reaper asks that table what runs, and an unread table used to be an empty one, which each
+guard read as nothing running. Where the platform cannot read it now - on Windows, a PowerShell
+that is missing, fails, does not answer within thirty seconds or prints no table - the watchdog
+starts no turn, wakes nobody and reaps nothing, and the alarm tells a person which platform and
+why. It rings the desktop and the phone once for the platform it names and climbs to red while the
+table stays unread. A notice that would have waited for an architect goes to a person meanwhile,
+since none is woken, and its "needs you" says why ([windows.md](windows.md)).
+
 Some conditions ring red at once, because waiting cannot help:
 
 - the implementer's credits are exhausted for the billing period, on the account its own

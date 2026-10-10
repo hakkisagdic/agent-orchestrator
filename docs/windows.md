@@ -8,13 +8,37 @@ What works, what does not, and how hosted runners exercise it.
 | what ao prints and reads on its standard streams | UTF-8, as Python's UTF-8 mode sets them, whatever the code page (below) |
 | gates, `ao lock`, `ao verify`, `ao commit-ok`, reviews | work — subprocesses of the project's own tools |
 | MCP server, playbook, `ao init` registration | work (`.mcp.json`, `.kiro/settings/mcp.json`); a request is read as UTF-8 and every reply is seven-bit JSON, whatever the code page |
-| process introspection (`ao writers`, orphans, hung turns) | first cut: `Win32_Process` through PowerShell as JSON, tree kill via `taskkill /T`; the working directory is read from the process environment block (a 64-bit process, by a 64-bit Python), proven on the Windows lane, and where it cannot be read a turn is matched by the repository path on its command line |
+| process introspection (`ao writers`, orphans, hung turns) | first cut: `Win32_Process` through PowerShell as JSON, tree kill via `taskkill /T`; the working directory is read from the process environment block (a 64-bit process, by a 64-bit Python), proven on the Windows lane, and where it cannot be read a turn is matched by the repository path on its command line; a table PowerShell cannot read never reads as no process: what decides from it refuses or holds, and says why (below) |
 | `ao hold` | proven on the Windows lane: a turn placed by its working directory is stopped |
 | scheduler (`ao watchdog install`) | first cut: Task Scheduler (`schtasks`, every 2 min; doctor every 15 min). Each task names a program that exists — the console script on PATH, a clone's script, or `python -m ao.watchdog` from an interpreter that imports an installed ao — or install refuses; install exits 1 when `schtasks` cannot create a task, and `ao remove --yes` deletes both tasks in its own process and checks they are gone |
 | desktop notifications | a toast through PowerShell behind the `toast` feature switch, off by default; Telegram and e-mail carry the orange and red levels |
 | `bin/ao.ps1`, the subset for a machine without Python | `status`, `board` and `doctor`; reads files as UTF-8 and takes paths literally; written and reviewed, not yet run on Windows (below) |
 | commit hook (`ao hooks install`) | installed inside the repository; a shared, external or globally configured hooks directory is refused (#71); since HOOK-V4 the hook reads a drive-letter index as absolute, and its execution proof passes on the lane (below) |
 | pre-push hook | works under Git's own shell |
+
+*In ao since slice WINDOWS-TABLE-CLOSED: a process table that cannot be read is an error everything
+that reads it sees, never an empty table. On Windows the table is one PowerShell query, and a
+PowerShell that was missing, failed, did not answer within thirty seconds or printed something that
+is not the table gave an empty one, which every caller took for fact: `ao hold` said no agent turn
+was running and stopped nothing, `ao writers` counted none, `ao review cancel` recorded a review
+failed while its reviewer worked on, and a watchdog cycle could start a turn or wake an architect
+beside one it never saw. The reader now says the table could not be read, on which platform and
+why: PowerShell not found, not answering in time, its exit status with the first line it wrote to
+standard error, its silence, or the length of an answer that is not the table - never its text,
+since a command line can hold a secret. The macOS and Linux readers and the `ps` they fall back to
+say the same of their own failures. What decides from the table refuses or holds: the watchdog
+starts no turn, wakes nobody and reaps nothing, and tells a person under `process-table-unreadable`
+([alarms.md](alarms.md)), and a notice that would wait for the architect goes to a person instead
+(the hold code `process-table`, [watchdog.md](watchdog.md)); `ao hold` stands, stops nothing it
+cannot see, says so and exits 1; `ao writers` says the writers are unknown and exits 1, its
+`--json` with `"writers": null`; `ao review cancel` stops and records nothing; any other command
+stops with the reason and exits 1. What only shows it says it could not look: `ao hold status`;
+the implementer's state in `ao status`, `ao digest`, `ao fleet` and `ao handoff`, `unknown` with
+the reason; `ao reviews`; and the MCP tool `ao_status`, whose `agent_processes` is null and
+`agent_processes_unread` says why. Where neither the process itself nor the table answers whether
+a process runs, it is taken as running: a gate lock or the architect's lock it holds is not
+cleared. `tests/test_windows_table_closed.py` makes each failure as its platform makes it, on
+every platform, and holds each caller to it.*
 
 *In ao since slice ANCESTOR-WINDOWS: the process that started a process is read from Toolhelp, the
 process list Windows keeps, in-process, and no longer from the PowerShell snapshot alone. It is how

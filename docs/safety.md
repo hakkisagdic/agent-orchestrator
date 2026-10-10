@@ -31,10 +31,10 @@ Never inject into a session that is mid-turn. Two hazards, two mitigations:
 
 | Hazard | Mitigation |
 |---|---|
-| Two writers on one session transcript | Ask the OS which agent processes have this repo as their cwd. Start nothing while any of them is alive. |
+| Two writers on one session transcript | Ask the OS which agent processes have this repo as their cwd. Start nothing while any of them is alive, and nothing while the OS cannot be asked: a process table the platform could not read is an error that names the platform and why, never a table in which nothing runs, so the watchdog stands down and tells a person (`process-table-unreadable`). |
 | Two writers on one working tree | Write lanes get separate git worktrees: `ao lane start` makes one per board item and refuses a second lane for an item that has one. |
-| A human needs the tree | `ao hold` stops every agent in it and holds the lock; every restart path reads the lock again right before it starts a turn. A hold that cannot wait out a watchdog cycle already running says so and exits 1. |
-| A turn ended but its processes did not | `ao writers` shows them as orphans (no terminal, dead group leader) and counts zero writers; the watchdog clears them before every count, and `ao hold` / the reaper stop turns by process group so no new ones are made. |
+| A human needs the tree | `ao hold` stops every agent in it and holds the lock; every restart path reads the lock again right before it starts a turn. A hold that cannot wait out a watchdog cycle already running says so and exits 1, and so does one that cannot read the process table: it stands, and stops nothing it cannot see. |
+| A turn ended but its processes did not | `ao writers` shows them as orphans (no terminal, dead group leader) and counts zero writers; the watchdog clears them before every count, and `ao hold` / the reaper stop turns by process group so no new ones are made. Where the process table cannot be read, `ao writers` says the writers are unknown and exits 1. |
 
 **Do not infer this from file timestamps.** That was the original design — status AND
 write-age, ANDed — and it failed twice in one night. A turn retrying a provider 5xx sits

@@ -22,6 +22,7 @@ from . import language
 from . import lib as A
 from . import matrix as M
 from . import settings as S
+from .procs import TableUnreadable
 from .storage import LedgerLockTimeout
 from .verdicts import REVIEWER_VERDICTS
 UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
@@ -612,7 +613,9 @@ def main(argv=None):
     ledger lock another process holds names the lock and what to do; Ctrl+C exits 130, as a
     shell's own commands do; anything unexpected prints its type and message, and AO_DEBUG=1
     keeps its traceback for whoever has to find where it came from. The standard streams are
-    UTF-8 before anything is read or printed, whatever the platform's code page (#71).
+    UTF-8 before anything is read or printed, whatever the platform's code page (#71). A
+    process table the platform could not read stops the command where it was asked, and says
+    so: what the command decides from it is not decided (WINDOWS-TABLE-CLOSED).
     """
     A.utf8_streams()
     command, root = "ao", None
@@ -645,6 +648,10 @@ def main(argv=None):
         waited = f" for {exc.timeout:g}s" if exc.timeout is not None else ""
         print(f"{command}: another process held the ledger lock {lock}{waited}; "
               "let it finish, then run this again", file=sys.stderr)
+        return 1
+    except TableUnreadable as exc:
+        print(f"{command} stopped: {exc}. It decides nothing from processes it cannot see; "
+              "run it again once the table can be read", file=sys.stderr)
         return 1
     except Exception as exc:
         if os.environ.get("AO_DEBUG", "") not in ("", "0"):

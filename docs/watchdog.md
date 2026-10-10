@@ -13,7 +13,9 @@ nothing else:
 1. **It never nudges an implementer that is working, waiting, or held.** Working
    is measured by live turns (not processes, not shells that mention the agent).
    Waiting is a standing request with nothing newer addressed to the implementer
-   and nothing queued. Held is `.ao/hold`.
+   and nothing queued. Held is `.ao/hold`. Where the platform cannot read its
+   process table nothing is measured, so the cycle starts no turn, wakes nobody and
+   reaps nothing, and tells a person which platform and why.
 2. **It counts only agents.** A candidate process is a writer only when an agent
    binary is on its command line — as the program, a sibling binary, or a path
    component of its runtime. Terminals, editors, monitors, greps are not.
@@ -27,7 +29,10 @@ nothing else:
 5. **It wakes the architect into measured absence, once per condition, within
    quota.** Presence means a live interactive process for the configured
    architect binary at the configured project cwd — never transcript age, a
-   remembered pid, lock file, or declaration. Headless and AO-helper trees do
+   remembered pid, lock file, or declaration. Absence the process table could not
+   measure is not absence: no architect is woken, and a notice that would wait for
+   one goes to a person instead, saying why (`architect_hold_reason` answers with
+   the code `process-table`). Headless and AO-helper trees do
    not count as human presence; a fresh process-start-validated AO helper tree
    registered specifically as `architect` prevents two watchdog helpers. Process
    exit releases both checks on the next tick, and dry-run reports the same
@@ -53,7 +58,7 @@ Order matters: each guard sees only what the ones above left standing.
 | # | guard | measures | verdict when it fires |
 |---|---|---|---|
 | −1 | hold | `.ao/hold` | stand down; red after four hours |
-| 0 | working here | orphans swept, live turns counted by root | stand down while a turn is live; reap a turn silent past 3× idle, by process group |
+| 0 | working here | orphans swept, live turns counted by root | stand down while a turn is live; reap a turn silent past 3× idle, by process group; where the process table cannot be read, stand down and tell a person (`process-table-unreadable`) |
 | 1 | idle | the implementer's last write, a subagent's included, vs `--idle-minutes` | not idle yet: stand down |
 | 1b | usage limit | the implementer's newest words, when its harness wrote them in the model's place; the last nudge, when it died within seconds; each in the words its adapter declares | stopped on its limit: park the implementer's running items until the reset, or one retry where none was named, then resume the session once — see [below](#a-slice-parked-on-quota) |
 | 2 | waiting on architect | newest implementer report is a request, inbox empty, queue empty | stand down and say so — a nudge cannot answer it |
@@ -223,6 +228,7 @@ test that would fail if it came back.
 | F30 | an implementer that stopped on its usage limit mid-slice read as stuck: every nudge died on the same limit until the backoff ran out and a person was told "agent stuck", and nothing resumed the slice when the limit reset | a usage limit was read only in an architect wake's log, in one harness's words; a nudge that died on one was a failure like any other, and the implementer's own transcript was not read for one | the stop is read from the harness's own reply or the nudge that died on it, in the words its adapter declares: the implementer's running items are parked `blocked`, `needs: quota (resets …)`, under an alarm that climbs the ladder, never nudged, and resumed once in the same session at the reset, at one retry where none was named, when the transcript goes on past the stop, or when keyflip rotates to headroom | test_quota_park | — |
 | F31 | a weekly limit whose stop named only a clock time could be woken again within minutes, days before its week was over, and a block's end was told as "04:00" whatever its day | the stop's reset was read within the five-hour window whatever limit it named, the spent window the machine reads for the provider was not read, and the end was told by its clock alone | a reset is read within the period the stop names; a spent window keyflip reports for the architect's provider holds the wake until the reset it states; the notice names the date beyond a day, and is told again when the end moves | test_architect_wake_quota | — |
 | F32 | a cycle cut off between starting the architect and recording it left a headless architect no record named, and the next cycle woke a second into the same session; a cycle killed while writing its state left it torn, and the markers that a park was resumed or a report handed were gone | the process started before anything said so, and the state was written over in place | the journal (`~/.ao/journal-<key>.db`, SQLite, written ahead and synced): a wake or refill is claimed under its session and reports before its process starts, with a lease, and its pid and start are written the moment it has them; a process the journal names holds its step past the lease while its start reads the same, and the next cycle registers it; a process of the architect's own harness already resuming the session is a wake under way; a journal that cannot be written leaves wakes to the process scan and tells a person; the state is replaced whole | test_journal | JOURNAL |
+| F33 | on Windows a PowerShell that was missing, failed or did not answer read as no process at all: the writer guard, the session guard and the presence check all passed, so a cycle could start a turn or wake an architect beside one it never saw, and `ao hold` stopped nothing | the process table was returned empty when it could not be read, on macOS, Linux and through `ps` as well | the readers raise `TableUnreadable`, naming the platform and why; a cycle that meets it starts, wakes and reaps nothing and raises `process-table-unreadable` for a person; presence it could not measure clears no quota block and holds no notice for the architect; a turn whose start cannot be read is believed for a bounded time | test_windows_table_closed | — |
 
 ## Scenarios: testing the decision, not the measurement
 

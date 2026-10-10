@@ -3074,19 +3074,24 @@ def _review_reviewer(pid):
 
 
 def _live_reviewer(state):
-    """The pid of the reviewer a run's state names, while that pid is still the process it started."""
+    """The pid of the reviewer a run's state names, while that pid is still the process it started.
+
+    TableUnreadable where the process table cannot be read: a reviewer nobody could see was taken
+    for one that had ended, and `ao review cancel` left it working for nobody (WINDOWS-TABLE-CLOSED).
+    """
     reviewer = state.get("reviewer") if isinstance(state.get("reviewer"), dict) else {}
     pid, start = reviewer.get("pid"), reviewer.get("start")
     if not isinstance(pid, int) or start in (None, 0, ""):
         return None
-    return pid if A._process_start(pid, refresh=True) == start else None
+    return pid if A._process_start(pid, refresh=True, strict=True) == start else None
 
 
 def _review_runner(state):
     """The run's pid while that process is still this review's runner, `ao review --run <id>` (REVIEWER-ORPHAN).
 
     A runner that is gone leaves its pid to whatever process is given it next, so the pid is the
-    runner only while the process holding it was started with the review's id.
+    runner only while the process holding it was started with the review's id. TableUnreadable where
+    the process table cannot be read, never a runner taken for gone (WINDOWS-TABLE-CLOSED).
     """
     from . import procs
     pid = state.get("pid")
@@ -3094,6 +3099,8 @@ def _review_runner(state):
         return None
     try:
         argv = procs.argv(pid) or []
+    except TableUnreadable:
+        raise
     except Exception:
         return None
     return pid if "--run" in argv and state.get("id") in argv else None
@@ -3191,7 +3198,12 @@ def _review_shown(state, now):
             went = f"its runner never reported; its log is .ao/reviews/{state.get('id')}.log"
         else:
             went = f"it was {what}" + (f": {on}" if on else "")
-        orphan = _live_reviewer(state)
+        try:
+            orphan = _live_reviewer(state)
+        except TableUnreadable as exc:
+            # Unseen is not ended: it says it could not look (WINDOWS-TABLE-CLOSED).
+            orphan = None
+            went = "; ".join(part for part in (went, f"whether its reviewer runs on cannot be told: {exc}") if part)
         if orphan:
             # Killed outright, the runner could not stop the reviewer it started (REVIEWER-ORPHAN).
             went = "; ".join(part for part in (went, f"its reviewer, pid {orphan}, runs on without it: "
@@ -3414,7 +3426,10 @@ def cmd_review_cancel(cfg, args):
     if state.get("state") != "running":
         print(f"{rid} has ended: {state.get('state')}; nothing to cancel")
         return 1
-    runner, how = _review_runner(state), "its runner was already gone"
+    try:
+        runner, how = _review_runner(state), "its runner was already gone"
+    except TableUnreadable as exc:
+        return _cancel_unseen(rid, exc, "its runner")
     if runner:
         A.kill_turn(runner, signal.SIGTERM)
         deadline = time.monotonic() + REVIEW_CANCEL_GRACE_SECONDS
@@ -3427,7 +3442,10 @@ def cmd_review_cancel(cfg, args):
         else:
             how = f"its runner, pid {runner}, was stopped"
     state = _review_state(root, rid) or state
-    reviewer = _live_reviewer(state)
+    try:
+        reviewer = _live_reviewer(state)
+    except TableUnreadable as exc:
+        return _cancel_unseen(rid, exc, "its reviewer", how if runner else None)
     if reviewer:
         A.kill_turn(reviewer, getattr(signal, "SIGKILL", signal.SIGTERM))
         A.helper_release(root, reviewer)
@@ -3442,6 +3460,19 @@ def cmd_review_cancel(cfg, args):
         _review_finished_event(root, state)
     print(f"{rid} cancelled: {state.get('reason')}")
     return 0
+
+
+def _cancel_unseen(rid, exc, unseen, done=None):
+    """Refuse to finish a cancel while the process table cannot be read (WINDOWS-TABLE-CLOSED).
+
+    A run and a reviewer nobody could see were taken for gone: the review was recorded failed and
+    its reviewer worked on for nobody. Nothing more is stopped and nothing is recorded; the same
+    cancel, run again once the table can be read, finishes it.
+    """
+    print(f"{C['red']}{rid} is not cancelled{C['reset']}: {exc}, so whether {unseen} still runs cannot be told"
+          + (f"; {done}" if done else "") + f". The review stays running: run `ao review cancel {rid}` again "
+          "once the table can be read")
+    return 1
 
 
 def cmd_review_collect(cfg, args):

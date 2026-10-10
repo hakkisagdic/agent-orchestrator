@@ -10,6 +10,8 @@ since its path was compared case-folded against a branch that keeps its item's c
 import json
 import os
 
+import pytest
+
 from ao import cli, lib as A, procs
 
 LANE_OF_ANOTHER_CHECKOUT = "a lane another checkout started: `ao lane remove` there retires it"
@@ -33,7 +35,9 @@ def test_a_snapshot_that_lists_no_process_is_not_kept(monkeypatch):
     backend = procs._Windows()
     backend.invalidate()
 
-    assert backend.all_pids() == [] and backend.all_pids() == [42]
+    with pytest.raises(procs.TableUnreadable):         # no reading, and it says so (WINDOWS-TABLE-CLOSED)
+        backend.all_pids()
+    assert backend.all_pids() == [42]
 
 
 def test_a_file_in_the_home_is_named_with_slashes_on_windows_too(monkeypatch):

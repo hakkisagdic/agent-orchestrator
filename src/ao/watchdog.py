@@ -42,6 +42,7 @@ from . import journal as J
 from . import language
 from . import lib as A
 from . import settings as S
+from .procs import TableUnreadable
 
 STATE_DIR = os.path.join(A.HOME, ".ao")
 _DRY_RUN = ContextVar("ao_watchdog_dry_run", default=False)
@@ -684,11 +685,13 @@ def child_alive(st):
     if not A._pid_alive(pid):
         return False
     started = st.get("child_start")
-    if started is not None:
-        return A._process_start(pid) == started
+    now = A._process_start(pid) if started is not None else None
+    if now is not None:
+        return now == started
     # No start was read when the turn was spawned, so the pid alone speaks for it, and a pid another process
     # was given since kept the refill waiting for good. It is believed for as long as a turn may run
-    # (CYCLE-SAFETY-2).
+    # (CYCLE-SAFETY-2). So is a turn whose start cannot be read now: a table the platform could not read
+    # holds none, and the turn read as ended while its pid ran (WINDOWS-TABLE-CLOSED).
     return time.time() - float(st.get("last_nudge") or 0) < UNVERIFIED_CHILD_SECONDS
 
 
@@ -769,7 +772,12 @@ def architect_hold_reason(root, cfg, adapter, st, found=None, now=None):
 
     if not argv:
         return no("no-architect", "no architect is configured")
-    if A.architect_present(root, arch):
+    try:
+        present = A.architect_present(root, arch)
+    except TableUnreadable as exc:
+        # No wake starts beside a process nobody could see, so a person is told what waits (WINDOWS-TABLE-CLOSED).
+        return no("process-table", f"{exc}, so no architect is woken")
+    if present:
         return no("interactive", "the architect session is interactive and acts only when someone prompts it")
     if not F.enabled(cfg, "architect_wake"):
         return no("wake-off", "architect wakes are switched off")
@@ -777,7 +785,11 @@ def architect_hold_reason(root, cfg, adapter, st, found=None, now=None):
         return no("no-quota", "there is no quota headroom to wake the architect")
     if st.get("arch_quota_until", 0) > now:
         return no("quota-block", "the architect is at quota until " + reset_when(st["arch_quota_until"], now))
-    if arch_alive(root, arch):
+    try:
+        running = arch_alive(root, arch)
+    except TableUnreadable as exc:
+        return no("process-table", f"{exc}, so no architect is woken")
+    if running:
         return {"holdable": True, "code": "wake-running", "reason": "an architect wake is already running"}
     provider = A.provider_of(argv)
     left, reserve = A.window_headroom(provider)
@@ -1571,7 +1583,11 @@ def tell_retried_wake(root, cfg, st, dry_run=False):
     retry = st.get("wake_retry")
     if not isinstance(retry, dict):
         return False
-    if arch_alive(root, cfg.get("architect") or {}) and time.time() - float(retry.get("at") or 0) < 900:
+    try:
+        running = time.time() - float(retry.get("at") or 0) < 900 and arch_alive(root, cfg.get("architect") or {})
+    except TableUnreadable:
+        running = True                    # it may run: it is told once that can be seen (WINDOWS-TABLE-CLOSED)
+    if running:
         return False                      # still running, and a failing one can take minutes to say so
     failure = wake_error(os.path.join(STATE_DIR, A.project_file_name("escalate-log", A.project_key(root))))
     worked = not wake_failed(failure, retry.get("at") or 0)
@@ -2021,12 +2037,15 @@ def _cycle(args, root):
     """Run one cycle with dry-run effects suppressed across nested helpers.
 
     A resume notice the cycle owes is sent here, once every guard has had its say and
-    whichever of them ended the cycle (RESUME-QUIET).
+    whichever of them ended the cycle (RESUME-QUIET). A process table the platform could
+    not read ends the cycle at the guard that asked it (WINDOWS-TABLE-CLOSED).
     """
     token = _DRY_RUN.set(bool(args.dry_run))
     resuming = _RESUME.set(None)
     try:
         return _cycle_impl(args, root)
+    except TableUnreadable as exc:
+        return _stand_down_unseen(root, exc)
     finally:
         owed = _RESUME.get()
         _RESUME.reset(resuming)
@@ -2037,6 +2056,27 @@ def _cycle(args, root):
             _note_above_verdict(f"the resume notice was not sent: {type(exc).__name__}: {str(exc)[:120]}")
         finally:
             _DRY_RUN.reset(token)
+
+
+def _stand_down_unseen(root, exc):
+    """End a cycle that could not read the process table: it starts, wakes and reaps nothing, and a person is told
+    why (WINDOWS-TABLE-CLOSED).
+
+    Every guard that keeps a second turn out of a tree, a second architect out of a session and a
+    person's session out of the reaper asks the table what runs. A table the platform could not read
+    - on Windows, a PowerShell that was missing or did not answer - was an empty one, and each of those
+    guards read it as nothing running. The alarm rings once for the platform it names and climbs as
+    any other while the table stays unread.
+    """
+    try:
+        notify(f"{A.project_key(root)}: the process table cannot be read",
+               f"{exc}. Until it can see what runs in the tree the watchdog starts no turn, wakes nobody and "
+               "reaps nothing.", root, key="process-table-unreadable", window=6 * 3600, audience="human",
+               what=f"unreadable on {exc.platform}")
+    except Exception as told:
+        print(f"the alarm for the process table could not be raised ({type(told).__name__})")
+    print(f"{exc}; this cycle starts no turn, wakes nobody and reaps nothing, and the next cycle looks again")
+    return 1
 
 
 def _sample_credits(root, st, adapter_id, project, now=None):
@@ -2598,8 +2638,15 @@ def _cycle_impl(args, root):
     # In dry-run, notify previews that same touch without persisting it.
     # A present, working architect is not at quota, whatever the cache says (#40).
     architect = cfg.get("architect") or {}
-    if st.get("arch_quota_until", 0) > time.time() and architect.get("argv") \
-            and A.architect_present(root, architect):
+    try:
+        present = st.get("arch_quota_until", 0) > time.time() and architect.get("argv") \
+            and A.architect_present(root, architect)
+    except TableUnreadable as exc:
+        # Presence that was not measured clears nothing; the guards below stand down on the same table
+        # once they ask it, after the alarms and the ping this cycle owes (WINDOWS-TABLE-CLOSED).
+        present = False
+        print(f"{exc}; the architect's cached quota block stands")
+    if present:
         st.pop("arch_quota_until", None)
         save_state(root, st)
         print("the architect is present and working; its cached quota block is cleared")
@@ -2617,7 +2664,13 @@ def _cycle_impl(args, root):
         _schedule_hunt(root, cfg, st)
     # Only meaningful when no implementer turn is running: a sub-agent's writes
     # do not appear as the parent's tool calls and would read as a stranger's.
-    fe = [] if A.agent_pids(root, adapter) else A.foreign_edits(root, cfg)
+    # Whose they are cannot be told where the process table cannot be read, and
+    # the writer guard below stands down on it (WINDOWS-TABLE-CLOSED).
+    try:
+        fe = [] if A.agent_pids(root, adapter) else A.foreign_edits(root, cfg)
+    except TableUnreadable as exc:
+        fe = []
+        _FACTS["process_table"] = str(exc)
     _FACTS["foreign_edits"] = fe
     if not args.dry_run:
         _FACTS["ungranted_commits"] = report_ungranted_commits(root, project, st)

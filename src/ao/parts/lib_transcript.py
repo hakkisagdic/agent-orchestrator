@@ -2141,7 +2141,14 @@ def busy(cfg, adapter):
     # truth, at exactly the moment someone is looking to find out what happened.
     # Only ask the OS when the mtime would otherwise claim "working"; that is the
     # only case where the answer changes anything, and it keeps the panel cheap.
-    if age < idle_s and not agent_pids(cfg["root"], adapter):
+    # Where the OS cannot be asked the state is unknown, and says why, rather than
+    # whatever the mtime claims (WINDOWS-TABLE-CLOSED).
+    from . import procs
+    try:
+        turns = agent_pids(cfg["root"], adapter) if age < idle_s else None
+    except procs.TableUnreadable as exc:
+        return "unknown", age, str(exc)
+    if age < idle_s and not turns:
         return "stopped", age, desc
 
     if age < 120:
@@ -2551,6 +2558,10 @@ def agent_pids(root, adapter, headless_only=False):
     replaced — `pgrep -f`, one `lsof` per candidate, `ps` output split on
     whitespace — took seconds and mistook a shell that mentioned the agent, and
     a runtime under "Application Support", for turns.
+
+    procs.TableUnreadable where the platform could not read its process table: the
+    empty list that stood for it read as no turn in this tree, so `ao hold` stopped
+    nothing and the watchdog could start a second turn (WINDOWS-TABLE-CLOSED).
     """
     from . import procs
     names = set()
@@ -2776,7 +2787,8 @@ def _headless_argv(argv):
 
 
 def _proc_table():
-    """pid -> (ppid, pgid, tty) for every process, from the platform API (see procs.py)."""
+    """pid -> (ppid, pgid, tty) for every process, from the platform API (see procs.py); procs.TableUnreadable
+    where the platform could not read it, never an empty table (WINDOWS-TABLE-CLOSED)."""
     from . import procs
     return procs.table()
 
@@ -2904,7 +2916,11 @@ def _pid_alive(pid):
         # liveness we are checking. The process itself is asked instead: the
         # snapshot is kept two seconds, and a gate lock taken by a run started
         # inside them read as a dead run's and was cleared (WINDOWS-PID-ALIVE).
-        # Where Windows does not answer, a fresh snapshot does.
+        # Where Windows does not answer, a fresh snapshot does; where neither
+        # answers, the process is taken as running. A table PowerShell could not
+        # read listed no process, and a lock its holder kept would read as a dead
+        # run's: what waits on a process waits on, and what holds it holds, until
+        # one of them can say (WINDOWS-TABLE-CLOSED).
         from . import procs
         answer = procs.alive(pid)
         if answer is not None:
@@ -2912,8 +2928,8 @@ def _pid_alive(pid):
         try:
             procs.refresh()
             return pid in set(procs.all_pids())
-        except (OSError, subprocess.SubprocessError, ValueError):
-            return False
+        except (procs.TableUnreadable, OSError, subprocess.SubprocessError, ValueError):
+            return True
     try:
         os.kill(pid, 0)
     except OSError:
@@ -2923,8 +2939,15 @@ def _pid_alive(pid):
     return not procs.zombie(pid)
 
 
-def _process_start(pid, refresh=False):
-    """Stable process-start identity, optionally forcing a fresh backend scan."""
+def _process_start(pid, refresh=False, strict=False):
+    """Stable process-start identity, optionally forcing a fresh backend scan; None where it cannot be read.
+
+    A process table the platform could not read holds no start either, and reads as None, which
+    every caller takes for a start it cannot prove: a lane's command is unknown and not stopped, a
+    helper is no helper, a step's process is unproven, a turn is believed only for a bounded time.
+    With `strict` it raises procs.TableUnreadable instead, for a caller that must not take a
+    process it cannot see for one that has gone (WINDOWS-TABLE-CLOSED).
+    """
     from . import procs
     # A fresh Windows snapshot lists every live process, so a pid it lacks has exited, and
     # each retry there is one more PowerShell query of a second or more (#71).
@@ -2934,6 +2957,10 @@ def _process_start(pid, refresh=False):
             if refresh:
                 procs.refresh()
             start = (procs.info(int(pid)) or {}).get("start")
+        except procs.TableUnreadable:
+            if strict:
+                raise
+            start = None
         except (OSError, TypeError, ValueError):
             start = None
         if start not in (None, 0, ""):
