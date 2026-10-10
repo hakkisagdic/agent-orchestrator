@@ -86,3 +86,15 @@ def test_doctor_names_a_switch_off_with_no_record(project):
 def test_a_config_that_names_no_root_is_held_to_review():
     assert F.enabled({"features": {"review": False}}, "review") is True
     assert F.enabled({"features": {"nudge": False}}, "nudge") is False
+
+
+def test_no_grant_an_agent_holds_may_switch_review_off():
+    """FEATURE-RECORDED-3: `--by` refuses an agent's or a role's name, but a grant that admitted `ao features` let an
+    agent write a person's name there; the grants audit names it as it names `ao waive`."""
+    from ao import allowlist as AL
+
+    found = AL.problems(["claude", "-p", "{prompt}", "--allowedTools", "Read,Bash(ao features:*)"], {})
+
+    assert ("switches review off", "ao features off review --by p", "Bash(ao features:*)") in found
+    assert ("switches the inventory review off", "ao features off inventory_review --by p", "Bash(ao features:*)") \
+        in found

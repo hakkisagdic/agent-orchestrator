@@ -26,6 +26,9 @@ FORBIDDEN = (
     ("records a person's review", "ao person-review --by p --verdict APPROVED --digest d"),
     ("opts into same-family review", "ao config set review.same_family labeled --by p"),
     ("opts into same-family review", "ao init --review-tier same-family --by p"),
+    # A person's act on the record since FEATURE-RECORDED; a grant that admits it hands an agent the record too.
+    ("switches review off", "ao features off review --by p"),
+    ("switches the inventory review off", "ao features off inventory_review --by p"),
     ("names the family that wrote a waived range", "ao catchup --author-family f --by b"),
     ("states which waived slices only moved code", "ao catchup --move-only s --by b"),
     ("removes the hooks", "ao hooks uninstall"),

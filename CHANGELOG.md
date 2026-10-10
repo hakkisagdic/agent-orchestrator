@@ -28,6 +28,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Security
 
+- The grants audit names a grant that admits `ao features off review --by <name>` or `ao features off inventory_review --by <name>`, as it names `ao waive`: `--by` refuses an agent's or a role's name, but an agent granted `ao features` could write a person's ([features](docs/features.md)) (FEATURE-RECORDED-3).
 - The move proof reads every file that runs where a module's parts load - the module and each part it loads, touched by the candidate or not - for a name its loads call through bound to another loader, and reads reflection there as a closed world: `globals()`, `exec`, `compile` and `__import__` from any object, `getattr` by a name computed at run time, a dunder that reaches an object's internals, the modules that import by a name or evaluate a string; and a module whose parts ao loads refuses at run time to rebind a name that holds ao's lib or its loader, however it is reached. Code that had already landed could make a split's loads run another loader the proof never read ([slices](docs/slices.md)) (SPLIT-CHECK-12, #111).
 
 ### Windows
