@@ -32,8 +32,8 @@ To see it first, `ao demo` plays one change through ao on a scratch project ([de
 ```bash
 pip install ao-orchestrator          # or: uv tool install ao-orchestrator
 cd your-repository
-ao init --profile claude-kiro        # Claude Code implements, Kiro reviews; or claude-claude
-git add .ao-project && git commit -m "adopt ao"
+ao init --profile claude-kiro        # Kiro implements, Claude reviews; or claude-claude
+git add .ao-project .gitignore && git commit -m "adopt ao"
 ao hooks install                     # from here on, only a granted candidate commits
 ```
 

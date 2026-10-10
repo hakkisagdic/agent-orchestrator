@@ -563,6 +563,10 @@ def cmd_init(cfg, args):
     # and so are the lanes it starts from here: each names a directory on this machine (LANE-START).
     add = [l for l in ("agent-mail/*.md", "!agent-mail/README.md", ".ao/inbox/", ".ao/hold", ".ao/sessions.json",
                        ".ao/lanes/") if l not in lines]
+    # So is the MCP file init writes into the tree for a harness that reads one there, `.mcp.json` for Claude Code: its
+    # entry names this machine's ao. Left untracked, it was the product file the first `ao verify` refused
+    # (README-QUICKSTART-7); one the repository already tracks is the repository's, and stays so.
+    add += [l for l in ([] if args.no_mcp else _mcp_files_in_tree(root, args)) if l not in lines and l not in add]
     if add:
         with open(gi, "a", encoding=UTF8) as fh:
             fh.write("\n# agent-orchestrator: mail is transient; the ledger and reviews are not\n"
@@ -658,6 +662,25 @@ def _adopt_refused(args):
              ("allow_uncovered_gates", getattr(args, "allow_uncovered_gates", None)),
              ("prove", getattr(args, "prove", None)), ("no_review", getattr(args, "no_review", None)))
     return ["--" + option.replace("_", "-") for option, value in given if value]
+
+
+def _mcp_files_in_tree(root, args):
+    """The MCP files inside the tree that init registers ao's server in for the agents it sees, and that the
+    repository does not track: each holds an entry naming this machine's ao (README-QUICKSTART-7)."""
+    from . import skillkit
+    _, agents = skillkit.detect_agents(root, args.agent)
+    files = set()
+    for ident, adapter in skillkit.setup_adapters(root):
+        declared = str((adapter.get("mcp") or {}).get("file") or "") if ident in agents else ""
+        if declared and not declared.startswith(("~", "/")) and ".." not in declared.split("/"):
+            files.add(declared)
+    if not files:
+        return []
+    try:
+        tracked = A._git_output(root, "ls-files", "-z", "--", *sorted(files)).decode(UTF8, "replace").split("\0")
+    except RuntimeError:                 # what git cannot answer for is left as it is
+        return []
+    return sorted(files - set(tracked))
 
 
 def _git_on_active_index(root, *args):

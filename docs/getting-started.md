@@ -32,7 +32,7 @@ ao init --profile claude-claude --review-tier person
 ## 2. Wire what makes the guarantees hold
 
 ```bash
-git add .ao-project && git commit -m "adopt ao"
+git add .ao-project .gitignore && git commit -m "adopt ao"
 ao hooks install                     # the pre-commit hook that refuses unauthorised commits
 ```
 

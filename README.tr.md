@@ -34,8 +34,8 @@ her karar, kurcalandığını belli eden bir deftere yazılır.
 ```bash
 pip install ao-orchestrator          # ya da: uv tool install ao-orchestrator
 cd deponun-yolu
-ao init --profile claude-kiro        # Claude Code yazar, Kiro gözden geçirir; ya da claude-claude
-git add .ao-project && git commit -m "adopt ao"
+ao init --profile claude-kiro        # Kiro yazar, Claude gözden geçirir; ya da claude-claude
+git add .ao-project .gitignore && git commit -m "adopt ao"
 ao hooks install                     # bundan sonra yalnızca yetki verilmiş aday commit edilir
 ```
 
