@@ -39,6 +39,9 @@ PREFIX = "ao-demo-"
 HOME_POINTERS = ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME")
 # ao's one variable that points nowhere: a traceback for whoever has to find where a failure came from.
 KEPT = ("AO_DEBUG",)
+# What the demo sets itself, each once: Windows reads `Path` and `PATH` as one name, and a block holding both may hand git
+# the one the demo did not set (DEMO-2).
+SET_HERE = ("HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP", "PYTHONDONTWRITEBYTECODE", "PATH")
 # Longer than any step needs; a command past it is a demo that went wrong, said as one.
 COMMAND_SECONDS = 600
 
@@ -186,7 +189,8 @@ def _environment(scratch, home, bin_dir):
     beside the ao it imports.
     """
     env = {name: value for name, value in os.environ.items()
-           if name.upper() in KEPT or not (name.upper().startswith(("AO_", "GIT_")) or name.upper() in HOME_POINTERS)}
+           if name.upper() in KEPT or not (name.upper().startswith(("AO_", "GIT_")) or name.upper() in HOME_POINTERS
+                                           or name.upper() in SET_HERE)}
     temporary = os.path.join(scratch, "tmp")
     env.update(HOME=home, USERPROFILE=home, TMPDIR=temporary, TEMP=temporary, TMP=temporary,
                PYTHONDONTWRITEBYTECODE="1")

@@ -127,3 +127,16 @@ def test_only_a_folder_the_demo_made_in_the_temporary_directory_is_removed(tmp_p
     os.chmod(read_only, 0o444)
 
     assert demo._remove(made) is None and not os.path.exists(made)
+
+
+def test_the_demo_sets_each_variable_once_whatever_case_it_came_in(monkeypatch, tmp_path):
+    """DEMO-2, from the review of DEMO: a person's `Path` stayed beside the `PATH` the demo set, and Windows reads both
+    as one name, so git could run the hook with the PATH that holds no demo `ao`."""
+    monkeypatch.setenv("Path", os.environ.get("PATH", ""))
+    monkeypatch.setenv("Home", str(tmp_path / "elsewhere"))
+
+    env = demo._environment(str(tmp_path), str(tmp_path / "home"), str(tmp_path / "bin"))
+
+    assert [name for name in env if name.upper() == "PATH"] == ["PATH"]
+    assert env["PATH"].split(os.pathsep)[0] == str(tmp_path / "bin")
+    assert [name for name in env if name.upper() == "HOME"] == ["HOME"] and env["HOME"] == str(tmp_path / "home")
