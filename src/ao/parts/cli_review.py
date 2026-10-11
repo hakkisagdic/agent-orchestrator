@@ -1137,7 +1137,10 @@ def _reviewer_candidate_paths(name, deadline=None):
         directories.append(directory)
         return True
 
-    path_entries = os.environ.get("PATH", "").split(os.pathsep)
+    # PATH's absolute entries alone, never the current directory: a relative entry was made absolute
+    # against it, so a reviewer program an agent left in the tree under that name could be the one ao
+    # resolved and ran (WINDOWS-NO-CWD-EXEC).
+    path_entries = A.search_directories()
     for raw in path_entries[:REVIEW_DISCOVERY_MAX_PATH_DIRS]:
         if expired():
             break

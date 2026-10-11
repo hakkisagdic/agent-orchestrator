@@ -95,6 +95,20 @@ def _run(argv):
     return _Unanswered(f"{why}: {said[:200]}" if said else why)
 
 
+def system_directory():
+    """Windows' system directory as Windows names it (GetSystemDirectoryW), or None where it cannot be asked.
+
+    For lib.windows_system_directory when SystemRoot names none: the lib's parts may not load ctypes
+    (WINDOWS-NO-CWD-EXEC).
+    """
+    try:
+        answer = ctypes.create_unicode_buffer(32768)
+        size = ctypes.windll.kernel32.GetSystemDirectoryW(answer, len(answer))
+    except (AttributeError, OSError):
+        return None
+    return answer.value if size else None
+
+
 def _clock_seconds(text):
     """Seconds in a `ps -o etime` reading, [[dd-]hh:]mm:ss, or None."""
     days, _, clock = text.strip().rpartition("-")

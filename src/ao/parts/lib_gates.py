@@ -65,9 +65,10 @@ def _find_git_binary():
     if explicit and os.path.isfile(explicit) and os.access(explicit, os.X_OK):
         return explicit
     names = ("git.exe", "git") if os.name == "nt" else ("git",)
-    directories = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d and os.path.isabs(d)]
+    directories = search_directories()
+    installed = os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Git", "cmd")
     if os.name == "nt":
-        directories.append(os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Git", "cmd"))
+        directories.append(installed)
     else:
         directories += ["/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin"]
     for directory in directories:
@@ -76,7 +77,10 @@ def _find_git_binary():
             if os.path.isfile(candidate) and os.access(candidate, os.X_OK) \
                     and _native_executable(os.path.realpath(candidate)):
                 return _xcrun_git(candidate) or candidate
-    return "git"
+    # With no compiled git, the git PATH holds, of whatever kind. Never the bare name on Windows, which looks in
+    # the current directory first: there the last resort is where Git for Windows installs, which fails to start
+    # rather than start a git.exe an agent left in the tree (WINDOWS-NO-CWD-EXEC).
+    return program_path("git") or (os.path.join(installed, "git.exe") if os.name == "nt" else "git")
 
 
 def git_binary():
@@ -87,8 +91,11 @@ def git_binary():
     itself, never from an agent's terminal, and it does not take a wrapper for git
     either: AO_GIT when that names an executable, otherwise the first git on PATH,
     then in the system directories, that is a compiled program rather than a
-    script in front of one; plain "git" only when there is none. When that git is
-    macOS's xcrun stub, the git xcrun names instead, asked once per process.
+    script in front of one; the first git PATH holds of any kind only when there
+    is none, and plain "git" only when PATH holds none either - never on Windows,
+    which looks for a bare name in the current directory first (WINDOWS-NO-CWD-EXEC).
+    When that git is macOS's xcrun stub, the git xcrun names instead, asked once
+    per process.
     """
     key = (os.environ.get("AO_GIT"), os.environ.get("PATH", ""), os.name, os.environ.get("DEVELOPER_DIR"))
     found = _GIT_BINARIES.get(key)
@@ -170,16 +177,15 @@ def measurement_filters(root):
     an agent runs. A hook is recognised here by its command; `probe_filters` asks
     it what it does (#52).
     """
-    import shutil
     found = []
     explicit = os.environ.get("AO_GIT")
     if explicit and not (os.path.isfile(explicit) and os.access(explicit, os.X_OK)):
         found.append(f"AO_GIT names {explicit}, which is not an executable file; ao measures with {git_binary()}")
-    first = shutil.which("git")
+    first = program_path("git")
     if first and not _native_executable(os.path.realpath(first)):
         chosen = git_binary()
         found.append(f"git on PATH is {first}, a script in front of git; " + (
-            f"ao measures with {chosen}" if chosen != "git" else
+            f"ao measures with {chosen}" if _native_executable(os.path.realpath(chosen)) else
             "no compiled git was found, so ao's own measurements go through it too: set AO_GIT"))
     for path, declaration, _ in command_hook_sources(root):
         for hook in _shell_hooks(path, declaration):
@@ -293,7 +299,6 @@ def _probe_program(argv, root, programs, search_path):
     allows, found where the agents' PATH finds it, outside the project, and no argument
     may name a path the agents can write.
     """
-    import shutil
     name = _program_name(argv[0])
     if name not in programs:
         return None, f"{name} is not in filters.probe_programs, the programs ao may run to ask"
@@ -302,7 +307,7 @@ def _probe_program(argv, root, programs, search_path):
     elif "/" in argv[0] or os.sep in argv[0]:
         return None, f"its program {argv[0]} is named relative to the directory it runs in, the project"
     else:
-        found = shutil.which(argv[0], path=search_path)
+        found = program_path(argv[0], path=search_path)
     if not found:
         return None, f"{argv[0]} is not an executable on the agents' PATH"
     if os.path.splitext(found)[1].lower() in (".bat", ".cmd"):
@@ -433,7 +438,7 @@ def _run_hook(argv, payload, cwd, env, timeout):
         cut = f"it wrote more than {_PROBE_OUTPUT_BYTES} bytes"
     if cut and (proc.poll() is None or any(reader.is_alive() for reader in readers)):
         if os.name == "nt":
-            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True)
+            stop_windows_tree(proc.pid)
         else:
             try:
                 os.killpg(proc.pid, signal.SIGKILL)

@@ -73,7 +73,8 @@ def _stop(proc):
     if proc.poll() is None:
         try:
             if os.name == "nt":
-                subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True)
+                from . import lib as A
+                A.stop_windows_tree(proc.pid)          # Windows' own taskkill (WINDOWS-NO-CWD-EXEC)
             else:
                 os.killpg(proc.pid, signal.SIGKILL)
         except OSError:

@@ -33,7 +33,7 @@ def test_a_harness_no_code_names_is_detected_and_set_up_from_its_adapter_alone(p
     root = project["root"]
     _declare(root)
     os.makedirs(os.path.join(root, ".newcomer"))
-    monkeypatch.setattr(skillkit.shutil, "which", lambda name: None)
+    monkeypatch.setattr(skillkit.shutil, "which", lambda name, *args, **kwargs: None)
 
     _, agents = skillkit.detect_agents(root)
     assert agents == {"newcomer"}
@@ -135,7 +135,7 @@ def test_a_harness_present_by_its_file_alone_gets_its_coordination(tmp_path, mon
 
 def test_a_name_resolves_through_the_vendor_list_and_rule_files_follow_what_is_declared(project, monkeypatch):
     root = project["root"]
-    monkeypatch.setattr(skillkit.shutil, "which", lambda name: None)
+    monkeypatch.setattr(skillkit.shutil, "which", lambda name, *args, **kwargs: None)
 
     assert skillkit.detect_agents(root, "claude") == ("claude-code", {"claude-code"})
     assert {"claude", "claude-code", "kiro", "auto", "all"} <= set(skillkit.agent_choices())
@@ -150,7 +150,7 @@ def test_a_name_resolves_through_the_vendor_list_and_rule_files_follow_what_is_d
 
 def test_the_shipped_harnesses_declare_what_init_used_to_hardcode(project, monkeypatch):
     root = project["root"]
-    monkeypatch.setattr(skillkit.shutil, "which", lambda name: None)
+    monkeypatch.setattr(skillkit.shutil, "which", lambda name, *args, **kwargs: None)
 
     assert skillkit.detect_agents(root, "all")[1] >= {"claude-code", "kiro", "codex"}
     assert skillkit.rule_file_names(root) == ["CLAUDE.md", "AGENTS.md"]

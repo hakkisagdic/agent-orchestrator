@@ -76,8 +76,11 @@ def test_writers_and_hold_do_not_report_nobody_when_they_cannot_see(project, mon
     assert A.hold_state(project["root"])
 
 
-def test_the_shell_helper_speaks_cmd_on_windows(monkeypatch):
+def test_the_shell_helper_speaks_cmd_on_windows(monkeypatch, tmp_path):
     seen = []
+    (tmp_path / "System32").mkdir()
+    (tmp_path / "System32" / "cmd.exe").write_bytes(b"MZ")          # Windows' own cmd.exe (WINDOWS-NO-CWD-EXEC)
+    monkeypatch.setenv("SystemRoot", str(tmp_path))
     monkeypatch.setattr(A.os, "name", "nt")
     monkeypatch.setattr(A.subprocess, "run", lambda cmd, **kw: seen.append(cmd) or
                         SimpleNamespace(stdout="", returncode=0))

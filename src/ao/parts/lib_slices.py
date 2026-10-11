@@ -1397,6 +1397,14 @@ def ask_codebase(root, cfg, question, timeout=300):
         raise ValueError("no codebase provider is configured: set codebase.provider.argv to a command that takes "
                          "{question} and {root} and prints {\"answer\", \"citations\"} as JSON (ctxman is the first "
                          "provider documented in docs/upstream.md)")
+    # Found before anything is copied: a provider named without a directory is the one PATH holds, never one the
+    # current directory holds, which Windows looks in first (WINDOWS-NO-CWD-EXEC); one named by a path is that file.
+    program = str(argv[0]).replace("{question}", question)
+    if not os.path.dirname(program):
+        found = program_path(program)
+        if found is None:
+            raise ValueError(f"the codebase provider {program} is not on PATH")
+        program = found
     copy = tempfile.mkdtemp(prefix="ao-codebase-")
     try:
         if _within(copy, root):
@@ -1412,7 +1420,7 @@ def ask_codebase(root, cfg, question, timeout=300):
         if tree is None:
             raise ValueError("the working tree could not be written out for the provider; a provider runs in a copy "
                              "of the tree, never in the repository")
-        rendered = [str(part).replace("{question}", question).replace("{root}", tree) for part in argv]
+        rendered = [program] + [str(part).replace("{question}", question).replace("{root}", tree) for part in argv[1:]]
         code, stdout = _run_codebase_provider(rendered, tree, timeout)
         try:
             document = json.loads(stdout)

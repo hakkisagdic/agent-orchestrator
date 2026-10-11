@@ -34,9 +34,9 @@ def cmd_mcp(cfg, args):
     role = ["--role", args.role] if args.role is not None else []
     if args.action != "serve":
         print(f"{C['b']}Add to an MCP client's config:{C['reset']}")
-        exe = shutil.which("ao") or sys.argv[0]
+        command, head = A.ao_program()             # never one the current directory holds (WINDOWS-NO-CWD-EXEC)
         print(json.dumps({"mcpServers": {"agent-orchestrator": {
-            "command": exe, "args": ["-C", cfg["root"], "mcp", "serve"] + role}}}, indent=2))
+            "command": command, "args": head + ["-C", cfg["root"], "mcp", "serve"] + role}}}, indent=2))
         return 0
     return _serve("mcp", cfg, (["--allow-verify"] if args.allow_verify else []) + role)
 
@@ -45,10 +45,10 @@ def cmd_a2a_mcp(cfg, args):
     """Expose configured A2A agents to an MCP client."""
     if args.action != "serve":
         reg = os.path.join(cfg["root"], ".ao", "a2a-agents.json")
-        exe = shutil.which("ao") or sys.argv[0]
+        command, head = A.ao_program()             # never one the current directory holds (WINDOWS-NO-CWD-EXEC)
         print(f"{C['b']}Add to an MCP client's config:{C['reset']}")
         print(json.dumps({"mcpServers": {"a2a": {
-            "command": exe, "args": ["-C", cfg["root"], "a2a-mcp", "serve"]}}}, indent=2))
+            "command": command, "args": head + ["-C", cfg["root"], "a2a-mcp", "serve"]}}}, indent=2))
         print(f"\n{C['b']}Then register agents in {reg}:{C['reset']}")
         print(json.dumps({"weather": {"url": "https://agent.example.com/a2a/v1",
                                       "headers": {"Authorization": "Bearer …"}}}, indent=2))
@@ -125,6 +125,15 @@ def cmd_lock(cfg, args):
         print("nothing to run")
         return 0
     root = cfg["root"]
+    command = list(args.command)
+    if not os.path.dirname(command[0]):
+        # Named without a directory, the program is the one PATH holds, never one the current directory holds,
+        # which Windows looks in first (WINDOWS-NO-CWD-EXEC); one named by its path is that file, as before.
+        program = A.program_path(command[0])
+        if program is None:
+            print(f"{C['red']}{command[0]} is not on PATH{C['reset']}: name it by its path to run it")
+            return 127
+        command[0] = program
     holder = A.gate_lock_holder()
     if holder and holder.get("root") != root:
         print(f"{C['yellow']}{os.path.basename(holder['root'])} holds the machine lock"
@@ -134,7 +143,7 @@ def cmd_lock(cfg, args):
         print(f"{C['red']}machine still busy after {args.wait}s; not starting{C['reset']}")
         return 2
     try:
-        return subprocess.run(args.command, cwd=root).returncode
+        return subprocess.run(command, cwd=root).returncode
     finally:
         A.release_gate_lock()
 

@@ -209,7 +209,8 @@ def _command(root, cfg_project, text, chat):
     cmd = text.split()[0].lstrip("/").split("@")[0]
     exe = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        "..", "bin", "ao")
-    exe = os.path.abspath(exe) if os.path.exists(exe) else "ao"
+    # Past the clone's own script, the ao on PATH, never one the current directory holds (WINDOWS-NO-CWD-EXEC).
+    exe = os.path.abspath(exe) if os.path.exists(exe) else A.program_path("ao")
     allowed = {"status": ["status"], "board": ["board"], "credits": ["credits"],
                "notices": ["notices", "-n", "8"], "fleet": ["fleet"],
                "decisions": ["decisions", "-n", "6"]}
@@ -217,6 +218,8 @@ def _command(root, cfg_project, text, chat):
         send(language.text(cfg_project, "telegram.commands"), root)
         return f"/{cmd} (unknown)"
     try:
+        if exe is None:
+            raise FileNotFoundError("ao is not on PATH")
         out = subprocess.run([exe, "-C", root] + allowed[cmd], capture_output=True,
                              text=True, encoding=UTF8, errors="replace", timeout=60).stdout
     except Exception as e:

@@ -165,7 +165,7 @@ def child_path():
     for cand in [c for binary in agents for c in A.binary_candidates(binary)] + A.binary_candidates("node"):
         parts.append(os.path.dirname(cand))
     # fnm / nvm / asdf style shims: whichever one currently owns `node`
-    node = shutil.which("node")
+    node = A.program_path("node")
     if node:
         parts.append(os.path.dirname(node))
     for base in ("~/.local/state/fnm_multishells", "~/.nvm/versions/node", "~/.asdf/shims"):
@@ -223,11 +223,12 @@ def desktop_notify(title, msg, cfg=None):
     `osascript` exists only on macOS. Elsewhere its FileNotFoundError ended the cycle
     before the notice was recorded or the state saved. On Windows a toast is shown
     through PowerShell when the project's `toast` feature is on (#9); unverified on a
-    Windows machine until the Windows lane runs it.
+    Windows machine until the Windows lane runs it. Windows' own PowerShell comes from its
+    system directory, never one the current directory holds (WINDOWS-NO-CWD-EXEC).
     """
     if sys.platform == "win32":
         from . import features as F
-        shell = shutil.which("powershell") or shutil.which("pwsh")
+        shell = A.program_path("powershell") or A.program_path("pwsh")
         if not (cfg and F.enabled(cfg, "toast")) or not shell:
             return False
         try:
@@ -237,11 +238,12 @@ def desktop_notify(title, msg, cfg=None):
         except (OSError, subprocess.SubprocessError):
             return False
         return done.returncode == 0
-    if sys.platform != "darwin" or not shutil.which("osascript"):
+    osascript = A.program_path("osascript") if sys.platform == "darwin" else None
+    if not osascript:
         return False
     title, msg = (str(part).replace('"', "'").replace("\\", "/") for part in (title, msg))
     try:
-        subprocess.run(["osascript", "-e", f'display notification "{msg}" with title "{title}"'],
+        subprocess.run([osascript, "-e", f'display notification "{msg}" with title "{title}"'],
                        capture_output=True, timeout=10)
         return True
     except (OSError, subprocess.SubprocessError):
@@ -995,7 +997,7 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
         # architect could not be woken, with nothing new in it (NOTICE-NOISE).
         if not args.dry_run and st.get("handoff_for") != waiting and time.time() - st.get("last_handoff", 0) > 3600:
             try:
-                exe = shutil.which("ao", path=child_path())
+                exe = A.program_path("ao", path=child_path())
                 if exe:
                     subprocess.run([exe, "-C", root, "handoff", "--reason",
                                     language.text(cfg, "watchdog.handoff-no-wake")] + _handoff_quiet(),
@@ -3132,7 +3134,7 @@ def _cycle_impl(args, root):
             if time.time() - st.get("last_handoff", 0) > 3600:
                 try:
                     import subprocess as _sp
-                    exe = shutil.which("ao", path=child_path())
+                    exe = A.program_path("ao", path=child_path())
                     if exe:
                         _sp.run([exe, "-C", root, "handoff", "--reason",
                                  language.text(cfg, "watchdog.handoff-provider")] + _handoff_quiet(),
@@ -3221,9 +3223,10 @@ def _cycle_impl(args, root):
         print("adapter has no resume command")
         return 1
 
-    # Resolve the CLI and hand the child a usable PATH — see child_path().
+    # Resolve the CLI and hand the child a usable PATH — see child_path(). Never a program the current
+    # directory holds, which Windows looks in before PATH (WINDOWS-NO-CWD-EXEC).
     search = child_path()
-    resolved = shutil.which(argv[0], path=search)
+    resolved = A.program_path(argv[0], path=search)
     if not resolved:
         notify(f"{project}: watchdog", f"{argv[0]} not on PATH; cannot nudge", root)
         print(f"{argv[0]} not found on PATH ({search})")

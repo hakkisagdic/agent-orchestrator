@@ -1079,6 +1079,22 @@ def sh(cmd, cwd=None, timeout=20):
     return _sh_run(cmd, cwd=cwd, timeout=timeout)[0]
 
 
+def shell_program():
+    """The shell a command line ao runs starts in: None on POSIX, where subprocess starts /bin/sh by its path, and
+    Windows' own cmd.exe on Windows (WINDOWS-NO-CWD-EXEC).
+
+    subprocess starts what %ComSpec% names, and where it names nothing an older Python started
+    `cmd.exe` by its bare name, which Windows looks for in the current directory first.
+    FileNotFoundError where Windows' system directory holds no cmd.exe.
+    """
+    if os.name != "nt":
+        return None
+    program = program_path("cmd")
+    if program is None:
+        raise FileNotFoundError(f"cmd.exe is not in Windows' system directory {windows_system_directory()}")
+    return program
+
+
 def _sh_run(cmd, cwd=None, timeout=20):
     """sh()'s command and how it ended: (stripped standard output, exit status), or ("", None).
 
@@ -1093,8 +1109,12 @@ def _sh_run(cmd, cwd=None, timeout=20):
     if cmd.startswith("git "):
         cmd = _shell_word(git_binary()) + cmd[3:]
     try:
+        # On Windows the shell is Windows' own cmd.exe, and it is told to look for the command in PATH
+        # alone: by default it looks in the directory it runs in first (WINDOWS-NO-CWD-EXEC).
+        windows = {"executable": shell_program(), "env": dict(os.environ, NoDefaultCurrentDirectoryInExePath="1")} \
+            if os.name == "nt" else {}
         r = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True,
-                           text=True, encoding=UTF8, errors="replace", timeout=timeout)
+                           text=True, encoding=UTF8, errors="replace", timeout=timeout, **windows)
         return r.stdout.strip(), r.returncode
     except Exception:
         return "", None

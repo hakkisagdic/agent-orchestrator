@@ -5,7 +5,9 @@ from ao import watchdog as W
 
 def _windows(monkeypatch, calls, code=0):
     monkeypatch.setattr(W.sys, "platform", "win32")
-    monkeypatch.setattr(W.shutil, "which", lambda name: "C:\\Windows\\powershell.exe" if name == "powershell" else None)
+    # Windows' own PowerShell, from its system directory (WINDOWS-NO-CWD-EXEC).
+    powershell = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+    monkeypatch.setattr(W.A, "program_path", lambda name, path=None: powershell if name == "powershell" else None)
 
     def run(argv, **kwargs):
         calls.append((argv, kwargs))

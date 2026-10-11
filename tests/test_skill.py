@@ -20,7 +20,7 @@ def test_every_command_is_in_the_playbook():
 def test_init_registers_mcp_and_writes_playbook(project, monkeypatch):
     root = project["root"]
     os.makedirs(os.path.join(root, ".claude"))
-    monkeypatch.setattr(skillkit.shutil, "which", lambda n: None)
+    monkeypatch.setattr(skillkit.shutil, "which", lambda n, *args, **kwargs: None)
     _, agents = skillkit.detect_agents(root)
     assert "claude-code" in agents
     assert skillkit.install_playbook(root, agents)[".claude/skills/ao/SKILL.md"] == "wrote"
@@ -41,7 +41,7 @@ def test_init_registers_mcp_and_writes_playbook(project, monkeypatch):
 def test_kiro_gets_steering_and_settings(project, monkeypatch):
     root = project["root"]
     os.makedirs(os.path.join(root, ".kiro"))
-    monkeypatch.setattr(skillkit.shutil, "which", lambda n: None)
+    monkeypatch.setattr(skillkit.shutil, "which", lambda n, *args, **kwargs: None)
     _, agents = skillkit.detect_agents(root)
     out = skillkit.install_playbook(root, agents)
     assert out[".kiro/steering/ao-playbook.md"] == "wrote"
@@ -84,7 +84,7 @@ def test_remove_undoes_init_and_only_removes_ao_owned_hooks(project, monkeypatch
     from types import SimpleNamespace
     root = project["root"]
     os.makedirs(os.path.join(root, ".claude"))
-    monkeypatch.setattr(skillkit.shutil, "which", lambda n: None)
+    monkeypatch.setattr(skillkit.shutil, "which", lambda n, *args, **kwargs: None)
     real_run = cli.subprocess.run
     # Remove takes the jobs off in its own process (SAFE-REMOVE): a launchd holding none of this project's.
     monkeypatch.setattr(cli.A, "_run_program", lambda argv, **kwargs: ("", 0))

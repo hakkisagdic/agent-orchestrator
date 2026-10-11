@@ -63,7 +63,7 @@ def test_ao_commit_hands_git_a_message_file_as_it_is(project, monkeypatch):
     monkeypatch.setattr(A, "landed_commit_problem", lambda root: None)
 
     assert cli.cmd_commit(project, SimpleNamespace(message=None, file="msg.txt")) == 0
-    assert calls == [["git", "commit", "-F", "msg.txt"]]
+    assert calls == [[A.git_binary(), "commit", "-F", "msg.txt"]]
 
 
 @pytest.mark.parametrize("message, file", [("", None), ("   ", None), (None, ""), (None, None)])

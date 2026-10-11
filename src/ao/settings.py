@@ -221,7 +221,8 @@ SETTINGS = {
         "percent of the machine's provider window kept free before a report wake"),
     "binaries.extra_dirs": Setting(
         [], list, None, None, "machine",
-        "directories searched for agent binaries after PATH, before the usual install locations"),
+        "directories searched for agent binaries after PATH, before the usual install locations; "
+        "a relative one is not searched"),
     "watchdog.bypass_adapters": Setting(
         [], list, None, None, "machine",
         "adapters whose implementer the watchdog may nudge with the flag that turns off their own sandbox; "

@@ -15,12 +15,16 @@ from ao import lib as A, procs
 
 @pytest.mark.parametrize("stop", [lambda: A.kill_turn(4242, signal.SIGTERM), lambda: A.sweep_orphans([4242])],
                          ids=["kill_turn", "sweep_orphans"])
-def test_a_tree_stopped_on_windows_is_read_again_before_anything_reads_it(monkeypatch, stop):
+def test_a_tree_stopped_on_windows_is_read_again_before_anything_reads_it(monkeypatch, stop, tmp_path):
     happened = []
+    taskkill = tmp_path / "System32" / "taskkill.exe"          # Windows' own taskkill (WINDOWS-NO-CWD-EXEC)
+    taskkill.parent.mkdir()
+    taskkill.write_bytes(b"MZ")
     with monkeypatch.context() as patch:
+        patch.setenv("SystemRoot", str(tmp_path))
         patch.setattr(A.subprocess, "run", lambda argv, **kw: happened.append(argv[0]))
         patch.setattr(procs, "refresh", lambda: happened.append("refresh"))
         patch.setattr(os, "name", "nt")
         stop()
 
-    assert happened == ["taskkill", "refresh"]
+    assert happened == [str(taskkill), "refresh"]

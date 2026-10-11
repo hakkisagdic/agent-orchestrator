@@ -40,11 +40,13 @@ def usage_limits(api, timeout=20):
     if not db or not os.path.exists(db):
         return None
     # The store's path and the query are arguments, never shell text: through cmd.exe the
-    # JSON-quoted path reached sqlite3 with every backslash doubled (#71).
+    # JSON-quoted path reached sqlite3 with every backslash doubled (#71). The sqlite3 is one
+    # on PATH, never one the current directory holds (WINDOWS-NO-CWD-EXEC).
     query = f"SELECT value FROM {token['table']} WHERE key='{token['key']}';"
+    sqlite3 = A.program_path("sqlite3")
     try:
-        raw = subprocess.run(["sqlite3", db, query], capture_output=True, text=True, encoding=UTF8,
-                             errors="replace", timeout=timeout).stdout.strip()
+        raw = subprocess.run([sqlite3, db, query], capture_output=True, text=True, encoding=UTF8,
+                             errors="replace", timeout=timeout).stdout.strip() if sqlite3 else ""
     except (OSError, ValueError, subprocess.SubprocessError):
         raw = ""
     if not raw:

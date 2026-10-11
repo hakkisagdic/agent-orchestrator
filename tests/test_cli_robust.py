@@ -195,15 +195,18 @@ def test_ctrl_c_exits_130_without_a_traceback_and_lets_the_machine_lock_go(proje
     real_run, lock, held = subprocess.run, tmp_path / "gate.lock", []
     monkeypatch.setattr(A, "GATE_LOCK", str(lock))
 
+    # A program named by its path: by its name it is looked for on PATH first (WINDOWS-NO-CWD-EXEC).
+    wrapped = [sys.executable, "-c", "import time; time.sleep(20)"]
+
     def run(*args, **kwargs):
-        if (args[0] if args else kwargs.get("args")) == ["sleep", "20"]:
+        if (args[0] if args else kwargs.get("args")) == wrapped:
             held.append(lock.exists())
             raise KeyboardInterrupt                  # Ctrl+C while the wrapped command runs
         return real_run(*args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", run)
 
-    assert cli.main(["-C", project["root"], "lock", "--", "sleep", "20"]) == 130
+    assert cli.main(["-C", project["root"], "lock", "--", *wrapped]) == 130
     assert held == [True] and not lock.exists() and "Traceback" not in capsys.readouterr().err
 
 

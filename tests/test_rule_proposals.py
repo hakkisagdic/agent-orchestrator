@@ -297,7 +297,7 @@ def test_a_proposal_waits_for_a_person_without_parking_a_slice_ringing_or_waking
 def test_neither_the_proposal_nor_its_answer_writes_the_playbook_or_the_rule_file(proposing, monkeypatch):
     root = proposing["root"]
     os.makedirs(os.path.join(root, ".claude"))
-    monkeypatch.setattr(skillkit.shutil, "which", lambda name: None)
+    monkeypatch.setattr(skillkit.shutil, "which", lambda name, *args, **kwargs: None)
     skillkit.install_playbook(root, skillkit.detect_agents(root)[1])
     playbook = ".claude/skills/ao/SKILL.md"
     A.project_key(root)                        # a project's name is written the first time any command sees it

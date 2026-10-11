@@ -173,6 +173,24 @@ def _harness_config_told(root):
     return "unreadable" if unreadable else A.harness_config_digest(unseen or [])
 
 
+def _path_problems():
+    """[("path-relative", what it says)] where PATH holds a relative or empty entry on Windows, else [].
+
+    Such an entry names the directory a program is started in, or one below it, and ao starts
+    programs from inside trees agents write, so ao looks for no program there: one PATH reaches
+    only through it is not started, and the entry only waits for a program left under its name
+    (WINDOWS-NO-CWD-EXEC).
+    """
+    unsafe = A.unsafe_path_entries() if os.name == "nt" else []
+    if not unsafe:
+        return []
+    named = ["an empty entry" if not entry else f"`{entry}`" for entry in dict.fromkeys(unsafe)]
+    return [("path-relative", f"PATH holds {', '.join(named)}: each names the directory a program is started in, "
+                              "or one below it, and that can be a tree an agent writes; ao starts no program found "
+                              f"only through {'it' if len(named) == 1 else 'them'} - take "
+                              f"{'it' if len(named) == 1 else 'them'} out of PATH")]
+
+
 def doctor_problems(cfg):
     """What `ao doctor --check` acts on: conditions a person must fix, as (key, text)."""
     from .watchdog import wake_error, STATE_DIR
@@ -273,6 +291,8 @@ def doctor_problems(cfg):
     # A setting that is written but not used says one thing and does another (#74).
     for name, text in S.problems(cfg):
         out.append((f"setting:{name}", text))
+    # A program found only through a relative or empty PATH entry is one ao does not start (WINDOWS-NO-CWD-EXEC).
+    out.extend(_path_problems())
     if len(A.deferred_open(root)) >= 3:
         out.append(("deferred-pile", f"{len(A.deferred_open(root))} deferred actions waiting — ao catchup"))
     # The playbook exists but nothing the agent reads points at it: the rules are

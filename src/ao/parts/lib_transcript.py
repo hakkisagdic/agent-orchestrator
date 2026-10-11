@@ -2171,9 +2171,9 @@ def tool_availability(ttl=600):
     a range of tools and never reads the secret itself, so ask it rather than
     reinventing credential detection — align, do not depend: if keyflip is absent
     the CLI check still works on its own. Which tools and which binaries come from
-    the vendor list and the adapters, never from a table here (#89).
+    the vendor list and the adapters, never from a table here (#89). A CLI is installed where
+    ao would start it from, never the current directory (WINDOWS-NO-CWD-EXEC).
     """
-    import shutil as _sh
     if time.time() - _SURFACES["at"] < ttl and _SURFACES["rows"]:
         return _SURFACES["rows"]
     rows = {}
@@ -2195,7 +2195,7 @@ def tool_availability(ttl=600):
         binaries = adapter_binaries((catalog.get(vendor["adapter"]) or {}).get("adapter"))
         if not binaries:
             continue
-        found = next((binary for binary in binaries if _sh.which(binary)), None)
+        found = next((binary for binary in binaries if program_path(binary)), None)
         entry = named.setdefault(vendor["adapter"], {})
         entry["installed"] = bool(found)
         entry["binary"] = found or binaries[0]
@@ -2843,6 +2843,20 @@ def _tree_stopped():
     procs.refresh()
 
 
+def stop_windows_tree(pid):
+    """Stop a process and every process it started, with Windows' own taskkill (WINDOWS-NO-CWD-EXEC).
+
+    Started by its bare name, taskkill was looked for in the current directory before Windows'
+    own, and ao stops turns from inside a tree an agent writes: a taskkill.exe left there would
+    have run as the person in its place. FileNotFoundError where Windows' system directory holds
+    none, as a taskkill found nowhere raised before.
+    """
+    taskkill = program_path("taskkill")
+    if taskkill is None:
+        raise FileNotFoundError(f"taskkill is not in Windows' system directory {windows_system_directory()}")
+    subprocess.run([taskkill, "/T", "/F", "/PID", str(pid)], capture_output=True)
+
+
 def kill_turn(pid, sig):
     """Signal a turn — the whole process group when this pid leads one.
 
@@ -2853,7 +2867,7 @@ def kill_turn(pid, sig):
     Windows there are no groups to signal; `taskkill /T` kills the tree.
     """
     if os.name == "nt":
-        subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True)
+        stop_windows_tree(pid)
         _tree_stopped()
         return
     try:
@@ -2880,7 +2894,7 @@ def sweep_orphans(pids, grace=3.0):
     import signal as _sig
     if os.name == "nt":
         for pid in pids:
-            subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True)
+            stop_windows_tree(pid)
         _tree_stopped()
         return list(pids)
     groups = set()

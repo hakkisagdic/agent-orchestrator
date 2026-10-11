@@ -1024,8 +1024,11 @@ def _ao_link_fix():
 
 
 def _hook_ao_reach(inv):
-    """(what a hook's /bin/sh finds for ao, the fix) when ao is not on PATH; None when it is (SAFE-REMOVE)."""
-    if shutil.which("ao"):
+    """(what a hook's /bin/sh finds for ao, the fix) when ao is not on PATH; None when it is (SAFE-REMOVE).
+
+    On PATH as ao looks: its absolute entries, never the current directory (WINDOWS-NO-CWD-EXEC).
+    """
+    if A.program_path("ao"):
         return None
     target = None if inv.get("error") else _active_hook_targets(inv).get("pre-commit")
     fallback = None

@@ -15,6 +15,30 @@ What works, what does not, and how hosted runners exercise it.
 | `bin/ao.ps1`, the subset for a machine without Python | `status`, `board` and `doctor`; reads files as UTF-8 and takes paths literally; written and reviewed, not yet run on Windows (below) |
 | commit hook (`ao hooks install`) | installed inside the repository; a shared, external or globally configured hooks directory is refused (#71); since HOOK-V4 the hook reads a drive-letter index as absolute, and its execution proof passes on the lane (below) |
 | pre-push hook | works under Git's own shell |
+| the programs ao starts | Windows' own tools from its system directory, every other program from PATH's absolute entries, never the current directory (below) |
+
+*In ao since slice WINDOWS-NO-CWD-EXEC: ao starts no program the current directory holds. Windows
+looks for a program named without a directory in the current directory before PATH - `subprocess`
+given a bare `taskkill`, `schtasks`, `git` or `cmd.exe`, and `shutil.which`, which before Python 3.12
+looked there first whatever path it was given - and ao runs inside a tree an agent writes: a
+`taskkill.exe`, `schtasks.exe`, `git.exe` or `powershell.exe`, or a `.bat`, `.cmd` or `.com` that
+PATHEXT admits, left in the repository root would have run as the person when ao stopped a turn,
+scheduled its jobs, read the process table or committed. One resolver now finds every program ao
+starts: Windows' own `taskkill`, `schtasks`, `tasklist`, `cmd`, `where` and `powershell` from its
+system directory - `%SystemRoot%\System32` as the environment names it, else as Windows answers,
+else `C:\Windows\System32` - and from nowhere else; every other program from PATH's absolute
+entries in order, honouring PATHEXT, never the current directory, an empty entry or a relative one.
+A command line ao runs through a shell starts in the system's `cmd.exe`, and ao's own commands there
+are looked for in PATH alone (`NoDefaultCurrentDirectoryInExePath`); a gate's command is the
+project's, and cmd.exe looks for it as it always has, in the project's directory first. Where no git
+is found ao no longer falls back to the bare name: it names the git Git for Windows installs, which
+fails to start rather than start one the tree holds. `ao doctor` names an empty or relative PATH
+entry (`path-relative`): ao looks for no program there, so one PATH reaches only through it is not
+started. POSIX keeps its own lookup, except that an empty or relative entry is not searched there
+either: to POSIX an empty entry is the current directory too, and a console script a relative entry
+led to was made absolute and scheduled (SAFE-REMOVE-2). `tests/test_windows_no_cwd_exec.py` gives ao
+a system directory of its own and plants a program under each name in a repository, on every
+platform.*
 
 *In ao since slice WINDOWS-TABLE-CLOSED: a process table that cannot be read is an error everything
 that reads it sees, never an empty table. On Windows the table is one PowerShell query, and a

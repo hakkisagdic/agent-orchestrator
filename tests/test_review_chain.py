@@ -962,9 +962,12 @@ def test_communication_error_drain_is_bounded_and_closes_pipes(
 
 @pytest.mark.skipif(os.name == "nt", reason="the fixture reviewer runs through its shebang, which Windows "
                                             "does not honour")
-def test_reviewer_resolver_canonicalizes_relative_path_candidate(
+def test_reviewer_resolver_passes_over_a_relative_path_entry(
     project, tmp_path, monkeypatch,
 ):
+    """WINDOWS-NO-CWD-EXEC: a relative PATH entry was made absolute against the current directory, which can be a
+    tree an agent writes, so a reviewer program left there under the name was the one ao resolved and ran. It is
+    passed over now: the reviewer reached only through it is not found, and nothing runs."""
     binary_dir = tmp_path / "relative-bin"
     binary_dir.mkdir()
     binary = binary_dir / "ao59-relative-reviewer"
@@ -985,8 +988,7 @@ def test_reviewer_resolver_canonicalizes_relative_path_candidate(
         project["root"], binary.name
     )
 
-    assert resolved == str(binary.resolve())
-    assert version == "7.8.9"
+    assert (resolved, version) == (None, "")
     assert not (tmp_path / "version-side-effect").exists()
 
 

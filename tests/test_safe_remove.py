@@ -385,14 +385,16 @@ def test_a_source_tree_is_not_an_installed_package():
     assert cli._package_installed() is False
 
 
-def test_a_program_found_through_a_relative_path_entry_is_named_absolutely(tmp_path, monkeypatch):
-    """SAFE-REMOVE-2: a job starts from `/`, so a program found through a relative PATH entry is made absolute."""
+def test_a_program_found_only_through_a_relative_path_entry_is_not_the_one_a_job_starts(tmp_path, monkeypatch):
+    """SAFE-REMOVE-2 made a console script found through a relative PATH entry absolute, since a job starts from
+    `/`. WINDOWS-NO-CWD-EXEC searches no relative entry: it names a directory under wherever install ran, a tree an
+    agent writes among them, so the job starts the clone's own script instead."""
     _executable(tmp_path / "console" / "ao-watchdog", "#!/bin/sh\n")
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(cli.shutil, "which", lambda name, *args, **kwargs: os.path.join("console", name))
+    monkeypatch.setenv("PATH", "console")
 
     assert cli._scheduled_argv("ao-watchdog", ("scripts", "ao-watchdog"), "ao.watchdog") == \
-        [os.path.join(os.getcwd(), "console", "ao-watchdog")]
+        [sys.executable, os.path.join(A.REPO, "scripts", "ao-watchdog")]
 
 
 @pytest.mark.skipif(os.name == "nt", reason=LAUNCHD_ONLY)

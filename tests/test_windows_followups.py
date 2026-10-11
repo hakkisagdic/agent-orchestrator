@@ -371,8 +371,10 @@ def test_the_token_store_is_queried_without_a_shell_whatever_its_path_holds(monk
     monkeypatch.setattr(drivers, "subprocess", _Instead(subprocess, run=run))
     monkeypatch.setattr(A, "sh", lambda *args, **kwargs: pytest.fail("the token store was read through a shell"))
     monkeypatch.setattr(A, "binary_candidates", lambda name, path=None: [])
+    sqlite3 = "C:\\Program Files\\SQLite\\sqlite3.exe"         # the one on PATH (WINDOWS-NO-CWD-EXEC)
+    monkeypatch.setattr(A, "program_path", lambda name, path=None: sqlite3 if name == "sqlite3" else None)
 
     assert drivers.usage_limits(api) == {"error": "agent is not on PATH or in the usual install directories"}
     [(argv, kwargs)] = ran
-    assert argv == ["sqlite3", db, "SELECT value FROM auth_kv WHERE key='agent:token';"]
+    assert argv == [sqlite3, db, "SELECT value FROM auth_kv WHERE key='agent:token';"]
     assert not kwargs.get("shell")

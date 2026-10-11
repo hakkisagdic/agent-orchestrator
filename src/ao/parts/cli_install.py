@@ -59,14 +59,14 @@ def _installation(package=None, prefix=None, python=None):
         if len(parts) > at + 3 and os.path.isfile(os.path.join(keg, "INSTALL_RECEIPT.json")):
             formula = parts[at + 1]
             brew = os.path.join(os.sep.join(parts[:at]) or os.sep, "bin", "brew")
-            brew = brew if os.path.isfile(brew) and os.access(brew, os.X_OK) else shutil.which("brew")
+            brew = brew if os.path.isfile(brew) and os.access(brew, os.X_OK) else A.program_path("brew")
             return dict(found, kind="homebrew", where=os.sep.join(parts[:at + 2]), missing=None if brew else "brew",
                         update=[brew or "brew", "upgrade", formula], remove=[brew or "brew", "uninstall", formula])
     if _hook_contains(prefix, package):
         for kind, marker, tool, verb in (("pipx", "pipx_metadata.json", "pipx", []),
                                          ("uv", "uv-receipt.toml", "uv", ["tool"])):
             if os.path.isfile(os.path.join(prefix, marker)):
-                program, name = shutil.which(tool), os.path.basename(prefix)
+                program, name = A.program_path(tool), os.path.basename(prefix)
                 return dict(found, kind=kind, where=prefix, missing=None if program else tool,
                             update=[program or tool, *verb, "upgrade", name],
                             remove=[program or tool, *verb, "uninstall", name])
@@ -371,7 +371,7 @@ def _program_removal(found):
         return f"run `{_argv_text(found['remove'])}`"
     if found["kind"] == "clone":
         target = os.path.realpath(os.path.join(found["where"], "bin", "ao"))
-        links = sorted({path for path in (shutil.which("ao"), os.path.join(A.HOME, ".local", "bin", "ao"))
+        links = sorted({path for path in (A.program_path("ao"), os.path.join(A.HOME, ".local", "bin", "ao"))
                         if path and os.path.islink(path) and os.path.realpath(path) == target})
         return f"delete the clone {found['where']}" + "".join(f" and the link {link}" for link in links)
     return "remove it the way it was installed"
@@ -403,7 +403,7 @@ def _uninstall_leaves(args, found):
     if _scheduler() == "systemd":
         lines.append("systemd: a unit you wrote to run ao stays; ao's own, the timers `ao watchdog install` wrote, "
                      "are among the jobs above (LINUX-SCHEDULER)")
-    elif shutil.which("systemctl"):
+    elif A.program_path("systemctl"):
         lines.append("systemd: ao schedules no unit of its own here (its jobs are launchd's or Task Scheduler's), "
                      "so a unit you wrote to run ao stays")
     return lines

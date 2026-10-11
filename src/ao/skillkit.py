@@ -108,7 +108,7 @@ def detect_agents(root, requested="auto"):
         detect = adapter.get("detect") or {}
         marks = [path for path in (detect.get("dirs") or []) if os.path.isdir(_local(root, path) or "\0")]
         marks += [path for path in (detect.get("files") or []) if os.path.exists(_local(root, path) or "\0")]
-        if requested == "all" or marks or any(shutil.which(binary) for binary in detect.get("binaries") or []):
+        if requested == "all" or marks or any(A.program_path(binary) for binary in detect.get("binaries") or []):
             found.add(ident)
     return None, found or {"generic"}
 
@@ -245,7 +245,7 @@ def _snippet(template, exe, root, args):
     return re.sub(r"\{(exe|root|args)\}", lambda match: values[match.group(1)], str(template or ""))
 
 
-def register_mcp(root, agents, exe=None):
+def register_mcp(root, agents, exe=None, head=None):
     """Register the ao MCP server for each agent, in the file its adapter declares.
 
     Merged, never clobbered: other servers in the same file survive. Returns
@@ -253,7 +253,12 @@ def register_mcp(root, agents, exe=None):
     gets the snippet its adapter declares, and the human decides. Each registration
     names the role its readers hold in this project, when they hold one (`registration_role`).
     """
-    exe = exe or shutil.which("ao") or os.path.join(A.REPO, "bin", "ao")
+    # The ao the registration names runs as the person whenever a harness starts it: one on PATH, else this
+    # interpreter running ao, never one the current directory holds (WINDOWS-NO-CWD-EXEC). `head` is what comes
+    # before ao's own arguments: `-m ao` after an interpreter.
+    if not exe:
+        exe, head = A.ao_program()
+    head = list(head or [])
     out = {}
 
     def merge(path, server, key="mcpServers", extra=None):
@@ -275,7 +280,7 @@ def register_mcp(root, agents, exe=None):
     for ident, adapter in setup_adapters(root, agents):
         mcp = adapter.get("mcp") or {}
         role = registration_role(root, ident)
-        args = ["-C", root, "mcp", "serve"] + (["--role", role] if role else [])
+        args = head + ["-C", root, "mcp", "serve"] + (["--role", role] if role else [])
         if mcp.get("manual"):
             out[ident] = f"manual: add to {mcp['manual']}\n{_snippet(mcp.get('snippet'), exe, root, args)}"
             continue
@@ -288,8 +293,10 @@ def register_mcp(root, agents, exe=None):
         server = {"command": exe, "args": args}
         # A command ao runs comes from a shipped adapter alone, never a layer an agent can write (HARNESS-SETUP-2).
         register = ((A.package_adapters().get(ident) or {}).get("mcp") or {}).get("register") or []
-        if register and shutil.which(register[0]) and not os.path.exists(path):
-            argv = [part.replace("{exe}", exe).replace("{args}", json.dumps(args)) for part in register]
+        program = A.program_path(register[0]) if register else None
+        if program and not os.path.exists(path):
+            argv = [program] + [part.replace("{exe}", exe).replace("{args}", json.dumps(args))
+                                for part in register[1:]]
             r = subprocess.run(argv, capture_output=True, text=True, encoding=UTF8, errors="replace", cwd=root)
             out[ident] = "registered" if r.returncode == 0 else \
                 merge(path, server, mcp.get("key", "mcpServers"), mcp.get("extra"))

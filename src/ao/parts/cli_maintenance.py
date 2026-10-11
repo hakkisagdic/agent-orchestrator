@@ -135,9 +135,17 @@ def _windows_task(job, key):
 
 
 def _schtasks(*args):
-    """(what schtasks printed, its exit status), asked without a shell; ("", None) when it cannot be run."""
+    """(what schtasks printed, its exit status), asked without a shell; ("", None) when it cannot be run.
+
+    Windows' own schtasks, from its system directory: by its bare name Windows looked for it in the
+    current directory first, and a schtasks.exe an agent left in the tree would have run as the
+    person, and been asked to schedule ao's jobs (WINDOWS-NO-CWD-EXEC).
+    """
+    schtasks = A.program_path("schtasks")
+    if schtasks is None:
+        return "", None
     try:
-        done = subprocess.run(["schtasks", *args], capture_output=True, text=True, encoding=UTF8, errors="replace")
+        done = subprocess.run([schtasks, *args], capture_output=True, text=True, encoding=UTF8, errors="replace")
     except OSError:
         return "", None
     return (done.stdout + done.stderr).strip(), done.returncode
@@ -846,10 +854,12 @@ def _scheduled_argv(console, clone, module):
     the console script on PATH, which carries its own interpreter in its shebang (prefixing
     this process's python imports ao from an interpreter that may not have it); the clone's
     script, with this interpreter, since its shebang is `/usr/bin/env python3`; this
-    interpreter running the module, when it imports ao from its own site directories. A path found
-    through a relative PATH entry is made absolute: a job starts from `/`, not from here (SAFE-REMOVE-2).
+    interpreter running the module, when it imports ao from its own site directories. PATH is searched
+    as ao searches it, its absolute entries alone and never the current directory: a console script
+    found through a relative entry, made absolute, named a file in whatever directory install ran in,
+    an agent's tree among them (WINDOWS-NO-CWD-EXEC, where SAFE-REMOVE-2 had made such a path absolute).
     """
-    found = shutil.which(console)
+    found = A.program_path(console)
     found = os.path.abspath(found) if found else None
     python = sys.executable if sys.executable and os.path.isfile(sys.executable) else None
     if found:
@@ -1042,12 +1052,11 @@ def _watchdog_windows(cfg, args):
                                             ["-C", root, "doctor", "--check", "--notify"])}
     if args.action == "status":
         for name in tasks:
-            r = subprocess.run(["schtasks", "/Query", "/TN", name], capture_output=True, text=True, encoding=UTF8, errors="replace")
-            print(f"{name}: {'scheduled' if r.returncode == 0 else 'absent'}")
+            print(f"{name}: {'scheduled' if _schtasks('/Query', '/TN', name)[1] == 0 else 'absent'}")
         return 0
     if args.action == "uninstall":
         for name in tasks:
-            subprocess.run(["schtasks", "/Delete", "/TN", name, "/F"], capture_output=True)
+            _schtasks("/Delete", "/TN", name, "/F")
             print(f"removed {name}")
         return 0
     # A task that names a missing program fails every run and says nothing (SAFE-REMOVE).
@@ -1273,7 +1282,7 @@ def _optional_features(cfg):
     root = cfg["root"]
     mail = email.config()
     features = [
-        ("keyflip", "installed" if shutil.which("keyflip") else "absent",
+        ("keyflip", "installed" if A.program_path("keyflip") else "absent",
          "install keyflip for account budgets and quota rotation"),
         ("telegram", "configured" if telegram.config() else "absent", "ao telegram setup"),
         ("email", f"configured ({mail['provider']})" if mail else "absent", "ao email setup"),
@@ -1287,7 +1296,8 @@ def _optional_features(cfg):
         contract = A.tool_review_contract(adapter)
         if contract is None:
             continue
-        found = any(shutil.which(binary) or _tool_beside_interpreter(binary) for binary in A.adapter_binaries(adapter))
+        found = any(A.program_path(binary) or _tool_beside_interpreter(binary)
+                    for binary in A.adapter_binaries(adapter))
         features.append((ident, "absent" if not found else "configured" if ident in configured else "installed",
                          str(contract.get("install") or f"install {ident}")))
     return features
@@ -1781,8 +1791,7 @@ def cmd_doctor(cfg, args):
     scheduler = _scheduler()
     if scheduler == "schtasks":
         # Windows schedules the watchdog with Task Scheduler, not launchd (#71).
-        wd = subprocess.run(["schtasks", "/Query", "/TN", _windows_task("watchdog", key)], capture_output=True,
-                            text=True, encoding=UTF8, errors="replace").returncode == 0
+        wd = _schtasks("/Query", "/TN", _windows_task("watchdog", key))[1] == 0
     elif scheduler == "systemd":
         timer = _systemd_unit("watchdog", key) + ".timer"
         wd = _systemd_states(timer)[timer] in SYSTEMD_UP
@@ -1846,13 +1855,15 @@ def cmd_doctor(cfg, args):
     print(f"{'checkout':<16}{_checkout_position(A.git_state(root))}")
     for line in _measurement_lines(cfg):
         print(line)
+    for _, text in _path_problems():                                                  # (WINDOWS-NO-CWD-EXEC)
+        print(f"{'PATH':<16}{C['yellow']}{text}{C['reset']}")
     # Can the *agent* run `ao`? A shell alias is invisible to a non-interactive
     # process, so steering that says "run your gates through ao lock" is an
     # instruction the agent cannot follow — and a disciplined agent then parks the
     # slice rather than working around it. That cost this project three parked
     # items and half a day. Check the child's PATH, not this shell's.
     from .watchdog import child_path
-    reachable = shutil.which("ao", path=child_path())
+    reachable = A.program_path("ao", path=child_path())
     if reachable:
         # The architect is woken through a binary the watchdog resolves by version,
         # not by PATH order; say which one, and whether the last wake died on it.
@@ -1947,7 +1958,7 @@ def cmd_doctor(cfg, args):
     # name, drift apart after the next commit, and which one runs depends on
     # how it was invoked. The second pilot's agent caught it on its first day.
     cands = []
-    for cand in (shutil.which("ao"), os.path.join(A.HOME, ".local", "bin", "ao"),
+    for cand in (A.program_path("ao"), os.path.join(A.HOME, ".local", "bin", "ao"),
                  os.path.join(A.REPO, "bin", "ao")):
         if cand and os.path.exists(cand):
             real = os.path.realpath(cand)

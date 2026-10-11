@@ -218,7 +218,7 @@ def test_a_candidate_that_cannot_be_measured_is_said_to_be_so(project, monkeypat
 
 def test_init_registers_each_harness_with_the_one_role_its_readers_hold(project, monkeypatch):
     root = project["root"]
-    monkeypatch.setattr(skillkit.shutil, "which", lambda name: None)     # a harness's own CLI is never run
+    monkeypatch.setattr(skillkit.shutil, "which", lambda name, *args, **kwargs: None)  # a harness's CLI is never run
 
     # The fixture: kiro implements, and the architect runs `claude`; nothing reviews.
     assert skillkit.register_mcp(root, {"claude-code", "kiro"}, exe="/x/ao") == {"claude-code": "registered",
@@ -241,7 +241,7 @@ ON_MCP_JSON = {"argv": ["claude", "-p", "{prompt}"]}      # a block whose harnes
         "a capability matrix binds the roles", "no role is configured"])
 def test_a_registration_read_by_two_roles_or_none_names_no_role(project, monkeypatch, blocks):
     root = project["root"]
-    monkeypatch.setattr(skillkit.shutil, "which", lambda name: None)
+    monkeypatch.setattr(skillkit.shutil, "which", lambda name, *args, **kwargs: None)
     _configure(root, **blocks)
 
     assert skillkit.register_mcp(root, {"claude-code"}, exe="/x/ao") == {"claude-code": "registered"}
@@ -252,7 +252,7 @@ def test_a_registration_read_by_two_roles_or_none_names_no_role(project, monkeyp
 def test_the_default_profile_registers_its_implementer_and_leaves_the_two_role_harness_unnamed(project, monkeypatch):
     """What docs/mcp.md says of the default profile, from the role blocks `ao init --profile` composes."""
     root = project["root"]
-    monkeypatch.setattr(skillkit.shutil, "which", lambda name: None)
+    monkeypatch.setattr(skillkit.shutil, "which", lambda name, *args, **kwargs: None)
     assert A.default_profile() == "claude-kiro"
     planned, _ = cli._profile_config(root, SimpleNamespace(profile=A.default_profile()), {"project": "proj"})
     Path(root, ".ao", "config.json").write_text(json.dumps(planned), encoding="utf-8")
@@ -265,7 +265,7 @@ def test_the_default_profile_registers_its_implementer_and_leaves_the_two_role_h
 
 def test_a_role_reassigned_reaches_the_registration_when_init_registers_again(project, monkeypatch):
     root = project["root"]
-    monkeypatch.setattr(skillkit.shutil, "which", lambda name: None)
+    monkeypatch.setattr(skillkit.shutil, "which", lambda name, *args, **kwargs: None)
     skillkit.register_mcp(root, {"kiro"}, exe="/x/ao")
     _configure(root, architect={"adapter": "kiro"})
 
@@ -276,7 +276,7 @@ def test_a_role_reassigned_reaches_the_registration_when_init_registers_again(pr
 
 def test_a_manual_snippet_carries_the_role_escaped_as_its_root_is(project, monkeypatch):
     root = project["root"]
-    monkeypatch.setattr(skillkit.shutil, "which", lambda name: None)
+    monkeypatch.setattr(skillkit.shutil, "which", lambda name, *args, **kwargs: None)
     _configure(root, implementer={"adapter": "codex"})
     exe = "/x/{args}/ao"                                   # filled once: a value is never filled again
 
@@ -297,7 +297,8 @@ def test_ao_mcp_config_prints_the_role_among_the_server_s_arguments(project, cap
 
     out = capsys.readouterr().out
     server = json.loads(out[out.index("{"):])["mcpServers"]["agent-orchestrator"]
-    assert server["args"] == ["-C", root, "mcp", "serve", "--role", "reviewer"]
+    # after `-m ao` where no ao is on PATH and this interpreter runs it (WINDOWS-NO-CWD-EXEC)
+    assert server["args"][-6:] == ["-C", root, "mcp", "serve", "--role", "reviewer"]
 
 
 def test_docs_mcp_lists_each_role_with_the_tools_it_is_served():

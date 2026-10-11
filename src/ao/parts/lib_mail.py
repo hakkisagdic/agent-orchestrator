@@ -102,7 +102,10 @@ def rotate_if_exhausted(cfg, argv, who, on_wait=None):
         if window and window["pct"] < ceiling:
             return {"ok": True, "provider": provider, "rotated": False, "text": "another actor rotated first"}
         try:
-            subprocess.run(["keyflip", "next", "--strategy", "best"], stdin=subprocess.DEVNULL,
+            keyflip = program_path("keyflip")        # never one the current directory holds (WINDOWS-NO-CWD-EXEC)
+            if keyflip is None:
+                raise FileNotFoundError("keyflip is not on PATH")
+            subprocess.run([keyflip, "next", "--strategy", "best"], stdin=subprocess.DEVNULL,
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
         except Exception as exc:                      # a rotation that cannot run is not a headroom
             return {"ok": False, "provider": provider, "rotated": False,
@@ -338,13 +341,19 @@ _BIN_GLOBS = ("~/.local/share/fnm/node-versions/*/installation/bin",
 
 
 def binary_candidates(name, path=None):
-    """Every executable called `name` this machine has, PATH first, deduplicated."""
+    """Every executable called `name` this machine has, PATH first, deduplicated.
+
+    PATH is read as search_directories reads it, and every other directory searched is taken only
+    when absolute: one relative to the current directory names a directory an agent writes
+    (WINDOWS-NO-CWD-EXEC).
+    """
     import glob as _glob
-    dirs = [d for d in (path or os.environ.get("PATH", "")).split(os.pathsep) if d]
+    dirs = search_directories(path or None)
     dirs += [os.path.expanduser(d) for d in settings.get(None, "binaries.extra_dirs")]
     dirs += [os.path.expanduser(d) for d in _BIN_DIRS]
     for g in _BIN_GLOBS:
         dirs += sorted(_glob.glob(os.path.expanduser(g)), reverse=True)
+    dirs = [d for d in dirs if os.path.isabs(d)]
     exts = [""] + (os.environ.get("PATHEXT", ".EXE;.CMD;.BAT").split(";") if os.name == "nt" else [])
     seen, out = set(), []
     for d in dirs:
@@ -365,9 +374,120 @@ def runnable_binary(name):
 
     Windows starts a program by its extension, and an npm install puts an extensionless
     POSIX script beside the .cmd that cmd.exe found; there only a match with an extension
-    is a program.
+    is a program. Windows' own programs - PowerShell for the process table above all - come
+    from its system directory alone (WINDOWS-NO-CWD-EXEC).
     """
+    if os.name == "nt" and _program_name(name) in WINDOWS_SYSTEM_PROGRAMS:
+        return program_path(name)
     return next((path for path in binary_candidates(name) if os.name != "nt" or os.path.splitext(path)[1]), None)
+
+
+# Windows' own programs ao starts, by the name it starts each by, and where each lies in Windows' system
+# directory: they are taken from there and from nowhere else (WINDOWS-NO-CWD-EXEC).
+WINDOWS_SYSTEM_PROGRAMS = {"cmd": ("cmd.exe",), "where": ("where.exe",), "taskkill": ("taskkill.exe",),
+                           "tasklist": ("tasklist.exe",), "schtasks": ("schtasks.exe",),
+                           "powershell": ("WindowsPowerShell", "v1.0", "powershell.exe")}
+
+
+def windows_system_directory():
+    """Windows' system directory, %SystemRoot%\\System32 (WINDOWS-NO-CWD-EXEC).
+
+    SystemRoot is set for every Windows process; where it names no absolute directory
+    Windows itself is asked (procs.system_directory), and where it cannot be asked the
+    directory is Windows' default one.
+    """
+    from . import procs
+    for variable in ("SystemRoot", "SYSTEMROOT", "windir", "WINDIR"):
+        system_root = os.environ.get(variable) or ""
+        if os.path.isabs(system_root):
+            return os.path.join(system_root, "System32")
+    return procs.system_directory() or "C:\\Windows\\System32"
+
+
+def search_directories(path=None):
+    """The directories a program is looked for in: PATH's entries in its order, each absolute and none the current
+    directory (WINDOWS-NO-CWD-EXEC).
+
+    Windows looks for a program named without a directory in the current directory before PATH,
+    an empty PATH entry is the current directory to shutil.which and to a POSIX shell alike, and
+    a relative entry is a directory below it. ao runs in a tree an agent writes, so a program it
+    left there under the name of one ao starts - a taskkill.exe, a git.bat - would run as the
+    person. None of the three is searched, on any platform.
+    """
+    try:
+        here = os.path.normcase(os.path.normpath(os.getcwd()))
+    except OSError:
+        here = None
+    entries = (os.environ.get("PATH", os.defpath) if path is None else path).split(os.pathsep)
+    # Each is absolute already, so it is only normalised: no entry is read against the current directory.
+    return [entry for entry in entries
+            if entry and os.path.isabs(entry) and os.path.normcase(os.path.normpath(entry)) != here]
+
+
+def unsafe_path_entries(path=None):
+    """The entries of PATH that are empty or relative: what search_directories passes over, as PATH writes them."""
+    entries = (os.environ.get("PATH", "") if path is None else path).split(os.pathsep)
+    return [entry for entry in entries if not entry or not os.path.isabs(entry)]
+
+
+def ao_program():
+    """(program, the arguments before ao's own) that start ao: the ao on PATH, else this interpreter running this
+    package, by its absolute path. Never `sys.argv[0]`, which can be a bare `ao` that a process started in a tree
+    looks for there, or one made absolute against the current directory (the review of WINDOWS-NO-CWD-EXEC)."""
+    found = program_path("ao")
+    return (found, []) if found else (sys.executable, ["-m", "ao"])
+
+
+def program_path(name, path=None):
+    """The file ao starts for program `name`, or None: never one the current directory holds (WINDOWS-NO-CWD-EXEC).
+
+    A name with a directory in it is taken as it is when absolute and never when relative,
+    since it names a file in the current directory. On Windows taskkill, schtasks, tasklist,
+    cmd, where and powershell are Windows' own, from its system directory and nowhere else.
+    Every other program is looked for as shutil.which looks, honouring PATHEXT, in
+    search_directories alone. Before Python 3.12 shutil.which on Windows looked in the
+    current directory first whatever directories it was given, and from 3.12 it still does
+    unless NoDefaultCurrentDirectoryInExePath is set, so an answer from there is set aside
+    for the first one PATH's own directories hold.
+    """
+    import shutil
+    name = str(name)
+    if os.path.isabs(name):
+        return shutil.which(name)
+    if os.path.dirname(name):
+        return None
+    if os.name == "nt" and _program_name(name) in WINDOWS_SYSTEM_PROGRAMS \
+            and os.path.splitext(name)[1].lower() in ("", ".exe"):
+        program = os.path.join(windows_system_directory(), *WINDOWS_SYSTEM_PROGRAMS[_program_name(name)])
+        return program if os.path.isfile(program) else None
+    directories = search_directories(path)
+    found = shutil.which(name, path=os.pathsep.join(directories))
+    if found and os.name == "nt" and _in_current_directory(found):
+        found = _first_program_in(name, directories)
+    return found
+
+
+def _in_current_directory(found):
+    """Whether a program found is a file in the current directory itself."""
+    try:
+        here = os.path.normcase(os.path.abspath(os.getcwd()))
+    except OSError:
+        return False
+    return os.path.isfile(found) and os.path.normcase(os.path.dirname(os.path.abspath(found))) == here
+
+
+def _first_program_in(name, directories):
+    """The first file in these directories that Windows starts for `name`: the name with each PATHEXT extension
+    in turn, or the name alone when it ends in one."""
+    extensions = [extension.lower() for extension in os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD").split(";")
+                  if extension]
+    names = [name] if os.path.splitext(name)[1].lower() in extensions else [name + ext for ext in extensions]
+    for directory in directories:
+        for candidate in names:
+            program = os.path.join(directory, candidate)
+            if os.path.isfile(program):
+                return program
+    return None
 
 
 def _run_program(argv, cwd=None, timeout=20, stderr=subprocess.DEVNULL):
@@ -1130,13 +1250,13 @@ def _github_says_private(url):
     The host is the one git reaches: `github.com/<owner>/<repo>` matched anywhere in the URL let GitHub's
     answer for an unrelated repository send mail and governance to another host (MAIL-SYNC-3).
     """
-    import shutil
     identity = _remote_identity(url)
     found = identity and identity[0] == "github.com" and re.fullmatch(r"([^/]+)/([^/]+)", identity[1])
-    if not found or not shutil.which("gh"):
+    gh = program_path("gh") if found else None          # never one the current directory holds (WINDOWS-NO-CWD-EXEC)
+    if not gh:
         return None
     try:
-        answer = subprocess.run(["gh", "api", f"repos/{found.group(1)}/{found.group(2)}", "--jq", ".private"],
+        answer = subprocess.run([gh, "api", f"repos/{found.group(1)}/{found.group(2)}", "--jq", ".private"],
                                 capture_output=True, text=True, encoding=UTF8, errors="replace", timeout=30)
     except (OSError, subprocess.TimeoutExpired):
         return None

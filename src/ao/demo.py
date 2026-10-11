@@ -286,9 +286,15 @@ class _Demo:
         return done.returncode, done.stdout
 
     def git(self, *args, shown=False):
-        """Run git in the project; shown, it is part of the transcript, else only a failure is said."""
+        """Run git in the project; shown, it is part of the transcript, else only a failure is said.
+
+        The git on PATH, never one the current directory holds, which Windows looks in first (WINDOWS-NO-CWD-EXEC).
+        """
+        git = A.program_path("git")
+        if git is None:
+            raise _Stopped("git is no longer on PATH")
         try:
-            done = subprocess.run(["git", *args], cwd=self.project, env=self.env, stdin=subprocess.DEVNULL,
+            done = subprocess.run([git, *args], cwd=self.project, env=self.env, stdin=subprocess.DEVNULL,
                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding=UTF8,
                                   errors="replace", timeout=COMMAND_SECONDS)
         except subprocess.TimeoutExpired:
@@ -449,7 +455,7 @@ def run(keep=False):
     The scratch folder is removed at the end whatever happened, unless `keep` asks for it to stay, and
     the last lines say which, and where it is.
     """
-    if not shutil.which("git"):
+    if not A.program_path("git"):
         print(f"{C['red']}ao demo needs git{C['reset']}: install git, so that `git --version` answers, and run it "
               "again")
         return 1

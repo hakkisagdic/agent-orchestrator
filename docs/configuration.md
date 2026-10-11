@@ -86,7 +86,7 @@ machine setting written into a project.
 | `architect.quota_window_hours` | `5` | machine | the architect's usage window, unless its limit names a week or a month; a reset named further away is not the one meant |
 | `heartbeat.retired_days` | `7` | machine | days of watchdog silence after which a project counts as retired, not dead |
 | `fleet.window_reserve_pct` | `20` | machine | percent of the machine's provider window kept free before a report wake |
-| `binaries.extra_dirs` | `none` | machine | directories searched for agent binaries after PATH, before the usual install locations |
+| `binaries.extra_dirs` | `none` | machine | directories searched for agent binaries after PATH, before the usual install locations; a relative one is not searched |
 | `watchdog.bypass_adapters` | `none` | machine | adapters whose implementer the watchdog may nudge with the flag that turns off their own sandbox; none: such a nudge is refused |
 | `review.api_providers` | `none` | machine | OpenAI-compatible providers the API reviewer may ask, each `<word> <base URL> <variable holding its key>`; a reviewer names one as `<word>/<model>`; none: no provider |
 | `filters.probe_programs` | `['rtk']` | machine | programs ao doctor may run as a user-level shell-command filter hook, to prove it leaves measurements alone |

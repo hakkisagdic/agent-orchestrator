@@ -84,7 +84,7 @@ def test_ao_commit_checks_authority_first_and_passes_nothing_but_the_message(pro
 
     monkeypatch.setattr(cli, "cmd_commit_check", lambda cfg, args: 0)
     assert cli.cmd_commit(project, SimpleNamespace(message="land it", file=None)) == 0
-    assert calls == [["git", "commit", "-m", "land it"]]
+    assert calls == [[A.git_binary(), "commit", "-m", "land it"]]
     assert cli.cmd_commit(project, SimpleNamespace(message="land it", file="msg.txt")) == 2
 
 

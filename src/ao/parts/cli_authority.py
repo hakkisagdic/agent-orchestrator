@@ -258,8 +258,10 @@ def cmd_merge_check(cfg, args):
             print(f"{C['dim']}▶ {name}{C['reset']}  {g['run']}")
             started = time.time()
             try:
+                # The project's command line runs in Windows' own cmd.exe, never one found in the current
+                # directory (WINDOWS-NO-CWD-EXEC); what that shell runs is the project's, as on POSIX.
                 r = subprocess.run(g["run"], shell=True, cwd=result_dir, capture_output=True, text=True,
-                                   encoding=UTF8, errors="replace",
+                                   encoding=UTF8, errors="replace", executable=A.shell_program(),
                                    timeout=g.get("timeout") or S.get(cfg, "gates.default_timeout"))
                 out, code = (r.stdout + r.stderr), r.returncode
             except subprocess.TimeoutExpired:
@@ -343,8 +345,9 @@ def cmd_verify(cfg, args):
         print(f"{C['dim']}▶ {name}{C['reset']}  {g['run']}")
         started = time.time()
         try:
+            # In Windows' own cmd.exe, never one found in the current directory (WINDOWS-NO-CWD-EXEC).
             r = subprocess.run(g["run"], shell=True, cwd=root, capture_output=True,
-                               text=True, encoding=UTF8, errors="replace",
+                               text=True, encoding=UTF8, errors="replace", executable=A.shell_program(),
                                timeout=g.get("timeout") or S.get(cfg, "gates.default_timeout"))
             out, code = (r.stdout + r.stderr), r.returncode
         except subprocess.TimeoutExpired:
@@ -1217,7 +1220,8 @@ def cmd_commit(cfg, args):
             print(f"{C['red']}{C['b']}COMMIT REFUSED{C['reset']}\n  {C['red']}·{C['reset']} {exc}")
             return 2
         source = ["-F", "-"]
-    code = subprocess.run(["git", "commit", *source], cwd=cfg["root"], env=env, input=data).returncode
+    # The git ao measures with, never one Windows finds in the current directory first (WINDOWS-NO-CWD-EXEC).
+    code = subprocess.run([A.git_binary(), "commit", *source], cwd=cfg["root"], env=env, input=data).returncode
     if code:
         return code
     # The hook saw the index before Git wrote the tree; what landed is compared
