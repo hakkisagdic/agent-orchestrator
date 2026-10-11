@@ -39,6 +39,9 @@ FORBIDDEN = (
     ("runs any command", "ao lock -- sh -c x"),
     ("runs arbitrary code", "python3 -c x"),
     ("runs arbitrary code", "python -c x"),
+    ("runs arbitrary code", "python -m x"),
+    ("runs arbitrary code", "python3 -m x"),
+    ("runs arbitrary code", "py -m x"),
     ("runs arbitrary code", "node -e x"),
     ("runs arbitrary code", "npx x"),
     ("runs arbitrary code", "npm run x"),
@@ -51,6 +54,22 @@ FORBIDDEN = (
     ("runs arbitrary code", "env sh -c x"),
     ("runs arbitrary code", "uv run x"),
     ("runs arbitrary code", "make x"),
+    # Windows' own ways to run a line of code, as `python -c` runs one: the py launcher, PowerShell and cmd.exe each
+    # run the text they are handed, and a grant of any of them was asked about none (WINDOWS-SAY-WHY). Git Bash, which
+    # runs a harness's Bash tool on Windows, hands cmd its switch as `//c`.
+    ("runs arbitrary code", "py -c x"),
+    ("runs arbitrary code", "py -3 -c x"),
+    ("runs arbitrary code", "python.exe -c x"),
+    ("runs arbitrary code", "powershell -Command x"),
+    ("runs arbitrary code", "powershell -c x"),
+    ("runs arbitrary code", "powershell -EncodedCommand x"),
+    ("runs arbitrary code", "powershell.exe -Command x"),
+    ("runs arbitrary code", "PowerShell -Command x"),
+    ("runs arbitrary code", "pwsh -Command x"),
+    ("runs arbitrary code", "pwsh -c x"),
+    ("runs arbitrary code", "cmd /c x"),
+    ("runs arbitrary code", "cmd //c x"),
+    ("runs arbitrary code", "cmd.exe /c x"),
 )
 
 # A person's act, by the words that make it one and the flags it needs: a rule admitting a command that starts with
@@ -169,7 +188,8 @@ def admits(rule, command):
         return True
     if not (rule.startswith("Bash(") and rule.endswith(")")):
         return False
-    body = rule[len("Bash("):-1]
+    body = _program_word(rule[len("Bash("):-1])
+    command = _program_word(command)
     if body.endswith(":*"):
         body = body[:-2] + " *"
     if "*" not in body:
@@ -177,6 +197,49 @@ def admits(rule, command):
     if body.endswith(" *") and body.count("*") == 1 and command == body[:-2]:
         return True
     return re.fullmatch(".*".join(re.escape(part) for part in body.split("*")), command, re.S) is not None
+
+
+def _program_name(word):
+    """A program's name as Windows starts it: its folder, quotes, case and .exe, .cmd, .bat or .com left off - a program
+    named by its path is the program all the same (the review of WINDOWS-SAY-WHY)."""
+    program = re.split(r"[\\/]", word.strip("\"'"))[-1].casefold()
+    for extension in (".exe", ".cmd", ".bat", ".com"):
+        if program.endswith(extension):
+            return program[:-len(extension)]
+    return program
+
+
+def _program_word(text):
+    """A command or a rule with its program read as Windows starts it - `powershell.exe -c x` is `powershell -c x` -
+    the program ending at a space or at a rule's `:*`. Each forbidden command was asked as one spelling, and a rule
+    written with another admitted it unnamed (the review of WINDOWS-SAY-WHY)."""
+    # A quoted program is one word, spaces and all: `"C:\Program Files\...\python.exe"`.
+    found = re.match(r"(?:\"([^\"]*)\"|'([^']*)'|(\S+?))(:\*|\s|$)(.*)", str(text), re.S)
+    if not found:
+        return str(text)
+    program = next(group for group in found.groups()[:3] if group is not None)
+    return _program_name(program) + found.group(4) + found.group(5)
+
+
+# Programs that run whatever code they are handed: an interpreter or a shell. A rule that grants one runs anything,
+# whatever arguments it fixes, so the audit reads it as a closed world rather than as spellings to list; only an exact
+# command asking its version or its help is no grant of code (the review of WINDOWS-SAY-WHY).
+INTERPRETERS = re.compile(r"(python|pythonw|pypy|py)(\d+(\.\d+)*)?|node|nodejs|deno|bun|ruby|perl|php|lua|"
+                          r"powershell|pwsh|cmd|bash|sh|zsh|fish|dash|ksh|csh|tcsh|osascript|wscript|cscript|mshta")
+HARMLESS_ARGUMENTS = {"--version", "-v", "-V", "--help", "-h", "/?"}
+
+
+def interpreter_rule(rule):
+    """The interpreter a rule grants with arguments that could hand it code, or None (WINDOWS-SAY-WHY)."""
+    rule = str(rule).strip()
+    if not (rule.startswith("Bash(") and rule.endswith(")")):
+        return None
+    words = unwrap(_program_word(rule[len("Bash("):-1]).replace(":*", " *").split())
+    if not words or not INTERPRETERS.fullmatch(_program_name(words[0])):
+        return None
+    if "*" not in " ".join(words) and words[1:] and all(word in HARMLESS_ARGUMENTS for word in words[1:]):
+        return None
+    return _program_name(words[0])
 
 
 def rules(argv):
@@ -260,6 +323,12 @@ def problems(argv, options=None, role=None):
             if rule not in named and admits(plain, command):
                 found.append((f"{reason}, as the command it runs", command, rule))
                 named.add(rule)
+    # An interpreter or a shell is named whatever its rule fixes after it (WINDOWS-SAY-WHY).
+    for rule in granted:
+        program = interpreter_rule(rule) if rule not in named else None
+        if program:
+            found.append(("runs arbitrary code", f"{program} ...", rule))
+            named.add(rule)
     # A person's act written out in full is named by the words that start it (GRANTS-PREFIX).
     for rule in granted:
         act = next(((reason, words, flags) for reason, words, flags in PERSON_ACTS if admits_act(rule, words, flags)),

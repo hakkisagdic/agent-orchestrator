@@ -266,13 +266,29 @@ def cmd_telegram(cfg, args):
         # The phone channel is the machine's, so its steps are in the machine's language (LANGUAGE-OUTPUT).
         print(f"{C['b']}1.{C['reset']} Telegram: {C['b']}@BotFather{C['reset']} → /newbot → token")
         print(f"{C['b']}2.{C['reset']} {language.text(None, 'telegram.setup-chat')}")
-        print(f"   {C['dim']}curl -s \"https://api.telegram.org/bot<TOKEN>/getUpdates\" \\\\{C['reset']}")
-        print(f"   {C['dim']}  | python3 -c \"import sys,json; print([u['message']['chat']['id'] for u in json.load(sys.stdin)['result']])\"{C['reset']}")
+        if os.name == "nt":
+            # Windows' own: curl piped to python3 and chmod mean nothing to cmd.exe, and echo there writes the
+            # quotes into the file (WINDOWS-SAY-WHY).
+            print(f"   {C['dim']}powershell -NoProfile -Command \"(Invoke-RestMethod "
+                  f"'https://api.telegram.org/bot<TOKEN>/getUpdates').result.message.chat.id\"{C['reset']}")
+        else:
+            print(f"   {C['dim']}curl -s \"https://api.telegram.org/bot<TOKEN>/getUpdates\" \\\\{C['reset']}")
+            print(f"   {C['dim']}  | python3 -c \"import sys,json; print([u['message']['chat']['id'] "
+                  f"for u in json.load(sys.stdin)['result']])\"{C['reset']}")
         print(f"{C['b']}3.{C['reset']} {language.text(None, 'telegram.setup-file', b=C['b'], reset=C['reset'])}")
-        print(f"   {C['dim']}mkdir -p ~/.ao{C['reset']}")
-        print(f"   {C['dim']}echo '{{\"token\":\"<BOT_TOKEN>\",\"chats\":[\"<CHAT_ID>\"]}}' > {conf}{C['reset']}")
-        print(f"   {C['dim']}chmod 600 {conf}{C['reset']}")
-        print(f"\n{C['b']}4.{C['reset']} {C['b']}ao telegram test{C['reset']} → {C['b']}ao telegram install{C['reset']}")
+        if os.name == "nt":
+            print(f"   {C['dim']}{conf}{C['reset']}")
+            print(f"   {C['dim']}{{\"token\":\"<BOT_TOKEN>\",\"chats\":[\"<CHAT_ID>\"]}}{C['reset']}")
+            print(f"   {C['dim']}{language.text(None, 'private-file.windows')}{C['reset']}")
+            # The poller is scheduled with launchd, which Windows does not have: `ao telegram install` refuses there.
+            print(f"\n{C['b']}4.{C['reset']} {C['b']}ao telegram test{C['reset']} → "
+                  f"{C['b']}ao telegram poll{C['reset']}")
+        else:
+            print(f"   {C['dim']}mkdir -p ~/.ao{C['reset']}")
+            print(f"   {C['dim']}echo '{{\"token\":\"<BOT_TOKEN>\",\"chats\":[\"<CHAT_ID>\"]}}' > {conf}{C['reset']}")
+            print(f"   {C['dim']}chmod 600 {conf}{C['reset']}")
+            print(f"\n{C['b']}4.{C['reset']} {C['b']}ao telegram test{C['reset']} → "
+                  f"{C['b']}ao telegram install{C['reset']}")
         print(f"\n{C['dim']}The allowlist is not optional: an inbound channel without one")
         print(f"is an authority surface open to whoever finds the bot.{C['reset']}")
         return 0

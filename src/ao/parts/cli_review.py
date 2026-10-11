@@ -308,6 +308,10 @@ def _reviewer_communicate(proc, timeout, label, started, stall=None, signed_out=
     they close, the beat sees nothing and the reviewer's own end says it.
     """
     from . import procs
+    if stall and os.name == "nt":
+        # The stall check reads a process group's CPU, which Windows has none of: said as the wait begins, where it
+        # was skipped without a word (WINDOWS-SAY-WHY).
+        print(f"{C['dim']}reviewer {label}: {WINDOWS_LIMITS['stall check']}{C['reset']}", flush=True)
     remaining = float(timeout)
     last_cpu, quiet_since = None, time.monotonic()
     while True:

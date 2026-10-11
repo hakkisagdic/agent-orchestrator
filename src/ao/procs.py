@@ -109,6 +109,22 @@ def system_directory():
     return answer.value if size else None
 
 
+def oem_encoding():
+    """The codec of Windows' OEM code page, which its console programs write to a pipe in - "cp857" on a Turkish
+    Windows, "cp437" on an American one - or None where there is none to ask (WINDOWS-SAY-WHY).
+
+    For lib.console_text: the lib's parts may not load ctypes. GetOEMCP is asked, and a code page
+    Python has no codec for is none.
+    """
+    import codecs
+    try:
+        name = f"cp{int(ctypes.windll.kernel32.GetOEMCP())}"
+        codecs.lookup(name)
+    except (AttributeError, OSError, LookupError, ValueError):
+        return None
+    return name
+
+
 def _clock_seconds(text):
     """Seconds in a `ps -o etime` reading, [[dd-]hh:]mm:ss, or None."""
     days, _, clock = text.strip().rpartition("-")

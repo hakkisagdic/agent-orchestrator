@@ -518,6 +518,18 @@ def stale_siblings(root, max_age=900):
     return out
 
 
+def scheduler_hint():
+    """Where a person looks into a watchdog that stopped, on this platform: launchd's `launchctl` on macOS, a user
+    systemd's `systemctl --user` on Linux, Task Scheduler on Windows (WINDOWS-SAY-WHY).
+
+    A silent watchdog was told "launchctl / ao watchdog status" on every platform, and the tool it
+    named is not there on Windows or Linux.
+    """
+    if os.name == "nt":
+        return "Task Scheduler"
+    return "systemctl --user" if sys.platform.startswith("linux") else "launchctl"
+
+
 # ---- review scope ----------------------------------------------------------------
 
 COORDINATION_DIRS = (".ao/", "agent-mail/")      # and each shipped harness's own, from harness_dirs()

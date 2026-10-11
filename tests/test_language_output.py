@@ -72,10 +72,14 @@ bir ortam değişkeninden bir kez okunur):
      AO_SMTP_PASSWORD=… ao email setup --provider smtp --host smtp.ornek.com \\
        --user SEN@ORNEK.COM --password-env AO_SMTP_PASSWORD --to SEN@ORNEK.COM
 
-Token {conf} dosyasında 0600 ile durur; hiçbir depoya yazılmaz. Kırmızı alarmlar
+Token {conf} dosyasında {kept} durur; hiçbir depoya yazılmaz. Kırmızı alarmlar
 (bir saatten uzun süren turuncu durumlar, tükenmiş kota, başarısız mimar uyandırma)
 bu adrese gider; `ao alarms` merdiveni gösterir.
 """
+# How the file is kept private, as the platform keeps it: Windows keeps no file mode (WINDOWS-SAY-WHY).
+KEPT = {"en": "as private as its folder's permissions (Windows keeps no file mode)",
+        "tr": "klasörünün izinleri kadar gizli (Windows dosya kipi tutmaz)"} if os.name == "nt" \
+    else {"en": "mode 0600", "tr": "0600 ile"}
 EMAIL_TEST = {
     "en": "ao's e-mail channel works. Project: {root}\nRed alarms come here: orange conditions standing longer than "
           "an hour, an exhausted quota, a failed architect wake.",
@@ -92,11 +96,11 @@ def test_the_email_setup_follows_the_machines_language_and_the_test_mail_the_pro
     english = capsys.readouterr().out
     assert english.startswith("The e-mail channel (the red alarm) — no server needed, it goes through formsubmit.co.\n")
     assert "3. Save:    ao email setup --token <token> --to YOUR@ADDRESS\n" in english
-    assert f"The token stays in {email.CONF}, mode 0600" in english
+    assert f"The token stays in {email.CONF}, {KEPT['en']}, and is never written" in english
     assert not TURKISH.search(english.replace(email.CONF, ""))
     _machine("tr")
     assert cli.cmd_email(turkish_project, setup) == 0
-    assert capsys.readouterr().out == EMAIL_SETUP_TR.format(conf=email.CONF) + "\n"
+    assert capsys.readouterr().out == EMAIL_SETUP_TR.format(conf=email.CONF, kept=KEPT["tr"]) + "\n"
 
     sent = []
     monkeypatch.setattr(email, "config", lambda: {"provider": "formsubmit", "token": "t", "to": "", "name": "ao"})

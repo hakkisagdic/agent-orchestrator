@@ -63,7 +63,9 @@ written as `[redacted:<rule>]` ([safety.md](safety.md#7b-what-ao-writes-is-scann
   name and path.
 - `~/.ao/email.json`, `~/.ao/telegram.json` and `~/.ao/pings.json` - the channels' credentials and
   addresses. ao writes the first and the last readable by you alone (mode 0600); the Telegram file is
-  the one you write yourself, and [telegram.md](telegram.md) asks the same mode of it.
+  the one you write yourself, and [telegram.md](telegram.md) asks the same mode of it. Windows keeps
+  no file mode: there the three are as private as `~/.ao`, which takes its permissions from your user
+  profile, and ao says so when it saves one ([windows.md](windows.md)).
   `~/.ao/telegram-offset` is the poller's place in the messages.
 - For each project, files named after it: the watchdog's state and log and its recorded cycles
   (`~/.ao/watchdog-<project>.json`, `~/.ao/cycles-<project>.jsonl`), its heartbeat, and the logs of the

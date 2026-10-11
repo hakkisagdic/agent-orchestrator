@@ -139,16 +139,17 @@ def _schtasks(*args):
 
     Windows' own schtasks, from its system directory: by its bare name Windows looked for it in the
     current directory first, and a schtasks.exe an agent left in the tree would have run as the
-    person, and been asked to schedule ao's jobs (WINDOWS-NO-CWD-EXEC).
+    person, and been asked to schedule ao's jobs (WINDOWS-NO-CWD-EXEC). What it prints is in the
+    OEM code page, read as such (console_text, WINDOWS-SAY-WHY).
     """
     schtasks = A.program_path("schtasks")
     if schtasks is None:
         return "", None
     try:
-        done = subprocess.run([schtasks, *args], capture_output=True, text=True, encoding=UTF8, errors="replace")
+        done = subprocess.run([schtasks, *args], capture_output=True)
     except OSError:
         return "", None
-    return (done.stdout + done.stderr).strip(), done.returncode
+    return A.console_text((done.stdout or b"") + (done.stderr or b"")).strip(), done.returncode
 
 
 def _scheduler():
@@ -1866,6 +1867,10 @@ def cmd_doctor(cfg, args):
         print(line)
     for _, text in _path_problems():                                                  # (WINDOWS-NO-CWD-EXEC)
         print(f"{'PATH':<16}{C['yellow']}{text}{C['reset']}")
+    # What ao cannot hold on Windows, and why, where a person looks for it; none is a fault to page about
+    # (WINDOWS-SAY-WHY).
+    for line in _windows_limit_lines():
+        print(line)
     # Can the *agent* run `ao`? A shell alias is invisible to a non-interactive
     # process, so steering that says "run your gates through ao lock" is an
     # instruction the agent cannot follow — and a disciplined agent then parks the

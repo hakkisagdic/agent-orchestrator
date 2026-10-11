@@ -631,13 +631,30 @@ def _open_regular(path):
     A subagent's file is checked by its real path when the directory is listed and opened later: one swapped in
     between for a link is not followed, and one swapped for a FIFO - or a sidecar that is one - is refused at
     once, opened without blocking, where reading it hung the reader (SUBAGENT-BOUNDS-2).
+
+    Windows has no O_NOFOLLOW, and the flag that asked for it was 0 there: a final link was followed
+    as if the flag were not asked for. Where the platform has none, the path is looked at before it
+    is opened - a link is refused - and what was opened must be the file that was looked at, by its
+    file id, so a link swapped in between is refused too (WINDOWS-SAY-WHY).
     """
     import stat as _stat
-    flags = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    before = None
+    if nofollow is None:
+        before = os.lstat(path)
+        if _stat.S_ISLNK(before.st_mode):
+            raise OSError(f"{path} is a link")
+    flags = (nofollow or 0) | getattr(os, "O_NONBLOCK", 0)
     handle = open(path, "rb", opener=lambda name, mode: os.open(name, mode | flags))
     try:
-        if not _stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+        opened = os.fstat(handle.fileno())
+        if not _stat.S_ISREG(opened.st_mode):
             raise OSError(f"{path} is not a regular file")
+        if before is not None and (not before.st_ino or not opened.st_ino or before.st_ino != opened.st_ino
+                                   or before.st_dev != opened.st_dev):
+            # A file system that numbers no file - FAT - cannot tell a file swapped in from the one looked at: read as
+            # changed, not passed (the review of WINDOWS-SAY-WHY).
+            raise OSError(f"{path} changed as it was opened, or its file system cannot say it did not")
     except BaseException:
         handle.close()
         raise

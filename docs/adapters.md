@@ -278,7 +278,8 @@ While a command fits with room to spare - the prompt's argument, the other argum
 margin for a launcher that starts the real program - the prompt stays in its argument and nothing changes.
 Past that ao uses what the adapter declares for the command: `resume`'s channels for one that carries
 `{session}`, `send`'s for any other, standard input before a file. The prompt's bytes are written to a file
-of mode 0600 in a directory of its own, never inside the repository, handed over as standard input or by
+of mode 0600 (on Windows, which keeps no file mode, as private as the directory's permissions make it)
+in a directory of its own, never inside the repository, handed over as standard input or by
 its path, and removed when the process ends. Every prompt ao hands an agent's CLI goes this way: a
 reviewer's, the bug hunter's, and those of the watchdog's nudges and architect wakes. A watchdog turn runs
 detached and nothing waits to remove a file after it, so it takes standard input or nothing. A review

@@ -1449,9 +1449,14 @@ def cmd_writers(cfg, args):
         cleaned = [p for p in dead if p not in left]
     else:
         cleaned, left = [], dead
+    # Windows has no process groups to tell an ended turn's leftovers by: none set aside there is not none, and the
+    # count may hold them (WINDOWS-SAY-WHY).
+    blind = os.name == "nt"
     if args.json:
-        print(json.dumps({"writers": len(roots), "turns": rows, "orphans": left,
-                          "cleaned": cleaned}, ensure_ascii=False))
+        told = {"writers": len(roots), "turns": rows, "orphans": None if blind else left, "cleaned": cleaned}
+        if blind:
+            told["orphans_unknown"] = WINDOWS_LIMITS["orphans"]
+        print(json.dumps(told, ensure_ascii=False))
         return 0 if len(roots) <= 1 else 1
     if not roots:
         print(f"{C['green']}0 writers{C['reset']} — no live turn in this tree")
@@ -1469,6 +1474,8 @@ def cmd_writers(cfg, args):
     elif left:
         print(f"   {C['yellow']}{len(left)} orphan(s){C['reset']} left by ended turns, not counted: {left}"
               "  (`ao writers --clean` stops them)")
+    if blind:
+        print(f"   {C['yellow']}orphans not told apart{C['reset']}: {WINDOWS_LIMITS['orphans']}")
     return 0 if len(roots) <= 1 else 1
 
 
@@ -1541,17 +1548,21 @@ def cmd_email(cfg, args):
                                     **{"from": args.sender})
         except ValueError as exc:
             print(f"{C['red']}not saved{C['reset']}: {exc}"); return 2
-        print(f"{C['green']}saved{C['reset']} {email.CONF} (0600) provider={provider} → {c.get('to')}")
+        print(f"{C['green']}saved{C['reset']} {email.CONF} ({_private_mode()}) provider={provider} → {c.get('to')}")
         print(f"now: {C['b']}ao email test{C['reset']}")
         return 0
     if args.action == "setup":
         if args.token:
             c = email.save(args.token, to=args.to)
-            print(f"{C['green']}saved{C['reset']} {email.CONF} (0600) → {c.get('to') or 'address hidden behind token'}")
+            print(f"{C['green']}saved{C['reset']} {email.CONF} ({_private_mode()}) → "
+                  f"{c.get('to') or 'address hidden behind token'}")
             print(f"now: {C['b']}ao email test{C['reset']}")
             return 0
-        # The channel is the machine's, so its steps are in the machine's language (LANGUAGE-OUTPUT).
-        print(language.text(None, "email.setup", conf=email.CONF))
+        # The channel is the machine's, so its steps are in the machine's language (LANGUAGE-OUTPUT); how its file is
+        # kept private is the platform's (WINDOWS-SAY-WHY).
+        print(language.text(None, "email.setup", conf=email.CONF,
+                            kept=language.text(None, "private-file.kept-windows" if os.name == "nt"
+                                               else "private-file.kept")))
         return 0
     c = email.config()
     if args.action == "status":

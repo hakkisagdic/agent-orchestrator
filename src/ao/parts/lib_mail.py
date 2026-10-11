@@ -502,6 +502,24 @@ def _first_program_in(name, directories):
     return None
 
 
+def console_text(data):
+    """What a Windows console program wrote to a pipe, as text: UTF-8 where it is that, else the OEM code page
+    Windows' own programs write in (WINDOWS-SAY-WHY).
+
+    schtasks wrote why it refused a task in the OEM code page - cp857 on a Turkish Windows - and ao
+    read it as UTF-8: every letter outside ASCII in the line a person was shown came out as a
+    replacement character. A console set to UTF-8 (chcp 65001) writes UTF-8, which is read first;
+    OEM bytes are almost never valid UTF-8. Where no OEM code page can be asked, UTF-8 with
+    replacements, as before.
+    """
+    try:
+        return data.decode(UTF8)
+    except UnicodeDecodeError:
+        pass
+    from . import procs
+    return data.decode(procs.oem_encoding() or UTF8, "replace")
+
+
 def _run_program(argv, cwd=None, timeout=20, stderr=subprocess.DEVNULL):
     """What sh() returned for these words, and the exit status, from the program started without a shell.
 

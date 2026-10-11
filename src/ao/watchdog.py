@@ -2747,7 +2747,7 @@ def _cycle_impl(args, root):
         if time.time() - restart <= 15 * 60:
             continue
         notify(f"{sib}: watchdog silent", f"no heartbeat for {age_s // 60}m — its watchdog is not "
-               f"running; launchctl / ao watchdog status", root, key=f"watchdog-dead:{sib}",
+               f"running; {A.scheduler_hint()} / ao watchdog status", root, key=f"watchdog-dead:{sib}",
                window=3600, audience="human")
     hs = A.hold_state(root)
     # A hold carried over a silence stands from the resume (RESUME-QUIET).
@@ -2816,7 +2816,10 @@ def _cycle_impl(args, root):
                 # (WINDOWS-STOP-PROVEN).
                 print(f"{len(left)} leftover process(es) still run after the sweep: {left}")
     running = [p for p in A.agent_pids(root, adapter) if p not in set(dead)]
-    _FACTS.update(writers=len(A.process_trees(running)) if running else 0, orphans=len(dead))
+    # Windows has no process groups to find an ended turn's leftovers by: none looked for is not none, and what
+    # `running` holds may be such leftovers (WINDOWS-SAY-WHY).
+    _FACTS.update(writers=len(A.process_trees(running)) if running else 0,
+                  orphans=None if os.name == "nt" else len(dead))
     # An agent whose working directory Windows would not let ao read cannot be placed (#71,
     # WINDOWS-CWD-2). One that cannot be placed may be this tree's writer; starting another
     # beside it is the two-writer incident, so stand down and say why.

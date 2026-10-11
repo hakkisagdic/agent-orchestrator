@@ -25,7 +25,9 @@ the project's.
 
 **You write the config file, not the tool and not an assistant.** A bot token can
 instruct the implementer, so it is a credential: it belongs in `~/.ao/telegram.json`
-with mode 600, and never in the repository or in a conversation.
+with mode 600, and never in the repository or in a conversation. Windows keeps no file mode:
+there the file is as private as `~/.ao`, and `ao telegram setup` says so and gives PowerShell's
+way to read your chat id ([windows.md](windows.md)).
 
 ```json
 {"token": "…", "chats": ["…"]}

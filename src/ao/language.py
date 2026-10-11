@@ -531,7 +531,8 @@ MARKERS = {
 # read the same in both languages, and an alarm's key is never a text: a project that changes its
 # language does not ring a standing alarm again.
 TEXTS.update({
-    # `ao email setup` with no token; {conf}: the file the channel's settings are kept in
+    # `ao email setup` with no token; {conf}: the file the channel's settings are kept in; {kept}: how it is kept
+    # private, "private-file.kept" or, on Windows, "private-file.kept-windows" (WINDOWS-SAY-WHY)
     "email.setup": {
         "en": """\
 The e-mail channel (the red alarm) — no server needed, it goes through formsubmit.co.
@@ -550,7 +551,7 @@ on the command line; it is read once from an environment variable):
      AO_SMTP_PASSWORD=… ao email setup --provider smtp --host smtp.example.com \\
        --user YOU@EXAMPLE.COM --password-env AO_SMTP_PASSWORD --to YOU@EXAMPLE.COM
 
-The token stays in {conf}, mode 0600, and is never written to a repository. Red alarms
+The token stays in {conf}, {kept}, and is never written to a repository. Red alarms
 (an orange condition standing longer than an hour, an exhausted quota, a failed architect
 wake) go to this address; `ao alarms` shows the ladder.
 """,
@@ -571,7 +572,7 @@ bir ortam değişkeninden bir kez okunur):
      AO_SMTP_PASSWORD=… ao email setup --provider smtp --host smtp.ornek.com \\
        --user SEN@ORNEK.COM --password-env AO_SMTP_PASSWORD --to SEN@ORNEK.COM
 
-Token {conf} dosyasında 0600 ile durur; hiçbir depoya yazılmaz. Kırmızı alarmlar
+Token {conf} dosyasında {kept} durur; hiçbir depoya yazılmaz. Kırmızı alarmlar
 (bir saatten uzun süren turuncu durumlar, tükenmiş kota, başarısız mimar uyandırma)
 bu adrese gider; `ao alarms` merdiveni gösterir.
 """,
@@ -584,6 +585,17 @@ bu adrese gider; `ao alarms` merdiveni gösterir.
         "tr": "ao e-posta kanalı çalışıyor. Proje: {root}\n"
               "Kırmızı alarmlar buraya gelir: bir saatten uzun süren turuncu durumlar, tükenmiş kota, başarısız "
               "mimar uyandırma.",
+    },
+    # How a file ao keeps private is kept, inside "email.setup": by its mode, and on Windows, which keeps no file
+    # mode, by its folder's permissions; and that, said whole, under `ao telegram setup` on Windows (WINDOWS-SAY-WHY)
+    "private-file.kept": {"en": "mode 0600", "tr": "0600 ile"},
+    "private-file.kept-windows": {"en": "as private as its folder's permissions (Windows keeps no file mode)",
+                                  "tr": "klasörünün izinleri kadar gizli (Windows dosya kipi tutmaz)"},
+    "private-file.windows": {
+        "en": "Windows keeps no file mode: the file is as private as its folder's permissions, which the folder "
+              "takes from your user profile unless someone changed them.",
+        "tr": "Windows dosya kipi tutmaz: dosya, klasörünün izinleri kadar gizlidir; klasör bu izinleri, biri "
+              "değiştirmediyse kullanıcı profilinden alır.",
     },
     # `ao telegram setup`, steps 2 and 3; {b} and {reset} set a word in bold
     "telegram.setup-chat": {"en": "Write the bot a message, then get your chat id:",

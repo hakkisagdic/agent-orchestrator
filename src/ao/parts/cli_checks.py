@@ -189,6 +189,34 @@ def _environment_problem(root):
                                     "outside the tree, and point these variables outside it")]
 
 
+# What ao cannot hold on Windows, and why: each is said where it bears - `ao writers`, a reviewer's wait, the
+# setup of a channel - and all of them in `ao doctor`. Each was a guarantee that quietly did not hold there, and
+# read as if it held (WINDOWS-SAY-WHY). None is a fault a person can fix, so `ao doctor --check` pages nobody.
+WINDOWS_LIMITS = {
+    "orphans": ("Windows has no process groups, so a process an ended turn left is not told apart from a turn: "
+                "`ao writers` counts it as a writer, and the watchdog starts no turn beside it until it is stopped - "
+                "`ao writers` lists it"),
+    "stall check": ("Windows has no process group to read a reviewer's CPU from, so review.stall_minutes does not "
+                    "apply: only the review's timeout ends a reviewer that hangs"),
+    "private files": ("Windows keeps no file mode, so ~/.ao/email.json, telegram.json and pings.json are as private "
+                      "as ~/.ao, which takes its permissions from your user profile unless someone changed them"),
+}
+
+
+def _private_mode():
+    """How a file ao keeps private is kept, as a saved line says it: mode 0600, or on Windows its folder's
+    permissions (WINDOWS-SAY-WHY)."""
+    return "no file mode on Windows: as private as its folder" if os.name == "nt" else "0600"
+
+
+def _windows_limit_lines():
+    """`ao doctor`'s lines naming what ao cannot hold on Windows, and why; none elsewhere (WINDOWS-SAY-WHY)."""
+    if os.name != "nt":
+        return []
+    return ([f"{'on Windows':<16}{C['yellow']}what ao cannot hold here, and why{C['reset']}"]
+            + [f"{'':<16}{C['dim']}{name}: {text}{C['reset']}" for name, text in WINDOWS_LIMITS.items()])
+
+
 def _path_problems():
     """[("path-relative", what it says)] where PATH holds a relative or empty entry on Windows, else [].
 
@@ -236,7 +264,8 @@ def doctor_problems(cfg):
     out.extend(_environment_problem(root))
     hb = A.heartbeat_age(root)
     if hb is not None and hb > WATCHDOG_SILENT_AFTER:
-        out.append(("watchdog-dead", f"watchdog silent for {hb // 60}m — launchctl / ao watchdog status"))
+        # The tool named is this platform's: launchctl means nothing on Windows or Linux (WINDOWS-SAY-WHY).
+        out.append(("watchdog-dead", f"watchdog silent for {hb // 60}m — {A.scheduler_hint()} / ao watchdog status"))
     we = wake_error(os.path.join(STATE_DIR, A.project_file_name("escalate-log", key)))
     if we and we["kind"] in ("binary", "session"):
         try:
@@ -1562,7 +1591,7 @@ def cmd_pings(cfg, args):
                   "The watchdog and the doctor job ping it every cycle; when both die, healthchecks e-mails you.")
             return 0
         A.set_ping_url(root, args.url, all_projects=args.all)
-        print(f"{C['green']}saved{C['reset']} {A.pings_path()} (0600)"); return 0
+        print(f"{C['green']}saved{C['reset']} {A.pings_path()} ({_private_mode()})"); return 0
     url = A.ping_url(root)
     if args.action == "test":
         ok = A.ping(root)

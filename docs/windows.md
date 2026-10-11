@@ -8,14 +8,43 @@ What works, what does not, and how hosted runners exercise it.
 | what ao prints and reads on its standard streams | UTF-8, as Python's UTF-8 mode sets them, whatever the code page (below) |
 | gates, `ao lock`, `ao verify`, `ao commit-ok`, reviews | work — subprocesses of the project's own tools |
 | MCP server, playbook, `ao init` registration | work (`.mcp.json`, `.kiro/settings/mcp.json`); a request is read as UTF-8 and every reply is seven-bit JSON, whatever the code page |
-| process introspection (`ao writers`, orphans, hung turns) | first cut: `Win32_Process` through PowerShell as JSON, tree kill via `taskkill /T`, every process of the tree named to it and asked afterwards; the working directory is read from the process environment block (a 64-bit process, by a 64-bit Python), proven on the Windows lane, and where it cannot be read a turn is matched by the repository path on its command line; a table PowerShell cannot read never reads as no process: what decides from it refuses or holds, and says why (below) |
+| process introspection (`ao writers`, orphans, hung turns) | first cut: `Win32_Process` through PowerShell as JSON, tree kill via `taskkill /T`, every process of the tree named to it and asked afterwards; the working directory is read from the process environment block (a 64-bit process, by a 64-bit Python), proven on the Windows lane, and where it cannot be read a turn is matched by the repository path on its command line; a table PowerShell cannot read never reads as no process: what decides from it refuses or holds, and says why; what an ended turn left is not told apart from a turn, as Windows has no process groups, and `ao writers` and `ao doctor` say so (below) |
 | `ao hold` | proven on the Windows lane: a turn placed by its working directory is stopped; what a stop leaves running is named, and the hold exits 1 (below) |
-| scheduler (`ao watchdog install`) | first cut: Task Scheduler (`schtasks`, every 2 min; doctor every 15 min). Each task names a program that exists — the console script on PATH, a clone's script, or `python -m ao.watchdog` from an interpreter that imports an installed ao — or install refuses; install exits 1 when `schtasks` cannot create a task, and `ao remove --yes` deletes both tasks in its own process and checks they are gone |
+| scheduler (`ao watchdog install`) | first cut: Task Scheduler (`schtasks`, every 2 min; doctor every 15 min). Each task names a program that exists — the console script on PATH, a clone's script, or `python -m ao.watchdog` from an interpreter that imports an installed ao — or install refuses; install exits 1 when `schtasks` cannot create a task, saying why in the OEM code page schtasks writes in, and `ao remove --yes` deletes both tasks in its own process and checks they are gone; a silent watchdog is to be looked into with Task Scheduler (below) |
 | desktop notifications | a toast through PowerShell behind the `toast` feature switch, off by default; Telegram and e-mail carry the orange and red levels |
 | `bin/ao.ps1`, the subset for a machine without Python | `status`, `board` and `doctor`; reads files as UTF-8 and takes paths literally; written and reviewed, not yet run on Windows (below) |
 | commit hook (`ao hooks install`) | installed inside the repository; a shared, external or globally configured hooks directory is refused (#71); since HOOK-V4 the hook reads a drive-letter index as absolute, and its execution proof passes on the lane (below) |
 | pre-push hook | works under Git's own shell |
 | the programs ao starts | Windows' own tools from its system directory, every other program from PATH's absolute entries, never the current directory (below) |
+| files ao keeps private (`~/.ao/email.json`, `telegram.json`, `pings.json`) | as private as `~/.ao`, which takes its permissions from the user profile: Windows keeps no file mode, and ao says so where it saves one and in `ao doctor` (below) |
+| the reviewer stall check (`review.stall_minutes`) | does not apply: Windows has no process group to read a reviewer's CPU from, so the review's timeout ends a reviewer that hangs, and the review says so (below) |
+| a transcript read without following a link | holds: where there is no O_NOFOLLOW the path is looked at before it is opened, and the file opened must be the one looked at (below) |
+| the grant audit (`ao doctor`, an actor's grant) | asks `py -c`, `powershell -Command` and `cmd /c`, with their kin, as it asks `python -c` (below) |
+
+*In ao since slice WINDOWS-SAY-WHY: what ao cannot hold on Windows it holds another way, or says
+so, where it bears and in `ao doctor` (`on Windows`). Several guarantees were made with what Windows
+does not have, and there they quietly did not hold. Opening a subagent's transcript without following a
+link asked for O_NOFOLLOW, which Windows lacks, and a link was followed; where a platform has none the
+path is now looked at first - a link is refused - and the file opened must be the one looked at, by its
+file id, or it is refused too. A file ao keeps private was given mode 0600, which Windows ignores, and
+ao said "(0600)": `~/.ao/email.json`, `telegram.json` and `pings.json` are as private as `~/.ao`, which
+takes its permissions from the user profile unless someone changed them, and `ao email setup`, `ao
+pings setup` and `ao telegram setup` say that on Windows; a prompt handed over in a file is kept by the
+permissions of its temporary directory the same way. What an ended turn left behind is found by its
+dead process group, which Windows has none of: none was ever found, and none was said to be. `ao
+writers` says on Windows that such leftovers are not told apart - each counts as a writer, and the
+watchdog starts no turn beside it until it is stopped - and its `--json` gives `"orphans": null` with
+`orphans_unknown`. The reviewer stall check (`review.stall_minutes`) reads a process group's CPU, and on
+Windows it never fired: a review there says, as its wait begins, that only its timeout ends a reviewer
+that hangs. schtasks writes in the OEM code page, and what it said when it refused a task was read as
+UTF-8, every letter outside ASCII a replacement character; it is read as UTF-8 where it is that, and in
+the OEM code page otherwise. The grant audit asks `py -c`, `py -3 -c`, `python.exe -c`, `powershell
+-Command`, `-c` and `-EncodedCommand`, `pwsh -Command` and `-c`, `cmd /c`, `cmd //c` (Git Bash's form)
+and `cmd.exe /c` as it asks `python -c`: each runs a line of code. A silent watchdog was to be looked
+into with launchctl on every platform; the hint names Task Scheduler on Windows and `systemctl --user`
+on Linux, and `ao telegram setup` gives PowerShell's way to read a chat id and says how to write the
+file, where it gave curl, python3, mkdir, echo and chmod. `tests/test_windows_say_why.py` makes Windows
+on every platform.*
 
 *In ao since slice WINDOWS-STOP-PROVEN: a stop says what it left running. `ao hold` stopped each
 turn with `taskkill /T /F` and said every tree was stopped, whatever taskkill did: taskkill is refused a

@@ -213,7 +213,8 @@ resume would send and writes nothing. A silence under the threshold changes noth
   as written, so an underscore in a report's name cannot make the phone refuse the message
   as broken markup.
 - E-mail: `ao email setup --token … --to …` — formsubmit.co relays a JSON POST,
-  no server; the token lives in `~/.ao/email.json` (0600), never in a repo.
+  no server; the token lives in `~/.ao/email.json` (0600; on Windows, which keeps no file mode,
+  as private as `~/.ao`), never in a repo.
   `ao doctor` warns when neither Telegram nor e-mail is configured: an orange
   alarm with no channel beyond the desktop is a silent alarm.
 
