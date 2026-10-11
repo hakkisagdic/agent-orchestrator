@@ -1034,10 +1034,58 @@ def harness_seen_record(root):
 
 def harness_unseen(changes, record):
     """The changes a person's record does not hold as they stand: each is seen by its path and its content, so a seen
-    change that lands leaves the others seen (HARNESS-CONFIG)."""
-    seen = {(item.get("path"), item.get("sha256")) for item in (record or {}).get("changes") or []
-            if isinstance(item, dict)}
+    change that lands leaves the others seen (HARNESS-CONFIG). What ao wrote itself is seen as it wrote it
+    (HARNESS-SEEN-OWN)."""
+    record = record or {}
+    seen = {(item.get("path"), item.get("sha256")) for item in list(record.get("changes") or [])
+            + list(record.get("written") or []) if isinstance(item, dict)}
     return [change for change in changes if (change[0], change[2]) not in seen]
+
+
+def record_harness_written(root, files, by):
+    """Record as seen each file ao wrote into what a harness reads whose bytes are ao's own rendering and nothing else;
+    the paths recorded, relative to the repository (HARNESS-SEEN-OWN).
+
+    `files` is [(path, the bytes ao's write leaves there)]. After HARNESS-CONFIG the playbook, the coordination steering
+    and the MCP entry `ao init` and `ao skill install` write held every turn until a person ran `ao harness seen`,
+    though no agent wrote a byte of them. A file is recorded only while it holds exactly what ao renders - a fresh
+    write, or one an earlier run left as it was - and by the digest of that rendering, never of what is read back: a
+    person's rule file ao adds its pointer to holds other text, and one an agent changed before or after the write
+    reads as other bytes, so neither is seen. Kept beside what a person recorded, in the same file in ~/.ao, and only
+    for an ao project: a folder with no .ao/ shares a key with whatever project bears its name. What cannot be read or
+    written is not recorded, and the files read as unseen, which holds until a person sees them.
+    """
+    from .storage import replace_file_durably
+    if not os.path.isdir(os.path.join(root, ".ao")):
+        return []
+    try:
+        top = os.path.realpath(os.fsdecode(_git_output(root, "rev-parse", "--show-toplevel")).strip())
+    except RuntimeError:
+        return []
+    names, now, ours = project_config_names(), int(time.time()), {}
+    for path, data in files:
+        rel = os.path.relpath(os.path.realpath(path), top).replace(os.sep, "/")
+        if rel.startswith("../") or rel == ".." or os.path.islink(path) or project_config_member(rel, names) is None:
+            continue
+        expected = hashlib.sha256(data).hexdigest()
+        try:
+            sha, view = _harness_read(path)
+        except RuntimeError:
+            continue
+        if view[0] == "file" and sha == expected:
+            ours[rel] = {"path": rel, "sha256": expected, "by": by, "at": now}
+    if not ours:
+        return []
+    record = harness_seen_record(root) or {}
+    record["written"] = [item for item in record.get("written") or []
+                         if isinstance(item, dict) and item.get("path") not in ours] + list(ours.values())
+    target = project_file(root, "harness-seen")
+    try:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        replace_file_durably(target, (json.dumps(record, indent=1, sort_keys=True) + "\n").encode(UTF8))
+    except OSError:
+        return []
+    return sorted(ours)
 
 
 def unseen_harness_config(root):
@@ -1062,7 +1110,9 @@ def record_harness_seen(root, changes, by, digest):
     head = _git_text(root, "rev-parse", "--verify", "-q", "HEAD")
     record = {"digest": digest, "by": by, "at": int(time.time()), "user": user, "interactive": interactive,
               "head": head if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head) else None,
-              "changes": [{"path": path, "state": state, "sha256": sha} for path, state, sha in changes]}
+              "changes": [{"path": path, "state": state, "sha256": sha} for path, state, sha in changes],
+              # What ao wrote itself stays seen beside it (HARNESS-SEEN-OWN).
+              "written": list((harness_seen_record(root) or {}).get("written") or [])}
     path = project_file(root, "harness-seen")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     replace_file_durably(path, (json.dumps(record, indent=1, sort_keys=True) + "\n").encode(UTF8))

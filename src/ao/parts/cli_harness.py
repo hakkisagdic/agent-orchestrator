@@ -27,8 +27,9 @@ def cmd_harness(cfg, args):
     from .storage import replace_file_durably
     if getattr(args, "action", None) == "seen":
         return _harness_seen(cfg, args)
-    if getattr(args, "by", None) or getattr(args, "digest", None):
-        print("--by and --digest belong to ao harness seen, where a person records what they read; probe takes neither")
+    if getattr(args, "by", None) or getattr(args, "digest", None) or getattr(args, "ask", False):
+        print("--by, --digest and --ask belong to ao harness seen, where a person records what they read; probe takes "
+              "none of them")
         return 2
     root = cfg.get("root") or os.getcwd()
     # Each adapter as ao loads it, from the package, the user's layer and the project's, a later one
@@ -114,6 +115,42 @@ def _harness_change_lines(root, path, state, view):
     return [A.shown_text(line) for line in lines] or ["empty"]
 
 
+def _harness_seen_text(record, changes):
+    """Who saw the changes that stand, as a person reads it: what ao wrote itself, and the person who recorded the rest,
+    and when (HARNESS-SEEN-OWN)."""
+    standing = {(path, sha) for path, _, sha in changes}
+    wrote = sorted(item["path"] for item in record.get("written") or []
+                   if isinstance(item, dict) and (item.get("path"), item.get("sha256")) in standing)
+    others = [change for change in changes if change[0] not in wrote]
+    parts = []
+    if wrote:
+        parts.append(f"ao wrote {', '.join(A.shown_text(path) for path in wrote)} itself")
+    if others:
+        when = time.strftime("%d %b %H:%M", time.localtime(float(record.get("at") or 0)))
+        parts.append(f"{record.get('by') or 'a person'} recorded {A.harness_config_line(others)} on {when}")
+    return "; ".join(parts)
+
+
+def _record_seen(root, by, digest):
+    """Record what a person was shown, while it is what the digest was taken of; the command's exit (HARNESS-CONFIG)."""
+    try:
+        changes = A.project_config_changes(root)
+    except Exception as exc:
+        print(f"{C['red']}not recorded{C['reset']}: what a harness reads from this tree cannot be read "
+              f"({' '.join(str(exc).split())})")
+        return 1
+    unseen = A.harness_unseen(changes, A.harness_seen_record(root) or {})
+    if not unseen or A.harness_config_digest(unseen) != digest:
+        print(f"{C['red']}refused{C['reset']}: what a harness reads here is not what that digest was taken of - it "
+              f"changed since it was shown, or the digest is another's. Nothing was recorded; "
+              f"`ao harness seen --by {by}` shows it as it stands now")
+        return 2
+    A.record_harness_seen(root, changes, by, digest)
+    print(f"{C['green']}recorded{C['reset']}: {by} has seen {A.harness_config_line(unseen)}; a wake, refill, "
+          "nudge, hunt or lane starts in this tree again")
+    return 0
+
+
 def _harness_seen(cfg, args):
     """Show a person the harness configuration an agent changed in this tree, and record it as seen (HARNESS-CONFIG).
 
@@ -125,6 +162,11 @@ def _harness_seen(cfg, args):
     read, as `ao person-review` records a verdict. It is a person's command, as `ao waive` is: --by names a person and
     never an agent or a role, the login and whether a terminal was attached are recorded beside the name, and no grant
     ao checks admits it.
+
+    With --ask, at a terminal, the changes are shown and the person is asked, and a yes records exactly what was shown,
+    as the digest does: one step for a person's own tool approvals, which Claude Code writes into
+    .claude/settings.local.json each time a tool is allowed for good, and which ao cannot tell from an agent's write
+    (HARNESS-SEEN-OWN). Nobody at a terminal - a pipe, a scheduled job, an agent's tool call - is never a yes.
     """
     root = cfg["root"]
     if getattr(args, "ids", None):
@@ -136,6 +178,10 @@ def _harness_seen(cfg, args):
         return 2
     if by.lower() in _agent_names(cfg):
         print(f"--by names an agent or a role ({by}); seeing what a harness runs is a person's act")
+        return 2
+    ask, wanted = bool(getattr(args, "ask", False)), (getattr(args, "digest", None) or "").strip()
+    if ask and wanted:
+        print("--ask and --digest are two ways to record what was shown; give one of them")
         return 2
     shown = {}
     try:
@@ -150,22 +196,12 @@ def _harness_seen(cfg, args):
     record = A.harness_seen_record(root) or {}
     unseen = A.harness_unseen(changes, record)
     if not unseen:
-        when = time.strftime("%d %b %H:%M", time.localtime(float(record.get("at") or 0)))
-        print(f"{C['green']}seen{C['reset']}: {record.get('by') or 'a person'} recorded each change to what a harness "
-              f"reads here as it stands, on {when}: {A.harness_config_line(changes)}")
+        print(f"{C['green']}seen{C['reset']}: each change to what a harness reads here is seen as it stands - "
+              f"{_harness_seen_text(record, changes)}")
         return 0
     digest = A.harness_config_digest(unseen)
-    wanted = (getattr(args, "digest", None) or "").strip()
     if wanted:
-        if wanted != digest:
-            print(f"{C['red']}refused{C['reset']}: what a harness reads here is not what that digest was taken of - it "
-                  f"changed since it was shown, or the digest is another's. Nothing was recorded; "
-                  f"`ao harness seen --by {by}` shows it as it stands now")
-            return 2
-        A.record_harness_seen(root, changes, by, digest)
-        print(f"{C['green']}recorded{C['reset']}: {by} has seen {A.harness_config_line(unseen)}; a wake, refill, "
-              "nudge, hunt or lane starts in this tree again")
-        return 0
+        return _record_seen(root, by, wanted)
     print(f"{C['b']}harness configuration nobody has seen{C['reset']}: {len(unseen)} change(s) to what a harness "
           "reads from this tree, each as it stands now")
     for path, state, _ in unseen:
@@ -173,8 +209,17 @@ def _harness_seen(cfg, args):
         for line in _harness_change_lines(root, path, state, shown.get(path)):
             print(f"  {line}")
     print(f"\ndigest {digest}")
+    if ask:
+        answer = _confirm(f"Record exactly these as seen by {by}? [y/N] ")
+        if not answer:
+            print("Nothing was recorded" + (": nobody can answer here, standard input is not a terminal; read the "
+                                            f"changes above, then `ao harness seen --by {by} --digest {digest}` "
+                                            "records them" if answer is None else "."))
+            return 1
+        return _record_seen(root, by, digest)
     print(f"Nothing is recorded yet. Read each change above, then\n  ao harness seen --by {by} --digest {digest}\n"
-          "records exactly these bytes as seen; a change made since refuses it.")
+          f"records exactly these bytes as seen; a change made since refuses it. At a terminal, "
+          f"`ao harness seen --by {by} --ask` shows them and records them on your yes.")
     return 0
 
 

@@ -340,6 +340,7 @@ A person reads them, then records that they have:
 ```bash
 ao harness seen --by <name>                     # each change as it stands, its diff from HEAD, and the digest of those bytes
 ao harness seen --by <name> --digest <digest>   # records exactly those bytes as seen
+ao harness seen --by <name> --ask               # at a terminal: shows each change, and records exactly them on your yes
 ```
 
 The first records nothing. It shows each change - its diff from HEAD where it is text, with control,
@@ -350,8 +351,26 @@ staged after it was seen it is still seen, one that lands leaves the others seen
 again is unseen again. The record is kept outside the tree an agent writes, in
 `~/.ao/harness-seen-<project>.json`, with the login and whether a terminal was attached beside the name.
 It is a person's command: `--by` names a person, never an agent or a role, and no grant ao checks admits
-it (`allowlist.FORBIDDEN`). What `ao init` and `ao skill install` write - the playbook, the MCP
-registration - is configuration like any other, and is read once the same way.
+it (`allowlist.FORBIDDEN`).
+
+*In ao since slice HARNESS-SEEN-OWN: what ao writes into what a harness reads is seen already, and a
+person's own tool approvals are seen in one step.*
+
+`ao init` and `ao skill install` record each file they write from ao's own declarations - the playbook,
+the coordination steering, the MCP entry - as seen, by the digest of what ao renders, while the file holds
+exactly that: a fresh one, or one an earlier run left as it was. No turn waits on what ao wrote itself,
+and both commands say which files they recorded. A file that holds anything else is left for a person to
+see: ao's pointer added to a person's rule file (`ao init --rules`), an MCP file that lists another
+server, a playbook a project's own adapter declares - a layer an agent can write - a file changed after
+ao wrote it, and an MCP file a harness's own `mcp add` command wrote in its own words. `ao harness seen`
+says which changes ao wrote itself and which a person recorded.
+
+Claude Code writes `.claude/settings.local.json` each time you allow a tool for good, and ao cannot tell
+your write from an agent's: an allow rule there widens every turn ao starts on that harness, so it is a
+change like any other. At a terminal, `ao harness seen --by <name> --ask` shows each change and asks; a
+yes records exactly what it showed, and is refused when anything changed while you read. A pipe, a
+scheduled job or an agent's tool call is no terminal and is asked nothing, and a grant that admits
+`--ask` is named as one that admits `--digest` is.
 
 Keep the architect's own sessions in a checkout of their own. The watchdog's wakes and refills start in
 the project's root, where the implementer works, and wait there for a person to see what it wrote; a

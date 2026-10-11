@@ -18,6 +18,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Behaviour changes
 
+- What `ao init` and `ao skill install` write into a harness's configuration - the playbook, the coordination steering, the MCP entry - no longer holds every turn until a person runs `ao harness seen`: it is recorded as seen by the digest of ao's own rendering while the file holds nothing else, and a person sees their own tool approvals in `.claude/settings.local.json` in one step with `ao harness seen --by <name> --ask` ([safety](docs/safety.md#harness-configuration-an-agent-changed-waits-for-a-person)) (HARNESS-SEEN-OWN, #115).
 - The architect is named `architect` in mail where a project names it nothing, and `ao init` writes that name, where both gave it a model's name, `fable`. Mail a project that names no architect wrote to `fable` stays the architect's there - read, routed and folded into as before - so nothing is moved or deleted; a project that names its architect answers to that name alone ([configuration](docs/configuration.md)) (#72).
 
 ### Fixes

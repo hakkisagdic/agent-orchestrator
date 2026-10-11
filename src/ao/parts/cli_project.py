@@ -581,6 +581,8 @@ def cmd_init(cfg, args):
     # nobody authorised — the second pilot's coordinator refused exactly that.
     from . import skillkit
     requested = skillkit.detect_agents(root, args.agent)[0]
+    # What ao writes into what a harness reads, from its own declarations, to record as seen (HARNESS-SEEN-OWN).
+    ours = []
     for ident, adapter in skillkit.setup_adapters(root):
         coordination = (adapter.get("directives") or {}).get("coordination")
         detect = adapter.get("detect") or {}
@@ -592,7 +594,10 @@ def cmd_init(cfg, args):
             if skillkit._local(root, coordination) is None:
                 print(f"  {C['yellow']}not written{C['reset']}  {coordination}: it lies outside the project (HARNESS-SETUP-2)")
                 continue
-            put(coordination, STEERING_COORD.format(urgent=language.marker(runtime_cfg, "urgent")))
+            steering = STEERING_COORD.format(urgent=language.marker(runtime_cfg, "urgent"))
+            put(coordination, steering)
+            if skillkit._shipped(ident, adapter, lambda a: (a.get("directives") or {}).get("coordination")):
+                ours.append((os.path.join(root, coordination), steering.encode(UTF8)))     # put writes "\n" as it is
 
     for rel in wrote:
         print(f"  {C['green']}wrote{C['reset']}  {rel}")
@@ -609,7 +614,7 @@ def cmd_init(cfg, args):
     # the tool itself does not ask.
     from . import skillkit
     _, agents = skillkit.detect_agents(root, args.agent)
-    playbook_files = skillkit.install_playbook(root, agents, rules=getattr(args, "rules", False))
+    playbook_files = skillkit.install_playbook(root, agents, rules=getattr(args, "rules", False), ours=ours)
     for rel, what in playbook_files.items():
         print(f"  {C['green'] if what != 'kept' else C['dim']}{what:<8}{C['reset']} {rel}")
     if not getattr(args, "rules", False):
@@ -617,7 +622,7 @@ def cmd_init(cfg, args):
               f"yourself, or re-run with --rules:{C['reset']}")
         for line in skillkit.RULE_POINTER.split("\n"):
             print(f"      {line}")
-    registered = {} if args.no_mcp else skillkit.register_mcp(root, agents, exe)
+    registered = {} if args.no_mcp else skillkit.register_mcp(root, agents, exe, ours=ours)
     # What init wrote, so `ao remove` can take exactly that away again.
     manifest = {"at": int(time.time()), "wrote": list(wrote) + [r for r, w in playbook_files.items() if w != "kept"],
                 "mcp": [k for k, v in registered.items() if v == "registered"], "gitignore": bool(add)}
@@ -625,6 +630,7 @@ def cmd_init(cfg, args):
         json.dump(manifest, fh, indent=2)
     # A person adopted the tree as it stands: its harness configuration is measured from this HEAD, once (HARNESS-CONFIG).
     A.record_harness_baseline(root, "ao init")
+    _print_seen_own(A.record_harness_written(root, ours, "ao init"))
     for agent, what in registered.items():
         print(f"  {C['green']}mcp{C['reset']}      {agent}: {what.splitlines()[0]}")
         if what.startswith("manual"):
@@ -1617,15 +1623,29 @@ def _watchdog_debug(cfg, args):
     return 0
 
 
+def _print_seen_own(paths):
+    """Say which files ao wrote into what a harness reads and recorded as seen, as they stand (HARNESS-SEEN-OWN)."""
+    if paths:
+        print(f"  {C['green']}{'seen':<8}{C['reset']} {', '.join(A.shown_text(path) for path in paths)}  "
+              f"{C['dim']}ao's own text holds no turn; a change made to it later does, until a person sees it"
+              f"{C['reset']}")
+
+
 def cmd_skill(cfg, args):
-    """The playbook, rendered for the agents this repository uses."""
+    """The playbook, rendered for the agents this repository uses.
+
+    What it writes as a file of ao's own is recorded as seen, so the turns HARNESS-CONFIG holds on harness configuration
+    nobody has seen start on it (HARNESS-SEEN-OWN).
+    """
     from . import skillkit
     root = cfg["root"]
     if args.action == "show":
         print(skillkit.playbook()[1])
         return 0
     _, agents = skillkit.detect_agents(root, args.agent)
-    for rel, what in skillkit.install_playbook(root, agents).items():
+    ours = []
+    for rel, what in skillkit.install_playbook(root, agents, ours=ours).items():
         print(f"  {C['green'] if what != 'kept' else C['dim']}{what:<8}{C['reset']} {rel}")
+    _print_seen_own(A.record_harness_written(root, ours, "ao skill install"))
     print(f"{C['dim']}agents: {', '.join(sorted(agents))} · regenerate any time; hand edits outside the markers survive{C['reset']}")
     return 0

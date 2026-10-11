@@ -113,9 +113,30 @@ def detect_agents(root, requested="auto"):
     return None, found or {"generic"}
 
 
+def _marked(body, header=""):
+    """What `_write_marked` writes into a file of its own: `header`, then `body` between the markers."""
+    return f"{header}{MARK_START}\n{body.rstrip()}\n{MARK_END}\n"
+
+
+def _as_written(text):
+    """The bytes a text-mode write of `text` leaves on this platform, as `_write_marked` and the MCP merge write it."""
+    return text.replace("\n", os.linesep).encode(UTF8)
+
+
+def _shipped(ident, adapter, read):
+    """Whether the adapter ao ships as `ident` declares what `adapter` does, as `read` takes it from either.
+
+    What ao writes is recorded as seen only where its own declarations say where and in what words: a project's adapter
+    layer is a file an agent can write, and a playbook path or header declared there would put an agent's text under
+    ao's name (HARNESS-SEEN-OWN).
+    """
+    shipped = A.package_adapters().get(ident)
+    return shipped is not None and read(shipped) == read(adapter)
+
+
 def _write_marked(path, body, header=""):
     """Write `body` between markers; replace an earlier rendering; keep the rest."""
-    block = f"{MARK_START}\n{body.rstrip()}\n{MARK_END}\n"
+    block = _marked(body)
     if os.path.exists(path):
         old = open(path, encoding=UTF8, errors="replace").read()
         if MARK_START in old and MARK_END in old:
@@ -149,7 +170,7 @@ def steering_dirs(root=None):
     return sorted({(adapter.get("directives") or {}).get("steering_dir") for _, adapter in setup_adapters(root)} - {None})
 
 
-def install_playbook(root, agents, rules=False):
+def install_playbook(root, agents, rules=False, ours=None):
     """Render the playbook for each agent. Returns {relpath: wrote|updated|kept|appended}.
 
     Only files ao owns are written: the file each adapter declares as its playbook
@@ -158,6 +179,10 @@ def install_playbook(root, agents, rules=False):
     issued rules nobody authorised. A coordinator on the second pilot refused
     exactly such lines and escalated them, and was right to. With `rules=True` the
     owner asks for the pointer; otherwise it is printed for them to paste.
+
+    `ours`, a list when given, gets (path, the bytes ao's rendering leaves there) for each file a shipped adapter
+    declares that holds nothing but ao's text when ao has written it, for `A.record_harness_written` to record as seen
+    where the file holds exactly that (HARNESS-SEEN-OWN).
     """
     front, body = playbook()
     out = {}
@@ -167,20 +192,29 @@ def install_playbook(root, agents, rules=False):
             + RULE_POINTER.split("\n\n", 1)[1].replace("\n", " ")
             + " (or run `ao init --rules`). `ao doctor` reports rules-not-wired until then. -->\n\n")
     out[".ao/PLAYBOOK.md"] = _write_marked(p, body, header=note)
-    for _, adapter in setup_adapters(root, agents):
+    for ident, adapter in setup_adapters(root, agents):
         target = (adapter.get("directives") or {}).get("playbook") or {}
         if not target.get("path"):
             continue
         header = front if target.get("header") == "frontmatter" else str(target.get("header") or "")
         place = _local(root, target["path"])
         out[target["path"]] = _write_marked(place, body, header=header) if place else "not written: outside the project"
+        if place and ours is not None \
+                and _shipped(ident, adapter, lambda a: (a.get("directives") or {}).get("playbook")):
+            ours.append((place, _as_written(_marked(body, header))))
     if rules:
         own = any(name != SHARED_RULE_FILE for _, adapter in setup_adapters(root, agents)
                   for name in (adapter.get("directives") or {}).get("rule_files") or [])
+        shipped = {name for adapter in A.package_adapters().values()
+                   for name in (adapter.get("directives") or {}).get("rule_files") or []} | {SHARED_RULE_FILE}
         for name in rule_file_names(root):
             p = os.path.join(root, name)
             if os.path.exists(p) or name == SHARED_RULE_FILE and not own:
-                out[name] = _write_marked(p, RULE_POINTER, header="# Agents\n\n" if name == SHARED_RULE_FILE else "")
+                header = "# Agents\n\n" if name == SHARED_RULE_FILE else ""
+                out[name] = _write_marked(p, RULE_POINTER, header=header)
+                # A pointer added to a person's rule file leaves their text beside it: that file is never all ao's.
+                if ours is not None and name in shipped:
+                    ours.append((p, _as_written(_marked(RULE_POINTER, header))))
     return out
 
 
@@ -245,13 +279,17 @@ def _snippet(template, exe, root, args):
     return re.sub(r"\{(exe|root|args)\}", lambda match: values[match.group(1)], str(template or ""))
 
 
-def register_mcp(root, agents, exe=None):
+def register_mcp(root, agents, exe=None, ours=None):
     """Register the ao MCP server for each agent, in the file its adapter declares.
 
     Merged, never clobbered: other servers in the same file survive. Returns
     {agent: what happened}. A harness that keeps its servers in a user-level file
     gets the snippet its adapter declares, and the human decides. Each registration
     names the role its readers hold in this project, when they hold one (`registration_role`).
+
+    `ours`, a list when given, gets (path, the bytes a file holding ao's entry alone has) for each file a shipped
+    adapter declares, as install_playbook's does (HARNESS-SEEN-OWN). One the harness's own `register` command wrote is
+    in that harness's words, not ao's, and is left for a person to see.
     """
     # The ao the registration names runs as the person whenever a harness starts it: one named by an absolute path,
     # never one the current directory holds (WINDOWS-NO-CWD-EXEC).
@@ -297,14 +335,17 @@ def register_mcp(root, agents, exe=None):
         # A command ao runs comes from a shipped adapter alone, never a layer an agent can write (HARNESS-SETUP-2).
         register = ((A.package_adapters().get(ident) or {}).get("mcp") or {}).get("register") or []
         program = A.program_path(register[0]) if register else None
+        key, extra = mcp.get("key", "mcpServers"), mcp.get("extra")
         if program and not os.path.exists(path):
             argv = [program] + [part.replace("{exe}", exe).replace("{args}", json.dumps(args))
                                 for part in register[1:]]
             r = subprocess.run(argv, capture_output=True, text=True, encoding=UTF8, errors="replace", cwd=root)
-            out[ident] = "registered" if r.returncode == 0 else \
-                merge(path, server, mcp.get("key", "mcpServers"), mcp.get("extra"))
-        else:
-            out[ident] = merge(path, server, mcp.get("key", "mcpServers"), mcp.get("extra"))
+            if r.returncode == 0:
+                out[ident] = "registered"
+                continue
+        out[ident] = merge(path, server, key, extra)
+        if ours is not None and _shipped(ident, adapter, lambda a: a.get("mcp")):
+            ours.append((path, _as_written(json.dumps({key: {"ao": dict(server, **(extra or {}))}}, indent=2))))
     return out
 
 

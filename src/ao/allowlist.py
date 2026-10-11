@@ -31,8 +31,10 @@ FORBIDDEN = (
     ("switches the inventory review off", "ao features off inventory_review --by p"),
     ("names the family that wrote a waived range", "ao catchup --author-family f --by b"),
     ("states which waived slices only moved code", "ao catchup --move-only s --by b"),
-    # What a person has seen of the harness configuration an agent changed lets every turn start again (HARNESS-CONFIG).
+    # What a person has seen of the harness configuration an agent changed lets every turn start again (HARNESS-CONFIG),
+    # by its digest or by a yes at the terminal (HARNESS-SEEN-OWN).
     ("records harness configuration as seen", "ao harness seen --by p --digest d"),
+    ("records harness configuration as seen", "ao harness seen --by p --ask"),
     ("removes the hooks", "ao hooks uninstall"),
     ("runs any command", "ao lock -- sh -c x"),
     ("runs arbitrary code", "python3 -c x"),
@@ -68,6 +70,7 @@ PERSON_ACTS = (
     ("opens a push window", ("ao", "push", "allow"), ()),
     ("removes the hooks", ("ao", "hooks", "uninstall"), ()),
     ("records harness configuration as seen", ("ao", "harness", "seen"), ("--digest",)),
+    ("records harness configuration as seen", ("ao", "harness", "seen"), ("--ask",)),
 )
 
 

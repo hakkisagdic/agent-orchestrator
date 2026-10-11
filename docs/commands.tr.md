@@ -43,7 +43,7 @@ Her `ao` komutu ve ne yaptığı. [README](../README.tr.md) her değişiklikte k
 | `ao note` | kutuya mimar mesajı, araç üzerinden |
 | `ao review` | ağacı, onu yazmayan bir aktörle gözden geçir |
 | `ao person-review --by <ad>` | bir insan stage edilmiş diff'i okur, sonra gösterilen `--digest` ile `--verdict APPROVED` ya da `NEEDS_CHANGES` kaydeder; her review gibi adaya bağlanır, `person review` diye etiketlenir, asla bir ajanın komutu değildir |
-| `ao harness seen --by <ad>` | bir insan, bir ajanın harness'ın buradan okuduğu şeylerde - hook'lar, eklentiler, MCP sunucuları, talimatlar - yaptığı her değişikliği okur, sonra gösterilen `--digest` ile görüldü diye kaydeder; o zamana kadar ağaçta hiçbir uyandırma, doldurma, dürtme, av ya da lane başlamaz; asla bir ajanın komutu değildir ([safety.md](safety.md#harness-configuration-an-agent-changed-waits-for-a-person)) |
+| `ao harness seen --by <ad>` | bir insan, bir ajanın harness'ın buradan okuduğu şeylerde - hook'lar, eklentiler, MCP sunucuları, talimatlar - yaptığı her değişikliği okur, sonra gösterilen `--digest` ile ya da bir terminalde `--ask` ile tek adımda görüldü diye kaydeder, kendi araç onayları için olduğu gibi; o zamana kadar ağaçta hiçbir uyandırma, doldurma, dürtme, av ya da lane başlamaz; `ao init` ile `ao skill install`'ın kendi yazdıkları zaten görülmüş sayılır; asla bir ajanın komutu değildir ([safety.md](safety.md#harness-configuration-an-agent-changed-waits-for-a-person)) |
 | `ao review --commits <aralık>` | inmiş işi sonradan review et; çıkış 3 = reviewer erişilemedi (asla verdict değil), yedekler `reviewer.fallbacks` ([roles.md](roles.md)) |
 | `ao handoff` | devralanın ihtiyacı olan her şeyi yaz ve gönder |
 | `ao a2a-mcp serve` | MCP-only istemciden A2A ajanlarına ulaş |

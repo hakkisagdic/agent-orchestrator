@@ -229,6 +229,8 @@ def build_parser(root=None):
     hs.add_argument("--by", help="seen: the person who reads the changes; never an agent or a role")
     hs.add_argument("--digest", help="seen: record the changes as seen, while they are the bytes shown with this "
                                      "digest; without it they are shown and nothing is recorded")
+    hs.add_argument("--ask", action="store_true", help="seen: at a terminal, show the changes and record exactly "
+                                                       "them on a yes; one step for a person's own tool approvals")
     hs.set_defaults(fn=cmd_harness)
     ah = sub.add_parser("agent-hook", help="what a harness's lifecycle hook runs: record one event of its session")
     ah.add_argument("event", help="the event in ao's words: " + ", ".join(A.AGENT_EVENTS))
