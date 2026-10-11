@@ -818,11 +818,11 @@ _NAMESPACE_MODULES = ("builtins", "importlib", "inspect", "ctypes", "gc", "pickl
                       "pkgutil", "timeit", "doctest", "cProfile", "profile", "pdb", "bdb", "trace", "logging",
                       "unittest", "multiprocessing", "zipimport")
 # The dunders that reach nothing: a name, the file, a constructor, an exception's links, the protocols a class defines,
-# and a folder name that is data.
+# and the folder names that are data - the compiled copies Python keeps beside a module among them (PYTHON-ENV).
 _PLAIN_DUNDERS = ("__name__", "__file__", "__doc__", "__init__", "__main__", "__cause__", "__context__", "__getitem__",
                   "__version__", "__qualname__", "__module__", "__all__", "__enter__", "__exit__", "__len__",
                   "__iter__", "__next__", "__contains__", "__eq__", "__hash__", "__repr__", "__str__", "__bool__",
-                  "__slots__", "__tests__")
+                  "__slots__", "__tests__", "__pycache__")
 # ao's loader and what keeps it reach the namespace by design, and this proof names what it looks for: each is read as
 # the loader is, as ao's own code.
 _NAMESPACE_OWN = ("_part", "_keeper", "_KeepsItsLoader", "_namespace_writes", "_compiles_a_pattern", "_internal",

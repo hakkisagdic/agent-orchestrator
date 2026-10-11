@@ -379,6 +379,41 @@ agent writes in, never starts a harness on an agent's configuration at all, and 
 work only as it lands, reviewed. `ao ask --codebase` runs its provider in a copy of the tree without
 that configuration, as a review does (CODEBASE-COPY).
 
+### What Python runs as it starts from inside the tree
+
+*In ao since slice PYTHON-ENV: a `.pth` file, a `sitecustomize` or a `usercustomize` that Python runs as
+it starts from inside the tree is harness configuration, and `ao doctor` names an installation of ao, a
+`PYTHONPATH` folder or an `AO_` variable that lies inside it.*
+
+A `.venv` in the repository is ignored, so an implementer can put a file there that every Python started
+from that environment runs first: a `.pth` file in a site directory, each of whose lines that begins
+with `import` is run as code, or a `sitecustomize` or `usercustomize` module. Every ao that environment
+runs runs it before ao does anything - the commit hook, which runs the `ao` on the committer's `PATH`,
+the watchdog's job, a person's own command - and before any review.
+
+These files are read as harness configuration is, by path and content, under the state `run by Python as
+it starts there`: in each site directory of each environment git names in the tree - by the `pyvenv.cfg`
+a venv, virtualenv or uv writes, or the `conda-meta/` conda keeps - every `.pth` file, and `sitecustomize`
+and `usercustomize` in any form the import system loads, with their compiled copies in `__pycache__`;
+in the site directories of the interpreter running ao and in every other folder on its import path that
+lies inside the tree, the same, a `.pth` file only where Python reads one. `ao verify`, `ao doctor` and
+the watchdog name each one no person has seen, no wake, refill, nudge, hunt or lane starts while one
+stands, and `ao harness seen` records it as it records any. A new one - a package installed into the
+environment brings its own - holds until a person has read it. One the repository tracks unchanged is
+HEAD's, reviewed with it.
+
+What this does not do, said plainly: a `.pth` file in the environment that runs ao has run by the time ao
+can read it. ao names it, so a person sees it before the next turn ao starts and before their own next
+command, and that naming is all the protection that run had. Nor are the modules such a file imports, or
+an installed package's own files, read: an environment inside the tree is one an agent can change
+throughout. So run ao from an installation outside the tree - `pipx`, `uv tool`, Homebrew, or a clone
+of its own - and `ao doctor` names the case it cannot cover, an `environment-in-tree` problem: ao
+running from a Python environment, or from its own code, inside the tree, a `PYTHONPATH` folder there,
+or an `AO_` variable that names a program, an adapter folder or a record there (`AO_GIT`,
+`AO_USER_ADAPTERS`, `AO_SETTINGS`, `AO_LEDGER_CHECKPOINTS`, `AO_PROJECT_REGISTRY`, `AO_EVENTS`). It is
+read from the environment the check runs in - a person's shell for `ao doctor`, the job's for the
+scheduled check - and holds no turn: only the person who set it up can move it.
+
 ## 6. Capability gating on MCP
 
 Every MCP tool has an access class ([mcp.md](mcp.md)): `read`, `write` or `run`. The one `run`
@@ -403,6 +438,16 @@ Secrets never enter the mailbox, the event log, a message, a commit, a status li
 report. Adapters record *where* credentials live, never their values. If a transcript
 contains one, that is the vendor's bug and the orchestrator does not propagate it — the
 dashboard renders opaque handles and commitments only.
+
+
+A Python installation with a standard library of its own inside the tree - a conda environment, a venv whose
+`lib` holds more than `site-packages`, an environment whose `pyvenv.cfg` makes a folder in the tree its Python's
+home, or a Python found by its standard library's signature (`lib/pythonX.Y/os.py`) among what git lists or
+tracks - runs from itself whatever it imports, in any form. ao does not read one file by file: it reads the
+configuration as unreadable and names the installation, the watchdog holds every turn, and the way on is to move
+the installation outside the tree. Each `pyvenv.cfg` in the tree is read as configuration too. ao does not search
+every ignored folder for an installation, and a person who runs a program an agent left in the tree runs that
+agent's code: what ao holds is what it, and the turns it starts, would run.
 
 ### 7b. What ao writes is scanned before it is written
 

@@ -1447,6 +1447,13 @@ def _harness_config_lines(cfg):
     return lines
 
 
+def _environment_lines(cfg):
+    """What ao runs from, loads or trusts inside the tree an agent writes, one line each; none when nothing is
+    (PYTHON-ENV)."""
+    found = dict(_environment_problem(cfg["root"])).get("environment-in-tree")
+    return [f"{'environment':<16}{C['yellow']}{found}{C['reset']}"] if found else []
+
+
 PROVE_BOUNDARY = ("ao prove: a throwaway candidate that adds one line to ao-prove.txt and nothing else. "
                   "Approve it if the diff is exactly that.")
 
@@ -1772,6 +1779,8 @@ def cmd_doctor(cfg, args):
     for line in waiver_lines:
         print(f"                {C['dim']}{line}{C['reset']}")
     for line in _harness_config_lines(cfg):
+        print(line)
+    for line in _environment_lines(cfg):
         print(line)
     for line in _review_evidence_lines(cfg):
         print(line)

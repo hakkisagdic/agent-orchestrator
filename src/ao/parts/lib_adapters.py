@@ -695,7 +695,8 @@ def project_config_member(path, names=None):
 HARNESS_CONFIG_STATES = {"modified": "modified", "added": "added", "deleted": "deleted", "untracked": "untracked",
                          "ignored": "ignored by git", "hidden": "modified, hidden from git status",
                          "linked": "a tracked link, read through to what it leads to",
-                         "committed": "committed with no grant"}
+                         "committed": "committed with no grant",
+                         "python": "run by Python as it starts there"}
 # The changes ao reads before it stops and says it cannot tell what changed: a folder it walks itself - one git lists
 # without descending, a repository of its own, a link's target - can hold any number of files.
 HARNESS_CONFIG_LIMIT = 5000
@@ -825,6 +826,278 @@ def harness_worktree_dirs():
     return dirs
 
 
+# What `site` runs whenever Python starts: each .pth file of a site directory, whose lines that begin with `import` are
+# run as code, and a module by each of these names wherever it lies on the import path (PYTHON-ENV).
+PYTHON_STARTUP_MODULES = ("sitecustomize", "usercustomize")
+# The variables ao reads that name a program it runs, the adapters it trusts as a person's, or a record it keeps
+# outside the tree on purpose; one that names a path inside the tree hands it to whoever writes there (PYTHON-ENV).
+AO_PATH_VARIABLES = ("AO_GIT", "AO_USER_ADAPTERS", "AO_SETTINGS", "AO_LEDGER_CHECKPOINTS", "AO_PROJECT_REGISTRY",
+                     "AO_EVENTS")
+
+
+def _children(folder):
+    """The names in a folder, sorted; none where it cannot be listed (PYTHON-ENV)."""
+    try:
+        return sorted(os.listdir(folder))
+    except OSError:
+        return []
+
+
+def _python_startup_names(folder, site_dir):
+    """The names in `folder` that Python runs as it starts: each .pth file where it is a site directory, and
+    sitecustomize and usercustomize in any form the import system loads - a source, a sourceless .pyc, an extension, a
+    package - with their compiled copies in __pycache__, which Python runs in a source's place while the stamp they
+    carry matches it (PYTHON-ENV)."""
+    names = _children(folder)
+    found = [name for name in names if (site_dir and name.casefold().endswith(".pth"))
+             or name.split(".", 1)[0].casefold() in PYTHON_STARTUP_MODULES]
+    if "__pycache__" in names:
+        found += ["__pycache__/" + name for name in _children(os.path.join(folder, "__pycache__"))
+                  if name.split(".", 1)[0].casefold() in PYTHON_STARTUP_MODULES]
+    return found
+
+
+def _own_standard_library(prefix):
+    """Why the environment at `prefix` holds a standard library of its own, or None: a conda environment, or a lib folder
+    holding anything beside site-packages - a venv's comes from outside it, and holds nothing else there (PYTHON-ENV).
+
+    Such an environment runs from itself, as it starts, whatever modules of its standard library it imports, in any
+    form the import system loads: naming some of them let a package or a sourceless file stand in for the rest (the
+    reviews of PYTHON-ENV). ao reads no installation file by file; one inside the tree is moved out."""
+    if os.path.isdir(os.path.join(prefix, "conda-meta")):
+        return "a conda environment"
+    if _python_installation(prefix) and not os.path.isfile(os.path.join(prefix, "pyvenv.cfg")):
+        return "a Python installation's own standard library"
+    for lib in [name for name in _children(prefix) if name.casefold() in ("lib", "lib64")]:
+        base = os.path.join(prefix, lib)
+        folders = [base] + [os.path.join(base, name) for name in _children(base)
+                            if name.casefold().startswith(("python", "pypy"))
+                            and os.path.isdir(os.path.join(base, name))]
+        for folder in folders:
+            extra = [name for name in _children(folder) if name.casefold() not in ("site-packages", "__pycache__")
+                     and not (folder == base and os.path.join(base, name) in folders)]
+            if extra:
+                return f"a standard library of its own ({os.path.basename(folder)}/{sorted(extra)[0]})"
+    return None
+
+
+def _site_directories(prefix):
+    """The site directories of the Python environment at `prefix`: lib/pythonX.Y/site-packages and its kin on POSIX,
+    Lib/site-packages on Windows, each by the name its folder has, whatever case a file system ignores (PYTHON-ENV)."""
+    # PyPy keeps its site-packages at the environment's top on some platforms (the review of PYTHON-ENV).
+    found = [os.path.join(prefix, name) for name in _children(prefix) if name.casefold() == "site-packages"]
+    for lib in [name for name in _children(prefix) if name.casefold() in ("lib", "lib64")]:
+        base = os.path.join(prefix, lib)
+        for name in _children(base):
+            if name.casefold() == "site-packages":
+                found.append(os.path.join(base, name))
+            else:
+                inner = os.path.join(base, name)
+                found += [os.path.join(inner, sub) for sub in _children(inner) if sub.casefold() == "site-packages"]
+    return [path for path in found if os.path.isdir(path)]
+
+
+def _in_tree(path, top):
+    """Whether `path`, its links followed, is the folder `top` or lies inside it (PYTHON-ENV). The root itself counts:
+    `PYTHONPATH=.` or an environment made at the root was read as outside the tree (the review of PYTHON-ENV). Named
+    apart from lib_transcript's `_inside`, a part loaded later into the same namespace, whose stricter reading - links
+    not followed, the folder itself outside - had replaced this one's."""
+    real, top = (os.path.normcase(os.path.realpath(each)) for each in (path, top))
+    return real == top or real.startswith(top.rstrip(os.sep) + os.sep)
+
+
+# Where a standard library of a Python's own sits: lib/pythonX.Y/os.py or lib/pypyX.Y/os.py; Windows' Lib/os.py is one
+# only beside a python.exe, since a project's own lib/os.py is a module of the project's.
+_STDLIB_SIGNATURE = re.compile(r"^(?:(.*)/)?(?:[Ll]ib(?:64)?/(?:[Pp]ython|[Pp]y[Pp]y)[^/]*|Lib)/os\.py$")
+
+
+def _python_installation(prefix):
+    """Whether a folder holds a Python installation of its own, by its standard library's signature (PYTHON-ENV)."""
+    names = _children(prefix)
+    if "Lib" in names and os.path.isfile(os.path.join(prefix, "Lib", "os.py")) \
+            and any(name.casefold() in ("python.exe", "pythonw.exe") for name in names):
+        return True
+    for lib in [name for name in names if name.casefold() in ("lib", "lib64")]:
+        base = os.path.join(prefix, lib)
+        if any(os.path.isfile(os.path.join(base, name, "os.py")) for name in _children(base)
+               if name.casefold().startswith(("python", "pypy"))):
+            return True
+    return False
+
+
+# The names a Python's own standard library folder has, probed one by one so an ignored folder is never listed.
+_STDLIB_FOLDERS = tuple(f"{name}3.{minor}" for name in ("python", "pypy") for minor in range(30)) + ("python2.7",)
+
+
+def _python_installation_probe(prefix):
+    """_python_installation by asking for each path it would find, never listing `prefix`: what git did not descend
+    into - build/, node_modules/ - is not read through (PYTHON-ENV)."""
+    if os.path.isfile(os.path.join(prefix, "Lib", "os.py")) and any(
+            os.path.isfile(os.path.join(prefix, name)) for name in ("python.exe", "pythonw.exe")):
+        return True
+    return any(os.path.isfile(os.path.join(prefix, lib, name, "os.py"))
+               for lib in ("lib", "lib64") for name in _STDLIB_FOLDERS)
+
+
+def _venv_home(root):
+    """The `home` a venv's pyvenv.cfg names for its Python, or None (PYTHON-ENV)."""
+    try:
+        with open(os.path.join(root, "pyvenv.cfg"), encoding=UTF8, errors="replace") as fh:
+            text = fh.read()
+    except OSError:
+        return None
+    for line in text.splitlines():
+        key, sep, value = line.partition("=")
+        if sep and key.strip().casefold() == "home":
+            return value.strip() or None
+    return None
+
+
+def python_startup_files(top, listed=(), folders_out=None):
+    """The paths, relative to the tree at `top`, of each file Python runs as it starts from inside the tree
+    (PYTHON-ENV).
+
+    A .venv in the repository is ignored, so an implementer can put a .pth file or a sitecustomize.py into its
+    site-packages, and every ao that environment runs - the commit hook through the ao on the committer's PATH, the
+    watchdog's job, a person's own command - runs it first, before any review (#113). What is read: each environment
+    git names in the tree, by the pyvenv.cfg a venv, virtualenv or uv writes or the conda-meta/ conda keeps, with the
+    folders `listed`, git status's names, holding one; the environment and the site directories of the interpreter
+    running this ao, where they lie inside the tree; and every other folder of this interpreter's import path inside
+    it, where only a sitecustomize or usercustomize runs. Nothing else of an environment is read.
+    """
+    import site
+    roots = [sys.prefix]
+    # An environment the repository tracks is found by its marker too: git status names only what changed, and a .pth
+    # added to a tracked environment changed nothing of its pyvenv.cfg (the review of PYTHON-ENV).
+    try:
+        tracked = _git_output(top, "ls-files", "-z", "--", "*pyvenv.cfg", "*conda-meta/*", "*os.py").split(b"\0")
+    except RuntimeError:
+        tracked = []
+    for item in tracked:
+        rel = os.fsdecode(item)
+        if rel.split("/")[-1] == "os.py":
+            continue                            # read by its signature below
+        if rel.split("/")[-1] == "pyvenv.cfg":
+            roots.append(os.path.join(top, *rel.split("/")[:-1]))
+        elif "/conda-meta/" in "/" + rel:
+            parts = rel.split("/")
+            roots.append(os.path.join(top, *parts[:parts.index("conda-meta")]))
+    # A Python installation with no marker at all - no pyvenv.cfg, no conda-meta - is found by its standard library's
+    # signature: among what git status names, file by file or as a folder it did not descend into, asked for without
+    # listing it, and among what the repository tracks (the review of PYTHON-ENV). What lies deeper in an ignored
+    # folder is not searched: a person who runs a program an agent left in the tree runs the agent's code.
+    for rel in list(listed) + [os.fsdecode(item) for item in tracked if item]:
+        if "node_modules" in rel.split("/"):
+            continue
+        found = _STDLIB_SIGNATURE.match(rel.rstrip("/"))
+        prefix = os.path.join(top, *(found.group(1) or ".").split("/")) if found else None
+        if prefix and (rel.rstrip("/").split("/")[-2:-1] != ["Lib"] or _python_installation(prefix)):
+            roots.append(prefix)
+        elif rel.endswith("/"):
+            folder = os.path.join(top, *rel.rstrip("/").split("/"))
+            if _python_installation_probe(folder):
+                roots.append(folder)
+    for rel in listed:
+        folder = os.path.join(top, *rel.rstrip("/").split("/"))
+        if rel.endswith("/") and (os.path.isfile(os.path.join(folder, "pyvenv.cfg"))
+                                  or os.path.isdir(os.path.join(folder, "conda-meta"))):
+            roots.append(folder)
+        elif rel.split("/")[-1] == "pyvenv.cfg":
+            roots.append(os.path.dirname(folder))
+        elif "/conda-meta/" in "/" + rel:
+            # An untracked conda environment is listed file by file, conda-meta/history among them (the review of
+            # PYTHON-ENV).
+            parts = rel.split("/")
+            roots.append(os.path.join(top, *parts[:parts.index("conda-meta")]))
+    for root in roots:
+        why = _own_standard_library(root) if _in_tree(root, top) else None
+        home = _venv_home(root) if _in_tree(root, top) else None
+        if home and _in_tree(home, top):
+            # pyvenv.cfg names where its Python and that Python's standard library are: a home in the tree is one an
+            # agent writes (the review of PYTHON-ENV).
+            why = f"its pyvenv.cfg makes {os.path.relpath(os.path.realpath(home), os.path.realpath(top))}, inside the " \
+                  "tree, its Python's home"
+        if why:
+            raise RuntimeError(f"{os.path.relpath(os.path.realpath(root), os.path.realpath(top)) or '.'} is a Python "
+                               f"installation inside the tree - {why} - which an agent can write and which runs from "
+                               "itself as it starts: move it outside the tree (PYTHON-ENV)")
+    sites = [path for root in roots if _in_tree(root, top) for path in _site_directories(root)]
+    sites += list(site.getsitepackages()) if hasattr(site, "getsitepackages") else []
+    if site.ENABLE_USER_SITE and hasattr(site, "getusersitepackages"):
+        sites.append(site.getusersitepackages())
+    # One folder each, by what it is: lib64 is often a link to lib, and a file system that ignores case reaches one
+    # folder by two spellings.
+    folders = {}
+    for path, site_dir in [(path, True) for path in sites] + [(path, False) for path in sys.path if path]:
+        if not (os.path.isdir(path) and _in_tree(path, top)):
+            continue
+        try:
+            stat = os.stat(path)
+        except OSError:
+            continue
+        # A file system that numbers no folder, as FAT does, is told them apart by name.
+        key = (stat.st_dev, stat.st_ino) if stat.st_ino else os.path.normcase(os.path.realpath(path))
+        held = folders.setdefault(key, [os.path.realpath(path), site_dir])
+        held[1] = held[1] or site_dir
+    real_top = os.path.realpath(top)
+
+    def tree_rel(path):
+        # The tree's root is "", never "./": git names a file at the root `pyvenv.cfg` (the review of PYTHON-ENV).
+        rel = os.path.relpath(os.path.realpath(path), real_top).replace(os.sep, "/")
+        return "" if rel == "." else rel
+
+    def joined(folder, name):
+        return f"{folder}/{name}" if folder else name
+
+    if folders_out is not None:
+        folders_out.update({tree_rel(folder): site_dir for folder, site_dir in folders.values()})
+    found = {joined(tree_rel(folder), name)
+             for folder, site_dir in folders.values() for name in _python_startup_names(folder, site_dir)}
+    # A venv's pyvenv.cfg says where its Python is, and so what that Python runs: configuration as much (PYTHON-ENV).
+    found |= {joined(tree_rel(root), "pyvenv.cfg") for root in dict.fromkeys(roots)
+              if _in_tree(root, top) and os.path.isfile(os.path.join(root, "pyvenv.cfg"))}
+    return found
+
+
+def _names_python_startup(rel):
+    """Whether a path's own name says Python runs it as it starts, wherever it stands and whether it is there or not:
+    a pyvenv.cfg, a .pth file in a site-packages folder, a sitecustomize or usercustomize in any form. A whole
+    environment deleted takes its folders with it, and what it held back went unnamed (the review of PYTHON-ENV)."""
+    parts = rel.split("/")
+    name = parts[-1].casefold()
+    if name == "pyvenv.cfg" or (name.endswith(".pth") and len(parts) > 1 and parts[-2].casefold() == "site-packages"):
+        return True
+    return any(part.split(".", 1)[0].casefold() in PYTHON_STARTUP_MODULES for part in parts[-3:])
+
+
+def environment_in_tree(root):
+    """[(what, path)] for each thing this ao runs from, loads or trusts that lies inside the tree an agent writes: the
+    Python environment it runs from, its own code, each PYTHONPATH folder, and each path an AO_ variable names
+    (PYTHON-ENV).
+
+    A .pth file or a module in any of them has run before ao can name it, so naming is all ao can do for the run that
+    finds it: the place is the person's to move outside the tree. Read from this process's own environment, which is
+    the person's shell for `ao doctor` and the job's for the watchdog.
+    """
+    try:
+        top = os.fsdecode(_git_output(root, "rev-parse", "--show-toplevel")).strip()
+    except RuntimeError:
+        top = root
+    found = []
+    if _in_tree(sys.prefix, top):
+        found.append(("the Python environment ao runs from", sys.prefix))
+    if _in_tree(_HERE, top):
+        found.append(("ao's own code", _HERE))
+    for entry in (os.environ.get("PYTHONPATH") or "").split(os.pathsep):
+        if entry and _in_tree(entry, top):
+            found.append(("PYTHONPATH", entry))
+    for name in AO_PATH_VARIABLES:
+        value = os.environ.get(name)
+        if value and _in_tree(value, top):
+            found.append((name, value))
+    return found
+
+
 def project_config_changes(root, names=None, shown=None):
     """[(path, state, sha256 or None)], sorted by path: each path in the working tree that a harness reads from a
     project as its configuration or instructions - `project_config_member` names it - and that differs from HEAD
@@ -838,7 +1111,9 @@ def project_config_changes(root, names=None, shown=None):
     its own is read like any other - a plugin cloned into .opencode/plugin/ is configuration - unless it is a worktree
     of this repository, a tree of its own that is checked where something runs. A tracked file git is told to skip
     (`update-index --assume-unchanged` or `--skip-worktree`) is left out of git status, so it is compared with HEAD's
-    blob by content; one a sparse checkout leaves out of the tree is no change.
+    blob by content; one a sparse checkout leaves out of the tree is no change. What Python runs as it starts from
+    inside the tree - a .pth file, a sitecustomize or usercustomize - is configuration in the same way, under the state
+    "python" (python_startup_files, PYTHON-ENV).
 
     `shown`, when given, is filled with {path: view} of the bytes each digest was taken of (_harness_read), so what a
     person is shown is what they record. Raises RuntimeError when git or a file cannot be read, and past
@@ -848,13 +1123,28 @@ def project_config_changes(root, names=None, shown=None):
     firsts = {entry[0] for entry in names}
     worktree_dirs = harness_worktree_dirs()
     top = os.fsdecode(_git_output(root, "rev-parse", "--show-toplevel")).strip()
-    changes, visited, worktrees = {}, set(), []
+    changes, visited, worktrees, startup, startup_folders = {}, set(), [], set(), {}
 
     def parts_of(rel):
         return [_config_part(part) for part in rel.split("/") if part not in ("", ".")]
 
     def member(rel):
-        return bool(firsts.intersection(parts_of(rel))) and project_config_member(rel, names) is not None
+        return (bool(firsts.intersection(parts_of(rel))) and project_config_member(rel, names) is not None) \
+            or starts_python(rel)
+
+    def starts_python(rel):
+        # What Python runs as it starts from inside the tree is configuration too, a sitecustomize package's own
+        # files among it (PYTHON-ENV); and a name of that kind in a folder Python starts from, there or not - a
+        # deleted sitecustomize took what it held back with it (the review of PYTHON-ENV).
+        if rel in startup or any(rel.startswith(path + "/") for path in startup) or _names_python_startup(rel):
+            return True
+        folder, _, name = rel.rpartition("/")
+        cached = folder.rpartition("/")[2] == "__pycache__"
+        site_dir = startup_folders.get(folder.rpartition("/")[0] if cached else folder)
+        if site_dir is None:
+            return False
+        return name.split(".", 1)[0].casefold() in PYTHON_STARTUP_MODULES \
+            or (site_dir and not cached and name.casefold().endswith(".pth"))
 
     def leads_to(rel):
         # A folder no name is declared for that a longer declared name starts with: `.github` of `.github/hooks`.
@@ -930,6 +1220,7 @@ def project_config_changes(root, names=None, shown=None):
                             "--no-renames").split(b"\0"):
         if len(item) > 3:
             listed.setdefault(os.fsdecode(item[3:]), []).append(item[:2].decode("ascii", "replace"))
+    startup.update(python_startup_files(top, listed, startup_folders))
     for rel, codes in sorted(listed.items()):
         tracked = [code for code in codes if code not in ("??", "!!")]
         state = ("ignored" if "!!" in codes else "untracked" if not tracked
@@ -942,14 +1233,21 @@ def project_config_changes(root, names=None, shown=None):
             elif leads_to(folder):
                 walk(folder, state, everything=False)
         elif member(rel):
-            take(rel, state)
+            take(rel, "python" if starts_python(rel) else state)
+    # What Python runs as it starts, in a folder git names without descending into it - an ignored environment's
+    # site-packages - is read there; one git tracks unchanged is HEAD's, and no change (PYTHON-ENV).
+    folders = [rel for rel in listed if rel.endswith("/")]
+    for rel in sorted(startup):
+        if rel not in changes and any(rel.startswith(folder) for folder in folders):
+            take(rel, "python")
     # What was committed since the last granted tree is no review's either: it is read as it stands now.
     since = harness_config_base(top)
     if since:
         for item in _git_output(top, "diff", "--name-only", "-z", "--no-renames", since, "HEAD", "--").split(b"\0"):
             rel = os.fsdecode(item)
             if item and rel not in changes and member(rel):
-                take(rel, "committed")
+                # what Python runs as it starts says so, as it does uncommitted (the review of PYTHON-ENV)
+                take(rel, "python" if starts_python(rel) else "committed")
     # A link git tracks unchanged is read through as well: what it leads to can change while the link does not, and git
     # names that change at the target's own path, which may be no configuration at all (the review of HARNESS-CONFIG).
     for item in _git_output(top, "ls-files", "-s", "-z").split(b"\0"):

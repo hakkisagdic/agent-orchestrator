@@ -97,6 +97,10 @@ watchdog starts without your shell can see an alias. On **Windows**, `bin/ao.ps1
 `board` and `doctor` with nothing installed; for the rest,
 `winget install Python.Python.3.12 && pip install ao-orchestrator` ([windows](docs/windows.md)).
 
+Install ao outside the projects it governs, never into a `.venv` inside one: an agent can write there,
+and Python runs a `.pth` file it leaves before ao starts. ao names such a file and `ao doctor` names
+an installation inside the tree ([safety](docs/safety.md#what-python-runs-as-it-starts-from-inside-the-tree)).
+
 > **Where this came from.** Extracted from a 30-epic durable-workflow product built
 > over weeks by exactly this loop. Every guard in here exists because something went
 > wrong first: a watchdog that started a second turn on one session and left a rename

@@ -99,6 +99,11 @@ kabuğun olmadan başlattığı ajan da alias'ı göremez. **Windows**'ta `bin/a
 kurmadan `status`, `board` ve `doctor`'ı karşılar; gerisi için
 `winget install Python.Python.3.12 && pip install ao-orchestrator` ([windows](docs/windows.md)).
 
+ao'yu yönettiği projelerin dışına kur, asla birinin içindeki bir `.venv`'e değil: oraya bir ajan
+yazabilir ve Python, orada bıraktığı bir `.pth` dosyasını ao başlamadan çalıştırır. ao böyle bir
+dosyanın adını verir, `ao doctor` da ağacın içindeki bir kurulumu söyler
+([safety](docs/safety.md#what-python-runs-as-it-starts-from-inside-the-tree)).
+
 > **Nereden çıktı.** Haftalarca tam olarak bu döngüyle geliştirilen 30 epic'lik
 > dayanıklı-iş-akışı ürününden çıkarıldı. Buradaki her koruma önce bir şey ters
 > gittiği için var: tek oturumda ikinci tur başlatıp yeniden adlandırmayı yarım

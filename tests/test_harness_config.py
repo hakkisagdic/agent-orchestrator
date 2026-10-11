@@ -642,3 +642,17 @@ def test_a_tracked_file_rewritten_behind_git_s_stat_cache_is_a_change(project):
     assert ".claude/settings.json" not in _git(root, "status", "--porcelain")
 
     assert _named(root) == [(".claude/settings.json", "modified")]
+
+
+
+def test_a_configuration_file_deleted_in_an_ungranted_commit_is_named_deleted(project, monkeypatch):
+    """From the review of PYTHON-ENV: a file a commit with no grant deleted was read as nothing at all."""
+    root = project["root"]
+    _committed(root, {"README.md": "a project\n", "CLAUDE.md": "rules\n"})
+    granted = _git(root, "rev-parse", "HEAD^{tree}").strip()
+    head = _git(root, "rev-parse", "HEAD").strip()
+    monkeypatch.setattr(A, "_granted_trees", lambda root: ({granted}, head, []))
+    _git(root, "rm", "-q", "CLAUDE.md")
+    _git(root, "commit", "-q", "-m", "rules gone, no grant")
+
+    assert _named(root) == [("CLAUDE.md", "deleted")]

@@ -55,6 +55,9 @@ nothing else:
     what a harness reads from the tree - hooks, plugins, MCP servers, instructions - is
     named to a person every cycle, and while one stands unseen no wake, refill, nudge or
     hunt starts here ([safety.md](safety.md#harness-configuration-an-agent-changed-waits-for-a-person)).
+    So is a `.pth` file, a `sitecustomize` or a `usercustomize` Python runs as it starts
+    from an environment inside the tree, which ran in the watchdog itself before it could
+    name it when the watchdog's job runs from there ([safety.md](safety.md#what-python-runs-as-it-starts-from-inside-the-tree)).
 
 ## The guard chain
 

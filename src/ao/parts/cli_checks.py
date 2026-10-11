@@ -173,6 +173,22 @@ def _harness_config_told(root):
     return "unreadable" if unreadable else A.harness_config_digest(unseen or [])
 
 
+def _environment_problem(root):
+    """[("environment-in-tree", text)] when ao runs from, loads or trusts a place inside the tree an agent writes; []
+    otherwise (PYTHON-ENV). An advisory: what ran there ran before ao could name it, and only the person who set it up
+    can move it, so no turn is held for it - the files Python runs as it starts there are, as harness configuration."""
+    try:
+        found = A.environment_in_tree(root)
+    except Exception:
+        return []
+    if not found:
+        return []
+    named = "; ".join(f"{what} {A.shown_text(path)}" for what, path in found)
+    return [("environment-in-tree", f"ao runs from, loads or trusts what an agent can write: {named} - a .pth file "
+                                    "or a module there runs before ao can name it; run ao from an installation "
+                                    "outside the tree, and point these variables outside it")]
+
+
 def _path_problems():
     """[("path-relative", what it says)] where PATH holds a relative or empty entry on Windows, else [].
 
@@ -217,6 +233,7 @@ def doctor_problems(cfg):
                     f"{switch} is off in .ao/config.json with no person's record, so it stays on - "
                     f"ao features off {switch} --by <name>, or remove it"))
     out.extend(_harness_config_problem(root))
+    out.extend(_environment_problem(root))
     hb = A.heartbeat_age(root)
     if hb is not None and hb > WATCHDOG_SILENT_AFTER:
         out.append(("watchdog-dead", f"watchdog silent for {hb // 60}m — launchctl / ao watchdog status"))
