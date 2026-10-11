@@ -77,10 +77,11 @@ def _find_git_binary():
             if os.path.isfile(candidate) and os.access(candidate, os.X_OK) \
                     and _native_executable(os.path.realpath(candidate)):
                 return _xcrun_git(candidate) or candidate
-    # With no compiled git, the git PATH holds, of whatever kind. Never the bare name on Windows, which looks in
-    # the current directory first: there the last resort is where Git for Windows installs, which fails to start
-    # rather than start a git.exe an agent left in the tree (WINDOWS-NO-CWD-EXEC).
-    return program_path("git") or (os.path.join(installed, "git.exe") if os.name == "nt" else "git")
+    # With no compiled git, the git PATH holds, of whatever kind. Never the bare name: Windows looks for it in the
+    # current directory first, and POSIX's execvp through every PATH entry, an empty one - the current directory -
+    # among them. The last resort is where git is installed, which fails to start rather than start a git an agent
+    # left in the tree (WINDOWS-NO-CWD-EXEC, and its review for POSIX).
+    return program_path("git") or (os.path.join(installed, "git.exe") if os.name == "nt" else "/usr/bin/git")
 
 
 def git_binary():
@@ -92,8 +93,9 @@ def git_binary():
     either: AO_GIT when that names an executable, otherwise the first git on PATH,
     then in the system directories, that is a compiled program rather than a
     script in front of one; the first git PATH holds of any kind only when there
-    is none, and plain "git" only when PATH holds none either - never on Windows,
-    which looks for a bare name in the current directory first (WINDOWS-NO-CWD-EXEC).
+    is none, and where git is installed when PATH holds none either - never the
+    bare name, which Windows looks for in the current directory first and POSIX
+    through an empty PATH entry (WINDOWS-NO-CWD-EXEC).
     When that git is macOS's xcrun stub, the git xcrun names instead, asked once
     per process.
     """

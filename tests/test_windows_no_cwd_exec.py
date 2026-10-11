@@ -293,3 +293,17 @@ def test_every_place_ao_names_itself_names_an_absolute_program(project, monkeypa
     with open(os.path.join(root, ".mcp.json"), encoding="utf-8") as fh:
         entry = json.load(fh)["mcpServers"]["ao"]
     assert entry["command"] == sys.executable and entry["args"][:4] == ["-m", "ao", "-C", root]
+
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX's last resort")
+def test_with_no_git_anywhere_posix_names_where_git_installs_never_the_bare_name(monkeypatch, tmp_path):
+    """From the review of WINDOWS-NO-CWD-EXEC: on POSIX the last resort was the bare `git`, which execvp looks up
+    through every PATH entry, an empty one - the current directory - among them."""
+    monkeypatch.delenv("AO_GIT", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setattr(A, "search_directories", lambda path=None: [])
+    monkeypatch.setattr(A, "program_path", lambda name, path=None: None)
+    monkeypatch.setattr(A.os.path, "isfile", lambda path: False)
+
+    assert A._find_git_binary() == "/usr/bin/git"
