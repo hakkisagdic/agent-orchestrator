@@ -245,7 +245,7 @@ def _snippet(template, exe, root, args):
     return re.sub(r"\{(exe|root|args)\}", lambda match: values[match.group(1)], str(template or ""))
 
 
-def register_mcp(root, agents, exe=None, head=None):
+def register_mcp(root, agents, exe=None):
     """Register the ao MCP server for each agent, in the file its adapter declares.
 
     Merged, never clobbered: other servers in the same file survive. Returns
@@ -253,12 +253,10 @@ def register_mcp(root, agents, exe=None, head=None):
     gets the snippet its adapter declares, and the human decides. Each registration
     names the role its readers hold in this project, when they hold one (`registration_role`).
     """
-    # The ao the registration names runs as the person whenever a harness starts it: one on PATH, else this
-    # interpreter running ao, never one the current directory holds (WINDOWS-NO-CWD-EXEC). `head` is what comes
-    # before ao's own arguments: `-m ao` after an interpreter.
-    if not exe:
-        exe, head = A.ao_program()
-    head = list(head or [])
+    # The ao the registration names runs as the person whenever a harness starts it: one named by an absolute path,
+    # never one the current directory holds (WINDOWS-NO-CWD-EXEC).
+    clone = os.path.join(A.REPO, "bin", "ao")
+    exe = exe or A.ao_program() or (clone if os.path.isfile(clone) and os.access(clone, os.X_OK) else None)
     out = {}
 
     def merge(path, server, key="mcpServers", extra=None):
@@ -279,8 +277,14 @@ def register_mcp(root, agents, exe=None, head=None):
 
     for ident, adapter in setup_adapters(root, agents):
         mcp = adapter.get("mcp") or {}
+        if exe is None and (mcp.get("manual") or mcp.get("file")):
+            # A registration naming a program that is not there starts nothing, and says nothing of why (the review
+            # of WINDOWS-NO-CWD-EXEC): none is written until ao can be named by an absolute path.
+            out[ident] = ("not registered: no ao program to name - none is on PATH and this ao was not started from "
+                          "one; put ao on PATH and run ao init again")
+            continue
         role = registration_role(root, ident)
-        args = head + ["-C", root, "mcp", "serve"] + (["--role", role] if role else [])
+        args = ["-C", root, "mcp", "serve"] + (["--role", role] if role else [])
         if mcp.get("manual"):
             out[ident] = f"manual: add to {mcp['manual']}\n{_snippet(mcp.get('snippet'), exe, root, args)}"
             continue

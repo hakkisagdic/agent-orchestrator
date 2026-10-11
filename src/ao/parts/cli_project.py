@@ -601,7 +601,7 @@ def cmd_init(cfg, args):
 
     # The ao the MCP registrations name and the watchdog's install runs: one on PATH, never one the current
     # directory - the repository being enrolled - holds, which Windows looks in first (WINDOWS-NO-CWD-EXEC).
-    exe, head = A.ao_program()                     # never one the current directory holds (WINDOWS-NO-CWD-EXEC)
+    exe = A.ao_program()                           # never one the current directory holds (WINDOWS-NO-CWD-EXEC)
     # The playbook and the MCP registration are the two things an agent needs to
     # behave like the architect from its first turn; both are written for every
     # agent this repository is seen to use. Ask the human before running init;
@@ -616,7 +616,7 @@ def cmd_init(cfg, args):
               f"yourself, or re-run with --rules:{C['reset']}")
         for line in skillkit.RULE_POINTER.split("\n"):
             print(f"      {line}")
-    registered = {} if args.no_mcp else skillkit.register_mcp(root, agents, exe, head)
+    registered = {} if args.no_mcp else skillkit.register_mcp(root, agents, exe)
     # What init wrote, so `ao remove` can take exactly that away again.
     manifest = {"at": int(time.time()), "wrote": list(wrote) + [r for r, w in playbook_files.items() if w != "kept"],
                 "mcp": [k for k, v in registered.items() if v == "registered"], "gitignore": bool(add)}
@@ -629,7 +629,9 @@ def cmd_init(cfg, args):
         if what.startswith("manual"):
             print("           " + "\n           ".join(what.splitlines()[1:]))
     if args.watchdog:
-        code = subprocess.run([exe, *head, "-C", root, "watchdog", "install"],
+        # This interpreter running this ao, handed where ao lives (SELF-REENTRY): never a program found by name.
+        code = subprocess.run([sys.executable, "-m", "ao", "-C", root, "watchdog", "install"],
+                              env=A.self_child_env(dict(os.environ)),
                               capture_output=True, text=True, encoding=UTF8, errors="replace").returncode
         print(f"  {C['green'] if code == 0 else C['red']}watchdog{C['reset']} "
               f"{'installed' if code == 0 else 'install failed — run ao watchdog install'}")

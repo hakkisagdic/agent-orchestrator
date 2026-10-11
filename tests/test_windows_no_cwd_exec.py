@@ -259,40 +259,32 @@ def test_the_doctor_names_an_empty_or_relative_path_entry_on_windows(windows, mo
     assert _as_windows(monkeypatch, cli._path_problems) == []
 
 
-
-def test_the_mcp_config_ao_prints_names_no_bare_program(project, monkeypatch, capsys):
-    """From the review of WINDOWS-NO-CWD-EXEC: with no ao on PATH the printed config named `sys.argv[0]`, which can be
-    a bare `ao` that a client started in the project would look for there; it names this interpreter running ao."""
-    from types import SimpleNamespace
-    monkeypatch.setattr(A, "program_path", lambda name, path=None: None)
-    monkeypatch.setattr(sys, "argv", ["ao", "mcp"])
-
-    assert cli.cmd_mcp(project, SimpleNamespace(action="config", role=None, allow_verify=False)) == 0
-
-    printed = json.loads(capsys.readouterr().out.split("\n", 1)[1])["mcpServers"]["agent-orchestrator"]
-    assert printed["command"] == sys.executable and os.path.isabs(printed["command"])
-    assert printed["args"][:2] == ["-m", "ao"]
-
-
-
-def test_every_place_ao_names_itself_names_an_absolute_program(project, monkeypatch, capsys, tmp_path):
-    """From the second review of WINDOWS-NO-CWD-EXEC: `ao a2a-mcp config` and the MCP registration `ao init` writes fell
-    back on `sys.argv[0]` too, made absolute against the current directory, where an agent could leave an `ao`."""
+def test_ao_names_itself_by_an_absolute_program_or_not_at_all(project, monkeypatch, capsys, tmp_path):
+    """From the reviews of WINDOWS-NO-CWD-EXEC: with no ao on PATH, `ao mcp config`, `ao a2a-mcp config` and the MCP
+    registration `ao init` writes named `sys.argv[0]`, a bare `ao` a client started in the project would look for
+    there, or one made absolute against the current directory. ao names the file it was started as only when that is
+    absolute and executable, and otherwise says how to put ao on PATH."""
     from ao import skillkit
     monkeypatch.setattr(A, "program_path", lambda name, path=None: None)
-    monkeypatch.setattr(sys, "argv", ["ao"])
 
-    assert A.ao_program() == (sys.executable, ["-m", "ao"])
-    assert cli.cmd_a2a_mcp(project, SimpleNamespace(action="config")) == 0
-    out = capsys.readouterr().out
-    server = json.loads(out[out.index("{"):out.index("\n}") + 2])["mcpServers"]["a2a"]
-    assert server["command"] == sys.executable and server["args"][:2] == ["-m", "ao"]
+    monkeypatch.setattr(sys, "argv", ["ao", "mcp"])
+    assert A.ao_program() is None
+    assert cli.cmd_mcp(project, SimpleNamespace(action="config", role=None, allow_verify=False)) == 1
+    assert cli.cmd_a2a_mcp(project, SimpleNamespace(action="config")) == 1
+    assert "put ao on PATH" in capsys.readouterr().out
 
-    root = str(tmp_path)
-    assert skillkit.register_mcp(root, {"claude-code"})["claude-code"] == "registered"
-    with open(os.path.join(root, ".mcp.json"), encoding="utf-8") as fh:
-        entry = json.load(fh)["mcpServers"]["ao"]
-    assert entry["command"] == sys.executable and entry["args"][:4] == ["-m", "ao", "-C", root]
+    started = tmp_path / "clone" / "bin" / "ao"
+    started.parent.mkdir(parents=True)
+    started.write_text("#!/bin/sh\n", encoding="utf-8")
+    started.chmod(0o755)
+    monkeypatch.setattr(sys, "argv", [str(started), "mcp"])
+    if os.access(str(started), os.X_OK):
+        assert A.ao_program() == str(started)
+        root = str(tmp_path / "project")
+        os.makedirs(root)
+        assert skillkit.register_mcp(root, {"claude-code"})["claude-code"] == "registered"
+        with open(os.path.join(root, ".mcp.json"), encoding="utf-8") as fh:
+            assert json.load(fh)["mcpServers"]["ao"]["command"] == str(started)
 
 
 
@@ -307,3 +299,17 @@ def test_with_no_git_anywhere_posix_names_where_git_installs_never_the_bare_name
     monkeypatch.setattr(A.os.path, "isfile", lambda path: False)
 
     assert A._find_git_binary() == "/usr/bin/git"
+
+
+def test_with_no_ao_to_name_init_registers_no_mcp_server(monkeypatch, tmp_path):
+    """From the review of WINDOWS-NO-CWD-EXEC-3: with no ao on PATH and none started from a file, the registration fell
+    back on a clone's bin/ao that a pip install does not have, and wrote a server that starts nothing."""
+    from ao import skillkit
+    monkeypatch.setattr(A, "ao_program", lambda: None)
+    monkeypatch.setattr(A, "REPO", str(tmp_path / "no-clone"))
+    root = str(tmp_path / "project")
+    os.makedirs(root)
+
+    said = skillkit.register_mcp(root, {"claude-code"})["claude-code"]
+
+    assert said.startswith("not registered: no ao program to name") and not os.path.exists(os.path.join(root, ".mcp.json"))

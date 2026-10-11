@@ -431,11 +431,15 @@ def unsafe_path_entries(path=None):
 
 
 def ao_program():
-    """(program, the arguments before ao's own) that start ao: the ao on PATH, else this interpreter running this
-    package, by its absolute path. Never `sys.argv[0]`, which can be a bare `ao` that a process started in a tree
-    looks for there, or one made absolute against the current directory (the review of WINDOWS-NO-CWD-EXEC)."""
+    """The program that starts ao, by its absolute path: the ao on PATH, else the file this ao was started as when
+    that is an absolute, executable one - a clone's bin/ao; None when neither is. Never a bare `ao`, which a process
+    started in a tree looks for there, nor one made absolute against the current directory (the review of
+    WINDOWS-NO-CWD-EXEC)."""
     found = program_path("ao")
-    return (found, []) if found else (sys.executable, ["-m", "ao"])
+    if found:
+        return found
+    first = sys.argv[0] if sys.argv else ""
+    return first if os.path.isabs(first) and os.path.isfile(first) and os.access(first, os.X_OK) else None
 
 
 def program_path(name, path=None):

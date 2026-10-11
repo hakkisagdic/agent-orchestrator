@@ -28,15 +28,23 @@ def _serve(module, cfg, extra):
     return server.main()
 
 
+# A client starts the program a config names, by that name, wherever it runs: one this ao cannot name by an absolute
+# path is put on PATH first (WINDOWS-NO-CWD-EXEC).
+NO_AO_PROGRAM = ("no ao program to name in the config: none is on PATH, and this ao was not started from one - put ao "
+                 "on PATH (pip install ao-orchestrator, or link a clone's bin/ao) and ask again")
+
+
 def cmd_mcp(cfg, args):
     """Serve this project's state to any MCP client, over stdio."""
     # The role is the server's own argument, so the config printed for a client carries it too (MCP-ROLES).
     role = ["--role", args.role] if args.role is not None else []
     if args.action != "serve":
+        command = A.ao_program()                   # never one the current directory holds (WINDOWS-NO-CWD-EXEC)
+        if command is None:
+            print(NO_AO_PROGRAM); return 1
         print(f"{C['b']}Add to an MCP client's config:{C['reset']}")
-        command, head = A.ao_program()             # never one the current directory holds (WINDOWS-NO-CWD-EXEC)
         print(json.dumps({"mcpServers": {"agent-orchestrator": {
-            "command": command, "args": head + ["-C", cfg["root"], "mcp", "serve"] + role}}}, indent=2))
+            "command": command, "args": ["-C", cfg["root"], "mcp", "serve"] + role}}}, indent=2))
         return 0
     return _serve("mcp", cfg, (["--allow-verify"] if args.allow_verify else []) + role)
 
@@ -45,10 +53,12 @@ def cmd_a2a_mcp(cfg, args):
     """Expose configured A2A agents to an MCP client."""
     if args.action != "serve":
         reg = os.path.join(cfg["root"], ".ao", "a2a-agents.json")
-        command, head = A.ao_program()             # never one the current directory holds (WINDOWS-NO-CWD-EXEC)
+        command = A.ao_program()                   # never one the current directory holds (WINDOWS-NO-CWD-EXEC)
+        if command is None:
+            print(NO_AO_PROGRAM); return 1
         print(f"{C['b']}Add to an MCP client's config:{C['reset']}")
         print(json.dumps({"mcpServers": {"a2a": {
-            "command": command, "args": head + ["-C", cfg["root"], "a2a-mcp", "serve"]}}}, indent=2))
+            "command": command, "args": ["-C", cfg["root"], "a2a-mcp", "serve"]}}}, indent=2))
         print(f"\n{C['b']}Then register agents in {reg}:{C['reset']}")
         print(json.dumps({"weather": {"url": "https://agent.example.com/a2a/v1",
                                       "headers": {"Authorization": "Bearer …"}}}, indent=2))

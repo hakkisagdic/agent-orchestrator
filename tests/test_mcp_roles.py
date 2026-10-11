@@ -290,15 +290,16 @@ def test_a_manual_snippet_carries_the_role_escaped_as_its_root_is(project, monke
         "command": exe, "args": ["-C", root, "mcp", "serve", "--role", "implementer"]}
 
 
-def test_ao_mcp_config_prints_the_role_among_the_server_s_arguments(project, capsys):
+def test_ao_mcp_config_prints_the_role_among_the_server_s_arguments(project, capsys, monkeypatch):
     root = project["root"]
+    monkeypatch.setattr(A, "ao_program", lambda: "/opt/ao/bin/ao")
 
     assert cli.main(["-C", root, "mcp", "config", "--role", "reviewer"]) == 0
 
     out = capsys.readouterr().out
     server = json.loads(out[out.index("{"):])["mcpServers"]["agent-orchestrator"]
-    # after `-m ao` where no ao is on PATH and this interpreter runs it (WINDOWS-NO-CWD-EXEC)
-    assert server["args"][-6:] == ["-C", root, "mcp", "serve", "--role", "reviewer"]
+    assert server["command"] == "/opt/ao/bin/ao"
+    assert server["args"] == ["-C", root, "mcp", "serve", "--role", "reviewer"]
 
 
 def test_docs_mcp_lists_each_role_with_the_tools_it_is_served():
