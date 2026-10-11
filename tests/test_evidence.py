@@ -197,6 +197,7 @@ def test_an_artefact_the_ledger_names_outside_the_reviews_folder_is_not_read(tmp
     digest = "sha256:" + __import__("hashlib").sha256(outside.read_bytes()).hexdigest()
     state = tmp_path / "state"
     (state / "semantic-review").mkdir(parents=True)
-    rows = [{"artefact": str(outside), "sha256": digest}, {"artefact": "../elsewhere.md", "sha256": digest}]
+    rows = [{"artefact": str(outside), "sha256": digest}, {"artefact": "../elsewhere.md", "sha256": digest},
+            {"artefact": "a\x00b.md", "sha256": digest}]
 
     assert _tool()._reviews(str(state), rows)["artefacts_held"] == 0

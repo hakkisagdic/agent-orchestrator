@@ -123,7 +123,7 @@ def _reviews(state, rows):
                 raise OSError("no file of the reviews folder")
             with open(os.path.join(folder, name), "rb") as fh:
                 data = fh.read()
-        except OSError:
+        except (OSError, ValueError):                 # a name holding a NUL byte is no file name either
             data = None
         if data is not None and "sha256:" + hashlib.sha256(data).hexdigest() == row.get("sha256"):
             held += 1
