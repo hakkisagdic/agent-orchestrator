@@ -43,6 +43,15 @@ def test_a_path_already_there_is_kept_after_it_and_never_twice():
     assert env["PYTHONPATH"].split(os.pathsep) == [PACKAGE_PARENT, "/other"]
 
 
+def test_the_child_s_pythonpath_is_one_name_whatever_case_it_came_in():
+    """From the review of DEMO-2: a `PythonPath` stayed beside the `PYTHONPATH` set here, and Windows reads both as one
+    name, so the child could be handed the one without this ao; what the other held is kept after it."""
+    env = A.self_child_env({"PythonPath": "/elsewhere", "PATH": "/usr/bin"})
+
+    assert [name for name in env if name.upper() == "PYTHONPATH"] == ["PYTHONPATH"]
+    assert env["PYTHONPATH"].split(os.pathsep) == [PACKAGE_PARENT, "/elsewhere"]
+
+
 def _an_interpreter_that_cannot_import_ao():
     """A python on PATH that does not have ao, or None: the shape of a clone with nothing installed.
 

@@ -1133,8 +1133,12 @@ def self_child_env(env=None):
     """
     child = dict(os.environ if env is None else env)
     parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    rest = [part for part in (child.get("PYTHONPATH") or "").split(os.pathsep) if part and part != parent]
-    child["PYTHONPATH"] = os.pathsep.join([parent] + rest)
+    # One PYTHONPATH, whatever case a caller's environment spelt it in: Windows reads `PythonPath` and `PYTHONPATH` as
+    # one name, and a block holding both may hand the child the one without this ao (the review of DEMO-2).
+    spelt = [name for name in child if name.upper() == "PYTHONPATH"]
+    given = os.pathsep.join(child.pop(name) or "" for name in spelt)
+    rest = [part for part in given.split(os.pathsep) if part and part != parent]
+    child["PYTHONPATH"] = os.pathsep.join([parent] + list(dict.fromkeys(rest)))
     return child
 
 
