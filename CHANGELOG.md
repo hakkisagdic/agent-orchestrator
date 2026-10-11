@@ -14,6 +14,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### New commands
 
+- `ao ci review` and the repository's `action.yml` have a pull request in any repository reviewed in CI by a model of another family than the one that wrote it, through ao's API reviewer and with no ao setup: the commits it adds to the merge base are reviewed, its title and commit messages read as claims, the verdict and the findings written to the job summary and the step outputs, and `fail-on` decides what fails the job. It reviews and grants nothing, and the author's family is the workflow's statement ([github-action](docs/github-action.md)) (GITHUB-ACTION).
 - `ao demo [--keep]` shows the guarantee in about a minute before ao is on a repository of yours: on a scratch project with a home of its own and a stand-in reviewer, a change with a bug is refused by review, `ao commit-ok` and the commit hook, and its fix lands with the trailers that name its grant ([demo](docs/demo.md)) (DEMO).
 
 ### Behaviour changes

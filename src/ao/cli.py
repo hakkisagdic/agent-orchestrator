@@ -370,6 +370,27 @@ def build_parser(root=None):
     pr.add_argument("--paths", nargs="*", help="narrow the review to these staged paths")
     pr.add_argument("--commits", help="a landed range instead of the staged candidate: what catch-up closes a waiver on")
     pr.set_defaults(fn=cmd_person_review)
+    ci = sub.add_parser("ci", help="a pull request's change reviewed in CI by a model of another family, with no "
+                                   "setup; it grants nothing")
+    ci.add_argument("action", choices=["review"])
+    ci.add_argument("--base", required=True,
+                    help="the revision the change is measured from, such as the pull request's base; the review "
+                         "starts at its merge base with --head")
+    ci.add_argument("--head", default="HEAD", help="the change's last commit (default HEAD)")
+    ci.add_argument("--reviewer", required=True, metavar="ADAPTER",
+                    help="the reviewer's adapter, composed for this run alone as ao role set reviewer composes one")
+    ci.add_argument("--model", help="the model the reviewer runs; a tool reviewer needs one")
+    ci.add_argument("--family", help="the reviewer model's family, as you know it; a tool reviewer needs one")
+    ci.add_argument("--author-family", dest="author_family", required=True,
+                    help="the family of the model that wrote the change, or unknown: a statement, not a measurement; "
+                         "a reviewer of that family is refused")
+    ci.add_argument("--boundary", help="what the change says it does, such as the pull request's title; judged as its "
+                                       "author's claim")
+    ci.add_argument("--summary", help="a Markdown file to append the verdict and the findings to, such as "
+                                      "$GITHUB_STEP_SUMMARY")
+    ci.add_argument("--outputs", help="a file to append name=value lines to, such as $GITHUB_OUTPUT: verdict, "
+                                      "artefact, tier, base, head and the four counts")
+    ci.set_defaults(fn=cmd_ci)
     tg = sub.add_parser("telegram", help="phone channel: alerts out, decisions in")
     tg.add_argument("action", nargs="?", default="status",
                     choices=["status", "setup", "test", "poll", "install", "uninstall"])

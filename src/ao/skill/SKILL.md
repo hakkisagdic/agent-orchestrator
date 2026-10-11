@@ -293,6 +293,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao merge-check <branch>` | gate the result of a merge before merging; the record names both parents |
 | `ao review --boundary "…" [--paths …]` | independent prospective review of the exact staged candidate; `--paths` narrows its staged scope |
 | `ao review --commits <range>` | retrospective review of landed work; never authorizes a candidate |
+| `ao ci review --base B --reviewer A --model M --family F --author-family F` | a step a person writes into a CI workflow, never an agent's command: a pull request's change reviewed by a model of another family; it grants nothing |
 | `ao review submit [--boundary …]` / `ao review collect <R-id>\|--any` / `ao reviews` / `ao review cancel <R-id>` | submit pins the staged tree and reviews it in the background, returning an id at once; collect takes a finished one; `ao reviews` lists them with what each is doing - starting, preparing, waiting and on what, or which reviewer runs; cancel ends a review and the reviewer it started, never a bare `kill`; `ao commit-ok --review <R-id>` grants only on the pinned tree |
 | `ao commit-ok` | persist authority for the exact isolated index candidate, verification and prospective review |
 | `ao commit-check` | revalidate the latest persisted grant against Git's active index without issuing or consuming one; `--range A..B` holds each landed commit to the tree its Ao- trailers name |

@@ -1,0 +1,121 @@
+# Cross-family review in CI (GITHUB-ACTION): a pull request's change reviewed by a model of another family than the
+# one that wrote it, in ao's verdict format, before it is merged. It reviews and grants nothing. docs/github-action.md
+# says what it does and does not guarantee. Every input reaches a script through the environment, never written into
+# it, so a pull request's title cannot become a command.
+name: ao cross-family review
+description: >-
+  Have a pull request's change reviewed by a model of another family than the one that wrote it, through an
+  OpenAI-compatible API, with ao's verdict, findings and evidence in the job summary. Advisory: it grants nothing.
+author: agent-orchestrator
+
+inputs:
+  model:
+    description: The reviewer model, as the API names it.
+    required: true
+  base-url:
+    description: The base URL of an OpenAI-compatible API, over https; ao asks its /chat/completions once.
+    required: true
+  api-key-env:
+    description: >-
+      The name of the environment variable that holds the API key; set the variable from a secret in the step's
+      env. The key itself is never an input.
+    required: true
+  reviewer-family:
+    description: The reviewer model's family, as you know it; ao never infers one from a model name.
+    required: true
+  author-family:
+    description: >-
+      The family of the model that wrote the change, or unknown. A reviewer of that family is refused; with unknown
+      the review claims no independence.
+    required: true
+  base:
+    description: The revision the change is measured from; the review starts at its merge base with head.
+    required: false
+    default: ${{ github.event.pull_request.base.sha }}
+  head:
+    description: The change's last commit.
+    required: false
+    default: ${{ github.event.pull_request.head.sha }}
+  boundary:
+    description: What the change says it does, judged as its author's claim, as its commit messages are.
+    required: false
+    default: ${{ github.event.pull_request.title }}
+  fail-on:
+    description: >-
+      needs-changes fails the job on NEEDS_CHANGES and when the review gave no verdict; no-verdict only when it gave
+      none; never leaves the job to the outputs.
+    required: false
+    default: needs-changes
+  ao-version:
+    description: The ao-orchestrator release installed from PyPI.
+    required: false
+    default: "0.5.2"
+  python-version:
+    description: The Python that runs ao.
+    required: false
+    default: "3.12"
+
+outputs:
+  verdict:
+    description: APPROVED, NEEDS_CHANGES, INVALID, UNAVAILABLE, or none when no review was recorded.
+    value: ${{ steps.review.outputs.verdict }}
+  artefact:
+    description: The review artefact's path in the checkout.
+    value: ${{ steps.review.outputs.artefact }}
+  tier:
+    description: The independence the review stands in, such as another model family, or not established.
+    value: ${{ steps.review.outputs.tier }}
+  blocker:
+    description: The BLOCKER findings the review counted.
+    value: ${{ steps.review.outputs.blocker }}
+  high:
+    description: The HIGH findings the review counted.
+    value: ${{ steps.review.outputs.high }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      # pinned to the commit of v5.6.0: a tag can be moved, a commit cannot (GITHUB-ACTION)
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install ao
+      shell: bash
+      env:
+        PINNED_AO_VERSION: ${{ inputs.ao-version }}
+      run: python -m pip install --disable-pip-version-check "ao-orchestrator==$PINNED_AO_VERSION"
+
+    - name: Name the review provider
+      shell: bash
+      env:
+        REVIEW_BASE_URL: ${{ inputs.base-url }}
+        REVIEW_KEY_ENV: ${{ inputs.api-key-env }}
+      run: ao config set review.api_providers "ci $REVIEW_BASE_URL $REVIEW_KEY_ENV" --machine
+
+    - name: Review the change
+      id: review
+      shell: bash
+      env:
+        REVIEW_BASE: ${{ inputs.base }}
+        REVIEW_HEAD: ${{ inputs.head }}
+        REVIEW_MODEL: ${{ inputs.model }}
+        REVIEWER_FAMILY: ${{ inputs.reviewer-family }}
+        AUTHOR_FAMILY: ${{ inputs.author-family }}
+        REVIEW_BOUNDARY: ${{ inputs.boundary }}
+        FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        set +e
+        # Each value is written --option=value, so a title that starts with a dash is still the option's value.
+        ao ci review --base="$REVIEW_BASE" --head="$REVIEW_HEAD" --reviewer=openai-api --model="ci/$REVIEW_MODEL" \
+          --family="$REVIEWER_FAMILY" --author-family="$AUTHOR_FAMILY" --boundary="$REVIEW_BOUNDARY" \
+          --summary="$GITHUB_STEP_SUMMARY" --outputs="$GITHUB_OUTPUT"
+        code=$?
+        set -e
+        case "$FAIL_ON" in
+          needs-changes) exit "$code" ;;
+          no-verdict) if [ "$code" -eq 1 ]; then exit 0; fi; exit "$code" ;;
+          never) exit 0 ;;
+          *) echo "fail-on is $FAIL_ON; it takes needs-changes, no-verdict or never" >&2; exit 2 ;;
+        esac
