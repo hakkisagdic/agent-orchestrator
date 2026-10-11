@@ -40,6 +40,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 - ao starts no program the current directory holds: Windows' own taskkill, schtasks, tasklist, cmd, where and powershell come from its system directory, every other program from PATH's absolute entries - an empty or relative entry is searched on no platform - and `ao doctor` names an empty or relative PATH entry on Windows, where a program an agent left in the repository could have run as the person ([windows](docs/windows.md)) (WINDOWS-NO-CWD-EXEC, part of #71).
 - A process table the platform cannot read stops what decides from it and says which platform and why, where it read as no process at all: on Windows a PowerShell that was missing, failed or did not answer let `ao hold` stop nothing, `ao writers` count none, `ao review cancel` record a review failed while its reviewer ran on, and a watchdog cycle start a turn or wake an architect beside one it never saw. Now the cycle starts, wakes and reaps nothing and raises `process-table-unreadable`; `ao hold`, `ao writers` and `ao review cancel` exit 1; `ao status`, `ao reviews` and the MCP `ao_status` say they could not look; and the macOS, Linux and `ps` readers fail the same way ([windows](docs/windows.md)) (WINDOWS-TABLE-CLOSED, part of #71).
 
+### Under the hood
+
+- docs/evidence.md gives what ao's own ledgers show about the guarantee on its own repository - every first-parent commit since the first grant with a tree a grant bound, the reviews by family and tier, every waiver closed, and what the ledgers cannot show - and tools/evidence.py makes each number again from a checkout, or the trailers alone from any clone ([evidence](docs/evidence.md)) (EVIDENCE).
+
 ## [0.5.2] - 2026-10-08
 
 ### Security

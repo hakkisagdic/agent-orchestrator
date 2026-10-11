@@ -159,4 +159,6 @@ lane'ler, bir lane'in rolü ve birleştirme kuyruğu bunlardan) ve projeler aras
 **koşum** (görünüm var; birkaç uygulayıcıyı aynı anda çalıştırmak makine gate kilidine bağlandı
 ama gerçek yükte denenmedi).
 
+ao'nun kendi defterlerinin bu depoda güvence hakkında gösterdikleri, ölçülmüş olarak: [kanıt](docs/evidence.md).
+
 MIT.

@@ -162,4 +162,6 @@ a lane's role and the merge queue among them, and cross-project parallel *execut
 view exists; running several implementers at once is governed by the machine gate lock but
 has not been run in anger).
 
+What ao's own ledgers show about the guarantee on this repository, measured: [evidence](docs/evidence.md).
+
 MIT.
