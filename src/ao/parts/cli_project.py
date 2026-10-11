@@ -599,9 +599,10 @@ def cmd_init(cfg, args):
     for rel in kept:
         print(f"  {C['dim']}kept   {rel}{C['reset']}")
 
-    # The ao the MCP registrations name and the watchdog's install runs: one on PATH, never one the current
-    # directory - the repository being enrolled - holds, which Windows looks in first (WINDOWS-NO-CWD-EXEC).
-    exe = A.ao_program()                           # never one the current directory holds (WINDOWS-NO-CWD-EXEC)
+    # The ao the MCP registrations name, by an absolute path, never one the current directory - the repository being
+    # enrolled - holds, which Windows looks in first (WINDOWS-NO-CWD-EXEC); the watchdog's install below re-enters
+    # this ao itself.
+    exe = A.ao_program()
     # The playbook and the MCP registration are the two things an agent needs to
     # behave like the architect from its first turn; both are written for every
     # agent this repository is seen to use. Ask the human before running init;

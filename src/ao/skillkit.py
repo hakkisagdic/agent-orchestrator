@@ -255,8 +255,7 @@ def register_mcp(root, agents, exe=None):
     """
     # The ao the registration names runs as the person whenever a harness starts it: one named by an absolute path,
     # never one the current directory holds (WINDOWS-NO-CWD-EXEC).
-    clone = os.path.join(A.REPO, "bin", "ao")
-    exe = exe or A.ao_program() or (clone if os.path.isfile(clone) and os.access(clone, os.X_OK) else None)
+    exe = exe or A.ao_program()
     out = {}
 
     def merge(path, server, key="mcpServers", extra=None):

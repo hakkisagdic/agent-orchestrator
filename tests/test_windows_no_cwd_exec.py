@@ -266,6 +266,7 @@ def test_ao_names_itself_by_an_absolute_program_or_not_at_all(project, monkeypat
     absolute and executable, and otherwise says how to put ao on PATH."""
     from ao import skillkit
     monkeypatch.setattr(A, "program_path", lambda name, path=None: None)
+    monkeypatch.setattr(A, "REPO", str(tmp_path / "an-installed-package"))         # no clone's bin/ao to fall back on
 
     monkeypatch.setattr(sys, "argv", ["ao", "mcp"])
     assert A.ao_program() is None
@@ -313,3 +314,23 @@ def test_with_no_ao_to_name_init_registers_no_mcp_server(monkeypatch, tmp_path):
     said = skillkit.register_mcp(root, {"claude-code"})["claude-code"]
 
     assert said.startswith("not registered: no ao program to name") and not os.path.exists(os.path.join(root, ".mcp.json"))
+
+
+
+def test_a_clone_run_as_a_module_names_its_own_bin_ao_everywhere(project, monkeypatch, capsys, tmp_path):
+    """From the review of WINDOWS-NO-CWD-EXEC-3: the registration fell back on a clone's bin/ao and `ao mcp config` did
+    not, so `python -m ao mcp config` in a clone said there was no ao to name."""
+    clone = tmp_path / "clone"
+    (clone / "bin").mkdir(parents=True)
+    (clone / "bin" / "ao").write_text("#!/bin/sh\n", encoding="utf-8")
+    (clone / "bin" / "ao").chmod(0o755)
+    monkeypatch.setattr(A, "program_path", lambda name, path=None: None)
+    monkeypatch.setattr(A, "REPO", str(clone))
+    monkeypatch.setattr(sys, "argv", [os.path.join(str(clone), "src", "ao", "__main__.py"), "mcp"])
+    if not os.access(str(clone / "bin" / "ao"), os.X_OK):
+        pytest.skip("this platform marks no file executable")
+
+    assert A.ao_program() == str(clone / "bin" / "ao")
+    assert cli.cmd_mcp(project, SimpleNamespace(action="config", role=None, allow_verify=False)) == 0
+    out = capsys.readouterr().out
+    assert json.loads(out[out.index("{"):])["mcpServers"]["agent-orchestrator"]["command"] == str(clone / "bin" / "ao")

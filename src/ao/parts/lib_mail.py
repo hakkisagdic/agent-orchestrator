@@ -432,14 +432,19 @@ def unsafe_path_entries(path=None):
 
 def ao_program():
     """The program that starts ao, by its absolute path: the ao on PATH, else the file this ao was started as when
-    that is an absolute, executable one - a clone's bin/ao; None when neither is. Never a bare `ao`, which a process
-    started in a tree looks for there, nor one made absolute against the current directory (the review of
-    WINDOWS-NO-CWD-EXEC)."""
+    that is an absolute, executable one, else the clone's own bin/ao this ao runs from; None when none is. Never a
+    bare `ao`, which a process started in a tree looks for there, nor one made absolute against the current directory
+    (the review of WINDOWS-NO-CWD-EXEC). `ao mcp config` and the registration `ao init` writes both ask here, so they
+    name the same ao (WINDOWS-NO-CWD-EXEC-4)."""
     found = program_path("ao")
     if found:
         return found
     first = sys.argv[0] if sys.argv else ""
-    return first if os.path.isabs(first) and os.path.isfile(first) and os.access(first, os.X_OK) else None
+    # Then the file it was started as, and a clone's own bin/ao, run as a module there (WINDOWS-NO-CWD-EXEC-4).
+    for candidate in (first, os.path.join(REPO, "bin", "ao")):
+        if os.path.isabs(candidate) and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
 
 
 def program_path(name, path=None):
