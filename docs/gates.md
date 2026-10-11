@@ -79,6 +79,13 @@ Two properties that are not negotiable:
   rewritten by a token-saving proxy; `ao doctor` names such a hook or wrapper, and asks
   each filter hook it may run what it does to the commands an agent measures with (below).
 
+*In ao since slice HARNESS-CONFIG: `ao verify` names each change to what a harness reads from the tree -
+hooks, plugins, MCP servers, instructions - that no person has seen, with `ao harness seen --by <name>`,
+which records it, and keeps them in the verification record as `harness_config`. They fail no gate: a
+slice may change the rules its implementer works under, and what holds is elsewhere, since no wake,
+refill, nudge, hunt or lane starts in the tree until a person has seen them
+([safety.md](safety.md#harness-configuration-an-agent-changed-waits-for-a-person)).*
+
 ## A filter's exclusions are proved, not trusted
 
 A token-saving filter installed as a harness hook rewrites the shell commands an agent

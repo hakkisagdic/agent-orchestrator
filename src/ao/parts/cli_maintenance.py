@@ -1420,6 +1420,23 @@ def _worktree_lines(cfg):
     return lines
 
 
+def _harness_config_lines(cfg):
+    """Each change to what a harness reads from this tree that no person has seen, by name, and what records it as
+    seen; or that there is none, or that it cannot be read (HARNESS-CONFIG)."""
+    unseen, unreadable = _harness_config_unseen(cfg["root"])
+    if unreadable:
+        return [f"{'harness config':<16}{C['red']}cannot be read: {unreadable}{C['reset']}  {C['dim']}no wake, refill, "
+                f"nudge, hunt or lane starts here until it can{C['reset']}"]
+    if not unseen:
+        return [f"{'harness config':<16}{C['green']}no change nobody has seen{C['reset']}"]
+    lines = [f"{'harness config':<16}{C['yellow']}{len(unseen)} change(s) nobody has seen{C['reset']}  "
+             f"{C['dim']}no wake, refill, nudge, hunt or lane starts here until a person reads them: "
+             f"ao harness seen --by <name>{C['reset']}"]
+    lines += [f"{'':<16}{A.shown_text(path)} ({A.HARNESS_CONFIG_STATES.get(state, state)})"
+              for path, state, _ in unseen]
+    return lines
+
+
 PROVE_BOUNDARY = ("ao prove: a throwaway candidate that adds one line to ao-prove.txt and nothing else. "
                   "Approve it if the diff is exactly that.")
 
@@ -1744,6 +1761,8 @@ def cmd_doctor(cfg, args):
           + (" open" if waiver_lines else ""))
     for line in waiver_lines:
         print(f"                {C['dim']}{line}{C['reset']}")
+    for line in _harness_config_lines(cfg):
+        print(line)
     for line in _review_evidence_lines(cfg):
         print(line)
     for line in _architect_absence_lines(cfg):

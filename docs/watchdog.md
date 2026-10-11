@@ -50,6 +50,10 @@ nothing else:
     `watchdog.resume_gap_hours` without one is a resume: what stands is named once, in
     one notice, and nothing turns orange or red on time in which nothing ran — see
     [alarms.md](alarms.md#after-a-silence).
+11. **It starts nothing on configuration nobody has seen.** A change an agent made to
+    what a harness reads from the tree - hooks, plugins, MCP servers, instructions - is
+    named to a person every cycle, and while one stands unseen no wake, refill, nudge or
+    hunt starts here ([safety.md](safety.md#harness-configuration-an-agent-changed-waits-for-a-person)).
 
 ## The guard chain
 
@@ -70,9 +74,19 @@ Order matters: each guard sees only what the ones above left standing.
 | 4c | reports pending | implementer reports the architect has not processed | wake the architect (once per 15 min, into absence, within quota) |
 | 5 | backoff | work fingerprint unchanged across nudges | escalate instead of nudging again |
 | 6 | nudge | — | start one headless turn in its own session |
+| any turn | harness configuration | each change to what a harness reads from the tree that no person has seen, read again right before each wake, refill, nudge and hunt, as the hold is | start none, and say why; a dry cycle says the same |
 
 Anomalies (`anomalies()`) are computed before the chain and delivered as facts:
 one file per condition, grouped per kind with a count.
+
+*In ao since slice HARNESS-CONFIG: a cycle names to a person each change to what a harness reads from
+the tree that nobody has seen, under one alarm, `harness-config`, that rings once for what the changes
+hold and climbs the ladder while they stand, whether or not the tree is held. Reports and alarms go on
+as before; only what would start a harness here waits: the architect's wake and refill, the nudge and
+the bug hunt each read the changes again right before they start, and stand down while one stands
+unseen or cannot be read, with the reason in the cycle's trace. A person reads them with
+`ao harness seen --by <name>` ([safety.md](safety.md#harness-configuration-an-agent-changed-waits-for-a-person)).
+The architect's own sessions are safest in a checkout of their own, where no agent writes.*
 
 A nudge, a wake and a refill tell their turn what to do in the project's `language`
 ([configuration.md](configuration.md)). The nudge names `## DECISION REQUIRED` for a slice parked on a
@@ -229,6 +243,7 @@ test that would fail if it came back.
 | F31 | a weekly limit whose stop named only a clock time could be woken again within minutes, days before its week was over, and a block's end was told as "04:00" whatever its day | the stop's reset was read within the five-hour window whatever limit it named, the spent window the machine reads for the provider was not read, and the end was told by its clock alone | a reset is read within the period the stop names; a spent window keyflip reports for the architect's provider holds the wake until the reset it states; the notice names the date beyond a day, and is told again when the end moves | test_architect_wake_quota | — |
 | F32 | a cycle cut off between starting the architect and recording it left a headless architect no record named, and the next cycle woke a second into the same session; a cycle killed while writing its state left it torn, and the markers that a park was resumed or a report handed were gone | the process started before anything said so, and the state was written over in place | the journal (`~/.ao/journal-<key>.db`, SQLite, written ahead and synced): a wake or refill is claimed under its session and reports before its process starts, with a lease, and its pid and start are written the moment it has them; a process the journal names holds its step past the lease while its start reads the same, and the next cycle registers it; a process of the architect's own harness already resuming the session is a wake under way; a journal that cannot be written leaves wakes to the process scan and tells a person; the state is replaced whole | test_journal | JOURNAL |
 | F33 | on Windows a PowerShell that was missing, failed or did not answer read as no process at all: the writer guard, the session guard and the presence check all passed, so a cycle could start a turn or wake an architect beside one it never saw, and `ao hold` stopped nothing | the process table was returned empty when it could not be read, on macOS, Linux and through `ps` as well | the readers raise `TableUnreadable`, naming the platform and why; a cycle that meets it starts, wakes and reaps nothing and raises `process-table-unreadable` for a person; presence it could not measure clears no quota block and holds no notice for the architect; a turn whose start cannot be read is believed for a bounded time | test_windows_table_closed | — |
+| F34 | a hook the implementer wrote into `.claude/settings.json` would have run in its own next nudge, outside the permissions that hold its commands, and in the architect's session when a wake started it in the same checkout, before any review saw it; Claude Code ran such a hook before it had even signed in | REVIEW-TREE-3 kept a candidate's configuration from its reviewer alone, and a harness's own folder is coordination state no candidate carries | each change to what an adapter declares its harness reads from a project is named to a person every cycle, and the wake, the refill, the nudge and the hunt each read them again before they start and stand down while one stands unseen, until `ao harness seen` records that a person read exactly those bytes | test_harness_config | HARNESS-CONFIG |
 
 ## Scenarios: testing the decision, not the measurement
 

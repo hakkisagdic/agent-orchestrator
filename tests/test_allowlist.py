@@ -86,3 +86,32 @@ def test_ao_commit_checks_authority_first_and_passes_nothing_but_the_message(pro
     assert cli.cmd_commit(project, SimpleNamespace(message="land it", file=None)) == 0
     assert calls == [["git", "commit", "-m", "land it"]]
     assert cli.cmd_commit(project, SimpleNamespace(message="land it", file="msg.txt")) == 2
+
+
+
+import pytest
+
+
+@pytest.mark.parametrize("rule, reason", [
+    ("Bash(ao features off review --by Alice)", "switches review off"),
+    ("Bash(ao waive review --slice S1 --by Alice --why late)", "waives a gate"),
+    ("Bash(ao waive review --slice S1 --by Alice --why *)", "waives a gate"),
+    ("Bash(ao person-review --by Alice --verdict APPROVED --digest abc)", "records a person's review"),
+    ("Bash(ao catchup --move-only S1 --by Alice)", "states which waived slices only moved code"),
+    ("Bash(ao init --profile x --review-tier same-family --by Alice)", "opts into same-family review"),
+    ("Bash(timeout 60 ao push allow 5)", "opens a push window"),
+    ("Bash(ao harness seen --by Alice --digest 0123abcd)", "records harness configuration as seen"),
+])
+def test_a_person_s_act_written_out_in_full_is_named_by_its_first_words(rule, reason):
+    """GRANTS-PREFIX (#114): each forbidden command was asked as a sample, `--by p`, so a rule that fixed another name
+    after --by admitted the act and passed the audit."""
+    found = AL.problems(["claude", "-p", "{prompt}", "--allowedTools", f"Read,{rule}"], {})
+
+    assert [(r, granted) for r, _, granted in found] == [(reason, rule)]
+
+
+@pytest.mark.parametrize("rule", ["Bash(ao catchup --limit 5)", "Bash(ao init --profile claude-kiro)",
+                                  "Bash(ao features on review)", "Bash(ao waiver-list)", "Bash(ao status:*)",
+                                  "Bash(ao harness seen --by Alice)"])
+def test_a_rule_that_starts_no_person_s_act_is_not_named(rule):
+    assert AL.problems(["claude", "-p", "{prompt}", "--allowedTools", f"Read,{rule}"], {}) == []

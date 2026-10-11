@@ -2,6 +2,8 @@
   "id": "claude-code",
   "name": "Claude Code",
   "project_config": [".claude", ".mcp.json", "CLAUDE.md", "CLAUDE.local.md"],
+  "worktree_dirs": [".claude/worktrees"],
+  "worktree_dirs_note": "Claude Code keeps the worktrees it makes here and reads no configuration from them: a session started in one reads that worktree's own. ao skips a worktree of the repository only here (HARNESS-CONFIG).",
   "verified": "full",
   "actor_name": "claude",
   "family": "anthropic",

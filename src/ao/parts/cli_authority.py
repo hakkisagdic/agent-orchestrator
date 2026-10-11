@@ -408,6 +408,8 @@ def cmd_verify(cfg, args):
         results.append({"name": "plan-integrity", "passed": False,
                         "detail": f"drifted: {','.join(drift)}", "exit": 1, "seconds": 0})
 
+    harness = _verify_harness_config(root)
+
     revs = A.reviews(root, cfg["reviews"], limit=1)
     rec = {"id": f"V-{int(time.time())}", "at": datetime.now().isoformat(timespec="seconds"),
            "schema": 2, "profile": profile, "gates_digest": gates_digest,
@@ -429,6 +431,8 @@ def cmd_verify(cfg, args):
            "candidate_size": _candidate_size_or_none(root, candidate_before),
            # Which git measured the candidate, and that no shell or agent stood between (#51).
            "measured_by": A.measured_by(),
+           # What a harness reads from the tree that changed and no person has seen (HARNESS-CONFIG).
+           "harness_config": harness,
            "dirty": len([l for l in A._git_text(root, "status", "--short").split("\n") if l.strip()])}
     try:
         A.record_verification(root, rec)
@@ -443,6 +447,33 @@ def cmd_verify(cfg, args):
         col = C["green"] if "APPROVED" in (revs[0][1] or "").upper() else C["yellow"]
         print(f"{C['dim']}newest review:{C['reset']} {col}{revs[0][1]}{C['reset']} ({revs[0][0]})")
     return 0 if ok else 1
+
+
+def _verify_harness_config(root):
+    """Name each change to what a harness reads from the tree that no person has seen, and what records it as seen;
+    the verification's record of them (HARNESS-CONFIG).
+
+    Not a failed gate: verification measures the candidate, and a change an implementer makes to its own instructions
+    can be the slice. What holds is elsewhere - no wake, refill, nudge, hunt or lane starts in the tree until a person
+    has seen it - and the record keeps what stood unseen when the gates ran.
+    """
+    try:
+        unseen = A.unseen_harness_config(root)
+    except Exception as exc:
+        why = " ".join(str(exc).split())[:240]
+        print(f"\n  {C['yellow']}harness configuration{C['reset']}  cannot be read ({why}); nothing ao starts in this "
+              "tree runs until it can")
+        return {"unreadable": why}
+    if not unseen:
+        return {"unseen": []}
+    print(f"\n  {C['yellow']}harness configuration nobody has seen{C['reset']}  {len(unseen)} change(s) to what a "
+          "harness reads from this tree:")
+    for path, state, _ in unseen:
+        print(f"    {A.shown_text(path)} ({A.HARNESS_CONFIG_STATES.get(state, state)})")
+    print(f"  {C['dim']}not a failed gate; no wake, refill, nudge, hunt or lane starts here until a person reads them: "
+          f"ao harness seen --by <name>{C['reset']}")
+    return {"unseen": [{"path": path, "state": state, "sha256": sha} for path, state, sha in unseen],
+            "digest": A.harness_config_digest(unseen)}
 
 
 def _candidate_size_or_none(root, candidate):

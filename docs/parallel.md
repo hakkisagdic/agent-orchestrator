@@ -84,6 +84,13 @@ ignore rules would not ignore what ao puts there, ao adds a line naming exactly 
 `/node_modules`, to the repository's own `.git/info/exclude`. Every worktree of the repository
 reads that file and nothing commits it; the main checkout ignores the name too.
 
+*In ao since slice HARNESS-CONFIG: `ao lane start` refuses, and makes nothing, while the checkout it
+starts from holds a change to what a harness reads - hooks, plugins, MCP servers, instructions - that no
+person has seen, or one it cannot read, and names each change and `ao harness seen --by <name>`, which
+records it. A lane links its paths from that checkout and runs its post-create command, an agent's own
+among the commands it can name, in what it made; one that appears while git makes the lane fails it
+with the command not run ([safety.md](safety.md#harness-configuration-an-agent-changed-waits-for-a-person)).*
+
 A Ctrl-C, SIGTERM or SIGHUP while `lane.post_create` runs stops the command with everything it
 started, since it runs in a process group of its own that the terminal's signals never reach,
 and the lane is recorded as failed. An ao killed outright can stop nothing: `ao lane list` then

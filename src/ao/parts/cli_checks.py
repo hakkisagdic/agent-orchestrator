@@ -142,6 +142,37 @@ def _active_review_tier(cfg):
     return f"{T.label(tier)} ({reviewer.get('id') or 'reviewer'}){opted if tier == T.SAME_FAMILY else ''}", problems
 
 
+def _harness_config_unseen(root):
+    """(the changes to what a harness reads here that no person has seen, or None; why they cannot be read, or None)
+    (HARNESS-CONFIG)."""
+    try:
+        return A.unseen_harness_config(root), None
+    except Exception as exc:
+        return None, " ".join(str(exc).split())[:240]
+
+
+def _harness_config_problem(root):
+    """[("harness-config", text)] naming each change to what a harness reads here that no person has seen, or that it
+    cannot be read; [] when neither (HARNESS-CONFIG). A person must act: nothing ao starts in the tree runs until
+    then."""
+    unseen, unreadable = _harness_config_unseen(root)
+    if unreadable:
+        return [("harness-config", f"what a harness reads from this tree cannot be read ({unreadable}), so no wake, "
+                                   "refill, nudge, hunt or lane starts here until it can")]
+    if not unseen:
+        return []
+    return [("harness-config", f"{len(unseen)} change(s) to what a harness reads from this tree, unseen by a person: "
+                               f"{A.harness_config_line(unseen, limit=20)} - no wake, refill, nudge, hunt or lane "
+                               "starts here until a person reads them: ao harness seen --by <name>")]
+
+
+def _harness_config_told(root):
+    """What the harness-config alarm is about, as the watchdog raises it: the digest of what stands unseen, or that it
+    cannot be read (HARNESS-CONFIG)."""
+    unseen, unreadable = _harness_config_unseen(root)
+    return "unreadable" if unreadable else A.harness_config_digest(unseen or [])
+
+
 def doctor_problems(cfg):
     """What `ao doctor --check` acts on: conditions a person must fix, as (key, text)."""
     from .watchdog import wake_error, STATE_DIR
@@ -167,6 +198,7 @@ def doctor_problems(cfg):
         out.append((f"unrecorded-switch:{switch}",
                     f"{switch} is off in .ao/config.json with no person's record, so it stays on - "
                     f"ao features off {switch} --by <name>, or remove it"))
+    out.extend(_harness_config_problem(root))
     hb = A.heartbeat_age(root)
     if hb is not None and hb > WATCHDOG_SILENT_AFTER:
         out.append(("watchdog-dead", f"watchdog silent for {hb // 60}m — launchctl / ao watchdog status"))
@@ -437,7 +469,8 @@ def doctor_problems(cfg):
 # raises the watchdog's own alarm at the watchdog's level and known end: one
 # condition is one alarm whoever sees it, with one snooze and one mail (#106).
 DOCTOR_WATCHDOG_ALARMS = {"credits-exhaust": {"key": "credits-exhaust", "level": "red", "window": 6 * 3600},
-                          "wake-failed": {"key": "architect-wake-failed", "level": None, "window": 6 * 3600}}
+                          "wake-failed": {"key": "architect-wake-failed", "level": None, "window": 6 * 3600},
+                          "harness-config": {"key": "harness-config", "level": None, "window": 6 * 3600}}
 
 # A heartbeat older than this is a watchdog that stopped.
 WATCHDOG_SILENT_AFTER = 360
@@ -595,7 +628,10 @@ def _doctor_credit_lines(cfg):
 
 # Findings that mean work has stopped and only a person can restart it. Everything
 # else a doctor finds is an advisory: recorded for the architect, never paged (#40).
-DOCTOR_RED = {"watchdog-dead", "wake-failed", "transcript-blind", "transcript-missing", "implementer-session"}
+# Harness configuration nobody has seen holds every turn ao starts, and only a person
+# may read it and record it as seen (HARNESS-CONFIG).
+DOCTOR_RED = {"watchdog-dead", "wake-failed", "transcript-blind", "transcript-missing", "implementer-session",
+              "harness-config"}
 
 
 def _doctor_severity(key, text):
@@ -646,12 +682,14 @@ def _doctor_check(cfg, page=False):
                    what=credits_told("exhausted", last.get("account")))
         elif shared:
             # A failed wake says what the watchdog's own raise of it says, so the same failure rings once
-            # whoever sees it (NOISE-REPEATS).
+            # whoever sees it (NOISE-REPEATS); so does harness configuration nobody has seen (HARNESS-CONFIG).
             from .watchdog import STATE_DIR, wake_error, wake_failure_told
             failed = wake_error(os.path.join(STATE_DIR, A.project_file_name("escalate-log", project))) \
                 if key == "wake-failed" else None
+            what = wake_failure_told(failed) if failed else _harness_config_told(root) \
+                if key == "harness-config" else None
             notify(f"{project}: {key}", text, root, key=shared["key"], window=shared["window"],
-                   audience="human", level=shared["level"], what=wake_failure_told(failed) if failed else None)
+                   audience="human", level=shared["level"], what=what)
         else:
             notify(f"{project}: {key}", text, root, key=f"doctor:{key}", window=3600,
                    audience="human")

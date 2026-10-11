@@ -1,4 +1,5 @@
-"""Harnesses: `ao harness probe`, which asks each harness that speaks ACP what it supports (ACP-PROBE).
+"""Harnesses: `ao harness probe`, which asks each harness that speaks ACP what it supports (ACP-PROBE), and
+`ao harness seen`, where a person reads the harness configuration an agent changed (HARNESS-CONFIG).
 
 A part of src/ao/cli.py, run in its namespace by `_part` as the parts moved out of it are (#44); it is
 not importable on its own.
@@ -19,9 +20,16 @@ def cmd_harness(cfg, args):
     What it answers is kept in ~/.ao/harness/<id>.json with when it was asked and which binary answered: how
     many sessions it listed is kept, and nothing of what they are. A harness that is not installed is said
     to be so; one that does not answer in --timeout seconds is said not to, and the command exits 1.
+
+    `ao harness seen` is a person's command of its own (_harness_seen).
     """
     from . import acp
     from .storage import replace_file_durably
+    if getattr(args, "action", None) == "seen":
+        return _harness_seen(cfg, args)
+    if getattr(args, "by", None) or getattr(args, "digest", None):
+        print("--by and --digest belong to ao harness seen, where a person records what they read; probe takes neither")
+        return 2
     root = cfg.get("root") or os.getcwd()
     # Each adapter as ao loads it, from the package, the user's layer and the project's, a later one
     # overriding by id; one whose contract this ao does not implement is not loaded, as elsewhere.
@@ -69,6 +77,105 @@ def cmd_harness(cfg, args):
               f"session: {', '.join(found['session']) or '-'}  mcp: {', '.join(found['mcp']) or '-'}"
               + (f"  sessions here: {found['sessions']}" if "sessions" in found else ""))
     return 1 if failed else 0
+
+
+# ---- what a harness reads from the tree, read by a person before anything ao starts here runs (HARNESS-CONFIG) ----
+
+def _harness_change_lines(root, path, state, view):
+    """The lines that show one change as it stands: its diff from HEAD where it is text (HARNESS-CONFIG)."""
+    import difflib
+    kind = view[0] if view else "deleted"
+    if kind == "deleted":
+        return ["deleted: HEAD holds it, and a harness started here reads none"]
+    if kind == "special":
+        return [f"{view[1]}, not a regular file: a harness that opens it reads whatever its writer sends"]
+    if kind == "missing":
+        return ["nothing: the link leads nowhere"]
+    if kind == "link":
+        target, inner = view[1], view[2]
+        if inner is None:
+            return [f"a link to the folder {A.shown_text(target)}: each file in it is a change of its own below"]
+        return [f"a link to {A.shown_text(target)}, which holds:"] \
+            + _harness_change_lines(root, path, "untracked", inner)
+    data, size = view[1], view[2]
+    if data is None:
+        return [f"{size} bytes, more than ao shows here: read the whole file before you record it"]
+    if b"\0" in data:
+        return [f"{size} bytes, not text: read it with a tool that shows such a file before you record it"]
+    before = b""
+    if state in ("modified", "hidden"):
+        try:
+            before = A._git_output(root, "cat-file", "blob", f"HEAD:{path}")
+        except RuntimeError:
+            before = b""
+    lines = list(difflib.unified_diff(before.decode(UTF8, "replace").splitlines(),
+                                      data.decode(UTF8, "replace").splitlines(),
+                                      fromfile=f"HEAD:{path}" if before else "nothing", tofile=path, lineterm=""))
+    return [A.shown_text(line) for line in lines] or ["empty"]
+
+
+def _harness_seen(cfg, args):
+    """Show a person the harness configuration an agent changed in this tree, and record it as seen (HARNESS-CONFIG).
+
+    What a harness reads from a project - hooks, plugins, MCP servers, instructions - acts in the next session started
+    there, before any review has seen it, so no wake, refill, nudge, hunt or lane starts here while a change to it
+    stands unseen. With --by alone each unseen change is shown as it stands, its diff from HEAD where it is text, with
+    the digest of exactly those bytes, and nothing is recorded. With --by and that digest it is recorded as seen, kept
+    in ~/.ao outside the tree; a change made since it was shown refuses the record, so what is recorded is what was
+    read, as `ao person-review` records a verdict. It is a person's command, as `ao waive` is: --by names a person and
+    never an agent or a role, the login and whether a terminal was attached are recorded beside the name, and no grant
+    ao checks admits it.
+    """
+    root = cfg["root"]
+    if getattr(args, "ids", None):
+        print("ao harness seen names no adapter: it shows what every harness ao knows reads from this tree")
+        return 2
+    by = (getattr(args, "by", None) or "").strip()
+    if not by or not by.isprintable() or len(by) > 80:
+        print("--by is required: the person who reads the changes, in one line of at most 80 characters")
+        return 2
+    if by.lower() in _agent_names(cfg):
+        print(f"--by names an agent or a role ({by}); seeing what a harness runs is a person's act")
+        return 2
+    shown = {}
+    try:
+        changes = A.project_config_changes(root, shown=shown)
+    except Exception as exc:
+        print(f"{C['red']}not read{C['reset']}: what a harness reads from this tree cannot be read "
+              f"({' '.join(str(exc).split())}); nothing ao starts here runs until it can, and nothing was recorded")
+        return 1
+    if not changes:
+        print(f"{C['green']}nothing a harness reads from this tree differs from HEAD{C['reset']}; nothing to record")
+        return 0
+    record = A.harness_seen_record(root) or {}
+    unseen = A.harness_unseen(changes, record)
+    if not unseen:
+        when = time.strftime("%d %b %H:%M", time.localtime(float(record.get("at") or 0)))
+        print(f"{C['green']}seen{C['reset']}: {record.get('by') or 'a person'} recorded each change to what a harness "
+              f"reads here as it stands, on {when}: {A.harness_config_line(changes)}")
+        return 0
+    digest = A.harness_config_digest(unseen)
+    wanted = (getattr(args, "digest", None) or "").strip()
+    if wanted:
+        if wanted != digest:
+            print(f"{C['red']}refused{C['reset']}: what a harness reads here is not what that digest was taken of - it "
+                  f"changed since it was shown, or the digest is another's. Nothing was recorded; "
+                  f"`ao harness seen --by {by}` shows it as it stands now")
+            return 2
+        A.record_harness_seen(root, changes, by, digest)
+        print(f"{C['green']}recorded{C['reset']}: {by} has seen {A.harness_config_line(unseen)}; a wake, refill, "
+              "nudge, hunt or lane starts in this tree again")
+        return 0
+    print(f"{C['b']}harness configuration nobody has seen{C['reset']}: {len(unseen)} change(s) to what a harness "
+          "reads from this tree, each as it stands now")
+    for path, state, _ in unseen:
+        print(f"\n{C['b']}{A.shown_text(path)}{C['reset']} ({A.HARNESS_CONFIG_STATES.get(state, state)})")
+        for line in _harness_change_lines(root, path, state, shown.get(path)):
+            print(f"  {line}")
+    print(f"\ndigest {digest}")
+    print(f"Nothing is recorded yet. Read each change above, then\n  ao harness seen --by {by} --digest {digest}\n"
+          "records exactly these bytes as seen; a change made since refuses it.")
+    return 0
 
 
 # ---- a harness's lifecycle hooks: `ao agent-hook EVENT`, and `ao agents` (HOOK-SPOOL) ---------------------------

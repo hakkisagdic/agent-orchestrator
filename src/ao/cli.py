@@ -217,11 +217,18 @@ def build_parser(root=None):
     pw.add_argument("action", choices=["watch"])
     pw.add_argument("--once", action="store_true", help="one pass, then exit; the watchdog does not run it yet")
     pw.set_defaults(fn=cmd_pr)
-    hs = sub.add_parser("harness", help="ask each harness that speaks ACP what it supports; sends no prompt")
-    hs.add_argument("action", choices=["probe"])
-    hs.add_argument("ids", nargs="*", help="the adapters to ask; every one that declares acp.argv when none is named")
-    hs.add_argument("--sessions", action="store_true", help="also ask how many sessions it lists for this directory")
-    hs.add_argument("--timeout", type=float, default=20.0, help="seconds each harness has to answer")
+    hs = sub.add_parser("harness", help="probe: ask each harness that speaks ACP what it supports, sending no prompt; "
+                                        "seen: a person reads the harness configuration an agent changed here, and "
+                                        "records it as seen")
+    hs.add_argument("action", choices=["probe", "seen"])
+    hs.add_argument("ids", nargs="*", help="probe: the adapters to ask; every one that declares acp.argv when none is "
+                                           "named")
+    hs.add_argument("--sessions", action="store_true", help="probe: also ask how many sessions it lists for this "
+                                                            "directory")
+    hs.add_argument("--timeout", type=float, default=20.0, help="probe: seconds each harness has to answer")
+    hs.add_argument("--by", help="seen: the person who reads the changes; never an agent or a role")
+    hs.add_argument("--digest", help="seen: record the changes as seen, while they are the bytes shown with this "
+                                     "digest; without it they are shown and nothing is recorded")
     hs.set_defaults(fn=cmd_harness)
     ah = sub.add_parser("agent-hook", help="what a harness's lifecycle hook runs: record one event of its session")
     ah.add_argument("event", help="the event in ao's words: " + ", ".join(A.AGENT_EVENTS))

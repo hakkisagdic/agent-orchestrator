@@ -157,6 +157,13 @@ the diff shows any change to those files.*
 of the working tree as it stands, since a provider that is a harness ran the tree's own hooks and MCP
 servers when it ran in the repository ([upstream](upstream.md#asking-the-codebase-as-built)).*
 
+*In ao since slice HARNESS-CONFIG: the same files act wherever else a harness starts in a tree an agent
+writes - the implementer's own next nudge, the architect's wake in the same checkout - and a harness's
+own folder is coordination state no candidate carries, so no review sees a change to it. `ao verify`,
+`ao doctor` and the watchdog name each change to those names that no person has seen, and no wake,
+refill, nudge, hunt or lane starts in the tree until a person has read it with `ao harness seen`
+([safety.md](safety.md#harness-configuration-an-agent-changed-waits-for-a-person)).*
+
 A review of eight scenarios is eight questions, not one. ao splits the prompt into
 **sections** — from the numbered scenarios in the boundary, or failing that from the
 candidate's file groups — and runs them as separate bounded calls, appending each result

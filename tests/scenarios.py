@@ -29,6 +29,7 @@ class World:
         self.transcript_age(0)
         self.turn_ended = False
         self.quota = True
+        self.harness_unseen = []        # harness configuration nobody has seen: [(path, state, sha256)]
         self._patch()
 
     # ---- knobs
@@ -113,6 +114,8 @@ class World:
             },
         )
         mp.setattr(W, "quota_ok", lambda adapter: w.quota)
+        # Read through git, which the Popen above stands in for: a world says what no person has seen (HARNESS-CONFIG).
+        mp.setattr(A, "unseen_harness_config", lambda root: list(w.harness_unseen))
         mp.setattr(W, "notify", lambda title, msg, root=None, key=None, window=1800, audience="human", level=None,
                    quiet_until=None, what=None, red_after=None:
                    w.notices.append((title, msg, audience, level)) or True)

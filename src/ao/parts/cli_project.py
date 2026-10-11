@@ -620,6 +620,8 @@ def cmd_init(cfg, args):
                 "mcp": [k for k, v in registered.items() if v == "registered"], "gitignore": bool(add)}
     with open(os.path.join(root, ".ao", "init-manifest.json"), "w", encoding=UTF8) as fh:
         json.dump(manifest, fh, indent=2)
+    # A person adopted the tree as it stands: its harness configuration is measured from this HEAD, once (HARNESS-CONFIG).
+    A.record_harness_baseline(root, "ao init")
     for agent, what in registered.items():
         print(f"  {C['green']}mcp{C['reset']}      {agent}: {what.splitlines()[0]}")
         if what.startswith("manual"):

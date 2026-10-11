@@ -388,6 +388,9 @@ def test_a_worktree_git_could_not_add_leaves_no_branch_and_no_record_behind(proj
     _board(root)
     # A required filter that fails, as a missing git-lfs does: git makes the branch, then fails the checkout.
     (Path(root) / "blob.bin").write_text("data\n", encoding="utf-8")
+    # Written well before its commit, as a checkout's unchanged files are: git status then trusts the index and runs
+    # no filter, and a start reads that status first, for what a harness reads (HARNESS-CONFIG).
+    os.utime(Path(root) / "blob.bin", (time.time() - 10, time.time() - 10))
     (Path(root) / ".gitattributes").write_text("*.bin filter=broken\n", encoding="utf-8")
     _git(root, "add", "blob.bin", ".gitattributes")
     _git(root, "commit", "-q", "-m", "a filtered file")

@@ -295,6 +295,71 @@ Until then `ao doctor` names the refusal and what allowing it costs; after it, t
 finding says its turns run outside the sandbox, with the network, where the commit hook and `ao commit`
 hold commits and nothing holds anything else.
 
+### Harness configuration an agent changed waits for a person
+
+*In ao since slice HARNESS-CONFIG: `ao verify`, `ao doctor` and the watchdog name every change to what a
+harness reads from a project, and nothing ao starts in the tree runs while one stands that no person has
+seen; `ao harness seen` is how a person reads them and says so.*
+
+A harness started in a folder reads its hooks, plugins, MCP servers and instructions from there. A
+reviewer is never handed a candidate's ([pipeline.md](pipeline.md), REVIEW-TREE-3), but the same files
+act wherever else a harness starts in a tree an agent writes: a hook the implementer puts in
+`.claude/settings.json` runs in its own next nudge, outside the permissions that hold its commands, and
+in the architect's session when the watchdog wakes it in the same checkout - each before any review has
+seen it. A harness's own folder, `.claude/` or `.kiro/` among them, is coordination state that no
+candidate carries, so no review ever would.
+
+What counts is what the adapters ao ships declare their harness reads from a project - `project_config`
+and the steering files ([the adapter guide](../src/ao/adapters/README.md)) - wherever in the tree it is,
+read from the package alone, since a layer an agent can write must not say what is watched. A change is any of
+those paths that differs from HEAD: modified, staged or not, added, deleted, untracked, ignored by git -
+a harness reads a gitignored `.claude/settings.local.json` all the same - or a tracked file git is told
+to leave out of its status with `git update-index --assume-unchanged` or `--skip-worktree`, which is
+compared with HEAD's blob by content. An ignored folder git lists without descending into it is read
+only when it is configuration itself, so a `node_modules/` is never walked. A link is read through, so
+what it leads to cannot change unseen; a FIFO or a device is named for what it is and never opened to
+wait on. A repository cloned into a configuration folder, such as a plugin, is read like any folder; a
+worktree of the project's own repository is not, since it is a tree of its own, checked where something
+runs in it. Past 5,000 changes ao stops and says it cannot tell what changed, and a change it cannot
+read holds as one nobody has seen.
+
+- `ao verify` prints each change nobody has seen with the command that records it, and keeps them in its
+  verification record as `harness_config`. It does not fail for them: a slice may change the rules its
+  implementer works under.
+- `ao doctor` shows them on a `harness config` line, and `ao doctor --check` names them as
+  `harness-config`; its scheduled run pages a person under the watchdog's own alarm.
+- The watchdog names them to a person each cycle, in one alarm that rings once for what the changes hold
+  and climbs the ladder while they stand ([alarms.md](alarms.md)). Before each turn it would start it
+  reads them again, as it reads the hold: no architect wake, refill, nudge or bug hunt starts while one
+  stands unseen, and the cycle's trace says why ([watchdog.md](watchdog.md)).
+- `ao lane start` refuses while one stands, and a lane's `lane.post_create` command is not run when one
+  appears while git makes the lane ([parallel.md](parallel.md)).
+
+A person reads them, then records that they have:
+
+```bash
+ao harness seen --by <name>                     # each change as it stands, its diff from HEAD, and the digest of those bytes
+ao harness seen --by <name> --digest <digest>   # records exactly those bytes as seen
+```
+
+The first records nothing. It shows each change - its diff from HEAD where it is text, with control,
+zero-width and bidirectional characters escaped so nothing can hide in them - and the digest of exactly
+the bytes shown. The second records them, and refuses when anything changed since they were shown, as
+`ao person-review` binds a verdict to the diff it showed. A change is seen by its path and its content:
+staged after it was seen it is still seen, one that lands leaves the others seen, and one that changes
+again is unseen again. The record is kept outside the tree an agent writes, in
+`~/.ao/harness-seen-<project>.json`, with the login and whether a terminal was attached beside the name.
+It is a person's command: `--by` names a person, never an agent or a role, and no grant ao checks admits
+it (`allowlist.FORBIDDEN`). What `ao init` and `ao skill install` write - the playbook, the MCP
+registration - is configuration like any other, and is read once the same way.
+
+Keep the architect's own sessions in a checkout of their own. The watchdog's wakes and refills start in
+the project's root, where the implementer works, and wait there for a person to see what it wrote; a
+person who runs the architect interactively in a second clone or worktree of the repository, one no
+agent writes in, never starts a harness on an agent's configuration at all, and meets the implementer's
+work only as it lands, reviewed. `ao ask --codebase` runs its provider in a copy of the tree without
+that configuration, as a review does (CODEBASE-COPY).
+
 ## 6. Capability gating on MCP
 
 Every MCP tool has an access class ([mcp.md](mcp.md)): `read`, `write` or `run`. The one `run`

@@ -280,6 +280,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao agents` | the sessions this project's harnesses told ao of through their lifecycle hooks, and what each is doing: working, waiting, idle or ended |
 | `ao agent-hook <event> [--harness ID]` | what a harness's lifecycle hook runs, not a command to type: it records the event in the event log and prints nothing |
 | `ao harness probe [ID…] [--sessions]` | a person's command: ask each harness that speaks ACP what it supports, sending no prompt, and keep the answer |
+| `ao harness seen --by NAME` / `--digest D` | a person's command, never an agent's: read each change an agent made to what a harness reads here - hooks, plugins, MCP servers, instructions - then record exactly those bytes as seen; until then no wake, refill, nudge, hunt or lane starts in the tree, so change none of it unless your slice asks |
 | `ao events [--follow] [--project P] [--since T]` | what ao did on this machine, one line an event: verifications, submitted and finished reviews, grants, mail, nudges and wakes; `--follow` prints each as it is written, `--json` as a line of JSON |
 | `ao mail list|read|send|log|search|ack` | the mailbox and its ledger; `ack` deletes processed messages (delivery confirmation) |
 | `ao note` | architect → implementer note without raw file writes (`--urgent`) |

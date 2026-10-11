@@ -88,6 +88,13 @@ pull request. Include the CLI version you tested against.
   names from the tree a reviewer reads, wherever they are, and unpacks that tree into a folder of
   its own: a harness started where the candidate's tree was ran the candidate's hooks, plugins and
   MCP servers (REVIEW-TREE-3). A test fails when an adapter that can review a tree declares none.
+  The same names are what ao watches in a working tree: a change to one that no person has seen is
+  named by `ao verify`, `ao doctor` and the watchdog, and holds every wake, refill, nudge, hunt and
+  lane there until a person reads it with `ao harness seen` (HARNESS-CONFIG). A harness that makes
+  worktrees inside one of those folders declares where in `worktree_dirs` (`.claude/worktrees`):
+  a worktree of the repository is skipped there and only there, so one made at `.claude` itself
+  is read as configuration; and a link git tracks at one of the names is read through to what it
+  leads to, so its target cannot change unseen.
 - **Declare how an unattended turn looks.** `detect.headless` lists the arguments of the
   non-interactive form (`-p`, `--print`, a subcommand such as `exec`). `ao hold` and the
   watchdog's reap stop only a process holding one its own harness declares, and a test fails

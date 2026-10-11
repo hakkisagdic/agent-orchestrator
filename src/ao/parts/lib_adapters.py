@@ -684,6 +684,399 @@ def project_config_member(path, names=None):
     return None
 
 
+# REVIEW-TREE-3 keeps a candidate's hooks, plugins, MCP servers and instructions from its reviewer, but the same files
+# act wherever else a harness starts in a tree an agent writes: a hook the implementer puts in .claude/settings.json
+# runs in its own next session, outside the permissions that hold its commands, and in the architect's when ao wakes it
+# in the same checkout - each before a review has seen it (#112). So every change to what an adapter declares its
+# harness reads from a project is named, and nothing ao starts in the tree runs until a person has seen it
+# (HARNESS-CONFIG).
+
+# How each state project_config_changes gives a change reads to a person.
+HARNESS_CONFIG_STATES = {"modified": "modified", "added": "added", "deleted": "deleted", "untracked": "untracked",
+                         "ignored": "ignored by git", "hidden": "modified, hidden from git status",
+                         "linked": "a tracked link, read through to what it leads to",
+                         "committed": "committed with no grant"}
+# The changes ao reads before it stops and says it cannot tell what changed: a folder it walks itself - one git lists
+# without descending, a repository of its own, a link's target - can hold any number of files.
+HARNESS_CONFIG_LIMIT = 5000
+# What ao keeps of a file to show a person; a larger one is named by its size alone.
+HARNESS_CONFIG_SHOW_BYTES = 1 << 20
+# What a terminal acts on rather than shows: control characters, a carriage return among them, and the zero-width and
+# bidirectional ones that make text read otherwise than it runs. Shown escaped, so a change cannot hide in them.
+_UNSHOWN = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]")
+
+
+def shown_text(text):
+    """Text as a person must read it to see what it does: each character of _UNSHOWN escaped, and a name that is not
+    UTF-8 shown with replacement characters rather than failing the line it is in (HARNESS-CONFIG)."""
+    return _UNSHOWN.sub(lambda m: "\\x%02x" % ord(m.group()) if ord(m.group()) < 0x100 else "\\u%04x" % ord(m.group()),
+                        str(text).encode(UTF8, "surrogatepass").decode(UTF8, "replace"))
+
+
+def _harness_read(full):
+    """(sha256, view) of what a harness reads at `full`, through a link where one stands (HARNESS-CONFIG).
+
+    Only a regular file is read. A FIFO or a device there - or a link to one, /dev/zero - would hold the reader for as
+    long as its writer liked, so it is opened without waiting and named for what it is. The view is ("file", its bytes
+    or None past HARNESS_CONFIG_SHOW_BYTES, its size), ("special", what it is) or ("missing",) for a link to nothing.
+    """
+    import stat
+    try:
+        fd = os.open(full, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
+    except FileNotFoundError:
+        return hashlib.sha256(b"missing").hexdigest(), ("missing",)
+    except OSError as exc:
+        raise RuntimeError(f"{full} cannot be read ({exc.strerror or exc})") from None
+    try:
+        mode = os.fstat(fd).st_mode
+    except OSError as exc:
+        os.close(fd)
+        raise RuntimeError(f"{full} cannot be read ({exc.strerror or exc})") from None
+    if not stat.S_ISREG(mode):
+        os.close(fd)
+        kind = ("a folder" if stat.S_ISDIR(mode) else "a FIFO" if stat.S_ISFIFO(mode)
+                else "a socket" if stat.S_ISSOCK(mode) else "a device")
+        return hashlib.sha256(("special:" + kind).encode(UTF8)).hexdigest(), ("special", kind)
+    digest, kept, size = hashlib.sha256(), [], 0
+    with os.fdopen(fd, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 16), b""):
+            digest.update(chunk)
+            size += len(chunk)
+            if size <= HARNESS_CONFIG_SHOW_BYTES:
+                kept.append(chunk)
+    return digest.hexdigest(), ("file", b"".join(kept) if size <= HARNESS_CONFIG_SHOW_BYTES else None, size)
+
+
+def harness_baseline(root):
+    """The HEAD this project's harness configuration was first read at - `ao init`'s, or the first reading's - kept in
+    ~/.ao and never moved by ao again; None before one is recorded (HARNESS-CONFIG)."""
+    try:
+        with open(project_file(root, "harness-base"), encoding=UTF8) as fh:
+            record = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return record.get("head") if isinstance(record, dict) and isinstance(record.get("head"), str) else None
+
+
+def record_harness_baseline(root, why):
+    """Keep HEAD as the commit this project's harness configuration is measured from when no grant or person says
+    later, once: the first record stands, so code that runs `ao init` again moves nothing (HARNESS-CONFIG)."""
+    from .storage import replace_file_durably
+    path = project_file(root, "harness-base")
+    head = _git_text(root, "rev-parse", "--verify", "-q", "HEAD")
+    if os.path.exists(path) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head):
+        return None
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    replace_file_durably(path, (json.dumps({"head": head, "at": int(time.time()), "why": why}) + "\n").encode(UTF8))
+    return head
+
+
+def _nearest_ancestor(root, marks):
+    """Of `marks`, the commit nearest HEAD that HEAD descends from; None when none is."""
+    best = None
+    for mark in dict.fromkeys(mark for mark in marks if mark):
+        try:
+            _git_output(root, "merge-base", "--is-ancestor", mark, "HEAD")
+            distance = int(_git_output(root, "rev-list", "--count", f"{mark}..HEAD").decode("ascii").strip())
+        except (RuntimeError, ValueError, UnicodeError):
+            continue
+        if best is None or distance < best[0]:
+            best = (distance, mark)
+    return best[1] if best else None
+
+
+def harness_config_base(root):
+    """The commit harness configuration is measured from when HEAD's own is not to be trusted: the one below the
+    oldest commit with no grant on HEAD's first-parent line, after the newest of the first grant's base, the HEAD a
+    person last recorded as seen, and the HEAD the configuration was first read at. None when every commit since is
+    granted, or when there is nothing to measure from.
+
+    What differs from HEAD is what no commit holds yet. A change committed with no grant - `git commit --no-verify` -
+    is in HEAD and differed from nothing, so a hook committed so ran in the next nudge; and in a project that had made
+    no grant at all, or one where a granted commit came after it, it went unseen all the same (the reviews of
+    HARNESS-CONFIG). Measured from below the oldest ungranted commit, it is a change until a person sees it."""
+    trees, base, _ = _granted_trees(root)
+    lower = _nearest_ancestor(root, [base, (harness_seen_record(root) or {}).get("head"), harness_baseline(root)])
+    if lower is None:
+        return None
+    try:
+        log = _git_output(root, "log", "--first-parent", "--format=%H %T", f"{lower}..HEAD", "--").decode("ascii")
+    except (RuntimeError, UnicodeError):
+        return None
+    commits = [line.split() for line in log.splitlines() if line.strip()]
+    ungranted = [index for index, (_, tree) in enumerate(commits) if tree not in trees]
+    if not ungranted:
+        return None
+    oldest = ungranted[-1]
+    return commits[oldest + 1][0] if oldest + 1 < len(commits) else lower
+
+
+def harness_worktree_dirs():
+    """The folders the shipped adapters' harnesses keep the worktrees they make in - `.claude/worktrees` - as tuples of
+    path components read as a file system would: a worktree of this repository there is a tree of its own, which no
+    harness started at the root reads as configuration (HARNESS-CONFIG). Anywhere else a worktree is read like any
+    folder: one made at `.claude` itself is configuration through and through (the review of HARNESS-CONFIG)."""
+    dirs = set()
+    for adapter in package_adapters().values():
+        for name in adapter.get("worktree_dirs") or []:
+            if isinstance(name, str) and name.strip() and not name.startswith(("/", "~")) and "\\" not in name \
+                    and ".." not in name.split("/"):
+                dirs.add(tuple(_config_part(part) for part in name.split("/") if part not in ("", ".")))
+    return dirs
+
+
+def project_config_changes(root, names=None, shown=None):
+    """[(path, state, sha256 or None)], sorted by path: each path in the working tree that a harness reads from a
+    project as its configuration or instructions - `project_config_member` names it - and that differs from HEAD
+    (HARNESS-CONFIG).
+
+    The state is one of HARNESS_CONFIG_STATES, the digest is of the bytes a harness reads there, through a link where
+    one stands, and None for a path deleted. Staged or not, git status names each change, an untracked file one by
+    one, and an ignored one too: a harness reads a gitignored .claude/settings.local.json all the same. An ignored
+    folder git names without descending is read here only when it is configuration itself, or the start of a declared
+    name such as `.github` of `.github/hooks`, so a node_modules/ is never walked. A folder that holds a repository of
+    its own is read like any other - a plugin cloned into .opencode/plugin/ is configuration - unless it is a worktree
+    of this repository, a tree of its own that is checked where something runs. A tracked file git is told to skip
+    (`update-index --assume-unchanged` or `--skip-worktree`) is left out of git status, so it is compared with HEAD's
+    blob by content; one a sparse checkout leaves out of the tree is no change.
+
+    `shown`, when given, is filled with {path: view} of the bytes each digest was taken of (_harness_read), so what a
+    person is shown is what they record. Raises RuntimeError when git or a file cannot be read, and past
+    HARNESS_CONFIG_LIMIT changes.
+    """
+    names = project_config_names() if names is None else names
+    firsts = {entry[0] for entry in names}
+    worktree_dirs = harness_worktree_dirs()
+    top = os.fsdecode(_git_output(root, "rev-parse", "--show-toplevel")).strip()
+    changes, visited, worktrees = {}, set(), []
+
+    def parts_of(rel):
+        return [_config_part(part) for part in rel.split("/") if part not in ("", ".")]
+
+    def member(rel):
+        return bool(firsts.intersection(parts_of(rel))) and project_config_member(rel, names) is not None
+
+    def leads_to(rel):
+        # A folder no name is declared for that a longer declared name starts with: `.github` of `.github/hooks`.
+        parts = parts_of(rel)
+        return any(len(parts) >= width and tuple(parts[-width:]) == entry[:width]
+                   for entry in names for width in range(1, len(entry)))
+
+    def full_path(rel):
+        return os.path.join(top, *rel.split("/"))
+
+    def record(rel, state, sha, view):
+        if rel in changes:
+            return
+        if len(changes) >= HARNESS_CONFIG_LIMIT:
+            raise RuntimeError(f"more than {HARNESS_CONFIG_LIMIT} changes to what a harness reads here, more than ao "
+                               f"reads to tell what changed; {rel} is past them")
+        changes[rel] = (state, sha)
+        if shown is not None:
+            shown[rel] = view
+
+    def own_worktree(full):
+        if not worktrees:
+            worktrees.append({os.path.normcase(os.path.realpath(tree["path"])) for tree in worktree_list(top)})
+        return os.path.normcase(os.path.realpath(full)) in worktrees[0]
+
+    def take(rel, state):
+        full = full_path(rel)
+        if os.path.islink(full):
+            target = os.readlink(full)
+            link = b"link\0" + os.fsencode(target)
+            if os.path.isdir(full):
+                record(rel, state, hashlib.sha256(link).hexdigest(), ("link", target, None))
+                walk(rel, state, everything=True)
+                return
+            inner, view = _harness_read(full)
+            record(rel, state, hashlib.sha256(link + b"\0" + inner.encode(UTF8)).hexdigest(), ("link", target, view))
+        elif os.path.isdir(full):
+            walk(rel, state, everything=True)          # a submodule, or a folder git named
+        elif not os.path.lexists(full):
+            record(rel, "deleted", None, ("deleted",))
+        else:
+            record(rel, state, *_harness_read(full))
+
+    def walk(rel, state, everything):
+        full = full_path(rel)
+        real = os.path.normcase(os.path.realpath(full))
+        if real in visited:
+            return
+        visited.add(real)
+        if os.path.lexists(os.path.join(full, ".git")) and tuple(parts_of(rel)[:-1]) in worktree_dirs \
+                and own_worktree(full):
+            return
+        try:
+            entries = sorted(os.listdir(full))
+        except OSError as exc:
+            raise RuntimeError(f"{rel}/ cannot be read ({exc.strerror or exc})") from None
+        for name in entries:
+            sub = f"{rel}/{name}"
+            if name == ".git":
+                continue
+            if os.path.isdir(os.path.join(full, name)) and not os.path.islink(os.path.join(full, name)):
+                if _config_part(name) == "node_modules":
+                    continue
+                if everything or member(sub):
+                    walk(sub, state, everything=True)
+                elif leads_to(sub):
+                    walk(sub, state, everything=False)
+            elif everything or member(sub):
+                take(sub, state)
+
+    listed = {}
+    for item in _git_output(top, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching",
+                            "--no-renames").split(b"\0"):
+        if len(item) > 3:
+            listed.setdefault(os.fsdecode(item[3:]), []).append(item[:2].decode("ascii", "replace"))
+    for rel, codes in sorted(listed.items()):
+        tracked = [code for code in codes if code not in ("??", "!!")]
+        state = ("ignored" if "!!" in codes else "untracked" if not tracked
+                 else "added" if any(code[0] == "A" for code in tracked) else "modified")
+        if rel.endswith("/"):
+            # A folder git does not descend into: ignored as a whole, or a repository of its own.
+            folder = rel.rstrip("/")
+            if member(folder):
+                walk(folder, state, everything=True)
+            elif leads_to(folder):
+                walk(folder, state, everything=False)
+        elif member(rel):
+            take(rel, state)
+    # What was committed since the last granted tree is no review's either: it is read as it stands now.
+    since = harness_config_base(top)
+    if since:
+        for item in _git_output(top, "diff", "--name-only", "-z", "--no-renames", since, "HEAD", "--").split(b"\0"):
+            rel = os.fsdecode(item)
+            if item and rel not in changes and member(rel):
+                take(rel, "committed")
+    # A link git tracks unchanged is read through as well: what it leads to can change while the link does not, and git
+    # names that change at the target's own path, which may be no configuration at all (the review of HARNESS-CONFIG).
+    for item in _git_output(top, "ls-files", "-s", "-z").split(b"\0"):
+        meta, _, path = item.partition(b"\t")
+        rel = os.fsdecode(path)
+        if meta.startswith(b"120000 ") and rel not in changes and member(rel):
+            take(rel, "linked")
+    _hidden_config_changes(top, member, take, record, changes)
+    return sorted(((rel, state, sha) for rel, (state, sha) in changes.items()), key=lambda change: change[0])
+
+
+def _hidden_config_changes(top, member, take, record, changes):
+    """Add every tracked file a harness reads whose content is not HEAD's, whatever git status said (HARNESS-CONFIG).
+
+    git status trusts its stat cache: a file rewritten at its old size with its modification time put back - where the
+    change time is not checked, as on Windows - reads as unchanged (the review of HARNESS-CONFIG); and one marked
+    assume-unchanged (`h`, any lower-case tag of `git ls-files -v`) or skip-worktree (`S`) is left out of it
+    altogether. Each is hashed as git would store it and compared with HEAD's blob."""
+    hidden = []
+    for item in _git_output(top, "ls-files", "-v", "-z").split(b"\0"):
+        tag, rel = item[:1].decode("ascii", "replace"), os.fsdecode(item[2:])
+        if len(item) > 2 and rel not in changes and member(rel):
+            hidden.append((rel, tag))
+    if not hidden:
+        return
+    heads = {}
+    try:
+        listed = _git_output(top, "--literal-pathspecs", "ls-tree", "-r", "-z", "HEAD", "--",
+                             *[rel for rel, _ in hidden])
+    except RuntimeError:
+        listed = b""                    # no commit yet: each of them is new to HEAD
+    for item in listed.split(b"\0"):
+        meta, _, path = item.partition(b"\t")
+        fields = meta.split()
+        if len(fields) == 3:
+            heads[os.fsdecode(path)] = (fields[0].decode("ascii"), fields[2].decode("ascii"))
+    full = {rel: os.path.join(top, *rel.split("/")) for rel, _ in hidden}
+    files = [rel for rel, _ in hidden if os.path.isfile(full[rel]) and not os.path.islink(full[rel])]
+    # Hashed as git would store them, filters and line endings applied, so a checkout's CRLF is no change.
+    work = dict(zip(files, _git_output(top, "hash-object", "--", *files).decode("ascii").split())) if files else {}
+    sparse = None
+    for rel, tag in hidden:
+        head = heads.get(rel)
+        if not os.path.lexists(full[rel]):
+            if head is None:
+                continue
+            if tag in "Ss":
+                # A sparse checkout keeps out of the tree what lies outside its cone, and marks it skip-worktree.
+                if sparse is None:
+                    sparse = _git_text(top, "config", "--bool", "core.sparseCheckout") == "true"
+                if sparse:
+                    continue
+            record(rel, "deleted", None, ("deleted",))
+        elif os.path.islink(full[rel]):
+            if head is None or head[0] != "120000" \
+                    or _git_output(top, "cat-file", "blob", head[1]) != os.fsencode(os.readlink(full[rel])):
+                take(rel, "hidden" if tag == "S" or tag.islower() else "modified")
+        elif head is None or work.get(rel) != head[1]:
+            take(rel, "hidden" if tag == "S" or tag.islower() else "modified")
+
+
+def harness_config_digest(changes):
+    """The digest of a list of changes: each path and the digest of what stands there, never its state, so a change
+    staged after it was seen is the change that was seen (HARNESS-CONFIG)."""
+    digest = hashlib.sha256()
+    _digest_field(digest, b"format", b"ao-harness-config-v1")
+    for path, _, sha in sorted(changes, key=lambda change: change[0]):
+        _digest_field(digest, b"path", path.encode(UTF8, "surrogatepass"))
+        _digest_field(digest, b"content", (sha or "deleted").encode("ascii"))
+    return "sha256:" + digest.hexdigest()
+
+
+def harness_seen_record(root):
+    """What a person last recorded as seen of this project's harness configuration, or None (HARNESS-CONFIG)."""
+    try:
+        with open(project_file(root, "harness-seen"), encoding=UTF8) as fh:
+            record = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return record if isinstance(record, dict) else None
+
+
+def harness_unseen(changes, record):
+    """The changes a person's record does not hold as they stand: each is seen by its path and its content, so a seen
+    change that lands leaves the others seen (HARNESS-CONFIG)."""
+    seen = {(item.get("path"), item.get("sha256")) for item in (record or {}).get("changes") or []
+            if isinstance(item, dict)}
+    return [change for change in changes if (change[0], change[2]) not in seen]
+
+
+def unseen_harness_config(root):
+    """The changes to what a harness reads from this tree that no person has seen as they stand; [] when nothing
+    differs from HEAD (HARNESS-CONFIG). Raises RuntimeError when they cannot be read."""
+    # The first reading keeps HEAD to measure from, where `ao init` left none: a project adopted before ao kept one.
+    record_harness_baseline(root, "first reading")
+    changes = project_config_changes(root)
+    return harness_unseen(changes, harness_seen_record(root)) if changes else []
+
+
+def record_harness_seen(root, changes, by, digest):
+    """Record that a person has seen each of `changes` as it stands (HARNESS-CONFIG).
+
+    Kept in this project's file in ~/.ao, outside the tree an agent writes, and written whole. `digest` is of what the
+    person was shown; beside the name they gave, ao records what it can check, the login and whether a terminal was
+    attached, as a waiver does.
+    """
+    from .storage import replace_file_durably
+    user, interactive = _login_and_terminal()
+    # The HEAD it was seen at is measured from after it: what is committed later is a change again (HARNESS-CONFIG).
+    head = _git_text(root, "rev-parse", "--verify", "-q", "HEAD")
+    record = {"digest": digest, "by": by, "at": int(time.time()), "user": user, "interactive": interactive,
+              "head": head if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head) else None,
+              "changes": [{"path": path, "state": state, "sha256": sha} for path, state, sha in changes]}
+    path = project_file(root, "harness-seen")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    replace_file_durably(path, (json.dumps(record, indent=1, sort_keys=True) + "\n").encode(UTF8))
+    return record
+
+
+def harness_config_line(changes, limit=None):
+    """`a (modified), b (untracked)`, and `and N more` past `limit`, for a line a person reads (HARNESS-CONFIG)."""
+    named = [f"{shown_text(path)} ({HARNESS_CONFIG_STATES.get(state, state)})" for path, state, _ in changes]
+    if limit is not None and len(named) > limit:
+        return ", ".join(named[:limit]) + f" and {len(named) - limit} more"
+    return ", ".join(named)
+
+
 def role_pin(argv, role, adapter=None):
     """[(flag, value)] an adapter pins on every turn ao starts in `role` (`options.pin`); a hunter holds the reviewer's."""
     adapter = command_adapter(argv) if adapter is None else adapter
@@ -1119,6 +1512,12 @@ def validate_adapter(adapter):
             and ".." not in name.split("/") for name in config)):
         problems.append("`project_config` must list the files and folders its harness reads from a project, each a "
                         "path within it")
+    worktrees = adapter.get("worktree_dirs")
+    if worktrees is not None and not (isinstance(worktrees, list) and all(
+            isinstance(name, str) and name.strip() and not name.startswith(("/", "~")) and "\\" not in name
+            and ".." not in name.split("/") for name in worktrees)):
+        problems.append("`worktree_dirs` must list the folders its harness keeps the worktrees it makes in, each a "
+                        "path within the project")
     if "contract" not in adapter:
         problems.append(f"`contract` is missing; this ao implements contract {ADAPTER_CONTRACT}")
     elif adapter["contract"] != ADAPTER_CONTRACT:

@@ -295,6 +295,26 @@ def _drop_lane_branch(root, branch, base):
         git_text(root, "worktree", "prune")
 
 
+def lane_harness_hold(root):
+    """Why no lane may start from this checkout now, as the sentence a person reads; None when nothing holds it
+    (HARNESS-CONFIG).
+
+    What a harness reads from a project - hooks, plugins, MCP servers, instructions - and an agent changed here acts
+    wherever a harness starts on it, and a lane links its paths from this checkout and runs its post-create command, an
+    agent's own among the commands it can name, in what it made. So, as no wake, refill, nudge or hunt starts here
+    while a change to it stands unseen, no lane does either, nor while it cannot be read.
+    """
+    try:
+        unseen = unseen_harness_config(root)
+    except Exception as exc:
+        return (f"what a harness reads from this checkout cannot be read ({' '.join(str(exc).split())[:200]}), and "
+                "nothing ao starts here runs until it can")
+    if not unseen:
+        return None
+    return (f"this checkout holds harness configuration nobody has seen: {harness_config_line(unseen, limit=20)}; "
+            "nothing ao starts here runs until a person reads it with `ao harness seen --by <name>`")
+
+
 def start_lane(root, cfg, item, now=None):
     """Start a READY board item's lane: a worktree of its own on a branch of its own, prepared from the settings.
 
@@ -318,6 +338,9 @@ def start_lane(root, cfg, item, now=None):
     if why:
         raise LaneRefused(f"{why}; a lane starts only for a READY item, and `ao board ready` lists them")
     wanted = lane_settings(cfg)
+    unseen = lane_harness_hold(root)
+    if unseen:
+        raise LaneRefused(unseen)
     branch = LANE_BRANCH + name
     if subprocess.run([git_binary(), "check-ref-format", "--branch", branch], cwd=root,
                       capture_output=True).returncode:
@@ -562,6 +585,11 @@ def _lane_post_create(root, name, record, argv, variables, timeout):
     outright, and a Ctrl-C, SIGTERM or SIGHUP stops it before ao stops.
     """
     program, command = argv[0], " ".join(argv)
+    # Asked again as late as the watchdog asks before a turn: an agent can change what a harness reads while git makes
+    # the worktree (HARNESS-CONFIG).
+    unseen = lane_harness_hold(root)
+    if unseen:
+        return f"lane.post_create `{command}` was not run: {unseen}"
     if os.path.isabs(program):
         found = program
     elif "/" in program or os.sep in program:

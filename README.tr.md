@@ -70,7 +70,8 @@ pre-commit hook'u başka her commit'i reddeder; push asla yetkilendirilmez
 - **İzler.** `ao watch` canlı bir panel: her ajan ne yapıyor, bağlam ve maliyet, açık gözden
   geçirmeler, board, ve bir ajanın *meşgul ama hiçbir şey üretmiyor* olup olmadığı.
 - **Yeniden başlatır.** Bir watchdog, iş ortasında duran bir turu fark eder ve dürter - asla bir
-  sağlayıcı kesintisine, tur bütçesinin ötesine ya da bir kişinin devraldığı ağaca değil.
+  sağlayıcı kesintisine, tur bütçesinin ötesine ya da bir kişinin devraldığı ağaca değil; bir ajanın
+  oraya yazdığı hook'lar ya da talimatlar bir kişinin okumasını beklerken de değil (`ao harness seen`).
 - **Durmaz.** Önceden yetkilendirilmiş işlerden oluşan bir board: seni bekleyen dilim sebebiyle
   park edilir, kuyruk boşalınca onu doldurması için mimar uyandırılır.
 - **Telafi eder.** Atladığın bir gözden geçirme kaydedilir; `ao catchup` inen aralığı sonradan

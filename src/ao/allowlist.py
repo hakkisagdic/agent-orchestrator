@@ -31,6 +31,8 @@ FORBIDDEN = (
     ("switches the inventory review off", "ao features off inventory_review --by p"),
     ("names the family that wrote a waived range", "ao catchup --author-family f --by b"),
     ("states which waived slices only moved code", "ao catchup --move-only s --by b"),
+    # What a person has seen of the harness configuration an agent changed lets every turn start again (HARNESS-CONFIG).
+    ("records harness configuration as seen", "ao harness seen --by p --digest d"),
     ("removes the hooks", "ao hooks uninstall"),
     ("runs any command", "ao lock -- sh -c x"),
     ("runs arbitrary code", "python3 -c x"),
@@ -48,6 +50,49 @@ FORBIDDEN = (
     ("runs arbitrary code", "uv run x"),
     ("runs arbitrary code", "make x"),
 )
+
+# A person's act, by the words that make it one and the flags it needs: a rule admitting a command that starts with
+# them hands an agent the act, whatever it fixes after them - a name after --by, a digest. Each forbidden command
+# above is asked as a sample, `--by p`, and a rule that wrote the act out in full, `Bash(ao features off review --by
+# Alice)`, admitted the act and not the sample (GRANTS-PREFIX, #114).
+PERSON_ACTS = (
+    ("waives a gate", ("ao", "waive"), ()),
+    ("records a review ao did not run", ("ao", "collect-review"), ()),
+    ("records a person's review", ("ao", "person-review"), ()),
+    ("opts into same-family review", ("ao", "config", "set", "review.same_family"), ()),
+    ("opts into same-family review", ("ao", "init"), ("--review-tier",)),
+    ("names the family that wrote a waived range", ("ao", "catchup"), ("--author-family",)),
+    ("states which waived slices only moved code", ("ao", "catchup"), ("--move-only",)),
+    ("switches review off", ("ao", "features", "off", "review"), ()),
+    ("switches the inventory review off", ("ao", "features", "off", "inventory_review"), ()),
+    ("opens a push window", ("ao", "push", "allow"), ()),
+    ("removes the hooks", ("ao", "hooks", "uninstall"), ()),
+    ("records harness configuration as seen", ("ao", "harness", "seen"), ("--digest",)),
+)
+
+
+def admits_act(rule, words, flags=()):
+    """Does this rule admit a command that starts with `words` and carries each of `flags`, whatever else it fixes?
+
+    Read as the command it runs - a wrapper, a rewriter or git's global options taken off - up to its first wildcard:
+    the words must come first, and each flag must stand among the rest or be left to a wildcard (GRANTS-PREFIX). A rule
+    whose wildcard falls inside the words, `Bash(ao wai*)`, is the samples' to ask, as the harness would match it.
+    """
+    rule = str(rule).strip()
+    if rule in ("Bash", "Bash(*)"):
+        return True
+    if not (rule.startswith("Bash(") and rule.endswith(")")):
+        return False
+    body = rule[len("Bash("):-1]
+    if body.endswith(":*"):
+        body = body[:-2] + " *"
+    head, wild = (body.split("*", 1)[0], True) if "*" in body else (body, False)
+    said = unwrap(head.split())
+    if tuple(said[:len(words)]) != tuple(words):
+        return False
+    rest = said[len(words):]
+    return all(wild or any(word == flag or word.startswith(flag + "=") for word in rest) for flag in flags)
+
 
 # The architect decides. An implementer granted this could restart its own round
 # budget with a re-specification it wrote itself (#65).
@@ -212,6 +257,14 @@ def problems(argv, options=None, role=None):
             if rule not in named and admits(plain, command):
                 found.append((f"{reason}, as the command it runs", command, rule))
                 named.add(rule)
+    # A person's act written out in full is named by the words that start it (GRANTS-PREFIX).
+    for rule in granted:
+        act = next(((reason, words, flags) for reason, words, flags in PERSON_ACTS if admits_act(rule, words, flags)),
+                   None) if rule not in named else None
+        if act:
+            reason, words, flags = act
+            found.append((reason, " ".join(words + flags) + " ...", rule))
+            named.add(rule)
     if role == "implementer":
         # Every setting ao reads governs the loop an implementer works in - its round budget, its review's
         # timeout, how long a waiver lasts - and only `review_timeout` was asked, so a grant of

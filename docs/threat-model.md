@@ -15,7 +15,11 @@ given, which for a person is none.
 1. **What lands.** A commit lands on a governed repository only with its verification and a review by
    another model family or a person, each recorded in ledgers that show tampering.
 2. **The machine.** An agent ao runs as reviewer or hunter only reads: it writes nowhere and runs
-   nothing on its own account.
+   nothing on its own account. Configuration an agent writes where a harness reads it - hooks,
+   plugins, MCP servers, instructions - runs in no harness ao starts before a person has seen it: a
+   reviewer is not handed a candidate's, and no wake, refill, nudge, hunt or lane starts in a tree
+   that holds a change to it nobody has seen. `ao ask --codebase` runs its provider in a copy of the
+   tree without that configuration, as a review does.
 3. **Secrets.** A provider's key, a token in mail and a person's credentials never reach a log, a
    prompt, a record or a host they were not meant for.
 4. **Failing closed.** A guarantee ao cannot keep on a platform or in a state is refused, and says

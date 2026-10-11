@@ -43,6 +43,7 @@ Every `ao` command and what it does. The [README](../README.md) starts with the 
 | `ao note` | an architect message into the mailbox, through the tool |
 | `ao review` | review the tree with an actor that did not write it |
 | `ao person-review --by <name>` | a person reads the staged diff, then records `--verdict APPROVED` or `NEEDS_CHANGES` with the `--digest` it showed; bound to the candidate like any review, labeled `person review`, never an agent's command |
+| `ao harness seen --by <name>` | a person reads each change an agent made to what a harness reads here - hooks, plugins, MCP servers, instructions - then records them with the `--digest` it showed; until then no wake, refill, nudge, hunt or lane starts in the tree, and it is never an agent's command ([safety.md](safety.md#harness-configuration-an-agent-changed-waits-for-a-person)) |
 | `ao review --commits <range>` | review landed work after the fact; exit 3 means no reviewer could review (never a verdict), fallbacks in `reviewer.fallbacks` ([roles.md](roles.md)) |
 | `ao handoff` | write and send everything a successor needs |
 | `ao a2a-mcp serve` | reach A2A agents from an MCP-only client |

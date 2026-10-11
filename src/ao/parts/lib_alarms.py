@@ -395,6 +395,9 @@ PROJECT_FILES = {
     "journal": "journal-{key}.db",
     "journal-wal": "journal-{key}.db-wal",
     "journal-shm": "journal-{key}.db-shm",
+    # The harness configuration a person has seen, outside the tree an agent writes (HARNESS-CONFIG).
+    "harness-seen": "harness-seen-{key}.json",
+    "harness-base": "harness-base-{key}.json",
 }
 
 

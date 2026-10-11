@@ -68,7 +68,8 @@ the pre-commit hook refuses every other commit; push is never granted
 - **Watches.** `ao watch` is a live panel: what each agent is doing, context and cost, open
   reviews, the board, and whether an agent is *busy but producing nothing*.
 - **Restarts.** A watchdog notices a turn that stopped mid-work and nudges it - never into a
-  provider outage, past the round budget, or into a tree a person has taken.
+  provider outage, past the round budget, or into a tree a person has taken, nor while hooks or
+  instructions an agent wrote there wait for a person to read them (`ao harness seen`).
 - **Keeps going.** A board of pre-authorised work: a slice waiting on you is parked with its
   reason, and when the queue runs dry the architect is woken to refill it.
 - **Catches up.** A review you waive is recorded, and `ao catchup` has a reviewer of another

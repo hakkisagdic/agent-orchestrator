@@ -21,6 +21,9 @@ Guards, in order — the point is to spend nothing when spending would not help:
   4b. Is the provider itself degraded?      (5xx at the end of our own nudge log)
   4c. Are reports sitting unhandled?        (wake the architect — its own pid guard)
   5. Did the last nudge achieve anything?   (backoff, then hand over to a human)
+  6. Has a person seen what a harness reads here? (asked before every turn it
+                                             starts: configuration an agent changed
+                                             and nobody saw holds them all)
 
 Run it from cron/launchd every couple of minutes, or once by hand.
 
@@ -1174,6 +1177,12 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
         if resolved and held:
             print(f"held by {held.get('by')} since this cycle began; not waking the architect")
             resolved = None
+        # The architect's harness reads its hooks, plugins and instructions from this tree, as late as the hold
+        # is read (HARNESS-CONFIG).
+        unseen = harness_config_hold(root) if resolved else None
+        if unseen:
+            print(f"{unseen}; not waking the architect")
+            resolved = None
         if resolved:
             argv[0] = resolved
             record_pinned(root, pinned)
@@ -1340,11 +1349,19 @@ def record_pinned(root, pinned):
 
 
 def _schedule_hunt(root, cfg, st):
-    """Start one bounded, detached bug hunt when it is switched on and due: a schedule, never a loop (#45)."""
+    """Start one bounded, detached bug hunt when it is switched on and due: a schedule, never a loop (#45).
+
+    Nor while harness configuration nobody has seen stands in the tree, as no turn ao starts here runs then
+    (HARNESS-CONFIG); a hunt held is due again next cycle.
+    """
     from . import features as F
     if not F.enabled(cfg, "hunter") or not S.get(cfg, "hunter.argv") or A.hold_state(root):
         return False
     if time.time() - float(st.get("last_hunt") or 0) < S.get(cfg, "hunter.every_hours") * 3600:
+        return False
+    unseen = harness_config_hold(root)
+    if unseen:
+        print(f"{unseen}; not starting a bug hunt")
         return False
     log = os.path.join(STATE_DIR, A.project_file_name("hunt-log", A.project_key(root)))
     os.makedirs(STATE_DIR, exist_ok=True)
@@ -1358,6 +1375,47 @@ def _schedule_hunt(root, cfg, st):
     save_state(root, st)
     print("started a bounded bug hunt")
     return True
+
+
+def harness_config_hold(root):
+    """Why no turn may start in this tree now, or None: what a harness reads from it changed and no person has seen it,
+    or it cannot be read (HARNESS-CONFIG).
+
+    A hook the implementer writes into .claude/settings.json runs in the next session started here - its own nudge, the
+    architect's wake or refill, a hunt - before any review has seen it. Each asks right before it starts, as each reads
+    the hold, since an agent can write one after the cycle began; one that cannot be read holds them all.
+    """
+    try:
+        unseen = A.unseen_harness_config(root)
+    except Exception as exc:
+        return f"what a harness reads from this tree cannot be read ({' '.join(str(exc).split())[:160]})"
+    if not unseen:
+        return None
+    return (f"harness configuration nobody has seen stands in this tree: {A.harness_config_line(unseen, limit=10)} - "
+            "a person reads it with ao harness seen --by <name>")
+
+
+def tell_harness_config(root, project):
+    """Name to a person, each cycle, every change to what a harness reads here that nobody has seen (HARNESS-CONFIG).
+
+    One alarm for what the changes hold: it rings once for them and climbs the ladder while they stand, and rings again
+    when they change. Seen, or gone from the tree, it is no longer raised and its episode closes.
+    """
+    try:
+        unseen = A.unseen_harness_config(root)
+    except Exception as exc:
+        _FACTS["harness_config"] = "unreadable"
+        notify(f"{project}: harness configuration cannot be read",
+               f"what a harness reads from this tree cannot be read ({' '.join(str(exc).split())[:160]}), so no wake, "
+               "refill, nudge or hunt starts here until it can", root, key="harness-config", window=6 * 3600,
+               audience="human", what="unreadable")
+        return
+    _FACTS["harness_config"] = len(unseen)
+    if unseen:
+        notify(f"{project}: harness configuration nobody has seen",
+               f"{A.harness_config_line(unseen, limit=20)}: what a harness reads from this tree changed, and no wake, "
+               "refill, nudge or hunt starts here until a person reads it - ao harness seen --by <name>",
+               root, key="harness-config", window=6 * 3600, audience="human", what=A.harness_config_digest(unseen))
 
 
 def open_work(cfg, root):
@@ -2701,6 +2759,9 @@ def _cycle_impl(args, root):
         needs = item["notes"].get("needs") or item["title"]
         notify(f"{project}: needs you", f"{item['id']} waits on a person: {needs}", root,
                key=f"waiting-human:{item['id']}", window=6 * 3600, audience="human", what=needs)
+    # Harness configuration an agent changed here reaches a person, held or not: a person who starts a session in
+    # this tree runs it too (HARNESS-CONFIG).
+    tell_harness_config(root, project)
     # An agent that is busy and producing nothing never trips the idle guard, so
     # check it before the guard chain rather than inside it. Notify only; a nudge
     # would add a turn to a loop that is already spending them.
@@ -2910,7 +2971,11 @@ def _cycle_impl(args, root):
                 print("queue low, but an architect wake is already running")
                 return 0
             if args.dry_run:
-                print(f"queue low ({depth}); would wake the architect to refill")
+                # A dry cycle says what a live one would decide, the harness configuration a refill waits for among it
+                # (HARNESS-CONFIG).
+                unseen = harness_config_hold(root)
+                print(f"queue low ({depth}); {unseen}; not waking the architect to refill" if unseen
+                      else f"queue low ({depth}); would wake the architect to refill")
                 return 0
             if child_alive(st):
                 print("queue low, but a turn is still running")
@@ -2967,6 +3032,10 @@ def _cycle_impl(args, root):
             log_path = os.path.join(STATE_DIR, A.project_file_name("refill-log", key))
             if A.hold_state(root):
                 print("held since this cycle began; not waking the architect to refill")
+                return 0
+            unseen = harness_config_hold(root)
+            if unseen:
+                print(f"queue low ({depth}); {unseen}; not waking the architect to refill")
                 return 0
             # A refill spends the same window a report wake does, and its failures
             # were never read (audit): check the quota and the last refill's log.
@@ -3197,6 +3266,12 @@ def _cycle_impl(args, root):
     headroom = A.rotate_if_exhausted(cfg, argv, "implementer") if not args.dry_run else {"ok": True}
     if not headroom["ok"]:
         print(f"idle {int(age)}s · {', '.join(reasons)} · {headroom['text']}; not nudging")
+        return 0
+    # The implementer's harness runs what it wrote into its own configuration: read after the rotation, which can
+    # wait minutes on keyflip, and in a dry cycle as in a live one (HARNESS-CONFIG).
+    unseen = harness_config_hold(root)
+    if unseen:
+        print(f"idle {int(age)}s · {', '.join(reasons)} · {unseen}; not nudging")
         return 0
     print(f"idle {int(age)}s · {', '.join(reasons)} · nudging")
     if args.dry_run:
