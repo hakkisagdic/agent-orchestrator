@@ -326,7 +326,11 @@ def test_a_clone_run_as_a_module_names_its_own_bin_ao_everywhere(project, monkey
     (clone / "bin" / "ao").chmod(0o755)
     monkeypatch.setattr(A, "program_path", lambda name, path=None: None)
     monkeypatch.setattr(A, "REPO", str(clone))
-    monkeypatch.setattr(sys, "argv", [os.path.join(str(clone), "src", "ao", "__main__.py"), "mcp"])
+    started = clone / "src" / "ao" / "__main__.py"         # on disk and executable, as Windows calls every file
+    started.parent.mkdir(parents=True)
+    started.write_text("", encoding="utf-8")
+    started.chmod(0o755)
+    monkeypatch.setattr(sys, "argv", [str(started), "mcp"])
     if not os.access(str(clone / "bin" / "ao"), os.X_OK):
         pytest.skip("this platform marks no file executable")
 

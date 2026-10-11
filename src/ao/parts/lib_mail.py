@@ -440,9 +440,12 @@ def ao_program():
     if found:
         return found
     first = sys.argv[0] if sys.argv else ""
-    # Then the file it was started as, and a clone's own bin/ao, run as a module there (WINDOWS-NO-CWD-EXEC-4).
+    # Then the file it was started as, and a clone's own bin/ao, run as a module there (WINDOWS-NO-CWD-EXEC-4). A
+    # Python source is no program a client starts: `python -m ao` was started as ao/__main__.py, which Windows calls
+    # executable as it calls every file (the review of WINDOWS-NO-CWD-EXEC-4).
     for candidate in (first, os.path.join(REPO, "bin", "ao")):
-        if os.path.isabs(candidate) and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+        if os.path.isabs(candidate) and os.path.isfile(candidate) and os.access(candidate, os.X_OK) \
+                and not candidate.lower().endswith((".py", ".pyw", ".pyc")):
             return candidate
     return None
 
