@@ -160,6 +160,9 @@ def _started(monkeypatch):
     monkeypatch.setattr(A.subprocess, "run", lambda argv, **kwargs: started.append((argv, kwargs)) or
                         SimpleNamespace(returncode=0, stdout="", stderr=""))
     monkeypatch.setattr(procs, "refresh", lambda: None)
+    # A tree of one, which Windows says is gone once it was stopped (WINDOWS-STOP-PROVEN).
+    monkeypatch.setattr(A, "_proc_table", lambda: {})
+    monkeypatch.setattr(procs, "alive", lambda pid: False)
     return started
 
 

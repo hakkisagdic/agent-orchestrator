@@ -212,12 +212,34 @@ def _reviewer_temp_is_inside(root, temp_cwd):
         return True
 
 
-def _reviewer_kill_and_drain(proc):
-    """Kill a reviewer with everything it started, and bound pipe draining after (#65)."""
+def _stop_reviewer(pid):
+    """Stop a reviewer's tree; what of it still runs after (WINDOWS-STOP-PROVEN).
+
+    A tree that could not be stopped at all is said to be, not taken for stopped: only the
+    reviewer itself is ended after this, by its own handle.
+    """
     try:
-        A.kill_turn(proc.pid, getattr(signal, "SIGKILL", signal.SIGTERM))
-    except (OSError, subprocess.SubprocessError):
-        pass
+        return A.kill_turn(pid, getattr(signal, "SIGKILL", signal.SIGTERM)) or []
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"{C['red']}reviewer pid {pid} could not be stopped with what it started{C['reset']} ({exc}): only the "
+              "reviewer itself is ended, and what it started may still run", flush=True)
+        return []
+
+
+def _say_reviewer_left(pid, left):
+    """Name what of a reviewer still runs after it was stopped, and what to do (WINDOWS-STOP-PROVEN)."""
+    if left:
+        print(f"{C['red']}reviewer pid {pid}: {len(left)} process(es) of it still run after it was stopped"
+              f"{C['reset']}: {left}; {_stop_by_hand()}", flush=True)
+
+
+def _reviewer_kill_and_drain(proc):
+    """Kill a reviewer with everything it started, and bound pipe draining after (#65).
+
+    What of it still runs after the stop is said where the review is read: a reviewer's tree a stop
+    missed reviewed on for nobody, and was taken for stopped (WINDOWS-STOP-PROVEN).
+    """
+    _say_reviewer_left(proc.pid, _stop_reviewer(proc.pid))
     try:
         proc.kill()
     except OSError:
@@ -1669,7 +1691,7 @@ def _run_acp_reviewer(root, argv, adapter_id, prompt, timeout, label, fallback=F
             raise
         finally:
             guard.cancel()
-            session.close()
+            _say_reviewer_left(pid, session.close())     # what of it still runs is said (WINDOWS-STOP-PROVEN)
             A.helper_release(root, pid)
             _review_reviewer(None)
             handlers_back()
@@ -3404,14 +3426,15 @@ def cmd_review_cancel(cfg, args):
         runner, how = _review_runner(state), "its runner was already gone"
     except TableUnreadable as exc:
         return _cancel_unseen(rid, exc, "its runner")
+    survived = []
     if runner:
-        A.kill_turn(runner, signal.SIGTERM)
+        survived += A.kill_turn(runner, signal.SIGTERM) or []
         deadline = time.monotonic() + REVIEW_CANCEL_GRACE_SECONDS
         while time.monotonic() < deadline and A._pid_alive(runner) \
                 and (_review_state(root, rid) or {}).get("state") == "running":
             time.sleep(0.1)
         if A._pid_alive(runner) and (_review_state(root, rid) or {}).get("state") == "running":
-            A.kill_turn(runner, getattr(signal, "SIGKILL", signal.SIGTERM))
+            survived += A.kill_turn(runner, getattr(signal, "SIGKILL", signal.SIGTERM)) or []
             how = f"its runner, pid {runner}, had not ended {REVIEW_CANCEL_GRACE_SECONDS}s after SIGTERM and was killed"
         else:
             how = f"its runner, pid {runner}, was stopped"
@@ -3421,18 +3444,32 @@ def cmd_review_cancel(cfg, args):
     except TableUnreadable as exc:
         return _cancel_unseen(rid, exc, "its reviewer", how if runner else None)
     if reviewer:
-        A.kill_turn(reviewer, getattr(signal, "SIGKILL", signal.SIGTERM))
+        survived += A.kill_turn(reviewer, getattr(signal, "SIGKILL", signal.SIGTERM)) or []
+    # What was stopped is asked again, each process, given a moment to be gone: a runner or a reviewer a stop
+    # missed ran on, and the review was recorded cancelled all the same (WINDOWS-STOP-PROVEN).
+    still = A._still_running(set(survived) | {pid for pid in (runner, reviewer) if pid})
+    if runner in still:
+        # The run still runs and may yet record its own end: nothing is recorded over it.
+        print(f"{C['red']}{rid} is not cancelled{C['reset']}: its runner, pid {runner}, still runs after it was "
+              f"stopped, with {still}; {_stop_by_hand()}, then `ao review cancel {rid}` again")
+        return 1
+    if reviewer and reviewer not in still:
         A.helper_release(root, reviewer)
     if state.get("state") == "running":
         # The run did not record its end: it was gone, or it was killed before it could.
         state.pop("phase", None)
         state.pop("reviewer", None)
+        stopped = ("" if not reviewer else f"; its reviewer, pid {reviewer}, still runs: it could not be stopped"
+                   if reviewer in still else f"; its reviewer, pid {reviewer}, was stopped")
         state.update(state="failed", finished_at=int(time.time()),
-                     reason="cancelled by `ao review cancel`: " + how
-                            + (f"; its reviewer, pid {reviewer}, was stopped" if reviewer else ""))
+                     reason="cancelled by `ao review cancel`: " + how + stopped)
         _write_review_state(root, state)
         _review_finished_event(root, state)
     print(f"{rid} cancelled: {state.get('reason')}")
+    if still:
+        print(f"{C['red']}{len(still)} process(es) of the review still run after the cancel{C['reset']}: {still}; "
+              f"{_stop_by_hand()}")
+        return 1
     return 0
 
 

@@ -1483,7 +1483,7 @@ def _run_codebase_provider(argv, cwd, timeout):
     try:
         stdout, _ = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        kill_turn(proc.pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+        left = kill_turn(proc.pid, getattr(signal, "SIGKILL", signal.SIGTERM)) or []
         try:
             proc.kill()
             proc.communicate(timeout=5)
@@ -1493,6 +1493,11 @@ def _run_codebase_provider(argv, cwd, timeout):
                     stream.close()
                 except OSError:
                     pass
+        if left:
+            # It said whatever the provider started was stopped, whatever the stop did (WINDOWS-STOP-PROVEN).
+            raise ValueError(f"the codebase provider did not answer within {timeout}s, and nothing was answered: it "
+                             f"was stopped, and {len(left)} process(es) it started still run: {left} - stop them by "
+                             "hand") from None
         raise ValueError(f"the codebase provider did not answer within {timeout}s: it was stopped, with whatever it "
                          "started, and nothing was answered") from None
     return proc.returncode, stdout

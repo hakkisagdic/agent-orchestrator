@@ -440,7 +440,10 @@ def _run_hook(argv, payload, cwd, env, timeout):
         cut = f"it wrote more than {_PROBE_OUTPUT_BYTES} bytes"
     if cut and (proc.poll() is None or any(reader.is_alive() for reader in readers)):
         if os.name == "nt":
-            stop_windows_tree(proc.pid)
+            left = stop_windows_tree(proc.pid)
+            if left:
+                # What taskkill left of it is named, not taken as stopped (WINDOWS-STOP-PROVEN).
+                cut += f" - and {len(left)} process(es) of it still run after it was stopped, {left} -"
         else:
             try:
                 os.killpg(proc.pid, signal.SIGKILL)

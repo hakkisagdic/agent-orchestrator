@@ -125,6 +125,13 @@ why. It rings the desktop and the phone once for the platform it names and climb
 table stays unread. A notice that would have waited for an architect goes to a person meanwhile,
 since none is woken, and its "needs you" says why ([windows.md](windows.md)).
 
+A hung turn the reaper could not stop is one alarm, `reap-survived`. The reaper stops an
+unattended turn silent past three idle windows; where a process of it still runs after the forced
+stop - on Windows, one taskkill was refused or could not find - the cycle starts no turn beside it
+and names to a person what still runs. It rings the desktop and the phone once for those processes
+and climbs the ladder while they run; `ao hold` stops what ao can and says what it could not
+([windows.md](windows.md)).
+
 Some conditions ring red at once, because waiting cannot help:
 
 - the implementer's credits are exhausted for the billing period, on the account its own

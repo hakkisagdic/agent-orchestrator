@@ -1291,28 +1291,33 @@ def cmd_hold(cfg, args):
 
 
 def _hold_stop(root, adapter, args, path, hold):
-    """Count the unattended turns in this tree, record them in the hold, and stop them (JOURNAL-6)."""
+    """Count the unattended turns in this tree, record them in the hold, stop them, and prove it (JOURNAL-6).
+
+    What was stopped is read again, never assumed: on Windows taskkill is refused a process
+    another user or an elevated prompt started, and misses a child whose parent had already
+    exited, and the hold still said every tree was stopped (the 2026-09-08 audit). Each stop
+    returns what of its tree still runs, the process table is read once more for unattended
+    turns and what ended turns left, and whatever still runs is named and the hold exits 1
+    (WINDOWS-STOP-PROVEN).
+    """
     from .storage import replace_file_durably
     pids = A.agent_pids(root, adapter, headless_only=True)
     hold["stopped"] = pids
     replace_file_durably(path, json.dumps(hold, indent=2).encode(UTF8))
-    if not pids:
-        dead = A.orphans(root, adapter)
-        if dead:
-            print(f"clearing {len(dead)} orphaned process(es) left by ended turns: {dead}")
-            A.sweep_orphans(dead)
-        if A.unplaced_agent_pids(root, adapter):
-            print(f"{C['yellow']}hold set{C['reset']} — no agent turn could be placed in this tree")
-            return _hold_unplaced(root, adapter)
-        print(f"{C['yellow']}hold set{C['reset']} — no agent turn was running")
-        return 0
-    dead = A.orphans(root, adapter)
+    dead, survived = A.orphans(root, adapter), []
     if dead:
         print(f"clearing {len(dead)} orphaned process(es) left by ended turns: {dead}")
-        A.sweep_orphans(dead)
+        survived += A.sweep_orphans(dead) or []
+    if not pids:
+        still = _hold_still_running(root, adapter, survived) if dead else []
+        if A.unplaced_agent_pids(root, adapter):
+            print(f"{C['yellow']}hold set{C['reset']} — no agent turn could be placed in this tree")
+            return max(_hold_unplaced(root, adapter), _hold_proven(still))
+        print(f"{C['yellow']}hold set{C['reset']} — no agent turn was running")
+        return _hold_proven(still)
     print(f"stopping {len(pids)} process(es): {pids}")
     for pid in pids:
-        A.kill_turn(pid, signal.SIGTERM)     # whole group; let it finish the write it is in
+        survived += A.kill_turn(pid, signal.SIGTERM) or []     # whole group; let it finish the write it is in
     deadline = time.time() + args.grace
     while time.time() < deadline:
         alive = [p for p in pids if _alive(p)]
@@ -1321,15 +1326,44 @@ def _hold_stop(root, adapter, args, path, hold):
         time.sleep(0.5)
     alive = [p for p in pids if _alive(p)]
     for pid in alive:
-        A.kill_turn(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+        survived += A.kill_turn(pid, getattr(signal, "SIGKILL", signal.SIGTERM)) or []
+    still = _hold_still_running(root, adapter, survived)
     if os.name == "nt":
         # taskkill /T /F ends a tree at once; nothing exited on request (#71).
-        print(f"{C['red']}HELD{C['reset']} — {len(pids)} process tree(s) stopped by force "
-              "(Windows). The watchdog will not restart while .ao/hold exists.")
+        print(f"{C['red']}HELD{C['reset']} — {len([p for p in pids if p not in still])} process tree(s) stopped "
+              "by force (Windows). The watchdog will not restart while .ao/hold exists.")
     else:
-        print(f"{C['red']}HELD{C['reset']} — {len(pids) - len(alive)} exited on request, "
-              f"{len(alive)} killed. The watchdog will not restart while .ao/hold exists.")
-    return _hold_unplaced(root, adapter)
+        print(f"{C['red']}HELD{C['reset']} — {len([p for p in pids if p not in alive and p not in still])} exited "
+              f"on request, {len([p for p in alive if p not in still])} killed. The watchdog will not restart while "
+              ".ao/hold exists.")
+    return max(_hold_unplaced(root, adapter), _hold_proven(still))
+
+
+def _hold_still_running(root, adapter, survived):
+    """What still runs in this tree after a hold stopped it: what a stop returned that runs yet - a later stop may
+    have ended it - and the unattended turns and what ended turns left, the process table read again
+    (WINDOWS-STOP-PROVEN)."""
+    return sorted(set(A._still_running(survived, seconds=0)) | set(A.agent_pids(root, adapter, headless_only=True))
+                  | set(A.orphans(root, adapter)))
+
+
+def _hold_proven(still):
+    """0 when nothing the hold stopped still runs; else name what does and what to do about it, and 1
+    (WINDOWS-STOP-PROVEN)."""
+    if not still:
+        return 0
+    print(f"{C['red']}{len(still)} process(es) still run in this tree after the hold{C['reset']}: {still}. The "
+          f"hold stands and the watchdog starts nothing beside them; {_stop_by_hand()} - `ao hold status` shows "
+          "what still runs")
+    return 1
+
+
+def _stop_by_hand():
+    """What a person does about a process ao could not stop, as their platform does it (WINDOWS-STOP-PROVEN)."""
+    if os.name == "nt":
+        return ("stop them by hand with `taskkill /T /F /PID <pid>`, from a prompt of the user that started them, "
+                "or an elevated one where access is denied")
+    return "stop them by hand with `kill -9 <pid>`, as the user that started them"
 
 
 def _hold_unplaced(root, adapter):
@@ -1410,8 +1444,8 @@ def cmd_writers(cfg, args):
         rows.append({"pid": pid, "elapsed": et, "headless": A._is_headless(pid),
                      "tty": table.get(pid, (0, 0, "?"))[2], "cmd": cmd.strip()[:90]})
     if args.clean and dead:
-        A.sweep_orphans(dead)
-        left = [p for p in dead if A._pid_alive(p)]
+        # What the sweep could not stop is what it returns, each process asked (WINDOWS-STOP-PROVEN).
+        left = A.sweep_orphans(dead) or []
         cleaned = [p for p in dead if p not in left]
     else:
         cleaned, left = [], dead
@@ -1429,9 +1463,12 @@ def cmd_writers(cfg, args):
             print(f"   {r['pid']:>6}  {r['elapsed']:>10}  {kind:<22} {r['cmd']}")
     if cleaned:
         print(f"   cleaned {len(cleaned)} orphan(s): {cleaned}")
-    if left:
+    if left and args.clean:
+        print(f"   {C['red']}{len(left)} process(es){C['reset']} left by ended turns still run after they were "
+              f"stopped, not counted: {left}; {_stop_by_hand()}")
+    elif left:
         print(f"   {C['yellow']}{len(left)} orphan(s){C['reset']} left by ended turns, not counted: {left}"
-              + ("" if args.clean else "  (`ao writers --clean` stops them)"))
+              "  (`ao writers --clean` stops them)")
     return 0 if len(roots) <= 1 else 1
 
 

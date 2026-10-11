@@ -2810,7 +2810,11 @@ def _cycle_impl(args, root):
         print(f"{len(dead)} orphaned agent process(es) left by an ended turn; clearing {dead}")
         if not args.dry_run:
             A.record_notice(root, "orphans cleared", f"{len(dead)} leftover process(es): {dead}", False, key="orphans")
-            A.sweep_orphans(dead)
+            left = A.sweep_orphans(dead)
+            if left:
+                # Said, not assumed cleared: a remnant the sweep could not stop is swept again next cycle
+                # (WINDOWS-STOP-PROVEN).
+                print(f"{len(left)} leftover process(es) still run after the sweep: {left}")
     running = [p for p in A.agent_pids(root, adapter) if p not in set(dead)]
     _FACTS.update(writers=len(A.process_trees(running)) if running else 0, orphans=len(dead))
     # An agent whose working directory Windows would not let ao read cannot be placed (#71,
@@ -2866,6 +2870,17 @@ def _cycle_impl(args, root):
         # tree is still here and still a writer; nudging next to it starts a second.
         # Counted as what the reaper could not have started, from the same scan.
         headless = set(A.agent_pids(root, adapter, headless_only=True))
+        if headless:
+            # A turn the reaper could not stop - taskkill refused, a child its parent no longer names - is
+            # still this tree's writer: the reaper was taken at its word and a nudge started beside it
+            # (WINDOWS-STOP-PROVEN).
+            print(f"{len(headless)} unattended turn process(es) still run after reaping ({sorted(headless)}); "
+                  "not starting another turn")
+            notify(f"{project}: a hung turn could not be stopped",
+                   f"{len(headless)} process(es) of an unattended turn still run after the reaper stopped them: "
+                   f"{sorted(headless)} - stop them by hand, or `ao hold`; no turn starts beside them", root,
+                   key="reap-survived", window=6 * 3600, audience="human", what=f"still running: {sorted(headless)}")
+            return 0
         people = [pid for pid in A.agent_pids(root, adapter) if pid not in headless]
         if people:
             print(f"{len(people)} interactive agent process(es) remain in this tree after reaping; "

@@ -8,14 +8,35 @@ What works, what does not, and how hosted runners exercise it.
 | what ao prints and reads on its standard streams | UTF-8, as Python's UTF-8 mode sets them, whatever the code page (below) |
 | gates, `ao lock`, `ao verify`, `ao commit-ok`, reviews | work — subprocesses of the project's own tools |
 | MCP server, playbook, `ao init` registration | work (`.mcp.json`, `.kiro/settings/mcp.json`); a request is read as UTF-8 and every reply is seven-bit JSON, whatever the code page |
-| process introspection (`ao writers`, orphans, hung turns) | first cut: `Win32_Process` through PowerShell as JSON, tree kill via `taskkill /T`; the working directory is read from the process environment block (a 64-bit process, by a 64-bit Python), proven on the Windows lane, and where it cannot be read a turn is matched by the repository path on its command line; a table PowerShell cannot read never reads as no process: what decides from it refuses or holds, and says why (below) |
-| `ao hold` | proven on the Windows lane: a turn placed by its working directory is stopped |
+| process introspection (`ao writers`, orphans, hung turns) | first cut: `Win32_Process` through PowerShell as JSON, tree kill via `taskkill /T`, every process of the tree named to it and asked afterwards; the working directory is read from the process environment block (a 64-bit process, by a 64-bit Python), proven on the Windows lane, and where it cannot be read a turn is matched by the repository path on its command line; a table PowerShell cannot read never reads as no process: what decides from it refuses or holds, and says why (below) |
+| `ao hold` | proven on the Windows lane: a turn placed by its working directory is stopped; what a stop leaves running is named, and the hold exits 1 (below) |
 | scheduler (`ao watchdog install`) | first cut: Task Scheduler (`schtasks`, every 2 min; doctor every 15 min). Each task names a program that exists — the console script on PATH, a clone's script, or `python -m ao.watchdog` from an interpreter that imports an installed ao — or install refuses; install exits 1 when `schtasks` cannot create a task, and `ao remove --yes` deletes both tasks in its own process and checks they are gone |
 | desktop notifications | a toast through PowerShell behind the `toast` feature switch, off by default; Telegram and e-mail carry the orange and red levels |
 | `bin/ao.ps1`, the subset for a machine without Python | `status`, `board` and `doctor`; reads files as UTF-8 and takes paths literally; written and reviewed, not yet run on Windows (below) |
 | commit hook (`ao hooks install`) | installed inside the repository; a shared, external or globally configured hooks directory is refused (#71); since HOOK-V4 the hook reads a drive-letter index as absolute, and its execution proof passes on the lane (below) |
 | pre-push hook | works under Git's own shell |
 | the programs ao starts | Windows' own tools from its system directory, every other program from PATH's absolute entries, never the current directory (below) |
+
+*In ao since slice WINDOWS-STOP-PROVEN: a stop says what it left running. `ao hold` stopped each
+turn with `taskkill /T /F` and said every tree was stopped, whatever taskkill did: taskkill is refused a
+process another user or an elevated prompt started, and finds a process's children by the parent each
+names, so a child whose parent had already exited - a turn's wrapper ending as it was stopped - was
+left running. Every process of the tree, as the process table read it just before, is now named to
+taskkill, not the first alone, and each is asked afterwards, for up to five seconds, whether it runs; a
+process neither Windows nor the table answers for is taken as running. A process that started more
+than a second before the parent it names is no part of the tree: Windows keeps a parent's pid after
+it exits and hands it to a process started later. `ao hold` then reads the table again for unattended
+turns and what ended turns left, names what still runs and how to stop it by hand, and exits 1; the
+hold stands. The watchdog's reaper starts no turn beside an unattended turn it could not stop and tells
+a person (`reap-survived`, [alarms.md](alarms.md)). `ao review cancel` records nothing while the
+review's runner still runs, records a reviewer it could not stop as still running, keeping its place
+among the helpers, and exits 1. A reviewer stopped on its timeout, an ACP reviewer's session, `ao
+harness probe`, `ao writers --clean`, a codebase provider, a lane's post-create command and a filter
+hook ao probes each say what of them still runs. What taskkill and the table both miss - a process
+whose parent had exited under a parent that had exited too - the hold's second reading still names
+when it is an agent's. On macOS and Linux a turn is stopped by its process group as before, and a
+forced stop is asked about the same way. `tests/test_windows_stop_proven.py` makes taskkill and
+Windows' answers its own, on every platform.*
 
 *In ao since slice WINDOWS-NO-CWD-EXEC: ao starts no program the current directory holds. Windows
 looks for a program named without a directory in the current directory before PATH - `subprocess`

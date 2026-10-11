@@ -2843,18 +2843,89 @@ def _tree_stopped():
     procs.refresh()
 
 
-def stop_windows_tree(pid):
-    """Stop a process and every process it started, with Windows' own taskkill (WINDOWS-NO-CWD-EXEC).
+# How long a stopped process tree is given to be gone before what still runs of it is named (WINDOWS-STOP-PROVEN).
+STOP_PROOF_SECONDS = 5.0
+
+
+def process_tree(pid, table=None):
+    """`pid` and every process started under it, parent link by parent link, as the process table reads now: what a
+    stop of the tree is proven against (WINDOWS-STOP-PROVEN).
+
+    `[pid]` alone where the table cannot be read. This process is never one of them: a hold run
+    from inside a turn would otherwise name itself among what it could not stop. A process that
+    started before the parent it names is not that parent's (_older_than).
+    """
+    from . import procs
+    if table is None:
+        try:
+            procs.refresh()
+            table = _proc_table()
+        except procs.TableUnreadable:
+            table = {}
+    children = {}
+    for child, row in table.items():
+        children.setdefault(row[0], []).append(child)
+    tree, waiting = [], [pid]
+    while waiting:
+        current = waiting.pop(0)
+        if current in tree or current == os.getpid():
+            continue
+        tree.append(current)
+        waiting.extend(child for child in sorted(children.get(current, [])) if not _older_than(child, current))
+    return tree
+
+
+def _older_than(child, parent):
+    """Whether `child` started more than a second before `parent`, so that the parent it names was an earlier process
+    with the same pid (WINDOWS-STOP-PROVEN).
+
+    Windows keeps the pid of a process's parent after that parent exits, and hands the pid to a
+    process started later: a turn given it would have counted an unrelated process of the person's
+    among its own, and a hold would have stopped it, or told them to. False where either age cannot
+    be read, and off Windows, where an orphan is handed to a parent that still runs.
+    """
+    if os.name != "nt":
+        return False
+    from . import procs
+    child_age, parent_age = procs.elapsed(child), procs.elapsed(parent)
+    return child_age is not None and parent_age is not None and child_age > parent_age + 1
+
+
+def _still_running(pids, seconds=None):
+    """Those of `pids` that still run, each asked of the process itself until none does or `seconds` have passed,
+    STOP_PROOF_SECONDS unless given (WINDOWS-STOP-PROVEN). A process neither Windows nor the table answers for is
+    taken as running."""
+    deadline = time.time() + (STOP_PROOF_SECONDS if seconds is None else seconds)
+    while True:
+        running = sorted(pid for pid in set(pids) if _pid_alive(pid))
+        if not running or time.time() >= deadline:
+            return running
+        time.sleep(0.1)
+
+
+def stop_windows_tree(pid, table=None):
+    """Stop a process and every process it started, with Windows' own taskkill, and return what of that tree still
+    runs after it (WINDOWS-NO-CWD-EXEC, WINDOWS-STOP-PROVEN).
 
     Started by its bare name, taskkill was looked for in the current directory before Windows'
     own, and ao stops turns from inside a tree an agent writes: a taskkill.exe left there would
-    have run as the person in its place. FileNotFoundError where Windows' system directory holds
-    none, as a taskkill found nowhere raised before.
+    have run as the person in its place. taskkill /T finds a process's children by the parent
+    each names, and is refused a process another user or an elevated prompt started; whatever
+    it answered, `ao hold` said the tree was stopped. Each process of the tree as the table read
+    it before the stop is now named to taskkill, not its first alone - a child whose parent had
+    exited by then, a turn's wrapper ending as it was stopped, was found by no parent and left
+    running - and each is asked whether it runs, until none does or STOP_PROOF_SECONDS have
+    passed, and what still runs is returned. FileNotFoundError where Windows' system directory
+    holds no taskkill, as a taskkill found nowhere raised before.
     """
     taskkill = program_path("taskkill")
     if taskkill is None:
         raise FileNotFoundError(f"taskkill is not in Windows' system directory {windows_system_directory()}")
-    subprocess.run([taskkill, "/T", "/F", "/PID", str(pid)], capture_output=True)
+    tree = process_tree(pid, table)
+    named = [pid] + [other for other in tree if other != pid]
+    subprocess.run([taskkill, "/T", "/F"] + [word for each in named for word in ("/PID", str(each))],
+                   capture_output=True)
+    return _still_running(tree)
 
 
 def kill_turn(pid, sig):
@@ -2865,15 +2936,23 @@ def kill_turn(pid, sig):
     started is its own session, so its pid is its group id and one killpg reaches
     everything it spawned. A pid that leads no group is signalled alone. On
     Windows there are no groups to signal; `taskkill /T` kills the tree.
+
+    Returns what of the turn still runs after a forced stop - taskkill on Windows,
+    SIGKILL elsewhere - each process of it asked: a stop that left something running
+    was reported as done (WINDOWS-STOP-PROVEN). A turn only signalled, and given time
+    to answer, returns []: its caller waits, and looks.
     """
+    import signal as _sig
     if os.name == "nt":
-        stop_windows_tree(pid)
+        survivors = stop_windows_tree(pid)
         _tree_stopped()
-        return
+        return survivors
+    forced = sig == getattr(_sig, "SIGKILL", None)
+    tree = process_tree(pid) if forced else []
     try:
         pgid = os.getpgid(pid)
     except OSError:
-        return
+        return []
     try:
         if pgid == pid:
             os.killpg(pgid, sig)
@@ -2881,6 +2960,7 @@ def kill_turn(pid, sig):
             os.kill(pid, sig)
     except OSError:
         pass
+    return _still_running(tree) if forced else []
 
 
 def sweep_orphans(pids, grace=3.0):
@@ -2889,14 +2969,23 @@ def sweep_orphans(pids, grace=3.0):
     Each orphan still carries the group id of the turn that made it, and its own
     children carry the same one, so signalling the group clears the whole remnant
     at once — a child re-parented to an orphan would otherwise be orphaned a second
-    time by the very cleanup. Returns the pids that were alive when we started.
+    time by the very cleanup. Returns what of the remnant still runs after it, each
+    process asked, where it returned the pids it was handed whatever became of them
+    (WINDOWS-STOP-PROVEN).
     """
     import signal as _sig
+    from . import procs
+    try:
+        procs.refresh()
+        table = _proc_table()
+    except procs.TableUnreadable:
+        table = {}
     if os.name == "nt":
+        survivors = []
         for pid in pids:
-            stop_windows_tree(pid)
+            survivors += stop_windows_tree(pid, table)
         _tree_stopped()
-        return list(pids)
+        return sorted(set(survivors))
     groups = set()
     for pid in pids:
         try:
@@ -2916,7 +3005,7 @@ def sweep_orphans(pids, grace=3.0):
             os.killpg(g, _sig.SIGKILL)
         except OSError:
             pass
-    return list(pids)
+    return _still_running(set(pids) | {pid for pid, row in table.items() if row[1] in groups})
 
 
 def _pid_alive(pid):

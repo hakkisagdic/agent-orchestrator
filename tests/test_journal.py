@@ -222,6 +222,17 @@ def test_a_wake_started_after_a_deferral_closes_it_in_the_next_cycle(world):
 
 # ---- a hold stops what a cycle started as it was placed, and a park whose transcript went is told (JOURNAL-6) -----
 
+def _stops(running, stopped):
+    """A turn stop that records the pid and leaves nothing of it running: the hold reads the table again after it
+    (WINDOWS-STOP-PROVEN)."""
+    def kill_turn(pid, sig):
+        stopped.append(pid)
+        if pid in running:
+            running.remove(pid)
+        return []
+    return kill_turn
+
+
 def test_a_turn_a_cycle_starts_while_a_hold_is_placed_is_stopped_with_the_rest(project, monkeypatch):
     """`ao hold` counted the turns and then wrote the hold: a turn the watchdog started between the two read no
     hold and ran on under it."""
@@ -233,7 +244,7 @@ def test_a_turn_a_cycle_starts_while_a_hold_is_placed_is_stopped_with_the_rest(p
     monkeypatch.setattr(A, "agent_pids", lambda root_, adapter, headless_only=False: list(running))
     monkeypatch.setattr(A, "orphans", lambda root_, adapter, table=None: [])
     monkeypatch.setattr(A, "unplaced_agent_pids", lambda root_, adapter: [])
-    monkeypatch.setattr(A, "kill_turn", lambda pid, sig: stopped.append(pid))
+    monkeypatch.setattr(A, "kill_turn", _stops(running, stopped))
     monkeypatch.setattr(cli, "_alive", lambda pid: False)
     lock = os.path.join(W.STATE_DIR, W.CYCLE_LOCK.format(key=A.project_key(root)))
     holding = threading.Event()
@@ -278,7 +289,7 @@ def test_a_hold_whose_wait_on_a_running_cycle_times_out_stops_what_it_counted_an
     monkeypatch.setattr(A, "agent_pids", lambda root_, adapter, headless_only=False: list(running))
     monkeypatch.setattr(A, "orphans", lambda root_, adapter, table=None: [])
     monkeypatch.setattr(A, "unplaced_agent_pids", lambda root_, adapter: [])
-    monkeypatch.setattr(A, "kill_turn", lambda pid, sig: stopped.append(pid))
+    monkeypatch.setattr(A, "kill_turn", _stops(running, stopped))
     monkeypatch.setattr(cli, "_alive", lambda pid: False)
     real = storage._exclusive_lock
     monkeypatch.setattr(storage, "_exclusive_lock", lambda path, timeout=10.0:     # the minute, made half a second

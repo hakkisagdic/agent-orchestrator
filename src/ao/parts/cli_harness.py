@@ -67,6 +67,7 @@ def cmd_harness(cfg, args):
             failed += 1
             print(f"  {adapter_id:<12} {C['red']}no answer{C['reset']}: {exc}")
             continue
+        left = found.pop("still_running", [])
         profile = dict({"id": adapter_id, "measured_at": int(time.time()), "argv": argv, "binary": path,
                         "binary_version": version}, **found)
         target = harness_profile_path(adapter_id)
@@ -77,6 +78,11 @@ def cmd_harness(cfg, args):
               f"load {'yes' if found['load_session'] else 'no'}  "
               f"session: {', '.join(found['session']) or '-'}  mcp: {', '.join(found['mcp']) or '-'}"
               + (f"  sessions here: {found['sessions']}" if "sessions" in found else ""))
+        if left:
+            # Asked, not assumed stopped (WINDOWS-STOP-PROVEN).
+            failed += 1
+            print(f"  {adapter_id:<12} {C['red']}{len(left)} process(es) of its agent still run after the probe "
+                  f"stopped it{C['reset']}: {left}; {_stop_by_hand()}")
     return 1 if failed else 0
 
 

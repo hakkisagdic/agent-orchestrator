@@ -68,6 +68,14 @@ start that fails after the reviewer began - an ACP session whose reader could no
 and whatever ends a start puts the handlers back, where they were left holding every later stop
 (REVIEWER-ORPHAN-5).*
 
+*In ao since slice WINDOWS-STOP-PROVEN: `ao review cancel` asks, once it has stopped them, whether the
+run and its reviewer still run, giving each five seconds to be gone; on Windows taskkill can be
+refused, and the review was recorded cancelled while they worked on. A run that still runs is not
+cancelled: nothing is recorded over it, and the command names what still runs and exits 1. A reviewer
+that still runs is recorded as one that could not be stopped, keeps its place among the helpers, and
+the command exits 1. A reviewer stopped on its timeout, and an ACP reviewer's session as it closes,
+say the same of what of them still runs ([windows.md](windows.md)).*
+
 ```bash
 ao review submit --boundary '…'      # returns R-1788… immediately
 ao reviews                            # what is in flight, with elapsed and progress

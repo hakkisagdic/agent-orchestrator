@@ -69,14 +69,17 @@ def _group():
 
 
 def _stop(proc):
-    """Stop the agent and everything it started, and wait for it."""
+    """Stop the agent and everything it started, wait for it, and return what of it still runs after the stop.
+
+    The stop is ao's own: its group on POSIX, Windows' own taskkill on Windows (WINDOWS-NO-CWD-EXEC),
+    and each process of the agent's tree is asked afterwards whether it runs, where the stop was
+    taken for done (WINDOWS-STOP-PROVEN).
+    """
+    left = []
     if proc.poll() is None:
         try:
-            if os.name == "nt":
-                from . import lib as A
-                A.stop_windows_tree(proc.pid)          # Windows' own taskkill (WINDOWS-NO-CWD-EXEC)
-            else:
-                os.killpg(proc.pid, signal.SIGKILL)
+            from . import lib as A
+            left = A.kill_turn(proc.pid, getattr(signal, "SIGKILL", signal.SIGTERM)) or []
         except OSError:
             pass
     for stream in (proc.stdin, proc.stdout):
@@ -89,6 +92,7 @@ def _stop(proc):
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
         proc.kill()
+    return left
 
 
 def _read(stream, lines):
@@ -162,7 +166,8 @@ def probe(argv, cwd, timeout=PROBE_TIMEOUT, sessions=False, env=None):
 
     Asks `initialize` and, with `sessions`, `session/list` for `cwd` where the agent lists sessions,
     keeping how many it listed and nothing of what they are. The agent is stopped, with everything it
-    started, whatever it answers.
+    started, whatever it answers; what of it still runs after that, if anything, is `still_running`,
+    never kept in a profile (WINDOWS-STOP-PROVEN).
     """
     try:
         proc = subprocess.Popen(list(argv), cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -182,11 +187,13 @@ def probe(argv, cwd, timeout=PROBE_TIMEOUT, sessions=False, env=None):
             _send(proc, {"jsonrpc": "2.0", "id": 1, "method": "session/list", "params": {"cwd": cwd}})
             listed = _answer(proc, lines, 1, "session/list", deadline)
             found["sessions"] = len(listed.get("sessions") or []) if isinstance(listed, dict) else 0
-        return found
     except (OSError, ValueError) as exc:
         raise ProbeError(f"the agent's streams failed: {exc}") from exc
     finally:
-        _stop(proc)
+        left = _stop(proc)
+    if left:
+        found["still_running"] = left
+    return found
 
 
 # ---- one session: a prompt turn, its updates and the permissions it asks for (ACP-CLIENT) ----------------------
@@ -212,7 +219,7 @@ class Session:
         self.decisions, self.session_id, self._next = [], None, 0
         # What the session holds is made before its agent starts, so nothing but the reader stands between the start
         # and the guard below (REVIEWER-ORPHAN-6).
-        self.lines, self._turn = queue.Queue(), None
+        self.lines, self._turn, self.still_running = queue.Queue(), None, None
         try:
             self.proc = subprocess.Popen(list(argv), cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                          stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
@@ -234,7 +241,11 @@ class Session:
         self.close()
 
     def close(self):
-        _stop(self.proc)
+        """Stop the agent; what of it still runs after the first stop, every later one keeps (WINDOWS-STOP-PROVEN)."""
+        left = _stop(self.proc)
+        if self.still_running is None:
+            self.still_running = left
+        return self.still_running
 
     def _request(self, method, params, timeout):
         request_id = self._next

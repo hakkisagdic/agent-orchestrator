@@ -563,15 +563,19 @@ def _restore_signals(saved):
 
 
 def _kill_lane_group(pid):
-    """Stop a lane's post-create command and everything it started: its process group, or on Windows its tree."""
+    """Stop a lane's post-create command and everything it started: its process group, or on Windows its tree.
+
+    Returns what of it still runs on Windows, each process asked, where taskkill can be refused
+    (WINDOWS-STOP-PROVEN); a group sent SIGKILL returns [].
+    """
     import signal
     if os.name == "nt":
-        kill_turn(pid, signal.SIGTERM)                 # taskkill /T /F, whatever the signal
-        return
+        return kill_turn(pid, signal.SIGTERM) or []    # taskkill /T /F, whatever the signal
     try:
         os.killpg(pid, signal.SIGKILL)
     except OSError:
         pass
+    return []
 
 
 def _lane_post_create(root, name, record, argv, variables, timeout):
@@ -615,13 +619,18 @@ def _lane_post_create(root, name, record, argv, variables, timeout):
                 code = proc.wait(timeout=timeout)
             except BaseException as exc:
                 # Its group is its pid, and no other process can hold that pid until this one is reaped.
-                _kill_lane_group(proc.pid)
+                left = _kill_lane_group(proc.pid)
                 try:
                     proc.wait(timeout=LANE_STOP_SECONDS)
                 except subprocess.TimeoutExpired:
                     pass
                 if not isinstance(exc, subprocess.TimeoutExpired):
                     raise
+                if left:
+                    # It said the command was stopped whatever taskkill did (WINDOWS-STOP-PROVEN).
+                    return (f"lane.post_create `{command}` ran past {timeout} seconds, and {len(left)} process(es) "
+                            f"of it still run after it was stopped: {left} - stop them by hand before the lane is "
+                            f"removed; its output is in {log}")
                 return (f"lane.post_create `{command}` ran past {timeout} seconds and was stopped; "
                         f"its output is in {log}")
     finally:

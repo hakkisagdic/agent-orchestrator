@@ -120,12 +120,18 @@ class World:
                    quiet_until=None, what=None, red_after=None:
                    w.notices.append((title, msg, audience, level)) or True)
         mp.setattr(W, "wake_error", lambda log_path: None)
-        # reaping in a scenario removes the processes it targets
+        # reaping in a scenario removes the processes it targets, and nothing of them still runs after it
         def kill_turn(pid, sig):
             for p in [q for q, v in w.procs.items() if q == pid or v["pgid"] == pid]:
                 w.procs.pop(p, None)
+            return []
+
+        def sweep_orphans(pids, grace=3.0):
+            for p in list(pids):
+                w.procs.pop(p, None)
+            return []
         mp.setattr(A, "kill_turn", kill_turn)
-        mp.setattr(A, "sweep_orphans", lambda pids, grace=3.0: [w.procs.pop(p, None) for p in list(pids)])
+        mp.setattr(A, "sweep_orphans", sweep_orphans)
 
     # ---- run
     def cycle(self, dry_run=True, idle_minutes=6.0):

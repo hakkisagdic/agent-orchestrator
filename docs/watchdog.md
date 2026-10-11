@@ -21,7 +21,8 @@ nothing else:
    component of its runtime. Terminals, editors, monitors, greps are not.
 3. **It clears its own debris before it counts.** A turn it reaps dies by process
    group; what an earlier turn left behind (no terminal, dead group leader) is
-   swept every cycle and never counted.
+   swept every cycle and never counted. A turn it could not stop is still a
+   writer: it starts nothing beside it and tells a person (`reap-survived`).
 4. **It reads the outcome of everything it starts.** A wake or a nudge is
    detached, so the next cycle reads the log segment it wrote: a stale binary,
    an exhausted quota, a dead session each get their own consequence, and none
@@ -62,7 +63,7 @@ Order matters: each guard sees only what the ones above left standing.
 | # | guard | measures | verdict when it fires |
 |---|---|---|---|
 | −1 | hold | `.ao/hold` | stand down; red after four hours |
-| 0 | working here | orphans swept, live turns counted by root | stand down while a turn is live; reap a turn silent past 3× idle, by process group; where the process table cannot be read, stand down and tell a person (`process-table-unreadable`) |
+| 0 | working here | orphans swept, live turns counted by root | stand down while a turn is live; reap a turn silent past 3× idle, by process group, and stand down and tell a person while what it reaped still runs (`reap-survived`); where the process table cannot be read, stand down and tell a person (`process-table-unreadable`) |
 | 1 | idle | the implementer's last write, a subagent's included, vs `--idle-minutes` | not idle yet: stand down |
 | 1b | usage limit | the implementer's newest words, when its harness wrote them in the model's place; the last nudge, when it died within seconds; each in the words its adapter declares | stopped on its limit: park the implementer's running items until the reset, or one retry where none was named, then resume the session once — see [below](#a-slice-parked-on-quota) |
 | 2 | waiting on architect | newest implementer report is a request, inbox empty, queue empty | stand down and say so — a nudge cannot answer it |
@@ -244,6 +245,7 @@ test that would fail if it came back.
 | F32 | a cycle cut off between starting the architect and recording it left a headless architect no record named, and the next cycle woke a second into the same session; a cycle killed while writing its state left it torn, and the markers that a park was resumed or a report handed were gone | the process started before anything said so, and the state was written over in place | the journal (`~/.ao/journal-<key>.db`, SQLite, written ahead and synced): a wake or refill is claimed under its session and reports before its process starts, with a lease, and its pid and start are written the moment it has them; a process the journal names holds its step past the lease while its start reads the same, and the next cycle registers it; a process of the architect's own harness already resuming the session is a wake under way; a journal that cannot be written leaves wakes to the process scan and tells a person; the state is replaced whole | test_journal | JOURNAL |
 | F33 | on Windows a PowerShell that was missing, failed or did not answer read as no process at all: the writer guard, the session guard and the presence check all passed, so a cycle could start a turn or wake an architect beside one it never saw, and `ao hold` stopped nothing | the process table was returned empty when it could not be read, on macOS, Linux and through `ps` as well | the readers raise `TableUnreadable`, naming the platform and why; a cycle that meets it starts, wakes and reaps nothing and raises `process-table-unreadable` for a person; presence it could not measure clears no quota block and holds no notice for the architect; a turn whose start cannot be read is believed for a bounded time | test_windows_table_closed | — |
 | F34 | a hook the implementer wrote into `.claude/settings.json` would have run in its own next nudge, outside the permissions that hold its commands, and in the architect's session when a wake started it in the same checkout, before any review saw it; Claude Code ran such a hook before it had even signed in | REVIEW-TREE-3 kept a candidate's configuration from its reviewer alone, and a harness's own folder is coordination state no candidate carries | each change to what an adapter declares its harness reads from a project is named to a person every cycle, and the wake, the refill, the nudge and the hunt each read them again before they start and stand down while one stands unseen, until `ao harness seen` records that a person read exactly those bytes | test_harness_config | HARNESS-CONFIG |
+| F35 | on Windows a hung turn taskkill could not stop - one an elevated prompt started, or a child its exited parent no longer led to - read as reaped, and a second turn was nudged beside it; `ao hold` said every tree was stopped | what a stop did was assumed, never read | every process of the tree is named to taskkill and asked afterwards; the reaper stands down and raises `reap-survived` while an unattended turn still runs; `ao hold` reads the table again, names what still runs and exits 1 | test_windows_stop_proven | WINDOWS-STOP-PROVEN |
 
 ## Scenarios: testing the decision, not the measurement
 

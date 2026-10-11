@@ -24,7 +24,11 @@ def test_a_tree_stopped_on_windows_is_read_again_before_anything_reads_it(monkey
         patch.setenv("SystemRoot", str(tmp_path))
         patch.setattr(A.subprocess, "run", lambda argv, **kw: happened.append(argv[0]))
         patch.setattr(procs, "refresh", lambda: happened.append("refresh"))
+        patch.setattr(procs, "alive", lambda pid: False)              # Windows answers: the tree is gone
+        patch.setattr(A, "_proc_table", lambda: {})
         patch.setattr(os, "name", "nt")
         stop()
 
-    assert happened == [str(taskkill), "refresh"]
+    # The tree is read afresh before taskkill, as what the stop is proven against (WINDOWS-STOP-PROVEN), and the
+    # snapshot is dropped again after it, before anything reads it.
+    assert happened == ["refresh", str(taskkill), "refresh"]
