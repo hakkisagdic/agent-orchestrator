@@ -159,3 +159,44 @@ def test_a_ledger_whose_chain_does_not_validate_is_named_and_nothing_is_measured
 
     assert code == 1 and out == ""
     assert "a ledger does not validate, so nothing is measured" in err and "authority.jsonl" in err
+
+
+def _tool():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("evidence_tool", TOOL)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_an_empty_authority_ledger_is_passed_as_itself_and_counts_no_grant_on_record(tmp_path):
+    """EVIDENCE-2, from the review of EVIDENCE: `tokens if authority else None` read an empty ledger as no ledger. The
+    trailers are held to the ledger as `ao commit-check` holds them - a grant the checkout's ledger does not hold fails
+    nothing, since a grant stays in the ledger of the checkout that made it - and the grant is counted as not on
+    record."""
+    root = str(tmp_path / "repo")
+    os.makedirs(root)
+    _git(root, "init", "-q")
+    with open(os.path.join(root, "a.txt"), "w", encoding="utf-8") as fh:
+        fh.write("a\n")
+    _git(root, "add", "a.txt")
+    tree = _git(root, "write-tree").strip()
+    _git(root, "commit", "-q", "-m", "a", "-m", f"Ao-Grant: C-1\nAo-Tree: {tree}\nAo-Verification: V-1\nAo-Review: r.md")
+    tool = _tool()
+
+    measured = tool._commits(root, "HEAD", [])
+
+    assert (measured["since_first_trailer"], measured["trailers_match"], measured["grant_on_record"]) == (1, 1, 0)
+
+
+def test_an_artefact_the_ledger_names_outside_the_reviews_folder_is_not_read(tmp_path):
+    """EVIDENCE-2: the ledger, which anyone on the machine can edit, named an artefact by an absolute path, and the tool
+    read whatever file that was."""
+    outside = tmp_path / "elsewhere.md"
+    outside.write_bytes(b"VERDICT: APPROVED\n")
+    digest = "sha256:" + __import__("hashlib").sha256(outside.read_bytes()).hexdigest()
+    state = tmp_path / "state"
+    (state / "semantic-review").mkdir(parents=True)
+    rows = [{"artefact": str(outside), "sha256": digest}, {"artefact": "../elsewhere.md", "sha256": digest}]
+
+    assert _tool()._reviews(str(state), rows)["artefacts_held"] == 0

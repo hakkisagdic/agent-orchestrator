@@ -90,7 +90,9 @@ def _commits(root, rev, authority):
     out.update(first_trailer=since[0]["sha"][:12] if since else None,
                since_first_trailer=len(since),
                carrying=sum(1 for commit in plain if A._ao_trailers(commit["trailers"])),
-               trailers_match=sum(1 for commit in since if not A.trailer_problems(commit, tokens if authority else None)),
+               # An empty ledger is a ledger, held to; only a checkout that keeps none is read by tree (EVIDENCE-2).
+               trailers_match=sum(1 for commit in since
+                                  if not A.trailer_problems(commit, tokens if authority is not None else None)),
                grant_on_record=sum(1 for commit in since
                                    if (A._ao_trailers(commit["trailers"]).get("Ao-Grant") or [None])[0] in tokens))
     return out
@@ -113,8 +115,13 @@ def _reviews(state, rows):
     tiers, counts = collections.Counter(), collections.Counter()
     held, ranges, authored, same = 0, 0, 0, []
     for row in rows:
+        # An artefact is named by the ledger, which anyone on the machine can edit: one that is no plain file name in
+        # the reviews folder is read as missing, never followed elsewhere (EVIDENCE-2).
+        name = str(row.get("artefact") or "")
         try:
-            with open(os.path.join(folder, str(row.get("artefact"))), "rb") as fh:
+            if not name or os.path.basename(name) != name or name in (".", ".."):
+                raise OSError("no file of the reviews folder")
+            with open(os.path.join(folder, name), "rb") as fh:
                 data = fh.read()
         except OSError:
             data = None
