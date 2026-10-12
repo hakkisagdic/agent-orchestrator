@@ -1460,8 +1460,10 @@ def _turn_command_lines(cfg):
     return [f"{'turn command':<16}{C['red']}{text}{C['reset']}" for _, text in _turn_problems(cfg)]
 
 
-PROVE_BOUNDARY = ("ao prove: a throwaway candidate that adds one line to ao-prove.txt and nothing else. "
-                  "Approve it if the diff is exactly that.")
+# Said as what is accepted, never as a word to a reviewer: a boundary that tells a reviewer what to answer reads as
+# the instruction a candidate must not carry (the review of TURN-ARGV).
+PROVE_BOUNDARY = ("ao prove: a throwaway candidate that adds one line to ao-prove.txt and nothing else; it is "
+                  "acceptable when its diff is exactly that.")
 
 
 def _prove_throwaway(cfg):
