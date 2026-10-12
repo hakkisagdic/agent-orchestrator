@@ -1311,7 +1311,6 @@ def open_waiver_report(root, now=None):
     return lines
 
 
-_OBJECT_ID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 # How long before a waiver was opened a commit landed under it may say it was committed: a clock
 # that disagreed, on this machine or on the one the commit was made on (CATCHUP-POLISH).
 WAIVER_CLOCK_ALLOWANCE = 86400

@@ -227,6 +227,12 @@ by `_part("name", globals())`. It runs in the module's namespace, so every name 
 callers, tests and monkeypatches look for it — a split moves text and never behaviour, and the
 suite passes without edits.
 
+One namespace written in a dozen files has one of each name: where two of a module's files define
+the same name, the one loaded later replaces the other for every caller of both, and each file
+reads right alone. `tests/test_parts_one_name.py` reads each module and its parts as the loader
+runs them and fails when two files bind a name to two things, or one file writes a function or a
+class twice (PARTS-ONE-NAME).
+
 A split slice is marked `move-only` on its board line. `ao commit-ok` then refuses the candidate
 unless `ao split-check` finds a pure move:
 
