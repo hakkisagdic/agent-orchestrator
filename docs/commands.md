@@ -68,7 +68,10 @@ The `current-local (behavior unverified)` and `current-scoped (behavior unverifi
 labels describe bytes only; `pre-commit execution: installed (execution proved)`
 is printed only after Git resolves and runs the active hook with an isolated
 synthetic index and AO returns the nonce-bound refusal for that exact challenge.
-The probe never commits, changes the real index, or writes a Git object. A missing,
+The probe never commits, changes the real index, or writes a Git object. Git may take
+`hooks.probe_timeout_seconds` (60 by default, a machine setting) to run the hook; on a
+machine busy enough the 15 seconds it was given were not enough, and an installed hook
+was reported unproven (HOOK-PROBE-TIME). A missing,
 misplaced, non-executable, stale, foreign, or fail-open hook is `not installed`, and
 `hooks status`, `doctor`, `doctor --check`, and `init` consume the same result.
 `status` also names the effective path, path class, winning `core.hooksPath`

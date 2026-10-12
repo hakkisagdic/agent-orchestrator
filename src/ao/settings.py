@@ -234,6 +234,9 @@ SETTINGS = {
     "filters.probe_programs": Setting(
         ["rtk"], list, None, None, "machine",
         "programs ao doctor may run as a user-level shell-command filter hook, to prove it leaves measurements alone"),
+    "hooks.probe_timeout_seconds": Setting(
+        60, int, 5, 900, "machine",
+        "seconds Git may take to run ao's pre-commit hook on the synthetic candidate that proves it is installed"),
     "filters.probe_timeout_seconds": Setting(
         5, int, 1, 60, "machine",
         "seconds a probed filter hook may take to answer for one measurement command before ao stops asking it"),

@@ -975,9 +975,11 @@ def _hook_execution_probe(inv):
             "AO_HOOK_PROBE_HEAD": head,
             "AO_HOOK_PROBE_INDEX": index,
         })
+        # The hook is ao itself, a Python start and a commit check: on a machine busy enough it ran past the 15
+        # seconds this allowed, and an installed hook was reported unproven (HOOK-PROBE-TIME).
         result = _hook_git(
             inv["top"], "hook", "run", "pre-commit",
-            timeout=15, extra_env=extra,
+            timeout=S.get(None, "hooks.probe_timeout_seconds"), extra_env=extra,
         )
     except _HookResolutionError as exc:
         return failed(f"Git could not execute the pre-commit probe: {exc}")

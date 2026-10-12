@@ -24,6 +24,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- The commit hook's execution proof waits `hooks.probe_timeout_seconds` (60 by default, a machine setting) for Git to run the hook: on a busy machine the 15 seconds it allowed ran out, `ao init` reported an installed hook unproven and exited 1 ([commands](docs/commands.md), HOOK-PROBE-TIME).
 - `ao harness probe` names what of a harness still runs after the probe stopped it where the harness never answered too: a probe that timed out, or whose harness ended first, said only that it had not answered ([adapters](docs/adapters.md), ACP-PROBE-LEFT).
 - The quickstart's first `ao verify` passes: it stages the `.gitignore` `ao init` appends to beside `.ao-project`, and `ao init` ignores the MCP file it writes into the tree for a harness - `.mcp.json` for Claude Code, whose entry names this machine's ao - unless the repository already tracks it; both were untracked product files the first verify refused. The README's `claude-kiro` line said Claude Code implements and Kiro reviews; Kiro implements and Claude reviews ([getting started](docs/getting-started.md)) (README-QUICKSTART-7).
 - A reviewer whose harness waits for a person to sign in is stopped at its next heartbeat and says so, naming the command a person runs - `kiro-cli login` for kiro - where a Kiro review whose sign-in had expired waited ten minutes and ended UNAVAILABLE with no word of why ([adapters](docs/adapters.md)) (KIRO-SIGNED-OUT).
