@@ -351,12 +351,20 @@ def test_a_child_that_re_enters_ao_starts_outside_the_project_and_with_python_s_
     (project / "json.py").write_text("open('imported-from-the-project', 'w').close()\n", encoding="utf-8")
 
     cwd, env = A.self_child_cwd(), A.self_child_env()
-    done = subprocess.run([sys.executable, "-m", "ao", "--version"], cwd=cwd, env=env, capture_output=True, text=True)
+    # As the children are started: the project named with -C, and a command that reads it (the review of CHILD-CWD).
+    done = subprocess.run([sys.executable, "-m", "ao", "-C", str(project), "status"], cwd=cwd,
+                          env=dict(env, HOME=str(tmp_path / "home"), USERPROFILE=str(tmp_path / "home")),
+                          capture_output=True, text=True)
 
-    assert done.returncode == 0 and env["PYTHONSAFEPATH"] == "1"
+    assert env["PYTHONSAFEPATH"] == "1" and "Traceback" not in done.stderr, done.stderr
     assert os.path.realpath(cwd) == os.path.realpath(str(tmp_path / "home" / ".ao"))
     assert not (project / "imported-from-the-project").exists() and not os.path.exists(
         os.path.join(cwd, "imported-from-the-project"))
+    # and the decoy does run where a child is started as it was, in the project: the test can tell the two apart
+    old = subprocess.run([sys.executable, "-m", "ao", "--version"], cwd=str(project),
+                         env={name: value for name, value in env.items() if name != "PYTHONSAFEPATH"},
+                         capture_output=True, text=True)
+    assert (project / "imported-from-the-project").exists(), old.stderr      # it ran, and broke ao's own import
 
 
 def test_every_child_ao_starts_names_that_working_directory():
