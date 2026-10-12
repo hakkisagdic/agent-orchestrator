@@ -24,6 +24,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- A report marked `## ACİL` is read as urgent everywhere: three readers lowered a message with Python's `str.lower()`, which makes the capital İ an i and a combining dot, so the watchdog filed such a report as one waiting rather than a decision asked for and went on nudging an implementer that waited on it ([protocol](docs/protocol.md), TR-MARKER-FOLD).
 - `ao hunt` goes through every line of every tracked file up to `hunter.max_file_kb`: a file that did not fit what was left of a hunt was passed over for good, one larger than a hunt was read to its first `hunter.bytes_per_run` and never further, and a tree with nothing readable kept the hunt going round. A large file is read a piece a hunt, cut before a definition where it can and headed with its lines; the cursor keeps its file by name; a file past `hunter.max_file_kb` is passed over and named ([roles](docs/roles.md), BUG-HUNTER-3).
 - The commit hook's execution proof waits `hooks.probe_timeout_seconds` (60 by default, a machine setting) for Git to run the hook: on a busy machine the 15 seconds it allowed ran out, `ao init` reported an installed hook unproven and exited 1 ([commands](docs/commands.md), HOOK-PROBE-TIME).
 - `ao harness probe` names what of a harness still runs after the probe stopped it where the harness never answered too: a probe that timed out, or whose harness ended first, said only that it had not answered ([adapters](docs/adapters.md), ACP-PROBE-LEFT).

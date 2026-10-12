@@ -690,7 +690,7 @@ def waiting_on_architect(root, cfg):
     latest = reports[-1]
     p = os.path.join(root, box, latest)
     try:
-        low = open(p, errors="replace", encoding=UTF8).read(4000).lower()
+        low = language.folded(open(p, errors="replace", encoding=UTF8).read(4000))
     except OSError:
         return None
     # In every language a project may choose, whichever this one writes (LANGUAGE-FILES).
@@ -925,7 +925,7 @@ def mail_class(name, meta=None, body=""):
     if not kind:
         found = re.match(r"^\d{8}-\d{4}-.+?-to-.+?-([a-z]+)-", name, re.I)
         kind = found.group(1).lower() if found else ""
-    low = str(body or "").lower()
+    low = language.folded(body or "")
     if kind in _DECISION_KINDS or any(mark in low for mark in language.lowered("decision")):
         return "needs-decision"
     return "fyi" if kind in _FYI_KINDS else "needs-read"

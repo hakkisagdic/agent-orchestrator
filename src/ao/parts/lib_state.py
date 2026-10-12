@@ -931,7 +931,7 @@ def anomalies(root, cfg, adapter, age, idle_seconds, exclude_pids=()):
         # as urgent and re-raised it every ten minutes: twenty-eight false alarms
         # in one hour, produced by a line that said the opposite of what matched.
         # In every language a project may choose, whichever this one writes (LANGUAGE-FILES).
-        low = body.lower()
+        low = language.folded(body)
         asking = any(h in low for h in language.lowered("decision", "urgent") + ("## blocked",))
         if not asking:
             for line in low.split("\n"):

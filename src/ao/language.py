@@ -849,15 +849,24 @@ def forms(*keys):
 
 
 def lowered(*keys):
-    """forms(), spelled for the readers that search a lowercased message.
+    """forms(), spelled for the readers that search a message lowered by folded().
 
     Those readers always searched for the plain-i spelling - `## karar gerekli`, `## acil` - and
     this keeps it: Python lowercases the capital İ to an i and a combining dot, and a form lowered
-    that way would match messages those readers never did and miss ones they did. The plain-i
-    spelling finds `## KARAR GEREKLİ`, whose dot follows its last letter, and not `## ACİL`,
-    which lib.urgent_messages finds by comparing in capitals.
+    that way would match messages those readers never did and miss ones they did.
     """
-    return tuple(form.replace("İ", "I").lower() for form in forms(*keys))
+    return tuple(folded(form) for form in forms(*keys))
+
+
+def folded(text):
+    """Text lowered as the readers of lowered() search it: the capital İ as a plain i first.
+
+    `str.lower()` made `## ACİL` an i and a combining dot, which no plain-i form matches: a Turkish
+    report marked urgent was neither a decision asked for in the watchdog's anomalies nor a reason
+    to stop nudging an implementer that waits on the architect (TR-MARKER-FOLD). An i already followed
+    by that combining dot - text another program lowered so - reads as a plain i too.
+    """
+    return str(text).replace("İ", "I").lower().replace("i\u0307", "i")
 
 
 def words(key):

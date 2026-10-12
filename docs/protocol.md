@@ -115,6 +115,12 @@ markers in the project's language.
 
 A report's blockers line is read the same way: `Blockers: none` and `Engel: yok` say there are none.
 
+*In ao since slice TR-MARKER-FOLD: a heading is found however it is cased. Python lowers the capital
+İ to an i and a combining dot, so a reader that lowered a message found `## KARAR GEREKLİ` but not
+`## ACİL`: the watchdog filed such a report as one waiting rather than a decision asked for, and went
+on nudging an implementer that waited on it. Every reader now lowers a message with the capital İ as
+a plain i first.*
+
 ## Verdicts
 
 Verdicts: `APPROVED`, `NEEDS_CHANGES` (a reviewer's), `UNAVAILABLE`, `INVALID` (ao's: no review took place, or the answer broke the schema). Review status: `pending`, `complete`, `invalid`, `unavailable`.
