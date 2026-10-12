@@ -40,15 +40,24 @@ def _call(checkpoint, step):
 
 @contextmanager
 def _exclusive_lock(path, timeout=10.0):
-    """Cross-platform advisory lock on one byte of a sidecar file."""
+    """Cross-platform advisory lock on one byte of a sidecar file.
+
+    The byte is written once, by whichever process finds the file empty. On Windows a lock is mandatory for
+    writes, and another process could take the file between this one's look and its write: the write then
+    failed with PermissionError, as four processes appending to a new ledger at once showed on the Windows
+    lane. The file is no longer empty then, which is all the write was for, and the handle buffers nothing,
+    so nothing is written again when it closes (WINDOWS-LOCK-WRITE).
+    """
     parent = os.path.dirname(path) or "."
     os.makedirs(parent, exist_ok=True)
-    handle = open(path, "a+b")
+    handle = open(path, "a+b", buffering=0)
     try:
         handle.seek(0, os.SEEK_END)
         if handle.tell() == 0:
-            handle.write(b"\0")
-            handle.flush()
+            try:
+                handle.write(b"\0")
+            except PermissionError:
+                pass
         deadline = time.monotonic() + max(0.0, timeout)
         while True:
             try:

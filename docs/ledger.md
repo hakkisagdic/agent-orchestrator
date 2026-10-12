@@ -82,6 +82,12 @@ without `previous` fields also fails closed; AO never rewrites historical author
 place. Preserve/archive such a ledger explicitly and obtain fresh verification, review
 and authority in a new ledger rather than silently treating old rows as chained.
 
+*In ao since slice WINDOWS-LOCK-WRITE: a lock file is made with one byte, written by whichever
+process finds it empty. Windows locks are mandatory for writes, and four processes appending to
+a new ledger at once failed there: one wrote the byte after another had locked it. The refused
+write is let go, since the file is no longer empty, and nothing is left to write when the lock's
+handle closes.*
+
 Every prefix of a valid chain is itself valid, so the chain alone cannot see a removed
 tail. Each row therefore also carries its `ordinal`, and every append records the
 ledger's committed length and the digest of its last row outside the repository, in

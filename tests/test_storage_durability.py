@@ -271,6 +271,35 @@ def test_chained_append_repairs_only_an_uncommitted_partial_tail(tmp_path):
         storage.read_chained_jsonl(str(path), CHAIN)
 
 
+def test_a_new_lock_file_whose_byte_another_process_holds_is_locked_without_writing_it(tmp_path, monkeypatch):
+    """WINDOWS-LOCK-WRITE: four processes appending to a new ledger at once failed on the Windows lane.
+
+    Windows locks are mandatory for writes, and the process that found the lock file empty wrote its byte after
+    another had taken it: PermissionError, out of the append. The file is not empty then, which is all the byte
+    was for, and the handle buffers nothing, so closing it writes nothing either.
+    """
+    import io
+    path = str(tmp_path / "authority.jsonl.lock")
+    real_open = open
+
+    class Held(io.FileIO):
+        def write(self, data):
+            raise PermissionError(13, "Permission denied")
+
+    def opened(name, mode="r", buffering=-1, *args, **kwargs):
+        if name != path:
+            return real_open(name, mode, buffering, *args, **kwargs)
+        assert (mode, buffering) == ("a+b", 0), (mode, buffering)       # nothing buffered to flush on close
+        return Held(name, "a+")
+
+    monkeypatch.setattr(storage, "open", opened, raising=False)
+    entered = []
+    with storage._exclusive_lock(path, timeout=1):
+        entered.append(True)
+
+    assert entered == [True] and os.path.getsize(path) == 0
+
+
 def test_concurrent_chained_appends_form_one_linear_history(tmp_path):
     path = tmp_path / "authority.jsonl"
     script = r'''
