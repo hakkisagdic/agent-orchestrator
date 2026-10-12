@@ -81,9 +81,13 @@ git push origin "v$V"
 
 ## 6. PyPI (automatic on the tag; a person approves and checks)
 
-The release workflow runs the suite on 3.9 and 3.12, builds, refuses a tag that is not the
-packaged version and a wheel without its adapters, uploads through Trusted Publishing, and only then
-creates the GitHub release, whose log prints the Homebrew sha256. If the `pypi` environment asks
+The release workflow runs the suite on 3.9 and 3.12, builds, refuses a ref that is not a tag, a tag
+on a commit main does not hold, a tag that is not the packaged version and a wheel without its
+adapters, uploads through Trusted Publishing, and only then creates the GitHub release, whose log
+prints the Homebrew sha256. A dispatch on a branch named like a version had passed the version check
+and published that branch (RELEASE-PINNED). Every action a workflow runs is named by a commit, its
+release in a comment beside it, since a tag or a branch can be moved to other code; to take a newer
+release, name its commit: `gh api repos/<owner>/<action>/commits/<tag> -q .sha`. If the `pypi` environment asks
 for an approval, a person gives it in the run. The first release of a new PyPI project needs the
 one-time pending publisher, set in a browser by the account owner
 ([RELEASING.md](../packaging/RELEASING.md), section 2).
