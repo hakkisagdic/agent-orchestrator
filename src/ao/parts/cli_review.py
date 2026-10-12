@@ -979,14 +979,17 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
             if not prepared["ok"]:
                 return prepared
             argv, env, handoff = prepared["argv"], prepared["env"], prepared["handoff"]
-        stdin = {}
+        # A reviewer reads nothing of this process's input: codex exec, finding its standard input open and no
+        # terminal, waited for more of its prompt there, used no CPU, and was ended as stalled after ten minutes,
+        # twice; ao's own input is a person's terminal or a pipe it does not own (REVIEWER-STDIN).
+        stdin = {"stdin": subprocess.DEVNULL}
         if channel is not None:
             given, refused = A.prompt_input(channel, root, argv)
             if refused:
                 return {"ok": False, "out": "", "reason": refused, "returncode": None, "kind": "handoff-error",
                         "retryable": False}
             after.callback(A.release_prompt, given)
-            argv, stdin = given["argv"], ({"stdin": given["stdin"]} if given["stdin"] is not None else {})
+            argv, stdin = given["argv"], {"stdin": given["stdin"] if given["stdin"] is not None else subprocess.DEVNULL}
         # A review in the foreground stopped by a signal stops its reviewer too, as a detached run does: the
         # reviewer leads a session of its own and hears nothing sent to this process (REVIEWER-ORPHAN-3). A
         # signal that comes while it starts waits until ao holds its pid, and stops it then (REVIEWER-ORPHAN-4).

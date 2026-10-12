@@ -403,6 +403,10 @@ reopens (`reviewer window reopened` in `ao watchdog explain`). `ao review
 --commits <range>` reviews landed work after the fact — the way to close a
 waiver.
 
+*In ao since slice REVIEWER-STDIN: a reviewer's standard input is empty unless its prompt is
+handed on it. `codex exec`, started from a shell whose input was a pipe nobody closed, waited for
+more of its prompt there, spent no CPU, and was ended as stalled after ten minutes, twice.*
+
 *In ao since slice RETRO-REVIEWER: a landed range can be reviewed again by another family. `ao review
 --commits <range> --reviewer <actor> --slice <id>` reviews it with an actor of the project's table, held
 to every rule `ao catchup --reviewer` holds one to, records the review as the slice that landed the range
