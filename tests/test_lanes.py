@@ -17,6 +17,7 @@ from types import SimpleNamespace
 import pytest
 
 from ao import cli, lib as A
+from tests.conftest import CALM_AO
 
 SRC = str(Path(A.__file__).resolve().parent.parent)
 
@@ -86,9 +87,10 @@ def _until(condition, seconds=20.0):
 
 
 def _start_in_a_process(root, tmp_path, item):
-    """`ao lane start <item>` as its own process, returned once its record names the post-create command."""
+    """`ao lane start <item>` as its own process, returned once its record names the post-create command. It finds the
+    machine calm, as every test's ao does (MACHINE-PRESSURE)."""
     env = dict(os.environ, HOME=str(tmp_path / "home"), PYTHONPATH=SRC, PYTHONDONTWRITEBYTECODE="1")
-    ao = subprocess.Popen([sys.executable, "-m", "ao", "-C", root, "lane", "start", item], env=env,
+    ao = subprocess.Popen(CALM_AO + ["-C", root, "lane", "start", item], env=env,
                           stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if not _until(lambda: ((A.lane_record(root, item) or {}).get("command") or {}).get("pid")):
         ao.kill()
@@ -207,7 +209,8 @@ def test_a_failed_preparation_is_reported_and_its_worktree_left_for_inspection(p
     assert not (tmp_path / "proj-lanes" / "D" / "ran").exists()   # nothing ran after the step that failed
 
     hung = dict(project, lane={"post_create": [sys.executable, "-c", "import time; time.sleep(30)"],
-                               "post_create_timeout": 1})
+                               "post_create_timeout": 1},
+                limits={"max_write_lanes": 3})         # a third lane beside the two failed ones (MACHINE-PRESSURE)
     assert cli.cmd_lane(hung, _args("start", "ACME-187/1")) == 1
     assert "ran past 1 seconds and was stopped" in capsys.readouterr().out
     assert [row["state"] for row in A.lane_rows(root)] == ["failed", "failed", "failed"]

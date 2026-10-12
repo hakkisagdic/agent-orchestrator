@@ -12,7 +12,8 @@ PROBE = r"""
 import json, os, sys, sysconfig
 before = set(sys.modules)            # what the interpreter itself loaded at start-up
 sys.path.insert(0, os.path.join(sys.argv[1], "src"))
-from ao import cli
+from ao import cli, pressure
+pressure.read = lambda: pressure.Reading(60.0, 0, (0, 0, 0, 0), 500.0, ())   # calm, as every test's (MACHINE-PRESSURE)
 for argv in (["ao", "-C", sys.argv[2], "status"], ["ao", "-C", sys.argv[2], "board"],
              ["ao", "-C", sys.argv[2], "doctor"]):
     sys.argv = argv

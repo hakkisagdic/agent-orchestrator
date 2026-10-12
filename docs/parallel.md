@@ -138,18 +138,28 @@ machine-wide lock while a project's gates run, and a run that finds it held wait
 another project or for the same one ([gates.md](gates.md#serialisation-and-machine-pressure)).
 `ao lock -- <command>` puts any other heavy command under the same lock, so an implementer's
 `ao lock -- npm test` and the architect's `ao verify` in one checkout no longer run two suites
-together. Not built yet: checking memory pressure and the swap-in rate before `ao lane start`
-or a gate run, refusing rather than thrashing, and a cap on write lanes. The design:
+together. Once a run holds the lock it reads the machine - memory free, swap-ins a second and
+disk free on the home volume - and waits up to `--wait` again while one is past its limit, then
+refuses rather than thrash ([gates.md](gates.md#serialisation-and-machine-pressure)).
+`ao lane start` reads it too, the last thing it asks before it makes anything, and refuses at
+once: it waits for no lock. It also refuses a lane past `limits.max_write_lanes`, 2 by default,
+counting every lane this checkout's `.ao/lanes/` records, whatever its state, so a failed lane
+counts until `ao lane remove` retires it. The limits are settings
+([configuration.md](configuration.md)):
 
-```yaml
-limits:
-  max_write_lanes: 2
-  max_concurrent_gates: 1          # test suites are serialised even when lanes are not
-  refuse_above_swapins_per_sec: 1500
+```bash
+ao config set limits.max_write_lanes 3                             # this project's lanes
+ao config set limits.refuse_above_swapins_per_sec 2500 --machine   # the machine's, for every project
 ```
 
-Gate serialisation is the important one. Lanes can *think* in parallel; they should not
-all *run the test suite* in parallel. The machine gate lock does it ([gates.md](gates.md)):
+*In ao since slice MACHINE-PRESSURE: the machine is read before a gate run, `ao lock` and a lane
+start, and lanes are capped, where `ao lane start` made a lane whatever the machine's load and
+however many stood. The design named three limits; `max_concurrent_gates: 1` is the machine gate
+lock itself and has no setting, and the other two are `limits.max_write_lanes` and
+`limits.refuse_above_swapins_per_sec`, beside the free memory and free disk floors.*
+
+Of the three, gate serialisation is the important one. Lanes can *think* in parallel; they
+should not all *run the test suite* in parallel. The machine gate lock does it ([gates.md](gates.md)):
 `ao verify`, `ao merge-check` and `ao lock -- <command>` hold one lock for the whole machine,
 and a run waits for whoever holds it - another project, a lane in another worktree, or
 another run in the same checkout.

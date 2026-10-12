@@ -315,6 +315,26 @@ def lane_harness_hold(root):
             "nothing ao starts here runs until a person reads it with `ao harness seen --by <name>`")
 
 
+def lane_cap_hold(root, cfg, name=None):
+    """Why this checkout may start no further lane, as a person reads it; None while it may (MACHINE-PRESSURE).
+
+    Five lanes each running a suite swap a laptop into uselessness while each looks reasonable, so
+    `limits.max_write_lanes` caps them. It counts every lane .ao/lanes/ records, whatever its state: a
+    failed lane's worktree stands until `ao lane remove` retires it, as its item is refused a second
+    one until then. Two starts at once both find room before either has a record, so a start asks
+    again once its own record, `name`, is made, counting every other: whichever of two asks second
+    sees the first, so two never both go on past the cap, though both may give way.
+    """
+    cap = settings.get(cfg, "limits.max_write_lanes")
+    lanes = [lane for lane in lane_records(root) if lane["name"] != name]
+    if len(lanes) < cap:
+        return None
+    named = ", ".join(f"{lane.get('item') or lane['name']} ({lane.get('state') or 'unreadable'})" for lane in lanes)
+    return (f"this checkout has {len(lanes)} lane{'' if len(lanes) == 1 else 's'} already, as many as "
+            f"limits.max_write_lanes allows: {named}; `ao lane remove <item>` retires one, or "
+            "`ao config set limits.max_write_lanes <n>` changes the cap")
+
+
 def start_lane(root, cfg, item, now=None):
     """Start a READY board item's lane: a worktree of its own on a branch of its own, prepared from the settings.
 
@@ -326,6 +346,10 @@ def start_lane(root, cfg, item, now=None):
     for a lane ao will not start, and RuntimeError when git could not add it; then neither the
     record nor the branch is left. Stopped while it works - Ctrl-C, SIGTERM, SIGHUP - it records
     the lane failed, or leaves nothing where git had not made the worktree yet, and stops too.
+
+    A lane past `limits.max_write_lanes` is refused, and so is one the machine has no room for: after
+    every other question, the machine is read once - memory, paging and disk - and a start, which
+    waits for no lock, is refused at once when one is past its limit (MACHINE-PRESSURE).
     """
     name = lane_name(item)
     if not name:
@@ -334,6 +358,9 @@ def start_lane(root, cfg, item, now=None):
     if held is not None:
         raise LaneRefused(f"{item} already has a lane, {held.get('state') or 'unreadable'}, at "
                           f"{held.get('path') or 'an unrecorded path'}; `ao lane remove {item}` retires it")
+    crowded = lane_cap_hold(root, cfg)
+    if crowded:
+        raise LaneRefused(crowded)
     why = lane_not_ready(root, item)
     if why:
         raise LaneRefused(f"{why}; a lane starts only for a READY item, and `ao board ready` lists them")
@@ -368,6 +395,10 @@ def start_lane(root, cfg, item, now=None):
     base = git_text(root, "rev-parse", "--verify", "--quiet", "HEAD^{commit}")
     if not base:
         raise LaneRefused("this checkout has no commit to start a lane from")
+    from . import pressure
+    short = pressure.wait_for_room(cfg, 0, "the lane")
+    if short:
+        raise LaneRefused(short)
     record = {"item": item, "branch": branch, "path": path, "base": base,
               "started_at": int(time.time() if now is None else now), "state": "preparing",
               "process": _process_of(os.getpid()), "prepared": [], "steps": []}
@@ -377,6 +408,10 @@ def start_lane(root, cfg, item, now=None):
             json.dump(record, fh, indent=2, ensure_ascii=False)
     except FileExistsError:
         raise LaneRefused(f"{item} already has a lane; `ao lane list` shows it") from None
+    crowded = lane_cap_hold(root, cfg, name)
+    if crowded:                                         # another start made its record meanwhile
+        _forget_lane(root, name)
+        raise LaneRefused(crowded)
     try:
         made = subprocess.run([git_binary(), "worktree", "add", "-b", branch, path, base], cwd=root,
                               capture_output=True)

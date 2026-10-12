@@ -14,9 +14,9 @@ ao config unset round_budget
 A **project** setting is read from the project's `.ao/config.json`, then from the
 machine's `~/.ao/settings.json`, then its default. A **machine** setting governs state
 every project on the machine shares - alarm episodes, provider windows, heartbeats, the
-event log, where binaries are found - and is read from `~/.ao/settings.json` only. Both files are
-written whole or not at all. A dotted name is nested in the file:
-`alarms.red_after_minutes` is `{"alarms": {"red_after_minutes": 60}}`.
+event log, where binaries are found, how busy the machine may be when a suite starts - and is
+read from `~/.ao/settings.json` only. Both files are written whole or not at all. A dotted name
+is nested in the file: `alarms.red_after_minutes` is `{"alarms": {"red_after_minutes": 60}}`.
 
 A value that is set but cannot be used - text where a number belongs, a number out of
 range - is passed over for the next layer, and `ao doctor` names it with the value ao
@@ -80,6 +80,7 @@ machine setting written into a project.
 | `lane.env_file` | `.env` | project | the file at the top of a new lane that lane.env is written to; never one the lane already has |
 | `lane.post_create` | `none` | project | the command a new lane runs before it is reported ready, as an argument list and never shell text; {item}, {lane} and {path} stand for the lane's own; none: nothing runs |
 | `lane.post_create_timeout` | `600` | project | seconds a new lane's post-create command may run before the lane is reported not ready |
+| `limits.max_write_lanes` | `2` | project | lanes ao lane start makes in this checkout, in any state, before it refuses another until one is removed |
 | `keyflip.rotation` | `off` | machine | on: before an actor starts on a spent window, keyflip rotates the machine's account; off: never |
 | `alarms.red_repeat_hours` | `6` | machine | hours before a red alarm that still stands e-mails again |
 | `alarms.reset_after_hours` | `2` | machine | hours of quiet after which an alarm episode is over |
@@ -87,6 +88,9 @@ machine setting written into a project.
 | `architect.quota_window_hours` | `5` | machine | the architect's usage window, unless its limit names a week or a month; a reset named further away is not the one meant |
 | `heartbeat.retired_days` | `7` | machine | days of watchdog silence after which a project counts as retired, not dead |
 | `fleet.window_reserve_pct` | `20` | machine | percent of the machine's provider window kept free before a report wake |
+| `limits.refuse_above_swapins_per_sec` | `1500` | machine | swap-ins a second - the lower median of four one-second samples - above which a gate run and ao lock wait for the machine, then refuse, and a lane start refuses; swap used is never read |
+| `limits.refuse_below_free_memory_pct` | `15` | machine | percent of memory free - memory_pressure's figure on macOS, MemAvailable on Linux - below which a gate run and ao lock wait for the machine, then refuse, and a lane start refuses; 0: never |
+| `limits.refuse_below_free_disk_gib` | `8` | machine | GiB free on the volume that holds the home, never /, below which a gate run and ao lock wait for the machine, then refuse, and a lane start refuses; 0: never |
 | `binaries.extra_dirs` | `none` | machine | directories searched for agent binaries after PATH, before the usual install locations; a relative one is not searched |
 | `watchdog.bypass_adapters` | `none` | machine | adapters whose implementer the watchdog may nudge with the flag that turns off their own sandbox; none: such a nudge is refused |
 | `review.api_providers` | `none` | machine | OpenAI-compatible providers the API reviewer may ask, each `<word> <base URL> <variable holding its key>`; a reviewer names one as `<word>/<model>`; none: no provider |
@@ -156,6 +160,20 @@ a project someone else set up.
 The two filter settings are machine settings on purpose: they decide which programs
 `ao doctor` may run, unattended, and a project's own files are writable by the agents it
 governs ([gates.md](gates.md#a-filters-exclusions-are-proved-not-trusted)).
+
+The three limits that hold the machine are machine settings for the same reason: a gate run,
+`ao lock` and a lane start read memory, paging and disk before they start, no flag skips the
+reading, and a value written into a project's `.ao/config.json` is not used
+([gates.md](gates.md#serialisation-and-machine-pressure)). A person who wants a limit looser,
+or none at all - a ceiling no machine reaches, a floor of 0 - changes it for the machine:
+
+```
+ao config set limits.refuse_above_swapins_per_sec 3000 --machine
+ao config set limits.refuse_below_free_disk_gib 4 --machine
+```
+
+`limits.max_write_lanes` is the project's own: how many lanes `ao lane start` keeps in one
+checkout, a failed one among them until `ao lane remove` retires it ([parallel.md](parallel.md)).
 
 `review.same_family` weakens a guarantee, so it is a person's act on one project, on the
 record, as a waiver is. `ao config set review.same_family labeled --by <name>` (and `unset`)

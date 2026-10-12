@@ -79,6 +79,7 @@ def _own_home():
 _own_home()
 
 from ao import lib as A  # noqa: E402
+from ao import pressure as P  # noqa: E402
 from ao import watchdog as W  # noqa: E402
 
 
@@ -232,6 +233,22 @@ for _module, _name, _in_its_place in KEPT_OFF_SHARED.values():
     setattr(_module, _name, _in_its_place)
 
 
+# ---- a calm machine (MACHINE-PRESSURE) -----------------------------------------------------------
+#
+# A gate run, `ao lock` and a lane start read the machine before they start - memory, paging and
+# disk - and the reading samples paging for four seconds. The suite runs those commands hundreds of
+# times, on a machine that is nobody's to judge, so every test finds it calm, read at once:
+# pressure.read, the one place ao reads the machine through, hands CALM_MACHINE, and a test of the
+# reading puts its own there. An ao a test starts as a process reads the machine for itself, so such
+# a test starts CALM_AO: this interpreter running ao with the same calm machine, as `python -m ao`.
+
+CALM_MACHINE = P.Reading(free_memory_pct=60.0, swapins_per_sec=0, swapin_samples=(0, 0, 0, 0), free_disk_gib=500.0,
+                         unmeasured=())
+CALM_AO = [sys.executable, "-c", "import sys\nfrom ao import pressure\n"
+           f"pressure.read = lambda: pressure.{CALM_MACHINE!r}\n"
+           "from ao.cli import main\nsys.exit(main())\n"]
+
+
 @pytest.fixture
 def project(tmp_path, monkeypatch):
     """A minimal ao project: git repo, .ao/config.json, board, empty mailbox."""
@@ -290,6 +307,16 @@ def _machine_settings(tmp_path_factory):
         os.environ.pop("AO_SETTINGS", None)
     else:
         os.environ["AO_SETTINGS"] = previous
+
+
+@pytest.fixture(autouse=True)
+def _calm_machine():
+    """Every test finds the machine calm, read at once (above). Not through monkeypatch, for the reason
+    _ledger_checkpoints gives."""
+    measured = P.read
+    P.read = lambda: CALM_MACHINE
+    yield
+    P.read = measured
 
 
 @pytest.fixture(autouse=True)

@@ -19,6 +19,7 @@ from types import SimpleNamespace
 import pytest
 
 from ao import cli, lib as A
+from tests.conftest import CALM_AO
 
 
 def _git(root, *args):
@@ -173,8 +174,10 @@ def test_a_verify_started_under_ao_lock_runs_inside_the_lock_its_parent_holds(pr
     # Both processes find their home, and the machine lock in it, in this test's directory.
     env = A.self_child_env(dict(os.environ, HOME=A.HOME, USERPROFILE=A.HOME))
     ao = [sys.executable, "-m", "ao", "-C", root]
+    # `ao lock` reads the machine, calm as every test's (MACHINE-PRESSURE); the verify under its lock reads none.
+    held = CALM_AO + ["-C", root, "lock", "--wait", "0", "--"]
 
-    done = subprocess.run(ao + ["lock", "--wait", "0", "--"] + ao + ["verify", "--wait", "0"], cwd=root, env=env,
+    done = subprocess.run(held + ao + ["verify", "--wait", "0"], cwd=root, env=env,
                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
 
     assert done.returncode == 0, done.stdout + done.stderr

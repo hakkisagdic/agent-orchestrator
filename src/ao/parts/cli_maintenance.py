@@ -1723,6 +1723,15 @@ def _backup_lines(cfg):
     return [f"{'backup':<16}{tone}{_elapsed(seconds)} ago{C['reset']}  {C['dim']}{where}{C['reset']}"]
 
 
+def _machine_line(cfg):
+    """The machine as a gate run reads it, on one line: memory, paging and disk, each past its limit naming the limit
+    (MACHINE-PRESSURE). Not a problem `ao doctor --check` pages about: a busy machine is waited for, not mended."""
+    from . import pressure
+    reading = pressure.read()
+    tone = C["yellow"] if pressure.shortfalls(reading, cfg) else C["dim"] if reading.unmeasured else C["green"]
+    return f"{'machine':<16}{tone}{pressure.summary(reading, cfg)}{C['reset']}"
+
+
 def cmd_doctor(cfg, args):
     if getattr(args, "consistency", False):
         return _doctor_consistency(cfg, repair=getattr(args, "repair", False))
@@ -1872,6 +1881,7 @@ def cmd_doctor(cfg, args):
         print(f"{'ao for hooks':<16}{C['yellow']}{reach[0]}{C['reset']}")
         print(f"{'':<16}{C['dim']}fix: {reach[1]}{C['reset']}")
     print(f"{'checkout':<16}{_checkout_position(A.git_state(root))}")
+    print(_machine_line(cfg))
     for line in _measurement_lines(cfg):
         print(line)
     for _, text in _path_problems():                                                  # (WINDOWS-NO-CWD-EXEC)

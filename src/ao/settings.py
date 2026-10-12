@@ -200,6 +200,9 @@ SETTINGS = {
     "lane.post_create_timeout": Setting(
         600, int, 1, None, "project",
         "seconds a new lane's post-create command may run before the lane is reported not ready"),
+    "limits.max_write_lanes": Setting(
+        2, int, 1, None, "project",
+        "lanes ao lane start makes in this checkout, in any state, before it refuses another until one is removed"),
     "keyflip.rotation": Setting(
         "off", str, None, None, "machine",
         "on: before an actor starts on a spent window, keyflip rotates the machine's account; off: never"),
@@ -222,6 +225,22 @@ SETTINGS = {
     "fleet.window_reserve_pct": Setting(
         20, int, 0, 100, "machine",
         "percent of the machine's provider window kept free before a report wake"),
+    # Read before a gate run, `ao lock` and a lane start (MACHINE-PRESSURE). Machine settings on purpose: no flag skips
+    # the reading, and a person who wants it off changes these, outside every repository an agent writes. The numbers
+    # are those a working machine was gated with: idle to busy paged under 200 swap-ins a second and thrash in the
+    # thousands; healthy work ran at 40 to 49% of memory free and at 10 GiB of disk, and none ran at a third of a GiB.
+    "limits.refuse_above_swapins_per_sec": Setting(
+        1500, int, 1, None, "machine",
+        "swap-ins a second - the lower median of four one-second samples - above which a gate run and ao lock wait "
+        "for the machine, then refuse, and a lane start refuses; swap used is never read"),
+    "limits.refuse_below_free_memory_pct": Setting(
+        15, int, 0, 100, "machine",
+        "percent of memory free - memory_pressure's figure on macOS, MemAvailable on Linux - below which a gate run "
+        "and ao lock wait for the machine, then refuse, and a lane start refuses; 0: never"),
+    "limits.refuse_below_free_disk_gib": Setting(
+        8, int, 0, None, "machine",
+        "GiB free on the volume that holds the home, never /, below which a gate run and ao lock wait for the "
+        "machine, then refuse, and a lane start refuses; 0: never"),
     "binaries.extra_dirs": Setting(
         [], list, None, None, "machine",
         "directories searched for agent binaries after PATH, before the usual install locations; "

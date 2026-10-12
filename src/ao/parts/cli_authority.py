@@ -141,7 +141,7 @@ def _judge_gate(g, out, code):
     return passed, detail, counts
 
 
-def _take_gate_lock(root, wait):
+def _take_gate_lock(cfg, wait):
     """Take the machine gate lock for one run of the gates: the call that lets it go, or None if it stayed busy.
 
     The lock is taken first and looked at only when the take fails. A look and then a take were
@@ -156,9 +156,16 @@ def _take_gate_lock(root, wait):
     letting go to it. Nothing in ao holds the lock while it starts a verify - the review runner and
     the MCP server take none, and `ao commit-ok --verify` and `ao prove` hold none when they call
     one - so each of those runs takes the lock like any other.
+
+    Once it holds the lock, the run reads the machine and waits up to `wait` seconds more while its
+    memory, paging or disk is past its limit, keeping the lock - a run waiting for it would find the
+    same machine; a machine still short then has the lock let go, and no suite starts (MACHINE-PRESSURE).
+    Under its own holder's lock it reads nothing: the holder read the machine when it took the lock,
+    and what loads the machine now is the holder's own work.
     """
+    root = cfg["root"]
     if A.acquire_gate_lock(root, 0):
-        return A.release_gate_lock
+        return _room_under_the_lock(cfg, wait)
     holder = A.gate_lock_holder()
     ours, unread = A.ancestry(holder.get("pid")) if holder else (False, None)
     if ours:
@@ -179,9 +186,31 @@ def _take_gate_lock(root, wait):
     print(f"{C['yellow']}{who}{C['reset']} {C['dim']}({detail}){C['reset']} — waiting up to {wait}s so two "
           f"suites do not fight for one machine", flush=True)
     if A.acquire_gate_lock(root, wait):
-        return A.release_gate_lock
+        return _room_under_the_lock(cfg, wait)
     print(f"{C['red']}still busy; not starting a second suite{C['reset']}")
     return None
+
+
+def _room_under_the_lock(cfg, wait):
+    """The call that lets the gate lock go once the machine has room for the gates it is held for, or None, the lock
+    let go, when the machine stays short (MACHINE-PRESSURE)."""
+    room = False
+    try:
+        room = _machine_has_room(cfg, wait, "the gates")
+    finally:
+        if not room:                             # short, or stopped while it waited
+            A.release_gate_lock()
+    return A.release_gate_lock if room else None
+
+
+def _machine_has_room(cfg, wait, what):
+    """Whether the machine has room for `what`, after waiting up to `wait` seconds while it is short; a refusal is
+    printed, and the caller exits 2 on it as on a lock that stayed busy (MACHINE-PRESSURE)."""
+    from . import pressure
+    refused = pressure.wait_for_room(cfg, wait, what)
+    if refused:
+        print(f"{C['red']}{refused}{C['reset']}", flush=True)
+    return refused is None
 
 
 def cmd_merge_check(cfg, args):
@@ -227,7 +256,7 @@ def cmd_merge_check(cfg, args):
         A.record_merge_check(root, row)
         print(f"{C['red']}{C['b']}CONFLICT{C['reset']}  {conflict}  {C['dim']}recorded as {row['id']}{C['reset']}")
         return 1
-    release = _take_gate_lock(root, args.wait)
+    release = _take_gate_lock(cfg, args.wait)
     if release is None:
         return 2
     scratch = tempfile.mkdtemp(prefix="ao-merge-check-")
@@ -321,7 +350,7 @@ def cmd_verify(cfg, args):
     # The record names what ran, so a later edit to gates.json cannot inherit
     # this result (#61).
     gates_digest = A.gate_definitions_digest_of(spec, profile)
-    release = _take_gate_lock(root, args.wait)
+    release = _take_gate_lock(cfg, args.wait)
     if release is None:
         return 2
 

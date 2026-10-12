@@ -531,9 +531,17 @@ Parallel lanes are cheap to start and expensive to run. Five simultaneous test s
 swap a laptop into uselessness, and each lane individually looks reasonable. `ao verify` and
 `ao merge-check` hold one machine-wide lock while a project's gates run; another project's run
 waits up to `--wait` seconds for it, then refuses rather than start a second suite - and so does a
-run of the same project ([gates.md](gates.md#serialisation-and-machine-pressure)). Not built yet:
-checking memory pressure before a lane or a gate run starts, and refusing rather than queueing
-into a thrash; `ao lane start` starts a lane whatever the machine's load ([parallel.md](parallel.md)).
+run of the same project ([gates.md](gates.md#serialisation-and-machine-pressure)). Before a gate
+run, `ao lock -- <command>` or a lane starts, ao reads the machine's memory, paging and disk, and
+waits or refuses rather than queue into a thrash; `ao lane start` also refuses a lane past
+`limits.max_write_lanes` ([parallel.md](parallel.md)). The limits on memory, paging and disk are
+machine settings, read from `~/.ao/settings.json` and never from a project's own files, and no
+flag skips the reading. Not built yet: the reading on Windows, where the gate lock alone keeps
+two suites apart, and a queue - a lane start that is refused is not started later.
+
+*In ao since slice MACHINE-PRESSURE: the machine is read before a gate run, `ao lock` and a lane
+start, and lanes are capped per checkout; `ao lane start` started a lane whatever the machine's
+load.*
 
 ## 9. What this model does not cover
 

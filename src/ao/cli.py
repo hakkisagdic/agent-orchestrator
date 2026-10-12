@@ -119,7 +119,8 @@ def build_parser(root=None):
     v = sub.add_parser("verify", help="run the declared gates and record the result")
     v.add_argument("-p", "--profile")
     v.add_argument("--wait", type=int, default=900,
-                   help="seconds to wait if another run, of any project, holds the machine gate lock")
+                   help="seconds to wait if another run, of any project, holds the machine gate lock, and as long "
+                        "again while the machine is short of memory, paging or disk")
     v.set_defaults(fn=cmd_verify)
 
     mc = sub.add_parser("merge-check", help="run the gates on a merge's result before merging, and record it")
@@ -127,7 +128,8 @@ def build_parser(root=None):
     mc.add_argument("--into", default="HEAD", help="what it is merged into (default HEAD)")
     mc.add_argument("-p", "--profile", help="gate profile (default full, when declared)")
     mc.add_argument("--wait", type=int, default=900,
-                    help="seconds to wait if another run, of any project, holds the machine gate lock")
+                    help="seconds to wait if another run, of any project, holds the machine gate lock, and as long "
+                         "again while the machine is short of memory, paging or disk")
     mc.set_defaults(fn=cmd_merge_check)
 
     wd = sub.add_parser("watchdog", help="the scheduled job that restarts a stalled agent: launchd, "
@@ -431,7 +433,9 @@ def build_parser(root=None):
                     help="with --range: leave out the commits older than the first one carrying Ao- trailers")
     cc.set_defaults(fn=cmd_commit_check)
     lk = sub.add_parser("lock", help="run a heavy command under the machine-wide lock")
-    lk.add_argument("--wait", type=int, default=1800)
+    lk.add_argument("--wait", type=int, default=1800,
+                    help="seconds to wait if another run holds the machine gate lock, and as long again while the "
+                         "machine is short of memory, paging or disk")
     lk.add_argument("command", nargs=argparse.REMAINDER)
     lk.set_defaults(fn=cmd_lock)
     mc = sub.add_parser("mcp", help="serve project state to MCP clients (stdio)")

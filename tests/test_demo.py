@@ -13,9 +13,11 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 
 from ao import cli, demo
+from tests.conftest import CALM_AO
 
 # A reviewer that answers the probe and approves whatever it is shown: the bug then lands nowhere
 # only if the demo notices that the review did not find it.
@@ -29,12 +31,32 @@ APPROVES_EVERYTHING = (
 )
 
 
+class _CalmChildren:
+    """The demo's subprocess module, except that each ao it starts finds the machine calm, as every test's ao does
+    (MACHINE-PRESSURE): its two `ao verify` runs would sample the machine's paging for four seconds each."""
+
+    def __init__(self):
+        self.started = []
+
+    def __getattr__(self, name):
+        return getattr(subprocess, name)
+
+    def run(self, argv, *args, **kwargs):
+        if list(argv[:3]) == [sys.executable, "-m", "ao"]:
+            argv = CALM_AO + list(argv[3:])
+            self.started.append(argv[len(CALM_AO)])
+        return subprocess.run(argv, *args, **kwargs)
+
+
 def _play(tmp_path, monkeypatch, capsys, *words):
     """`ao <words>` as the parser reads it, with the temporary directory the test's own; (exit, what it printed)."""
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    children = _CalmChildren()
+    monkeypatch.setattr(demo, "subprocess", children)
     args = cli.build_parser().parse_args(list(words))
     capsys.readouterr()
     code = args.fn({}, args)
+    assert "verify" in children.started                         # the calm machine reached the demo's verify
     return code, re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
 
 

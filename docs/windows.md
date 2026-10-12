@@ -18,6 +18,7 @@ What works, what does not, and how hosted runners exercise it.
 | the programs ao starts | Windows' own tools from its system directory, every other program from PATH's absolute entries, never the current directory (below) |
 | files ao keeps private (`~/.ao/email.json`, `telegram.json`, `pings.json`) | as private as `~/.ao`, which takes its permissions from the user profile: Windows keeps no file mode, and ao says so where it saves one and in `ao doctor` (below) |
 | the reviewer stall check (`review.stall_minutes`) | does not apply: Windows has no process group to read a reviewer's CPU from, so the review's timeout ends a reviewer that hangs, and the review says so (below) |
+| the machine read before a gate run, `ao lock` and a lane start | not measured: ao reads memory, paging and disk on macOS and Linux, so the run says once that it read none and goes on, never refused on its account; the gate lock still keeps two suites apart, and `ao doctor`'s `machine` line says so ([gates.md](gates.md#serialisation-and-machine-pressure)) |
 | a transcript read without following a link | holds: where there is no O_NOFOLLOW the path is looked at before it is opened, and the file opened must be the one looked at (below) |
 | the grant audit (`ao doctor`, an actor's grant) | asks `py -c`, `powershell -Command` and `cmd /c`, with their kin, as it asks `python -c` (below) |
 

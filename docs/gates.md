@@ -234,15 +234,50 @@ declare, is told so at once, where it waited out another suite first. The candid
 inside the lock, so an index changed during the wait is not taken for one changed while the
 gates ran.*
 
-Not built yet: checking memory pressure and the swap-in rate before a gate run, and refusing
-rather than thrashing. Five simultaneous test suites will make a laptop unusable while
-each one individually looks reasonable — and the failure mode is a machine that appears
-hung, which is the most expensive kind of confusion to debug.
+Once a run holds the lock it reads the machine, and waits while the machine is short rather
+than thrash. Five simultaneous test suites will make a laptop unusable while each one
+individually looks reasonable — and the failure mode is a machine that appears hung, which
+is the most expensive kind of confusion to debug. The lock keeps ao's own suites apart; the
+reading catches whatever else loads the machine. Three figures are read, each held to a
+machine setting ([configuration](configuration.md)):
+
+| figure | read from | a run waits while it is |
+|---|---|---|
+| memory free | macOS: the system-wide free percentage `memory_pressure` prints; Linux: MemAvailable over MemTotal | under `limits.refuse_below_free_memory_pct`, 15% |
+| paging | the swap-in counter - vm_stat's Swapins on macOS, pswpin in /proc/vmstat on Linux - as the lower median of four one-second samples | over `limits.refuse_above_swapins_per_sec`, 1500 a second |
+| disk free | the volume that holds your home, in GiB | under `limits.refuse_below_free_disk_gib`, 8 GiB |
+
+A machine that has room costs one reading, about four seconds. One that is short is read
+again every ten seconds for up to `--wait` seconds more - the lock's own wait, given again -
+and when it stays short the lock is let go and the run exits 2, naming what it read, the limit
+and what to do: let the machine settle, or free disk, and run it again; or a person changes the
+limit with `ao config set <setting> <n> --machine`. A run inside a lock its own holder took, as
+`ao lock -- ao verify` starts its verify, reads nothing: the holder read the machine when it took
+the lock. No flag skips the reading. The limits live in `~/.ao/settings.json`, outside every
+repository an agent writes, and a project's `.ao/config.json` cannot loosen them. On Windows,
+and wherever a figure cannot be read, it is not measured: the run says so once and is never
+refused on its account. `ao doctor` shows the reading on one line.
 
 A word on measurement, learned the hard way: do not gate on swap *usage*. macOS does not
 release swap files after a heavy job, so an idle machine can read 93% and the gate is red
 forever — and a gate that is always red teaches everyone to ignore gates, which is worse
-than having none. Gate on **swap-ins per second**, which reflects present pressure.
+than having none. Gate on **swap-ins per second**, which reflects present pressure, and take
+their median: paging spikes by an order of magnitude for a second whenever anything starts.
+Four one-second samples of an idle machine read 96, 185, 237 and 1482, and the mean of a
+window holding the last closed the gate on a machine with 49% of its memory free; the median,
+the second smallest of four, lets a burst of a second or two pass and still catches sustained
+thrash, which runs in the thousands where idle to busy stays under 200. Take memory as the
+system reports it: worked out from vm_stat's page counts, it read 1.1 GB free on a machine the
+system called 47% free. And read the disk where the home is, never `/`, which on macOS is the
+sealed system volume and reads 100% full when all is well. The floors come from what was
+measured: healthy work ran at 40 to 49% of memory free, far above 15%, and at 10 GiB of disk,
+which 8 GiB passes, where it could not run at a third of a GiB. Raise a floor if a run ever
+dies above it.
+
+*In ao since slice MACHINE-PRESSURE: a gate run and `ao lock` read memory, paging and disk once
+they hold the lock, and wait up to `--wait` while one is past its limit, then refuse, where they
+started their suite into whatever else loaded the machine; `ao lane start` reads them before it
+makes a lane and refuses at once ([parallel.md](parallel.md)).*
 
 ## Reporting a failed gate
 

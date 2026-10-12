@@ -153,6 +153,8 @@ def cmd_lock(cfg, args):
         print(f"{C['red']}machine still busy after {args.wait}s; not starting{C['reset']}")
         return 2
     try:
+        if not _machine_has_room(cfg, args.wait, "the command"):     # memory, paging and disk (MACHINE-PRESSURE)
+            return 2
         return subprocess.run(command, cwd=root).returncode
     finally:
         A.release_gate_lock()
