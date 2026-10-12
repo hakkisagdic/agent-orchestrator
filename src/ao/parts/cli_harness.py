@@ -66,6 +66,7 @@ def cmd_harness(cfg, args):
         except acp.ProbeError as exc:
             failed += 1
             print(f"  {adapter_id:<12} {C['red']}no answer{C['reset']}: {exc}")
+            _probe_left(adapter_id, exc.still_running)
             continue
         left = found.pop("still_running", [])
         profile = dict({"id": adapter_id, "measured_at": int(time.time()), "argv": argv, "binary": path,
@@ -79,11 +80,17 @@ def cmd_harness(cfg, args):
               f"session: {', '.join(found['session']) or '-'}  mcp: {', '.join(found['mcp']) or '-'}"
               + (f"  sessions here: {found['sessions']}" if "sessions" in found else ""))
         if left:
-            # Asked, not assumed stopped (WINDOWS-STOP-PROVEN).
             failed += 1
-            print(f"  {adapter_id:<12} {C['red']}{len(left)} process(es) of its agent still run after the probe "
-                  f"stopped it{C['reset']}: {left}; {_stop_by_hand()}")
+            _probe_left(adapter_id, left)
     return 1 if failed else 0
+
+
+def _probe_left(adapter_id, left):
+    """Say what of a probed agent still runs after the probe stopped it: asked, not assumed stopped
+    (WINDOWS-STOP-PROVEN), whether the agent answered or not (ACP-PROBE-LEFT)."""
+    if left:
+        print(f"  {adapter_id:<12} {C['red']}{len(left)} process(es) of its agent still run after the probe "
+              f"stopped it{C['reset']}: {list(left)}; {_stop_by_hand()}")
 
 
 # ---- what a harness reads from the tree, read by a person before anything ao starts here runs (HARNESS-CONFIG) ----

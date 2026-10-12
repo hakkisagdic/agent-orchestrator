@@ -76,7 +76,8 @@ a person (`reap-survived`, [alarms.md](alarms.md)). `ao review cancel` records n
 review's runner still runs, records a reviewer it could not stop as still running, keeping its place
 among the helpers, and exits 1. A reviewer stopped on its timeout, an ACP reviewer's session, `ao
 harness probe`, `ao writers --clean`, a codebase provider, a lane's post-create command and a filter
-hook ao probes each say what of them still runs. What taskkill and the table both miss - a process
+hook ao probes each say what of them still runs - a probe whose harness never answered too, which
+said only that it had not (ACP-PROBE-LEFT). What taskkill and the table both miss - a process
 whose parent had exited under a parent that had exited too - the hold's second reading still names
 when it is an agent's. On macOS and Linux a turn is stopped by its process group as before, and a
 forced stop is asked about the same way. `tests/test_windows_stop_proven.py` makes taskkill and

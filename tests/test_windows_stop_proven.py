@@ -342,6 +342,38 @@ def test_a_harness_probe_that_leaves_its_agent_running_says_so_and_exits_1(proje
     assert "still_running" not in profile
 
 
+def test_a_probe_that_got_no_answer_still_says_what_of_its_agent_runs(project, agent, tmp_path, monkeypatch, capsys):
+    """The error went up without it: a probe that timed out named nothing still running (ACP-PROBE-LEFT)."""
+    argv, _, write, _ = agent
+    write(silent=True)                                                   # asked, it never answers
+    _adapter(project, "fake", argv)
+    stop = A.kill_turn
+    monkeypatch.setattr(A, "kill_turn", lambda pid, sig: (stop(pid, sig) or []) + [4343])
+
+    with pytest.raises(acp.ProbeError, match="no answer to initialize") as raised:
+        acp.probe(argv, str(tmp_path), timeout=1)
+    assert raised.value.still_running == [4343]
+
+    args = cli.build_parser().parse_args(["harness", "probe", "fake", "--timeout", "1"])
+    assert cli.cmd_harness(project, args) == 1
+    assert _plain(capsys).splitlines()[-2:] == [
+        "  fake         no answer: no answer to initialize within the time allowed",
+        f"  fake         1 process(es) of its agent still run after the probe stopped it: [4343]; {cli._stop_by_hand()}"]
+    assert not os.path.exists(cli.harness_profile_path("fake"))
+
+
+def test_a_probe_that_failed_and_left_nothing_running_says_only_why_it_failed(project, agent, capsys):
+    argv, _, write, _ = agent
+    write(exit=True)                                                     # it ends before it answers
+    _adapter(project, "fake", argv)
+
+    assert _probe(project, "fake") == 1
+
+    said = _plain(capsys)
+    assert "fake         no answer: the agent ended before it answered initialize" in said
+    assert "still run" not in said and acp.ProbeError("x").still_running == ()
+
+
 # ---- what ao starts and stops on its own: a provider, a lane's command, a filter hook -------------------------
 
 def test_a_codebase_provider_stopped_on_its_timeout_says_what_of_it_still_runs(tmp_path, monkeypatch):

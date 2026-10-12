@@ -33,7 +33,9 @@ END_TURN = STOP_REASONS[0]
 
 
 class ProbeError(RuntimeError):
-    """An agent that did not answer what it was asked, and why."""
+    """An agent that did not answer what it was asked, and why; `still_running` is what of it still ran after
+    a probe that failed stopped it (ACP-PROBE-LEFT)."""
+    still_running = ()
 
 
 def _take(parts, update):
@@ -167,7 +169,8 @@ def probe(argv, cwd, timeout=PROBE_TIMEOUT, sessions=False, env=None):
     Asks `initialize` and, with `sessions`, `session/list` for `cwd` where the agent lists sessions,
     keeping how many it listed and nothing of what they are. The agent is stopped, with everything it
     started, whatever it answers; what of it still runs after that, if anything, is `still_running`,
-    never kept in a profile (WINDOWS-STOP-PROVEN).
+    never kept in a profile (WINDOWS-STOP-PROVEN) - a key of the answer, and of the ProbeError where there
+    is no answer (ACP-PROBE-LEFT).
     """
     try:
         proc = subprocess.Popen(list(argv), cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -177,7 +180,7 @@ def probe(argv, cwd, timeout=PROBE_TIMEOUT, sessions=False, env=None):
         raise ProbeError(f"could not start {argv[0]}: {exc}") from exc
     lines = queue.Queue()
     threading.Thread(target=_read, args=(proc.stdout, lines), daemon=True).start()
-    deadline = time.monotonic() + timeout
+    deadline, failed = time.monotonic() + timeout, None
     try:
         _send(proc, {"jsonrpc": "2.0", "id": 0, "method": "initialize",
                      "params": {"protocolVersion": PROTOCOL_VERSION, "clientCapabilities": {},
@@ -187,10 +190,18 @@ def probe(argv, cwd, timeout=PROBE_TIMEOUT, sessions=False, env=None):
             _send(proc, {"jsonrpc": "2.0", "id": 1, "method": "session/list", "params": {"cwd": cwd}})
             listed = _answer(proc, lines, 1, "session/list", deadline)
             found["sessions"] = len(listed.get("sessions") or []) if isinstance(listed, dict) else 0
+    except ProbeError as exc:
+        failed = exc
     except (OSError, ValueError) as exc:
-        raise ProbeError(f"the agent's streams failed: {exc}") from exc
+        failed = ProbeError(f"the agent's streams failed: {exc}")
+        failed.__cause__ = exc
     finally:
         left = _stop(proc)
+    if failed is not None:
+        # An agent that did not answer is stopped as one that did, and what its stop left is said as well: the
+        # error went up without it, and a probe that timed out named nothing still running (ACP-PROBE-LEFT).
+        failed.still_running = left
+        raise failed
     if left:
         found["still_running"] = left
     return found

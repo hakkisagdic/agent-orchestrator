@@ -485,7 +485,9 @@ as it has answered. What it says - its protocol version, name and release, wheth
 which session, prompt and MCP capabilities it has and which ways it authenticates - is kept in
 `~/.ao/harness/<id>.json`, with when it was asked and which binary answered. How many sessions it listed
 is kept, and nothing of what they are. A harness that is not installed is said to be so; one that does
-not answer within `--timeout` seconds, or ends first, is said not to, and the command exits 1.
+not answer within `--timeout` seconds, or ends first, is said not to, and the command exits 1. It is
+stopped as one that answered is, and what of it still runs after the stop is named beside why it failed
+(ACP-PROBE-LEFT).
 
 *In ao since slice ACP-CLIENT: `ao.acp.Session`, which holds one session with a harness and runs one prompt
 turn in it. `ao review` is the first command to drive a harness through it, where a project sets
