@@ -103,8 +103,9 @@ jobs:
           - os: windows-latest
             utf8: "off"
     runs-on: ${{ matrix.os }}
-    # A Windows runner spawns processes slowest.
-    timeout-minutes: 40
+    # A Windows runner spawns processes slowest: the suite took 37 minutes there on 3.9 and ran past 40 on
+    # 2026-10-12, when the job was cancelled before it said a result (CI-WINDOWS-TIME).
+    timeout-minutes: 60
     env:
       PYTHONDONTWRITEBYTECODE: "1"
       # Python reads an empty PYTHONUTF8 or PYTHONIOENCODING as unset.
@@ -126,7 +127,7 @@ jobs:
       matrix:
         os: ${{ fromJSON(inputs.os == 'all' && '["ubuntu-latest","macos-latest","windows-latest"]' || format('["{0}"]', inputs.os)) }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    timeout-minutes: 60                     # as the weekly job's: Windows is the slowest runner (CI-WINDOWS-TIME)
     env:
       PYTHONDONTWRITEBYTECODE: "1"
       # Python reads an empty PYTHONUTF8 or PYTHONIOENCODING as unset.
