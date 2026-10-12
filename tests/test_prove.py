@@ -77,3 +77,10 @@ def test_the_getting_started_page_types_only_commands_ao_has():
 
     assert "prove" in typed and "init" in typed and "hooks" in typed
     assert [name for name in typed if name not in commands] == []
+
+
+
+def test_the_boundary_ao_prove_writes_is_one_criterion_and_no_order_to_a_reviewer():
+    """PROVE-BOUNDARY-2: reworded to say what is accepted, the boundary gained a semicolon, which parts a boundary into
+    criteria, so `ao prove` refused its own throwaway slice for a criterion with no verdict."""
+    assert ";" not in cli.PROVE_BOUNDARY and "approve" not in cli.PROVE_BOUNDARY.lower()

@@ -1461,9 +1461,9 @@ def _turn_command_lines(cfg):
 
 
 # Said as what is accepted, never as a word to a reviewer: a boundary that tells a reviewer what to answer reads as
-# the instruction a candidate must not carry (the review of TURN-ARGV).
-PROVE_BOUNDARY = ("ao prove: a throwaway candidate that adds one line to ao-prove.txt and nothing else; it is "
-                  "acceptable when its diff is exactly that.")
+# the instruction a candidate must not carry (the review of TURN-ARGV). One sentence with no semicolon: a boundary's
+# semicolons part its criteria, and each criterion needs a verdict of its own (PROVE-BOUNDARY-2).
+PROVE_BOUNDARY = "ao prove: a throwaway candidate whose whole diff adds one line to ao-prove.txt and nothing else."
 
 
 def _prove_throwaway(cfg):
