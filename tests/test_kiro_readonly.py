@@ -7,11 +7,11 @@ to and made nothing. ao writes that agent into the reviewer's own directory for 
 """
 import json
 import os
-import sys
 
 import pytest
 
 from ao import cli, lib as A
+from tests.standin import program
 
 KIRO = ["kiro-cli", "chat", "--no-interactive", "{prompt}", "--model", "m", "--trust-tools="]
 
@@ -71,21 +71,18 @@ def test_a_reviewer_agent_ao_cannot_write_is_named():
     assert len(A.reviewer_agent_problems(broken)) == 3
 
 
-@pytest.mark.skipif(os.name == "nt", reason="the stand-in harness is a script its shebang runs")
 def test_a_kiro_review_runs_its_harness_as_the_agent_written_beside_the_tree(project, tmp_path):
-    """End to end: the stand-in kiro-cli finds the agent ao named in its own directory, holding read tools alone."""
-    harness = tmp_path / "kiro-cli"
-    harness.write_text(f"""#!{sys.executable}
-import json, os, sys
+    """End to end: the stand-in kiro-cli finds the agent ao named in its own directory, holding read tools alone. A
+    program on Windows too (WINDOWS-LANE-PARITY)."""
+    harness = program(tmp_path, "kiro-cli", """import json, os, sys
 name = sys.argv[sys.argv.index("--agent") + 1]
 with open(os.path.join(".kiro", "agents", name + ".json"), encoding="utf-8") as fh:
     tools = json.load(fh)["tools"]
 assert tools == ["read", "grep", "glob"], tools
 for line in ("VERDICT: APPROVED", "BLOCKER: 0", "HIGH: 0", "MEDIUM: 0", "LOW: 0"):
     print(line)
-""", encoding="utf-8")
-    harness.chmod(0o755)
-    argv = [str(harness), "chat", "--no-interactive", "review this", "--model", "m", "--trust-tools="]
+""")
+    argv = [harness, "chat", "--no-interactive", "review this", "--model", "m", "--trust-tools="]
 
     attempt = cli._run_reviewer(project["root"], argv, 30)
 

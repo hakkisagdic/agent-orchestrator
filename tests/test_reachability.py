@@ -8,20 +8,19 @@ and `ao adapters` marks the column.
 """
 import json
 import os
-import sys
 
 from ao import cli, lib as A
+from tests.standin import program
 
 ADAPTERS = os.path.join(os.path.dirname(os.path.abspath(A.__file__)), "adapters")
 
 
 def _conformed(adapter, tmp_path):
-    harness = tmp_path / "harness"
+    # The harness is a program on Windows too, where its shebang line ran nothing (WINDOWS-LANE-PARITY).
     source = open(os.path.join(os.path.dirname(A.__file__), "conformance_harness.py"), encoding="utf-8").read()
-    harness.write_text(f"#!{sys.executable}\n" + source, encoding="utf-8")
-    harness.chmod(0o755)
+    harness = program(tmp_path, "harness", source)
     return dict((capability, (state, detail))
-                for capability, state, detail in A.conform_adapter(adapter, str(harness), str(tmp_path)))
+                for capability, state, detail in A.conform_adapter(adapter, harness, str(tmp_path)))
 
 
 SHAPED = {"id": "shaped", "name": "Shaped", "verified": "untested",

@@ -76,10 +76,7 @@ def test_a_kiro_reviewer_that_names_text_output_is_named():
 
 # ---- a reviewer whose provider failed to answer this time is a passing failure, retried (KIRO-TRANSIENT) --------
 
-import os  # noqa: E402
-import sys  # noqa: E402
-
-import pytest  # noqa: E402
+from tests.standin import program  # noqa: E402
 
 FAILED_TO_GENERATE = "\n".join([
     json.dumps({"type": "runStarted", "data": {"payloadSchema": "acp", "acpProtocolVersion": 1, "engine": "v2"}}),
@@ -99,13 +96,9 @@ def test_a_kiro_run_its_provider_failed_to_answer_is_read_as_passing():
     assert cli._stream_error(["claude", "-p", "x", "--output-format", "stream-json"], FAILED_TO_GENERATE) is None
 
 
-@pytest.mark.skipif(os.name == "nt", reason="the stand-in harness is a script its shebang runs")
 def test_a_reviewer_whose_provider_failed_to_answer_is_a_temporary_exit_retried(project, tmp_path):
-    harness = tmp_path / "kiro-cli"
-    harness.write_text(f"#!{sys.executable}\nimport sys\nprint({FAILED_TO_GENERATE!r})\nsys.exit(1)\n",
-                       encoding="utf-8")
-    harness.chmod(0o755)
-    argv = [str(harness)] + A.pinned_argv(KIRO, "reviewer")[0][1:]
+    harness = program(tmp_path, "kiro-cli", f"import sys\nprint({FAILED_TO_GENERATE!r})\nsys.exit(1)\n")
+    argv = [harness] + A.pinned_argv(KIRO, "reviewer")[0][1:]
 
     attempt = cli._run_reviewer(project["root"], [part.replace("{prompt}", "review this") for part in argv], 30)
 
@@ -123,34 +116,26 @@ EMPTY_TURN = "\n".join([
 ])
 
 
-@pytest.mark.skipif(os.name == "nt", reason="the stand-in harness is a script its shebang runs")
 def test_a_turn_that_ran_and_ended_on_no_message_is_asked_once_more(project, tmp_path):
     """Measured on kiro-cli 2.27.1 on 2026-10-05: Sol ended three of twelve reviews on an empty message after minutes
     of reading, and exited 0. The review was UNAVAILABLE and not retried, as a reviewer that writes nothing is."""
-    harness = tmp_path / "kiro-cli"
-    harness.write_text(f"#!{sys.executable}\nprint({EMPTY_TURN!r})\n", encoding="utf-8")
-    harness.chmod(0o755)
-    argv = [str(harness)] + A.pinned_argv(KIRO, "reviewer")[0][1:]
+    harness = program(tmp_path, "kiro-cli", f"print({EMPTY_TURN!r})\n")
+    argv = [harness] + A.pinned_argv(KIRO, "reviewer")[0][1:]
 
     attempt = cli._run_reviewer(project["root"], [part.replace("{prompt}", "review this") for part in argv], 30)
 
     assert attempt["kind"] == "silence" and attempt["retryable"] is True and "empty message" in attempt["reason"]
     # a reviewer that writes text and wrote none shows no turn, and is not asked again
-    quiet = tmp_path / "quiet"
-    quiet.write_text(f"#!{sys.executable}\n", encoding="utf-8")
-    quiet.chmod(0o755)
-    assert cli._run_reviewer(project["root"], [str(quiet), "review this"], 30)["retryable"] is False
+    quiet = program(tmp_path, "quiet", "")
+    assert cli._run_reviewer(project["root"], [quiet, "review this"], 30)["retryable"] is False
 
 
-@pytest.mark.skipif(os.name == "nt", reason="the stand-in harness is a script its shebang runs")
 def test_a_turn_that_ended_on_no_message_is_not_answered_by_its_stderr(project, tmp_path, capsys):
     """REVIEW-EMPTY-TURN-2: a run that answers in session updates said nothing there, and a warning on its stderr
     was read as its answer, a success no route after it or retry replaced."""
-    harness = tmp_path / "kiro-cli"
-    harness.write_text(f"#!{sys.executable}\nimport sys\nprint({EMPTY_TURN!r})\n"
-                       "print('warning: a newer kiro-cli is out', file=sys.stderr)\n", encoding="utf-8")
-    harness.chmod(0o755)
-    argv = [str(harness)] + A.pinned_argv(KIRO, "reviewer")[0][1:]
+    harness = program(tmp_path, "kiro-cli", f"import sys\nprint({EMPTY_TURN!r})\n"
+                                            "print('warning: a newer kiro-cli is out', file=sys.stderr)\n")
+    argv = [harness] + A.pinned_argv(KIRO, "reviewer")[0][1:]
 
     attempt = cli._run_reviewer(project["root"], [part.replace("{prompt}", "review this") for part in argv], 30)
 

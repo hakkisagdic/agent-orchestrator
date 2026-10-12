@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from ao import cli, lib as A
+from tests.standin import program
 
 
 def _fake(*lines, exit_code=0):
@@ -960,32 +961,24 @@ def test_communication_error_drain_is_bounded_and_closes_pipes(
     assert attempt["retryable"] is False
 
 
-@pytest.mark.skipif(os.name == "nt", reason="the fixture reviewer runs through its shebang, which Windows "
-                                            "does not honour")
 def test_reviewer_resolver_passes_over_a_relative_path_entry(
     project, tmp_path, monkeypatch,
 ):
     """WINDOWS-NO-CWD-EXEC: a relative PATH entry was made absolute against the current directory, which can be a
     tree an agent writes, so a reviewer program left there under the name was the one ao resolved and ran. It is
-    passed over now: the reviewer reached only through it is not found, and nothing runs."""
-    binary_dir = tmp_path / "relative-bin"
-    binary_dir.mkdir()
-    binary = binary_dir / "ao59-relative-reviewer"
-    binary.write_text(
-        "#!/usr/bin/env python3\n"
-        "from pathlib import Path\n"
-        "Path('version-side-effect').write_text('x', encoding='utf-8')\n"
-        "print('fixture reviewer 7.8.9')\n",
-        encoding="utf-8",
-    )
-    binary.chmod(0o755)
+    passed over now: the reviewer reached only through it is not found, and nothing runs. The reviewer is a program
+    Windows starts too, so the relative entry is passed over there as well (WINDOWS-LANE-PARITY)."""
+    program(tmp_path / "relative-bin", "ao59-relative-reviewer",
+            "from pathlib import Path\n"
+            "Path('version-side-effect').write_text('x', encoding='utf-8')\n"
+            "print('fixture reviewer 7.8.9')\n")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv(
         "PATH", "relative-bin" + os.pathsep + os.environ.get("PATH", "")
     )
 
     resolved, version = cli._reviewer_resolve_binary(
-        project["root"], binary.name
+        project["root"], "ao59-relative-reviewer"
     )
 
     assert (resolved, version) == (None, "")

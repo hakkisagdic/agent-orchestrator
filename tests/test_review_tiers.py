@@ -28,6 +28,7 @@ from tests.test_commit_authority import _allow_commit_prerequisites
 from tests.test_profiles import _init_args
 from tests.test_prove import PROBE_OR_APPROVE
 from tests.test_review_chain import _args, _fake, _repo_with_change
+from tests.standin import program
 
 PERSON = "A. Person"
 
@@ -371,19 +372,15 @@ def test_the_doctor_names_the_tier_in_force_and_a_project_with_no_implementer_as
     assert re.search(r"^review tier\s+not established", out, re.M) and "no implementer is configured" in out
 
 
-@pytest.mark.skipif(os.name == "nt", reason="the fixture reviewer runs through its shebang, which Windows "
-                                            "does not honour")
 def test_the_single_harness_profile_initialises_once_a_tier_is_chosen(project, tmp_path, monkeypatch, capsys):
-    # A script in the harness's name that answers the probe; the harness itself is never started.
-    fake = tmp_path / "bin" / "claude"
-    fake.parent.mkdir()
-    fake.write_text("#!/usr/bin/env python3\nimport sys\n"
-                    "if '--version' in sys.argv:\n    print('1.0.0')\n    raise SystemExit(0)\n"
-                    "print(sys.argv[sys.argv.index('-p') + 1].splitlines()[-1])\n", encoding="utf-8")
-    fake.chmod(0o755)
+    # A program in the harness's name that answers the probe, on Windows too (WINDOWS-LANE-PARITY); the harness
+    # itself is never started.
+    fake = program(tmp_path / "bin", "claude", "import sys\n"
+                   "if '--version' in sys.argv:\n    print('1.0.0')\n    raise SystemExit(0)\n"
+                   "print(sys.argv[sys.argv.index('-p') + 1].splitlines()[-1])\n")
     composed = cli._reviewer_block
     monkeypatch.setattr(cli, "_reviewer_block", lambda adapter, model=None: dict(
-        composed(adapter, model), argv=[str(fake)] + composed(adapter, model)["argv"][1:]))
+        composed(adapter, model), argv=[fake] + composed(adapter, model)["argv"][1:]))
 
     same = tmp_path / "same-family"
     same.mkdir()

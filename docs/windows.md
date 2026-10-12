@@ -21,6 +21,21 @@ What works, what does not, and how hosted runners exercise it.
 | a transcript read without following a link | holds: where there is no O_NOFOLLOW the path is looked at before it is opened, and the file opened must be the one looked at (below) |
 | the grant audit (`ao doctor`, an actor's grant) | asks `py -c`, `powershell -Command` and `cmd /c`, with their kin, as it asks `python -c` (below) |
 
+*In ao since slice WINDOWS-LANE-PARITY: the Windows lane runs the reviewer and authority tests the
+other lanes run. Each of them started a stand-in harness - a reviewer, a kiro-cli, an agy, an opencode,
+a conformance harness - as a Python script whose first line named the interpreter; Windows runs no
+such line, and ao knows a harness by the name of the program it starts, so `[sys.executable, script]`
+would be no harness of any adapter's, and every one of them was skipped on Windows. A stand-in is now
+written by `tests/standin.py`: an executable script on POSIX, and on Windows `<name>.exe`, as pip makes
+a console script there - distlib's console launcher, a line naming the interpreter, and the script as
+`__main__.py` in a zip after them. Eighteen tests that were skipped on Windows run there now; the one
+reviewer test still skipped waits for a sign-in line while the reviewer runs, which Windows does not
+hand over until the reviewer's streams close. The weekly run also has a Windows leg without Python's
+UTF-8 mode, as a default install runs it, and a dispatch can drop UTF-8 mode on any runner
+(`-f utf8=off`). `tests/test_windows_lane_parity.py` runs a stand-in as a program on every platform,
+and fails when a test is skipped on Windows for its shebang again, or the workflow loses that leg or
+a lane's list of what it skipped.*
+
 *In ao since slice WINDOWS-SAY-WHY: what ao cannot hold on Windows it holds another way, or says
 so, where it bears and in `ao doctor` (`on Windows`). Several guarantees were made with what Windows
 does not have, and there they quietly did not hold. Opening a subagent's transcript without following a
@@ -166,9 +181,10 @@ case. A prompt file is no channel for it, since its path is an argument too.
 `tests/test_windows_cmd_channel.py` holds it on every platform by deciding as Windows does; the
 lane has not yet started an agent CLI through a `.cmd`.*
 
-The hosted `tests` workflow runs Windows and macOS every week on Python 3.12, and any
-environment on demand (`gh workflow run tests -f os=windows-latest -f python=3.12`);
-Ubuntu runs on every push and pull request with the Python 3.9 support floor and 3.12.
+The hosted `tests` workflow runs Windows and macOS every week on Python 3.12, Windows twice -
+once without Python's UTF-8 mode - and any environment on demand (`gh workflow run tests -f
+os=windows-latest -f python=3.12`, with `-f utf8=off` for a run without UTF-8 mode); Ubuntu runs
+on every push and pull request with the Python 3.9 support floor and 3.12.
 Every lane runs the same suite, and each supported
 runner must pass the process backend's native self-check rather than silently use
 the shell fallback. Each lane's log ends with every test it skipped and the reason
@@ -189,8 +205,9 @@ hosted runner get a scenario in `tests/test_scenarios.py` like any other.
 
 ## Text on a default Windows install
 
-Every lane runs Python in UTF-8 mode (`PYTHONUTF8=1`); a Python a person installs on
-Windows does not, and there it reads and writes a pipe in the ANSI code page. A character
+Every lane but one runs Python in UTF-8 mode (`PYTHONUTF8=1`); a Python a person installs on
+Windows does not, and there it reads and writes a pipe in the ANSI code page. The weekly run's
+second Windows leg runs without it, as such an install does (WINDOWS-LANE-PARITY). A character
 outside that page - an arrow is outside the Western and the Turkish one alike, and the
 Turkish letters are outside the Western one - ended the write, and with it the command
 or the MCP server (#71, from the 2026-09-08 audit); a body piped in as UTF-8 was read as
@@ -304,11 +321,13 @@ and the lane's log lists each one with it:
 
 - a hook write that needs `--allow-shared-hooks`, which ao refuses on Windows;
 - POSIX file modes: an executable hook, an owner-only credentials file;
-- fixtures that run through a shebang or are POSIX shell scripts: a reviewer, a
-  conformance harness, a filter named `git`, a fake `keyflip` or quota command. These
-  could run on Windows once each fixture is a program Windows starts - and a reviewer
-  cannot be a `.cmd`, which ao refuses - but each rewrite is a Windows result only when
-  the lane has run it, so they stay skipped, with their reasons, until one does;
+- fixtures that are POSIX shell scripts: a filter named `git`, a fake `keyflip`, `xcrun`
+  or quota command, the stub programs an update or uninstall runs, a failing lane hook.
+  A Python stand-in runs on Windows as a program since WINDOWS-LANE-PARITY
+  (`tests/standin.py`), and each of these could be rewritten as one; the fake `gh` of
+  `ao pr watch` is a Python script still started through its shebang;
+- a reviewer that prints a sign-in prompt and waits: Windows hands over what a child
+  printed only once its streams close, so no heartbeat sees the prompt while it waits;
 - what Windows does not have: process groups and the CPU they spend, zombie
   processes, a directory fsync, launchd, and the `ps` and `lsof` a process table falls
   back to.
@@ -316,4 +335,6 @@ and the lane's log lists each one with it:
 The other way round, `tests/test_windows_processes.py` and the board read through
 `bin/ao.ps1` need Windows itself and run only there. PowerShell's parser reads ao's scripts
 wherever a PowerShell is installed, and `pwsh` runs on Linux and macOS too. Where none is,
-each test says so as it is skipped.
+each test says so as it is skipped. No test runs `bin/ao.ps1 status` or `doctor`: a `.ps1` runs
+only in a PowerShell, and both read what only Windows has - the user profile's Kiro sessions,
+the process table through `Get-CimInstance` - so each would be a test of the Windows lane's alone.

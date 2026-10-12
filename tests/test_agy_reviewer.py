@@ -8,12 +8,11 @@ a call to one was denied only because no rule in the person's settings allowed i
 settings allow more than reading. Its answer is the `response` of the one JSON record it prints.
 """
 import json
-import os
-import sys
 
 import pytest
 
 from ao import cli, lib as A
+from tests.standin import program
 
 AGY = ["agy", "--print={prompt}", "--output-format=json", "--model=gemini-3.1-pro-high"]
 READS = ["view_file", "grep_search", "find_by_name", "list_dir"]
@@ -101,22 +100,19 @@ def test_an_agy_reviewer_is_eligible_and_a_command_that_names_an_agent_of_its_ow
 
 
 def _harness(tmp_path, record, notice=""):
-    """A stand-in agy: it checks the agent ao named holds read tools alone, and prints `record`."""
-    harness = tmp_path / "agy"
-    harness.write_text(f"""#!{sys.executable}
-import os, sys
+    """A stand-in agy: it checks the agent ao named holds read tools alone, and prints `record`. A program on
+    Windows too (WINDOWS-LANE-PARITY)."""
+    harness = program(tmp_path, "agy", f"""import os, sys
 name = [arg for arg in sys.argv if arg.startswith("--agent=")][0].split("=", 1)[1]
 with open(os.path.join(".agents", "agents", name + ".md"), encoding="utf-8") as fh:
     text = fh.read()
 assert '"view_file"' in text and "write_to_file" not in text and "run_command" not in text, text
 sys.stderr.write({notice!r})
 print({json.dumps(record)!r})
-""", encoding="utf-8")
-    harness.chmod(0o755)
-    return [str(harness), "--print=review this", "--output-format=json"]
+""")
+    return [harness, "--print=review this", "--output-format=json"]
 
 
-@pytest.mark.skipif(os.name == "nt", reason="the stand-in harness is a script its shebang runs")
 def test_an_agy_review_reads_the_answer_in_the_record_its_harness_prints(project, tmp_path, home):
     verdict = "VERDICT: APPROVED\nBLOCKER: 0\nHIGH: 0\nMEDIUM: 0\nLOW: 0"
     argv = _harness(tmp_path, {"conversation_id": "c", "status": "SUCCESS", "response": verdict})
@@ -126,7 +122,6 @@ def test_an_agy_review_reads_the_answer_in_the_record_its_harness_prints(project
     assert attempt["ok"] and attempt["out"] == verdict, attempt
 
 
-@pytest.mark.skipif(os.name == "nt", reason="the stand-in harness is a script its shebang runs")
 def test_a_review_its_harness_denied_a_tool_says_so_and_is_asked_again(project, tmp_path, home):
     argv = _harness(tmp_path, {"status": "SUCCESS", "response": "", "denied_actions": [{"action": "mcp"}]},
                     notice="jetski: no output produced - a tool required the mcp permission\n")
@@ -169,18 +164,14 @@ def test_a_release_that_is_no_version_is_named():
 
 def _failing(tmp_path, record, code, notice=""):
     """A stand-in agy that fails as agy 1.3 does: a record with status ERROR, a notice on stderr, a non-zero exit."""
-    harness = tmp_path / "agy"
-    harness.write_text(f"""#!{sys.executable}
-import sys
+    harness = program(tmp_path, "agy", f"""import sys
 sys.stderr.write({notice!r})
 print({json.dumps(record)!r})
 sys.exit({code})
-""", encoding="utf-8")
-    harness.chmod(0o755)
-    return [str(harness), "--print=review this", "--output-format=json"]
+""")
+    return [harness, "--print=review this", "--output-format=json"]
 
 
-@pytest.mark.skipif(os.name == "nt", reason="the stand-in harness is a script its shebang runs")
 def test_a_review_agy_could_not_send_for_the_network_is_asked_again(project, tmp_path, home):
     """AGY-TRANSIENT: agy 1.3 ended a review with exit 3 on a network issue, and the review was UNAVAILABLE and not
     asked again, where the same review asked again answered."""
@@ -192,7 +183,6 @@ def test_a_review_agy_could_not_send_for_the_network_is_asked_again(project, tmp
     assert attempt["kind"] == "temporary-exit" and attempt["retryable"] and said in attempt["reason"], attempt
 
 
-@pytest.mark.skipif(os.name == "nt", reason="the stand-in harness is a script its shebang runs")
 def test_a_failure_agy_names_that_is_not_passing_is_not_asked_again(project, tmp_path, home):
     said = "model gemini-9 is not available to this account"
     argv = _failing(tmp_path, {"status": "ERROR", "response": "", "error": said}, 1, notice=f"error: {said}\n")

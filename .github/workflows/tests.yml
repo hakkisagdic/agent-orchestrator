@@ -1,9 +1,10 @@
 name: tests
 # The suite runs on GitHub's hosted runners, which cost nothing for a public repository:
 #   - every push to main and every pull request: Ubuntu, on the Python 3.9 support floor and on 3.12;
-#   - every Monday: macOS and Windows on 3.12;
-#   - on demand, one environment or all:
+#   - every Monday: macOS and Windows on 3.12, and Windows once more without Python's UTF-8 mode;
+#   - on demand, one environment or all, with UTF-8 mode or without it:
 #       gh workflow run tests -f os=windows-latest -f python=3.12
+#       gh workflow run tests -f os=windows-latest -f python=3.12 -f utf8=off
 # Every lane's log ends with each test it skipped and the reason (-rs): a test that cannot pass on a
 # platform is skipped there with its reason, never silently absent (#71).
 on:
@@ -24,6 +25,11 @@ on:
         default: "3.12"
         type: choice
         options: ["3.9", "3.11", "3.12"]
+      utf8:
+        description: "Python's UTF-8 mode: on, as every lane runs; off, as a default install runs"
+        default: "on"
+        type: choice
+        options: ["on", "off"]
 permissions:
   contents: read
 concurrency:
@@ -31,7 +37,7 @@ concurrency:
   # or the weekly one answers a different question and must not cancel it, or be cancelled by it.
   # So do two dispatches for another runner or interpreter: the release checklist starts one on
   # Python 3.9 and one on 3.12, and the second cancelled the first (CI-DISPATCH-GROUP).
-  group: tests-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.os }}-${{ inputs.python }}
+  group: tests-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.os }}-${{ inputs.python }}-${{ inputs.utf8 }}
   cancel-in-progress: true
 
 jobs:
@@ -85,18 +91,25 @@ jobs:
 
   weekly:
     if: github.event_name == 'schedule'
-    name: ${{ matrix.os }} / Python 3.12
+    name: ${{ matrix.os }} / Python 3.12${{ matrix.utf8 == 'off' && ' / no UTF-8 mode' || '' }}
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, windows-latest]
+        utf8: ["on"]
+        # Windows once more as a default install runs Python, without UTF-8 mode: its pipes and files then
+        # default to the ANSI code page, which every other lane sets aside (WINDOWS-LANE-PARITY).
+        include:
+          - os: windows-latest
+            utf8: "off"
     runs-on: ${{ matrix.os }}
     # A Windows runner spawns processes slowest.
     timeout-minutes: 40
     env:
       PYTHONDONTWRITEBYTECODE: "1"
-      PYTHONUTF8: "1"
-      PYTHONIOENCODING: utf-8
+      # Python reads an empty PYTHONUTF8 or PYTHONIOENCODING as unset.
+      PYTHONUTF8: ${{ matrix.utf8 != 'off' && '1' || '' }}
+      PYTHONIOENCODING: ${{ matrix.utf8 != 'off' && 'utf-8' || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -107,7 +120,7 @@ jobs:
 
   on-demand:
     if: github.event_name == 'workflow_dispatch'
-    name: ${{ matrix.os }} / Python ${{ inputs.python }}
+    name: ${{ matrix.os }} / Python ${{ inputs.python }}${{ inputs.utf8 == 'off' && ' / no UTF-8 mode' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -116,8 +129,9 @@ jobs:
     timeout-minutes: 40
     env:
       PYTHONDONTWRITEBYTECODE: "1"
-      PYTHONUTF8: "1"
-      PYTHONIOENCODING: utf-8
+      # Python reads an empty PYTHONUTF8 or PYTHONIOENCODING as unset.
+      PYTHONUTF8: ${{ inputs.utf8 != 'off' && '1' || '' }}
+      PYTHONIOENCODING: ${{ inputs.utf8 != 'off' && 'utf-8' || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -1,21 +1,16 @@
 import json
 import os
-import sys
 from types import SimpleNamespace
 
-import pytest
-
 from ao import cli, lib as A
-
-pytestmark = pytest.mark.skipif(os.name == "nt", reason="the fixture harness runs through its shebang")
+from tests.standin import program
 
 
 def _harness(tmp_path):
-    harness = tmp_path / "harness"
+    """The conformance harness ao ships, as a program: on Windows too, where a script's shebang line runs nothing and
+    every test here was skipped (WINDOWS-LANE-PARITY)."""
     source = open(os.path.join(os.path.dirname(A.__file__), "conformance_harness.py"), encoding="utf-8").read()
-    harness.write_text(f"#!{sys.executable}\n" + source, encoding="utf-8")
-    harness.chmod(0o755)
-    return str(harness)
+    return program(tmp_path, "harness", source)
 
 
 def test_every_shipped_adapter_passes_conformance_through_the_fixture_harness(tmp_path):

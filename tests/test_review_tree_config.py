@@ -9,11 +9,11 @@ into a folder of its own, `candidate/`, so the root a harness reads its project 
 files and folders any adapter declares its harness reads from a project are not unpacked at all, wherever they are.
 """
 import os
-import sys
 
 import pytest
 
 from ao import cli, lib as A
+from tests.standin import program
 from tests.test_review_tree import _tree_of
 
 KEPT = {"src/core.py": b"def add(a, b):\n    return a + b\n", ".github/workflows/ci.yml": b"on: push\n",
@@ -85,24 +85,21 @@ def test_the_names_come_from_the_adapters_ao_ships_and_steering_files_count(monk
     assert sorted(A.project_config_names().values()) == [".a", "A.md"]
 
 
-@pytest.mark.skipif(os.name == "nt", reason="the stand-in harness is a script its shebang runs")
 def test_a_reviewer_runs_where_nothing_the_candidate_wrote_is_its_configuration(project, tmp_path):
     """End to end: the stand-in harness finds its working directory's root holds only the tree's folder, the tree's
-    code there, and none of the configuration the candidate committed."""
+    code there, and none of the configuration the candidate committed. A program on Windows too
+    (WINDOWS-LANE-PARITY)."""
     repo, tree = _tree_of(tmp_path, {**KEPT, **WITHHELD})
-    harness = tmp_path / "harness"
-    harness.write_text(f"""#!{sys.executable}
-import os
+    harness = program(tmp_path, "harness", """import os
 assert os.listdir(".") == ["candidate"], os.listdir(".")
 assert os.path.isfile(os.path.join("candidate", "src", "core.py"))
 for name in (".claude", ".agents", "opencode.json", ".opencode", "AGENTS.md", ".mcp.json"):
     assert not os.path.exists(os.path.join("candidate", name)), name
 for line in ("VERDICT: APPROVED", "BLOCKER: 0", "HIGH: 0", "MEDIUM: 0", "LOW: 0"):
     print(line)
-""", encoding="utf-8")
-    harness.chmod(0o755)
+""")
 
-    attempt = cli._run_reviewer(repo, [str(harness)], 30, tree=tree)
+    attempt = cli._run_reviewer(repo, [harness], 30, tree=tree)
 
     assert attempt["ok"] and attempt["out"].startswith("VERDICT: APPROVED"), attempt
 

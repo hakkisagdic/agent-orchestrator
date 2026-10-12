@@ -6,12 +6,10 @@ grep, glob and list, with `--pure`, opencode offered the model read, grep and gl
 command or fetch a page, it had no tool to, and nothing was written. It prints the turn's progress on stderr and the
 model's text alone on stdout.
 """
-import os
-import sys
-
 import pytest
 
 from ao import allowlist, cli, lib as A
+from tests.standin import program
 
 OPENCODE = ["opencode", "run", "{prompt}", "--model", "evren/deepseek-v4-flash", "--pure"]
 
@@ -48,10 +46,9 @@ def test_an_opencode_reviewer_runs_only_on_the_release_its_agent_was_measured_on
 
 
 def _harness(tmp_path, stdout, stderr):
-    """A stand-in opencode: it checks the agent ao named allows reading alone, and prints as opencode run does."""
-    harness = tmp_path / "opencode"
-    harness.write_text(f"""#!{sys.executable}
-import os, sys
+    """A stand-in opencode: it checks the agent ao named allows reading alone, and prints as opencode run does. A
+    program on Windows too (WINDOWS-LANE-PARITY)."""
+    harness = program(tmp_path, "opencode", f"""import os, sys
 name = sys.argv[sys.argv.index("--agent") + 1]
 with open(os.path.join(".opencode", "agents", name + ".md"), encoding="utf-8") as fh:
     text = fh.read()
@@ -59,12 +56,10 @@ assert '"*": "deny"' in text and '"write"' not in text and '"bash"' not in text,
 assert "--pure" in sys.argv
 sys.stderr.write({stderr!r})
 sys.stdout.write({stdout!r})
-""", encoding="utf-8")
-    harness.chmod(0o755)
-    return [str(harness), "run", "review this", "--model", "evren/deepseek-v4-flash", "--pure"]
+""")
+    return [harness, "run", "review this", "--model", "evren/deepseek-v4-flash", "--pure"]
 
 
-@pytest.mark.skipif(os.name == "nt", reason="the stand-in harness is a script its shebang runs")
 def test_an_opencode_review_is_the_text_it_prints_on_stdout(project, tmp_path):
     verdict = "VERDICT: APPROVED\nBLOCKER: 0\nHIGH: 0\nMEDIUM: 0\nLOW: 0\n"
     argv = _harness(tmp_path, verdict, "> ao-reviewer · deepseek-v4-flash\n* Read candidate/x.py\n")
@@ -74,7 +69,6 @@ def test_an_opencode_review_is_the_text_it_prints_on_stdout(project, tmp_path):
     assert attempt["ok"] and attempt["out"] == verdict.strip(), attempt
 
 
-@pytest.mark.skipif(os.name == "nt", reason="the stand-in harness is a script its shebang runs")
 def test_an_opencode_run_that_printed_only_its_progress_answered_nothing(project, tmp_path):
     """Its progress is no answer: read as one, a tool call's line was a reviewer's text."""
     argv = _harness(tmp_path, "", "> ao-reviewer · deepseek-v4-flash\n* Glob candidate/**\nVERDICT: APPROVED\n")

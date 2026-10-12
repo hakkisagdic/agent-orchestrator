@@ -4,9 +4,8 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 from ao import cli
+from tests.standin import program
 
 
 def _bare(root):
@@ -207,8 +206,6 @@ def test_init_rejects_oversized_planned_profile_before_probe_or_write(
 
 
 
-@pytest.mark.skipif(os.name == "nt", reason="the fixture reviewer runs through its shebang, which Windows "
-                                            "does not honour")
 def test_init_real_failed_probe_contains_version_discovery_side_effects(
     tmp_path, monkeypatch, capsys,
 ):
@@ -228,9 +225,9 @@ def test_init_real_failed_probe_contains_version_discovery_side_effects(
     )
     tracked.write_text("unstaged owner change\n", encoding="utf-8")
 
-    binary = tmp_path / "ao59-side-effect-reviewer"
-    binary.write_text(
-        "#!/usr/bin/env python3\n"
+    # A program on Windows too (WINDOWS-LANE-PARITY).
+    binary = program(
+        tmp_path, "ao59-side-effect-reviewer",
         "import subprocess, sys\n"
         "from pathlib import Path\n"
         "Path('reviewer-local-write').write_text('x', encoding='utf-8')\n"
@@ -241,16 +238,14 @@ def test_init_real_failed_probe_contains_version_discovery_side_effects(
         "    raise SystemExit(0)\n"
         "print('fixture probe refused', file=sys.stderr)\n"
         "raise SystemExit(17)\n",
-        encoding="utf-8",
     )
-    binary.chmod(0o755)
 
     def planned_profile(_root, _args, base):
         planned = dict(base)
         planned["reviewer"] = {
             "id": "fixture-reviewer",
             "family": "fixture",
-            "argv": [str(binary), "{prompt}"],
+            "argv": [binary, "{prompt}"],
         }
         return planned, ["reviewer"]
 
@@ -263,7 +258,7 @@ def test_init_real_failed_probe_contains_version_discovery_side_effects(
     assert cli.cmd_init({"root": str(root)}, _init_args()) == 1
     output = capsys.readouterr().out
 
-    assert str(binary) in output
+    assert binary in output
     assert "exited 17" in output
     assert _tree_state(root) == before
     assert tracked.read_text(encoding="utf-8") == "unstaged owner change\n"

@@ -87,7 +87,9 @@ unless `--allow-shared-hooks` is explicit.
 
 The hosted `tests` workflow runs the suite on every push to main and every pull request
 on Ubuntu, with Python 3.9 (the support floor) and 3.12; macOS and Windows run every
-week and on demand (`gh workflow run tests -f os=windows-latest -f python=3.12`). The
+week and on demand (`gh workflow run tests -f os=windows-latest -f python=3.12`), Windows
+a second time each week without Python's UTF-8 mode, as a default install runs it
+(`-f utf8=off` on demand, [windows.md](windows.md)). The
 repository is public, so the hosted runners cost nothing, and the pre-push hook still
 runs the suite locally before a push: first the tests the pushed commits touch, then the
 whole suite, in four processes where pytest-xdist (the `dev` extra) is installed -

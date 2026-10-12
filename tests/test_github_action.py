@@ -15,6 +15,7 @@ import pytest
 
 import ao
 from ao import cli
+from tests import standin
 from tests.test_docs_commands import _commands, _refusals
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -115,7 +116,22 @@ def test_the_release_it_installs_is_the_one_this_commit_is():
     assert default == f'default: "{ao.__version__}"'
 
 
-@pytest.mark.skipif(os.name == "nt" or not shutil.which("bash"), reason="the stand-in ao runs through its shebang")
+def _bash():
+    """The bash a step's `shell: bash` runs in, or None. On Windows that is Git's, found beside the git that is on
+    PATH: System32 holds a `bash.exe` too, which starts a Linux distribution and is no shell of a runner's."""
+    if os.name != "nt":
+        return shutil.which("bash")
+    git = shutil.which("git")
+    folder = os.path.dirname(os.path.realpath(git)) if git else ""
+    for _ in range(3 if folder else 0):
+        found = os.path.join(folder, "bin", "bash.exe")
+        if os.path.isfile(found):
+            return found
+        folder = os.path.dirname(folder)
+    return None
+
+
+@pytest.mark.skipif(not _bash(), reason="the action's steps are bash scripts, and there is no bash here to run one")
 @pytest.mark.parametrize("fail_on, exits", [
     ("needs-changes", {0: 0, 1: 1, 2: 2, 3: 3}),
     ("no-verdict", {0: 0, 1: 0, 2: 2, 3: 3}),
@@ -124,14 +140,13 @@ def test_the_release_it_installs_is_the_one_this_commit_is():
 ])
 def test_fail_on_decides_what_the_review_s_exit_does_to_the_job(tmp_path, fail_on, exits):
     review = _scripts(_text(ACTION))[-1]
-    stand_in = tmp_path / "ao"
-    stand_in.write_text('#!/bin/sh\nexit "$STAND_IN_EXIT"\n', encoding="utf-8")
-    stand_in.chmod(0o755)
+    # The stand-in is a program named ao on Windows too, as the ao pip installs on a runner is (tests/standin.py).
+    standin.program(tmp_path, "ao", "import os\nimport sys\nsys.exit(int(os.environ['STAND_IN_EXIT']))\n")
     for code, job in exits.items():
         env = dict(os.environ, PATH=f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}", STAND_IN_EXIT=str(code),
                    FAIL_ON=fail_on, GITHUB_STEP_SUMMARY=str(tmp_path / "summary"), GITHUB_OUTPUT=str(tmp_path / "out"))
 
-        done = subprocess.run(["bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", review], env=env,
+        done = subprocess.run([_bash(), "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", review], env=env,
                               capture_output=True, text=True, encoding="utf-8")
 
         assert done.returncode == job, (fail_on, code, done.stderr)
