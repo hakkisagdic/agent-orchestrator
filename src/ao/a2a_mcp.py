@@ -80,10 +80,24 @@ def agents():
     return {}
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Follow no redirect: an answer that sends the request elsewhere is an error, said as its HTTP status.
+
+    urllib carried every header of a request - an agent's Authorization among them - to wherever a redirect
+    pointed, another host included (A2A-HARDEN). An agent that moved is written anew in .ao/a2a-agents.json.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 def _post(url, headers, payload, timeout=60):
     body = json.dumps(payload).encode()
     req = urllib.request.Request(url, data=body, headers=headers)
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with _OPENER.open(req, timeout=timeout) as r:
         return json.loads(r.read().decode() or "{}")
 
 
@@ -94,7 +108,7 @@ def fetch_card(url, headers=None, timeout=20):
         for candidate in (base + path, base.rsplit("/", 1)[0] + path):
             try:
                 req = urllib.request.Request(candidate, headers=headers or {})
-                with urllib.request.urlopen(req, timeout=timeout) as r:
+                with _OPENER.open(req, timeout=timeout) as r:
                     card = json.loads(r.read().decode())
                 declared = str(card.get("protocolVersion", "")).strip()
                 # Interfaces can declare per-binding versions; prefer the JSON-RPC one.
@@ -115,9 +129,16 @@ def rpc(agent, method_key, params, version=None, timeout=90):
     When the card declares nothing, try 1.0 and fall back to 0.3 on a
     method-not-found. Guessing once and caching beats failing on a card that
     simply omitted a field.
+
+    A message is sent in the other dialect only when the first said it does not
+    take the method or the request: after a timeout, a dropped connection or any
+    other answer it is not known whether the agent took the message, and sending
+    it again could start the work twice (A2A-HARDEN).
     """
     url = agent["url"]
     order = [version] if version else ["1.0", "0.3"]
+    once = method_key == "send"
+    unknown = "the agent may have taken the message: ask a2a_task, or a2a_agents, before sending it again"
     last = None
     for v in order:
         d = DIALECTS[v]
@@ -130,11 +151,22 @@ def rpc(agent, method_key, params, version=None, timeout=90):
                                        "params": params(d)}, timeout)
         except urllib.error.HTTPError as e:
             last = {"error": f"HTTP {e.code}", "dialect": v}
+            if once and e.code not in (400, 404, 405, 415):
+                return dict(last, note=unknown)
             continue
         except Exception as e:
             last = {"error": str(e)[:200], "dialect": v}
+            if once:
+                return dict(last, note=unknown)
+            continue
+        if not isinstance(out, dict):
+            last = {"error": "the agent answered with no JSON-RPC object", "dialect": v}
+            if once:
+                return dict(last, note=unknown)
             continue
         err = out.get("error") or {}
+        if not isinstance(err, dict):
+            err = {"message": str(err)[:200]}
         if err.get("code") in (-32601, -32600):        # method not found / invalid
             last = {"error": err.get("message", "method not found"), "dialect": v}
             continue
@@ -222,12 +254,14 @@ def call(name, args):
                            for s in card.get("skills") or []]}
 
     if name == "a2a_send":
+        # One message, whichever dialect carries it: an agent can tell a repeat by its id (A2A-HARDEN).
+        message_id = f"ao-{os.urandom(8).hex()}"
+
         def params(d):
             part = {"text": args["message"]}
             if d["part_kind"]:
                 part["kind"] = "text"
-            msg = {"role": d["role_user"], "parts": [part],
-                   "messageId": f"ao-{os.urandom(8).hex()}"}
+            msg = {"role": d["role_user"], "parts": [part], "messageId": message_id}
             for k in ("taskId", "contextId"):
                 if args.get(k):
                     msg[k] = args[k]
@@ -265,6 +299,12 @@ def main():
         try:
             req = json.loads(line)
         except json.JSONDecodeError:
+            continue
+        if not isinstance(req, dict):
+            # A JSON array or a scalar is no request, and reading it as one ended the server (A2A-HARDEN).
+            sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": None, "error": {
+                "code": -32600, "message": "a request is a JSON object"}}) + "\n")
+            sys.stdout.flush()
             continue
         rid, method = req.get("id"), req.get("method")
         try:

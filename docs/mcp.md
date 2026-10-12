@@ -250,6 +250,19 @@ one normalised vocabulary either way.
 `ListTasks` returns `TASK_STATE_INPUT_REQUIRED` and `tasks/list` returns
 `input-required`, from the same board.
 
+*In ao since slice A2A-HARDEN: the bug hunter read both and named five faults, each now held by
+`tests/test_a2a_harden.py`. The server answers only a request named for its own address - `127.0.0.1`
+or `localhost` with its port - as `ao watch --web` does, so a page from another site that points its
+own name at 127.0.0.1 reads no board through a person's browser; each connection has a thread and 30
+seconds to send its request, where one client that stalled held every other; a body past 1 MiB, or a
+length that is none, is refused unread; and a request that is no JSON object, or whose params are
+none, is answered as invalid instead of ending with no answer. The bridge follows no redirect, which
+carried an agent's `Authorization` header to wherever it pointed - an agent that moved is written anew
+in `.ao/a2a-agents.json`; a message is sent in the other dialect only when the first said it does not
+take the method, keeping its `messageId`, since after a timeout it is not known whether the agent took
+it; and a line on its standard input that is no JSON object is answered as invalid, where it ended the
+bridge.*
+
 ## Registration is part of `ao init`
 
 `ao init` registers the server for every agent it detects — `.mcp.json` for

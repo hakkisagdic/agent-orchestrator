@@ -103,7 +103,7 @@ Only these, each once someone has set it up; take the setup away and it stops.
 | Borrowed harness content | `ao content add` | the source you name, through git | a fetch of the one commit it is pinned to; `ao content verify` reads only the files on disk |
 | Pull requests | `ao config set pr.watch on`, then `ao pr watch --once` | GitHub, asked through your `gh` | two reads a pass: `gh pr list` for this checkout's open pull requests, and `gh pr view` for each of this project's; nothing is written to GitHub ([pr.md](pr.md)) |
 | Updating ao | `ao update`, which prints the command it will run and asks first | the clone's git remote, or the source of the tool that installed ao: Homebrew, pipx, uv or pip | that tool's own requests for the newer ao; ao adds nothing of its own ([getting-started.md](getting-started.md)) |
-| A2A | `ao a2a serve`, `ao a2a-mcp serve` | 127.0.0.1 only; the agents in `.ao/a2a-agents.json` or `~/.ao/a2a-agents.json` | the board, to anything on this machine; the messages you send, to the agents you registered ([mcp.md](mcp.md)) |
+| A2A | `ao a2a serve`, `ao a2a-mcp serve` | 127.0.0.1 only, answering a request named for that address alone; the agents in `.ao/a2a-agents.json` or `~/.ao/a2a-agents.json` | the board, to anything on this machine; the messages you send, to the agents you registered ([mcp.md](mcp.md)) |
 
 `gh` is asked only these reads - whether a repository is private, and with `pr.watch` on the open
 pull requests - the two refs above are all ao ever pushes, and ao never grants `push` to an agent

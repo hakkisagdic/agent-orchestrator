@@ -22,9 +22,10 @@ Standard library only.
 """
 import json
 import os
+import socket
 import socketserver
 import sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import __version__, lib as A
 
@@ -87,7 +88,31 @@ def tasks(v1=True):
     return out
 
 
+# The largest request the board's methods take: one names a method and a task id. A body's declared length
+# was read whole, however large (A2A-HARDEN).
+MAX_REQUEST_BYTES = 1 << 20
+
+
 class Handler(BaseHTTPRequestHandler):
+    # A connection that sends nothing, or less than its Content-Length said, is closed rather than kept: the
+    # server read a declared body with no limit in time, one connection at a time, so one stalled client held
+    # every other (A2A-HARDEN).
+    timeout = 30
+
+    def parse_request(self):
+        """Refuse any Host but this server's own before anything is read or computed (A2A-HARDEN).
+
+        The server binds loopback alone, and a page from another site can still point its own name at
+        127.0.0.1 and read the board through a person's browser (DNS rebinding): `ao watch --web` refused
+        such a request, this server answered it.
+        """
+        if not super().parse_request():
+            return False
+        if (self.headers.get("Host") or "").strip().lower() not in self.server.hosts():
+            self._send(403, {"error": f"this A2A server answers only to {' or '.join(sorted(self.server.hosts()))}"})
+            return False
+        return True
+
     def _send(self, code, payload):
         body = json.dumps(payload, ensure_ascii=False, default=str).encode()
         self.send_response(code)
@@ -107,15 +132,31 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"tasks": tasks()})
         self._send(404, {"error": "not found"})
 
+    def _error(self, rid, code, message, status=200):
+        return self._send(status, {"jsonrpc": "2.0", "id": rid, "error": {"code": code, "message": message}})
+
     def do_POST(self):
         try:
-            n = int(self.headers.get("Content-Length", 0))
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            n = -1
+        # A negative length read until the client closed; a large one was read whole (A2A-HARDEN).
+        if n < 0:
+            return self._error(None, -32700, "Content-Length is not a length", 400)
+        if n > MAX_REQUEST_BYTES:
+            return self._error(None, -32600, f"a request of {n} bytes is past the {MAX_REQUEST_BYTES} this server "
+                                             "reads", 413)
+        try:
             req = json.loads(self.rfile.read(n) or b"{}")
         except Exception as e:
-            return self._send(400, {"jsonrpc": "2.0", "id": None,
-                                    "error": {"code": -32700, "message": str(e)}})
+            return self._error(None, -32700, str(e), 400)
+        # A JSON array or a scalar, or params that are no object, ended the request with no answer (A2A-HARDEN).
+        if not isinstance(req, dict):
+            return self._error(None, -32600, "a request is a JSON object")
         rid, method = req.get("id"), req.get("method")
         params = req.get("params") or {}
+        if not isinstance(params, dict):
+            return self._error(rid, -32602, "params is a JSON object")
         if method in ("ListTasks", "tasks/list"):
             return self._send(200, {"jsonrpc": "2.0", "id": rid,
                                     "result": {"tasks": tasks(method[0].isupper())}})
@@ -136,13 +177,34 @@ class Handler(BaseHTTPRequestHandler):
                          "error": {"code": -32601, "message": f"method not found: {method}"}})
 
 
-class _Server(HTTPServer):
+class _Server(ThreadingHTTPServer):
     """The A2A listener, named by its address: the resolver is not asked for the loopback address's name,
-    which on a machine whose resolver is slow to answer held the server back from listening (LOOPBACK-BIND)."""
+    which on a machine whose resolver is slow to answer held the server back from listening (LOOPBACK-BIND).
+
+    Each connection has a thread of its own, so a client that stalls holds up no other, as in `ao watch --web`
+    (A2A-HARDEN).
+    """
+
+    daemon_threads = True
+    # As in the web view: elsewhere the option only lets a restarted server take its port back at once; on
+    # Windows it lets the bind succeed on a port another program already listens on, where it must fail.
+    allow_reuse_address = os.name != "nt"
 
     def server_bind(self):
         socketserver.TCPServer.server_bind(self)
         self.server_name, self.server_port = self.server_address[:2]
+
+    def hosts(self):
+        """The Host values a request may carry: this server's address, by number or as localhost."""
+        host, port = self.server_address[:2]
+        names = {host, "localhost"}
+        return {f"{name}:{port}" for name in names} | (names if port == 80 else set())
+
+    def handle_error(self, request, client_address):
+        """A client gone, or closed for sending nothing in time, is no error worth a traceback."""
+        if isinstance(sys.exc_info()[1], (ConnectionError, socket.timeout)):
+            return
+        super().handle_error(request, client_address)
 
 
 def main():
