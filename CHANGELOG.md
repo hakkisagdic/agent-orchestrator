@@ -42,6 +42,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Windows
 
+- A reviewer ao starts - a route of `ao review`, the bug hunter - is asked for UTF-8 standard streams, as ao writes its prompt and reads its answer: one written in Python wrote Windows' ANSI code page without UTF-8 mode, so its leads and findings lost the em dash they are read by, and a Turkish letter ended it before it answered ([windows](docs/windows.md), REVIEWER-UTF8).
 - Two tests the Windows lane failed now hold to the platform they run on: a turn's refusal names a relative program as Windows writes its path, and a cycle on a Windows runner records the orphans it could not look for as unknown from its first run ([windows](docs/windows.md), WINDOWS-TESTS-6).
 - The Windows lane runs the reviewer and authority tests the other lanes run - a stand-in harness is a program there too - and the weekly run has a Windows leg without Python's UTF-8 mode, as a default install runs it ([windows](docs/windows.md)) (WINDOWS-LANE-PARITY, part of #71).
 - On Windows ao says what it cannot hold there and why - orphan detection, the reviewer stall check, files kept private by mode - in `ao writers`, a review's wait, the channel setup and `ao doctor`; it refuses a transcript link where there is no O_NOFOLLOW, reads schtasks in the OEM code page, audits grants of `py -c`, `powershell -Command` and `cmd /c`, and names Task Scheduler where it named launchctl ([windows](docs/windows.md)) (WINDOWS-SAY-WHY, part of #71).

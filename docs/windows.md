@@ -224,6 +224,14 @@ text file ao opens and every program's output it reads as text names its encodin
 a guard keeps it so. `tests/test_windows_close.py` holds this on every platform by
 starting ao with `PYTHONIOENCODING=cp1252`, the streams of a Western Windows install.
 
+*In ao since slice REVIEWER-UTF8:* a reviewer ao starts - a route of `ao review`, the bug
+hunter, a stand-in - is asked for UTF-8 standard streams too (`PYTHONIOENCODING=utf-8`, keeping
+an error handler the person named), since ao hands it the prompt and reads its answer in UTF-8. A
+reviewer that is a Python program wrote in the code page: on the leg without UTF-8 mode its em
+dash came back as a byte no UTF-8 reads, so a hunter's leads and a reviewer's findings lost the
+separator they are read by, and a Turkish letter ended the reviewer before it answered. A program
+that is not Python reads no such variable. `tests/test_reviewer_utf8.py` holds it the same way.
+
 PowerShell has code pages of its own. It wrote the process table in the console's, so a
 command line holding a letter outside it - a repository under a user directory with a
 Turkish name, a prompt in Turkish - came back as other letters, and a turn named by its

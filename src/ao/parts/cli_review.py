@@ -121,7 +121,16 @@ def _review_retry_wait(seconds):
 
 
 def _reviewer_environment(cwd):
-    """Preserve account/runtime state while removing inherited Git bindings."""
+    """Preserve account/runtime state while removing inherited Git bindings.
+
+    ao hands a reviewer its prompt and reads its answer as UTF-8, and a reviewer that is a Python program - a
+    hunter, a stand-in, a harness written in Python - reads and writes its standard streams as
+    PYTHONIOENCODING says, which wins over UTF-8 mode, else in Windows' ANSI code page. There an em dash came
+    back as a byte no UTF-8 reads: a lead's or a finding's separator was lost with what it carried, and a
+    Turkish letter ended the reviewer with an encoding error before it answered (REVIEWER-UTF8). Its streams
+    are UTF-8, keeping an error handler the person named; a program that is not Python reads no such variable.
+    """
+    import codecs
     env = os.environ.copy()
     for key in list(env):
         if key.upper().startswith("GIT_"):
@@ -131,6 +140,13 @@ def _reviewer_environment(cwd):
     # The fresh directory contains no repository.  The ceiling also prevents a
     # Git command issued by a reviewer from discovering a repository above it.
     env["GIT_CEILING_DIRECTORIES"] = cwd
+    encoding, _, errors = env.get("PYTHONIOENCODING", "").partition(":")
+    try:
+        named = codecs.lookup(encoding.strip()).name if encoding.strip() else None
+    except LookupError:
+        named = None
+    if named != "utf-8":
+        env["PYTHONIOENCODING"] = "utf-8" + (f":{errors}" if errors else "")
     return env
 
 
