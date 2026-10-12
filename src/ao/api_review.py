@@ -19,22 +19,21 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import __version__, lib as A
+from . import __version__, lib as A, outbound
 
 UTF8 = "utf-8"
 USAGE, FAILED = 2, 1
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    """A redirect is an answer, not a place to send the key."""
-
-    def redirect_request(self, *args, **kwargs):
-        return None
-
-
 def providers(entries):
-    """{word: (base URL, key variable)} from `review.api_providers`, or ValueError naming the entry that is not one."""
+    """{word: (base URL, key variable)} from `review.api_providers`, or ValueError naming the entry that is not one.
+
+    `/chat/completions` is put after the base URL. Behind a `?` or a `#` it landed in the query or the fragment, and
+    the key went to the base URL's own path; and a user or a password in the URL is a credential written in a setting,
+    which urllib read as a port and printed in the error that refused it (HUNT-LEADS-SEC). Neither is taken, and
+    neither refusal repeats the URL, whose query may hold a key too.
+    """
     table = {}
     for entry in entries or []:
         words = str(entry).split()
@@ -43,6 +42,12 @@ def providers(entries):
                              "variable that holds its key")
         name, url, variable = words
         parsed = urllib.parse.urlparse(url)
+        if "@" in parsed.netloc:
+            raise ValueError(f"{name}'s base URL names a user or a password: write it without them, since the key is "
+                             "read from its environment variable alone")
+        if "?" in url or "#" in url:
+            raise ValueError(f"{name}'s base URL holds a query or a fragment, where /chat/completions would land: "
+                             "write the URL the API's paths start from, with neither")
         if not (parsed.scheme == "https" or parsed.scheme == "http" and parsed.hostname in LOOPBACK) \
                 or not parsed.hostname:
             raise ValueError(f"{name}'s base URL {url} is not https: its key would leave this machine unprotected")
@@ -142,15 +147,20 @@ def main(argv=None):
         "User-Agent": f"ao/{__version__}"})
     # A provider on this machine is asked directly. A proxy the environment named took a request for 127.0.0.1, its
     # key in plain text, to wherever the proxy was (API-REVIEWER-2); one over HTTPS passes a proxy as a tunnel, which
-    # carries the key encrypted.
-    handlers = [_NoRedirect()]
+    # carries the key encrypted. No redirect is followed: it is an answer, not a place to send the key.
+    handlers = []
     if urllib.parse.urlparse(url).hostname in LOOPBACK:
         handlers.append(urllib.request.ProxyHandler({}))
     try:
-        opener = urllib.request.build_opener(*handlers)
+        opener = outbound.opener(*handlers)
         with opener.open(request, timeout=args.timeout) as response:
             answer = json.loads(response.read().decode(UTF8, "replace"))
     except urllib.error.HTTPError as exc:
+        if outbound.is_redirect(exc.code):
+            # The status, and what to do: the key goes to the URL review.api_providers names and nowhere else
+            # (HUNT-LEADS-SEC).
+            return refuse(f"{provider} answered HTTP {exc.code}, a redirect, which ao does not follow with the key: "
+                          "write the URL its endpoint moved to in review.api_providers", FAILED)
         try:
             said = _scrub(exc.read(300).decode(UTF8, "replace"), key) if exc.fp else ""
         except Exception:                           # a body cut short is no reason to say less than the status

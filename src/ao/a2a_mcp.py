@@ -30,7 +30,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from ao import __version__, lib as A  # noqa: E402
+from ao import __version__, lib as A, outbound  # noqa: E402
 UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 PROTOCOL = "2025-06-18"
@@ -80,18 +80,10 @@ def agents():
     return {}
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    """Follow no redirect: an answer that sends the request elsewhere is an error, said as its HTTP status.
-
-    urllib carried every header of a request - an agent's Authorization among them - to wherever a redirect
-    pointed, another host included (A2A-HARDEN). An agent that moved is written anew in .ao/a2a-agents.json.
-    """
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
-
-
-_OPENER = urllib.request.build_opener(_NoRedirect)
+# Follow no redirect: urllib carried every header of a request - an agent's Authorization among them - to wherever a
+# redirect pointed, another host included (A2A-HARDEN). An agent that moved is written anew in .ao/a2a-agents.json.
+# The opener is the one every request of ao's that carries a credential leaves by (HUNT-LEADS-SEC).
+_OPENER = outbound.OPENER
 
 
 def _post(url, headers, payload, timeout=60):

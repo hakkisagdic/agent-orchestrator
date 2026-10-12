@@ -245,7 +245,11 @@ its base URL and the environment variable that holds its key, and a route names 
 The key is read from that variable when the request is sent, goes to that URL alone - over HTTPS, or
 to this machine with no proxy between - and is never carried through a redirect; a provider whose key
 could leave unprotected, or whose variable is unset or holds what no header carries, is said, the
-key's value never, and nothing is sent. `ao doctor` finds the client where a review does, in a
+key's value never, and nothing is sent. A base URL holding a query or a fragment is refused, since
+`/chat/completions` landed in it and the key went to the base URL's own path, and so is one naming a
+user or a password, a credential written in a setting that urllib printed in the error refusing it;
+neither refusal repeats the URL. A redirect is said with its status and where to write the URL the
+endpoint moved to (HUNT-LEADS-SEC). `ao doctor` finds the client where a review does, in a
 Windows interpreter's Scripts directory too. A prompt past one argument
 reaches it on its standard input. A reasoning model can spend the whole answer its provider allows
 on reasoning and write no verdict: EVREN allows 16,384 tokens, and on 2026-10-06 its reasoning

@@ -1617,9 +1617,11 @@ def set_ping_url(root, url, all_projects=False):
     except (OSError, ValueError):
         d = {}
     d["*" if all_projects else project_key(root)] = url
-    os.makedirs(os.path.dirname(pings_path()), exist_ok=True)
-    json.dump(d, open(pings_path(), "w", encoding=UTF8), indent=2)
-    os.chmod(pings_path(), 0o600)
+    # The URL stands for the watchdog being alive: whoever holds it can ping in its place. The file is 0600 from its
+    # creation and replaces the one before whole, as ~/.ao/email.json does; written in place and chmod-ed after, it
+    # was readable meanwhile, and a write cut short lost every project's URL (HUNT-LEADS-SEC).
+    from .storage import replace_file_durably
+    replace_file_durably(pings_path(), json.dumps(d, indent=2).encode(UTF8), mode=0o600)
     return d
 
 

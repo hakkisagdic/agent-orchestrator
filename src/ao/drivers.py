@@ -55,8 +55,10 @@ def usage_limits(api, timeout=20):
         tok = json.loads(raw)
     except Exception:
         return None
-    access = tok.get(token.get("field") or "access_token")
-    if not access:
+    # A store value that is JSON but no object, or a token that is no string, is no usable token: `tok.get` and
+    # "Bearer " + a number raised out of here, where the caller expects None (HUNT-LEADS-SEC).
+    access = tok.get(token.get("field") or "access_token") if isinstance(tok, dict) else None
+    if not access or not isinstance(access, str):
         return None
     expires = token.get("expires") or "expires_at"
     if tok.get(expires):
@@ -92,6 +94,7 @@ def usage_limits(api, timeout=20):
 
     import urllib.error
     import urllib.request
+    from . import outbound
     body = {key: (arn if value == "{profile}" else value) for key, value in (api.get("body") or {}).items()}
     req = urllib.request.Request(
         api["endpoint"],
@@ -99,21 +102,31 @@ def usage_limits(api, timeout=20):
         headers={"Content-Type": api["content_type"],
                  "x-amz-target": api["target"],
                  "Authorization": "Bearer " + access})
+    # The token goes to the endpoint the adapter names and nowhere else: urlopen followed a redirect with every
+    # header, this one among them, to whatever host it named (HUNT-LEADS-SEC).
+    opener = outbound.OPENER
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with opener.open(req, timeout=timeout) as r:
             d = json.loads(r.read().decode())
     except urllib.error.HTTPError as e:
+        if outbound.is_redirect(e.code):
+            return {"error": f"HTTP {e.code}, a redirect, which ao does not follow with the account's token: the URL "
+                             "the endpoint moved to belongs in the adapter's billing.api.endpoint, which ships with "
+                             "ao - report it, and read the transcripts meanwhile with ao credits --offline"}
         return {"error": f"HTTP {e.code}"}
     except Exception:
         return None
+    # The answer is read as the store is: JSON that is no object, or a field of another shape, is said, not raised.
+    if not isinstance(d, dict):
+        return {"error": "the response is no JSON object"}
 
     resource = api.get("resource") or "CREDIT"
-    row = next((b for b in d.get("usageBreakdownList") or []
-                if b.get("resourceType") == resource), None)
+    rows = d.get("usageBreakdownList") if isinstance(d.get("usageBreakdownList"), list) else []
+    row = next((b for b in rows if isinstance(b, dict) and b.get("resourceType") == resource), None)
     if not row:
         return {"error": f"no {resource} row in response"}
-    sub = d.get("subscriptionInfo") or {}
-    over = d.get("overageConfiguration") or {}
+    sub = d.get("subscriptionInfo") if isinstance(d.get("subscriptionInfo"), dict) else {}
+    over = d.get("overageConfiguration") if isinstance(d.get("overageConfiguration"), dict) else {}
     return {
         "used": row.get("currentUsageWithPrecision", row.get("currentUsage")),
         "limit": row.get("usageLimitWithPrecision", row.get("usageLimit")),

@@ -160,15 +160,13 @@ def test_urgent_mail_rides_along_where_ao_inbox_is_served(project, monkeypatch, 
     assert "URGENT_UNACKNOWLEDGED" not in as_reviewer and "URGENT_NOTE" not in as_reviewer
 
 
-@pytest.mark.parametrize("flags", [(), ("--role", "reviwer")], ids=["no role", "a role it does not know"])
-def test_no_role_or_one_the_server_does_not_know_is_served_every_tool_and_says_so(project, monkeypatch, capsys,
-                                                                                   flags):
-    listed, err = _listed(monkeypatch, capsys, project["root"], *flags)
+def test_no_role_is_served_every_tool_and_says_so(project, monkeypatch, capsys):
+    """A role the server does not know is refused, naming the roles: tests/test_hunt_leads_sec.py (HUNT-LEADS-SEC)."""
+    listed, err = _listed(monkeypatch, capsys, project["root"])
 
     assert listed == list(mcp.EVERY_TOOL)
     notice = [line for line in err.splitlines() if "every tool is served" in line]
     assert len(notice) == 1 and notice[0].startswith("ao mcp: ")
-    assert ("'reviwer'" in notice[0]) == bool(flags)
 
 
 def test_a_role_written_in_other_case_is_still_that_role(project, monkeypatch, capsys):

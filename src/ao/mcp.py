@@ -13,7 +13,9 @@ expensive action, `verify`, is opt-in because it runs the project's real gates.
 A second rule narrows it per session (MCP-ROLES): a server started for a role,
 `--role architect|implementer|reviewer`, lists and runs that role's tools alone. A
 reviewer reads and sends nothing; an implementer works its mailbox; the architect
-keeps every tool. `ao init` writes the role into a registration only one role reads.
+keeps every tool. `ao init` writes the role into a registration only one role reads. A
+role it does not know stops the server, naming the roles: served every tool, a mistyped
+reviewer could act as the architect (HUNT-LEADS-SEC).
 
 JSON-RPC 2.0 over stdio, standard library only.
 """
@@ -158,27 +160,48 @@ ROLE_TOOLS = {
 def role_tools(role):
     """The names of the tools a server started for `role` lists and runs.
 
-    Every tool when `role` is None or one this server does not know: a registration written
-    before roles existed, one a newer ao wrote, or one a person mistyped. Refusing then would
-    take the tools from a session that may well be the architect's, so the server keeps what it
-    served before roles existed, and `role_notice` says so.
+    Every tool when `role` is None: a registration written before roles existed, or one several
+    roles read, keeps what it served then, and `role_notice` says so. No tool for a role this
+    server does not know. It was served every tool, so a mistyped `--role reviwer` was a reviewer
+    that could report and acknowledge mail as the architect does (HUNT-LEADS-SEC); `served_role`
+    refuses such a role before the server starts, and this holds to it should one reach a call.
     """
-    return ROLE_TOOLS.get(role, EVERY_TOOL)
+    if role is None:
+        return EVERY_TOOL
+    return ROLE_TOOLS.get(role, ())
+
+
+def served_role(argv):
+    """The role the server's arguments name, read as AO_ROLE is - without case or surrounding space - or None.
+
+    ValueError, naming the roles, for a `--role` that names none of them, or nothing at all: both were
+    served every tool (HUNT-LEADS-SEC). `--role=<role>` is read too, which was taken for no role.
+    """
+    named = [index for index, word in enumerate(argv) if word == "--role" or word.startswith("--role=")]
+    if not named:
+        return None
+    index = named[-1]
+    given = argv[index].partition("=")[2] if argv[index] != "--role" else \
+        (argv[index + 1] if index + 1 < len(argv) else "")
+    role = given.strip().lower()
+    if role not in ROLE_TOOLS:
+        known = ", ".join(sorted(ROLE_TOOLS))
+        raise ValueError(f"ao mcp: --role {given!r} is none of {known}, so the server does not start; name one of "
+                         "them in the registration - `ao init` writes it - or leave --role out for every tool")
+    return role
 
 
 def role_notice(role):
-    """The line a server prints on stderr when it cannot hold its session to a role's tools, or None.
+    """The line a server started with no role prints on stderr, or None.
 
     stderr, because stdout is the protocol: an MCP client keeps what its server writes there in
     its own log, where the person who wrote the registration finds it.
     """
-    if role in ROLE_TOOLS:
+    if role is not None:
         return None
     known = ", ".join(sorted(ROLE_TOOLS))
-    if role is None:
-        return (f"ao mcp: started with no --role, so every tool is served; the roles are {known}, "
-                "and `ao init` writes one into each registration a single role reads")
-    return f"ao mcp: --role {role!r} is none of {known}, so every tool is served"
+    return (f"ao mcp: started with no --role, so every tool is served; the roles are {known}, "
+            "and `ao init` writes one into each registration a single role reads")
 
 
 def status_payload(cfg):
@@ -450,8 +473,13 @@ def main():
         root = sys.argv[sys.argv.index("-C") + 1]
     # The role the registration names (MCP-ROLES): fixed for the session, since a harness starts
     # its servers once, when its session starts. Read as AO_ROLE is, without case or surrounding
-    # space, so a hand-written `Reviewer` is not an unknown role served every tool.
-    role = sys.argv[sys.argv.index("--role") + 1].strip().lower() if "--role" in sys.argv[:-1] else None
+    # space, so a hand-written `Reviewer` is the reviewer; a role it does not know stops the
+    # server before it answers anything, where it was served every tool (HUNT-LEADS-SEC).
+    try:
+        role = served_role(sys.argv[1:])
+    except ValueError as refused:
+        print(refused, file=sys.stderr, flush=True)
+        return 2
     served = role_tools(role)
     notice = role_notice(role)
     if notice:
@@ -513,4 +541,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

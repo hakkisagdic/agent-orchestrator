@@ -32,8 +32,10 @@ systemd units on Linux and the web view on 127.0.0.1.*
   beside a first.
 - **A harness's login, for one request.** Where the implementer's adapter declares an account lookup,
   ao reads the access token that harness's CLI already keeps on this machine and uses it for the
-  request described under [What leaves the machine](#what-leaves-the-machine). The token is never
-  written, logged or shown.
+  request described under [What leaves the machine](#what-leaves-the-machine), to the endpoint the
+  adapter names and no other: a redirect is said with its status, never followed with the token
+  (HUNT-LEADS-SEC). A store value that is no token is read as none. The token is never written,
+  logged or shown.
 - **What keyflip says**, when it is installed: quota windows, budgets and which accounts exist
   (`keyflip usage --providers`, `keyflip budget status --json`, `keyflip surfaces`). keyflip never hands
   ao a secret ([keyflip.md](keyflip.md)).
@@ -62,10 +64,13 @@ written as `[redacted:<rule>]` ([safety.md](safety.md#7b-what-ao-writes-is-scann
 - `~/.ao/settings.json` and `~/.ao/projects.json` - the machine's settings, and the projects on it by
   name and path.
 - `~/.ao/email.json`, `~/.ao/telegram.json` and `~/.ao/pings.json` - the channels' credentials and
-  addresses. ao writes the first and the last readable by you alone (mode 0600); the Telegram file is
-  the one you write yourself, and [telegram.md](telegram.md) asks the same mode of it. Windows keeps
-  no file mode: there the three are as private as `~/.ao`, which takes its permissions from your user
-  profile, and ao says so when it saves one ([windows.md](windows.md)).
+  addresses. ao writes the first and the last readable by you alone (mode 0600) from the moment each
+  is created, and puts a new one in place of the old one whole, so a write cut short leaves the one
+  that worked; each was written in place and given its mode after, readable by every user of the
+  machine meanwhile (HUNT-LEADS-SEC). The Telegram file is the one you write yourself, and
+  [telegram.md](telegram.md) asks the same mode of it. Windows keeps no file mode: there the three
+  are as private as `~/.ao`, which takes its permissions from your user profile, and ao says so when
+  it saves one ([windows.md](windows.md)).
   `~/.ao/telegram-offset` is the poller's place in the messages.
 - For each project, files named after it: the watchdog's state and log and its recorded cycles
   (`~/.ao/watchdog-<project>.json`, `~/.ao/cycles-<project>.jsonl`), its heartbeat, and the logs of the
@@ -104,6 +109,14 @@ Only these, each once someone has set it up; take the setup away and it stops.
 | Pull requests | `ao config set pr.watch on`, then `ao pr watch --once` | GitHub, asked through your `gh` | two reads a pass: `gh pr list` for this checkout's open pull requests, and `gh pr view` for each of this project's; nothing is written to GitHub ([pr.md](pr.md)) |
 | Updating ao | `ao update`, which prints the command it will run and asks first | the clone's git remote, or the source of the tool that installed ao: Homebrew, pipx, uv or pip | that tool's own requests for the newer ao; ao adds nothing of its own ([getting-started.md](getting-started.md)) |
 | A2A | `ao a2a serve`, `ao a2a-mcp serve` | 127.0.0.1 only, answering a request named for that address alone; the agents in `.ao/a2a-agents.json` or `~/.ao/a2a-agents.json` | the board, to anything on this machine; the messages you send, to the agents you registered ([mcp.md](mcp.md)) |
+
+A request that carries a credential in a header - the account lookup's token, an A2A agent's headers,
+the key of the API reviewer ([adapters.md](adapters.md)) - follows no redirect: it goes to the URL
+that is named and no other, and an answer that sends it elsewhere is an error naming its HTTP status.
+urllib followed one with every header, `Authorization` among them, to whatever host it named
+(HUNT-LEADS-SEC). A token written in a URL's path - Telegram's bot token, formsubmit's alias - stays
+with the host that URL names: a redirect is asked at the place it names, with nothing of the path it
+left.
 
 `gh` is asked only these reads - whether a repository is private, and with `pr.watch` on the open
 pull requests - the two refs above are all ao ever pushes, and ao never grants `push` to an agent

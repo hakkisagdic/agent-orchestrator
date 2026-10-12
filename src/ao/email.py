@@ -18,7 +18,7 @@ import os
 import time
 import urllib.request
 
-from . import lib as A
+from . import lib as A, storage
 UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 CONF = os.path.join(A.HOME, ".ao", "email.json")
@@ -49,10 +49,13 @@ def config():
 
 
 def _write(c):
-    os.makedirs(os.path.dirname(CONF), exist_ok=True)
-    with open(CONF, "w", encoding=UTF8) as fh:
-        json.dump(c, fh, indent=2)
-    os.chmod(CONF, 0o600)
+    """Save the settings: a file of mode 0600 from its creation, put in place of the one before whole.
+
+    Opened with the process's umask, written, and only then chmod-ed, the file and its credential were readable by
+    every user of the machine meanwhile, and stayed so when the process stopped between the two; and truncated in
+    place, a write cut short left no settings where working ones had been (HUNT-LEADS-SEC).
+    """
+    storage.replace_file_durably(CONF, json.dumps(c, indent=2).encode(UTF8), mode=0o600)
     return c
 
 

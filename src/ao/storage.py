@@ -444,7 +444,7 @@ def _sync_directory(directory, fsync):
     return True
 
 
-def replace_file_durably(path, data, *, _checkpoint=None, _fsync=None):
+def replace_file_durably(path, data, *, mode=None, _checkpoint=None, _fsync=None):
     """Replace a whole file so it is only ever seen with its old bytes or its new ones.
 
     ``open(path, "w")`` truncates first. A crash, kill or full disk before the new
@@ -453,18 +453,34 @@ def replace_file_durably(path, data, *, _checkpoint=None, _fsync=None):
     This writes a temporary file beside the target, fsyncs it, renames it over the
     target and fsyncs the directory. ``_checkpoint`` and ``_fsync`` are the private
     test seams the ledger appends take.
+
+    ``mode`` is for a file that holds a credential. Its temporary file is created
+    with that mode, under a name no file had (``O_EXCL``, and ``O_NOFOLLOW`` where
+    the platform has it), so the bytes are never readable by anyone the mode leaves
+    out - not while they are written, and not when a write is cut short - and a file
+    or a link already at that name is never written through. Written in place and
+    chmod-ed after, ``~/.ao/email.json`` was readable by every user of the machine
+    meanwhile, and stayed so when the process stopped between the two
+    (HUNT-LEADS-SEC). Without ``mode`` the file keeps the mode it had, or 0644.
     """
     fsync = _fsync or os.fsync
     parent = os.path.dirname(path) or "."
     os.makedirs(parent, exist_ok=True)
-    try:
-        mode = os.stat(path).st_mode & 0o7777
-    except OSError:
-        mode = 0o644
-    temporary = os.path.join(parent, f".{os.path.basename(path)}.{os.getpid()}.tmp")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0)
+    if mode is None:
+        try:
+            mode = os.stat(path).st_mode & 0o7777
+        except OSError:
+            mode = 0o644
+        temporary = os.path.join(parent, f".{os.path.basename(path)}.{os.getpid()}.tmp")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    else:
+        temporary = os.path.join(parent, f".{os.path.basename(path)}.{os.getpid()}.{os.urandom(4).hex()}.tmp")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_BINARY", 0)
+    opened = False
     try:
         fd = os.open(temporary, flags, mode)
+        opened = True
         try:
             _call(_checkpoint, "temporary-opened")
             remaining = memoryview(data)
@@ -483,10 +499,12 @@ def replace_file_durably(path, data, *, _checkpoint=None, _fsync=None):
             os.close(fd)
         _replace(temporary, path)
     except BaseException:
-        try:
-            os.remove(temporary)
-        except OSError:
-            pass
+        # Only a file this call made goes: what stood at an exclusive name before it is not this call's.
+        if opened:
+            try:
+                os.remove(temporary)
+            except OSError:
+                pass
         raise
     _call(_checkpoint, "replaced")
     if _sync_directory(parent, fsync):

@@ -99,9 +99,15 @@ configures with `ao mcp config --role reviewer`, or a harness registered as the 
 implementer is served the tools its playbook's mailbox section names, and `ao_verify`, the gate
 step of its loop, still only with `--allow-verify`.
 
-With no `--role`, or with one it does not know, the server serves every tool, as it did before
-roles existed, and says so in one line on stderr, which an MCP client keeps in its log. Refusing
-instead would take the tools from a session that may be the architect's.
+With no `--role` the server serves every tool, as it did before roles existed, and says so in one
+line on stderr, which an MCP client keeps in its log. A role is read without case or surrounding
+space, so `Reviewer` is the reviewer. One it does not know - mistyped, or nothing after `--role` - is
+refused, by `ao mcp` and by the server itself, naming the three, and the server does not start; the
+line is in the client's log.
+
+*In ao since slice HUNT-LEADS-SEC: a role the server did not know was served every tool, so a
+registration that misspelt `reviewer` started a reviewer that could send reports and acknowledge the
+implementer's mail. Every registration `ao init` writes names one of the three, or none.*
 
 **Which role a registration names.** `ao init` reads it from `.ao/config.json`: the role whose
 block - or a reviewer's fallback - runs a harness that reads the registration. A file holds one
