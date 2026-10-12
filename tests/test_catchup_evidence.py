@@ -26,8 +26,9 @@ MODULE = ('"""a module"""\nimport os\n\nX = 1\n\n\ndef a():\n    return X\n\n\nd
           'def c():\n    return b(1)\n')
 WITHOUT_B = MODULE.replace('def b(n):\n    return n + 1\n\n\n', '_part("mod_b", globals())\n\n\n')
 WITHOUT_C = WITHOUT_B.replace('def c():\n    return b(1)\n', '_part("mod_c", globals())\n')
-B_PART = '"""b, moved"""\n\n\ndef b(n):\n    return n + 1\n'
-C_PART = '"""c, moved"""\n\n\ndef c():\n    return b(1)\n'
+# A part a move adds brings no docstring: it would be text no move carries (SPLIT-DOCSTRING).
+B_PART = 'def b(n):\n    return n + 1\n'
+C_PART = 'def c():\n    return b(1)\n'
 
 
 def _git(root, *args, env=None):
@@ -292,7 +293,7 @@ def test_plan_names_the_waivers_that_close_by_proof_and_writes_nothing(project, 
     out = capsys.readouterr().out
     assert _snapshot(root, A.HOME, os.path.dirname(os.environ["AO_LEDGER_CHECKPOINTS"])) == before
     start, end = moved.split("..")
-    assert (f"{proven['id']} (SPLIT-B): {start[:12]}..{end[:12]}, 1 commit(s), 8 changed line(s): its grant recorded "
+    assert (f"{proven['id']} (SPLIT-B): {start[:12]}..{end[:12]}, 1 commit(s), 5 changed line(s): its grant recorded "
             "a pure move; closes by proof, 1 definition(s) moved byte for byte on the landed range; no reviewer") in out
     start, end = edited.split("..")
     assert f"{reviewed['id']} (B8): {start[:12]}..{end[:12]}, 1 commit(s), 1 changed line(s): review by a family" in out
@@ -325,7 +326,7 @@ def test_a_person_states_which_waived_slices_only_moved_code_and_each_closes_onl
 
     stated = dict(move_only="SPLIT-B, SPLIT-E,SPLIT-D,SPLIT-X", by="A. Person")
     start, end = moved_range.split("..")
-    closes = (f"{moved['id']} (SPLIT-B): {start[:12]}..{end[:12]}, 1 commit(s), 8 changed line(s): A. Person states "
+    closes = (f"{moved['id']} (SPLIT-B): {start[:12]}..{end[:12]}, 1 commit(s), 5 changed line(s): A. Person states "
               "it is a pure move; ")
     for plan in (True, False):
         assert _catchup(project, plan=plan, **stated) == 0
@@ -335,8 +336,9 @@ def test_a_person_states_which_waived_slices_only_moved_code_and_each_closes_onl
                               "reviewer") in out
         # A statement closes nothing the proof does not hold for: an edit, and a move beside a document.
         assert (f"{edited['id']} (SPLIT-E)" in out and "A. Person states it is a pure move, and the landed range is not "
-                "one: b changed in parts/mod_b.py; parts/mod_b.py does not run its old statements in their old "
-                "order with its new parts in place; keeping it open" in out)
+                "one: b changed in parts/mod_b.py; mod.py, read with its parts where they load, is not the text it "
+                "was: a move adds, drops or carries elsewhere no line (first: 'return n + 2'); parts/mod_b.py does "
+                "not run its old statements in their old order with its new parts in place; keeping it open" in out)
         assert (f"{documented['id']} (SPLIT-D)" in out and "A. Person states it is a pure move, and the landed range "
                 "is not one: docs/notes.md changed, and the proof reads Python definitions only; keeping it open" in out)
         assert "--move-only SPLIT-X: no open review waiver names it; nothing is proven or closed" in out
