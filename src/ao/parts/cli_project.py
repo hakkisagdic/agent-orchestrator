@@ -1545,6 +1545,18 @@ def cmd_email(cfg, args):
             password = os.environ.get(args.password_env)
             if password is None:
                 print(f"{C['red']}not saved{C['reset']}: ${args.password_env} is not set"); return 2
+        elif args.user:
+            # An account's password is asked at the terminal, not shown: the setup text had a person read it into a
+            # variable first, a line that swallowed the next one pasted with it as the password, and left the
+            # variable set when it was cut short (EMAIL-SETUP-PROMPT).
+            if not sys.stdin.isatty():
+                print(f"{C['red']}not saved{C['reset']}: {args.user}'s password is asked at a terminal, and none is "
+                      "attached; --password-env names a variable that holds it")
+                return 2
+            import getpass
+            password = getpass.getpass(f"password for {args.user} on {args.host} (not shown): ")
+            if not password:
+                print(f"{C['red']}not saved{C['reset']}: no password was given"); return 2
         try:
             c = email.save_provider(provider, host=args.host, port=args.port, user=args.user,
                                     password=password, to=args.to, tls=args.tls,

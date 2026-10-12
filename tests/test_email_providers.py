@@ -84,6 +84,40 @@ def test_ao_email_setup_saves_smtp_with_the_password_from_the_environment(projec
     assert email.config()["host"] == "smtp.example.test"
 
 
+def test_ao_email_setup_asks_for_an_account_s_password_at_the_terminal_and_never_without_one(project, conf,
+                                                                                           monkeypatch, capsys):
+    """EMAIL-SETUP-PROMPT: the setup text had a person read the password into a variable first, a line that swallowed
+    the command pasted after it as the password and left the variable set when it was cut short."""
+    import getpass
+    import sys
+    args = SimpleNamespace(action="setup", provider="smtp", token=None, to="me@example.test",
+                           host="smtp.example.test", port=None, user="me@example.test",
+                           password_env=None, sender=None, tls=None)
+    asked = []
+    monkeypatch.setattr(getpass, "getpass", lambda prompt: asked.append(prompt) or "typed-unseen")
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False, raising=False)
+    assert cli.cmd_email(project, args) == 2
+    assert "asked at a terminal, and none is attached; --password-env names a variable" in capsys.readouterr().out
+    assert asked == [] and not conf.exists()
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
+    assert cli.cmd_email(project, args) == 0
+
+    assert asked == ["password for me@example.test on smtp.example.test (not shown): "]
+    assert json.loads(conf.read_text())["password"] == "typed-unseen"
+
+
+def test_an_smtp_server_with_no_account_is_saved_without_asking_for_a_password(project, conf, monkeypatch):
+    import getpass
+    monkeypatch.setattr(getpass, "getpass", lambda prompt: pytest.fail("asked for a password"))
+    args = SimpleNamespace(action="setup", provider="smtp", token=None, to="me@example.test",
+                           host="relay.example.test", port=25, user=None, password_env=None, sender=None, tls="none")
+
+    assert cli.cmd_email(project, args) == 0
+    assert "password" not in json.loads(conf.read_text())
+
+
 def test_the_formsubmit_file_from_before_providers_still_sends(conf):
     conf.write_text(json.dumps({"token": "tok", "to": "me@example.test"}))
 

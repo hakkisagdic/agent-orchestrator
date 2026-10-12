@@ -67,12 +67,11 @@ E-posta kanalı (kırmızı alarm) — sunucu gerekmez, formsubmit.co üzerinden
 3. Kaydet:  ao email setup --token <token> --to SENIN@ADRESIN
 4. Dene:    ao email test        → gelen kutunda "[ao/<proje>] test" görmelisin.
 
-Kendi posta sunucun varsa formsubmit yerine SMTP (parola, kabuğun geçmişinin tuttuğu komut
-satırına yazılmaz: ekrana basılmadan bir değişkene okunur, ao onu bir kez okur):
-     read -rs AO_SMTP_PASSWORD && export AO_SMTP_PASSWORD
+Kendi posta sunucun varsa formsubmit yerine SMTP; ao hesabın parolasını sorar ve ekrana
+basmaz, böylece parola kabuğun geçmişinin tuttuğu komut satırına hiç yazılmaz (bir betik
+parolayı tutan değişkeni --password-env ile adlandırır):
      ao email setup --provider smtp --host smtp.ornek.com \\
-       --user SEN@ORNEK.COM --password-env AO_SMTP_PASSWORD --to SEN@ORNEK.COM
-     unset AO_SMTP_PASSWORD
+       --user SEN@ORNEK.COM --to SEN@ORNEK.COM
 
 Token {conf} dosyasında {kept} durur; hiçbir depoya yazılmaz. Kırmızı alarmlar
 (bir saatten uzun süren turuncu durumlar, tükenmiş kota, başarısız mimar uyandırma)
