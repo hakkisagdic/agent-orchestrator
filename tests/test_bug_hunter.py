@@ -118,7 +118,7 @@ def test_a_hunt_reads_its_budget_in_bytes(project):
     subprocess.run(["git", "add", "src"], cwd=root, check=True)
     cfg = dict(project, hunter={"bytes_per_run": 60000, "files_per_run": 1})
 
-    read = [text for _ in range(10) for path, text in A.hunt_slice(root, cfg)[0] if path == "src/u.py"]
+    read = [text for _ in range(10) for path, text, _, _, _ in A.hunt_slice(root, cfg)[0] if path == "src/u.py"]
 
     assert read and all(len(text.encode("utf-8")) <= 60000 for text in read)
 

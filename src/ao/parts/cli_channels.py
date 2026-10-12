@@ -602,19 +602,30 @@ def cmd_hunt(cfg, args):
     if problems:
         print(f"{C['red']}refused{C['reset']}: the hunter must not be able to write — {'; '.join(problems)}")
         return 2
-    files, cursor = A.hunt_slice(root, cfg)
-    if not files:
+    passed_over = []
+    pieces, cursor = A.hunt_slice(root, cfg, passed_over)
+    if passed_over:
+        # Said, not skipped in silence: a file this large is never read by a hunt (BUG-HUNTER-3).
+        print(f"{C['dim']}passed over {len(passed_over)} file(s) larger than hunter.max_file_kb "
+              f"({S.get(cfg, 'hunter.max_file_kb')} KB): {', '.join(A.shown_text(path) for path in passed_over)}"
+              f"{C['reset']}")
+    if not pieces:
         print("nothing tracked to hunt in")
         return 0
+    files = [(path, text) for path, text, _, _, _ in pieces]
+    # A piece of a file larger than one hunt says which lines it is, so a lead's line is the file's (BUG-HUNTER-3).
+    parts = [[path, first, last, total] for path, _, first, last, total in pieces if (first, last) != (1, total)]
     # The hunter is told in the project's language, and a lead is read in one shape in either (LANGUAGE-PROMPTS).
     prompt = language.text(cfg, "prompt.hunt", categories=", ".join(A.HUNT_CATEGORIES)) + "".join(
-        f"\n--- {path} ---\n{text}" for path, text in files)
+        "\n--- " + (path if (first, last) == (1, total) else language.text(
+            cfg, "prompt.hunt-part", path=path, first=first, last=last, total=total)) + f" ---\n{text}"
+        for path, text, first, last, total in pieces)
     # A slice of files can outgrow one argument; past that the prompt goes where the hunter's
     # adapter declares, or the hunt is refused as a configuration (PROMPT-CHANNEL).
     plan, refused = A.prompt_plan(argv, prompt, A.block_adapter({"argv": argv}))
     if refused:
         A.hunter_record(root, "run", files=[path for path, _ in files], cursor=cursor, ok=False, reason=refused,
-                        leads=0, sent=0, hunter=S.get(cfg, "hunter.id"))
+                        leads=0, sent=0, hunter=S.get(cfg, "hunter.id"), **({"parts": parts} if parts else {}))
         print(f"{C['red']}refused{C['reset']}: {refused}")
         return 2
     result = _run_reviewer(root, [part.replace("{prompt}", prompt) for part in plan["argv"]], _review_timeout(cfg),
@@ -629,7 +640,7 @@ def cmd_hunt(cfg, args):
     fresh = fresh[:S.get(cfg, "hunter.max_leads")]
     A.hunter_record(root, "run", files=[path for path, _ in files], cursor=cursor, ok=bool(result.get("ok")),
                     reason=result.get("reason") or None, leads=len(leads), sent=len(fresh),
-                    hunter=S.get(cfg, "hunter.id"))
+                    hunter=S.get(cfg, "hunter.id"), **({"parts": parts} if parts else {}))
     if not result.get("ok"):
         print(f"{C['yellow']}hunt did not run{C['reset']}: {result.get('reason')}")
         return 3

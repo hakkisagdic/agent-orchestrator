@@ -52,6 +52,7 @@ machine setting written into a project.
 | `hunter.every_hours` | `24` | project | hours between bug hunts the watchdog starts, when the hunter feature is on |
 | `hunter.files_per_run` | `8` | project | tracked files one hunt reads, going round the tree run by run |
 | `hunter.bytes_per_run` | `60000` | project | bytes of source one hunt reads |
+| `hunter.max_file_kb` | `512` | project | kilobytes of a tracked file past which no hunt reads it: a lock file, a bundle, a data set |
 | `hunter.max_leads` | `5` | project | new leads one hunt may send |
 | `hunter.argv` | `none` | project | the hunter's command with {prompt}, unable to write; none: no hunt runs |
 | `hunter.id` | `hunter` | project | the name a hunt's runs and leads are recorded under |

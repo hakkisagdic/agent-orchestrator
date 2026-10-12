@@ -110,6 +110,9 @@ SETTINGS = {
     "hunter.bytes_per_run": Setting(
         60_000, int, 1000, None, "project",
         "bytes of source one hunt reads"),
+    "hunter.max_file_kb": Setting(
+        512, int, 1, None, "project",
+        "kilobytes of a tracked file past which no hunt reads it: a lock file, a bundle, a data set"),
     "hunter.max_leads": Setting(
         5, int, 1, None, "project",
         "new leads one hunt may send"),

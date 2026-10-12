@@ -624,8 +624,63 @@ def hunter_known(root):
     return {row.get("fingerprint") for row in hunter_rows(root) if row.get("event") in ("sent", "discarded")}
 
 
-def hunt_slice(root, cfg):
-    """The next bounded slice of tracked product files, from a cursor that goes round the tree (#45)."""
+def _hunt_cursor(state_path, candidates):
+    """(index, line) the next hunt starts at: the file the last one stopped before, and the line of it its next
+    piece begins with. The file is kept by name: a file added or removed above it moves no other into its place,
+    and where it is gone the hunt goes on with the one that follows it (BUG-HUNTER-3)."""
+    try:
+        with open(state_path, encoding=UTF8) as fh:
+            state = json.load(fh)
+        index, path, line = int(state.get("cursor") or 0), state.get("path"), int(state.get("line") or 1)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return 0, 1
+    if not isinstance(path, str):
+        return index % len(candidates), 1           # a cursor written before BUG-HUNTER-3: a place in the list
+    if path in candidates:
+        return candidates.index(path), max(line, 1)
+    return next((at for at, each in enumerate(candidates) if each > path), 0), 1
+
+
+def _hunt_lines(full, largest):
+    """The lines of one file as a hunt reads them, numbered as an editor numbers them: [] where it cannot be read
+    as text, None where it is larger than `largest` bytes and so no source a hunt goes through (BUG-HUNTER-3)."""
+    try:
+        if os.path.getsize(full) > largest:
+            return None
+        with open(full, encoding=UTF8) as fh:
+            return fh.readlines()
+    except (OSError, ValueError):
+        return []
+
+
+def _hunt_piece(lines, budget):
+    """How many of `lines` one hunt reads of a file larger than its budget: those that fit, ending where a
+    blank line is followed by a line that starts at the margin - a definition, a heading - when the last
+    quarter of them holds such a place, so the next piece opens on a whole one (BUG-HUNTER-3)."""
+    taken = spent = 0
+    for line in lines:
+        spent += len(line.encode(UTF8))
+        if spent > budget:
+            break
+        taken += 1
+    for at in range(taken, taken - taken // 4, -1):
+        if at < len(lines) and not lines[at - 1].strip() and lines[at][:1].strip():
+            return at
+    return taken
+
+
+def hunt_slice(root, cfg, passed_over=None):
+    """The next bounded slice of tracked product files, from a cursor that goes round the tree (#45):
+    [(path, text, first line, last line, lines in the file)] and the place in the list the hunt started at.
+
+    Every line of every file up to `hunter.max_file_kb` is read in some hunt (BUG-HUNTER-3). A file that does
+    not fit what is left of a hunt's budget starts the next one; it was passed over, the cursor already beyond
+    it, and the same files could be missed on every round. A file larger than a whole hunt is read a piece a
+    hunt, cut at a line; it was read to its first `hunter.bytes_per_run` and never further, and ao's own
+    largest files are three times that. A line longer than a hunt is cut to it. A file past
+    `hunter.max_file_kb` is no source a hunt goes through: it is passed over, and named in `passed_over` where
+    the caller gives a list. A round that finds nothing it can read ends the hunt, where it went round for ever.
+    """
     try:
         listed = [os.fsdecode(p) for p in _git_output(root, "ls-files", "-z").split(b"\0") if p]
     except RuntimeError:
@@ -634,32 +689,41 @@ def hunt_slice(root, cfg):
     if not candidates:
         return [], 0
     state_path = os.path.join(root, ".ao", "hunter.json")
-    try:
-        with open(state_path, encoding=UTF8) as fh:
-            cursor = int(json.load(fh).get("cursor") or 0) % len(candidates)
-    except (OSError, ValueError, TypeError, AttributeError):
-        cursor = 0
-    files, spent, index = [], 0, cursor
+    index, line = _hunt_cursor(state_path, candidates)
+    cursor, pieces, spent, passed = index, [], 0, 0
     budget, most = settings.get(cfg, "hunter.bytes_per_run"), settings.get(cfg, "hunter.files_per_run")
-    while len(files) < most and len(files) < len(candidates):
+    largest = settings.get(cfg, "hunter.max_file_kb") * 1024
+    while len(pieces) < most and passed < len(candidates):
         path = candidates[index % len(candidates)]
-        index += 1
-        try:
-            with open(os.path.join(root, path), encoding=UTF8) as fh:
-                text = fh.read(budget)
-        except (OSError, UnicodeDecodeError):
+        lines = _hunt_lines(os.path.join(root, path), largest)
+        if lines is None and passed_over is not None:
+            passed_over.append(path)
+        rest = (lines or [])[line - 1:]
+        size = sum(len(each.encode(UTF8)) for each in rest)
+        if not rest or size <= budget - spent:
+            if rest:
+                pieces.append((path, "".join(rest), line, len(lines), len(lines)))
+                spent += size
+            index, line, passed = index + 1, 1, passed + 1
             continue
-        # The budget is bytes, as `hunter.bytes_per_run` says: counted in characters, a file of `é` was read at
-        # twice it (BUG-HUNTER-2). Only a character the cut splits is dropped.
-        text = text.encode(UTF8)[:budget].decode(UTF8, "ignore")
-        size = len(text.encode(UTF8))
-        if files and spent + size > budget:
-            break
-        files.append((path, text))
-        spent += size
+        if pieces:
+            break                                    # it starts the next hunt, whole or by its next piece
+        taken = _hunt_piece(rest, budget)
+        if taken:
+            pieces.append((path, "".join(rest[:taken]), line, line + taken - 1, len(lines)))
+        else:
+            # One line longer than a whole hunt: what of it fits, a character the cut splits dropped.
+            taken = 1
+            pieces.append((path, rest[0].encode(UTF8)[:budget].decode(UTF8, "ignore"), line, line, len(lines)))
+        line += taken
+        if line > len(lines):
+            index, line = index + 1, 1
+        break
     from .storage import replace_file_durably
-    replace_file_durably(state_path, (json.dumps({"cursor": index % len(candidates)}) + "\n").encode(UTF8))
-    return files, cursor
+    at = index % len(candidates)
+    replace_file_durably(state_path, (json.dumps({"cursor": at, "path": candidates[at], "line": line}) + "\n")
+                         .encode(UTF8))
+    return pieces, cursor
 
 
 def parse_leads(out):

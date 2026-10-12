@@ -165,6 +165,15 @@ discards it with `ao hunt discard <id>`. Each lead carries a fingerprint (file, 
 category), so a repeat is not sent again and a discard is remembered. A lead never blocks a
 slice or raises a human alarm.
 
+Every line of every tracked file up to `hunter.max_file_kb` is read in some hunt (BUG-HUNTER-3). A file that does not fit
+what is left of a hunt's budget starts the next hunt, where it was passed over and the cursor
+went on beyond it; a file larger than a whole hunt is read a piece a hunt, cut at a line - where
+it can, before a definition or a heading - and its piece is headed with the lines it holds, so a
+lead names the file's own line; it was read to its first `hunter.bytes_per_run` and never further.
+The cursor keeps the file it stopped before by its name, so a file added above it moves nothing
+into its place. A file past `hunter.max_file_kb` - a lock file, a bundle - is no source a hunt
+goes through: it is passed over and named. A hunt that finds nothing it can read ends.
+
 The hunter is configured as `hunter.argv` and refused unless it cannot write, by the same rule a
 reviewer must meet: its command runs a harness ao ships that can review, with every flag of that
 harness's `options.trust_none` in it. It is asked in the project's `language`, and a lead is read in one shape in
