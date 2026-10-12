@@ -1378,7 +1378,7 @@ def _schedule_hunt(root, cfg, st):
     with open(log, "a", encoding=UTF8) as fh:
         fh.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} hunt ===\n")
         fh.flush()
-        subprocess.Popen([sys.executable, "-m", "ao", "-C", root, "hunt", "run"], cwd=root,
+        subprocess.Popen([sys.executable, "-m", "ao", "-C", root, "hunt", "run"], cwd=A.self_child_cwd(),
                          stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.STDOUT, start_new_session=True,
                          env=A.self_child_env(dict(os.environ, AO_ROLE="hunter")))
     st["last_hunt"] = time.time()

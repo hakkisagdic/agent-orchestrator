@@ -1139,7 +1139,25 @@ def self_child_env(env=None):
     given = os.pathsep.join(child.pop(name) or "" for name in spelt)
     rest = [part for part in given.split(os.pathsep) if part and part != parent]
     child["PYTHONPATH"] = os.pathsep.join([parent] + list(dict.fromkeys(rest)))
+    # `-m` puts the working directory first on the import path: where the interpreter can be told not to (3.11), it
+    # is; self_child_cwd holds on the older ones (CHILD-CWD).
+    child["PYTHONSAFEPATH"] = "1"
     return child
+
+
+def self_child_cwd():
+    """The working directory of a child that re-enters ao as `-m ao`: ao's own folder in the person's home, which holds
+    no module of a project's (CHILD-CWD, #117).
+
+    `python -m ao` puts its working directory first on the import path. The watchdog's hunt, a submitted review's
+    runner, the MCP server's verify and init's watchdog install started that child in the project - or wherever the
+    person stood, which is the project - so a json.py or an ao/ package an agent left at its root was imported in
+    place of the standard library's or ao's own: from the watchdog's job, outside any agent's sandbox. Each names the
+    project with -C and needs no working directory there.
+    """
+    path = os.path.join(HOME, ".ao")
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
 _part("lib_transcript", globals())

@@ -485,6 +485,11 @@ the installation outside the tree. Each `pyvenv.cfg` in the tree is read as conf
 every ignored folder for an installation, and a person who runs a program an agent left in the tree runs that
 agent's code: what ao holds is what it, and the turns it starts, would run.
 
+A child ao itself starts as `python -m ao` - the watchdog's hunt, a submitted review's runner, the MCP server's
+verify, init's watchdog install - starts in ao's own folder in the person's home and asks Python for its safe path:
+`-m` puts the working directory first on the import path, and started in the project such a child imported a
+`json.py` or an `ao/` package left at its root in place of the standard library's or ao's own (CHILD-CWD).
+
 ### 7b. What ao writes is scanned before it is written
 
 On 2026-09-08 a boundary asked for a reviewer's raw output to be kept as evidence, and the

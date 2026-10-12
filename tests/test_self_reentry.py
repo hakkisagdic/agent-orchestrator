@@ -338,3 +338,43 @@ def test_the_guard_follows_each_way_an_argv_is_put_together_and_fails_on_one_it_
         ("m.py", "env_only_in_kwargs", NO_ENV),
         ("m.py", "env_from_elsewhere", OTHER_ENV), ("m.py", "env_bound_again", OTHER_ENV),
         ("m.py", "returned_to_a_caller", LOST)]
+
+
+
+def test_a_child_that_re_enters_ao_starts_outside_the_project_and_with_python_s_safe_path(tmp_path, monkeypatch):
+    """CHILD-CWD (#117): `python -m ao` puts its working directory first on the import path, and four children were
+    started in the project, so a json.py an agent left at its root was imported in place of the standard library's.
+    Each starts in ao's own folder now, and the environment asks the interpreter to leave the directory off its path."""
+    monkeypatch.setattr(A, "HOME", str(tmp_path / "home"))
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "json.py").write_text("open('imported-from-the-project', 'w').close()\n", encoding="utf-8")
+
+    cwd, env = A.self_child_cwd(), A.self_child_env()
+    done = subprocess.run([sys.executable, "-m", "ao", "--version"], cwd=cwd, env=env, capture_output=True, text=True)
+
+    assert done.returncode == 0 and env["PYTHONSAFEPATH"] == "1"
+    assert os.path.realpath(cwd) == os.path.realpath(str(tmp_path / "home" / ".ao"))
+    assert not (project / "imported-from-the-project").exists() and not os.path.exists(
+        os.path.join(cwd, "imported-from-the-project"))
+
+
+def test_every_child_ao_starts_names_that_working_directory():
+    """Read from the source, as the environment is: a `-m ao` child with no cwd of ao's own starts where the caller
+    stands. The demo's children run in the scratch project it wrote itself, which is the demo."""
+    found = []
+    for path in sorted((ROOT / "src" / "ao").rglob("*.py")):
+        rel = path.relative_to(ROOT).as_posix()
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), rel)):
+            if not isinstance(node, ast.Call):
+                continue
+            lists = [arg for arg in node.args if isinstance(arg, (ast.List, ast.BinOp))]
+            words = [word for arg in lists for word in ast.walk(arg) if isinstance(word, ast.Constant)]
+            values = [word.value for word in words]
+            if not any(a == "-m" and b == "ao" for a, b in zip(values, values[1:])):
+                continue
+            cwd = next((keyword.value for keyword in node.keywords if keyword.arg == "cwd"), None)
+            safe = isinstance(cwd, ast.Call) and getattr(cwd.func, "attr", getattr(cwd.func, "id", "")) == "self_child_cwd"
+            found.append((rel, safe))
+
+    assert found and [rel for rel, safe in found if not safe] == ["src/ao/demo.py"], found

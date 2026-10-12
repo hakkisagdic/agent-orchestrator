@@ -3220,7 +3220,7 @@ def _spawn_review_run(root, rid):
     """Start the detached run of one submitted review, its output in .ao/reviews/<id>.log."""
     log = os.path.join(_reviews_dir(root), f"{rid}.log")
     with open(log, "a", encoding=UTF8) as fh:
-        subprocess.Popen([sys.executable, "-m", "ao", "-C", root, "review", "--run", rid], cwd=root,
+        subprocess.Popen([sys.executable, "-m", "ao", "-C", root, "review", "--run", rid], cwd=A.self_child_cwd(),
                          stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.STDOUT,
                          env=A.self_child_env(), **_reviewer_group())
 

@@ -641,7 +641,7 @@ def cmd_init(cfg, args):
     if args.watchdog:
         # This interpreter running this ao, handed where ao lives (SELF-REENTRY): never a program found by name.
         code = subprocess.run([sys.executable, "-m", "ao", "-C", root, "watchdog", "install"],
-                              env=A.self_child_env(dict(os.environ)),
+                              cwd=A.self_child_cwd(), env=A.self_child_env(dict(os.environ)),
                               capture_output=True, text=True, encoding=UTF8, errors="replace").returncode
         print(f"  {C['green'] if code == 0 else C['red']}watchdog{C['reset']} "
               f"{'installed' if code == 0 else 'install failed — run ao watchdog install'}")
