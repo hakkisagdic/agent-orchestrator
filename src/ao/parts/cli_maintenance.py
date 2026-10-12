@@ -1455,6 +1455,11 @@ def _environment_lines(cfg):
     return [f"{'environment':<16}{C['yellow']}{found}{C['reset']}"] if found else []
 
 
+def _turn_command_lines(cfg):
+    """Each role's command the watchdog refuses to start, in the words it refuses it in (TURN-ARGV)."""
+    return [f"{'turn command':<16}{C['red']}{text}{C['reset']}" for _, text in _turn_problems(cfg)]
+
+
 PROVE_BOUNDARY = ("ao prove: a throwaway candidate that adds one line to ao-prove.txt and nothing else. "
                   "Approve it if the diff is exactly that.")
 
@@ -1782,6 +1787,8 @@ def cmd_doctor(cfg, args):
     for line in _harness_config_lines(cfg):
         print(line)
     for line in _environment_lines(cfg):
+        print(line)
+    for line in _turn_command_lines(cfg):
         print(line)
     for line in _review_evidence_lines(cfg):
         print(line)

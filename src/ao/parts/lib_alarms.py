@@ -398,6 +398,8 @@ PROJECT_FILES = {
     # The harness configuration a person has seen, outside the tree an agent writes (HARNESS-CONFIG).
     "harness-seen": "harness-seen-{key}.json",
     "harness-base": "harness-base-{key}.json",
+    # Each role's turn command as last accepted, by ao init, the first reading or a person (TURN-ARGV).
+    "harness-turns": "harness-turns-{key}.json",
 }
 
 

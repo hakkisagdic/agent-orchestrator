@@ -79,6 +79,7 @@ Order matters: each guard sees only what the ones above left standing.
 | 5 | backoff | work fingerprint unchanged across nudges | escalate instead of nudging again |
 | 6 | nudge | — | start one headless turn in its own session |
 | any turn | harness configuration | each change to what a harness reads from the tree that no person has seen, read again right before each wake, refill, nudge and hunt, as the hold is | start none, and say why; a dry cycle says the same |
+| any turn | its command | the command a wake, refill or nudge would start, against the adapter the package ships - its program, its grant, the values filled into it - and against the command last accepted for its role | refused: start none and tell a person once (`turn-refused:<role>`); changed: start none until a person sees it, as harness configuration |
 
 Anomalies (`anomalies()`) are computed before the chain and delivered as facts:
 one file per condition, grouped per kind with a count.
@@ -91,6 +92,14 @@ the bug hunt each read the changes again right before they start, and stand down
 unseen or cannot be read, with the reason in the cycle's trace. A person reads them with
 `ao harness seen --by <name>` ([safety.md](safety.md#harness-configuration-an-agent-changed-waits-for-a-person)).
 The architect's own sessions are safest in a checkout of their own, where no agent writes.*
+
+*In ao since slice TURN-ARGV: the nudge is composed from the adapter the package ships, never from a user's or
+a project's layer, and each wake, refill and nudge is checked against that adapter before it starts - its
+program found as that harness's, no value from the role's block or session that reads as a flag, no grant
+beyond the one ao composes for the role from it. A refused turn starts nothing and is named to a person once,
+`turn-refused:<role>`; a change to what a role's block says of its command holds every turn as harness
+configuration nobody has seen, judged by the command the cycle composed
+([safety.md](safety.md#the-command-a-turn-starts-with-is-the-packages-not-the-trees)).*
 
 A nudge, a wake and a refill tell their turn what to do in the project's `language`
 ([configuration.md](configuration.md)). The nudge names `## DECISION REQUIRED` for a slice parked on a
@@ -249,6 +258,7 @@ test that would fail if it came back.
 | F33 | on Windows a PowerShell that was missing, failed or did not answer read as no process at all: the writer guard, the session guard and the presence check all passed, so a cycle could start a turn or wake an architect beside one it never saw, and `ao hold` stopped nothing | the process table was returned empty when it could not be read, on macOS, Linux and through `ps` as well | the readers raise `TableUnreadable`, naming the platform and why; a cycle that meets it starts, wakes and reaps nothing and raises `process-table-unreadable` for a person; presence it could not measure clears no quota block and holds no notice for the architect; a turn whose start cannot be read is believed for a bounded time | test_windows_table_closed | — |
 | F34 | a hook the implementer wrote into `.claude/settings.json` would have run in its own next nudge, outside the permissions that hold its commands, and in the architect's session when a wake started it in the same checkout, before any review saw it; Claude Code ran such a hook before it had even signed in | REVIEW-TREE-3 kept a candidate's configuration from its reviewer alone, and a harness's own folder is coordination state no candidate carries | each change to what an adapter declares its harness reads from a project is named to a person every cycle, and the wake, the refill, the nudge and the hunt each read them again before they start and stand down while one stands unseen, until `ao harness seen` records that a person read exactly those bytes | test_harness_config | HARNESS-CONFIG |
 | F35 | on Windows a hung turn taskkill could not stop - one an elevated prompt started, or a child its exited parent no longer led to - read as reaped, and a second turn was nudged beside it; `ao hold` said every tree was stopped | what a stop did was assumed, never read | every process of the tree is named to taskkill and asked afterwards; the reaper stands down and raises `reap-survived` while an unattended turn still runs; `ao hold` reads the table again, names what still runs and exits 1 | test_windows_stop_proven | WINDOWS-STOP-PROVEN |
+| F36 | an agent that wrote the project's own `.ao/adapters/` or a role's block in `.ao/config.json` chose the command the implementer's next nudge, or the architect's next wake or refill, started with: another program, a grant that admits `git commit --no-verify`, a model that reads as a flag | the nudge was composed from the adapter as every layer loads it, the wake and refill ran the block's argv as written, and only `ao doctor` named a grant that admitted a hook bypass | each turn is composed from the adapter the package ships and checked against it before it starts, or refused and a person told; a change to what a role's block says of its command holds every turn until `ao harness seen` | test_turn_argv | TURN-ARGV |
 
 ## Scenarios: testing the decision, not the measurement
 

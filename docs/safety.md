@@ -414,6 +414,42 @@ or an `AO_` variable that names a program, an adapter folder or a record there (
 read from the environment the check runs in - a person's shell for `ao doctor`, the job's for the
 scheduled check - and holds no turn: only the person who set it up can move it.
 
+### The command a turn starts with is the package's, not the tree's
+
+*In ao since slice TURN-ARGV: a wake, a refill and a nudge are composed from the adapter ao ships and
+checked against it before they start, and a change to what a role's block says of its command waits for a
+person.*
+
+The watchdog composed the implementer's nudge from its adapter as every layer loads it - the project's
+`.ao/adapters/` among them - and started the architect's wake and refill with the argv its block in
+`.ao/config.json` names. Both are files an agent can write, so a change to either could start a command the
+agent chose: another program in the harness's place, a grant that admits `git commit --no-verify`, a model
+that reads as a flag.
+
+- A nudge is composed from the adapter the package ships under the implementer's `adapter`: its resume, the
+  grant it declares for a turn nobody attends, its pin, and the model and effort the block names, spelled as
+  that adapter spells them. A user's or a project's layer changes nothing in it, and an implementer whose
+  adapter only such a layer declares is not nudged.
+- Before a wake, a refill or a nudge starts, its command is checked against that adapter. Its program is the
+  harness's: one of the adapter's binaries, named alone and found on the path ao searches, or named by a path
+  where ao finds that harness - never a file inside the repository, nor one named by a path from where it
+  starts. No value ao fills in from the role's block or its session - a model, an effort, a refill prompt, a
+  session id - starts with `-`, where a harness would read it as a flag. And its grant admits nothing ao
+  forbids the role (`allowlist.problems`: a hook bypass, a person's act, arbitrary code, every tool) that the
+  command ao composes for the role from the shipped adapter does not admit too, so a grant `ao doctor` only
+  named before is refused at spawn. A refused turn does not start, and a person is told once for what
+  refuses it, under `turn-refused:<role>`, which `ao doctor --check` names too, red and under the same alarm,
+  and `ao doctor` shows on a `turn command` line. No record lets it start: its configuration must change.
+- What a role's block says of its command - the implementer's adapter, model and effort, the architect's
+  adapter, argv and refill prompt - is accepted once as it stands: as `ao init` composed it for a block it
+  wrote, else at the first reading, and a role with no block as having none. A change from it is harness
+  configuration nobody has seen, named as `the implementer's command (changed)` by `ao verify`, `ao doctor`
+  and the watchdog, and no wake, refill, nudge, hunt or lane starts until a person reads it with
+  `ao harness seen`, which shows the command the turn would start and what changed since it was accepted, and
+  records it as the one accepted from then on. A role reassigned with `ao role set` is such a change. The
+  watchdog judges the command it composed, not the file read again, which an agent can put back in between.
+  What is accepted is kept in `~/.ao/harness-turns-<project>.json`.
+
 ## 6. Capability gating on MCP
 
 Every MCP tool has an access class ([mcp.md](mcp.md)): `read`, `write` or `run`. The one `run`

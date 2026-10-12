@@ -216,6 +216,31 @@ def _windows_limit_lines():
     return ([f"{'on Windows':<16}{C['yellow']}what ao cannot hold here, and why{C['reset']}"]
             + [f"{'':<16}{C['dim']}{name}: {text}{C['reset']}" for name, text in WINDOWS_LIMITS.items()])
 
+# The features that start each role's turn: a command no turn starts with is no finding (TURN-ARGV).
+TURN_FEATURES = {"implementer": ("nudge",), "architect": ("architect_wake", "refill")}
+
+
+def _turn_problems(cfg):
+    """[("turn-refused:<role>", text)] for each role whose turn the watchdog would refuse to start, in the words it
+    refuses it in, so the doctor and the watchdog raise one alarm (TURN-ARGV). Read as the command is composed before a
+    program is looked for: where the program is found is the watchdog's to say."""
+    from . import features as F
+    out = []
+    for role, features in TURN_FEATURES.items():
+        block = cfg.get(role) if isinstance(cfg.get(role), dict) else {}
+        if not block or not any(F.enabled(cfg, name) for name in features):
+            continue
+        ident, argv = A.turn_command(cfg, role)
+        if argv is None and (role == "architect" or A.turn_adapter(ident) is not None):
+            continue
+        values = {"session": A.session_to_resume(cfg, role)[0]}
+        values.update({"model": block.get("model"), "effort": block.get("effort")} if role == "implementer"
+                      else {"prompt": block.get("prompt")})
+        refused = A.turn_refusal(role, ident, argv or [], root=cfg["root"], values=values)
+        if refused:
+            out.append((f"turn-refused:{role}", refused))
+    return out
+
 
 def _path_problems():
     """[("path-relative", what it says)] where PATH holds a relative or empty entry on Windows, else [].
@@ -262,6 +287,8 @@ def doctor_problems(cfg):
                     f"ao features off {switch} --by <name>, or remove it"))
     out.extend(_harness_config_problem(root))
     out.extend(_environment_problem(root))
+
+    out.extend(_turn_problems(cfg))
     hb = A.heartbeat_age(root)
     if hb is not None and hb > WATCHDOG_SILENT_AFTER:
         # The tool named is this platform's: launchctl means nothing on Windows or Linux (WINDOWS-SAY-WHY).
@@ -536,7 +563,12 @@ def doctor_problems(cfg):
 # condition is one alarm whoever sees it, with one snooze and one mail (#106).
 DOCTOR_WATCHDOG_ALARMS = {"credits-exhaust": {"key": "credits-exhaust", "level": "red", "window": 6 * 3600},
                           "wake-failed": {"key": "architect-wake-failed", "level": None, "window": 6 * 3600},
-                          "harness-config": {"key": "harness-config", "level": None, "window": 6 * 3600}}
+                          "harness-config": {"key": "harness-config", "level": None, "window": 6 * 3600},
+                          # A turn the watchdog refuses to start, in the words it refuses it in (TURN-ARGV).
+                          "turn-refused:implementer": {"key": "turn-refused:implementer", "level": None,
+                                                       "window": 6 * 3600},
+                          "turn-refused:architect": {"key": "turn-refused:architect", "level": None,
+                                                     "window": 6 * 3600}}
 
 # A heartbeat older than this is a watchdog that stopped.
 WATCHDOG_SILENT_AFTER = 360
@@ -695,9 +727,10 @@ def _doctor_credit_lines(cfg):
 # Findings that mean work has stopped and only a person can restart it. Everything
 # else a doctor finds is an advisory: recorded for the architect, never paged (#40).
 # Harness configuration nobody has seen holds every turn ao starts, and only a person
-# may read it and record it as seen (HARNESS-CONFIG).
+# may read it and record it as seen (HARNESS-CONFIG). A turn the watchdog refuses to
+# start waits for its configuration to change (TURN-ARGV).
 DOCTOR_RED = {"watchdog-dead", "wake-failed", "transcript-blind", "transcript-missing", "implementer-session",
-              "harness-config"}
+              "harness-config", "turn-refused:implementer", "turn-refused:architect"}
 
 
 def _doctor_severity(key, text):
@@ -748,12 +781,13 @@ def _doctor_check(cfg, page=False):
                    what=credits_told("exhausted", last.get("account")))
         elif shared:
             # A failed wake says what the watchdog's own raise of it says, so the same failure rings once
-            # whoever sees it (NOISE-REPEATS); so does harness configuration nobody has seen (HARNESS-CONFIG).
+            # whoever sees it (NOISE-REPEATS); so does harness configuration nobody has seen (HARNESS-CONFIG),
+            # and a refused turn, in the words the watchdog refuses it in (TURN-ARGV).
             from .watchdog import STATE_DIR, wake_error, wake_failure_told
             failed = wake_error(os.path.join(STATE_DIR, A.project_file_name("escalate-log", project))) \
                 if key == "wake-failed" else None
             what = wake_failure_told(failed) if failed else _harness_config_told(root) \
-                if key == "harness-config" else None
+                if key == "harness-config" else text if key.startswith("turn-refused:") else None
             notify(f"{project}: {key}", text, root, key=shared["key"], window=shared["window"],
                    audience="human", level=shared["level"], what=what)
         else:

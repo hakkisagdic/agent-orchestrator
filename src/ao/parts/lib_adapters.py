@@ -1388,10 +1388,13 @@ def record_harness_written(root, files, by):
 
 def unseen_harness_config(root):
     """The changes to what a harness reads from this tree that no person has seen as they stand; [] when nothing
-    differs from HEAD (HARNESS-CONFIG). Raises RuntimeError when they cannot be read."""
+    differs from HEAD (HARNESS-CONFIG), and each role's command is the one last accepted (TURN-ARGV). Raises
+    RuntimeError when they cannot be read."""
     # The first reading keeps HEAD to measure from, where `ao init` left none: a project adopted before ao kept one.
     record_harness_baseline(root, "first reading")
-    changes = project_config_changes(root)
+    # And each role's command as it stands, where none is accepted yet (TURN-ARGV).
+    record_turn_baseline(root, "first reading")
+    changes = harness_config_changes(root)
     return harness_unseen(changes, harness_seen_record(root)) if changes else []
 
 
@@ -1414,6 +1417,8 @@ def record_harness_seen(root, changes, by, digest):
     path = project_file(root, "harness-seen")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     replace_file_durably(path, (json.dumps(record, indent=1, sort_keys=True) + "\n").encode(UTF8))
+    # A role's command seen is the one accepted from now on, and a change from it is measured from there (TURN-ARGV).
+    record_turns_seen(root, changes, by)
     return record
 
 
@@ -1584,6 +1589,250 @@ def bypass_refusal(adapter, flags, cfg=None):
     return (f"its unattended turn would run with {found[0]}, which turns off {ident}'s sandbox and its approvals, "
             f"and no person has allowed that on this machine (ao config set watchdog.bypass_adapters {ident} "
             "--machine)")
+
+
+# ---- the command a turn starts with is the package's, not the tree's (TURN-ARGV) ----------------
+
+# The watchdog composed the implementer's nudge from its adapter as every layer loads it - the project's .ao/adapters/
+# among them - and started the architect's wake and refill with the argv its block in .ao/config.json names: files an
+# agent writes, so a change to either could start a command the agent chose, another program or a grant that admits a
+# hook bypass (#116). A turn ao starts unattended is composed from the adapter the package ships and checked against
+# it before it starts, and what its role's block says of it holds every turn, as harness configuration does, until a
+# person has seen it as it stands.
+
+# The roles whose turns the watchdog starts, and the turns each one's command starts.
+TURN_ROLES = {"implementer": "a nudge", "architect": "a wake and a refill"}
+
+
+def turn_adapter(ident):
+    """The adapter a turn ao starts unattended is composed from and checked against: the one the package ships under
+    `ident`, else None. Never a user's layer or a project's, which the agents they describe can write (TURN-ARGV)."""
+    ident = str(ident or "").strip()
+    adapter = package_adapters().get(ident) if ident else None
+    return adapter if isinstance(adapter, dict) else None
+
+
+def turn_path(role):
+    """How a role's command is named among the changes a person reads, beside the files they name (TURN-ARGV)."""
+    return f"the {role}'s command"
+
+
+def turn_config(root, config=None):
+    """The role blocks a turn's command is composed from, as load_config resolves them - the actor table, and the
+    implementer a project that names none is found to run - from `config` or .ao/config.json, with no session read
+    (TURN-ARGV)."""
+    cfg = dict((project_config_document(root)["config"] if config is None else config) or {})
+    resolve_roles(root, cfg)
+    if "implementer" not in cfg:
+        architect = cfg.get("architect") if isinstance(cfg.get("architect"), dict) else {}
+        pinned = _concrete_session(architect.get("session"))
+        found = discover_session(root, exclude={pinned} if pinned else ())
+        if found:
+            cfg["implementer"] = found
+    return cfg
+
+
+def turn_identity(cfg, role):
+    """What a role's block says of the command a turn of it starts - its adapter, and the implementer's model and effort
+    or the architect's argv and refill prompt - or None for a role ao starts no turn of. The rest of the command is the
+    shipped adapter's, or ao's (TURN-ARGV)."""
+    block = cfg.get(role) if isinstance(cfg.get(role), dict) else None
+    if not block:
+        return None
+    if role == "implementer":
+        return {"adapter": block.get("adapter"), "model": block.get("model"), "effort": block.get("effort")}
+    if not block.get("argv"):
+        return None
+    return {"adapter": block.get("adapter"), "argv": block.get("argv"), "prompt": block.get("prompt")}
+
+
+def turn_digest(role, identity):
+    """The digest a role's command is accepted by, of the role and what its block says; None where it says nothing."""
+    if identity is None:
+        return None
+    return hashlib.sha256(json.dumps({"role": role, "turn": identity}, sort_keys=True).encode(UTF8)).hexdigest()
+
+
+def turn_record(root):
+    """{role: {sha256, identity, by, at}}: each role's command as last accepted - by `ao init`, at the first reading, or
+    by a person who saw it - kept in ~/.ao, outside the tree an agent writes; {} before any is (TURN-ARGV)."""
+    try:
+        with open(project_file(root, "harness-turns"), encoding=UTF8) as fh:
+            record = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(record, dict):
+        return {}
+    return {role: entry for role, entry in record.items() if role in TURN_ROLES and isinstance(entry, dict)}
+
+
+def _keep_turns(root, accepted, by):
+    """Accept each role of `accepted`, {role: (digest, what its block says)}, by `by`, beside the roles accepted before;
+    the roles kept, [] when they could not be written (TURN-ARGV)."""
+    from .storage import replace_file_durably
+    record, now = turn_record(root), int(time.time())
+    for role, (digest, identity) in accepted.items():
+        record[role] = {"sha256": digest, "identity": identity, "by": by, "at": now}
+    target = project_file(root, "harness-turns")
+    try:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        replace_file_durably(target, (json.dumps(record, indent=1, sort_keys=True) + "\n").encode(UTF8))
+    except OSError:
+        return []
+    return [role for role in TURN_ROLES if role in accepted]
+
+
+def _as_composed(cfg, roles):
+    """{role: (digest, what its block says)} for each of `roles`, as `cfg` holds it (TURN-ARGV)."""
+    return {role: (turn_digest(role, identity), identity) for role in roles for identity in [turn_identity(cfg, role)]}
+
+
+def record_turn_baseline(root, why):
+    """Accept each role's command as it stands where none is accepted for it yet - `ao init`'s, or the first reading's
+    in a project adopted before ao kept one - and a role with no command as having none, so a block added later is a
+    change. Only in an ao project, as what ao writes is (HARNESS-SEEN-OWN), and not while a .ao/config.json that is
+    there cannot be read, as load_config reads one; the roles recorded (TURN-ARGV)."""
+    if not os.path.isdir(os.path.join(root, ".ao")):
+        return []
+    missing = [role for role in TURN_ROLES if role not in turn_record(root)]
+    document = project_config_document(root) if missing else None
+    if not missing or (document["problem"] and os.path.lexists(os.path.join(root, ".ao", "config.json"))):
+        return []
+    return _keep_turns(root, _as_composed(turn_config(root, document["config"]), missing), why)
+
+
+def record_turns_written(root, cfg, roles, by):
+    """Accept the command of each of `roles` whose block ao composed itself - those `ao init` wrote - by the blocks it
+    composed, `cfg`, never by what is read back, nor through an actor table it did not write: a block an agent changed
+    before or after the write is another command, and stays unseen (HARNESS-SEEN-OWN, TURN-ARGV)."""
+    roles = [role for role in roles if role in TURN_ROLES]
+    if not roles or not os.path.isdir(os.path.join(root, ".ao")):
+        return []
+    return _keep_turns(root, _as_composed(cfg, roles), by)
+
+
+def record_turns_seen(root, changes, by):
+    """Accept each role's command among `changes` that a person was shown, by the digest they were shown, with what its
+    block says while that is still what stands (TURN-ARGV)."""
+    paths = {turn_path(role): role for role in TURN_ROLES}
+    seen = {paths[path]: sha for path, _, sha in changes if path in paths}
+    if not seen:
+        return []
+    standing = _as_composed(turn_config(root), seen)
+    return _keep_turns(root, {role: (sha, standing[role][1] if standing[role][0] == sha else None)
+                              for role, sha in seen.items()}, by)
+
+
+def turn_command(cfg, role):
+    """(adapter, argv) of the command a turn of `role` starts, composed as the watchdog composes it, with its prompt and
+    session left as placeholders; argv is None where nothing ao ships composes one (TURN-ARGV)."""
+    block = cfg.get(role) if isinstance(cfg.get(role), dict) else {}
+    if role != "implementer":
+        argv = block.get("argv")
+        if not isinstance(argv, list) or not argv:
+            return block_adapter(block), None
+        return block_adapter(block), pinned_argv(admit_rewrites([str(part) for part in argv])[0], "architect")[0]
+    ident = str(block.get("adapter") or "").strip() or None
+    shipped = turn_adapter(ident) or {}
+    resume = (shipped.get("resume") or {}).get("argv") if isinstance(shipped.get("resume"), dict) else None
+    if not isinstance(resume, list) or not resume:
+        return ident, None
+    argv = admit_rewrites([str(part) for part in resume])[0]
+    argv = pinned_argv(argv + unattended_flags(shipped, argv)[0], "implementer")[0]
+    options = shipped.get("options") or {}
+    for key in ("model", "effort"):
+        value = block.get(key)
+        if value and isinstance(options.get(key), list) and not any(str(arg).startswith(f"--{key}") for arg in argv):
+            if key == "effort" and options.get("effort_values") and value not in options["effort_values"]:
+                continue
+            argv += [str(part).replace("{" + key + "}", str(value)) for part in options[key]]
+    return ident, argv
+
+
+def turn_changes(root, shown=None):
+    """[(path, "changed", digest)] for each role whose block says otherwise of its command than the one last accepted,
+    the path `the architect's command`; with `shown`, what a person is shown of each, by its path (TURN-ARGV)."""
+    cfg, record, out = turn_config(root), turn_record(root), []
+    for role in TURN_ROLES:
+        identity = turn_identity(cfg, role)
+        accepted = record.get(role) or {}
+        if identity is None or (role in record and accepted.get("sha256") == turn_digest(role, identity)):
+            continue
+        out.append((turn_path(role), "changed", turn_digest(role, identity)))
+        if shown is not None:
+            shown[turn_path(role)] = ("turn", role, identity, accepted.get("identity"), turn_command(cfg, role))
+    return out
+
+
+def harness_config_changes(root, shown=None):
+    """Every change that holds what ao starts in this tree until a person has seen it: each to what a harness reads from
+    the tree (project_config_changes), and each role's command its block changed (turn_changes) (TURN-ARGV)."""
+    return project_config_changes(root, shown=shown) + turn_changes(root, shown=shown)
+
+
+def unseen_turn(root, cfg, role):
+    """The change no person has seen that a turn of `role` would start with, judged by `cfg`, the configuration its
+    command was composed from: the file read again later can be put back between the two readings. None when its
+    command is the one last accepted (TURN-ARGV)."""
+    record_turn_baseline(root, "first reading")
+    identity = turn_identity(cfg, role)
+    if identity is None:
+        return None
+    digest = turn_digest(role, identity)
+    if (turn_record(root).get(role) or {}).get("sha256") == digest:
+        return None
+    unseen = harness_unseen([(turn_path(role), "changed", digest)], harness_seen_record(root))
+    return unseen[0] if unseen else None
+
+
+def _same_program(path, other):
+    """Whether two paths, followed through their links, are one file (TURN-ARGV)."""
+    return os.path.normcase(os.path.realpath(path)) == os.path.normcase(os.path.realpath(other))
+
+
+def turn_refusal(role, ident, argv, root=None, resolved=None, search=None, values=None):
+    """Why the watchdog refuses to start a turn of `role` with `argv`, as a person reads it; None when it may
+    (TURN-ARGV).
+
+    `argv` is the command as it would start, its program as the command names it, composed from adapter `ident`;
+    `resolved` the file ao found for that program on `search`, once it has looked; `values` what ao fills into it from
+    the role's block and its session, by name. The adapter is one the package ships; the program is its harness's,
+    named alone or by where ao finds that harness, and never inside this repository; no value reads as a flag; and the
+    grant admits nothing ao forbids the role that the command ao composes for it from the shipped adapter does not. No
+    person's record lets a refused turn start: its configuration must change.
+    """
+    from . import allowlist as AL
+    head = f"the watchdog refuses the {role}'s command:"
+    shipped = turn_adapter(ident)
+    program = str(argv[0]) if argv else ""
+    if shipped is None:
+        if ident:
+            return (f"{head} its adapter {shown_text(ident)} is no adapter ao ships, and a turn ao starts unattended "
+                    "is composed from one the package ships, never one a user's or a project's layer declares")
+        return f"{head} no adapter ao ships runs `{shown_text(program)}`" if program else f"{head} it names no adapter"
+    resume = (shipped.get("resume") or {}).get("argv") if isinstance(shipped.get("resume"), dict) else None
+    binaries = list(dict.fromkeys(adapter_binaries(shipped) + ([os.path.basename(str(resume[0]))] if resume else [])))
+    listed = ", ".join(binaries)
+    if _program_name(program) not in {_program_name(name) for name in binaries}:
+        return f"{head} it runs `{shown_text(program)}`, which is not {ident}'s program ({listed})"
+    if not os.path.isabs(program) and os.path.dirname(program):
+        return (f"{head} it names its program by a path from where it starts, `{shown_text(program)}`, where an agent "
+                "can leave a program of its own")
+    for name, value in sorted((values or {}).items()):
+        if isinstance(value, str) and value.startswith("-"):
+            return f"{head} its {name} `{shown_text(value)}` would be read as a flag, not as a {name}"
+    if resolved and root and _within(resolved, root):
+        return f"{head} its program would be {shown_text(resolved)}, inside this repository, which an agent writes"
+    if resolved and os.path.isabs(program) and not any(
+            _same_program(resolved, found) for name in binaries for found in binary_candidates(name, search)):
+        return (f"{head} it runs {shown_text(program)}, which is not where ao finds {ident}'s program ({listed}) on "
+                "the path it searches")
+    own = {(reason, command) for reason, command, _ in AL.problems(role_commands(shipped).get(role) or [], {}, role)}
+    for reason, command, rule in AL.problems(list(argv), {}, role):
+        if (reason, command) not in own:
+            return (f"{head} its grant admits `{command}` ({reason}) through {shown_text(rule)}, which {ident}'s own "
+                    f"{role} command does not")
+    return None
 
 
 # ---- a grant admits what a command rewriter makes of the commands it names (GRANTS-RTK) ----------

@@ -630,7 +630,10 @@ def cmd_init(cfg, args):
         json.dump(manifest, fh, indent=2)
     # A person adopted the tree as it stands: its harness configuration is measured from this HEAD, once (HARNESS-CONFIG).
     A.record_harness_baseline(root, "ao init")
-    _print_seen_own(A.record_harness_written(root, ours, "ao init"))
+    # The role blocks init composed are its own commands, and the rest are accepted as they stand, once (TURN-ARGV).
+    composed = [A.turn_path(role) for role in A.record_turns_written(root, planned_config, added, "ao init")]
+    A.record_turn_baseline(root, "ao init")
+    _print_seen_own(A.record_harness_written(root, ours, "ao init") + composed)
     for agent, what in registered.items():
         print(f"  {C['green']}mcp{C['reset']}      {agent}: {what.splitlines()[0]}")
         if what.startswith("manual"):

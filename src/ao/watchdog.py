@@ -1166,6 +1166,14 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
         if resolved and st.get("arch_quota_until", 0) > time.time():
             print(f"architect at quota until {reset_when(st['arch_quota_until'])}; not waking")
             resolved = None
+        # The command a wake starts runs the harness of an adapter the package ships, with no grant beyond the one ao
+        # composes from it, before anything is spent on it (TURN-ARGV).
+        refused = A.turn_refusal("architect", A.block_adapter(arch), argv, root=root, resolved=resolved,
+                                 search=search, values={"session": sess}) if resolved else None
+        if refused:
+            print(f"{refused}; not waking the architect")
+            tell_turn_refused(root, "architect", refused)
+            resolved = None
         if resolved and not args.dry_run:
             # An exhausted window is rotated through keyflip first, when it may be (#32).
             headroom = A.rotate_if_exhausted(cfg, argv, "architect")
@@ -1180,8 +1188,8 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
             print(f"held by {held.get('by')} since this cycle began; not waking the architect")
             resolved = None
         # The architect's harness reads its hooks, plugins and instructions from this tree, as late as the hold
-        # is read (HARNESS-CONFIG).
-        unseen = harness_config_hold(root) if resolved else None
+        # is read (HARNESS-CONFIG), and its command is the one a person accepted (TURN-ARGV).
+        unseen = (harness_config_hold(root) or turn_hold(root, cfg, "architect")) if resolved else None
         if unseen:
             print(f"{unseen}; not waking the architect")
             resolved = None
@@ -1395,6 +1403,30 @@ def harness_config_hold(root):
         return None
     return (f"harness configuration nobody has seen stands in this tree: {A.harness_config_line(unseen, limit=10)} - "
             "a person reads it with ao harness seen --by <name>")
+
+
+def turn_hold(root, cfg, role):
+    """Why a turn of `role` may not start with the command composed from `cfg`, or None: its block says otherwise of it
+    than the command last accepted, judged by the configuration the command came from (TURN-ARGV).
+
+    harness_config_hold reads .ao/config.json again, and an agent can put it back between the two readings; what
+    starts is what this cycle composed.
+    """
+    try:
+        unseen = A.unseen_turn(root, cfg, role)
+    except Exception as exc:
+        return f"the {role}'s command cannot be compared with the one accepted ({' '.join(str(exc).split())[:160]})"
+    if not unseen:
+        return None
+    return (f"harness configuration nobody has seen stands in this tree: {A.harness_config_line([unseen])} - a person "
+            "reads it with ao harness seen --by <name>")
+
+
+def tell_turn_refused(root, role, refused):
+    """Name a turn the watchdog refuses to a person, once for what refuses it (TURN-ARGV): its configuration must
+    change, and nothing an agent does or a person records lets it start as it stands."""
+    notify(f"{A.project_key(root)}: {'nudge' if role == 'implementer' else 'architect wake'} refused", refused, root,
+           key=f"turn-refused:{role}", window=6 * 3600, audience="human", what=refused)
 
 
 def tell_harness_config(root, project):
@@ -2992,8 +3024,11 @@ def _cycle_impl(args, root):
                 return 0
             if args.dry_run:
                 # A dry cycle says what a live one would decide, the harness configuration a refill waits for among it
-                # (HARNESS-CONFIG).
-                unseen = harness_config_hold(root)
+                # (HARNESS-CONFIG), and a command it would refuse, as composed before a session is chosen (TURN-ARGV).
+                ident, template = A.turn_command(cfg, "architect")
+                unseen = A.turn_refusal("architect", ident, template or [], root=root,
+                                        values={"prompt": arch.get("prompt")}) \
+                    or harness_config_hold(root) or turn_hold(root, cfg, "architect")
                 print(f"queue low ({depth}); {unseen}; not waking the architect to refill" if unseen
                       else f"queue low ({depth}); would wake the architect to refill")
                 return 0
@@ -3043,6 +3078,13 @@ def _cycle_impl(args, root):
             if not resolved:
                 print(f"architect command {argv[0]} not on PATH")
                 return 0
+            # As in escalate(): the shipped adapter's harness, and no grant beyond its own (TURN-ARGV).
+            refused = A.turn_refusal("architect", A.block_adapter(arch), argv, root=root, resolved=resolved,
+                                     search=search, values={"session": sess, "prompt": arch.get("prompt")})
+            if refused:
+                print(f"queue low ({depth}); {refused}; not waking the architect to refill")
+                tell_turn_refused(root, "architect", refused)
+                return 0
             argv[0] = resolved
             headroom = A.rotate_if_exhausted(cfg, argv, "architect")
             if not headroom["ok"]:
@@ -3053,7 +3095,7 @@ def _cycle_impl(args, root):
             if A.hold_state(root):
                 print("held since this cycle began; not waking the architect to refill")
                 return 0
-            unseen = harness_config_hold(root)
+            unseen = harness_config_hold(root) or turn_hold(root, cfg, "architect")
             if unseen:
                 print(f"queue low ({depth}); {unseen}; not waking the architect to refill")
                 return 0
@@ -3223,8 +3265,18 @@ def _cycle_impl(args, root):
     # A batch program on Windows takes it there whatever its size, and one whose adapter declares no
     # standard input is not started: prompt_input decides once argv[0] is resolved (WINDOWS-CMD-CHANNEL).
     # A grant the resume carries of its own admits what a command rewriter makes of each command it
-    # names, as the one options.unattended appends does (GRANTS-RTK).
-    plan, refused = A.prompt_plan(A.admit_rewrites(adapter.get("resume", {}).get("argv") or [])[0], prompt,
+    # names, as the one options.unattended appends does (GRANTS-RTK). The nudge is composed from the
+    # adapter the package ships, never from the user's or the project's layer, which an agent can
+    # write (TURN-ARGV).
+    shipped = A.turn_adapter(impl.get("adapter"))
+    if shipped is None:
+        from . import features as F
+        refused = A.turn_refusal("implementer", impl.get("adapter"), [])
+        print(f"idle {int(age)}s · {', '.join(reasons)} · {refused}; not nudging")
+        if F.enabled(cfg, "nudge"):
+            tell_turn_refused(root, "implementer", refused)
+        return 0
+    plan, refused = A.prompt_plan(A.admit_rewrites((shipped.get("resume") or {}).get("argv") or [])[0], prompt,
                                   impl.get("adapter"), detached=True)
     if refused:
         print(f"the nudge's prompt cannot be handed over: {refused}; not nudging")
@@ -3249,14 +3301,14 @@ def _cycle_impl(args, root):
         notify(f"{project}: watchdog", f"{argv[0]} not on PATH; cannot nudge", root)
         print(f"{argv[0]} not found on PATH ({search})")
         return 1
-    argv[0] = resolved
+    named, argv[0] = argv[0], resolved
     # What a turn nobody attends starts with: the grant its adapter declares for one, or its
     # trust_all, and only when the resume carries no allowlist of its own - appending
     # --dangerously-skip-permissions on top of --allowedTools would silently override the
     # narrower grant. A flag that turns off the harness's own sandbox waits for a person, and the
     # permission mode is the one the adapter pins, whatever a person's settings default to (GRANTS-PINNED).
-    added, added_why = A.unattended_flags(adapter, argv)
-    bypass = A.bypass_refusal(adapter, added, cfg)
+    added, added_why = A.unattended_flags(shipped, argv)
+    bypass = A.bypass_refusal(shipped, added, cfg)
     if bypass:
         notify(f"{project}: nudge refused", bypass, root, key="nudge-bypass-refused", window=12 * 3600,
                audience="human", what=bypass)
@@ -3270,11 +3322,11 @@ def _cycle_impl(args, root):
                                                        "so ao appends the one its adapter pins"]))
     # The project chooses the implementer's model and effort in its config; the
     # adapter says how to spell them. Nothing is appended for an adapter that
-    # has no such option.
-    opts = adapter.get("options") or {}
+    # has no such option, or declares it null: one with no flag for it (TURN-ARGV).
+    opts = shipped.get("options") or {}
     for key in ("model", "effort"):
         val = impl.get(key)
-        if val and key in opts and not any(str(a).startswith(f"--{key}") for a in argv):
+        if val and isinstance(opts.get(key), list) and not any(str(a).startswith(f"--{key}") for a in argv):
             if key == "effort" and opts.get("effort_values") and val not in opts["effort_values"]:
                 print(f"effort {val!r} not in {opts['effort_values']}; ignored")
                 continue
@@ -3284,13 +3336,23 @@ def _cycle_impl(args, root):
     if not F.enabled(cfg, "nudge"):
         print(f"idle {int(age)}s · {', '.join(reasons)} · nudge feature off; not starting a turn")
         return 0
+    # The command as it starts runs the shipped adapter's harness, with no value that reads as a flag
+    # and no grant beyond its own, before anything is spent on it (TURN-ARGV).
+    refused = A.turn_refusal("implementer", impl.get("adapter"), [named] + argv[1:], root=root, resolved=resolved,
+                             search=search, values={"session": sess, "model": impl.get("model"),
+                                                    "effort": impl.get("effort")})
+    if refused:
+        print(f"idle {int(age)}s · {', '.join(reasons)} · {refused}; not nudging")
+        tell_turn_refused(root, "implementer", refused)
+        return 0
     headroom = A.rotate_if_exhausted(cfg, argv, "implementer") if not args.dry_run else {"ok": True}
     if not headroom["ok"]:
         print(f"idle {int(age)}s · {', '.join(reasons)} · {headroom['text']}; not nudging")
         return 0
     # The implementer's harness runs what it wrote into its own configuration: read after the rotation, which can
-    # wait minutes on keyflip, and in a dry cycle as in a live one (HARNESS-CONFIG).
-    unseen = harness_config_hold(root)
+    # wait minutes on keyflip, and in a dry cycle as in a live one (HARNESS-CONFIG). Its command is the one a person
+    # accepted (TURN-ARGV).
+    unseen = harness_config_hold(root) or turn_hold(root, cfg, "implementer")
     if unseen:
         print(f"idle {int(age)}s · {', '.join(reasons)} · {unseen}; not nudging")
         return 0

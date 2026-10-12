@@ -88,10 +88,26 @@ def cmd_harness(cfg, args):
 
 # ---- what a harness reads from the tree, read by a person before anything ao starts here runs (HARNESS-CONFIG) ----
 
+def _turn_lines(identity):
+    """What a role's block says of its command, a line for each thing it says, as a person reads it (TURN-ARGV)."""
+    return [A.shown_text(f"{key}: {json.dumps(value, ensure_ascii=False)}")
+            for key, value in sorted((identity or {}).items()) if value is not None]
+
+
 def _harness_change_lines(root, path, state, view):
-    """The lines that show one change as it stands: its diff from HEAD where it is text (HARNESS-CONFIG)."""
+    """The lines that show one change as it stands: its diff from HEAD where it is text (HARNESS-CONFIG); for a role's
+    command, the command a turn would start and what its block says, beside what was last accepted (TURN-ARGV)."""
     import difflib
+    import shlex
     kind = view[0] if view else "deleted"
+    if kind == "turn":
+        _, role, identity, accepted, (ident, argv) = view
+        starts = (A.shown_text(" ".join(shlex.quote(str(part)) for part in argv)) if argv
+                  else f"nothing: no adapter ao ships composes it ({A.shown_text(ident or 'none named')})")
+        lines = list(difflib.unified_diff(_turn_lines(accepted), _turn_lines(identity), lineterm="",
+                                          fromfile="accepted" if accepted else "nothing accepted",
+                                          tofile=".ao/config.json"))
+        return [f"{A.TURN_ROLES[role]} would start: {starts}"] + lines
     if kind == "deleted":
         return ["deleted: HEAD holds it, and a harness started here reads none"]
     if kind == "special":
@@ -140,7 +156,7 @@ def _harness_seen_text(record, changes):
 def _record_seen(root, by, digest):
     """Record what a person was shown, while it is what the digest was taken of; the command's exit (HARNESS-CONFIG)."""
     try:
-        changes = A.project_config_changes(root)
+        changes = A.harness_config_changes(root)
     except Exception as exc:
         print(f"{C['red']}not recorded{C['reset']}: what a harness reads from this tree cannot be read "
               f"({' '.join(str(exc).split())})")
@@ -191,13 +207,16 @@ def _harness_seen(cfg, args):
         return 2
     shown = {}
     try:
-        changes = A.project_config_changes(root, shown=shown)
+        # Each role's command among them, as its block in .ao/config.json says it (TURN-ARGV).
+        A.record_turn_baseline(root, "first reading")
+        changes = A.harness_config_changes(root, shown=shown)
     except Exception as exc:
         print(f"{C['red']}not read{C['reset']}: what a harness reads from this tree cannot be read "
               f"({' '.join(str(exc).split())}); nothing ao starts here runs until it can, and nothing was recorded")
         return 1
     if not changes:
-        print(f"{C['green']}nothing a harness reads from this tree differs from HEAD{C['reset']}; nothing to record")
+        print(f"{C['green']}nothing a harness reads from this tree differs from HEAD{C['reset']}, and each role's "
+              "command is the one accepted; nothing to record")
         return 0
     record = A.harness_seen_record(root) or {}
     unseen = A.harness_unseen(changes, record)
