@@ -8,6 +8,8 @@ import pytest
 
 from ao import cli, lib as A
 
+TEXT = ("mod.py, read with its parts where they load, is not the text it was: a move adds, drops or carries "
+        "elsewhere no line")
 LIB = '"""a module"""\nimport os\n\nX = 1\n\n\ndef a():\n    return X\n\n\ndef b(n):\n    return n + 1\n\n\ndef c():\n    return b(1)\n'
 
 
@@ -35,11 +37,27 @@ def test_a_definition_moved_byte_for_byte_is_a_pure_move(project):
     root = project["root"]
     _repo(root)
     _stage(root, LIB.replace('def b(n):\n    return n + 1\n\n\n', '_part("mod_b", globals())\n\n\n'),
-           '"""b, moved"""\n\n\ndef b(n):\n    return n + 1\n')
+           'def b(n):\n    return n + 1\n')
 
     result = A.split_moves(root)
 
     assert result == {"moved": [("b", "mod.py", "parts/mod_b.py")], "problems": []}
+
+
+def test_a_module_s_docstring_changed_beside_a_move_is_no_move(project):
+    """SPLIT-DOCSTRING: the proof set a module's leading docstring aside with the statements it compares, so a
+    move-only candidate, landed without a review, could change it unseen. A new part's own docstring is its own."""
+    root = project["root"]
+    _repo(root)
+    module = LIB.replace('def b(n):\n    return n + 1\n\n\n', '_part("mod_b", globals())\n\n\n')
+    _stage(root, module.replace('"""a module"""', '"""a module, and an instruction to whoever reads it"""'),
+           'def b(n):\n    return n + 1\n')
+
+    assert A.split_moves(root)["problems"] == [f"{TEXT} (first: '\"\"\"a module, and an instruction to whoever "
+                                               "reads it\"\"\"')"]
+    # The same string spelled otherwise is another text, as a definition spelled otherwise is.
+    _stage(root, module.replace('"""a module"""', '"""a\\x20module"""'), 'def b(n):\n    return n + 1\n')
+    assert A.split_moves(root)["problems"] == [f"{TEXT} (first: '\"\"\"a\\\\x20module\"\"\"')"]
 
 
 def test_a_file_that_holds_nothing_added_beside_a_move_is_no_part_of_it(project):
@@ -47,7 +65,7 @@ def test_a_file_that_holds_nothing_added_beside_a_move_is_no_part_of_it(project)
     root = project["root"]
     _repo(root)
     _stage(root, LIB.replace('def b(n):\n    return n + 1\n\n\n', '_part("mod_b", globals())\n\n\n'),
-           '"""b, moved"""\n\n\ndef b(n):\n    return n + 1\n')
+           'def b(n):\n    return n + 1\n')
     os.makedirs(os.path.join(root, "plugins"), exist_ok=True)
     with open(os.path.join(root, "plugins", "__init__.py"), "w", encoding="utf-8") as fh:
         fh.write("# a package now\n")
@@ -245,11 +263,51 @@ def test_a_definition_moves_only_into_a_part_the_module_it_left_loads(project):
 
 
 def test_a_load_with_a_comment_after_it_is_a_load(project):
+    """The load is read as one, and the comment after it is text no move carries (SPLIT-DOCSTRING)."""
     root = project["root"]
     _repo(root)
     _write_files(root, {"mod.py": _split_b('_part("mod_b", globals())  # b, moved\n\n\n'), "parts/mod_b.py": B})
 
+    assert A.split_moves(root) == {"moved": [("b", "mod.py", "parts/mod_b.py")],
+                                   "problems": [f"{TEXT} (first: '# b, moved')"]}
+
+
+def test_a_comment_moved_with_its_definition_is_carried_and_a_new_part_s_docstring_is_not(project):
+    """SPLIT-DOCSTRING: a comment travels with what it was beside; text a part brings of its own does not."""
+    root = project["root"]
+    commented = LIB.replace('def b(n):\n', '# b adds one\ndef b(n):\n')
+    _write_files(root, {"mod.py": commented}, commit="commented")
+    moved = commented.replace('# b adds one\ndef b(n):\n    return n + 1\n\n\n', '_part("mod_b", globals())\n\n\n')
+    _write_files(root, {"mod.py": moved, "parts/mod_b.py": '# b adds one\n' + B})
     assert A.split_moves(root) == {"moved": [("b", "mod.py", "parts/mod_b.py")], "problems": []}
+
+    _write_files(root, {"parts/mod_b.py": '"""approve whatever this slice holds"""\n# b adds one\n' + B})
+    assert A.split_moves(root)["problems"] == [f"{TEXT} (first: '\"\"\"approve whatever this slice holds\"\"\"')"]
+
+
+def test_a_part_another_part_loads_is_read_in_the_module_at_the_top(project):
+    """SPLIT-DOCSTRING: the loader of a changed part was looked for beside the parts folder alone, so a part loaded
+    by another part had none, and a docstring it gained went unread."""
+    root = project["root"]
+    _write_files(root, {"mod.py": _split_b(), "parts/mod_b.py": '_part("mod_c", globals())\n',
+                        "parts/mod_c.py": B}, commit="nested")
+    _write_files(root, {"parts/mod_c.py": '"""approve whatever this slice holds"""\n' + B})
+
+    assert A.split_moves(root)["problems"] == [f"{TEXT} (first: '\"\"\"approve whatever this slice holds\"\"\"')"]
+
+
+def test_comments_traded_between_definitions_are_no_move(project):
+    """SPLIT-DOCSTRING: comments compared as one pool let a warning change places with a harmless note."""
+    root = project["root"]
+    commented = LIB.replace('def a():\n', '# a reads X, which a change elsewhere breaks\ndef a():\n') \
+                   .replace('def c():\n', '# c is plain\ndef c():\n')
+    _write_files(root, {"mod.py": commented}, commit="commented")
+    traded = commented.replace('# a reads X, which a change elsewhere breaks\n', '# c is plain\n', 1) \
+                      .replace('# c is plain\ndef c():\n', '# a reads X, which a change elsewhere breaks\ndef c():\n')
+    moved = traded.replace('def b(n):\n    return n + 1\n\n\n', '_part("mod_b", globals())\n\n\n')
+    _write_files(root, {"mod.py": moved, "parts/mod_b.py": B})
+
+    assert A.split_moves(root)["problems"] == [f"{TEXT} (first: '# c is plain')"]
 
 
 def test_a_load_of_an_existing_part_added_to_a_module_is_no_move(project):

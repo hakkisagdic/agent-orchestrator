@@ -578,6 +578,74 @@ def top_level_statements(source, filename="<source>"):
     return definitions, others, loads, order
 
 
+# A load as a line of a module holds it: the call alone, and a comment after it, which is text of its own.
+_PART_LOAD_LINE = re.compile(r"""^(?:\w+\.)?_part\(\s*["']([\w-]+)["']\s*,\s*globals\(\)\s*\)\s*(#.*)?$""")
+
+
+def _folder_modules(root, rev, folder):
+    """The Python files directly in `folder` at `rev`, the index where `rev` is empty."""
+    import posixpath
+    listing = ("ls-files", "-z", "--", f"{folder}/" if folder else ".") if not rev else \
+        ("ls-tree", "--name-only", "-z", rev, "--", f"{folder}/" if folder else ".")
+    try:
+        names = _git_output(root, *listing).decode(UTF8, "replace").split("\0")
+    except RuntimeError:
+        return []
+    return [name for name in names if name.endswith(".py") and posixpath.dirname(name) == folder]
+
+
+def _loading_modules(root, read, before, after, paths):
+    """The modules whose text a candidate's files are: each changed file that is no part, and for a changed part the
+    module that runs it - found by its load in the folder above the parts folder or, for a part another part loads,
+    in the parts folder itself, up to the module at the top (SPLIT-DOCSTRING)."""
+    import posixpath
+    is_part = lambda path: posixpath.basename(posixpath.dirname(path)) == "parts"     # noqa: E731
+    modules = {path for path in paths if not is_part(path)}
+    waiting, asked = [path for path in paths if is_part(path)], set()
+    while waiting:
+        path = waiting.pop()
+        if path in asked:
+            continue
+        asked.add(path)
+        folder = posixpath.dirname(path)
+        name = posixpath.splitext(posixpath.basename(path))[0]
+        for rev in (before, after):
+            for candidate in _folder_modules(root, rev, posixpath.dirname(folder)) + \
+                    _folder_modules(root, rev, folder):
+                text = read(f"{rev}:{candidate}") or ""
+                if candidate != path and any(_PART_LOAD_LINE.match(line) and
+                                             _PART_LOAD_LINE.match(line).group(1) == name
+                                             for line in text.splitlines()):
+                    (waiting.append if is_part(candidate) else modules.add)(candidate)
+    return modules
+
+
+def _inlined_lines(read, rev, path, seen=()):
+    """The lines of `path` at `rev` as its module runs them, each part it loads read in place of its load and every
+    blank line left out; None where the file is not there (SPLIT-DOCSTRING).
+
+    A pure move leaves this text as it was: a definition moved into a part comes back where its load stands, with the
+    comments beside it, and anything else - a module's docstring, a comment added, dropped or carried elsewhere, a
+    docstring a new part brings - is a line that differs. A module's text is read whole, as the reader of the code
+    is handed it, where comparing its statements set the rest aside.
+    """
+    text = read(f"{rev}:{path}")
+    if text is None:
+        return None
+    out = []
+    for line in text.splitlines():
+        found = _PART_LOAD_LINE.match(line)
+        part = _part_file(path, found.group(1)) if found else None
+        inner = _inlined_lines(read, rev, part, seen + (path,)) if part and part not in seen else None
+        if inner is not None:
+            out.extend(inner)
+            if found.group(2):
+                out.append(found.group(2))
+        elif line.strip():
+            out.append(line.rstrip())
+    return out
+
+
 def _part_file(module, name):
     """The file `_part(name, globals())` in `module` runs: parts/<name>.py beside the module, or beside a part
     that loads one: `_parts_folder`, the rule `_part` itself reads by (SPLIT-CHECK-4)."""
@@ -965,6 +1033,7 @@ def split_moves(root, start=None, end=None):
         listing, before, after = ("diff", "--name-only", "--no-renames", "-z", start, end, "--"), start, end
     raw = _git_output(root, *listing).decode(UTF8, "replace").split("\0")
     paths = sorted({path for path in raw if path.endswith(".py")})
+    base, head = before, after                      # the names below are taken by a definition's texts
 
     def read(spec):
         result = subprocess.run([git_binary(), "show", spec], cwd=root, capture_output=True)
@@ -1026,6 +1095,17 @@ def split_moves(root, start=None, end=None):
     for path in sorted(set(other["old"]) | set(other["new"])):
         if other["old"].get(path, []) != other["new"].get(path, []):
             problems.append(f"a top-level statement that is not a definition changed in {path}")
+    # A module's text is the move's whole: read with its parts in place it is the text it was, line for line, so a
+    # docstring, a comment or a line carried elsewhere is no move - a move-only slice lands without a review, and text
+    # steers whoever reads the code next (SPLIT-DOCSTRING). A part's text is read in the module that loads it.
+    for path in sorted(_loading_modules(root, read, base, head, paths)):
+        was, now = _inlined_lines(read, base, path), _inlined_lines(read, head, path)
+        if was is None or now is None or was == now:
+            continue
+        at = next((i for i, pair in enumerate(zip(was, now)) if pair[0] != pair[1]), min(len(was), len(now)))
+        line = (now[at] if at < len(now) else was[at]).strip()
+        problems.append(f"{path}, read with its parts where they load, is not the text it was: a move adds, drops or "
+                        f"carries elsewhere no line (first: {line[:80]!r})")
     for path in sorted(loads["old"]):
         for name in sorted(loads["old"][path] - loads["new"].get(path, set())):
             problems.append(f"the _part call that loaded {name} is gone")

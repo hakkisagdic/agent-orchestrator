@@ -241,6 +241,10 @@ unless `ao split-check` finds a pure move:
   module loads, runs in another namespace and is no move;
 - no definition is edited in place, lost or added, no other top-level statement changes in any
   file, and no module loses a `_part` call it made;
+- each module, read with its parts where they load, is the text it was, line for line but its blank
+  lines: a docstring, a comment added, dropped or carried to another place, a docstring a new part
+  brings, is no move. A move-only slice lands without a review, and such text steers whoever reads
+  the code next (SPLIT-DOCSTRING);
 - put in place where the module loads it, each part the candidate adds gives back the module's old
   statements in their old order, loads of existing parts included: a part loaded where its
   definitions did not run, two statements swapped, or a definition moved across a statement runs
