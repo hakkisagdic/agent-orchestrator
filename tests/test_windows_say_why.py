@@ -187,7 +187,8 @@ def test_a_cycle_on_windows_records_the_orphans_it_could_not_look_for_as_unknown
     world.board("running", "- [B8] slice · since: 2026-09-05 10:00").transcript_age(700)
 
     world.cycle()
-    assert W._FACTS["orphans"] == 0
+    # Counted where the platform can look for them; on a Windows runner the first cycle cannot either.
+    assert W._FACTS["orphans"] == (None if os.name == "nt" else 0)
     monkeypatch.setattr(W, "os", _OsOf("nt"))
     world.cycle()
     assert W._FACTS["orphans"] is None

@@ -206,7 +206,8 @@ def test_a_program_named_by_its_path_runs_only_where_ao_finds_that_harness(proje
     assert "which is not where ao finds claude-code's program (claude) on the path it searches" in refusal(planted)
     assert "inside this repository, which an agent writes" in refusal(inside)
     assert "inside this repository" in refusal("claude", resolved=inside)           # found by name, on a path into it
-    assert "by a path from where it starts, `tools/claude`" in refusal(os.path.join("tools", "claude"))
+    relative = os.path.join("tools", "claude")                                   # as this platform writes it
+    assert f"by a path from where it starts, `{relative}`" in refusal(relative)
 
 
 # ---- what the role's block says holds every turn until a person has seen it ----------------------------------------
