@@ -3590,6 +3590,22 @@ def cmd_review(cfg, args):
         return cmd_review_cancel(cfg, args)
     if getattr(args, "run", None):
         return cmd_review_run(cfg, args.run)
+    # A landed range may be reviewed again by another actor of the project's table, as the slice that landed it, as a
+    # catch-up run reviews a waived one: a retrospective review never authorizes a commit (RETRO-REVIEWER).
+    actor = getattr(args, "reviewer", None)
+    if (actor or getattr(args, "range_slice", None)) and not getattr(args, "commits", None):
+        print(f"{C['red']}--reviewer and --slice go with --commits{C['reset']}: they name who reviews a landed range "
+              "and the slice that landed it; a staged candidate is the running slice's, reviewed by the reviewer role")
+        return 2
+    if actor:
+        cfg, refused = _catchup_reviewer(cfg, actor)
+        if refused:
+            print(f"{C['red']}refused{C['reset']}: {refused}")
+            return 2
+    if getattr(args, "range_slice", None) and not args.boundary and getattr(args, "claims", None) is None:
+        # Judged as a catch-up review is: against what the range's commit messages say it does.
+        args.claims = True
+        args.boundary = f"the range {args.range_slice} landed: what its commit messages say it does"
     # A submitted review judges a pinned tree; the worktree beside it is the next slice's (#27).
     pinned = bool(getattr(args, "pinned", False))
     root = cfg["root"]

@@ -344,6 +344,12 @@ def build_parser(root=None):
     rw.add_argument("--boundary", help="acceptance boundary; defaults to the running slice")
     rw.add_argument("--paths", nargs="*", help="narrow a prospective review to these staged paths")
     rw.add_argument("--commits", help="review landed work retrospectively; never authorizes a commit")
+    rw.add_argument("--reviewer", metavar="ACTOR",
+                    help="with --commits: a reviewer actor of the project's table reviews the range in place of the "
+                         "reviewer role, as `ao catchup --reviewer` does; the table is not changed")
+    rw.add_argument("--slice", dest="range_slice", metavar="ID",
+                    help="with --commits: the slice that landed the range; the review is recorded as that slice's and, "
+                         "without --boundary, judged against the range's commit messages, as a catch-up review is")
     # Accepted so existing callers keep working, and ignored: the timeout is
     # `review_timeout` in .ao/config.json (#63).
     rw.add_argument("--timeout", type=int, help=argparse.SUPPRESS)

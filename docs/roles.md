@@ -402,3 +402,10 @@ implementer parks the review, and the watchdog nudges again when the window
 reopens (`reviewer window reopened` in `ao watchdog explain`). `ao review
 --commits <range>` reviews landed work after the fact — the way to close a
 waiver.
+
+*In ao since slice RETRO-REVIEWER: a landed range can be reviewed again by another family. `ao review
+--commits <range> --reviewer <actor> --slice <id>` reviews it with an actor of the project's table, held
+to every rule `ao catchup --reviewer` holds one to, records the review as the slice that landed the range
+and, without `--boundary`, judges it against the range's commit messages, as a catch-up review is. The
+catch-up reviews of 2026-09-30 and 10-01 recorded no author family, and 83 of them were made by the
+alibaba family while a Qwen model also implemented; their ranges are reviewed again so.*
