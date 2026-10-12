@@ -530,7 +530,10 @@ def load_config(root):
                                            "implementer is configured" if beside else "")}
             cfg["implementer"] = found
     # `auto` names no session: each role's is resolved here, once, for every reader (SESSION-IDENTITY).
-    return resolve_sessions(root, cfg)
+    cfg = resolve_sessions(root, cfg)
+    # What a review or a hunt would start is judged as it was read here, before anything can put the file back
+    # (ROUTE-ARGV); noted only, so loading writes nothing.
+    return note_routes_read(cfg)
 
 
 # ---- a split moves text, never behaviour (#44) ------------------------------------------

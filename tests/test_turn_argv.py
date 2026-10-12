@@ -220,7 +220,8 @@ def test_a_changed_command_holds_every_turn_until_a_person_reads_and_records_it(
     root = project["root"]
     assert A.unseen_harness_config(root) == []                       # the first reading accepts what stands
     assert {role: entry["by"] for role, entry in A.turn_record(root).items()} == {
-        "implementer": "first reading", "architect": "first reading"}
+        "implementer": "first reading", "architect": "first reading", "reviewer": "first reading",
+        "hunter": "first reading"}
 
     cfg = _store(root, implementer=dict(project["implementer"], model="model-b"))
     unseen = A.unseen_harness_config(root)
@@ -288,7 +289,7 @@ def test_ao_init_accepts_the_commands_it_composes_and_an_edit_after_it_is_unseen
 
     assert "the implementer's command, the architect's command" in capsys.readouterr().out
     assert {role: entry["by"] for role, entry in A.turn_record(str(root)).items()} == {
-        "implementer": "ao init", "architect": "ao init"}
+        "implementer": "ao init", "architect": "ao init", "reviewer": "ao init", "hunter": "ao init"}
     assert [path for path, _, _ in A.unseen_harness_config(str(root)) if path.endswith("command")] == []
     with open(os.path.join(str(root), ".ao", "config.json"), encoding="utf-8") as fh:
         architect = json.load(fh)["architect"]

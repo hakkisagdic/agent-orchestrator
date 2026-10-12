@@ -182,6 +182,9 @@ def test_the_hunter_is_held_to_the_reviewers_pin(project, monkeypatch, capsys):
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "src"], cwd=root, check=True)
     seen = []
     monkeypatch.setattr(cli, "_run_reviewer", lambda root, argv, timeout, **kw: seen.append(argv) or {"ok": True, "out": ""})
+    # The hunter's program is found as a reviewer's is (ROUTE-ARGV): here, as on a machine that has claude.
+    monkeypatch.setattr(cli, "_reviewer_resolve_binary",
+                        lambda root, name: (os.path.join(os.sep, "agents", name), "2.1.0"))
     hunter = ["claude", "-p", "{prompt}", "--allowedTools", "Read,Grep,Glob", "--strict-mcp-config"]
     run = SimpleNamespace(action="run", fingerprint=None)
 

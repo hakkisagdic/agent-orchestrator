@@ -450,9 +450,14 @@ def cmd_init(cfg, args):
                   f"the detected toolchains ({', '.join(chains)}); declare gates in .ao/gates.json first, "
                   "or pass --allow-uncovered-gates")
             return 1
-    runtime_cfg = _planned_runtime_config(root, planned_config)
+    # A copy, since the probe's routes may carry a mark the plan must not (ROUTE-ARGV).
+    runtime_cfg = _planned_runtime_config(root, json.loads(json.dumps(planned_config)))
     if opt_in:
         runtime_cfg["_same_family_opt_in"] = opt_in
+    # A reviewer kept from the configuration as it stood is probed only as a person accepted it, as a review starts it;
+    # one init composes is its own (ROUTE-ARGV).
+    if config_existed and "reviewer" not in added:
+        A.note_routes_read(runtime_cfg)
     reviewer_probe = _reviewer_probe(runtime_cfg)
     if not reviewer_probe["ok"]:
         print(

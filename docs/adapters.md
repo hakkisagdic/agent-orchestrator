@@ -85,7 +85,11 @@ ao role set reviewer codex --model <model> --effort high --family openai
 `ao role set reviewer <adapter>` composes the invocation from the adapter - `send.argv`, then
 `options.model`, `options.effort` (refused when the adapter does not take that value), then
 `trust_none` - so a pair of harnesses is chosen by naming two adapters and a model each, not by
-writing argv by hand. A hand-written reviewer argv still works and stays the exception.
+writing argv by hand, and from the adapter the package ships alone: one only a user's or a project's
+layer declares is refused. A hand-written reviewer argv still works and stays the exception: it starts
+once a person has accepted it with `ao harness seen`, and a route that names an adapter ao ships, or runs
+a shipped harness's program, runs that adapter's own program under its name
+([safety.md](safety.md#a-reviews-and-a-hunts-command-is-held-as-a-turns-is)).
 `ao adapters` shows which adapters may review, and `ao doctor` reports a configured reviewer
 whose adapter cannot deny tools. Whatever composed a route, it runs with the flags its adapter pins
 for a reviewer (below): `claude-code`'s `trust_none` carries `--tools Read,Grep,Glob` and

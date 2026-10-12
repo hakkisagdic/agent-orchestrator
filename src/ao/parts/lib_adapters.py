@@ -447,9 +447,17 @@ def compose_reviewer(adapter_id, model=None, effort=None, root=None, family=None
     A tool reviewer (#86) reaches many models through its own provider. Its route
     carries the model, which the adapter's review contract pins when ao runs it, and
     the family only a person can name: ao never infers one from a model name.
+
+    Composed from the adapter the package ships alone, never a user's or a project's layer: `ao ci review` composes
+    on a pull request's checkout, whose `.ao/adapters/` its author wrote, and a route that names an adapter runs that
+    harness's program wherever it starts (ROUTE-ARGV). `root` only tells a layer's adapter from one nobody declares,
+    so the refusal says which.
     """
-    adapter = load_adapter(adapter_id, root)
+    adapter = turn_adapter(adapter_id)
     if not adapter:
+        if load_adapter(adapter_id, root):
+            raise ValueError(f"{adapter_id} is no adapter ao ships, and a reviewer is composed from one the package "
+                             "ships, never one a user's or a project's layer declares")
         raise ValueError(f"no adapter {adapter_id}")
     eligible, why = reviewer_eligibility(adapter)
     if not eligible:
@@ -1602,6 +1610,11 @@ def bypass_refusal(adapter, flags, cfg=None):
 
 # The roles whose turns the watchdog starts, and the turns each one's command starts.
 TURN_ROLES = {"implementer": "a nudge", "architect": "a wake and a refill"}
+# A review and a hunt start a command a project's configuration names too - the reviewer's routes, `hunter.argv` -
+# in a file an agent writes, and each is held as a role's is (ROUTE-ARGV).
+ROUTE_KINDS = {"reviewer": "a review", "hunter": "a hunt"}
+# Every command ao starts whose change waits for a person, and what starts it.
+HELD_COMMANDS = dict(TURN_ROLES, **ROUTE_KINDS)
 
 
 def turn_adapter(ident):
@@ -1636,7 +1649,16 @@ def turn_identity(cfg, role):
     """What a role's block says of the command a turn of it starts - its adapter, and the implementer's model and effort
     or the architect's argv and refill prompt - or None for a role ao starts no turn of. The rest of the command is the
     shipped adapter's, or ao's (TURN-ARGV)."""
+    if role == "hunter":
+        argv = settings.get(cfg, "hunter.argv")
+        return {"argv": argv} if argv else None
     block = cfg.get(role) if isinstance(cfg.get(role), dict) else None
+    if role == "reviewer":
+        # Every route a review can start, the fallbacks among them, and the capability matrix a strict project's
+        # reviewers come from (ROUTE-ARGV).
+        routes = [_route_fields(route) for route in reviewer_routes(cfg) if route]
+        matrix = cfg.get("capability_matrix")
+        return {"routes": routes, "capability_matrix": matrix} if routes or matrix is not None else None
     if not block:
         return None
     if role == "implementer":
@@ -1644,6 +1666,22 @@ def turn_identity(cfg, role):
     if not block.get("argv"):
         return None
     return {"adapter": block.get("adapter"), "argv": block.get("argv"), "prompt": block.get("prompt")}
+
+
+def reviewer_routes(cfg):
+    """The reviewer routes a project's configuration names, as dicts: its reviewer, then each of its fallbacks
+    (ROUTE-ARGV)."""
+    primary = cfg.get("reviewer") if isinstance(cfg.get("reviewer"), dict) else None
+    if primary is None:
+        return []
+    fallbacks = primary.get("fallbacks") if isinstance(primary.get("fallbacks"), list) else []
+    return [primary] + [route for route in fallbacks if isinstance(route, dict)]
+
+
+def _route_fields(route):
+    """What a reviewer route says of itself, every field but its fallbacks and the marks ao puts beside it
+    (ROUTE-ARGV)."""
+    return {key: value for key, value in route.items() if not str(key).startswith("_") and key != "fallbacks"}
 
 
 def turn_digest(role, identity):
@@ -1663,7 +1701,7 @@ def turn_record(root):
         return {}
     if not isinstance(record, dict):
         return {}
-    return {role: entry for role, entry in record.items() if role in TURN_ROLES and isinstance(entry, dict)}
+    return {role: entry for role, entry in record.items() if role in HELD_COMMANDS and isinstance(entry, dict)}
 
 
 def _keep_turns(root, accepted, by):
@@ -1679,7 +1717,7 @@ def _keep_turns(root, accepted, by):
         replace_file_durably(target, (json.dumps(record, indent=1, sort_keys=True) + "\n").encode(UTF8))
     except OSError:
         return []
-    return [role for role in TURN_ROLES if role in accepted]
+    return [role for role in HELD_COMMANDS if role in accepted]
 
 
 def _as_composed(cfg, roles):
@@ -1694,7 +1732,7 @@ def record_turn_baseline(root, why):
     there cannot be read, as load_config reads one; the roles recorded (TURN-ARGV)."""
     if not os.path.isdir(os.path.join(root, ".ao")):
         return []
-    missing = [role for role in TURN_ROLES if role not in turn_record(root)]
+    missing = [role for role in HELD_COMMANDS if role not in turn_record(root)]
     document = project_config_document(root) if missing else None
     if not missing or (document["problem"] and os.path.lexists(os.path.join(root, ".ao", "config.json"))):
         return []
@@ -1705,7 +1743,7 @@ def record_turns_written(root, cfg, roles, by):
     """Accept the command of each of `roles` whose block ao composed itself - those `ao init` wrote - by the blocks it
     composed, `cfg`, never by what is read back, nor through an actor table it did not write: a block an agent changed
     before or after the write is another command, and stays unseen (HARNESS-SEEN-OWN, TURN-ARGV)."""
-    roles = [role for role in roles if role in TURN_ROLES]
+    roles = [role for role in roles if role in HELD_COMMANDS]
     if not roles or not os.path.isdir(os.path.join(root, ".ao")):
         return []
     return _keep_turns(root, _as_composed(cfg, roles), by)
@@ -1714,7 +1752,7 @@ def record_turns_written(root, cfg, roles, by):
 def record_turns_seen(root, changes, by):
     """Accept each role's command among `changes` that a person was shown, by the digest they were shown, with what its
     block says while that is still what stands (TURN-ARGV)."""
-    paths = {turn_path(role): role for role in TURN_ROLES}
+    paths = {turn_path(role): role for role in HELD_COMMANDS}
     seen = {paths[path]: sha for path, _, sha in changes if path in paths}
     if not seen:
         return []
@@ -1725,7 +1763,15 @@ def record_turns_seen(root, changes, by):
 
 def turn_command(cfg, role):
     """(adapter, argv) of the command a turn of `role` starts, composed as the watchdog composes it, with its prompt and
-    session left as placeholders; argv is None where nothing ao ships composes one (TURN-ARGV)."""
+    session left as placeholders; argv is None where nothing ao ships composes one (TURN-ARGV). A review's is its
+    reviewer route's and a hunt's the hunter's, each with the flags a reviewer is pinned to (ROUTE-ARGV)."""
+    if role in ROUTE_KINDS:
+        routes = reviewer_routes(cfg) if role == "reviewer" else [{"argv": settings.get(cfg, "hunter.argv")}]
+        route = routes[0] if routes else {}
+        argv = route.get("argv")
+        if not isinstance(argv, list) or not argv:
+            return (block_adapter(route) if route else None), None
+        return block_adapter(route), pinned_argv([str(part) for part in argv], "reviewer")[0]
     block = cfg.get(role) if isinstance(cfg.get(role), dict) else {}
     if role != "implementer":
         argv = block.get("argv")
@@ -1753,7 +1799,7 @@ def turn_changes(root, shown=None):
     """[(path, "changed", digest)] for each role whose block says otherwise of its command than the one last accepted,
     the path `the architect's command`; with `shown`, what a person is shown of each, by its path (TURN-ARGV)."""
     cfg, record, out = turn_config(root), turn_record(root), []
-    for role in TURN_ROLES:
+    for role in HELD_COMMANDS:
         identity = turn_identity(cfg, role)
         accepted = record.get(role) or {}
         if identity is None or (role in record and accepted.get("sha256") == turn_digest(role, identity)):
@@ -1810,8 +1856,7 @@ def turn_refusal(role, ident, argv, root=None, resolved=None, search=None, value
             return (f"{head} its adapter {shown_text(ident)} is no adapter ao ships, and a turn ao starts unattended "
                     "is composed from one the package ships, never one a user's or a project's layer declares")
         return f"{head} no adapter ao ships runs `{shown_text(program)}`" if program else f"{head} it names no adapter"
-    resume = (shipped.get("resume") or {}).get("argv") if isinstance(shipped.get("resume"), dict) else None
-    binaries = list(dict.fromkeys(adapter_binaries(shipped) + ([os.path.basename(str(resume[0]))] if resume else [])))
+    binaries = _harness_programs(shipped)
     listed = ", ".join(binaries)
     if _program_name(program) not in {_program_name(name) for name in binaries}:
         return f"{head} it runs `{shown_text(program)}`, which is not {ident}'s program ({listed})"
@@ -1833,6 +1878,144 @@ def turn_refusal(role, ident, argv, root=None, resolved=None, search=None, value
             return (f"{head} its grant admits `{command}` ({reason}) through {shown_text(rule)}, which {ident}'s own "
                     f"{role} command does not")
     return None
+
+
+def _harness_programs(adapter):
+    """The names a shipped adapter's harness runs as: those it detects, and the programs its send and resume start
+    (TURN-ARGV, ROUTE-ARGV)."""
+    names = list(adapter_binaries(adapter))
+    for capability in ("send", "resume"):
+        argv = (adapter.get(capability) or {}).get("argv") if isinstance(adapter.get(capability), dict) else None
+        if isinstance(argv, list) and argv:
+            names.append(os.path.basename(str(argv[0])))
+    return list(dict.fromkeys(name for name in names if name))
+
+
+def route_refusal(kind, ident, argv, root=None, resolved=None, values=None):
+    """Why ao refuses to start a review's or a hunt's command `argv`, as a person reads it; None when it may
+    (ROUTE-ARGV).
+
+    `kind` is reviewer or hunter, `ident` the adapter the route names, if any; `resolved` the file ao found for its
+    program, once it has looked, and `values` what ao fills into the command from the configuration, by name. A route
+    is held to what turn_refusal holds a turn to, as each rule applies to one a project names. The adapter it names
+    and the harness it runs agree: a route that names an adapter ao ships runs that adapter's own program, and one
+    that runs a shipped harness's program names that harness or none, since the adapter a route names says its family,
+    its prompt channel and its ACP command. No program is named by a path from where it starts, or lies inside this
+    repository, and no value reads as a flag. A route that runs a program no adapter ships is written by hand, the
+    exception docs/adapters.md keeps, whatever label it gives itself - a capability matrix names its tools' adapters
+    in its own words: it is not refused here, and starts only as a person accepted it (hold_unseen_routes). An
+    absolute program is taken as written, as `_reviewer_resolve_binary` takes it: a person accepted the route that
+    names it. Whether it can write is allowlist.reviewer_problems' and reading_problems' to say, where it starts. No
+    person's record lets a refused route start: its configuration must change.
+    """
+    head = f"ao refuses the {kind}'s command:"
+    program = str(argv[0]) if argv else ""
+    if not program:
+        return f"{head} it names no program"
+    named = str(ident or "").strip()
+    shipped = turn_adapter(named) if named else None
+    runs = command_adapter(argv)
+    adapter = shipped or runs
+    if named and shipped is None and runs is not None:
+        return (f"{head} it runs `{shown_text(program)}`, {runs.get('id')}'s program, under adapter "
+                f"{shown_text(named)}, which ao does not ship; name {runs.get('id')} or none")
+    if adapter is not None:
+        programs = _harness_programs(adapter)
+        if _program_name(program) not in {_program_name(name) for name in programs}:
+            return (f"{head} it runs `{shown_text(program)}`, which is not {adapter.get('id')}'s program "
+                    f"({', '.join(programs)})")
+    if not os.path.isabs(program) and os.path.dirname(program):
+        return (f"{head} it names its program by a path from where it starts, `{shown_text(program)}`, where an agent "
+                "can leave a program of its own")
+    for name, value in sorted((values or {}).items()):
+        if isinstance(value, str) and value.startswith("-"):
+            return f"{head} its {name} `{shown_text(value)}` would be read as a flag, not as a {name}"
+    if resolved and program_in_repository(resolved, root):
+        return f"{head} its program would be {shown_text(resolved)}, inside this repository, which an agent writes"
+    return None
+
+
+def program_in_repository(path, root):
+    """Whether a program lies inside the repository at `root`, where an agent can write it (ROUTE-ARGV).
+
+    ao's own install - the folder of the interpreter it runs on, and that interpreter's scripts folder, where an
+    optional extra such as the API reviewer lands - is not asked, wherever it lies: the threat model leaves ao's
+    install to the person, and a virtual environment kept in a tree holds ao itself too.
+    """
+    import sysconfig
+    if not path or not root or not _within(path, root):
+        return False
+    try:
+        scripts = sysconfig.get_path("scripts")
+    except (KeyError, TypeError, ValueError):
+        scripts = None
+    own = {os.path.normcase(os.path.realpath(place)) for place in (os.path.dirname(sys.executable or ""), scripts)
+           if place}
+    return os.path.normcase(os.path.realpath(os.path.dirname(os.path.abspath(path)))) not in own
+
+
+def outside_repository(path, root):
+    """A search path less each folder inside the repository at `root`, for finding a program ao starts: resolving one
+    asks each candidate its version, which runs it, and an agent can leave a program under any name in a folder a
+    PATH entry leads to inside the tree (ROUTE-ARGV). A path left with no folder names none, never the process's own
+    PATH."""
+    kept = os.pathsep.join(entry for entry in str(path or "").split(os.pathsep)
+                           if entry and not program_in_repository(os.path.join(entry, "program"), root))
+    return kept or os.pathsep
+
+
+def note_routes_read(cfg):
+    """Keep in `cfg`, as load_config read it, the digest of each command a review or a hunt would start, and return
+    it (ROUTE-ARGV). Computed from `cfg` alone, so loading a configuration writes nothing; hold_unseen_routes judges
+    what it notes."""
+    cfg.pop("_routes_judged", None)
+    cfg["_routes_read"] = {kind: turn_digest(kind, turn_identity(cfg, kind)) for kind in ROUTE_KINDS}
+    return cfg
+
+
+def hold_unseen_routes(root, cfg):
+    """Mark in `cfg` each command a review or a hunt would start, as the project's configuration was read, that no
+    person has accepted, and return it (ROUTE-ARGV). A review, a probe and a hunt ask it where they start.
+
+    `cfg["_unseen"]` names each such kind with its change, and each reviewer route of an unseen reviewer carries the
+    change itself, as `_unseen`, wherever ao takes it: a route starts only unmarked. Only what note_routes_read noted
+    is judged, and only while it is still what `cfg` holds: never the file read again, since `ao review` is the
+    implementer's to run and a route it wrote could be put back between ao reading it and the reviewer starting, and
+    never a route ao composes in memory - `ao ci review`'s, or a test's - which is no project's configuration. Judged
+    once for a `cfg`, against the record of the project at `root`. What cannot be compared is held, as harness
+    configuration that cannot be read is.
+    """
+    if cfg.get("_routes_judged"):
+        return cfg
+    read = cfg.get("_routes_read") if isinstance(cfg.get("_routes_read"), dict) else {}
+    cfg.pop("_unseen", None)
+    for route in reviewer_routes(cfg):
+        route.pop("_unseen", None)
+    unseen = {}
+    for kind in ROUTE_KINDS:
+        if kind not in read or read[kind] != turn_digest(kind, turn_identity(cfg, kind)):
+            continue
+        try:
+            change = unseen_turn(root, cfg, kind)
+        except Exception as exc:
+            change = (turn_path(kind), f"it cannot be compared with the one accepted "
+                                       f"({' '.join(str(exc).split())[:160]})", None)
+        if change:
+            unseen[kind] = change
+    if unseen:
+        cfg["_unseen"] = unseen
+    if unseen.get("reviewer"):
+        for route in reviewer_routes(cfg):
+            route["_unseen"] = unseen["reviewer"]
+    cfg["_routes_judged"] = True
+    return cfg
+
+
+def unseen_route_text(kind, change):
+    """What a person reads of a route held because its change is unseen: what it is, and what lets it start
+    (ROUTE-ARGV)."""
+    return (f"{harness_config_line([change])}: {ROUTE_KINDS[kind]} starts no command a person has not accepted, and "
+            f"no person has seen this one - a person reads it with ao harness seen --by <name>")
 
 
 # ---- a grant admits what a command rewriter makes of the commands it names (GRANTS-RTK) ----------

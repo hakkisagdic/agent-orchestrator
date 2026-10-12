@@ -549,6 +549,10 @@ def cmd_role(cfg, args):
         stored.pop("roles_next", None)
         print(f"assigned: {changed}{tiered}")
     A.write_project_config(root, json.dumps(stored, indent=2, ensure_ascii=False) + "\n")
+    # A reassigned role's command is a change nobody has seen, as any write to the configuration is, so a person reads
+    # it before a turn or a review starts it (TURN-ARGV, ROUTE-ARGV).
+    print(f"{C['dim']}a turn or a review starts a reassigned role's command once a person has read it: "
+          f"ao harness seen --by <name>{C['reset']}")
     return 0
 
 
@@ -595,6 +599,12 @@ def cmd_hunt(cfg, args):
         print(f"{C['yellow']}no hunter configured{C['reset']}: `hunter.argv` in .ao/config.json, read-only, "
               "a different family from the implementer where one is available")
         return 2
+    # A hunter command no person has accepted starts nothing, judged as this run read it (ROUTE-ARGV).
+    A.hold_unseen_routes(root, cfg)
+    unseen = cfg.get("_unseen") if isinstance(cfg.get("_unseen"), dict) else {}
+    if unseen.get("hunter"):
+        print(f"{C['red']}refused{C['reset']}: {A.unseen_route_text('hunter', unseen['hunter'])}")
+        return 2
     # The hunter is held to a reviewer's pin: the mode and the tools its adapter pins for one (GRANTS-PINNED).
     argv, pinned = A.pinned_argv(argv, "reviewer")
     if pinned:
@@ -603,6 +613,13 @@ def cmd_hunt(cfg, args):
     problems = allowlist.reviewer_problems(argv) + _hunter_reading_problems(argv)
     if problems:
         print(f"{C['red']}refused{C['reset']}: the hunter must not be able to write — {'; '.join(problems)}")
+        return 2
+    # And it runs its shipped adapter's own program, never one named from where it starts or left in this
+    # repository (ROUTE-ARGV).
+    refused = A.route_refusal("hunter", None, argv, root=root,
+                              resolved=str(argv[0]) if os.path.isabs(str(argv[0])) else None)
+    if refused:
+        print(f"{C['red']}refused{C['reset']}: {refused}")
         return 2
     passed_over = []
     pieces, cursor = A.hunt_slice(root, cfg, passed_over)
@@ -630,9 +647,17 @@ def cmd_hunt(cfg, args):
                         leads=0, sent=0, hunter=S.get(cfg, "hunter.id"), **({"parts": parts} if parts else {}))
         print(f"{C['red']}refused{C['reset']}: {refused}")
         return 2
-    result = _run_reviewer(root, [part.replace("{prompt}", prompt) for part in plan["argv"]], _review_timeout(cfg),
-                           label=S.get(cfg, "hunter.id"),
-                           **({"channel": plan} if plan["channel"] != "argument" else {}))
+    # Found as a reviewer's program is, on the path ao searches and never inside the repository: started by name, it
+    # was whatever the platform found first, the current directory among the places Windows looks (ROUTE-ARGV).
+    run = [part.replace("{prompt}", prompt) for part in plan["argv"]]
+    exe, _ = _reviewer_resolve_binary(root, run[0])
+    if exe:
+        run[0] = exe
+        result = _run_reviewer(root, run, _review_timeout(cfg), label=S.get(cfg, "hunter.id"),
+                               **({"channel": plan} if plan["channel"] != "argument" else {}))
+    else:
+        result = {"ok": False, "out": "", "reason": f"{argv[0]} is not installed on any path ao searches, or only "
+                                                    "inside this repository, which an agent writes"}
     leads = A.parse_leads(result.get("out")) if result.get("ok") else []
     known = A.hunter_known(root)
     fresh = []

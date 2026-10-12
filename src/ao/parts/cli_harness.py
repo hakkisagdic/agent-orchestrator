@@ -96,9 +96,18 @@ def _probe_left(adapter_id, left):
 # ---- what a harness reads from the tree, read by a person before anything ao starts here runs (HARNESS-CONFIG) ----
 
 def _turn_lines(identity):
-    """What a role's block says of its command, a line for each thing it says, as a person reads it (TURN-ARGV)."""
-    return [A.shown_text(f"{key}: {json.dumps(value, ensure_ascii=False)}")
-            for key, value in sorted((identity or {}).items()) if value is not None]
+    """What a role's block says of its command, a line for each thing it says, as a person reads it (TURN-ARGV); a
+    reviewer's routes a line each, so one route's change reads as that route's (ROUTE-ARGV)."""
+    lines = []
+    for key, value in sorted((identity or {}).items()):
+        if value is None:
+            continue
+        if isinstance(value, list) and value and all(isinstance(item, dict) for item in value):
+            lines += [f"{key}[{at}]: {json.dumps(item, ensure_ascii=False, sort_keys=True)}"
+                      for at, item in enumerate(value)]
+        else:
+            lines.append(f"{key}: {json.dumps(value, ensure_ascii=False)}")
+    return [A.shown_text(line) for line in lines]
 
 
 def _harness_change_lines(root, path, state, view):
@@ -114,7 +123,7 @@ def _harness_change_lines(root, path, state, view):
         lines = list(difflib.unified_diff(_turn_lines(accepted), _turn_lines(identity), lineterm="",
                                           fromfile="accepted" if accepted else "nothing accepted",
                                           tofile=".ao/config.json"))
-        return [f"{A.TURN_ROLES[role]} would start: {starts}"] + lines
+        return [f"{A.HELD_COMMANDS[role]} would start: {starts}"] + lines
     if kind == "deleted":
         return ["deleted: HEAD holds it, and a harness started here reads none"]
     if kind == "special":

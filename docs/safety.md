@@ -450,6 +450,51 @@ that reads as a flag.
   watchdog judges the command it composed, not the file read again, which an agent can put back in between.
   What is accepted is kept in `~/.ao/harness-turns-<project>.json`.
 
+### A review's and a hunt's command is held as a turn's is
+
+*In ao since slice ROUTE-ARGV: the reviewer's routes and `hunter.argv` are checked against the adapter ao
+ships before a review or a hunt starts one, and a change to them waits for a person.*
+
+The reviewer's routes - its command, its fallbacks, a strict project's capability matrix - and the bug
+hunter's `hunter.argv` are named in `.ao/config.json` too, a file the implementer writes. A route could run
+another program under a shipped adapter's name, a program left in the tree, or a stand-in that approves
+whatever it is shown, and `ao ci review` composed its reviewer from the `.ao/adapters/` of the pull request it
+reviewed.
+
+- Every route a review starts - from `ao review`, a submitted review's runner, `ao catchup`, `ao ci review`,
+  `ao prove`, and the reviewer probe of `ao init` and `ao doctor`; spawned, run through ACP, or the API tool
+  reviewer - and the hunter's command, from `ao hunt` or the watchdog's scheduled hunt, are held to what a
+  turn is held to, as each rule applies to a route. The adapter a route names and the harness it runs agree:
+  a route that names an adapter ao ships runs that adapter's own program, and one that runs a shipped
+  harness's program names that harness or none, since the name says its family, its prompt channel and its
+  ACP command. No program is named by a path from where it starts or lies inside the repository - a
+  candidate inside the tree, reached through a PATH entry that leads there, is not even asked its version,
+  which runs it - and no value ao fills in, a capability matrix's model argument or a route's model, starts
+  with `-`. A refused route is a configuration to change: the review tries its next route, and says why.
+- Two rules a turn keeps are adapted. A route that runs a program no adapter ships is written by hand, the
+  exception [adapters.md](adapters.md) keeps, whatever label it gives itself - a capability matrix names its
+  tools' adapters in its own words - and it starts only as a person accepted it. An absolute program is taken
+  as written, as a reviewer's always was, for the same reason. Whether a route can write is the reviewer's
+  rule's to say where it starts (`allowlist.reviewer_problems`, and every `options.trust_none` flag of a
+  shipped harness), as before; the hunter must run a shipped harness that can review.
+- A reviewer is composed from the adapter the package ships alone, by `ao role set reviewer` and `ao ci
+  review` alike; one only a user's or a project's layer declares is refused, and says so. The hunter's
+  program is found as a reviewer's is, by ao's own search: it was started by its name, and on Windows the
+  current directory comes before PATH.
+- What the routes say of their commands - every field of the reviewer and each fallback, and the capability
+  matrix - and the effective `hunter.argv` are accepted as a role's block is: by `ao init` for a reviewer it
+  composes, else at the first reading, and by a person with `ao harness seen`, which shows the command a review
+  or a hunt would start and what changed. A change is harness configuration nobody has seen, named as
+  `the reviewer's command (changed)` or `the hunter's command (changed)`. While it stands, a review starts
+  none of its routes and says why, a hunt does not run, and, as for any change nobody has seen, the
+  watchdog's wakes, refills, nudges and hunts and a lane wait too. It is judged by what ao read, never the file
+  read again: `ao review` is the implementer's to run, and a route it wrote could be put back between ao
+  reading it and the reviewer starting. `ao role set reviewer` writes such a change: run `ao harness seen`
+  after it.
+- The architect's wake and refill now ask whether their command is accepted, and refuse one inside the
+  repository, before they look for its program, which runs each candidate for its version; no candidate is
+  taken from inside the tree for a turn either (ROUTE-ARGV).
+
 ## 6. Capability gating on MCP
 
 Every MCP tool has an access class ([mcp.md](mcp.md)): `read`, `write` or `run`. The one `run`

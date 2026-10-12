@@ -18,6 +18,7 @@ from types import SimpleNamespace
 import pytest
 
 from ao import cli, language, lib as A, procs, watchdog as W
+from tests import standin
 from tests.scenarios import World
 
 APPROVED = "print('VERDICT: APPROVED\\nBLOCKER: 0\\nHIGH: 0\\nMEDIUM: 0\\nLOW: 0')"
@@ -26,7 +27,7 @@ LARGE = "ş" * 70_000 + "\nquotes ' \" ` $(true) and {prompt} and {prompt_file}\
 # Records what it was handed - standard input, the file its --prompt-file names, its arguments - then answers.
 FAKE_CLI = """import json, os, stat, sys
 record = sys.argv[1]
-seen = {"argv": sys.argv[2:]}
+seen = {"argv": [arg for arg in sys.argv[2:] if arg != "--read-only"]}
 if "--prompt-file" in sys.argv:
     path = sys.argv[sys.argv.index("--prompt-file") + 1]
     with open(path, "rb") as fh:
@@ -51,17 +52,21 @@ def _linux(monkeypatch):
 
 
 def _declare(monkeypatch, ident, **blocks):
-    """Ship one more adapter, with these blocks, beside the package's own."""
+    """Ship one more adapter, with these blocks, beside the package's own. Unless it says otherwise it reviews with
+    --read-only, which the fake CLI takes and leaves out of what it records: a route that names it runs its program,
+    and is held to its rule for reading (ROUTE-ARGV)."""
     shipped = A.package_adapters()
+    blocks.setdefault("options", {"trust_none": ["--read-only"]})
     monkeypatch.setattr(A, "package_adapters", lambda: dict(shipped, **{ident: dict(blocks, id=ident)}))
 
 
-def _route(tmp_path, ident, adapter, *extra):
-    script = tmp_path / "fake_cli.py"
-    script.write_text(FAKE_CLI, encoding="utf-8")
+def _route(tmp_path, ident, adapter, *extra, program=None):
+    """A route naming `adapter` that runs the fake CLI as that adapter's program: a route that names an adapter ao
+    ships runs that adapter's program (ROUTE-ARGV)."""
+    fake = standin.program(tmp_path / "bin", program or adapter or "reviewer", FAKE_CLI)
     record = tmp_path / f"{ident}.received"
     return {"id": ident, "family": "review-family", "adapter": adapter,
-            "argv": [sys.executable, str(script), str(record), *extra, "{prompt}"]}, record
+            "argv": [fake, str(record), "--read-only", *extra, "{prompt}"]}, record
 
 
 def _seen(record):
@@ -256,7 +261,7 @@ def test_a_capability_matrix_route_is_handed_its_prompt_file_as_any_route_is(pro
     _linux(monkeypatch)
     _declare(monkeypatch, "filed", send={"argv": ["filed", "{prompt}"], "file": {
         "replaces": ["{prompt}"], "with": ["--prompt-file", "{prompt_file}"]}})
-    route, record = _route(tmp_path, "bound", None)
+    route, record = _route(tmp_path, "bound", None, program="filed")
     bound = {"index": 0, "eligible": True, "argv": route["argv"] + ["{model}"],
              "identity": {"binding": "binding.primary", "adapter": "filed", "model_argument": "review-runtime-v1"}}
 

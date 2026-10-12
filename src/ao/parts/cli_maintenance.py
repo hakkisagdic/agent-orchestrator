@@ -1534,6 +1534,8 @@ def _prove_steps(cfg, root, tree, stamp, links, unlinked, heard):
         fh.write(f"ao prove {stamp}\n")
     subprocess.run([A.git_binary(), "add", "ao-prove.txt"], cwd=tree, check=True, capture_output=True)
     tree_cfg = A.load_config(tree)
+    # Its reviewer is this project's, accepted or not by this project's record, never a fresh one's (ROUTE-ARGV).
+    A.hold_unseen_routes(root, tree_cfg)
     with contextlib.redirect_stdout(heard):
         verified = cmd_verify(tree_cfg, SimpleNamespace(profile="quick", wait=900))
     if verified != 0:

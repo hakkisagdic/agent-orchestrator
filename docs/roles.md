@@ -176,7 +176,10 @@ goes through: it is passed over and named. A hunt that finds nothing it can read
 
 The hunter is configured as `hunter.argv` and refused unless it cannot write, by the same rule a
 reviewer must meet: its command runs a harness ao ships that can review, with every flag of that
-harness's `options.trust_none` in it. It is asked in the project's `language`, and a lead is read in one shape in
+harness's `options.trust_none` in it. It runs that harness's own program, found as ao finds a
+reviewer's - never one inside the repository, nor one named by a path from where it starts - and a
+change to `hunter.argv` holds every hunt until a person has read it with `ao harness seen`
+([safety.md](safety.md#a-reviews-and-a-hunts-command-is-held-as-a-turns-is)). It is asked in the project's `language`, and a lead is read in one shape in
 either: `- [category] path:line symbol — what is wrong`. With the `hunter` feature switched on
 (it is off by default) the watchdog starts one hunt every `hunter.every_hours`, detached, never
 continuously. `ao hunt status` and `ao cost --features` count the runs, so its value can be judged

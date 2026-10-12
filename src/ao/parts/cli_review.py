@@ -1242,7 +1242,11 @@ def _reviewer_version_key(version):
 
 
 def _reviewer_resolve_binary(root, name):
-    """Resolve a bounded candidate set within one shared discovery deadline."""
+    """Resolve a bounded candidate set within one shared discovery deadline.
+
+    A program inside the repository is no candidate: each is asked its version before anything else looks at it,
+    and one an agent left there - on a PATH entry that leads into the tree - would run as the person (ROUTE-ARGV).
+    """
     name = str(name)
     deadline = time.monotonic() + REVIEW_DISCOVERY_TOTAL_SECONDS
     if os.path.isabs(name):
@@ -1253,7 +1257,8 @@ def _reviewer_resolve_binary(root, name):
         )
     else:
         candidates = _reviewer_candidate_paths(name, deadline=deadline)
-    candidates = candidates[:REVIEW_DISCOVERY_MAX_CANDIDATES]
+    candidates = [candidate for candidate in candidates
+                  if not A.program_in_repository(candidate, root)][:REVIEW_DISCOVERY_MAX_CANDIDATES]
     if not candidates:
         return None, ""
 
@@ -1306,8 +1311,18 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, can
     A tool route (#86) is handed `candidate`, the exact bytes the review names. A prompt
     past what one argument carries reaches the route as its adapter declares, or the
     route is not started (PROMPT-CHANNEL).
+
+    A route starts only as a person accepted it, and only as the shipped adapter it names or runs would start it
+    (ROUTE-ARGV): one whose change nobody has seen, or that A.route_refusal refuses, is a configuration to change, and
+    the next route is tried.
     """
     tool = None
+    held = cand.get("_unseen") if isinstance(cand, dict) else None
+    if held:
+        identity = cand.get("identity") if isinstance(cand.get("identity"), dict) else {}
+        return str((identity.get("binding") if strict else cand.get("id")) or "reviewer"), None, None, {
+            "ok": False, "out": "", "reason": A.unseen_route_text("reviewer", held), "returncode": None,
+            "kind": "configuration-error", "retryable": False}
     if strict:
         label = "reviewer"
         fallback = False
@@ -1385,6 +1400,17 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, can
             "returncode": None, "kind": "configuration-error",
             "retryable": False,
         }
+    # The route runs the program of the shipped adapter it names or runs, and no value ao filled in reads as a flag,
+    # whichever way it is reached; a program named inside this repository is refused before it is looked for, and
+    # none found inside it is taken (ROUTE-ARGV).
+    identity = cand.get("identity") if strict and isinstance(cand.get("identity"), dict) else {}
+    ident = identity.get("adapter") if strict else cand.get("adapter")
+    values = {"model": identity.get("model_argument") if strict else cand.get("model")}
+    refused = A.route_refusal("reviewer", ident, argv, root=root, values=values,
+                              resolved=str(argv[0]) if os.path.isabs(str(argv[0])) else None)
+    if refused:
+        return label, None, None, {"ok": False, "out": "", "reason": refused, "returncode": None,
+                                   "kind": "configuration-error", "retryable": False}
     # Where the project asks for it, a route that can answers through its adapter's ACP command, handed
     # this same prompt; one that cannot is spawned below as it always was, and says why (ACP-REVIEWER).
     through, spawned = _acp_reviewer_command(root, cand, strict)
@@ -2039,12 +2065,13 @@ def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
     def invoke(position, route_timeout):
         cand = chain[position]
         # The one machine-wide lock a review can wait on: a spent window is rotated under it (#32). The run
-        # says it waits there only once the window is read spent, as it is about to wait.
+        # says it waits there only once the window is read spent, as it is about to wait. A route no person has
+        # accepted rotates nothing: it is refused before anything is spent on it (ROUTE-ARGV).
         headroom = A.rotate_if_exhausted(
             None, cand.get("argv") or [], "reviewer",
             on_wait=lambda: _review_phase("waiting", f"quota headroom for {cand.get('id') or 'reviewer'}; a spent "
                                                      "window waits on the machine's keyflip rotation lock")) \
-            if isinstance(cand, dict) else {"ok": True}
+            if isinstance(cand, dict) and not cand.get("_unseen") else {"ok": True}
         if not headroom["ok"]:
             # Not spent on an exhausted window: the next route is tried (#32).
             labels[position] = str(cand.get("id") or "reviewer")
@@ -2155,8 +2182,12 @@ def _reviewer_probe_diff():
 
 
 def _reviewer_probe(cfg, timeout=REVIEW_PROBE_TIMEOUT):
-    """Actually invoke the configured chain and require one exact nonce line."""
+    """Actually invoke the configured chain and require one exact nonce line.
+
+    A probe is a review run: a route no person has accepted is not started by it either (ROUTE-ARGV).
+    """
     root = cfg["root"]
+    A.hold_unseen_routes(root, cfg)
     rv = cfg.get("reviewer") or {}
     strict = M.is_strict(cfg)
     resolution = None
@@ -2446,8 +2477,17 @@ def _same_family_opt_in(cfg):
 
 
 def _resolve_matrix(cfg, **kwargs):
-    """M.resolve with the same-family opt-in this project has in force, so every caller sees one tier."""
-    return M.resolve(cfg, same_family=_same_family_opt_in(cfg) is not None, **kwargs)
+    """M.resolve with the same-family opt-in this project has in force, so every caller sees one tier.
+
+    A reviewer change nobody has seen goes with each route resolved from the matrix, as with a configured route, so
+    none starts (ROUTE-ARGV).
+    """
+    resolution = M.resolve(cfg, same_family=_same_family_opt_in(cfg) is not None, **kwargs)
+    held = (cfg.get("_unseen") or {}).get("reviewer") if isinstance(cfg.get("_unseen"), dict) else None
+    if held:
+        for route in resolution.get("reviewers") or []:
+            route["_unseen"] = held
+    return resolution
 
 
 def _review_tier(cfg, route, sessions=None, author=None):
@@ -3624,6 +3664,14 @@ def cmd_review(cfg, args):
     if author is not None and not _author_families(author):
         print(f"{C['red']}No reviewer may review this range:{C['reset']} the family of the model that "
               "wrote it is not established.")
+        return 2
+    # A reviewer command no person has accepted reviews nothing: the review stops before a prompt is built, as it read
+    # the configuration, whatever the file holds now (ROUTE-ARGV).
+    A.hold_unseen_routes(root, cfg)
+    unseen = cfg.get("_unseen") if isinstance(cfg.get("_unseen"), dict) else {}
+    held = None if carried or person else (unseen.get("reviewer") if strict else rv.get("_unseen"))
+    if held:
+        print(f"{C['red']}not reviewed{C['reset']}: {A.unseen_route_text('reviewer', held)}")
         return 2
     matrix_resolution = None
     if strict:

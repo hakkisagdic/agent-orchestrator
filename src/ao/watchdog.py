@@ -1102,7 +1102,20 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
         argv = [x.replace("{prompt}", prompt) .replace("{session}", sess or "")
                 for x in plan["argv"]]
         search = child_path()
-        resolved, ver = A.resolve_binary(argv[0], path=search)
+        # A command no person accepted, or one that names a program inside this repository, is stopped before its
+        # program is resolved: resolving asks each candidate its version, which runs it, and TURN-ARGV asked only
+        # after that. No candidate is taken from inside the tree (ROUTE-ARGV).
+        held = turn_hold(root, cfg, "architect")
+        if held:
+            print(f"{held}; not waking the architect")
+            return woke
+        refused = A.turn_refusal("architect", A.block_adapter(arch), argv, root=root, search=search,
+                                 values={"session": sess}, resolved=argv[0] if os.path.isabs(argv[0]) else None)
+        if refused:
+            print(f"{refused}; not waking the architect")
+            tell_turn_refused(root, "architect", refused)
+            return woke
+        resolved, ver = A.resolve_binary(argv[0], path=A.outside_repository(search, root))
         key = A.project_key(root)
         log_path = os.path.join(STATE_DIR, A.project_file_name("escalate-log", key))
         # Read what the previous wake said before starting another. Same binary,
@@ -3074,13 +3087,26 @@ def _cycle_impl(args, root):
             argv = [x.replace("{prompt}", prompt) .replace("{session}", sess or "")
                     for x in plan["argv"]]
             search = child_path()
-            resolved, ver = A.resolve_binary(argv[0], path=search)
+            # As in escalate(): held or refused before its program is resolved, which runs it, and no candidate is
+            # taken from inside the tree (ROUTE-ARGV).
+            held = turn_hold(root, cfg, "architect")
+            if held:
+                print(f"queue low ({depth}); {held}; not waking the architect to refill")
+                return 0
+            values = {"session": sess, "prompt": arch.get("prompt")}
+            refused = A.turn_refusal("architect", A.block_adapter(arch), argv, root=root, search=search, values=values,
+                                     resolved=argv[0] if os.path.isabs(argv[0]) else None)
+            if refused:
+                print(f"queue low ({depth}); {refused}; not waking the architect to refill")
+                tell_turn_refused(root, "architect", refused)
+                return 0
+            resolved, ver = A.resolve_binary(argv[0], path=A.outside_repository(search, root))
             if not resolved:
                 print(f"architect command {argv[0]} not on PATH")
                 return 0
             # As in escalate(): the shipped adapter's harness, and no grant beyond its own (TURN-ARGV).
             refused = A.turn_refusal("architect", A.block_adapter(arch), argv, root=root, resolved=resolved,
-                                     search=search, values={"session": sess, "prompt": arch.get("prompt")})
+                                     search=search, values=values)
             if refused:
                 print(f"queue low ({depth}); {refused}; not waking the architect to refill")
                 tell_turn_refused(root, "architect", refused)
@@ -3294,9 +3320,9 @@ def _cycle_impl(args, root):
         return 1
 
     # Resolve the CLI and hand the child a usable PATH — see child_path(). Never a program the current
-    # directory holds, which Windows looks in before PATH (WINDOWS-NO-CWD-EXEC).
+    # directory holds, which Windows looks in before PATH (WINDOWS-NO-CWD-EXEC), nor one inside the tree (ROUTE-ARGV).
     search = child_path()
-    resolved = A.program_path(argv[0], path=search)
+    resolved = A.program_path(argv[0], path=A.outside_repository(search, root))
     if not resolved:
         notify(f"{project}: watchdog", f"{argv[0]} not on PATH; cannot nudge", root)
         print(f"{argv[0]} not found on PATH ({search})")
