@@ -150,7 +150,10 @@ resolved against the repository root where the Git query runs, so direct
 missing, unreadable, malformed, non-object, or empty `.ao/config.json` state
 refuses rather than falling back to auto-discovery. Every write of that file replaces
 it whole — a temporary file beside it, fsync, rename — so a crash or kill leaves the old
-document or the new one, never an empty file that has lost its `capability_matrix`;
+document or the new one, never an empty file that has lost its `capability_matrix`. The
+temporary file, for this file and every other ao replaces whole, is made under a name no file
+had and never through a link: at the `.<name>.<pid>.tmp` it had, a link an agent left for a
+likely pid had ao truncate and write the link's target (STORAGE-TMP);
 a writer refuses a config it cannot read instead of rebuilding it. Both pre-dispatch loading and
 commit enforcement use one bounded reader: it reads at most 1,048,576 bytes and
 rejects container nesting deeper than 64 before recursive JSON decoding. A

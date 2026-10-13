@@ -361,7 +361,7 @@ def test_nothing_is_written_outside_the_harness_directory_but_the_record(project
             return True
         if any(real == top or real.startswith(top + os.sep) for top in (home, work)):
             return True
-        return os.path.dirname(real) == record and re.fullmatch(r"\.?content\.json(\.\d+\.tmp)?",
+        return os.path.dirname(real) == record and re.fullmatch(r"\.?content\.json(\.\d+\.[0-9a-f]+\.tmp)?",
                                                                  os.path.basename(real)) is not None
 
     assert _WRITES and [write for write in _WRITES if not allowed(*write)] == []

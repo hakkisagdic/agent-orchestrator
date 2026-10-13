@@ -3372,7 +3372,7 @@ def fold_notice_times(root):
     Each process folds from the newest line the file names to the end of the ledger, so a
     fold another process overtakes, or one that could not be written, leaves only more lines
     for the next fold and for a check to read. It is rebuilt from the ledger when it cannot be
-    read, which is why it is replaced whole and not synced. A key not recorded for
+    read, and replaced whole. A key not recorded for
     NOTICE_TIMES_DAYS goes, and past NOTICE_TIMES_KEYS the oldest go once NOTICE_TIMES_HOLD has
     passed since they were recorded; `forgotten_through` says when the newest of them was
     recorded, and a window reaching back to it reads the ledger.
@@ -3411,19 +3411,14 @@ def fold_notice_times(root):
     for name in [name for name in newest_first if keys[name]["recorded"] < old] + past:
         if name in keys:
             forgotten = max(forgotten, keys.pop(name)["recorded"])
-    path = notice_times_path(root)
-    temporary = os.path.join(os.path.dirname(path), f".{os.path.basename(path)}.{os.getpid()}.tmp")
+    # Under a name no file had, never through a link: `.notice-times.json.<pid>.tmp` in `.ao/ledger/`, a folder the
+    # implementer writes, opened to truncate, wrote the target of a link left there for a likely pid (STORAGE-TMP).
+    from .storage import replace_file_durably
     try:
-        from .storage import _replace
-        with open(temporary, "w", encoding=UTF8) as fh:
-            json.dump({"last": fresh[0][0], "forgotten_through": forgotten, "keys": keys}, fh,
-                      ensure_ascii=False, sort_keys=True)
-        _replace(temporary, path)
+        replace_file_durably(notice_times_path(root), json.dumps(
+            {"last": fresh[0][0], "forgotten_through": forgotten, "keys": keys},
+            ensure_ascii=False, sort_keys=True).encode(UTF8))
     except OSError:
-        try:
-            os.remove(temporary)
-        except OSError:
-            pass
         return False
     return True
 

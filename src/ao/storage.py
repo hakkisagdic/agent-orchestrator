@@ -204,21 +204,13 @@ def _replace(source, target):
 
 
 def _write_committed_lengths(data):
-    """Replace the checkpoint store whole; the caller holds its lock."""
-    store = checkpoint_path()
-    temporary = f"{store}.{os.getpid()}.tmp"
-    try:
-        with open(temporary, "w", encoding="utf-8") as handle:
-            json.dump(data, handle, indent=1, sort_keys=True)
-            handle.flush()
-            os.fsync(handle.fileno())
-        _replace(temporary, store)
-    except BaseException:
-        try:
-            os.remove(temporary)
-        except OSError:
-            pass
-        raise
+    """Replace the checkpoint store whole; the caller holds its lock.
+
+    Through replace_file_durably, under a name no file had and never through a link: `<store>.<pid>.tmp`, opened to
+    truncate, wrote the target of a link left at that name, and AO_LEDGER_CHECKPOINTS can name a store in a folder an
+    agent writes (STORAGE-TMP).
+    """
+    replace_file_durably(checkpoint_path(), json.dumps(data, indent=1, sort_keys=True).encode("utf-8"))
 
 
 def _record_committed_length(path, count, digest, sealed=None):
@@ -462,6 +454,12 @@ def replace_file_durably(path, data, *, mode=None, _checkpoint=None, _fsync=None
     chmod-ed after, ``~/.ao/email.json`` was readable by every user of the machine
     meanwhile, and stayed so when the process stopped between the two
     (HUNT-LEADS-SEC). Without ``mode`` the file keeps the mode it had, or 0644.
+
+    Every temporary file is made that way, with or without ``mode``. Without one it
+    was ``.<name>.<pid>.tmp``, opened to truncate and through any link: an agent that
+    left a link at that name for a likely pid in a folder ao writes - ``.ao/`` among
+    them - had ao truncate and write the link's target, a file of the person's
+    (STORAGE-TMP).
     """
     fsync = _fsync or os.fsync
     parent = os.path.dirname(path) or "."
@@ -471,12 +469,8 @@ def replace_file_durably(path, data, *, mode=None, _checkpoint=None, _fsync=None
             mode = os.stat(path).st_mode & 0o7777
         except OSError:
             mode = 0o644
-        temporary = os.path.join(parent, f".{os.path.basename(path)}.{os.getpid()}.tmp")
-        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-    else:
-        temporary = os.path.join(parent, f".{os.path.basename(path)}.{os.getpid()}.{os.urandom(4).hex()}.tmp")
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-    flags |= getattr(os, "O_BINARY", 0)
+    temporary = os.path.join(parent, f".{os.path.basename(path)}.{os.getpid()}.{os.urandom(4).hex()}.tmp")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
     opened = False
     try:
         fd = os.open(temporary, flags, mode)
