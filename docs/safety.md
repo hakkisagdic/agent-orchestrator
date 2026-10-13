@@ -353,6 +353,13 @@ again is unseen again. The record is kept outside the tree an agent writes, in
 It is a person's command: `--by` names a person, never an agent or a role, and no grant ao checks admits
 it (`allowlist.FORBIDDEN`).
 
+*In ao since slice LEADS-MCP: each command it prints to copy holds the name quoted as one word for the
+shell - `--by 'Ada Lovelace'`, and on Windows `--by "Ada Lovelace"`, which cmd.exe and PowerShell read
+alike - where a name with a space was copied as two words and refused, and a `;` in one ran a command
+of its own. A name holding a sign PowerShell or cmd.exe expands inside double quotes - `$`, a backtick,
+`%`, `!`, a quote - is put in no command; you type it as you write your name. A line feed in a path or
+in a turn's command is escaped too, as `\x0a`, where it started a line that read as ao's.*
+
 *In ao since slice HARNESS-SEEN-OWN: what ao writes into what a harness reads is seen already, and a
 person's own tool approvals are seen in one step.*
 

@@ -711,13 +711,17 @@ HARNESS_CONFIG_LIMIT = 5000
 # What ao keeps of a file to show a person; a larger one is named by its size alone.
 HARNESS_CONFIG_SHOW_BYTES = 1 << 20
 # What a terminal acts on rather than shows: control characters, a carriage return among them, and the zero-width and
-# bidirectional ones that make text read otherwise than it runs. Shown escaped, so a change cannot hide in them.
-_UNSHOWN = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]")
+# bidirectional ones that make text read otherwise than it runs. Shown escaped, so a change cannot hide in them. A line
+# feed and the line and paragraph separators are among them: a name or a session's id holding one started a line of
+# its own, which read as one ao wrote (LEADS-MCP). So is a tab: in a title it moved what followed it to another
+# column, where a person read it as another field.
+_UNSHOWN = re.compile("[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]")
 
 
 def shown_text(text):
     """Text as a person must read it to see what it does: each character of _UNSHOWN escaped, and a name that is not
-    UTF-8 shown with replacement characters rather than failing the line it is in (HARNESS-CONFIG)."""
+    UTF-8 shown with replacement characters rather than failing the line it is in (HARNESS-CONFIG). It is one line:
+    text of several is shown a line at a time (LEADS-MCP)."""
     return _UNSHOWN.sub(lambda m: "\\x%02x" % ord(m.group()) if ord(m.group()) < 0x100 else "\\u%04x" % ord(m.group()),
                         str(text).encode(UTF8, "surrogatepass").decode(UTF8, "replace"))
 

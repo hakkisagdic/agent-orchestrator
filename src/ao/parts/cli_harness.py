@@ -53,19 +53,22 @@ def cmd_harness(cfg, args):
     failed = 0
     for adapter_id in chosen:
         argv = [str(part) for part in catalog[adapter_id]["acp"].get("argv") or []]
+        # An adapter's id and command may come from the project's own layer, which an agent writes, and what the
+        # harness answers is a vendor's: each is shown escaped, as `ao agents` shows a hook's (LEADS-MCP).
         if not argv:
             failed += 1
-            print(f"  {adapter_id:<12} {C['red']}no command{C['reset']}: its `acp.argv` is empty")
+            print(f"  {A.shown_text(adapter_id):<12} {C['red']}no command{C['reset']}: its `acp.argv` is empty")
             continue
         path, version = A.resolve_binary(argv[0])
         if path is None:
-            print(f"  {adapter_id:<12} {C['dim']}not installed: {argv[0]} is on no path ao searches{C['reset']}")
+            print(f"  {A.shown_text(adapter_id):<12} {C['dim']}not installed: {A.shown_text(argv[0])} is on no path "
+                  f"ao searches{C['reset']}")
             continue
         try:
             found = acp.probe([path] + argv[1:], root, timeout=args.timeout, sessions=args.sessions)
         except acp.ProbeError as exc:
             failed += 1
-            print(f"  {adapter_id:<12} {C['red']}no answer{C['reset']}: {exc}")
+            print(f"  {A.shown_text(adapter_id):<12} {C['red']}no answer{C['reset']}: {A.shown_text(exc)}")
             _probe_left(adapter_id, exc.still_running)
             continue
         left = found.pop("still_running", [])
@@ -74,10 +77,12 @@ def cmd_harness(cfg, args):
         target = harness_profile_path(adapter_id)
         os.makedirs(os.path.dirname(target), exist_ok=True)
         replace_file_durably(target, (json.dumps(profile, indent=1, sort_keys=True) + "\n").encode(UTF8))
-        agent = " ".join(part for part in (found["agent"].get("name"), found["agent"].get("version")) if part)
-        print(f"  {adapter_id:<12} ACP {found['protocol_version']}  {agent or '(unnamed)'}  "
-              f"load {'yes' if found['load_session'] else 'no'}  "
-              f"session: {', '.join(found['session']) or '-'}  mcp: {', '.join(found['mcp']) or '-'}"
+        agent = " ".join(A.shown_text(part) for part in (found["agent"].get("name"), found["agent"].get("version"))
+                         if part)
+        print(f"  {A.shown_text(adapter_id):<12} ACP {A.shown_text(found['protocol_version'])}  "
+              f"{agent or '(unnamed)'}  load {'yes' if found['load_session'] else 'no'}  "
+              f"session: {A.shown_text(', '.join(found['session'])) or '-'}  "
+              f"mcp: {A.shown_text(', '.join(found['mcp'])) or '-'}"
               + (f"  sessions here: {found['sessions']}" if "sessions" in found else ""))
         if left:
             failed += 1
@@ -89,8 +94,8 @@ def _probe_left(adapter_id, left):
     """Say what of a probed agent still runs after the probe stopped it: asked, not assumed stopped
     (WINDOWS-STOP-PROVEN), whether the agent answered or not (ACP-PROBE-LEFT)."""
     if left:
-        print(f"  {adapter_id:<12} {C['red']}{len(left)} process(es) of its agent still run after the probe "
-              f"stopped it{C['reset']}: {list(left)}; {_stop_by_hand()}")
+        print(f"  {A.shown_text(adapter_id):<12} {C['red']}{len(left)} process(es) of its agent still run after the "
+              f"probe stopped it{C['reset']}: {list(left)}; {_stop_by_hand()}")
 
 
 # ---- what a harness reads from the tree, read by a person before anything ao starts here runs (HARNESS-CONFIG) ----
@@ -175,16 +180,16 @@ def _record_seen(root, by, digest):
         changes = A.harness_config_changes(root)
     except Exception as exc:
         print(f"{C['red']}not recorded{C['reset']}: what a harness reads from this tree cannot be read "
-              f"({' '.join(str(exc).split())})")
+              f"({A.shown_text(' '.join(str(exc).split()))})")
         return 1
     unseen = A.harness_unseen(changes, A.harness_seen_record(root) or {})
     if not unseen or A.harness_config_digest(unseen) != digest:
         print(f"{C['red']}refused{C['reset']}: what a harness reads here is not what that digest was taken of - it "
               f"changed since it was shown, or the digest is another's. Nothing was recorded; "
-              f"`ao harness seen --by {by}` shows it as it stands now")
+              f"`ao harness seen --by {A.copyable_word(by) or '<your name>'}` shows it as it stands now")
         return 2
     A.record_harness_seen(root, changes, by, digest)
-    print(f"{C['green']}recorded{C['reset']}: {by} has seen {A.harness_config_line(unseen)}; a wake, refill, "
+    print(f"{C['green']}recorded{C['reset']}: {A.shown_text(by)} has seen {A.harness_config_line(unseen)}; a wake, refill, "
           "nudge, hunt or lane starts in this tree again")
     return 0
 
@@ -228,7 +233,8 @@ def _harness_seen(cfg, args):
         changes = A.harness_config_changes(root, shown=shown)
     except Exception as exc:
         print(f"{C['red']}not read{C['reset']}: what a harness reads from this tree cannot be read "
-              f"({' '.join(str(exc).split())}); nothing ao starts here runs until it can, and nothing was recorded")
+              f"({A.shown_text(' '.join(str(exc).split()))}); nothing ao starts here runs until it can, and nothing "
+              "was recorded")
         return 1
     if not changes:
         print(f"{C['green']}nothing a harness reads from this tree differs from HEAD{C['reset']}, and each role's "
@@ -250,17 +256,23 @@ def _harness_seen(cfg, args):
         for line in _harness_change_lines(root, path, state, shown.get(path)):
             print(f"  {line}")
     print(f"\ndigest {digest}")
+    # The name goes into each command a person copies quoted as one word for any shell they paste it into: copied,
+    # `--by Ada Lovelace` named `Lovelace` an adapter and was refused, and a `;` or a `$(...)` in a name ran as a
+    # command. A name no quoting holds as one word in every shell is put in no command (LEADS-MCP).
+    named = A.copyable_word(by) or "<your name>"
+    unquotable = "" if A.copyable_word(by) else (f" ({A.shown_text(by)} holds a sign a shell reads as more than a "
+                                                 "name: type the command with your name as you write it)")
     if ask:
-        answer = _confirm(f"Record exactly these as seen by {by}? [y/N] ")
+        answer = _confirm(f"Record exactly these as seen by {A.shown_text(by)}? [y/N] ")
         if not answer:
             print("Nothing was recorded" + (": nobody can answer here, standard input is not a terminal; read the "
-                                            f"changes above, then `ao harness seen --by {by} --digest {digest}` "
-                                            "records them" if answer is None else "."))
+                                            f"changes above, then `ao harness seen --by {named} --digest {digest}` "
+                                            f"records them{unquotable}" if answer is None else "."))
             return 1
         return _record_seen(root, by, digest)
-    print(f"Nothing is recorded yet. Read each change above, then\n  ao harness seen --by {by} --digest {digest}\n"
+    print(f"Nothing is recorded yet. Read each change above, then\n  ao harness seen --by {named} --digest {digest}\n"
           f"records exactly these bytes as seen; a change made since refuses it. At a terminal, "
-          f"`ao harness seen --by {by} --ask` shows them and records them on your yes.")
+          f"`ao harness seen --by {named} --ask` shows them and records them on your yes{unquotable}.")
     return 0
 
 
@@ -333,7 +345,10 @@ def cmd_agents(cfg, args):
     tone = {"working": C["green"], "waiting": C["yellow"], "idle": C["dim"], "ended": C["dim"]}
     for session in sessions:
         since = _elapsed(now - float(session.get("at") or now))
+        # The harness's name and the session's id are what a hook's command line and input said, and any program on
+        # the machine can run the hook: shown escaped, so an escape sequence is not acted on and a line feed starts
+        # no row of its own (LEADS-MCP).
         print(f"  {tone.get(session['state'], '')}{session['state']:<8}{C['reset']} "
-              f"{str(session.get('harness') or '?'):<12} {session['session'][:24]:<24} "
+              f"{A.shown_text(session.get('harness') or '?'):<12} {A.shown_text(session['session'][:24]):<24} "
               f"{since:>8}  last: {session['event']}")
     return 0

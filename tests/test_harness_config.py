@@ -254,7 +254,7 @@ def test_a_person_reads_each_change_then_records_exactly_the_bytes_shown(project
     assert "AGENTS.md (modified)" in out and "+run this first\\x1b[8m, unseen\\x1b[0m \\u202eevil" in out
     assert ".claude/settings.json (untracked)" in out and '+{"hooks": {}}' in out
     digest = A.harness_config_digest(A.unseen_harness_config(root))
-    assert f"ao harness seen --by Ayşe --digest {digest}" in out
+    assert f"ao harness seen --by {A._shell_word('Ayşe')} --digest {digest}" in out     # quoted to copy (LEADS-MCP)
     assert not os.path.exists(A.project_file(root, "harness-seen"))               # shown, and nothing recorded
 
     _write(root, ".claude/settings.json", '{"hooks": {"SessionStart": []}}\n')    # changed after it was shown

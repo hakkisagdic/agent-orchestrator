@@ -172,9 +172,12 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0, show
     w = min(width or shutil.get_terminal_size((120, 40)).columns, 130)
     L = []
     a = L.append
+    # What the panel shows of a transcript, a session's record, mail, the board, a file's name or a vendor's output
+    # is shown escaped, a wrapped text a line at a time: an agent writes all of them, and an escape sequence among
+    # them acted on the terminal of whoever watched, or a line feed wrote a line that read as ao's (LEADS-MCP).
 
     a(f"{C['b']}{C['cyan']}{'═' * w}{C['reset']}")
-    a(f"{C['b']}  {facts['project'].upper()}{C['reset']}{C['dim']}   agent-orchestrator   "
+    a(f"{C['b']}  {A.shown_text(facts['project'].upper())}{C['reset']}{C['dim']}   agent-orchestrator   "
       f"{datetime.fromtimestamp(facts['at']):%d %b %H:%M:%S}{C['reset']}")
     a(f"{C['b']}{C['cyan']}{'═' * w}{C['reset']}")
 
@@ -190,22 +193,29 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0, show
         unresolved = _unresolved_session(age, implementer["session"])
         if unresolved:
             agestr, desc = f"session {unresolved['how']}", unresolved["why"]
-        a(f"\n{col}{C['b']}{txt}{C['reset']}  {C['dim']}{impl.get('adapter','?')} · {agestr}{C['reset']}")
+        a(f"\n{col}{C['b']}{txt}{C['reset']}  {C['dim']}{A.shown_text(impl.get('adapter','?'))} · "
+          f"{A.shown_text(agestr)}{C['reset']}")
         for i, ln in enumerate(textwrap.wrap(desc, w - 6)[:2]):
-            a(f"  {C['dim']}↳{C['reset']} {ln}" if i == 0 else f"    {ln}")
+            a(f"  {C['dim']}↳{C['reset']} {A.shown_text(ln)}" if i == 0 else f"    {A.shown_text(ln)}")
         elsewhere = implementer["working_elsewhere"]
         if elsewhere:
-            a(f"  {C['green']}↳ working in {elsewhere['name']}{C['reset']}  {C['dim']}"
-              f"{elsewhere['root']} · last write {elsewhere['seconds_since_write']}s ago there{C['reset']}")
+            a(f"  {C['green']}↳ working in {A.shown_text(elsewhere['name'])}{C['reset']}  {C['dim']}"
+              f"{A.shown_text(elsewhere['root'])} · last write {elsewhere['seconds_since_write']}s ago there"
+              f"{C['reset']}")
     else:
         a(f"\n{C['yellow']}No implementer session found for this workspace.{C['reset']}")
-        a(f"   {C['dim']}{facts['root']}{C['reset']}")
+        a(f"   {C['dim']}{A.shown_text(facts['root'])}{C['reset']}")
         if facts["workspaces"]:
             a("\n   Run it from a project, or point at one:")
             for ws in facts["workspaces"]:
                 mins = int(ws["seconds_since_write"] / 60)
                 age = f"{mins}m ago" if mins < 90 else f"{mins // 60}h ago"
-                a(f"     {C['b']}ao -C {ws['path']}{C['reset']}  {C['dim']}{age}{C['reset']}")
+                # A command to copy: the path quoted as one word for the shell, as `ao harness seen` quotes a name; a
+                # path no quoting holds as one word in every shell is shown, and no command made of it (LEADS-MCP).
+                word = A.copyable_word(ws["path"])
+                a(f"     {C['b']}ao -C {word}{C['reset']}  {C['dim']}{age}{C['reset']}" if word else
+                  f"     {A.shown_text(ws['path'])}  {C['dim']}{age}; no command is printed for a path a shell would "
+                  f"read as more than a name{C['reset']}")
         else:
             a(f"   {C['dim']}No local agent sessions found at all. See docs/adapters.md.{C['reset']}")
 
@@ -221,7 +231,7 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0, show
             warn = f"  {C['yellow']}⚠ {lu/max(avg,1):.1f}× average{C['reset']}" if lu > 2 * avg else ""
             # The subagents a turn started spent inside its cost, and inside the total.
             delegated = f", {tel['cost_delegated']:.0f} delegated" if tel["cost_delegated"] else ""
-            a(f"   cost     last turn {C['b']}{lu:.0f}{C['reset']} {tel['cost_unit']} "
+            a(f"   cost     last turn {C['b']}{lu:.0f}{C['reset']} {A.shown_text(tel['cost_unit'])} "
               f"({tel['last_turn_tool_calls']} tool calls) · {tel['turns']} turns, total "
               f"{C['b']}{tel['cost_total']:.0f}{C['reset']}{C['dim']} (avg {avg:.0f}{delegated}){C['reset']}{warn}")
         if tel["machine_quota"]:
@@ -229,9 +239,10 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0, show
             # implementer's own pool — Kiro bills credits, Claude Code bills a
             # 5h window. Labelling it plainly avoids reading someone else's
             # quota as this agent's.
-            a(f"   {C['dim']}other tools on this machine (not {impl.get('adapter','this agent')}'s pool):{C['reset']}")
+            a(f"   {C['dim']}other tools on this machine (not {A.shown_text(impl.get('adapter','this agent'))}'s "
+              f"pool):{C['reset']}")
             for line in tel["machine_quota"]:
-                a(f"     {C['dim']}{line}{C['reset']}")
+                a(f"     {C['dim']}{A.shown_text(line)}{C['reset']}")
 
     # problems — only rendered when there is one, so an empty panel means healthy
     trouble = facts["problems"]
@@ -252,23 +263,29 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0, show
             a(f"   {C['red']}restart failed{C['reset']} {C['dim']}{mins}m ago · "
               f"exit {nudge_err['code']}{C['reset']}")
             for ln in textwrap.wrap(nudge_err["tail"], w - 8)[:2]:
-                a(f"     {C['dim']}{ln}{C['reset']}")
+                a(f"     {C['dim']}{A.shown_text(ln)}{C['reset']}")
             a(f"     {C['dim']}full log: {_home_relative(nudge_err['log'])}{C['reset']}")
         for error in trouble["agent_errors"]:
             for i, ln in enumerate(textwrap.wrap(error["text"], w - 12)[:2]):
-                a(f"   {C['dim']}{error['time']}{C['reset']} {C['yellow']}agent error{C['reset']}  {ln}"
-                  if i == 0 else f"        {C['dim']}│{C['reset']}  {ln}")
+                a(f"   {C['dim']}{error['time']}{C['reset']} {C['yellow']}agent error{C['reset']}  {A.shown_text(ln)}"
+                  if i == 0 else f"        {C['dim']}│{C['reset']}  {A.shown_text(ln)}")
 
     # A returned review is handled before new work starts (#28, W1).
     for review in facts["returned_reviews"]:
         # One that ended with no verdict is collected and submitted again; it was told to be handled as a
-        # review that came back (PIPELINE-HANDLE-2).
-        a(f"\n   {C['yellow']}{C['b']}REVIEW RETURNED{C['reset']} for {review['slice'] or 'a slice'}: "
-          f"{review['id']} {review['verdict']} — handle it before new work "
-          f"({C['b']}ao review collect {review['id']}{C['reset']})" if review["verdict"] else
-          f"\n   {C['yellow']}{C['b']}REVIEW ENDED{C['reset']} for {review['slice'] or 'a slice'}: "
-          f"{review['id']} {review['state']}, no verdict — collect it, then submit again "
-          f"({C['b']}ao review collect {review['id']}{C['reset']})")
+        # review that came back (PIPELINE-HANDLE-2). Its record is a file in the tree, so what it says is shown
+        # escaped, and its id goes into the command to copy only as an id ao makes, quoted as one word for any shell
+        # the person may paste it into: a PowerShell window runs `$(...)` inside double quotes (LEADS-MCP).
+        rid, slice_ = A.shown_text(review["id"]), A.shown_text(review["slice"] or "a slice")
+        made = str(review["id"])
+        word = A.copyable_word(made) if made[:2] == "R-" and made[2:].isascii() and made[2:].isdigit() else None
+        collect = (f"({C['b']}ao review collect {word}{C['reset']})" if word else
+                   f"({C['red']}its id is none ao makes: read its record in .ao/reviews/ before acting on it"
+                   f"{C['reset']})")
+        a(f"\n   {C['yellow']}{C['b']}REVIEW RETURNED{C['reset']} for {slice_}: "
+          f"{rid} {A.shown_text(review['verdict'])} — handle it before new work {collect}" if review["verdict"] else
+          f"\n   {C['yellow']}{C['b']}REVIEW ENDED{C['reset']} for {slice_}: "
+          f"{rid} {A.shown_text(review['state'])}, no verdict — collect it, then submit again {collect}")
     # reviews + round budget
     if facts["reviews"]:
         rn, budget = facts["rounds"]["spent"], facts["rounds"]["budget"]
@@ -280,7 +297,7 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0, show
             a(f"   {C['dim']}round {rn}/{budget}{C['reset']}")
         for review in facts["reviews"]:
             col = C["green"] if "APPROVED" in review["verdict"].upper() else C["yellow"]
-            a(f"   {review['file'].split('-pr')[0]}   {col}{review['verdict']}{C['reset']}")
+            a(f"   {A.shown_text(review['file'].split('-pr')[0])}   {col}{A.shown_text(review['verdict'])}{C['reset']}")
 
     # throughput: what the window produced, so busy-and-landing-nothing shows (#91)
     tp = facts["throughput"]
@@ -293,25 +310,27 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0, show
         a(f"   {C['dim']}{counts}{C['reset']}")
         # A stall names paths and a reason; keep it to two lines so a bounded panel stays bounded.
         for i, ln in enumerate(textwrap.wrap(state, w - 6, break_on_hyphens=False)[:2]):
-            a(f"   {colour}{ln}{C['reset']}" if i == 0 else f"     {C['dim']}{ln}{C['reset']}")
+            a(f"   {colour}{A.shown_text(ln)}{C['reset']}" if i == 0
+              else f"     {C['dim']}{A.shown_text(ln)}{C['reset']}")
 
     # git + mail
     repo = facts["repository"]
     a(f"\n{C['b']}{C['mag']}── REPOSITORY {'─' * max(0, w - 15)}{C['reset']}")
     for ln in repo["log"]:
-        a(f"   {ln[:w-5]}")
+        a(f"   {A.shown_text(ln[:w-5])}")
     a(f"   {C['dim']}{repo['dirty_files']} files uncommitted · {C['reset']}{_checkout_position(repo)}")
 
     mail = facts["mail"]
     a(f"\n   {C['b']}Mailbox:{C['reset']} " +
-      (", ".join(mail["waiting"]) if mail["waiting"] else f"{C['dim']}empty{C['reset']}"))
+      (", ".join(A.shown_text(name) for name in mail["waiting"]) if mail["waiting"]
+       else f"{C['dim']}empty{C['reset']}"))
     if mail["urgent"] is not None:
         for line in _banner_lines(mail["dir"], mail["urgent"], len(mail["waiting"])):
             a(f"   {line}")
     unseen = mail["unseen"]
     if unseen:
         oldest = unseen[0]
-        a(f"   {C['yellow']}oldest unseen{C['reset']} {oldest['id']}  {C['dim']}{oldest['class']}, "
+        a(f"   {C['yellow']}oldest unseen{C['reset']} {A.shown_text(oldest['id'])}  {C['dim']}{oldest['class']}, "
           f"{oldest['age_seconds'] // 60}m" + (f" · {len(unseen) - 1} more unseen" if len(unseen) > 1 else "")
           + f"{C['reset']}")
 
@@ -325,7 +344,8 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0, show
         for it in board["blocked"]:
             why = it["why"] or "reason not recorded"
             for i, ln in enumerate(textwrap.wrap(f"{it['id']}  {it['title']} — {why}", w - 14)[:2]):
-                a(f"     {C['red']}⊘{C['reset']} {ln}" if i == 0 else f"       {C['dim']}{ln}{C['reset']}")
+                a(f"     {C['red']}⊘{C['reset']} {A.shown_text(ln)}" if i == 0
+                  else f"       {C['dim']}{A.shown_text(ln)}{C['reset']}")
 
     # The message log is elastic and goes last, so a short window drops history
     # rather than the state you actually steer by.
@@ -335,8 +355,8 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0, show
         for message in facts["messages"]:
             tag = f"{C['blue']}YOU  {C['reset']}" if message["role"] == "user" else f"{C['cyan']}AGENT{C['reset']}"
             for i, ln in enumerate(textwrap.wrap(message["text"], w - 14)[:3]):
-                msgs_block.append(f"   {C['dim']}{message['time']}{C['reset']} {tag}  {ln}" if i == 0
-                                  else f"        {C['dim']}│{C['reset']}      {ln}")
+                msgs_block.append(f"   {C['dim']}{message['time']}{C['reset']} {tag}  {A.shown_text(ln)}" if i == 0
+                                  else f"        {C['dim']}│{C['reset']}      {A.shown_text(ln)}")
 
     if max_lines is None:
         return "\n".join(L + msgs_block)
@@ -374,12 +394,15 @@ def _marked_mail(cfg, shown):
 
 
 def _banner_lines(mailbox_dir, urgent, waiting):
-    """The banner: each marked message and whom it is for, then how many others wait (#29)."""
-    lines = [f"{C['red']}{C['b']}URGENT{C['reset']} for the {m['to']}: {C['b']}{m['title']}{C['reset']}  "
-             f"{C['dim']}{m['id']}{C['reset']}" for m in urgent]
+    """The banner: each marked message and whom it is for, then how many others wait (#29).
+
+    A message's title is its writer's and its id a file's name, so both are shown escaped (LEADS-MCP).
+    """
+    lines = [f"{C['red']}{C['b']}URGENT{C['reset']} for the {m['to']}: {C['b']}{A.shown_text(m['title'])}"
+             f"{C['reset']}  {C['dim']}{A.shown_text(m['id'])}{C['reset']}" for m in urgent]
     others = waiting - len(urgent)
     if others > 0:
-        lines.append(f"{C['dim']}{others} other message(s) waiting in {mailbox_dir}/{C['reset']}")
+        lines.append(f"{C['dim']}{others} other message(s) waiting in {A.shown_text(mailbox_dir)}/{C['reset']}")
     return lines
 
 
@@ -555,7 +578,8 @@ def render_fleet(width=None):
             flags.append(f"{C['cyan']}{r['mail_waiting']} mail{C['reset']}")
         if not r["has_source"]:
             flags.append(f"{C['dim']}no source{C['reset']}")
-        L.append(f"\n {col}{dot}{C['reset']} {C['b']}{r['name'][:22]:<22}{C['reset']}"
+        # A project's name and what its session says it does are its agent's to write: shown escaped (LEADS-MCP).
+        L.append(f"\n {col}{dot}{C['reset']} {C['b']}{A.shown_text(r['name'][:22]):<22}{C['reset']}"
                  f"{C['dim']}{r['state']:<8} {agestr:>4}{C['reset']}  "
                  f"q{r['queued']} r{r['running']} "
                  f"{C['dim']}·{C['reset']} {r['dirty_files']} dirty"
@@ -566,7 +590,7 @@ def render_fleet(width=None):
             desc = f"session {unresolved['how']}: {unresolved['why']}"          # why it is unknown (SESSION-IDENTITY)
         if desc:
             for ln in textwrap.wrap(desc, w - 8)[:1]:
-                L.append(f"     {C['dim']}↳ {ln}{C['reset']}")
+                L.append(f"     {C['dim']}↳ {A.shown_text(ln)}{C['reset']}")
     return L
 
 
@@ -592,7 +616,14 @@ def cmd_tail(cfg, args):
     _, _, adapter = _ctx(cfg)
     for hh, kind, text in A.messages(A.read_tail(msgs_path), args.n, adapter):
         who = "YOU  " if kind == "user" else "AGENT"
-        print(f"--- {hh} [{who}] ---\n{text}\n")
+        print(f"--- {hh} [{who}] ---\n{_shown_lines(text)}\n")
+
+
+def _shown_lines(text):
+    """Text of many lines - a transcript's words, a message's body - as a person reads it: a line at a time, each
+    escaped as A.shown_text escapes one, so its lines stay lines and nothing in them acts on a terminal
+    (LEADS-MCP)."""
+    return "\n".join(A.shown_text(line) for line in str(text).split("\n"))
 
 
 def cmd_mail(cfg, args):
@@ -606,12 +637,13 @@ def cmd_mail(cfg, args):
         role = A.invoking_role()
         shown = [f for f in A.mailbox(root, cfg["mailbox"]) if A.addressed_to(f, cfg, role)]
         A.mail_seen(root, shown, role or "person")
+    # A message's name and body are its writer's, an agent's among them: shown escaped (LEADS-MCP).
     if args.action == "list":
         for f in A.mailbox(root, cfg["mailbox"]):
-            print(f)
+            print(A.shown_text(f))
     elif args.action == "read":
         for f in A.mailbox(root, cfg["mailbox"]):
-            print(f"===== {f} =====\n{open(os.path.join(d, f), encoding=UTF8).read()}")
+            print(f"===== {A.shown_text(f)} =====\n{_shown_lines(open(os.path.join(d, f), encoding=UTF8).read())}")
     elif args.action == "send":
         os.makedirs(d, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d-%H%M")
@@ -641,7 +673,7 @@ def cmd_mail(cfg, args):
             else:
                 os.remove(os.path.join(d, f))
             A.mail_ledger_append(root, {"event": "consumed", "id": f, "outcome": args.body or "processed"})
-            print(f"  {C['green']}acked{C['reset']} {f}")
+            print(f"  {C['green']}acked{C['reset']} {A.shown_text(f)}")
     elif args.action == "sync":
         A.ingest_mail(root, cfg)
         try:
@@ -666,13 +698,14 @@ def cmd_mail(cfg, args):
         for r in A.mail_log(root, 40):
             when = datetime.fromtimestamp(r["at"]).strftime("%d %b %H:%M")
             extra = f"  stood {r['stood_s'] // 60}m" if r.get("stood_s") is not None else ""
-            print(f"  {when}  {r.get('event', '?'):<9} {r.get('id', '')[:70]}{extra}")
+            print(f"  {when}  {A.shown_text(r.get('event', '?')):<9} {A.shown_text(r.get('id', '')[:70])}{extra}")
     elif args.action == "search":
         if not args.type or args.type == "INFO":
             print("usage: ao mail search <text>"); return 2
         for r in A.mail_search(root, args.type):
             when = datetime.fromtimestamp(r["at"]).strftime("%d %b %H:%M")
-            print(f"  {when}  {r.get('kind') or '':<9} {r['id'][:60]}  {C['dim']}{r.get('summary', '')[:70]}{C['reset']}")
+            print(f"  {when}  {A.shown_text(r.get('kind') or ''):<9} {A.shown_text(r['id'][:60])}  "
+                  f"{C['dim']}{A.shown_text(r.get('summary', '')[:70])}{C['reset']}")
 
 
 # ---- the machine's event log, read and followed (EVENTS-LOG) ------------------------------

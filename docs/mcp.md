@@ -30,6 +30,12 @@ JSON, whatever the platform's code page, in this server and in the A2A bridge be
 default Windows install a reply holding a Turkish letter or an arrow ended the server
 ([windows.md](windows.md)).
 
+*In ao since slice LEADS-MCP: a line that is JSON but no object - an array, a number, `null` - is
+answered as an invalid request (`-32600`) and the server reads on, as the A2A bridge does since
+A2A-HARDEN; one the parser will not hold, a number of more than 4300 digits or nesting deeper than it
+recurses, is passed over as a line that is no JSON is. Each ended the server, and its client lost
+every tool for the rest of the session.*
+
 ## Tools
 
 Each tool has an access class, which says what calling it does to the project: **read**
@@ -44,7 +50,7 @@ changes nothing, **write** records something in its mailbox, decisions or ledger
 | `ao_notices` | read | Alerts this project raised, and on request the ones the rate limit held back. |
 | `ao_fleet` | read | One row per project with a local agent session. |
 | `ao_inbox` | write | Messages to the implementer that it has not acknowledged; it records that each was shown. |
-| `ao_ack` | write | Acknowledges one message once it is applied or rejected: removes it, or records it handled when `mail.store` is append-only. |
+| `ao_ack` | write | Acknowledges one message `ao_inbox` lists, once it is applied or rejected: removes it, or records it handled when `mail.store` is append-only. |
 | `ao_report` | write | Writes a report to the architect; `blocked` wakes it on the next watchdog cycle, and a repeat folds into the report already standing. |
 | `ao_ask` | write | Records a question with options for the architect or a person, and sends it to a phone when one is set up. |
 | `ao_decisions` | read | The questions asked, open, proposed or answered. |
@@ -120,6 +126,15 @@ implementer. A project on a capability matrix binds its roles to declared tools 
 harnesses, and its registrations name none. A role reassigned later, with `ao role set` or
 `ao role swap`, reaches the registrations when `ao init` runs again.
 
+So a server with no role is one `ao init` registered for a file two roles read, or none, or a
+person's own, and it keeps every tool, the architect's. No agent can put a reviewer on one: ao starts
+its reviewers outside the repository, with their MCP servers off wherever the adapter can turn them
+off, and hands none a candidate's configuration. An implementer that took the role out of its own
+registration would gain two reads, `ao_candidate` and `ao_fleet`, by a change to harness
+configuration, which no turn ao starts runs on before a person has seen it
+([safety.md](safety.md#harness-configuration-an-agent-changed-waits-for-a-person)). And `ao_ack` takes
+the implementer's mail alone, whatever the role (below).
+
 ## Files or MCP?
 
 | Prefer files when | Prefer MCP when |
@@ -145,6 +160,13 @@ and that is the whole design: a second store for the same fact is a second thing
 to drift, and every expensive failure in this project's history has been two
 records of one truth disagreeing. So a project without MCP loses nothing — the
 files are the protocol, and MCP is a faster door onto the same room.
+
+*In ao since slice LEADS-MCP: `ao_ack` takes only a message `ao_inbox` lists - one addressed to the
+implementer - whatever role the server was started for. It took any name in the mailbox, so an
+implementer could consume a report waiting for the architect, the hunter's leads or the watchdog's
+anomaly: deleted, or with `mail.store` append-only recorded handled, which the store keeps from the
+actor deciding what was handled so that it cannot erase the question ([protocol.md](protocol.md#delivery-by-deletion)).
+The architect's mail and the watchdog's is acknowledged by the one it is for, with `ao mail ack`.*
 
 `ao_report {kind: "blocked"}` writes the marker the watchdog escalates on within
 one cycle. That matters more than it sounds: three finished slices once sat for

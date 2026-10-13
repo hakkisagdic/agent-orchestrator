@@ -486,6 +486,11 @@ ao harness probe                  # every harness whose adapter declares acp.arg
 ao harness probe qoder --sessions # one, and how many sessions it lists for this directory
 ```
 
+*In ao since slice LEADS-MCP: what the command prints of an adapter and of what its harness answered is
+shown escaped - an adapter's id and command may come from the project's own layer, which an agent
+writes, and the answer is a vendor's - so a control character, a line feed among them, or a direction
+override reads as `\x1b`, `\x0a` or `‮` and acts on nothing.*
+
 Each harness is started from its `acp.argv`, found as ao finds any program, and asked `initialize`;
 with `--sessions`, where it lists sessions, `session/list` for this directory too. It is sent no prompt
 and opens no session, so asking spends no quota, and it is stopped with everything it started as soon
@@ -609,6 +614,11 @@ ended. For Claude Code, the hooks are its settings' `hooks` block:
            "Stop": [{"hooks": [{"type": "command", "command": "ao agent-hook turn-end --harness claude-code"}]}],
            "SessionEnd": [{"hooks": [{"type": "command", "command": "ao agent-hook session-end --harness claude-code"}]}]}}
 ```
+
+*In ao since slice LEADS-MCP: `ao agents` shows a session's harness and id as the hook gave them,
+escaped. The hook is a command any program on the machine can run, with whatever command line and
+input it likes: an escape sequence in either acted on the terminal of whoever ran `ao agents`, and a
+line feed added a row of its own.*
 
 ## Two observation modes
 

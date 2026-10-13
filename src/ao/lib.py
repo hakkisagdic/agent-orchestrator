@@ -1158,6 +1158,34 @@ def _shell_word(word):
     return shlex.quote(word)
 
 
+# What PowerShell expands inside double quotes (`$`, the backtick), what cmd.exe expands there (`%`, `!`), and the
+# quotes either reads as its own, the typographic ones among them.
+_WINDOWS_UNQUOTABLE = frozenset('$`"%!\u201c\u201d\u201e\u2018\u2019\u201a\u201b')
+
+
+def copyable_word(word, windows=None):
+    """`word` quoted as one word of a command a person copies into their shell, or None where no quoting is sure to
+    keep it one.
+
+    POSIX shells read shlex's single quotes literally. On Windows the command may be pasted into cmd.exe or
+    PowerShell, and the word is always put in double quotes, where both read `&`, `|`, `<`, `>`, `^`, `(` and `;` as
+    text: the C runtime's quoting left a word with no space bare, and `ao -C C:\\repo&calc` ran calc in cmd.exe. Inside
+    the quotes PowerShell still runs `$(...)` and cmd.exe expands `%NAME%`, so a word holding either's sign, a quote,
+    or a control character is copyable nowhere: a review id an agent wrote, `R-1 $(Start-Process calc)`, ran as the
+    person who copied `ao review collect` (LEADS-MCP). A backslash before the closing quote is doubled, since the C
+    runtime reads `\\"` as a quote.
+    """
+    text = str(word)
+    if any(ord(char) < 32 or ord(char) == 127 for char in text):
+        return None
+    if not (os.name == "nt" if windows is None else windows):
+        import shlex
+        return shlex.quote(text)
+    if _WINDOWS_UNQUOTABLE & set(text):
+        return None
+    return '"' + text + "\\" * (len(text) - len(text.rstrip("\\"))) + '"'
+
+
 def sh(cmd, cwd=None, timeout=20):
     return _sh_run(cmd, cwd=cwd, timeout=timeout)[0]
 

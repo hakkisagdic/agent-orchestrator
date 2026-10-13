@@ -307,7 +307,7 @@ def call(name, args, cfg, allow_verify, role=None):
         box = cfg.get("mailbox", "agent-mail")
         out = []
         for m in A.mailbox(root, box):
-            if A.to_architect(m, cfg) or A.from_watchdog(m):
+            if not A.addressed_to(m, cfg, "implementer"):
                 continue                     # our own outbound, or the watchdog's; not addressed to us
             try:
                 body = open(os.path.join(root, box, m), errors="replace", encoding=UTF8).read(20000)
@@ -324,6 +324,14 @@ def call(name, args, cfg, allow_verify, role=None):
         path = os.path.join(root, box, mid)
         if not mid or mid == "README.md" or not os.path.exists(path):
             return {"error": f"no such message: {args.get('id')}"}
+        # Only what ao_inbox lists: mail addressed to the implementer. Any name in the mailbox was taken, so an
+        # implementer consumed the architect's reports, the hunter's leads and the watchdog's anomalies - deleted,
+        # or with mail.store append-only recorded handled, which the store keeps from the actor deciding what was
+        # handled precisely so that it cannot erase the question (LEADS-MCP).
+        if not A.addressed_to(mid, cfg, "implementer"):
+            return {"error": f"{mid} is not addressed to the implementer, so ao_ack does not take it: it acknowledges "
+                             "only what ao_inbox lists. Mail to the architect, and the watchdog's, is acknowledged by "
+                             "the one it is for, with `ao mail ack`; leave it where it is."}
         if A.mail_store_mode(root) == "append-only":
             A.ingest_mail(root, cfg)
             A.handle_message(root, cfg, mid, "implementer", args.get("outcome", "applied"))   # a record (#80)
@@ -492,7 +500,16 @@ def main():
             continue
         try:
             req = json.loads(line)
-        except json.JSONDecodeError:
+        except (ValueError, RecursionError):
+            # Not JSON - or JSON this parser will not hold, a number of more than 4300 digits or nesting deeper than
+            # it recurses, which raised no JSONDecodeError and ended the server (LEADS-MCP).
+            continue
+        if not isinstance(req, dict):
+            # A JSON array or a scalar is no request, and reading it as one ended the server, as it ended the A2A
+            # bridge (A2A-HARDEN): answered as invalid, and the next line is read (LEADS-MCP).
+            sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": None, "error": {
+                "code": -32600, "message": "a request is a JSON object"}}) + "\n")
+            sys.stdout.flush()
             continue
         rid, method = req.get("id"), req.get("method")
         try:

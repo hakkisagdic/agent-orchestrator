@@ -74,6 +74,22 @@ The default. `ao watch` renders a panel from the project's files; leave it on a 
 monitor, or keep it in a browser tab with `ao watch --web` (Surface 4). See the TUI section below.
 `ao status` prints the panel once.
 
+*In ao since slice LEADS-MCP: what the panel shows that an agent or a vendor wrote - what a session
+says it does and its messages, mail's names and titles, the board's items, a returned review's
+record, a project's name, keyflip's quota lines - is shown escaped, as `ao board`, `ao fleet`,
+`ao tail`, `ao mail` and `ao agents` show it: a control character, a line feed among them, or a
+direction override reads as `\x1b`, `\x0a` or `‮` and acts on nothing. An escape sequence in a
+board title acted on the terminal of whoever watched, and a line feed in a name wrote a line that read
+as ao's. A wrapped text is escaped a line at a time, and `ao tail` and `ao mail read` keep a message's
+lines. A command the panel prints to copy, `ao review collect <id>` or `ao -C <path>`, holds its value
+quoted as one word for the shell, and only a value no shell a person pastes it into reads as more: on
+Windows the command may go into cmd.exe or PowerShell, so the value is always in double quotes, where
+both read `&` and `|` as text, and since PowerShell runs `$(...)` inside them and cmd.exe expands
+`%NAME%`, a value holding `$`, a backtick, `%`, `!`, a quote or a control character is shown and no
+command is made of it. A tab is shown escaped too, where it moved what followed it to another column. A returned review's command is printed only for an
+id ao makes (`R-` and digits); its record is a file in the tree, and one with another id is named as
+none ao made. `ao status --json` prints the text as it is, for a program.*
+
 *In ao since slice JSON-OUTPUT: `ao status --json` prints what the panel shows as one JSON document
 and nothing else on stdout - no colour, no banner - for a program to read where it had to read the
 panel. The panel is drawn from the same reading, so the two cannot disagree; `-m` and `--window`
