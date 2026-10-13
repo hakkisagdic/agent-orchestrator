@@ -147,12 +147,22 @@ def test_a_command_that_cannot_start_is_said_not_to(tmp_path):
 
 # ---- ao harness probe ---------------------------------------------------------------------------
 
-def _adapter(project, adapter_id, argv, measured="fake 1.0 answered initialize, 2026-09-28"):
-    directory = os.path.join(project["root"], ".ao", "adapters")
+def _declared(adapter_id, argv, measured="fake 1.0 answered initialize, 2026-09-28"):
+    return {"id": adapter_id, "name": adapter_id, "verified": "untested", "contract": A.ADAPTER_CONTRACT,
+            "send": {"argv": ["x", "{prompt}"]}, "acp": {"argv": argv, "measured": measured}}
+
+
+def _adapter(monkeypatch, adapter_id, argv, measured="fake 1.0 answered initialize, 2026-09-28"):
+    """An adapter the package ships, as a test stands one in: only a shipped adapter's ACP command is started."""
+    shipped = dict(A.package_adapters(), **{adapter_id: _declared(adapter_id, argv, measured)})
+    monkeypatch.setattr(A, "package_adapters", lambda: shipped)
+
+
+def _layer(directory, adapter_id, argv):
+    """An adapter a user's or a project's layer declares, a file the agents it describes can write."""
     os.makedirs(directory, exist_ok=True)
     with open(os.path.join(directory, f"{adapter_id}.json"), "w", encoding="utf-8") as fh:
-        json.dump({"id": adapter_id, "name": adapter_id, "verified": "untested", "contract": A.ADAPTER_CONTRACT,
-                   "send": {"argv": ["x", "{prompt}"]}, "acp": {"argv": argv, "measured": measured}}, fh)
+        json.dump(_declared(adapter_id, argv), fh)
 
 
 def _probe(project, *ids, sessions=False):
@@ -161,9 +171,9 @@ def _probe(project, *ids, sessions=False):
     return cli.cmd_harness(project, args)
 
 
-def test_the_command_keeps_each_answer_in_the_machines_harness_profiles(project, agent, capsys):
+def test_the_command_keeps_each_answer_in_the_machines_harness_profiles(project, agent, capsys, monkeypatch):
     argv, methods, _, _ = agent
-    _adapter(project, "fake", argv)
+    _adapter(monkeypatch, "fake", argv)
 
     assert _probe(project, "fake", sessions=True) == 0
 
@@ -176,8 +186,8 @@ def test_the_command_keeps_each_answer_in_the_machines_harness_profiles(project,
     assert methods() == ["initialize", "session/list"]
 
 
-def test_a_harness_that_is_not_installed_is_said_to_be_and_nothing_is_kept(project, capsys):
-    _adapter(project, "absent", ["ao-test-no-such-harness", "acp"])
+def test_a_harness_that_is_not_installed_is_said_to_be_and_nothing_is_kept(project, capsys, monkeypatch):
+    _adapter(monkeypatch, "absent", ["ao-test-no-such-harness", "acp"])
 
     assert _probe(project, "absent") == 0
 
@@ -185,10 +195,10 @@ def test_a_harness_that_is_not_installed_is_said_to_be_and_nothing_is_kept(proje
     assert not os.path.exists(cli.harness_profile_path("absent"))
 
 
-def test_one_that_does_not_answer_makes_the_command_exit_1(project, agent, capsys):
+def test_one_that_does_not_answer_makes_the_command_exit_1(project, agent, capsys, monkeypatch):
     argv, _, write, _ = agent
     write(exit=True)
-    _adapter(project, "fake", argv)
+    _adapter(monkeypatch, "fake", argv)
 
     assert _probe(project, "fake") == 1
     assert "fake         no answer: the agent ended before it answered initialize" in capsys.readouterr().out
@@ -199,6 +209,49 @@ def test_an_adapter_without_an_acp_command_or_unknown_is_refused(project, capsys
     assert "no adapter" in capsys.readouterr().out
     assert _probe(project, "claude-code") == 2
     assert "declares no `acp.argv`" in capsys.readouterr().out
+
+
+def test_an_acp_command_a_user_s_or_a_project_s_layer_declares_is_never_started(project, tmp_path, capsys,
+                                                                              monkeypatch):
+    """A layer is a file an agent writes: an adapter of its own, or another command for one ao ships, would start a
+    program the agent chose when a person probes (PROBE-SHIPPED)."""
+    marker = tmp_path / "started"
+    chosen = [sys.executable, "-c", f"open({str(marker)!r}, 'w').close()"]
+    monkeypatch.setenv("AO_USER_ADAPTERS", str(tmp_path / "user"))
+    _layer(os.path.join(project["root"], ".ao", "adapters"), "planted", chosen)
+    _layer(str(tmp_path / "user"), "kiro", chosen)
+    with open(os.path.join(project["root"], ".ao", "adapters", "dressed.json"), "w", encoding="utf-8") as fh:
+        json.dump(dict(_declared("dressed\x1b[2J", chosen)), fh)
+
+    assert _probe(project, "planted") == 2
+    assert "not started: ao ships no adapter planted" in capsys.readouterr().out
+
+    assert _probe(project) == 0
+    out = capsys.readouterr().out
+    assert "Not started: the ACP command a user's or a project's layer declares for dressed\\x1b[2J, kiro, planted" in out
+    assert "\x1b" not in out
+    assert "kiro         not installed: kiro-cli is on no path ao searches" in out
+
+    assert _probe(project, "kiro") == 0
+    assert "layer declares for kiro;" in capsys.readouterr().out
+    assert not marker.exists()
+
+
+def test_a_shipped_adapter_whose_id_names_no_plain_file_is_not_asked(project, tmp_path, capsys, monkeypatch):
+    marker = tmp_path / "started"
+    _adapter(monkeypatch, "odd\u202e/..", [sys.executable, "-c", f"open({str(marker)!r}, 'w').close()"])
+
+    assert _probe(project, "odd\u202e/..") == 1
+
+    out = capsys.readouterr().out
+    assert "odd\\u202e/.. not asked: 'odd\\u202e/..' is no adapter id a harness profile is named by" in out
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("ident", ["../escape", "..", ".hidden", "a/b", "a\\b", ""])
+def test_a_harness_profile_is_named_by_a_plain_id_alone(ident):
+    with pytest.raises(ValueError, match="no adapter id a harness profile is named by"):
+        cli.harness_profile_path(ident)
 
 
 def test_the_shipped_acp_commands_are_the_three_measured_and_validate():

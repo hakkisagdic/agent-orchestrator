@@ -487,9 +487,15 @@ ao harness probe qoder --sessions # one, and how many sessions it lists for this
 ```
 
 *In ao since slice LEADS-MCP: what the command prints of an adapter and of what its harness answered is
-shown escaped - an adapter's id and command may come from the project's own layer, which an agent
+shown escaped - an adapter's id may come from a user's or the project's own layer, which an agent
 writes, and the answer is a vendor's - so a control character, a line feed among them, or a direction
 override reads as `\x1b`, `\x0a` or `‮` and acts on nothing.*
+
+Only an adapter the package ships is started this way. A user's or a project's layer is a file the
+agents it describes can write, so the ACP command one declares - for an adapter of its own, or in place
+of a shipped one's - is named and never started, as a turn's command and a reviewer's route are not
+(PROBE-SHIPPED); the profile's file is named by the adapter's id, and an id that is not a plain name is
+refused.
 
 Each harness is started from its `acp.argv`, found as ao finds any program, and asked `initialize`;
 with `--sessions`, where it lists sessions, `session/list` for this directory too. It is sent no prompt

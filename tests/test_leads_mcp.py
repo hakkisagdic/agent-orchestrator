@@ -119,17 +119,16 @@ def test_ao_agents_shows_what_a_hook_said_escaped(project, capsys, monkeypatch):
     assert "claude\\x1b]0;pwned\\x07" in out and "s-1\\x0d\\x0a  idle  forged  s-2" in out
 
 
-def test_harness_probe_shows_a_project_adapter_and_what_its_harness_answered_escaped(project, capsys, monkeypatch):
-    """A project's adapter is a layer an agent writes, and what a harness answers is a vendor's output."""
+def test_harness_probe_shows_what_a_harness_answered_escaped(project, capsys, monkeypatch):
+    """What a harness answers is a vendor's output. Only an adapter the package ships is asked (PROBE-SHIPPED), so
+    the two stand in as shipped ones; an id a layer declares is shown escaped where it is named (test_acp_probe)."""
     monkeypatch.setenv("NO_COLOR", "1")
-    directory = Path(project["root"], ".ao", "adapters")
-    directory.mkdir()
-    answers, refuses = "fake‮", "late‮"
-    for name, ident in (("answers", answers), ("refuses", refuses)):
-        (directory / f"{name}.json").write_text(json.dumps({
-            "id": ident, "name": name, "verified": "untested", "contract": A.ADAPTER_CONTRACT,
-            "send": {"argv": ["x", "{prompt}"]}, "acp": {"argv": ["fake-agent", name], "measured": "never"}}),
-            encoding="utf-8")
+    answers, refuses = "fake", "late"
+    shipped = dict(A.package_adapters(), **{ident: {
+        "id": ident, "name": name, "verified": "untested", "contract": A.ADAPTER_CONTRACT,
+        "send": {"argv": ["x", "{prompt}"]}, "acp": {"argv": ["fake-agent", name], "measured": "never"}}
+        for name, ident in (("answers", answers), ("refuses", refuses))})
+    monkeypatch.setattr(A, "package_adapters", lambda: shipped)
     monkeypatch.setattr(A, "resolve_binary", lambda name, path=None: ("/no/such/fake-agent", "1.0"))
 
     def probe(argv, cwd, timeout=None, sessions=False, env=None):          # no harness is started
@@ -144,9 +143,9 @@ def test_harness_probe_shows_a_project_adapter_and_what_its_harness_answered_esc
 
     out = capsys.readouterr().out
     assert code == 1 and _acted_on(out) == []                          # one did not answer, and nothing acts
-    assert "fake\\u202e" in out and "ACP 1\\x1b[8m  agent\\x1b]0;pwned\\x07 7" in out
+    assert "fake         ACP 1\\x1b[8m  agent\\x1b]0;pwned\\x07 7" in out
     assert "session: list\\x1b[31m" in out
-    assert "late\\u202e" in out and "initialize was refused: \\x1b[2Jgo away" in out
+    assert "late         no answer: initialize was refused: \\x1b[2Jgo away" in out
 
 
 def test_the_status_panel_the_board_and_the_mail_show_what_agents_wrote_escaped(project, capsys, monkeypatch):

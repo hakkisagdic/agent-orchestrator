@@ -7,7 +7,14 @@ not importable on its own.
 
 
 def harness_profile_path(adapter_id):
-    """Where what a harness said it supports is kept: ~/.ao/harness/<id>.json, the machine's, as its binaries are."""
+    """Where what a harness said it supports is kept: ~/.ao/harness/<id>.json, the machine's, as its binaries are.
+
+    The id names a file, so one that is not a plain name - a separator, a leading dot - is refused rather than
+    followed out of that folder (PROBE-SHIPPED).
+    """
+    import re
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", str(adapter_id)):
+        raise ValueError(f"{adapter_id!r} is no adapter id a harness profile is named by")
     return os.path.join(A.HOME, ".ao", "harness", f"{adapter_id}.json")
 
 
@@ -15,7 +22,10 @@ def cmd_harness(cfg, args):
     """Ask each harness whose adapter says how to start it in ACP what it supports, and keep the answer (ACP-PROBE).
 
     Only an adapter's `acp.argv` is started, found as ao finds any program, and only the harnesses named,
-    or every one whose adapter declares that command. Each is asked `initialize` and, with --sessions,
+    or every one whose adapter declares that command. The adapter is one the package ships: an ACP command
+    is a program ao starts, and a user's or a project's layer is a file the agents it describes can write, so
+    the command such a layer declares is named and never started, as a turn's and a route's are not
+    (TURN-ARGV, ROUTE-ARGV, PROBE-SHIPPED). Each is asked `initialize` and, with --sessions,
     `session/list` for this directory; it is sent no prompt and opens no session, so asking spends no quota.
     What it answers is kept in ~/.ao/harness/<id>.json with when it was asked and which binary answered: how
     many sessions it listed is kept, and nothing of what they are. A harness that is not installed is said
@@ -32,32 +42,54 @@ def cmd_harness(cfg, args):
               "none of them")
         return 2
     root = cfg.get("root") or os.getcwd()
-    # Each adapter as ao loads it, from the package, the user's layer and the project's, a later one
-    # overriding by id; one whose contract this ao does not implement is not loaded, as elsewhere.
-    catalog = {adapter_id: entry["adapter"] for adapter_id, entry in A.adapter_catalog(cfg.get("root")).items()
-               if not entry["problem"]}
+    # Only the adapters the package ships; what a user's or a project's layer declares of an ACP command - an
+    # adapter of its own, or another command for one ao ships - is named, and not started (PROBE-SHIPPED).
+    catalog = {adapter_id: adapter for adapter_id, adapter in A.package_adapters().items()
+               if adapter.get("contract", A.ADAPTER_CONTRACT) == A.ADAPTER_CONTRACT}
+    layered = sorted(adapter_id for adapter_id, entry in A.adapter_catalog(cfg.get("root")).items()
+                     if entry["source"] != "package" and isinstance(entry["adapter"].get("acp"), dict)
+                     and entry["adapter"].get("acp") != (catalog.get(adapter_id) or {}).get("acp"))
     named = list(getattr(args, "ids", None) or [])
     unknown = [adapter_id for adapter_id in named if adapter_id not in catalog]
     if unknown:
-        print(f"{C['red']}no adapter{C['reset']} {', '.join(unknown)}; `ao adapters` lists them")
+        held = [adapter_id for adapter_id in unknown if adapter_id in layered]
+        if held:
+            print(f"{C['red']}not started{C['reset']}: ao ships no adapter {', '.join(map(A.shown_text, held))}, and "
+                  "it starts the ACP command of one the package ships alone, never one a user's or a project's layer "
+                  "declares")
+        missing = [adapter_id for adapter_id in unknown if adapter_id not in held]
+        if missing:
+            print(f"{C['red']}no adapter{C['reset']} {', '.join(map(A.shown_text, missing))}; `ao adapters` lists them")
         return 2
+    noted = [adapter_id for adapter_id in layered if not named or adapter_id in named]
+    if noted:
+        print(f"{C['dim']}Not started: the ACP command a user's or a project's layer declares for "
+              f"{', '.join(map(A.shown_text, noted))}; ao starts the one an adapter it ships declares, and only "
+              f"that.{C['reset']}")
     silent = [adapter_id for adapter_id in named if not isinstance(catalog[adapter_id].get("acp"), dict)]
     if silent:
-        print(f"{C['red']}no ACP command{C['reset']}: {', '.join(silent)} declares no `acp.argv`")
+        print(f"{C['red']}no ACP command{C['reset']}: the adapter ao ships for {', '.join(map(A.shown_text, silent))} "
+              "declares no `acp.argv`")
         return 2
     chosen = named or sorted(adapter_id for adapter_id, adapter in catalog.items()
                              if isinstance(adapter.get("acp"), dict))
     if not chosen:
-        print(f"{C['dim']}No adapter says how to start its harness in ACP (`acp.argv`).{C['reset']}")
+        print(f"{C['dim']}No adapter ao ships says how to start its harness in ACP (`acp.argv`).{C['reset']}")
         return 1
     failed = 0
     for adapter_id in chosen:
         argv = [str(part) for part in catalog[adapter_id]["acp"].get("argv") or []]
-        # An adapter's id and command may come from the project's own layer, which an agent writes, and what the
-        # harness answers is a vendor's: each is shown escaped, as `ao agents` shows a hook's (LEADS-MCP).
+        # What the harness answers is a vendor's, and an id named on the command line is a person's: each is shown
+        # escaped, as `ao agents` shows a hook's (LEADS-MCP), as an id a layer declares is where it is named above.
         if not argv:
             failed += 1
             print(f"  {A.shown_text(adapter_id):<12} {C['red']}no command{C['reset']}: its `acp.argv` is empty")
+            continue
+        try:
+            target = harness_profile_path(adapter_id)          # a harness is asked only where its answer can be kept
+        except ValueError as exc:
+            failed += 1
+            print(f"  {A.shown_text(adapter_id):<12} {C['red']}not asked{C['reset']}: {A.shown_text(exc)}")
             continue
         path, version = A.resolve_binary(argv[0])
         if path is None:
@@ -74,7 +106,6 @@ def cmd_harness(cfg, args):
         left = found.pop("still_running", [])
         profile = dict({"id": adapter_id, "measured_at": int(time.time()), "argv": argv, "binary": path,
                         "binary_version": version}, **found)
-        target = harness_profile_path(adapter_id)
         os.makedirs(os.path.dirname(target), exist_ok=True)
         replace_file_durably(target, (json.dumps(profile, indent=1, sort_keys=True) + "\n").encode(UTF8))
         agent = " ".join(A.shown_text(part) for part in (found["agent"].get("name"), found["agent"].get("version"))

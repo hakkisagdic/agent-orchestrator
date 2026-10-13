@@ -331,7 +331,7 @@ def test_an_acp_agents_stop_returns_what_of_it_still_runs_and_a_session_keeps_it
 
 def test_a_harness_probe_that_leaves_its_agent_running_says_so_and_exits_1(project, agent, monkeypatch, capsys):
     argv, _, _, _ = agent
-    _adapter(project, "fake", argv)
+    _adapter(monkeypatch, "fake", argv)
     monkeypatch.setattr(A, "kill_turn", lambda pid, sig: [4343])         # its engine, which the stop missed
 
     assert _probe(project, "fake") == 1
@@ -346,7 +346,7 @@ def test_a_probe_that_got_no_answer_still_says_what_of_its_agent_runs(project, a
     """The error went up without it: a probe that timed out named nothing still running (ACP-PROBE-LEFT)."""
     argv, _, write, _ = agent
     write(silent=True)                                                   # asked, it never answers
-    _adapter(project, "fake", argv)
+    _adapter(monkeypatch, "fake", argv)
     stop = A.kill_turn
     monkeypatch.setattr(A, "kill_turn", lambda pid, sig: (stop(pid, sig) or []) + [4343])
 
@@ -362,10 +362,10 @@ def test_a_probe_that_got_no_answer_still_says_what_of_its_agent_runs(project, a
     assert not os.path.exists(cli.harness_profile_path("fake"))
 
 
-def test_a_probe_that_failed_and_left_nothing_running_says_only_why_it_failed(project, agent, capsys):
+def test_a_probe_that_failed_and_left_nothing_running_says_only_why_it_failed(project, agent, monkeypatch, capsys):
     argv, _, write, _ = agent
     write(exit=True)                                                     # it ends before it answers
-    _adapter(project, "fake", argv)
+    _adapter(monkeypatch, "fake", argv)
 
     assert _probe(project, "fake") == 1
 
