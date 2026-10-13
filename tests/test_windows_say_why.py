@@ -234,9 +234,11 @@ def test_the_telegram_setup_on_windows_says_what_windows_runs_and_how_the_file_i
                                                                                       once=False))) == 0
 
     out = _plain(capsys)
-    assert "Invoke-RestMethod" in out and language.text(None, "private-file.windows") in out
+    assert language.text(None, "private-file.kept-windows") in out and language.text(None, "private-file.windows") in out
     assert "4. ao telegram test → ao telegram poll" in out
-    for posix in ("python3 -c", "mkdir -p", "chmod 600", "echo '", "ao telegram install"):
+    # ao asks for the token and writes the file itself: no command line holds the token, PowerShell's neither, since
+    # its history file kept it as a shell's does (LEADS-SECRETS).
+    for posix in ("Invoke-RestMethod", "curl", "python3 -c", "mkdir -p", "chmod 600", "echo '", "ao telegram install"):
         assert posix not in out
 
 

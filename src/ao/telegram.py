@@ -55,6 +55,60 @@ def config():
     return c
 
 
+# A bot token as @BotFather gives one: the bot's number, a colon, and letters, digits, `-` and `_`. Anything else is
+# refused before it is put into a request's URL, where an error could quote it back (LEADS-SECRETS).
+TOKEN_SHAPE = re.compile(r"\d+:[A-Za-z0-9_-]+")
+# A chat as Telegram numbers it, which is what the poller compares a message's chat with; a group's is negative.
+CHAT_SHAPE = re.compile(r"-?\d+")
+
+
+def save(token, chats):
+    """Write the bot token and the chats it allows to CONF, readable by the person alone from the moment it exists.
+
+    The setup had a person echo the file into place and chmod it afterwards: anyone on the machine could read the
+    token between the two, and the shell's history kept the line that held it. ao asks for the token now and
+    writes the file itself, as ~/.ao/email.json is written: 0600 from its creation, in place of the old one whole
+    (HUNT-LEADS-SEC, LEADS-SECRETS).
+    """
+    from ao.storage import replace_file_durably
+    data = (json.dumps({"token": token, "chats": [str(chat) for chat in chats]}, indent=1) + "\n").encode(UTF8)
+    replace_file_durably(CONF, data, mode=0o600)
+    return config()
+
+
+def _chat_name(chat):
+    """What Telegram calls a chat, as a terminal can show it: a group's title, or a person's names and username.
+
+    The names are whatever the chat's owner chose, a stranger's among them, so a character a terminal would act
+    on is left out (LEADS-SECRETS).
+    """
+    name = " ".join(str(chat[key]) for key in ("title", "first_name", "last_name") if chat.get(key))
+    if chat.get("username"):
+        name += f" (@{chat['username']})"
+    return "".join(ch for ch in name if ch.isprintable())[:60] or str(chat.get("type") or "?")
+
+
+def recent_chats(token):
+    """({chat id: its name}, None) for the chats that wrote to the bot, or (None, what Telegram answered instead).
+
+    Asked in this process with the token the setup was given: it had a person put the token into a curl or
+    PowerShell command line to find their chat id, and the shell's history and the process list kept it
+    (LEADS-SECRETS). Without an offset getUpdates confirms nothing, so the poller still reads these messages;
+    Telegram keeps an update it was not asked to confirm for 24 hours.
+    """
+    answer = api({"token": token}, "getUpdates", timeout=0)
+    if not answer.get("ok"):
+        why = str(answer.get("description") or answer.get("error") or "getUpdates failed")
+        return None, why.replace(token, "<token>")
+    found = {}
+    for update in answer.get("result") or []:
+        for kind in ("message", "edited_message", "channel_post", "my_chat_member"):
+            chat = (update.get(kind) or {}).get("chat") or {}
+            if chat.get("id") is not None:
+                found[str(chat["id"])] = _chat_name(chat)
+    return found, None
+
+
 def api(cfg, method, **params):
     url = API.format(token=cfg["token"], method=method)
     data = urllib.parse.urlencode(

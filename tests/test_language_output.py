@@ -129,15 +129,23 @@ def test_the_telegram_setup_follows_the_machines_language_and_its_test_message_t
 
     assert cli.cmd_telegram(turkish_project, setup) == 0
     lines = capsys.readouterr().out.split("\n")
-    assert f"{C['b']}2.{C['reset']} Write the bot a message, then get your chat id:" in lines
-    assert (f"{C['b']}3.{C['reset']} {C['b']}You{C['reset']} write the file — a bot token is a credential; it goes "
-            f"into neither a repository nor a chat:") in lines
+    assert (f"{C['b']}2.{C['reset']} Write the bot a message from each chat that may reach it: ao finds those chats "
+            "with the token.") in lines
+    assert (f"{C['b']}3.{C['reset']} {C['b']}You{C['reset']} give ao the token when it asks — a bot token is a "
+            "credential: it is not shown, and no") in lines
+    assert f"   bot, you choose the ones it allows, and it writes {telegram.CONF} itself, {KEPT['en']}." in lines
+    assert "No terminal is attached, so ao asks for nothing: run ao telegram setup in a terminal of yours, or" in lines
     _machine("tr")
     assert cli.cmd_telegram(turkish_project, setup) == 0
     lines = capsys.readouterr().out.split("\n")
-    assert f"{C['b']}2.{C['reset']} Bota bir mesaj yaz, sonra chat id'ni al:" in lines
-    assert (f"{C['b']}3.{C['reset']} Dosyayı {C['b']}sen{C['reset']} yaz — bir bot token'ı "
-            f"kimlik bilgisidir; ne repoya ne bir sohbete girer:") in lines
+    assert f"{C['b']}2.{C['reset']} Ona ulaşabilecek her sohbetten bota bir mesaj yaz: ao bu sohbetleri token ile bulur." \
+        in lines
+    assert (f"{C['b']}3.{C['reset']} Token'ı ao sorduğunda {C['b']}sen{C['reset']} ver — bir bot token'ı kimlik "
+            "bilgisidir: ekrana basılmaz; onu ne") in lines
+    assert (f"   listeler, izin vereceklerini sen seçersin, {telegram.CONF} dosyasını da ao kendisi yazar, "
+            f"{KEPT['tr']}.") in lines
+    assert ("Bağlı bir terminal yok, bu yüzden ao bir şey sormaz: ao telegram setup komutunu kendi terminalinde"
+            in lines)
 
     sent = []
     monkeypatch.setattr(telegram, "config", lambda: {"token": "t", "chats": ["42"]})

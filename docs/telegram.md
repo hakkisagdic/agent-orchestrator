@@ -14,27 +14,47 @@ keyboard for the same mailbox, exactly as the MCP tools are.
 ## Setup
 
 ```bash
-ao telegram setup      # prints the four steps
+ao telegram setup      # the four steps, then the token, asked and not shown
 ao telegram test       # confirms the bot reaches you
-ao telegram install    # launchd job, long-polls for your replies
+ao telegram install    # launchd job on macOS, long-polls for your replies
 ```
 
 The bot and its allowlist serve every project on the machine, so `ao telegram setup` prints its steps in
 the machine's `language` ([configuration.md](configuration.md)); `ao telegram test` sends its message in
 the project's.
 
-**You write the config file, not the tool and not an assistant.** A bot token can
-instruct the implementer, so it is a credential: it belongs in `~/.ao/telegram.json`
-with mode 600, and never in the repository or in a conversation. Windows keeps no file mode:
-there the file is as private as `~/.ao`, and `ao telegram setup` says so and gives PowerShell's
-way to read your chat id ([windows.md](windows.md)).
+**You give the token, at a terminal of yours; no assistant does.** A bot token can
+instruct the implementer, so it is a credential: it goes on no command line, into no
+repository and into no conversation. `ao telegram setup` asks for it and does not show it,
+asks Telegram with it which chats wrote to the bot, and takes the ids you type of the ones
+the bot may take messages from. Then it writes `~/.ao/telegram.json` itself, readable by you
+alone from the moment it exists (mode 0600). Windows keeps no file mode: there the file is as
+private as `~/.ao`, and `ao telegram setup` says so ([windows.md](windows.md)).
 
 ```json
 {"token": "…", "chats": ["…"]}
 ```
 
+Where no terminal is attached to ask at, nothing is asked: a script names the variable that
+holds the token, and each chat, `ao telegram setup --token-env NAME --chat ID`.
+
 The chat allowlist is not optional. An inbound channel without one is an authority
 surface open to whoever finds the bot.
+
+The poller is a launchd job, and only macOS has launchd. On Linux and on Windows
+`ao telegram install`, `uninstall` and `status` refuse, and say what keeps `ao telegram poll`
+running there instead: a systemd user service, or Task Scheduler.
+
+*In ao since slice LEADS-SECRETS: the setup had a person put the token into a curl command line -
+on Windows a PowerShell one - to read their chat id, then echo the file into `~/.ao` and chmod it.
+The shell's history and the process list kept the token, PowerShell's history file as well, and
+anyone on the machine could read the file until the chmod. ao asks for the token now, finds the
+chats with it, and writes the file through its durable replace, 0600 from its creation; a token that
+is not the shape @BotFather gives is refused before it is put into a request. `ao telegram install`,
+`uninstall` and `status` refused on Windows alone, so on Linux install wrote into a
+`~/Library/LaunchAgents` that is not there and asked for launchctl, uninstall said it had removed the
+job, and status sent the person to install; they refuse wherever there is no launchd.
+`tests/test_leads_secrets.py`.*
 
 ## Inbound: everything you type is urgent
 

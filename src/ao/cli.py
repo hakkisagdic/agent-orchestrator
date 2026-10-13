@@ -403,6 +403,12 @@ def build_parser(root=None):
     tg.add_argument("action", nargs="?", default="status",
                     choices=["status", "setup", "test", "poll", "install", "uninstall"])
     tg.add_argument("--once", action="store_true", help="poll: one pass then exit")
+    tg.add_argument("--chat", action="append", metavar="ID",
+                    help="setup: a chat the bot takes messages from, by its id; again for each. Without one, ao lists "
+                         "the chats that wrote to the bot and asks")
+    tg.add_argument("--token-env", metavar="NAME",
+                    help="setup: the environment variable holding the bot token, where no terminal is attached to "
+                         "ask for it at")
     tg.set_defaults(fn=cmd_telegram)
     cr = sub.add_parser("credits", help="credit spend measured from local transcripts")
     cr.add_argument("--offline", action="store_true", help="skip the account lookup")

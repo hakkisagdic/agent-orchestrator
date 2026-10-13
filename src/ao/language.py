@@ -604,13 +604,28 @@ bu adrese gider; `ao alarms` merdiveni gösterir.
         "tr": "Windows dosya kipi tutmaz: dosya, klasörünün izinleri kadar gizlidir; klasör bu izinleri, biri "
               "değiştirmediyse kullanıcı profilinden alır.",
     },
-    # `ao telegram setup`, steps 2 and 3; {b} and {reset} set a word in bold
-    "telegram.setup-chat": {"en": "Write the bot a message, then get your chat id:",
-                            "tr": "Bota bir mesaj yaz, sonra chat id'ni al:"},
-    "telegram.setup-file": {"en": "{b}You{reset} write the file — a bot token is a credential; it goes into neither "
-                                  "a repository nor a chat:",
-                            "tr": "Dosyayı {b}sen{reset} yaz — bir bot token'ı kimlik bilgisidir; ne repoya ne bir "
-                                  "sohbete girer:"},
+    # `ao telegram setup`, steps 2 and 3; {b} and {reset} set a word in bold, {conf} is the file ao writes and {kept}
+    # how it is kept private, as in "email.setup". The token is asked at the terminal and not shown: a command line
+    # holding it stayed in the shell's history and the process list (LEADS-SECRETS).
+    "telegram.setup-chat": {"en": "Write the bot a message from each chat that may reach it: ao finds those chats "
+                                  "with the token.",
+                            "tr": "Ona ulaşabilecek her sohbetten bota bir mesaj yaz: ao bu sohbetleri token ile "
+                                  "bulur."},
+    "telegram.setup-file": {
+        "en": "{b}You{reset} give ao the token when it asks — a bot token is a credential: it is not shown, and no\n"
+              "   command line, shell history, repository or chat holds it. ao lists the chats that wrote to the\n"
+              "   bot, you choose the ones it allows, and it writes {conf} itself, {kept}.",
+        "tr": "Token'ı ao sorduğunda {b}sen{reset} ver — bir bot token'ı kimlik bilgisidir: ekrana basılmaz; onu ne\n"
+              "   bir komut satırı, ne kabuğun geçmişi, ne bir repo, ne bir sohbet tutar. ao bota yazan sohbetleri\n"
+              "   listeler, izin vereceklerini sen seçersin, {conf} dosyasını da ao kendisi yazar, {kept}.",
+    },
+    # `ao telegram setup` where no terminal is attached to ask at: what to do instead (LEADS-SECRETS)
+    "telegram.setup-no-terminal": {
+        "en": "No terminal is attached, so ao asks for nothing: run ao telegram setup in a terminal of yours, or\n"
+              "name a variable that holds the token, and each chat it allows: --token-env NAME --chat ID",
+        "tr": "Bağlı bir terminal yok, bu yüzden ao bir şey sormaz: ao telegram setup komutunu kendi terminalinde\n"
+              "çalıştır ya da token'ı tutan değişkeni ve izin verilen her sohbeti adlandır: --token-env AD --chat ID",
+    },
     # `ao telegram test`; {name}: the project
     "telegram.test": {
         "en": "*{name}* — connection test.\n\nEvery message you write in this chat lands in the mailbox as an urgent "

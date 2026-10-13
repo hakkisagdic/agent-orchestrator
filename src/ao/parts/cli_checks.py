@@ -1631,5 +1631,26 @@ def cmd_pings(cfg, args):
         ok = A.ping(root)
         print(f"{C['green']}pinged{C['reset']}" if ok else f"{C['red']}no ping{C['reset']} ({'no url' if not url else 'request failed'})")
         return 0 if ok else 1
-    print(f"ping url: {url or C['yellow'] + 'not configured' + C['reset']}")
+    if not url:
+        print(f"ping url: {C['yellow']}not configured{C['reset']}")
+        return 0
+    print(f"ping url: {_ping_url_shown(url)}  {C['dim']}(the rest is the secret, in {A.pings_path()}){C['reset']}")
     return 0
+
+
+def _ping_url_shown(url):
+    """A ping URL as `ao pings` shows it: its scheme, and the file that holds it.
+
+    The address is the secret: whoever has it can ping the check, and then a dead watchdog looks alive and the alarm
+    that its pings stopped never rings. `ao pings` printed the URL whole, then its host - and a check's UUID can stand
+    in a host's labels, or a host can be the check's own name, `https://deadmansecret.com`, and its last four
+    characters can be all of the secret (LEADS-SECRETS). So no part of it is shown but its scheme, and the file that
+    holds it is named.
+    """
+    from urllib.parse import urlsplit
+    try:
+        scheme = urlsplit(url).scheme
+    except ValueError:                                   # a URL urllib cannot read, a port that is no number among them
+        scheme = ""
+    # No character of it: four from its end were the whole secret of an address with a public prefix.
+    return (f"{scheme}://" if scheme in ("http", "https") else "") + "…"

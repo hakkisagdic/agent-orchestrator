@@ -176,7 +176,7 @@ def test_a_message_keeps_its_id_in_the_dialect_it_falls_back_to(project, monkeyp
         return {"jsonrpc": "2.0", "id": 1, "result": {"id": "t1", "status": {"state": "submitted"}}}
 
     monkeypatch.setattr(a2a_mcp, "_post", answered)
-    monkeypatch.setattr(a2a_mcp, "agents", lambda: {"x": {"url": "http://127.0.0.1:9/"}})
+    monkeypatch.setattr(a2a_mcp, "registry", lambda: ({"x": {"url": "http://127.0.0.1:9/"}}, False))
     monkeypatch.setattr(a2a_mcp, "ROOT", project["root"])
 
     view = a2a_mcp.call("a2a_send", {"agent": "x", "message": "hello"})

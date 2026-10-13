@@ -237,6 +237,14 @@ the samples the implementer's own adapter took: another harness's readings in th
 ledger are not its account, and neither is a sample that names no adapter
 ([telemetry.md](telemetry.md), "Whose account").
 
+The check's address is a secret: whoever has its UUID can ping it, and keep a dead
+watchdog looking alive. The whole address is the secret - a check's UUID can stand in its
+path or in its host's labels, a host can be the check's own name, and four characters at its
+end can be all of the secret - so `ao pings` shows only its scheme, and names the file that
+holds it, `~/.ao/pings.json`.
+
+*In ao since slice LEADS-SECRETS: `ao pings` printed the whole ping URL. `tests/test_leads_secrets.py`.*
+
 The doctor job, `ao doctor --check --notify` every fifteen minutes, is the watchdog's
 backstop, and it pages nothing twice:
 

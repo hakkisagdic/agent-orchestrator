@@ -71,6 +71,13 @@ The note is written in the project's `language` ([configuration.md](configuratio
 reason the watchdog hands off with. The phone is sent everything above `## What a successor can do`,
 which a Turkish note heads `## Devralan ne yapabilir`; either heading is found in any project.
 
+A note is named by the minute it was written in; a second handoff in that minute is written beside
+the first, `-2` after its kind, never over it.
+
+*In ao since slice LEADS-SECRETS: the minute and the roles were the whole name, so a second handoff in
+the same minute was written over the first, and a message store, which takes a name in once, never
+took the second. `tests/test_leads_secrets.py`.*
+
 Paste it into a new session, or let an MCP client read the same state through `ao_status`,
 `ao_board` and `ao_decisions` — see [`mcp.md`](mcp.md). Either way the recovery is seconds,
 not an archaeology session.

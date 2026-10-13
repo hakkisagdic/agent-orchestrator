@@ -48,7 +48,8 @@ A report is in scope when it breaks something ao's documents say holds. Three ki
 - **A secret exposed.** ao copies a credential - a token, a key, a password, a harness's login - into
   something it writes into a repository (a ledger, a review, the mailbox, the board), into a message or
   an alarm it sends (Telegram, e-mail), into a prompt it hands a reviewer, or into a log; or it writes
-  a credential file of its own, `~/.ao/email.json` or `~/.ao/pings.json`, readable by another user
+  a credential file of its own, `~/.ao/email.json`, `~/.ao/telegram.json` or `~/.ao/pings.json`, readable by
+  another user
   ([privacy.md](docs/privacy.md)).
 - **A reviewer escaping its sandbox.** ao starts a reviewer with no tool but reading
   (`options.trust_none`, [adapters.md](docs/adapters.md)), in a directory outside the repository that

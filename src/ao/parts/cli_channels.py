@@ -60,9 +60,12 @@ def cmd_a2a_mcp(cfg, args):
         print(json.dumps({"mcpServers": {"a2a": {
             "command": command, "args": ["-C", cfg["root"], "a2a-mcp", "serve"]}}}, indent=2))
         print(f"\n{C['b']}Then register agents in {reg}:{C['reset']}")
+        # The example wrote a token into the project's file, which a commit takes: a header names the variable that
+        # holds it, and one written out there is refused (LEADS-SECRETS).
         print(json.dumps({"weather": {"url": "https://agent.example.com/a2a/v1",
-                                      "headers": {"Authorization": "Bearer …"}}}, indent=2))
-        print(f"{C['dim']}The dialect is read from each agent's card; set "
+                                      "headers": {"Authorization": "Bearer ${WEATHER_A2A_TOKEN}"}}}, indent=2))
+        print(f"{C['dim']}A credential stays out of the file: ${{NAME}} is read from the environment the client starts "
+              f"the bridge with.\nThe dialect is read from each agent's card; set "
               f'"version": "0.3" to pin one.{C["reset"]}')
         return 0
     return _serve("a2a_mcp", cfg, [])
@@ -250,6 +253,122 @@ def cmd_credits(cfg, args):
     return 0
 
 
+# What keeps the phone channel's poller running where there is no launchd, as `ao telegram install`, `uninstall` and
+# `status` say when they refuse: only macOS has launchd (LEADS-SECRETS).
+TELEGRAM_POLLER_ELSEWHERE = {
+    "schtasks": "Windows does not have; schedule `ao telegram poll` with Task Scheduler instead",
+    "systemd": "Linux does not have; keep `ao telegram poll` running as a systemd user service instead",
+}
+
+
+def _telegram_steps(conf):
+    """The steps of `ao telegram setup`, in the machine's language: the phone channel is the machine's
+    (LANGUAGE-OUTPUT)."""
+    print(f"{C['b']}1.{C['reset']} Telegram: {C['b']}@BotFather{C['reset']} → /newbot → token")
+    print(f"{C['b']}2.{C['reset']} {language.text(None, 'telegram.setup-chat')}")
+    # How the file is kept private is the platform's: Windows keeps no file mode (WINDOWS-SAY-WHY).
+    kept = language.text(None, "private-file.kept-windows" if os.name == "nt" else "private-file.kept")
+    print(f"{C['b']}3.{C['reset']} " + language.text(None, "telegram.setup-file", b=C["b"], reset=C["reset"],
+                                                      conf=conf, kept=kept))
+    if os.name == "nt":
+        print(f"   {C['dim']}{language.text(None, 'private-file.windows')}{C['reset']}")
+    # The poller is a launchd job: where there is no launchd it is started by hand (LEADS-SECRETS).
+    then = "install" if _scheduler() == "launchd" else "poll"
+    print(f"\n{C['b']}4.{C['reset']} {C['b']}ao telegram test{C['reset']} → {C['b']}ao telegram {then}{C['reset']}")
+    print(f"\n{C['dim']}The allowlist is not optional: an inbound channel without one")
+    print(f"is an authority surface open to whoever finds the bot.{C['reset']}")
+
+
+def _telegram_setup(args):
+    """`ao telegram setup`: its steps, then the bot token asked at the terminal and not shown, and the file ao writes.
+
+    The steps had a person put the token into a curl command line - on Windows a PowerShell one - to find their
+    chat id, then echo the file into ~/.ao and chmod it: the shell's history and the process list kept the token,
+    and anyone on the machine could read the file until the chmod. ao asks for the token now, as `ao email setup`
+    asks for an account's password (EMAIL-SETUP-PROMPT), finds the chats that wrote to the bot with it, and writes
+    the file itself, 0600 from its creation (LEADS-SECRETS).
+    """
+    from . import telegram
+    token_env = getattr(args, "token_env", None)
+    chats = list(dict.fromkeys(getattr(args, "chat", None) or []))
+    at_terminal = sys.stdin.isatty()
+    if not token_env and not chats:
+        _telegram_steps(telegram.CONF)
+        if not at_terminal:
+            print("\n" + language.text(None, "telegram.setup-no-terminal"))
+            return 0
+        print()
+    if token_env:
+        # Read once from the environment, for a script: a token on a command line stays in the shell's history.
+        token = os.environ.get(token_env)
+        if not token:
+            print(f"{C['red']}not saved{C['reset']}: ${token_env} is {'empty' if token == '' else 'not set'}")
+            return 2
+    elif not at_terminal:
+        print(f"{C['red']}not saved{C['reset']}: the bot token is asked at a terminal, and none is attached; "
+              "--token-env names a variable that holds it")
+        return 2
+    else:
+        token = _hidden_input("bot token (not shown): ")
+        if token is None:
+            print(f"{C['red']}not saved{C['reset']}: this terminal cannot hide what is typed, and a token typed here "
+                  "would stand in its scrollback; --token-env names a variable that holds it")
+            return 2
+    token = token.strip()
+    if not token:
+        print(f"{C['red']}not saved{C['reset']}: no token was given"); return 2
+    if not telegram.TOKEN_SHAPE.fullmatch(token):
+        print(f"{C['red']}not saved{C['reset']}: that is no bot token; @BotFather gives one as the bot's number, a "
+              "colon, then letters and digits")
+        return 2
+    if not chats:
+        found, why = telegram.recent_chats(token)
+        if found is None:
+            print(f"{C['red']}not saved{C['reset']}: Telegram did not say which chats wrote to the bot ({why}); "
+                  "check the token with @BotFather, or name the chats it allows with --chat")
+            return 2
+        if found:
+            print("chats that wrote to the bot:")
+            for chat, name in found.items():
+                print(f"   {chat:>14}  {name}")
+        else:
+            print(f"{C['yellow']}no chat wrote to the bot in the last 24 hours{C['reset']}: write it a message, "
+                  "then run this again, or name a chat whose id you know")
+        if not at_terminal:
+            print(f"{C['red']}not saved{C['reset']}: name the chats it allows with --chat"); return 2
+        typed = input("chats it allows, their ids separated by spaces: ")
+        chats = list(dict.fromkeys(typed.replace(",", " ").split()))
+    wrong = [chat for chat in chats if not telegram.CHAT_SHAPE.fullmatch(chat)]
+    if wrong:
+        print(f"{C['red']}not saved{C['reset']}: a chat id is a number, as Telegram gives it: {', '.join(wrong)}")
+        return 2
+    if not chats:
+        print(f"{C['red']}not saved{C['reset']}: no chat was allowed, and the allowlist is not optional")
+        return 2
+    telegram.save(token, chats)
+    print(f"{C['green']}saved{C['reset']} {telegram.CONF} ({_private_mode()}): {len(chats)} chat(s) allowed")
+    print(f"now: {C['b']}ao telegram test{C['reset']}")
+    return 0
+
+
+def _hidden_input(prompt):
+    """What a person types at `prompt` with nothing shown, or None where this terminal cannot hide it.
+
+    getpass falls back to reading the line as typed, echo on, where it cannot turn a terminal's echo off - a terminal
+    emulator that refuses it, a pipe that passes for a terminal - and says so only in a warning: a token or a password
+    typed there stood in the terminal's scrollback and in whatever recorded the session (LEADS-SECRETS). Its warning is
+    taken as the refusal it is, before anything is read.
+    """
+    import getpass
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", getpass.GetPassWarning)
+        try:
+            return getpass.getpass(prompt)
+        except getpass.GetPassWarning:
+            return None
+
+
 def cmd_telegram(cfg, args):
     """Set up, test, or run the phone channel.
 
@@ -265,35 +384,7 @@ def cmd_telegram(cfg, args):
     label = _launchd_label("telegram", A.project_key(cfg["root"]))
 
     if args.action == "setup":
-        # The phone channel is the machine's, so its steps are in the machine's language (LANGUAGE-OUTPUT).
-        print(f"{C['b']}1.{C['reset']} Telegram: {C['b']}@BotFather{C['reset']} → /newbot → token")
-        print(f"{C['b']}2.{C['reset']} {language.text(None, 'telegram.setup-chat')}")
-        if os.name == "nt":
-            # Windows' own: curl piped to python3 and chmod mean nothing to cmd.exe, and echo there writes the
-            # quotes into the file (WINDOWS-SAY-WHY).
-            print(f"   {C['dim']}powershell -NoProfile -Command \"(Invoke-RestMethod "
-                  f"'https://api.telegram.org/bot<TOKEN>/getUpdates').result.message.chat.id\"{C['reset']}")
-        else:
-            print(f"   {C['dim']}curl -s \"https://api.telegram.org/bot<TOKEN>/getUpdates\" \\\\{C['reset']}")
-            print(f"   {C['dim']}  | python3 -c \"import sys,json; print([u['message']['chat']['id'] "
-                  f"for u in json.load(sys.stdin)['result']])\"{C['reset']}")
-        print(f"{C['b']}3.{C['reset']} {language.text(None, 'telegram.setup-file', b=C['b'], reset=C['reset'])}")
-        if os.name == "nt":
-            print(f"   {C['dim']}{conf}{C['reset']}")
-            print(f"   {C['dim']}{{\"token\":\"<BOT_TOKEN>\",\"chats\":[\"<CHAT_ID>\"]}}{C['reset']}")
-            print(f"   {C['dim']}{language.text(None, 'private-file.windows')}{C['reset']}")
-            # The poller is scheduled with launchd, which Windows does not have: `ao telegram install` refuses there.
-            print(f"\n{C['b']}4.{C['reset']} {C['b']}ao telegram test{C['reset']} → "
-                  f"{C['b']}ao telegram poll{C['reset']}")
-        else:
-            print(f"   {C['dim']}mkdir -p ~/.ao{C['reset']}")
-            print(f"   {C['dim']}echo '{{\"token\":\"<BOT_TOKEN>\",\"chats\":[\"<CHAT_ID>\"]}}' > {conf}{C['reset']}")
-            print(f"   {C['dim']}chmod 600 {conf}{C['reset']}")
-            print(f"\n{C['b']}4.{C['reset']} {C['b']}ao telegram test{C['reset']} → "
-                  f"{C['b']}ao telegram install{C['reset']}")
-        print(f"\n{C['dim']}The allowlist is not optional: an inbound channel without one")
-        print(f"is an authority surface open to whoever finds the bot.{C['reset']}")
-        return 0
+        return _telegram_setup(args)
 
     if args.action == "test":
         if not c:
@@ -308,10 +399,14 @@ def cmd_telegram(cfg, args):
     if args.action == "poll":
         return _serve("telegram", cfg, ["--once"] if args.once else [])
 
-    if os.name == "nt" and args.action in ("install", "uninstall", "status"):
-        # The poller is a launchd job; on Windows these printed success and did nothing (#71).
+    scheduler = _scheduler()
+    if scheduler != "launchd" and args.action in ("install", "uninstall", "status"):
+        # The poller is a launchd job, and only macOS has launchd. On Windows these printed success and did nothing
+        # (#71); on Linux install wrote into a ~/Library/LaunchAgents that is not there and asked for launchctl,
+        # uninstall said it had removed the job, and status sent the person to install (LEADS-SECRETS).
         print(f"{C['yellow']}refused{C['reset']}: the telegram poller is scheduled with launchd, which "
-              "Windows does not have; schedule `ao telegram poll` with Task Scheduler instead")
+              + TELEGRAM_POLLER_ELSEWHERE.get(scheduler, f"{sys.platform} does not have; keep `ao telegram poll` "
+                                                         "running with its own service manager instead"))
         return 1
 
     if args.action == "uninstall":
@@ -1059,7 +1154,9 @@ def cmd_handoff(cfg, args):
     text = "\n".join(lines)
     # Named in the project's language; a note named in either is listed and read the same (LANGUAGE-FILES).
     kind = language.marker(cfg, "handoff-kind")
-    name = f"{datetime.now():%Y%m%d-%H%M}-{A.mail_names(cfg)[1]}-to-anyone-{kind}.md"
+    # A name no mail had before: the minute and the roles were all of it, so a second handoff in the same minute was
+    # written over the first, and a message store, which takes an id in once, never took the second (LEADS-SECRETS).
+    name = A._unwritten_mail_name(root, cfg, f"{datetime.now():%Y%m%d-%H%M}-{A.mail_names(cfg)[1]}-to-anyone-{kind}")
     path = os.path.join(root, cfg["mailbox"], name)
     # As every mail ao writes: an envelope with its roles, scanned for credentials, mirrored in the mail
     # ledger. The note was written past write_mail, and so were none of those (ROLE-TABLE-2).

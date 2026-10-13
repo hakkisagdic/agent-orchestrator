@@ -254,6 +254,44 @@ because everything else here keeps state where a human can read it during an
 incident, and a registry that exists only inside a process is the one thing you
 cannot inspect when something is wrong.
 
+A credential is the one thing that file does not hold. A product repository tracks
+`.ao/`, so a token written into it goes into the history with the next commit that
+takes the file. A header's value names the variable that holds it, `${NAME}`, read
+from the environment the MCP client starts the bridge with. A header whose name says
+it carries a credential - one of its words is `auth`, `authorization`, `key`, `apikey`,
+`token`, `secret`, `password`, `cookie`, `session`, `credential` or `bearer`, so
+`X-Api-Key` does and `X-Monkey` does not - and whose value is written out in the
+project's file is refused, not sent, and so is a header that names a variable not set.
+A credential of fewer than eight characters is sent nowhere - nor is a value a variable
+holds, in any header, since what a variable holds is taken for a credential, nor a cookie
+any of whose values is that short - since an answer that echoed one could not be told
+from ordinary text to be hidden. The machine's `~/.ao/a2a-agents.json`, outside every repository, may hold one; it
+is read where the project has no file of its own. A variable the project's file names
+is sent only to an origin - scheme, host and port - that the machine's file sends the
+same variable to: an agent can write `.ao/a2a-agents.json`, and one that kept the header
+and named its own host had the bridge send the token there. So an agent that needs a
+credential is registered in `~/.ao/a2a-agents.json` with its URL and header, and the
+project's file may name it too. What an agent answers is its own text: a credential the
+bridge sent, should an agent echo it in an error, a task or its card, is answered as
+`[credential]`, to the model and in the notice the bridge records - as it was sent, a URL's
+user, password and query values among them, since an agent's URL is answered by its origin
+alone, scheme, host and port - and each of
+its parts, the token after `Bearer` and each value of a `Cookie`. An agent the person gave a
+credential to can still pass it on encoded; that agent is trusted with it, as the threat
+model says ([threat-model.md](threat-model.md)). In `.ao/a2a-agents.json`:
+
+```json
+{"weather": {"url": "https://agent.example.com/a2a/v1",
+             "headers": {"Authorization": "Bearer ${WEATHER_A2A_TOKEN}"}}}
+```
+
+*In ao since slice LEADS-SECRETS: the file held an agent's `Authorization` header as
+written, and `ao a2a-mcp config` showed a token written into it; nothing kept it out
+of a commit in a project whose `.gitignore` does not cover the file. Leaving the file
+out of git with `ao init` was the other way, and it would have kept the token in the
+working tree, where every agent in the checkout reads, and the agents' addresses out
+of the repository a team shares. `tests/test_leads_secrets.py`.*
+
 ### Why not use the existing bridge
 
 [a2anet/a2a-mcp](https://github.com/a2anet/a2a-mcp) does this job and came first.

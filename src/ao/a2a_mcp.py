@@ -25,6 +25,7 @@ Standard library only.
 """
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -61,23 +62,161 @@ def normalise_state(state):
 
 ROOT = None
 
+# A header's value names a variable that holds it as `${NAME}`, read where the bridge runs (LEADS-SECRETS).
+VARIABLE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+# A header whose name says it carries a credential: in the project's file its value must name a variable. Read by the
+# words of the name, so `X-Api-Key` and `Proxy-Authorization` are and `X-Monkey` is not (LEADS-SECRETS).
+CREDENTIAL_WORDS = frozenset({"auth", "authorization", "authentication", "key", "apikey", "token", "secret",
+                              "password", "passwd", "cookie", "session", "credential", "credentials", "bearer"})
+# The fewest characters a credential is sent with: one shorter is guessed sooner than hidden, and an answer that
+# echoes it could not be told from ordinary text to be redacted (LEADS-SECRETS).
+CREDENTIAL_MIN = 8
 
-def agents():
-    """Configured agents: {id: {url, headers?, version?}} from .ao/a2a-agents.json.
+
+def secret_parts(value):
+    """The parts of a credential header's value that are secret: of each `;` or `,` item, a `name=value` pair's value,
+    and of an item with no name, its last word - the token after `Bearer`, a cookie's value, never its name."""
+    parts = []
+    for item in re.split(r"[;,]", str(value)):
+        item = item.strip()
+        pair = re.match(r"^[A-Za-z0-9_.!#$%&'*+^`|~-]+=(.*)$", item)
+        if item:
+            parts.append(pair.group(1).strip() if pair else (item.split() or [""])[-1])
+    return parts
+
+
+def credential_header(name):
+    """Whether a header's name says it carries a credential, read by its words."""
+    return any(word in CREDENTIAL_WORDS for word in re.split(r"[^a-z0-9]+", str(name).lower()) if word)
+
+
+def registries():
+    """The files agents are registered in, in the order `agents` reads them: the project's, then the machine's."""
+    return (os.path.join(ROOT or os.getcwd(), ".ao", "a2a-agents.json"),
+            os.path.join(A.HOME, ".ao", "a2a-agents.json"))
+
+
+def _origin(url):
+    """`scheme://host:port` of an http or https URL, its host lower-cased and its default port written; else None."""
+    from urllib.parse import urlsplit
+    try:
+        parts = urlsplit(str(url or ""))
+        port = parts.port
+    except ValueError:
+        return None
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return None
+    return f"{parts.scheme}://{parts.hostname.lower()}:{port or (443 if parts.scheme == 'https' else 80)}"
+
+
+def bound_variables():
+    """{variable: {origin}}: where the machine's file sends each variable one of its headers names (LEADS-SECRETS).
+
+    `.ao/a2a-agents.json` is a file the implementer writes: one that kept `Bearer ${WEATHER_A2A_TOKEN}` and named
+    another URL had the bridge send the token to that host. A variable the project's file names is sent only to an
+    origin the machine's `~/.ao/a2a-agents.json`, outside every tree, sends it to.
+    """
+    try:
+        with open(registries()[1], encoding=UTF8) as fh:
+            machine = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    bound = {}
+    for agent in machine.values() if isinstance(machine, dict) else []:
+        headers = agent.get("headers") if isinstance(agent, dict) else None
+        origin = _origin(agent.get("url")) if isinstance(headers, dict) else None
+        for value in (headers or {}).values() if origin else []:
+            for variable in VARIABLE.findall(str(value)):
+                bound.setdefault(variable, set()).add(origin)
+    return bound
+
+
+def resolved(aid, agent, in_project, bound=None):
+    """(the agent with each `${NAME}` in its headers replaced by that variable's value, None), or (None, why not).
+
+    `.ao/a2a-agents.json` is a file of the project, which a commit takes with the rest of `.ao/`, and an
+    Authorization header written into it went into the repository's history with it. In the project's file a
+    credential header names the variable that holds it, which is set where the bridge runs, and one written out
+    there is refused rather than sent; `~/.ao/a2a-agents.json`, outside every repository, may hold one. A variable
+    the project's file names is sent only to an origin the machine's file sends it to (`bound`, bound_variables). A value
+    that holds a line break is refused here too: http.client refuses it with the value in its error, which the
+    bridge answered with (LEADS-SECRETS).
+    """
+    headers = agent.get("headers") or {}
+    if not isinstance(headers, dict):
+        return None, f"agent {aid}: its headers are no JSON object"
+    out = {}
+    for name, value in headers.items():
+        text = str(value)
+        named = VARIABLE.findall(text)
+        unset = [variable for variable in named if not os.environ.get(variable)]
+        if unset:
+            return None, (f"agent {aid}: its {name} header names ${{{unset[0]}}}, which is not set where the bridge "
+                          "runs: set it in the environment the MCP client starts the bridge with")
+        origin = _origin(agent.get("url"))
+        loose = [variable for variable in named if in_project and origin not in (bound or {}).get(variable, ())]
+        if loose:
+            return None, (f"agent {aid}: its {name} header names ${{{loose[0]}}}, which the machine's "
+                          f"~/.ao/a2a-agents.json sends to no agent at {origin or 'its URL'}: .ao/a2a-agents.json is "
+                          "a file an agent can write, and a URL changed there carried the credential to another host; "
+                          "register the agent with its URL and that header in ~/.ao/a2a-agents.json")
+        if in_project and not named and credential_header(name):
+            return None, (f"agent {aid}: its {name} header is written into .ao/a2a-agents.json, which a commit "
+                          "takes with the project; name the variable that holds it instead, as \"Bearer ${NAME}\", "
+                          "and set NAME where the bridge runs")
+        out[name] = VARIABLE.sub(lambda found: os.environ[found.group(1)].strip(), text)
+        if "\n" in out[name] or "\r" in out[name]:
+            return None, f"agent {aid}: its {name} header holds a line break, which no header may"
+        # A value a variable holds is a credential whatever the header's name, since that is what a variable is for
+        # here: each is hidden in what the bridge answers, so none shorter than can be told apart is sent.
+        short = [variable for variable in named if len(os.environ[variable].strip()) < CREDENTIAL_MIN]
+        if short or credential_header(name) and any(len(part) < CREDENTIAL_MIN for part in secret_parts(out[name])):
+            return None, (f"agent {aid}: its {name} header carries a credential of fewer than {CREDENTIAL_MIN} "
+                          "characters, which ao sends nowhere: one that short is guessed, and an answer that echoes "
+                          "it cannot be told apart to be hidden")
+    return dict(agent, headers=out), None
+
+
+def registry():
+    """(configured agents, whether they are the project's): {id: {url, headers?, version?}} and where they came from,
+    read in one opening of one file - the project's `.ao/a2a-agents.json` when it has one, else the machine's.
 
     A file, not an environment variable. The rest of this tool keeps its state in
     files that a human can read during an incident, and a registry that only
     exists inside a process's environment is the one thing you cannot inspect when
-    something is wrong.
+    something is wrong. A credential is the exception: a header names the variable
+    that holds it (`resolved`). Whose file it was is taken from the same opening: told apart by a second look, a
+    project file renamed away between the reading and the look was taken for the machine's, and its URLs were sent
+    the person's variables with no origin bound to them (LEADS-SECRETS).
     """
-    for p in (os.path.join(ROOT or os.getcwd(), ".ao", "a2a-agents.json"),
-              os.path.join(A.HOME, ".ao", "a2a-agents.json")):
-        if os.path.exists(p):
-            try:
-                return json.load(open(p, encoding=UTF8))
-            except Exception:
-                return {}
-    return {}
+    for at, path in enumerate(registries()):
+        try:
+            with open(path, encoding=UTF8) as fh:
+                data = json.load(fh)
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError):
+            return {}, at == 0
+        return (data if isinstance(data, dict) else {}), at == 0
+    return {}, False
+
+
+def agents():
+    """The configured agents, as `registry` reads them."""
+    return registry()[0]
+
+
+def _shown_url(url):
+    """An agent's URL as an answer shows it: its origin - scheme, host and port - alone. A credential can stand in
+    every other part of it, its user, its path (`/a2a/<token>`), its query (`?access_token=...`), and the model the
+    bridge answers needs none of them (LEADS-SECRETS)."""
+    from urllib.parse import urlsplit
+    try:
+        parts = urlsplit(str(url or ""))
+        netloc = (parts.hostname or "") + (f":{parts.port}" if parts.port else "")
+    except ValueError:
+        return "…"
+    return f"{parts.scheme}://{netloc}" if parts.scheme and netloc else "…"
 
 
 # Follow no redirect: urllib carried every header of a request - an agent's Authorization among them - to wherever a
@@ -215,17 +354,79 @@ TOOLS = [
 ]
 
 
+def _credentials(reg):
+    """Each value a request of the bridge's may carry as a credential, longest first: a variable's value a header names,
+    and a credential header's value as it is sent - the machine's file may hold one written out - with each of its
+    parts, the token after `Bearer` and each value of `sid=...; csrf=...`, which an answer can echo alone."""
+    found = set()
+    for agent in reg.values() if isinstance(reg, dict) else []:
+        headers = agent.get("headers") if isinstance(agent, dict) else None
+        for name, value in headers.items() if isinstance(headers, dict) else []:
+            text = str(value)
+            for variable in VARIABLE.findall(text):
+                held = os.environ.get(variable, "").strip()
+                found.update([held] + re.split(r"[\s;,=:&]+", held))
+            if credential_header(name):
+                sent = VARIABLE.sub(lambda named: os.environ.get(named.group(1), "").strip(), text).strip()
+                found.update([sent] + re.split(r"[\s;,=:&]+", sent) + secret_parts(sent))
+        # A URL can carry one too: its user, its password, a value of its query (`?access_token=...`).
+        from urllib.parse import urlsplit, parse_qsl
+        try:
+            parts = urlsplit(str((agent or {}).get("url") or "") if isinstance(agent, dict) else "")
+            found.update(value for _, value in parse_qsl(parts.query))
+            found.update(part for part in (parts.username, parts.password) if part)
+        except ValueError:
+            pass
+    # None shorter than CREDENTIAL_MIN is sent (`resolved`), so none such needs hiding, and hiding every few letters
+    # would garble the answer.
+    return sorted((value for value in found if len(value) >= CREDENTIAL_MIN), key=len, reverse=True)
+
+
+def _redacted(value, credentials):
+    """`value` with each credential in its text replaced by `[credential]`."""
+    if isinstance(value, str):
+        for credential in credentials:
+            value = value.replace(credential, "[credential]")
+        return value
+    if isinstance(value, dict):
+        return {key: _redacted(item, credentials) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redacted(item, credentials) for item in value]
+    return value
+
+
 def call(name, args):
-    reg = agents()
+    """A tool's answer, with no credential the bridge sends in it.
+
+    What an agent answers is its own text, and one that echoed the header it was sent - in an error, a task's
+    message, its card - had the bridge hand the person's token to the model that called it, and to the notice the
+    bridge records (LEADS-SECRETS). A credential is hidden as it was sent and by each of its parts; an agent the person
+    gave one to can still pass it on encoded, which no hiding stops - the guard there is the origin the person bound it
+    to (bound_variables), and docs/threat-model.md puts such an agent out of scope.
+    """
+    # One reading of the registry for the request and for what is hidden in its answer: read twice, a file changed
+    # between the two sent a credential the second reading named and the first did not know to hide.
+    reg, in_project = registry()
+    credentials = _credentials(reg)
+    return _redacted(_answer(name, args, credentials, reg, in_project), credentials)
+
+
+def _answer(name, args, credentials, reg, in_project):
+    # The agents are the project's when it has a registry, as the one reading of it said (`registry`).
+    bound = bound_variables() if in_project else None
     if name == "a2a_agents":
         out = []
         for aid, a in reg.items():
-            card, ver, at = fetch_card(a["url"], a.get("headers"))
-            out.append({"id": aid, "url": a["url"],
+            a, why = resolved(aid, a, in_project, bound)
+            if why:
+                out.append({"id": aid, "url": _shown_url(reg[aid].get("url")), "error": why, "reachable": False})
+                continue
+            card, ver, at = fetch_card(a["url"], a["headers"])
+            out.append({"id": aid, "url": _shown_url(a["url"]),
                         "name": (card or {}).get("name"),
                         "description": (card or {}).get("description"),
                         "dialect": a.get("version") or ver or "undeclared",
-                        "card": at, "reachable": card is not None})
+                        "card": _shown_url(at) if at else None, "reachable": card is not None})
         return {"agents": out, "count": len(out),
                 "note": "none configured; write .ao/a2a-agents.json" if not out else None}
 
@@ -233,13 +434,16 @@ def call(name, args):
     if not a:
         return {"error": f"unknown agent {args.get('agent')!r}",
                 "configured": list(reg)}
+    a, why = resolved(args["agent"], a, in_project, bound)
+    if why:
+        return {"error": why}
     version = a.get("version")
 
     if name == "a2a_agent":
         card, ver, at = fetch_card(a["url"], a.get("headers"))
         if not card:
-            return {"error": "no agent card at " + a["url"]}
-        return {"card_url": at, "dialect": version or ver or "undeclared",
+            return {"error": "no agent card at " + _shown_url(a["url"])}
+        return {"card_url": _shown_url(at), "dialect": version or ver or "undeclared",
                 "name": card.get("name"), "description": card.get("description"),
                 "skills": [{"id": s.get("id"), "name": s.get("name"),
                             "description": s.get("description")}
@@ -261,7 +465,7 @@ def call(name, args):
         r = rpc(a, "send", params, version)
         if "result" not in r:
             return r
-        view = _task_view(r["result"])
+        view = _redacted(_task_view(r["result"]), credentials)
         # Remember what we sent, so a task can be followed after the turn that
         # started it has ended — the common case for anything slow.
         A.record_notice(ROOT or os.getcwd(), "a2a", f"{args['agent']} task {view.get('id')} "

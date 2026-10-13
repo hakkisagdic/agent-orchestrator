@@ -1561,8 +1561,11 @@ def cmd_email(cfg, args):
                 print(f"{C['red']}not saved{C['reset']}: {args.user}'s password is asked at a terminal, and none is "
                       "attached; --password-env names a variable that holds it")
                 return 2
-            import getpass
-            password = getpass.getpass(f"password for {args.user} on {args.host} (not shown): ")
+            password = _hidden_input(f"password for {args.user} on {args.host} (not shown): ")
+            if password is None:
+                print(f"{C['red']}not saved{C['reset']}: this terminal cannot hide what is typed, and a password "
+                      "typed here would stand in its scrollback; --password-env names a variable that holds it")
+                return 2
             if not password:
                 print(f"{C['red']}not saved{C['reset']}: no password was given"); return 2
         try:
