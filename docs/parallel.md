@@ -176,7 +176,10 @@ Parallel lanes converge serially. The architect owns a queue:
 1. A lane finishes and reports; it does not merge itself.
 2. The verifier runs the gates **on the merge result**, not on the lane in isolation —
    two independently green lanes can be red together.
-3. Green merges; red goes back to its lane with the failure.
+3. Green lands squashed: `git merge --squash <lane>` stages the merge result as one candidate, which
+   goes through `ao verify`, `ao review`, `ao commit-ok` and `ao commit` as any slice does - a grant
+   binds one parent, and ao lands no merge ([gates](gates.md#a-commit-names-its-grant)). Red goes back
+   to its lane with the failure.
 4. One merge at a time, in queue order.
 
 Step 2 is `ao merge-check`, which records the run ([gates.md](gates.md)):

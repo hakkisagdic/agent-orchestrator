@@ -1418,14 +1418,11 @@ def _commit_range_check(cfg, args):
     if not commits:
         print(f"no commits in {spec}")
         return 0
-    checked = [commit for commit in commits if not (commit["merge"] or commit["exempt"])]
+    checked = [commit for commit in commits if not commit["exempt"]]
     failing = [commit for commit in checked if commit["problems"]]
     for commit in commits:
         sha = commit["sha"][:12]
-        if commit["merge"]:
-            print(f"  {C['dim']}merge     {sha}  skipped: a merge's tree is git's, "
-                  f"not a granted candidate's{C['reset']}")
-        elif commit["problems"]:
+        if commit["problems"]:
             print(f"  {C['red']}NO MATCH{C['reset']}  {sha}  {'; '.join(commit['problems'])}")
         elif not commit["exempt"]:
             record = {None: "", True: " · on record", False: " · not in this checkout's ledger"}[commit["on_record"]]

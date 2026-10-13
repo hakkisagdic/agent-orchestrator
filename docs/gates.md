@@ -228,14 +228,26 @@ trailers is refused, not rewritten: they could only be another commit's.
 `.ao/`: a commit amended, rebased or rewritten after its grant has another tree, and fails. Where the
 checkout's authority ledger can be read, a grant on record that names another tree, verification,
 review or waiver fails the commit too; a grant it does not hold fails nothing, since a grant stays in
-the ledger of the checkout that made it. A merge's tree is git's, not a granted candidate's, so a
-merge is skipped. The tests workflow runs the check on every push to main, over the pushed range.
+the ledger of the checkout that made it. A merge matches nothing (below). The
+tests workflow runs the check on every push to main, over the pushed range.
 
 *In ao since slice COMMIT-TRAILER: the trailers and the range check. The commit carries its authority
 where a hook cannot follow it: a hook runs only on the machine that commits, `--no-verify` skips it,
 and a command rewriter once broke the allowlist that kept it. Requiring the check is a person's step,
 as publishing is: a ruleset on main that requires the `commit trailers` status check, and signed
 commits where you sign them. ao never sets a ruleset.*
+
+*In ao since slice LEADS-GATE: a merge is checked too, and matches nothing after the first commit
+that carries trailers. It was skipped as git's, and a merge's tree is whatever was committed: a
+conflict resolved by hand, or an edit made while merging, landed unreviewed and passed the check CI
+runs. Even git's own merge of two reviewed parents is no grant's - two changes each reviewed alone can
+act together where neither review looked, and `ao merge-check` runs gates, which are no review - and
+a grant binds one parent, the commit its candidate was built on, so trailers on a merge, copied or
+written over the granted tree, say nothing of what else it merges. A lane lands squashed:
+`git merge --squash` stages it as one candidate, verified, reviewed and granted as any, which
+`ao commit` lands on one parent.
+The check merges nothing to say so: `git merge-tree` runs the merge drivers a repository configures,
+and a range check reads and runs nothing.*
 
 ## Serialisation and machine pressure
 

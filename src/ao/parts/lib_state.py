@@ -685,13 +685,13 @@ def trailer_audit(root, revisions, since_first=False):
     """Each commit of a revision range held to the grant its Ao- trailers name (COMMIT-TRAILER).
 
     Read-only, and it needs no .ao/: `revisions` is `<a>..<b>`, or one commit for all of its history,
-    and each commit in it that is not a merge is judged by `trailer_problems`, against the checkout's
-    authority ledger where one can be read. A merge's tree is git's, not a granted candidate's: it is
-    skipped. `since_first` leaves out the commits older than the first one carrying Ao- trailers - those
-    it descends from - and every commit while none carries them: history from before ao wrote them.
-    Returns {commits, end, first, ledger, unreadable}; each commit also holds merge, exempt, grant,
-    problems and on_record (None where no ledger was read). ValueError for a range ao does not hand to
-    git; RuntimeError when git cannot read it.
+    and each commit in it is judged by `trailer_problems`, against the checkout's authority ledger where
+    one can be read - except a merge, which `_merge_problems` refuses whatever it carries, without
+    merging anything (LEADS-GATE). `since_first` leaves out the commits older than the
+    first one carrying Ao- trailers - those it descends from - and every commit while none carries them:
+    history from before ao wrote them. Returns {commits, end, first, ledger, unreadable}; each commit
+    also holds merge, exempt, grant, problems and on_record (None where no ledger was read).
+    ValueError for a range ao does not hand to git; RuntimeError when git cannot read it.
     """
     spec = str(revisions or "")
     _, dots, end = spec.partition("..")
@@ -717,12 +717,34 @@ def trailer_audit(root, revisions, since_first=False):
     grants, unreadable = ledger_grants(root)
     for commit in commits:
         commit["merge"] = len(commit["parents"]) > 1
-        commit["exempt"] = not commit["merge"] and commit["sha"] in older
-        checked = not (commit["merge"] or commit["exempt"])
-        commit["problems"] = trailer_problems(commit, grants) if checked else []
+        commit["exempt"] = commit["sha"] in older
+        held = not commit["exempt"] and not commit["merge"]
+        if held:
+            commit["problems"] = trailer_problems(commit, grants)
+        elif not commit["exempt"]:
+            commit["problems"] = _merge_problems(commit)
+        else:
+            commit["problems"] = []
         commit["grant"] = (_ao_trailers(commit["trailers"]).get("Ao-Grant") or [None])[0]
-        commit["on_record"] = commit["grant"] in grants if checked and grants is not None else None
+        commit["on_record"] = commit["grant"] in grants if held and grants is not None else None
     return {"commits": commits, "end": end, "first": first, "ledger": grants is not None, "unreadable": unreadable}
+
+
+def _merge_problems(commit):
+    """Why a merge is no grant's: always, after the first commit that carries Ao- trailers, whatever it carries
+    (LEADS-GATE).
+
+    A merge was skipped as git's, and a merge's tree is whatever was committed: a conflict resolved by hand, or an
+    edit made while merging, landed unreviewed and passed the range check CI runs. Even git's own merge of two
+    reviewed parents is no grant's, since two changes each reviewed alone can act together where neither review
+    looked; and a grant binds one parent, the commit its candidate was built on, so trailers on a merge - copied, or
+    written by a commit of the granted tree - say nothing of what else it merges. A lane lands squashed
+    (`git merge --squash`), as one commit on one parent, which `ao commit` lands as any commit. Nothing is merged
+    again to say more: `git merge-tree` runs the merge drivers a repository configures, an implementer's choice among
+    them, and a range check reads and runs nothing.
+    """
+    return [f"it merges {len(commit['parents'])} parents, and a grant binds one: ao lands no merge - land a lane "
+            "squashed (git merge --squash), which ao commit lands as any commit"]
 
 
 def record_authority(root, granted, reasons, tree, verification, token=None,

@@ -127,7 +127,9 @@ def test_a_clone_with_no_ao_state_checks_by_tree_alone(project, monkeypatch, cap
     assert "on record" not in out
 
 
-def test_a_merge_is_skipped_and_a_bad_range_is_refused(project, monkeypatch, capsys):
+def test_a_merge_with_no_trailers_does_not_match_and_a_bad_range_is_refused(project, monkeypatch, capsys):
+    """A merge carrying no trailers was skipped; it lands through ao commit now, as any commit, since two changes
+    reviewed alone can act together where neither review looked (LEADS-GATE)."""
     root, base, _ = _landed(project, monkeypatch)
     landed = _git(root, "rev-parse", "HEAD").strip()
     _git(root, "checkout", "-q", "-b", "side", base)
@@ -137,7 +139,7 @@ def test_a_merge_is_skipped_and_a_bad_range_is_refused(project, monkeypatch, cap
 
     audit = A.trailer_audit(root, f"{landed}..HEAD")
     merge = [commit for commit in audit["commits"] if commit["merge"]]
-    assert len(merge) == 1 and merge[0]["problems"] == []
+    assert len(merge) == 1 and "ao lands no merge" in merge[0]["problems"][0]
 
     code, out = _check(root, capsys, "HEAD~1...HEAD")
     assert code == 2 and "is not a range ao reads" in out
