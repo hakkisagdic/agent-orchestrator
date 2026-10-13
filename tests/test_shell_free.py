@@ -38,10 +38,10 @@ ALLOWED = {
     ("src/ao/parts/lib_transcript.py", "_quota_output", "_sh_run()"):
         "an adapter declares its quota command as words a shell ran: one a shell would change, a program "
         "found nowhere, and every command on Windows still run through the shell",
-    ("src/ao/parts/cli_authority.py", "cmd_merge_check", "shell=True"):
-        "a gate's `run` in .ao/gates.json is a shell command line the project declares, run in the merge result",
-    ("src/ao/parts/cli_authority.py", "cmd_verify", "shell=True"):
-        "a gate's `run` in .ao/gates.json is a shell command line the project declares",
+    # `ao verify` and `ao merge-check` run a gate through one function since LEADS-GATE.
+    ("src/ao/parts/cli_authority.py", "_run_gate", "shell=True"):
+        "a gate's `run` in .ao/gates.json is a shell command line the project declares, run in the project by "
+        "`ao verify` and in the merge result by `ao merge-check`",
 }
 
 

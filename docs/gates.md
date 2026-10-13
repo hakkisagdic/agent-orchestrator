@@ -13,7 +13,7 @@ run — that distinction is the whole point, and everything else here follows fr
     "focused":        {"run": "node --test test/claims", "expect": "exit_zero", "timeout": 600},
     "full":           {"run": "npm test", "expect": "exit_zero", "timeout": 1800, "min_tests": 300},
     "diff-check":     {"run": "git diff --check", "expect": "exit_zero", "timeout": 60},
-    "artifact-sweep": {"run": "ls -d .tmp-* scratch-* 2>/dev/null", "expect": "empty"}
+    "artifact-sweep": {"run": "git ls-files --cached --others --exclude-standard -- \".tmp-*\" \"scratch-*\"", "expect": "empty"}
   },
   "profiles": {
     "quick": ["typecheck", "focused", "diff-check"],
@@ -26,7 +26,8 @@ run — that distinction is the whole point, and everything else here follows fr
 Declared once, in the repository, so a gate is not something the orchestrator improvises
 differently each time it asks. `ao init` writes this file from the toolchains it finds and
 leaves one that exists alone. A gate passes on exit code zero, or with `"expect": "empty"` on
-printing nothing; `timeout` is in seconds, and `gates.default_timeout` when a gate names none.
+printing nothing; `timeout` is in seconds, at most a week, and `gates.default_timeout` when a gate
+names none.
 
 A gate may declare the paths it reads as `inputs`, a list of globs (`"inputs": ["src/**", "tests/**"]`).
 An unstaged or untracked path refuses verification and commit authority only when it is part of
@@ -34,6 +35,30 @@ the staged candidate or a gate reads it; when **every** gate declares inputs, a 
 all of them is listed as `worktree_noise` instead. One gate without inputs reads the whole tree,
 and then every dirty path counts, as before. Inputs are part of the gate definitions a
 verification is bound to, so narrowing them after `ao verify` withdraws its authority.
+
+*In ao since slice LEADS-GATE: an `expect: empty` gate passes on printing nothing only where its
+command exited 0, or with a code the gate declares in `ok_exit`: grep and `git grep` exit 1 when they
+find nothing, so a sweep with them declares `"ok_exit": [0, 1]`. No other code is taken for an
+answer: grep exits 2 for an error, and `grep -R '[' src 2>/dev/null` printed nothing, measured
+nothing and passed, as did a command that could not run or was not found, and a program whose silent
+exit 1 is its failure. GNU `ls` exits 2 for a glob that matched no file and for
+an error alike, so the sweep above asks git, which answers 0 on every platform; a `timeout` of zero is
+refused, where it was read as no timeout and replaced by the default, as is one past a week, where `1e308`
+overflowed the wait once the machine lock was held, and a `gates.default_timeout` past a week where a gate
+runs under it, which was passed over for 600 seconds; a profile that is not a list
+of gate names - `""` too - is said as the configuration ao cannot run. A gate that runs past its
+`timeout` is stopped with what can be found of it - its process tree, its process group and, on POSIX,
+its session, read again until nothing of it is found, so a worker that moved into a group of its own is
+reached, its parent gone or not - where its shell alone was killed and its test workers ran on after the
+run had let go of the machine lock; what the stop leaves running is named, and a process table that cannot
+be read is said. It is a cleanup, not a boundary: a gate is code the implementer wrote, run as theirs by
+design, and one written to outlive the stop - a worker in a session of its own - can
+([threat model](threat-model.md#out-of-scope)). A
+`.ao/gates.json` that `ao verify` or `ao merge-check` cannot run - not JSON, not an object, a profile
+that is not a list of gate names, a gate it names that is missing or has no `run`, a `timeout` that is
+not a number of seconds up to a week - is said in one line and exits 2 before the machine lock is taken, where it
+raised in the middle of the run. A gate whose command line the system cannot start - one past `ARG_MAX` -
+fails with exit 127 and what the system said, where it raised once the lock was held.*
 
 ## The artifact sweep earns its place
 

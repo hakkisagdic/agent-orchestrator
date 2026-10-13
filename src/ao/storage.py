@@ -627,13 +627,15 @@ def append_jsonl(path, record, timeout=10.0, *, _checkpoint=None,
 
 
 def append_chained_jsonl(path, record, chain, timeout=10.0, *,
-                         previous_field=CHAIN_PREVIOUS_FIELD, legacy_prefix=False,
+                         previous_field=CHAIN_PREVIOUS_FIELD, legacy_prefix=False, prepare=None,
                          _checkpoint=None, _write=None, _fsync=None):
     """Atomically select a predecessor, append, and persist one chained row.
 
     Existing committed rows are validated before a successor is constructed.
     Predecessor selection and append share one lock, so concurrent writers form
     one linear chain instead of siblings that name the same predecessor.
+    `prepare`, given the committed rows, returns fields to set on the record under
+    that lock: what must be unique across writers is decided where they take turns.
     """
     if not isinstance(record, dict):
         raise TypeError("a chained ledger row must be a JSON object")
@@ -659,6 +661,11 @@ def append_chained_jsonl(path, record, chain, timeout=10.0, *,
         previous = chained_row_digest(rows[-1], chain) if rows else (seal["digest"] if seal else None)
         chained = {previous_field: previous, "ordinal": retired + len(rows) + 1}
         chained.update(record)
+        if prepare is not None:
+            fields = prepare(rows) or {}
+            if previous_field in fields or "ordinal" in fields:
+                raise ValueError(f"prepare must not set the {previous_field!r} or 'ordinal' chain fields")
+            chained.update(fields)
         payload = _encode_jsonl(chained)
         digest = chained_row_digest(chained, chain)
         undo = _append_payload_unlocked(

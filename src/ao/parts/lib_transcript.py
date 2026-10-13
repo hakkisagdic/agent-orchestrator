@@ -2977,7 +2977,141 @@ def kill_turn(pid, sig):
             os.kill(pid, sig)
     except OSError:
         pass
+    if forced:
+        # A process of the tree that moved into a group of its own is not reached by the group's signal: it ran on,
+        # named among what was left but never stopped. Each is signalled by its pid (LEADS-GATE-RUNS).
+        for member in tree:
+            try:
+                if member != pid and os.getpgid(member) != pgid:
+                    os.kill(member, sig)
+            except OSError:
+                pass
     return _still_running(tree) if forced else []
+
+
+def run_as_group(argv, timeout, **popen):
+    """subprocess.run(argv, timeout=timeout, **popen), the program leading a session and a process group of its own,
+    so that a timeout or an interrupt stops it with what can be found of it: its process tree, its group and, on
+    POSIX, its session, read again until nothing of it is found - a worker that moved into a group of its own is
+    reached by its session, its parent gone or not (LEADS-GATE-RUNS). A cleanup, not a boundary: a process that
+    started a session of its own, or one forking faster than the table is read, outlives it, and a gate is code the
+    implementer wrote, run as theirs by design (docs/threat-model.md).
+
+    subprocess.run kills the program alone. A gate's shell was killed on its timeout and the test
+    workers it had started ran on, after `ao verify` had let go of the machine lock they ran under;
+    the hook Git ran for the execution proof outlived Git the same way, holding the pipes ao read.
+    On Windows subprocess.run then reads those pipes until their last holder closes them, so the
+    timeout bounded nothing. The tree is stopped with kill_turn, and on POSIX its group by its id
+    as well: macOS names no group for a leader that has exited while what it started runs on, and
+    the id is the group's until the leader is reaped, which is done here after the stop. What the
+    program wrote is then read for STOP_PROOF_SECONDS at most. TimeoutExpired carries it, `left`,
+    what of the tree still runs after the stop (WINDOWS-STOP-PROVEN), and `unasked`, why the tree could
+    be neither stopped nor asked after where that is so; an interrupt is raised again once the tree is
+    stopped. `capture_output` and `input` are taken as subprocess.run takes them.
+    """
+    import signal
+    if popen.pop("capture_output", False):
+        popen.update(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    given = popen.pop("input", None)
+    if given is not None:
+        popen["stdin"] = subprocess.PIPE
+    group = ({"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)} if os.name == "nt"
+             else {"start_new_session": True})
+    proc = subprocess.Popen(argv, **popen, **group)
+    try:
+        out, err = proc.communicate(given, timeout=timeout)
+    except (subprocess.TimeoutExpired, KeyboardInterrupt, SystemExit) as stopped:
+        unasked = None
+        try:
+            left = kill_turn(proc.pid, getattr(signal, "SIGKILL", signal.SIGTERM)) or []
+        except (OSError, subprocess.SubprocessError) as exc:
+            # No taskkill, or one that could not run: the program alone is ended, below, and what it started is
+            # neither stopped nor asked after. That is said, never read as nothing left (LEADS-GATE).
+            left, unasked = [], f"what it started could not be stopped or asked after ({' '.join(str(exc).split())})"
+        if os.name != "nt":
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            # The program leads a session of its own: a worker that moved into a group of its own and lost its parent
+            # is in neither the tree nor the group, and ran on, named nowhere. The session is read and stopped again
+            # until a reading finds nobody or STOP_PROOF_SECONDS have passed, while the program's pid is still its,
+            # unreaped, and what it leaves is named; a table that cannot be read is said (LEADS-GATE-RUNS). It is a
+            # cleanup, not a boundary: a gate is the implementer's code, and one written to outlive it can
+            # (docs/threat-model.md).
+            strays, deadline = set(), time.time() + STOP_PROOF_SECONDS
+            while True:
+                found = _session_members(proc.pid)
+                if found is None:
+                    unasked = "; ".join(filter(None, [unasked, "the process table could not be read for the rest of "
+                                                                "its session, which may still run"]))
+                    break
+                for pid in found:
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+                strays.update(found)
+                if not found or time.time() >= deadline:
+                    break
+                time.sleep(0.05)
+            left = sorted(set(left) | set(_still_running(strays)))
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        out = err = None
+        if isinstance(stopped, subprocess.TimeoutExpired):
+            try:
+                out, err = proc.communicate(timeout=STOP_PROOF_SECONDS)
+            except (OSError, ValueError, subprocess.TimeoutExpired):
+                pass                                      # a holder outside the group keeps the pipes: closed below
+        for stream in (proc.stdin, proc.stdout, proc.stderr):
+            if stream is not None:
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+        try:
+            proc.wait(timeout=STOP_PROOF_SECONDS)
+        except subprocess.TimeoutExpired:
+            pass
+        if not isinstance(stopped, subprocess.TimeoutExpired):
+            raise
+        expired = subprocess.TimeoutExpired(argv, timeout, output=out, stderr=err)
+        expired.left = left
+        expired.unasked = unasked
+        raise expired from None
+    except BaseException:
+        # Anything else that broke the reading ends the program alone, as subprocess.run ends it: the tree is stopped
+        # for a timeout or an interrupt, what this is for (LEADS-GATE-RUNS).
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        raise
+    return subprocess.CompletedProcess(argv, proc.returncode, out, err)
+
+
+def _session_members(sid):
+    """Every process of session `sid` the process table names, but this one; None where the table cannot be read
+    (LEADS-GATE-RUNS)."""
+    from . import procs
+    try:
+        procs.refresh()
+        pids = procs.all_pids()
+    except procs.TableUnreadable:
+        return None
+    members = []
+    for pid in pids:
+        if pid == os.getpid():
+            continue
+        try:
+            if os.getsid(pid) == sid:
+                members.append(pid)
+        except OSError:
+            pass
+    return members
 
 
 def sweep_orphans(pids, grace=3.0):

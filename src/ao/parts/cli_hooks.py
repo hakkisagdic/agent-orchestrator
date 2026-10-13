@@ -48,18 +48,27 @@ def _hook_git_env():
 
 
 def _hook_git(cwd, *args, timeout=15, extra_env=None):
-    """Run one literal-path Git query without a shell; return the byte result."""
+    """Run one literal-path Git query without a shell; return the byte result.
+
+    Git leads a process group of its own, so a timeout stops it with whatever it started: the hook
+    `git hook run` runs for the execution proof ran on after Git alone was killed, and held the
+    pipes this reads (LEADS-GATE).
+    """
     env = _hook_git_env()
     if extra_env:
         env.update(extra_env)
     try:
-        return subprocess.run(
-            [A.git_binary(), "--literal-pathspecs", "-C", str(cwd), *args],
+        return A.run_as_group(
+            [A.git_binary(), "--literal-pathspecs", "-C", str(cwd), *args], timeout,
             env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            timeout=timeout,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise _HookResolutionError(f"git query failed: {exc}") from exc
+        left, unasked = getattr(exc, "left", None), getattr(exc, "unasked", None)
+        raise _HookResolutionError(
+            f"git query failed: {exc}"
+            + (f"; {len(left)} process(es) it started still run after it was stopped: {left}" if left else "")
+            + (f"; {unasked}" if unasked else "")
+        ) from exc
 
 
 def _hook_output_path(result, label):

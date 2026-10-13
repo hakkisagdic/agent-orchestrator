@@ -85,13 +85,15 @@ def test_a_status_read_asks_git_without_a_shell_and_reads_what_the_shell_read(pr
              for place in places}
     toplevel = A.sh("git rev-parse --show-toplevel", cwd=str(empty / "sub"))
     started = []
-    real_run = subprocess.run
+    real_popen = subprocess.Popen
 
-    def spy(*args, **kwargs):
-        started.append(bool(kwargs.get("shell")))
-        return real_run(*args, **kwargs)
+    class Spy(real_popen):
+        # Every process started, subprocess.run's and a Git query's own group alike (LEADS-GATE-RUNS).
+        def __init__(self, *args, **kwargs):
+            started.append(bool(kwargs.get("shell")))
+            super().__init__(*args, **kwargs)
 
-    monkeypatch.setattr(subprocess, "run", spy)
+    monkeypatch.setattr(subprocess, "Popen", Spy)
     for place in places:
         log, status = shell[place]
         state = A.git_state(place)

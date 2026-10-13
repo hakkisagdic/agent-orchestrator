@@ -83,14 +83,16 @@ def _places(project, tmp_path):
 
 
 def _shell_flags(monkeypatch):
-    """Whether each subprocess.run from here on was asked for a shell."""
-    started, real_run = [], subprocess.run
+    """Whether each process started from here on was asked for a shell: subprocess.run starts one through Popen, and
+    a Git query in a process group of its own starts its own (LEADS-GATE-RUNS)."""
+    started, real_popen = [], subprocess.Popen
 
-    def run(*args, **kwargs):
-        started.append(bool(kwargs.get("shell")))
-        return real_run(*args, **kwargs)
+    class Popen(real_popen):
+        def __init__(self, *args, **kwargs):
+            started.append(bool(kwargs.get("shell")))
+            super().__init__(*args, **kwargs)
 
-    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "Popen", Popen)
     return started
 
 

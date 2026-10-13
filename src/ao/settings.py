@@ -17,6 +17,8 @@ from collections import namedtuple
 UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 Setting = namedtuple("Setting", "default kind minimum maximum scope text")
+# The longest a gate may run, in seconds: a longer wait overflowed once the machine lock was held (LEADS-GATE).
+GATE_TIMEOUT_MAX = 7 * 24 * 3600
 
 
 class Location(str):
@@ -133,8 +135,8 @@ SETTINGS = {
         None, Location, None, None, "project",
         "the one private repository the message store is pushed to as refs/mail/<project>; none: not synced"),
     "gates.default_timeout": Setting(
-        600, int, 1, None, "project",
-        "seconds a gate may run when its own definition names no timeout"),
+        600, int, 1, GATE_TIMEOUT_MAX, "project",
+        "seconds a gate may run when its own definition names no timeout, at most a week"),
     "gates.coverage_min_files": Setting(
         5, int, 1, None, "project",
         "source files of one toolchain a top-level tree must hold before a gate must exercise it"),

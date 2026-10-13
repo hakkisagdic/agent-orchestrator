@@ -112,8 +112,17 @@ def _judge_gate(g, out, code):
     counts = None
 
     if g.get("expect") == "empty":
-        passed = not out.strip()
-        detail = "clean" if passed else " ".join(out.split())[:120]
+        # What it prints decides, and it counts only where the command exited 0, or with a code the gate declares
+        # in `ok_exit` - grep and git grep exit 1 for finding nothing, so a sweep with them declares [0, 1]. No code
+        # is taken for an answer unsaid: grep exits 2 for an error, and `grep -R '[' src 2>/dev/null` printed
+        # nothing, measured nothing and passed, as did a program whose silent 1 is its failure (LEADS-GATE).
+        answered = _gate_ok_exits(g)
+        ran = isinstance(code, int) and not isinstance(code, bool) and code in answered
+        passed = ran and not out.strip()
+        detail = ("clean" if passed else " ".join(out.split())[:120] if out.strip()
+                  else f"exit {code} and nothing printed: the command failed rather than found nothing (a sweep "
+                       f"counts on {', '.join(map(str, sorted(answered)))}; a program that answers otherwise is "
+                       "declared with ok_exit)")
     else:
         # The exit code decides; counts come only from the runner's closing
         # summary, never from the first match in output the implementer controls (#70).
@@ -139,6 +148,108 @@ def _judge_gate(g, out, code):
         else:
             detail = f"exit {code}"
     return passed, detail, counts
+
+
+def _gate_ok_exits(g):
+    """The exit codes an `expect: empty` gate's command answers with when it found nothing: 0, and the ones the gate
+    declares in `ok_exit` (LEADS-GATE)."""
+    declared = g.get("ok_exit")
+    return {0} | (set(declared) if isinstance(declared, list) else set())
+
+
+def _run_gate(cfg, g, cwd):
+    """(what one gate printed, its exit code): its command line run in `cwd`, as `ao verify` and `ao merge-check` run it.
+
+    In Windows' own cmd.exe, never one found in the current directory (WINDOWS-NO-CWD-EXEC); what that
+    shell runs is the project's, as on POSIX. It leads a process group of its own, so a timeout stops
+    it with whatever it started (A.run_as_group): a gate's shell was killed alone and its test workers
+    ran on, loading the machine after the run had let go of the lock they ran under (LEADS-GATE). A
+    SIGTERM or SIGHUP sent to ao stops the gate as Ctrl-C does, since its group hears neither.
+    """
+    timeout = g.get("timeout") or S.get(cfg, "gates.default_timeout")
+    saved = A._hear_stop_signals()
+    try:
+        ran = A.run_as_group(g["run"], timeout, shell=True, cwd=cwd, capture_output=True, text=True,
+                             encoding=UTF8, errors="replace", executable=A.shell_program())
+    except subprocess.TimeoutExpired as expired:
+        left, unasked = getattr(expired, "left", None), getattr(expired, "unasked", None)
+        return ("timed out" + (f"; {len(left)} process(es) it started still run after it was stopped: {left} - "
+                               "stop them by hand" if left else "")
+                + (f"; {unasked} - look for them and stop them by hand" if unasked else ""), 124)
+    except OSError as exc:
+        # A command line the system cannot start - one past ARG_MAX, a shell that is gone - is the gate's failure,
+        # recorded as its answer, where it raised once the machine lock was held (LEADS-GATE-RUNS).
+        return f"could not start: {' '.join(str(exc).split())[:200]}", 127
+    finally:
+        A._restore_signals(saved)
+    return (ran.stdout or "") + (ran.stderr or ""), ran.returncode
+
+
+def _profile_gates(spec, profile, cfg=None):
+    """(the names of the gates `profile` runs, why .ao/gates.json cannot run them); ([], None) for a profile it does not
+    declare (LEADS-GATE).
+
+    The file is the implementer's to write, and every shape a run reads is checked before the machine
+    lock is taken: a file that was not an object, a profile that was not a list of names, a gate it
+    named that was not there or had no command, a timeout that was not a number - each raised in the
+    middle of `ao verify`, once the lock was held, where it is now one line and exit 2.
+    """
+    if not isinstance(spec, dict):
+        return [], "it is not a JSON object"
+    profiles, gates = spec.get("profiles", {}), spec.get("gates", {})
+    if not isinstance(profiles, dict) or not isinstance(gates, dict):
+        return [], "its profiles and gates are not both JSON objects"
+    if not isinstance(profile, str):
+        return [], f"its default_profile {profile!r} is not a name"
+    if profile not in profiles:
+        return [], None
+    names = profiles[profile]
+    # A profile that is there is a list of names, an empty one too: `""` read as no profile at all (LEADS-GATE).
+    if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
+        return [], f"profile {profile} is not a list of gate names"
+    for name in names:
+        why = _gate_shape_problem(gates.get(name))
+        if why:
+            return [], f"profile {profile} runs gate {name}, and {why}"
+    untimed = next((name for name in names if gates[name].get("timeout") is None), None)
+    if untimed is not None and cfg is not None:
+        # The default a gate with no timeout runs under is held to what a gate's own is held to: one past a week was
+        # passed over for 600 seconds, where the gates file is refused (LEADS-GATE).
+        unusable = S.resolve(cfg, "gates.default_timeout")[2]
+        if unusable:
+            return [], f"profile {profile} runs gate {untimed} with no timeout of its own, and {unusable}"
+    return names, None
+
+
+def _gate_shape_problem(g):
+    """Why one gate's definition is not one a run reads, or None (LEADS-GATE)."""
+    if g is None:
+        return "no gate defines it"
+    if not isinstance(g, dict):
+        return "it is not a JSON object"
+    if not isinstance(g.get("run"), str) or not g["run"].strip():
+        return "it has no command in run"
+    if "\x00" in g["run"]:
+        return "its command holds a NUL character, which no command line can carry"
+    timeout = g.get("timeout")
+    if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+                                or not 0 < timeout <= S.GATE_TIMEOUT_MAX):
+        # Zero was taken, then read as no timeout at all and replaced by the default; 1e308 was taken, then
+        # overflowed the wait once the machine lock was held (LEADS-GATE).
+        return "its timeout is not a number of seconds above zero and at most a week"
+    ok_exit = g.get("ok_exit")
+    if ok_exit is not None and not (isinstance(ok_exit, list) and ok_exit and all(
+            isinstance(code, int) and not isinstance(code, bool) and 0 <= code <= 125 for code in ok_exit)):
+        return "its ok_exit is not a list of the exit codes 0 to 125 its command answers with"
+    for key in ("expect", "summary"):
+        if g.get(key) is not None and not isinstance(g[key], str):
+            return f"its {key} is not text"
+    min_tests = g.get("min_tests")
+    # A whole number of tests or nothing: `[]` and `""` read as zero and the gate passed without its floor, and
+    # 1e309 read as infinity, which no int holds (LEADS-GATE).
+    if min_tests is not None and (isinstance(min_tests, bool) or not isinstance(min_tests, int) or min_tests < 0):
+        return "its min_tests is not a whole number of tests"
+    return None
 
 
 def _take_gate_lock(cfg, wait):
@@ -232,9 +343,13 @@ def cmd_merge_check(cfg, args):
     except (OSError, ValueError) as exc:
         print(f"{C['red']}no usable .ao/gates.json{C['reset']}: {exc}")
         return 2
-    profiles = spec.get("profiles") or {}
-    profile = args.profile or ("full" if "full" in profiles else spec.get("default_profile", "quick"))
-    names = profiles.get(profile)
+    declared = spec if isinstance(spec, dict) else {}
+    profiles = declared.get("profiles") if isinstance(declared.get("profiles"), dict) else {}
+    profile = args.profile or ("full" if "full" in profiles else declared.get("default_profile", "quick"))
+    names, problem = _profile_gates(spec, profile, cfg)
+    if problem:
+        print(f"{C['red']}no usable .ao/gates.json{C['reset']}: {problem}")
+        return 2
     if not names:
         print(f"unknown profile {profile}; have: {', '.join(profiles)}")
         return 2
@@ -286,15 +401,7 @@ def cmd_merge_check(cfg, args):
             g = spec["gates"][name]
             print(f"{C['dim']}▶ {name}{C['reset']}  {g['run']}")
             started = time.time()
-            try:
-                # The project's command line runs in Windows' own cmd.exe, never one found in the current
-                # directory (WINDOWS-NO-CWD-EXEC); what that shell runs is the project's, as on POSIX.
-                r = subprocess.run(g["run"], shell=True, cwd=result_dir, capture_output=True, text=True,
-                                   encoding=UTF8, errors="replace", executable=A.shell_program(),
-                                   timeout=g.get("timeout") or S.get(cfg, "gates.default_timeout"))
-                out, code = (r.stdout + r.stderr), r.returncode
-            except subprocess.TimeoutExpired:
-                out, code = "timed out", 124
+            out, code = _run_gate(cfg, g, result_dir)
             passed, detail, counts = _judge_gate(g, out, code)
             ok = ok and passed
             print(f"  {C['green'] + 'pass' if passed else C['red'] + 'FAIL'}{C['reset']}  {detail}")
@@ -333,7 +440,6 @@ def cmd_verify(cfg, args):
     so a change to the index during the wait is not read as one made while the gates ran.
     """
     import json as _json
-    import subprocess
     root = cfg["root"]
     _urgent_banner(cfg)
     gates_file = os.path.join(root, ".ao", "gates.json")
@@ -341,11 +447,22 @@ def cmd_verify(cfg, args):
         print(f"{C['yellow']}No .ao/gates.json — nothing declared to verify.{C['reset']}")
         print(f"{C['dim']}See docs/gates.md for the shape.{C['reset']}")
         return 1
-    spec = _json.load(open(gates_file, encoding=UTF8))
-    profile = args.profile or spec.get("default_profile", "quick")
-    names = spec.get("profiles", {}).get(profile)
+    try:
+        with open(gates_file, encoding=UTF8) as fh:
+            spec = _json.load(fh)
+    except (OSError, ValueError) as exc:
+        # Said in one line before the lock is taken, as `ao merge-check` says it, where it raised (LEADS-GATE).
+        print(f"{C['red']}no usable .ao/gates.json{C['reset']}: {exc}")
+        return 2
+    declared = spec if isinstance(spec, dict) else {}
+    profile = args.profile or declared.get("default_profile", "quick")
+    names, problem = _profile_gates(spec, profile, cfg)
+    if problem:
+        print(f"{C['red']}no usable .ao/gates.json{C['reset']}: {problem}")
+        return 2
     if not names:
-        print(f"unknown profile {profile}; have: {', '.join(spec.get('profiles', {}))}")
+        profiles = declared.get("profiles")
+        print(f"unknown profile {profile}; have: {', '.join(profiles if isinstance(profiles, dict) else [])}")
         return 1
     # The record names what ran, so a later edit to gates.json cannot inherit
     # this result (#61).
@@ -373,14 +490,7 @@ def cmd_verify(cfg, args):
         g = spec["gates"][name]
         print(f"{C['dim']}▶ {name}{C['reset']}  {g['run']}")
         started = time.time()
-        try:
-            # In Windows' own cmd.exe, never one found in the current directory (WINDOWS-NO-CWD-EXEC).
-            r = subprocess.run(g["run"], shell=True, cwd=root, capture_output=True,
-                               text=True, encoding=UTF8, errors="replace", executable=A.shell_program(),
-                               timeout=g.get("timeout") or S.get(cfg, "gates.default_timeout"))
-            out, code = (r.stdout + r.stderr), r.returncode
-        except subprocess.TimeoutExpired:
-            out, code = "timed out", 124
+        out, code = _run_gate(cfg, g, root)
         took = int(time.time() - started)
         passed, detail, counts = _judge_gate(g, out, code)
         ok = ok and passed
@@ -443,7 +553,7 @@ def cmd_verify(cfg, args):
     harness = _verify_harness_config(root)
 
     revs = A.reviews(root, cfg["reviews"], limit=1)
-    rec = {"id": f"V-{int(time.time())}", "at": datetime.now().isoformat(timespec="seconds"),
+    rec = {"id": _verification_id(root), "at": datetime.now().isoformat(timespec="seconds"),
            "schema": 2, "profile": profile, "gates_digest": gates_digest,
            "by": "ao verify", "passed": ok,
            "gates": results, "plan_drift": drift,
@@ -479,6 +589,28 @@ def cmd_verify(cfg, args):
         col = C["green"] if "APPROVED" in (revs[0][1] or "").upper() else C["yellow"]
         print(f"{C['dim']}newest review:{C['reset']} {col}{revs[0][1]}{C['reset']} ({revs[0][0]})")
     return 0 if ok else 1
+
+
+def _verification_id(root):
+    """A verification's id: V- and the millisecond it is minted in, above the newest one recorded (LEADS-GATE).
+
+    It was the second, and two runs in one second - two quick runs under one `ao lock`, on a machine
+    whose pressure is not read - or a run after the clock stepped back recorded two verifications
+    under one id, which a grant, a commit's Ao-Verification trailer and a report each name.
+    A.unique_ms keeps one process's ids apart, and the newest id in the ledger keeps every run above
+    the runs before it.
+    """
+    # Three digits of the process's id after the millisecond: two verifications under one held lock read the same
+    # newest id in the same millisecond and recorded two runs under one id; each now goes above it by its own.
+    salt = os.getpid() % 1000
+    value = A.unique_ms() * 1000 + salt
+    try:
+        newest = str((A.latest_verification(root) or {}).get("id") or "")
+    except Exception:
+        newest = ""                       # an unreadable ledger refuses the record itself
+    found = A.re.fullmatch(r"V-([0-9]+)", newest)
+    above = (int(found.group(1)) // 1000 + 1) * 1000 + salt if found else value
+    return f"V-{max(value, above)}"
 
 
 def _verify_harness_config(root):

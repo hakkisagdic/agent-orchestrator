@@ -65,6 +65,11 @@ The rule that makes this worth writing: **commit authority is granted against a
 verification id, not against a report.** Afterwards, "why was this allowed to land" has a
 row, with the numbers, and the name of whoever measured them.
 
+*In ao since slice LEADS-GATE: an id `ao verify` writes is `V-` and the millisecond it was minted,
+above the newest id in the ledger. It was the second, and two runs in one second, or a run after the
+clock stepped back, recorded two verifications under one id, which a grant, a commit's
+`Ao-Verification` trailer and a report each name.*
+
 ## Authority chain
 
 `.ao/ledger/authority.jsonl` is stricter than the other ledgers because its newest grant

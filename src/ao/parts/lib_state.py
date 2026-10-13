@@ -455,7 +455,18 @@ def record_verification(root, record):
     """
     from .storage import append_chained_jsonl
     path = os.path.join(root, ".ao", "ledger", "verifications.jsonl")
-    row = append_chained_jsonl(path, scan_record(record), VERIFICATION_CHAIN, legacy_prefix=True)
+
+    def above_every_recorded(rows):
+        # Under the ledger's lock, where writers take turns: two runs that minted one id outside it - under one held
+        # machine lock, in one millisecond - recorded two verifications under it, which a grant names (LEADS-GATE).
+        taken = [int(found.group(1)) for found in (re.fullmatch(r"V-([0-9]+)", str(row.get("id") or ""))
+                                                   for row in rows if isinstance(row, dict)) if found]
+        mine = re.fullmatch(r"V-([0-9]+)", str(record.get("id") or ""))
+        return {"id": f"V-{max(taken) + 1}"} if mine and taken and int(mine.group(1)) <= max(taken) else {}
+
+    row = append_chained_jsonl(path, scan_record(record), VERIFICATION_CHAIN, legacy_prefix=True,
+                               prepare=above_every_recorded)
+    record["id"] = row.get("id")                        # the id it went under, which its caller reports
     emit_event(root, "verification", {"id": row.get("id"), "passed": row.get("passed"), "profile": row.get("profile")})
     return row
 

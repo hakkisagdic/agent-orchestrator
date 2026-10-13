@@ -598,14 +598,19 @@ def filter_probe_text(result):
 
 
 def _git_output(root, *args, timeout=60):
-    """Run git without a shell and return bytes, failing closed on an unreadable tree."""
+    """Run git without a shell and return bytes, failing closed on an unreadable tree.
+
+    In a process group of its own, as every Git query of authority's is: a timeout stops git with what it started -
+    a hook or a filter a repository configures - where it stopped git alone (LEADS-GATE-RUNS).
+    """
     try:
-        result = subprocess.run(
-            [git_binary(), *args], cwd=root, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, timeout=timeout,
-        )
+        result = run_as_group([git_binary(), *args], timeout, cwd=root, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise RuntimeError(f"cannot measure git tree: {exc}") from exc
+        left, unasked = getattr(exc, "left", None), getattr(exc, "unasked", None)
+        raise RuntimeError(f"cannot measure git tree: {exc}"
+                           + (f"; {len(left)} process(es) it started still run after it was stopped: {left}"
+                              if left else "") + (f"; {unasked}" if unasked else "")) from exc
     if result.returncode:
         detail = result.stderr.decode(UTF8, "replace").strip()[:240]
         raise RuntimeError(f"cannot measure git tree: {detail or 'git failed'}")
@@ -622,8 +627,9 @@ def _git_text(cwd, *args, timeout=20):
     """
     argv = [git_binary(), *args]
     try:
-        result = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, encoding=UTF8,
-                                errors="replace", timeout=timeout)
+        # In a process group of its own, as every Git query is: a timeout stops git with what it started (LEADS-GATE-RUNS).
+        result = run_as_group(argv, timeout, cwd=cwd, capture_output=True, text=True, encoding=UTF8,
+                              errors="replace")
     except Exception:
         return ""
     return result.stdout.strip()
@@ -1734,11 +1740,13 @@ def merge_result_tree(root, into, branch):
     RuntimeError when git cannot compute it at all (merge-tree --write-tree needs git 2.38).
     """
     try:
-        result = subprocess.run([git_binary(), "merge-tree", "--write-tree", "--name-only", "--no-messages",
-                                 into, branch], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                timeout=120)
+        # In a process group of its own, as every Git query of authority's is: a merge driver the repository
+        # configures can start a worker that holds git's pipes past its time (LEADS-GATE).
+        result = run_as_group([git_binary(), "merge-tree", "--write-tree", "--name-only", "--no-messages",
+                               into, branch], 120, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise RuntimeError(f"cannot compute the merge: {exc}") from exc
+        unasked = getattr(exc, "unasked", None)
+        raise RuntimeError(f"cannot compute the merge: {exc}" + (f"; {unasked}" if unasked else "")) from exc
     lines = result.stdout.decode(UTF8, "replace").splitlines()
     if result.returncode == 0 and lines:
         return lines[0].strip(), None
