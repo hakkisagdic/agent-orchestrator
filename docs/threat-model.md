@@ -51,6 +51,14 @@ A finding that needs one of these assumptions is a hardening note, not a blocker
 - A repository before the commit that tracks its `.ao-project`. Enrollment is that commit: until it
   lands the marker is only staged, and an agent can unstage it and commit unchecked, with no race at all.
   The person commits the marker before an agent works in a new repository.
+- A gate's own code running on after ao stops it. `.ao/gates.json` names the project's checks, the
+  implementer writes it, and `ao verify` runs what it names as the person, by design: a test suite is
+  code. ao stops a gate past its time with what it can find of it - its process tree, its group, its
+  session - so that a suite whose workers outlive its shell does not load the machine after the lock is
+  let go; a gate written to outlive that stop - a worker that starts a session of its own, or forks
+  faster than ao reads the process table - is code the implementer chose to run, and no reading of the
+  table bounds it. The machine lock schedules heavy runs; it is not a boundary. What holds is what a
+  verification binds: the gate definitions it ran, and the tree it ran them on.
 - A vendor command's own bug that ao cannot observe. Where one of ao's guarantees rests on a vendor's
   behaviour, ao measures it and records the measurement, as KIRO-READONLY does for kiro-cli.
 
