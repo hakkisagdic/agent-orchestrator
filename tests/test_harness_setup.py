@@ -49,7 +49,9 @@ def test_a_harness_no_code_names_is_detected_and_set_up_from_its_adapter_alone(p
     assert skillkit.rule_file_names(root)[-1] == "AGENTS.md" and "NEWCOMER.md" in skillkit.rule_file_names(root)
     assert ".newcomer/rules" in skillkit.steering_dirs(root)
     paths, mcp_files = skillkit.ao_files(root)
-    assert ".newcomer/rules/ao-coordination.md" in paths
+    # Its own layer names the files ao wrote for it, and the removal names them and leaves them (REMOVE-SHIPPED).
+    assert ".newcomer/rules/ao-coordination.md" not in paths
+    assert ".newcomer/rules/ao-coordination.md" in skillkit.layer_ao_files(root)
     assert (os.path.join(".newcomer", "mcp.json"), "ao", False) in mcp_files
 
     assert skillkit.rules_wired(root) is True          # its steering directory holds the playbook
@@ -76,6 +78,7 @@ def test_a_setup_path_that_leaves_the_project_is_written_nowhere_and_never_remov
     assert not os.path.exists(os.path.join(root, "~"))
     paths, mcp_files = skillkit.ao_files(root)
     assert "../victim.md" not in paths and "~/x.md" not in paths
+    assert "../victim.md" not in skillkit.layer_ao_files(root) and "~/x.md" not in skillkit.layer_ao_files(root)
     assert all(not path.startswith("~") for path, _, _ in mcp_files)
 
 
@@ -160,3 +163,31 @@ def test_the_shipped_harnesses_declare_what_init_used_to_hardcode(project, monke
     manual = skillkit.register_mcp(root, {"codex"}, exe="/x/ao")["codex"]
     assert manual.splitlines()[0] == "manual: add to ~/.codex/config.toml"
     assert 'args = ["-C", "%s", "mcp", "serve"]' % root.replace("\\", "\\\\") in manual    # a TOML string (#71)
+
+
+def test_a_path_only_a_layer_names_as_ao_s_is_named_by_the_removal_and_never_deleted(project, capsys):
+    """REMOVE-SHIPPED: a project adapter an agent wrote, its `ao_files` naming the source, had `ao remove --yes`
+    delete it; a layer that overrides a shipped adapter adds nothing to what is deleted either."""
+    from ao import cli
+    root = project["root"]
+    os.makedirs(os.path.join(root, "src"))
+    open(os.path.join(root, "src", "app.py"), "w", encoding="utf-8").write("print('mine')\n")
+    open(os.path.join(root, "README.md"), "w", encoding="utf-8").write("# mine\n")
+    _declare(root, dict(NEWCOMER, directives=dict(NEWCOMER["directives"], ao_files=["src/", "README.md"])))
+    kiro = json.load(open(os.path.join(cli.A.adapters_dir(), "kiro.json"), encoding="utf-8"))
+    kiro["directives"]["ao_files"] = kiro["directives"]["ao_files"] + ["src/app.py"]
+    _declare(root, kiro)
+
+    paths, _ = skillkit.ao_files(root)
+    assert "src/" not in paths and "README.md" not in paths and "src/app.py" not in paths
+    assert ".kiro/steering/ao-playbook.md" in paths                       # the shipped adapter's own, as before
+    assert {"src/", "README.md", "src/app.py"} <= set(skillkit.layer_ao_files(root))
+
+    args = cli.build_parser().parse_args(["remove"])
+    assert cli.cmd_remove(project, args) == 0
+
+    out = capsys.readouterr().out
+    plan = out.split("hook files only when", 1)[0]
+    assert "   src/\n" not in plan and "README.md" not in plan
+    assert "left: src/, which only a user's or a project's adapter layer names as ao's" in out
+    assert "left: README.md, which only" in out and "left: src/app.py, which only" in out

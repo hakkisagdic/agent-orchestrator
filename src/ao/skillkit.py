@@ -350,15 +350,34 @@ def register_mcp(root, agents, exe=None, ours=None):
 
 
 def ao_files(root=None):
-    """(paths, [(mcp file, server, remove when empty)]) ao may have written for any harness, for `ao remove`."""
+    """(paths, [(mcp file, server, remove when empty)]) ao may have written for any harness, for `ao remove`.
+
+    The paths are those the adapter the package ships under each id declares. A user's or a project's layer is a
+    file the agents it describes can write, and `"ao_files": ["src/"]` there had the removal delete the project's
+    source: what a layer names beyond them is layer_ao_files', which the removal names and leaves (REMOVE-SHIPPED).
+    An MCP file stays every adapter's, since only the `ao` entry that runs ao's server is taken from it.
+    """
     paths, mcp_files = [], []
-    for _, adapter in setup_adapters(root):
-        directives = adapter.get("directives") or {}
-        paths += [path for path in directives.get("ao_files") or [] if path not in paths and not _escapes(path)]
+    shipped = A.package_adapters()
+    for ident, adapter in setup_adapters(root):
+        own = ((shipped.get(ident) or {}).get("directives") or {}).get("ao_files") or []
+        paths += [path for path in own if path not in paths and not _escapes(path)]
         mcp = adapter.get("mcp") or {}
         if mcp.get("file") and not _escapes(mcp["file"]):
             mcp_files.append((os.path.join(*mcp["file"].split("/")), "ao", bool(mcp.get("remove_when_empty"))))
     return paths, mcp_files
+
+
+def layer_ao_files(root=None):
+    """The paths a user's or a project's adapter layer names as ao's and no shipped adapter does: `ao remove` names
+    them and deletes none, since an agent can write the layer (REMOVE-SHIPPED)."""
+    shipped, _ = ao_files(root)
+    out = []
+    for _, adapter in setup_adapters(root):
+        for path in (adapter.get("directives") or {}).get("ao_files") or []:
+            if isinstance(path, str) and path not in shipped and path not in out and not _escapes(path):
+                out.append(path)
+    return out
 
 
 def next_steps(agents, registered):

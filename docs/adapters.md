@@ -323,7 +323,7 @@ repository and where ao's files for it go are fields of its adapter, and core re
 | `directives.steering_dir`, `directives.skills_dir` | directories the harness reads by itself | `ao doctor`, `ao content add` |
 | `directives.agents_dir`, `directives.agent_format` | where the harness reads agent definitions, and their format: `extension`, the fields that run a command (`commands`, taken out), those that grant trust (`grants`, named) and the one that loads context (`context`, named when empty) | `ao content add` |
 | `directives.steering_inclusion`, `directives.hook_files` | which steering inclusion the harness honours (`field`, `default`, `honoured`, and `unhonoured`, the reason it gives), and the header a skill becomes a steering file under (`skill_header`); what a hook file's suffix says of its format | `ao content add` |
-| `directives.ao_files` | every path ao may have written for this harness | `ao remove` |
+| `directives.ao_files` | every path ao may have written for this harness; `ao remove` deletes the ones the package's adapter names, and names and leaves those only another layer does | `ao remove` |
 | `mcp` | `{file, key, extra, register, remove_when_empty}` or `{manual, snippet}`; a snippet's `{exe}` and `{root}` are written escaped for a double-quoted TOML string, and its `{args}` as a list of such strings: the server's arguments, with the role the registration names ([mcp.md](mcp.md#roles)) | `ao init`, `ao remove`, `ao uninstall` (the `ao` entry under `key`, the file itself only when nothing else is left in it) |
 
 A harness with no such fields is simply not set up: ao writes `.ao/PLAYBOOK.md` and prints the
@@ -334,7 +334,10 @@ Every path these fields name is held to the repository, since the project's laye
 can write: a path that is absolute, starts with `~`, or leaves through `..` or a link is written
 nowhere and never removed, and init says it was not written, so a harness whose MCP file lives in
 the home directory is given ao by hand. `mcp.register` is read from the package's adapters only:
-another layer names the file its server goes in, never a program init runs (HARNESS-SETUP-2).
+another layer names the file its server goes in, never a program init runs (HARNESS-SETUP-2). So is
+what `ao remove` deletes of `directives.ao_files`: a layer that named `"src/"` there had the removal
+delete the project's source, so a path only a user's or a project's layer names - for a harness of
+its own, or added to a shipped one's - is named by the removal and left for you (REMOVE-SHIPPED).
 
 ## Where a harness keeps its sessions is declared, not coded
 

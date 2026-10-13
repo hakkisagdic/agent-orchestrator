@@ -473,6 +473,12 @@ def cmd_remove(cfg, args):
           + (f"what ao archived in {_home_relative(archive)}/, " if owned and os.path.isdir(archive) else "")
           + f"other projects' and the machine's files in ~/.ao, "
           f"{' / '.join(skillkit.rule_file_names(root))} text (paste-in was yours){C['reset']}")
+    # What only a layer an agent can write names as ao's is named and left (REMOVE-SHIPPED).
+    for rel in skillkit.layer_ao_files(root):
+        if os.path.lexists(os.path.join(root, rel)):
+            print(f"   {C['dim']}left: {A.shown_text(rel)}, which only a user's or a project's adapter layer names "
+                  f"as ao's; ao deletes what an adapter it ships names, and you can delete it if ao wrote it"
+                  f"{C['reset']}")
     if not owned:
         print(f"   {C['dim']}nothing of ~/.ao: no .ao/ here, and the registry holds no project at this path"
               f"{C['reset']}")
