@@ -1003,7 +1003,7 @@ def _head_project_marker(root):
     head = _hook_git(root, "rev-parse", "--verify", "--quiet", "HEAD")
     if head.returncode:
         if not head.stdout and not head.stderr:
-            return {"status": "absent"}
+            return {"status": "absent", "unborn": True}
         detail = head.stderr.decode(UTF8, "replace").strip()[:160]
         return {
             "status": "invalid",
@@ -1232,6 +1232,44 @@ def _project_enrollment(root, index_file=None):
     elif headed["status"] == "canonical":
         source, marker = "head", headed
     else:
+        # A branch not born yet, with no marker staged: a repository whose history tracks the marker on any ref was
+        # enrolled, and an orphan branch with the marker unstaged is no way out of it; nor is deleting every ref
+        # that tracked it, where this machine recorded the project as enrolled (LEADS-GATE). Only a repository
+        # with neither is before its marker's first commit (docs/threat-model.md).
+        if headed.get("unborn"):
+            tracked = _hook_git(root, "log", "--all", "-1", "--format=%H", "--", PROJECT_MARKER)
+            recorded = A.enrollment_record(root)
+            why = None
+            if tracked.returncode:
+                why = "the repository's history cannot be read for its marker"
+            elif tracked.stdout.strip():
+                why = ("this branch is not born yet and stages no marker, but the repository's history tracks "
+                       f"{PROJECT_MARKER} on another branch; commit the marker on this branch, or switch back")
+            elif recorded is not None:
+                when = recorded.get("at")
+                why = ("this branch is not born yet and stages no marker, and no ref's history tracks one, but this "
+                       "machine recorded the project as enrolled"
+                       + (f" on {time.strftime('%Y-%m-%d', time.localtime(when))}"
+                          if isinstance(when, int) and not isinstance(when, bool) and when > 0 else "")
+                       + (f" (the record cannot be read: {recorded['unreadable']})" if recorded.get("unreadable")
+                          else "")
+                       + f": the refs that tracked {PROJECT_MARKER} were deleted - restore the branch that tracked it "
+                       "(git reflog names its last commit), or commit the marker on this branch")
+            if why:
+                return {"state": "broken", "detail": _project_refusal(why), "index": indexed, "head": headed}
+        else:
+            # Born, and tracking no marker: a branch whose history never tracked one - made from a commit before the
+            # marker's - in a repository this machine recorded as enrolled is no new repository either; one whose
+            # history did is a removal committed, and passes (LEADS-GATE-HOOK).
+            touched = _hook_git(root, "rev-list", "-n", "1", "HEAD", "--", PROJECT_MARKER)
+            recorded = A.enrollment_record(root) if touched.returncode == 0 and not touched.stdout.strip() else None
+            if recorded is not None:
+                return {"state": "broken", "detail": _project_refusal(
+                    f"this branch tracks no {PROJECT_MARKER} and descends from no commit that did, but this machine "
+                    "recorded the project as enrolled: a branch made from before the marker's commit - commit the "
+                    "marker on it, or switch back"
+                    + (f" (the record cannot be read: {recorded['unreadable']})" if recorded.get("unreadable")
+                       else "")), "index": indexed, "head": headed}
         legacy = _legacy_enrollment(root)
         if legacy is not None:
             legacy.update({"index": indexed, "head": headed})
@@ -1575,12 +1613,27 @@ def cmd_commit_check(cfg, args):
     if enrollment["state"] == "uninitialized":
         return 0
     if enrollment["state"] == "broken":
+        # Refused, and recorded as enrolled all the same: an orphan branch of an enrolled repository is read as
+        # broken while a ref still tells of the marker, and an agent can delete the ref next. A record that cannot be
+        # written is said with the refusal (LEADS-GATE-HOOK).
+        unkept = A.record_enrollment(root)
         print(f"{C['red']}{C['b']}COMMIT REFUSED{C['reset']}")
         print(f"  {C['red']}·{C['reset']} {enrollment['detail']}")
+        if unkept:
+            print(f"  {C['red']}·{C['reset']} this machine cannot record that the project is enrolled either, and a "
+                  f"branch not born yet would read as a new repository's: {unkept}")
         return 1
     probe_code = _commit_hook_probe_response(root)
     if probe_code is not None:
         return probe_code
+    # Kept outside the tree, for a branch not born yet to ask where no ref tracks the marker any more; a proof that
+    # the hook runs records nothing (LEADS-GATE).
+    unkept = A.record_enrollment(root)
+    if unkept:
+        print(f"{C['red']}{C['b']}COMMIT REFUSED{C['reset']}")
+        print(f"  {C['red']}·{C['reset']} this machine cannot record that the project is enrolled, and a branch not "
+              f"born yet would read as a new repository's: {unkept}")
+        return 1
     reasons = []
     strict = M.is_strict(cfg)
     matrix_resolution = None

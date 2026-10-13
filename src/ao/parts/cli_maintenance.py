@@ -79,15 +79,21 @@ def _remove_key(root):
     return (registered, True) if registered else (A.project_key(root), False)
 
 
-def _project_home_files(key):
-    """This project's files in ~/.ao that exist, named from PROJECT_FILES (SAFE-REMOVE).
+def _project_home_files(key, root=None):
+    """This project's files in ~/.ao that exist, named from PROJECT_FILES (SAFE-REMOVE), and the record that its
+    repository is enrolled (LEADS-GATE-HOOK).
 
     One path per file: a case-insensitive disk answers to a lower-cased name and to the
     name as it is, and both would otherwise be listed and removed as two files.
     """
     seen, found = set(), []
-    for name in A.project_file_names(key):
-        path = os.path.join(A.HOME, ".ao", name)
+    names = [os.path.join(A.HOME, ".ao", name) for name in A.project_file_names(key)]
+    if root is not None:
+        # The record is the repository's, whichever of its worktrees the project is removed from (LEADS-GATE-HOOK).
+        record = A.enrollment_record(root)
+        if record and record.get("repository"):
+            names.append(A.enrollment_record_path(root)[0])
+    for path in names:
         try:
             st = os.lstat(path)
         except OSError:
@@ -462,7 +468,7 @@ def cmd_remove(cfg, args):
     # Outside the tree, each thing by name, found as the removal below finds it (SAFE-REMOVE).
     for kind, name in _installed_jobs(key) if owned else []:
         print(f"   {kind} {name}")
-    for path in _project_home_files(key) if owned else []:
+    for path in _project_home_files(key, root) if owned else []:
         print(f"   {_home_relative(path)}")
     for name in _registry_names(root):
         print(f"   {_home_relative(A.project_registry_path())}: the `{name}` entry (other projects stay)")
@@ -585,7 +591,7 @@ def cmd_remove(cfg, args):
     # Exactly this project's files in ~/.ao, named by the table their writers name them from, and
     # its row of the registry, which stays for every other project (SAFE-REMOVE).
     removed = 0
-    for path in _project_home_files(key) if owned else []:
+    for path in _project_home_files(key, root) if owned else []:
         try:
             os.remove(path)
             removed += 1

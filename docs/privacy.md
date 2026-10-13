@@ -84,7 +84,10 @@ written as `[redacted:<rule>]` ([safety.md](safety.md#7b-what-ao-writes-is-scann
   (`~/.ao/watchdog-<project>.json`, `~/.ao/cycles-<project>.jsonl`), its heartbeat, and the logs of the
   turns it started (`~/.ao/nudge-<project>.log`, `~/.ao/escalate-<project>.log`). Those logs hold what
   the agent CLIs printed, model output included; they stay on the machine, and what a notice quotes
-  from one is masked for anything shaped like a token first.
+  from one is masked for anything shaped like a token first. In the repository's own git directory,
+  `ao-enrolled.json` holds the project's path, that directory, and when ao first installed its hook or
+  checked a commit there, so a branch not born yet is still known as the enrolled repository's
+  ([safety](safety.md)).
 - `~/.ao/events.jsonl` - one line each time ao records a verification, submits a review or sees one
   end, grants commit authority, sends mail, or nudges or wakes an agent, for `ao events` to read; its
   oldest lines go past `retention.events_kb` ([surfaces.md](surfaces.md)).

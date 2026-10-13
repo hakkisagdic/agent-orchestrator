@@ -1,5 +1,5 @@
 #!/bin/sh
-# agent-orchestrator: ao-hook-v4 role=pre-commit binding=project-local
+# agent-orchestrator: ao-hook-v5 role=pre-commit binding=project-local
 initial_cwd=$(CDPATH= cd -- . && pwd -P)
 root="$initial_cwd"
 case ${GIT_INDEX_FILE-} in
@@ -7,9 +7,16 @@ case ${GIT_INDEX_FILE-} in
   *) GIT_INDEX_FILE="$initial_cwd/$GIT_INDEX_FILE"; export GIT_INDEX_FILE ;;
 esac
 unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_PREFIX GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_CEILING_DIRECTORIES GIT_DISCOVERY_ACROSS_FILESYSTEM GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
-if ! git --literal-pathspecs -C "$root" ls-files --error-unmatch -- .ao-project >/dev/null 2>&1 &&
-   ! git --literal-pathspecs -C "$root" cat-file -e HEAD:.ao-project 2>/dev/null; then
-  exit 0
+indexed=$(git --literal-pathspecs -C "$initial_cwd" ls-files -- .ao-project 2>/dev/null) || indexed=unread
+headed=
+git --literal-pathspecs -C "$initial_cwd" rev-parse --verify -q HEAD >/dev/null 2>&1 || headed=$?
+case $headed in
+  "") headed=$(git --literal-pathspecs -C "$initial_cwd" ls-tree --name-only HEAD -- .ao-project 2>/dev/null) || headed=unread ;;
+  1) headed=unborn ;;
+esac
+if [ -z "$indexed$headed" ]; then
+  headed=$(git --literal-pathspecs -C "$initial_cwd" log --all -1 --format=%H -- .ao-project 2>/dev/null) || headed=unread
 fi
+[ -n "$indexed$headed" ] || exit 0
 ao=$(command -v ao) || { echo 'agent-orchestrator: ao not found' >&2; exit 1; }
 exec "$ao" -C "$root" commit-check

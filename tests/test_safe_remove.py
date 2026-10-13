@@ -339,6 +339,7 @@ def test_status_doctor_and_prove_say_plainly_that_bin_sh_finds_no_ao_and_how_to_
     root = project["root"]
     with open(os.path.join(root, ".git", "hooks", "pre-commit"), "wb") as fh:
         fh.write(cli._render_local_hook("pre-commit", "."))
+    os.chmod(os.path.join(root, ".git", "hooks", "pre-commit"), 0o755)     # as install writes it (LEADS-GATE)
     detail = f"the hook exited 1 without AO's nonce-bound refusal proof: {cli.HOOK_AO_NOT_FOUND}"
     monkeypatch.setattr(cli, "_hook_execution_probe",
                         lambda inv: {"installed": False, "state": "not installed", "detail": detail, "exit": 1})

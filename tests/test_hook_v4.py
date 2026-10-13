@@ -112,10 +112,11 @@ def test_the_v3_hook_put_the_directory_before_a_drive_letter_index(tmp_path):
 
 def test_v4_is_the_v3_hook_with_its_version_and_the_drive_letter_arm_and_nothing_else():
     arm = (b'  ""|/*) ;;\n', b'  ""|/*|[A-Za-z]:[\\\\/]*) ;;\n')
-    pairs = [(cli._render_v3_local_hook(role, rel), cli._render_local_hook(role, rel))
+    # The v4 bodies are kept as the legacy ao reads them as since the v5 guard (LEADS-GATE).
+    pairs = [(cli._render_v3_local_hook(role, rel), cli._render_v4_local_hook(role, rel))
              for role in ("pre-commit", "pre-push") for rel in (".", "sub dir")]
     pairs += [(cli._render_v3_scoped_hook(role, ".", "/repo/.git", binding),
-               cli._render_scoped_hook(role, ".", "/repo/.git", binding))
+               cli._render_v4_scoped_hook(role, ".", "/repo/.git", binding))
               for role in ("pre-commit", "pre-push") for binding in ("shared", "external")]
 
     assert cli._render_v3_local_hook("pre-commit", ".") == V3_PRE_COMMIT
@@ -126,7 +127,7 @@ def test_v4_is_the_v3_hook_with_its_version_and_the_drive_letter_arm_and_nothing
 
 @pytest.mark.parametrize(("hooks_path", "fallback"), ((None, FALLBACK), (".githooks", None)),
                          ids=("git-directory", "hooks-path-in-the-tree"))
-def test_an_exact_v3_hook_reads_as_legacy_and_install_puts_v4_in_its_place(project, hooks_path, fallback):
+def test_an_exact_v3_hook_reads_as_legacy_and_install_puts_the_current_hook_in_its_place(project, hooks_path, fallback):
     root = project["root"]
     if hooks_path:
         _git(root, "config", "core.hooksPath", hooks_path)
@@ -147,11 +148,11 @@ def test_an_exact_v3_hook_reads_as_legacy_and_install_puts_v4_in_its_place(proje
         target = _active(after, role)
         assert target["static_state"] == "current-local (behavior unverified)"
         assert (hooks / role).read_bytes() == target["body"]
-        assert b"# agent-orchestrator: ao-hook-v4 " in target["body"]
+        assert b"# agent-orchestrator: ao-hook-v5 " in target["body"]
 
 
 @pytest.mark.skipif(os.name == "nt", reason=SHARED_HOOKS_REFUSED)
-def test_an_exact_v3_shared_hook_reads_as_legacy_and_install_puts_v4_in_its_place(project, tmp_path):
+def test_an_exact_v3_shared_hook_reads_as_legacy_and_install_puts_the_current_hook_in_its_place(project, tmp_path):
     root = project["root"]
     _git(root, "worktree", "add", "-q", "-b", "linked", str(tmp_path / "linked"))
     shared = cli._ao_hook_inventory(root)
@@ -171,4 +172,4 @@ def test_an_exact_v3_shared_hook_reads_as_legacy_and_install_puts_v4_in_its_plac
         target = _active(after, role)
         assert target["static_state"] == "current-scoped (behavior unverified)"
         assert (hooks / role).read_bytes() == target["body"]
-        assert b"# agent-orchestrator: ao-hook-v4 " in target["body"]
+        assert b"# agent-orchestrator: ao-hook-v5 " in target["body"]

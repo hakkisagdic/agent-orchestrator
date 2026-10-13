@@ -383,6 +383,7 @@ def _hook_repository_unset():
 
 
 def _hook_project_marker_guard():
+    """The guard of a v3 and a v4 hook, kept so that each reads as legacy and `ao hooks install` replaces it (LEADS-GATE)."""
     return (
         "if ! git --literal-pathspecs -C \"$root\" ls-files --error-unmatch -- "
         ".ao-project >/dev/null 2>&1 &&\n"
@@ -390,6 +391,48 @@ def _hook_project_marker_guard():
         "HEAD:.ao-project 2>/dev/null; then\n"
         "  exit 0\n"
         "fi\n"
+    )
+
+
+def _hook_enrollment_guard(top, root_rel):
+    """The lines that let a hook stand aside: only where Git, asked at `top`, the shell variable naming the top of the
+    working tree, answers that the project's .ao-project is neither in the index nor in HEAD (LEADS-GATE).
+
+    The v4 guard stood aside whenever both its queries failed, and they fail for more than a marker
+    that is not there. A project in a subdirectory whose directory an agent moved away failed both,
+    and so did one whose marker's deletion was staged: `HEAD:.ao-project` names a marker at the top
+    of the repository, not in the project's directory. Either way the hook let the commit through
+    unchecked. The marker is now asked for by its path from the top, which is there whatever became
+    of the project's directory, and each answer is read for what it says: the index lists no marker and
+    HEAD holds none. A branch not born yet, which `rev-parse --verify -q` says by exit 1 alone, goes on to
+    ao: an orphan branch of an enrolled repository is not a new repository, and whether the repository
+    is one only ao can say, from its history and from this machine's record that the project was enrolled,
+    since an agent can delete every ref whose history tracked the marker. A born branch that tracks no
+    marker - one made from a commit before the marker's - goes on to ao too while any ref's history tracks
+    one (LEADS-GATE-HOOK). Any other answer goes on to ao, which refuses what it cannot read; a hook that
+    finds no ao refuses.
+    """
+    import shlex
+    marker = shlex.quote(PROJECT_MARKER if root_rel in ("", ".") else f"{root_rel}/{PROJECT_MARKER}")
+    return (
+        f"indexed=$(git --literal-pathspecs -C \"{top}\" ls-files -- {marker} 2>/dev/null) || indexed=unread\n"
+        "headed=\n"
+        f"git --literal-pathspecs -C \"{top}\" rev-parse --verify -q HEAD >/dev/null 2>&1 || headed=$?\n"
+        "case $headed in\n"
+        f"  \"\") headed=$(git --literal-pathspecs -C \"{top}\" ls-tree --name-only HEAD -- {marker} 2>/dev/null)"
+        " || headed=unread ;;\n"
+        # Not born on this branch: ao is asked, which reads the repository's history and this machine's record of
+        # the project; Git alone cannot say, since an agent can delete every ref that tracked the marker (LEADS-GATE).
+        "  1) headed=unborn ;;\n"
+        "esac\n"
+        # Born, and tracking no marker: a branch made from a commit before the marker's is no new repository while any
+        # ref's history tracks one, and ao is asked. A project a person removed by hand, its hook left in place, asks
+        # ao too; `ao hooks uninstall` takes the hook (LEADS-GATE-HOOK).
+        "if [ -z \"$indexed$headed\" ]; then\n"
+        f"  headed=$(git --literal-pathspecs -C \"{top}\" log --all -1 --format=%H -- {marker} 2>/dev/null)"
+        " || headed=unread\n"
+        "fi\n"
+        "[ -n \"$indexed$headed\" ] || exit 0\n"
     )
 
 
@@ -543,8 +586,9 @@ def _hook_index_case():
     )
 
 
-def _render_local_hook(role, root_rel, fallback=None):
-    """Portable bytes for one project-local hook; no machine/family binding unless a fallback ao is named."""
+def _render_v4_local_hook(role, root_rel):
+    """Exact project-local body emitted before the hook stood aside only on Git's answer that no marker is tracked
+    (LEADS-GATE). Kept so that an installed v4 hook reads as legacy; a fallback ao is taken out before comparing."""
     import shlex
     suffix = "" if root_rel in ("", ".") else "/" + shlex.quote(root_rel)
     command = _role_command(role)
@@ -556,13 +600,14 @@ def _render_local_hook(role, root_rel, fallback=None):
         + _hook_index_case()
         + _hook_repository_unset()
         + _hook_project_marker_guard()
-        + _ao_lookup(fallback)
+        + _AO_LOOKUP
         + f"exec \"$ao\" -C \"$root\" {command}\n"
     ).encode(UTF8)
 
 
-def _render_scoped_hook(role, root_rel, family, directory_class, fallback=None):
-    """Family-bound bytes for a shared/external target; unknown routing is fail-open."""
+def _render_v4_scoped_hook(role, root_rel, family, directory_class):
+    """Exact shared/external body emitted before the hook stood aside only on Git's answer that no marker is tracked
+    (LEADS-GATE)."""
     import shlex
     suffix = "" if root_rel in ("", ".") else "/" + shlex.quote(root_rel)
     command = _role_command(role)
@@ -582,6 +627,50 @@ def _render_scoped_hook(role, root_rel, family, directory_class, fallback=None):
         + "top=$(CDPATH= cd \"$top\" 2>/dev/null && pwd -P) || exit 0\n"
         + f"root=\"$top\"{suffix}\n"
         + _hook_project_marker_guard()
+        + _AO_LOOKUP
+        + f"exec \"$ao\" -C \"$root\" {command}\n"
+    ).encode(UTF8)
+
+
+def _render_local_hook(role, root_rel, fallback=None):
+    """Portable bytes for one project-local hook; no machine/family binding unless a fallback ao is named."""
+    import shlex
+    suffix = "" if root_rel in ("", ".") else "/" + shlex.quote(root_rel)
+    command = _role_command(role)
+    return (
+        "#!/bin/sh\n"
+        f"# agent-orchestrator: ao-hook-v5 role={role} binding=project-local\n"
+        "initial_cwd=$(CDPATH= cd -- . && pwd -P)\n"
+        f"root=\"$initial_cwd\"{suffix}\n"
+        + _hook_index_case()
+        + _hook_repository_unset()
+        + _hook_enrollment_guard("$initial_cwd", root_rel)
+        + _ao_lookup(fallback)
+        + f"exec \"$ao\" -C \"$root\" {command}\n"
+    ).encode(UTF8)
+
+
+def _render_scoped_hook(role, root_rel, family, directory_class, fallback=None):
+    """Family-bound bytes for a shared/external target; unknown routing is fail-open."""
+    import shlex
+    suffix = "" if root_rel in ("", ".") else "/" + shlex.quote(root_rel)
+    command = _role_command(role)
+    return (
+        "#!/bin/sh\n"
+        f"# agent-orchestrator: ao-hook-v5 role={role} binding={directory_class}\n"
+        "initial_cwd=$(CDPATH= cd -- . && pwd -P)\n"
+        + _hook_index_case()
+        + _hook_repository_unset()
+        + "common=$(git --literal-pathspecs rev-parse --git-common-dir 2>/dev/null) || exit 0\n"
+        + "case $common in /*) ;; *) common=\"$initial_cwd/$common\" ;; esac\n"
+        + "common=$(CDPATH= cd \"$common\" 2>/dev/null && pwd -P) || exit 0\n"
+        + f"expected={shlex.quote(os.path.realpath(family))}\n"
+        + "[ \"$common\" = \"$expected\" ] || exit 0\n"
+        + "top=$(git --literal-pathspecs rev-parse --show-toplevel 2>/dev/null) || exit 0\n"
+        + "case $top in /*) ;; *) top=\"$initial_cwd/$top\" ;; esac\n"
+        + "top=$(CDPATH= cd \"$top\" 2>/dev/null && pwd -P) || exit 0\n"
+        + f"root=\"$top\"{suffix}\n"
+        + _hook_enrollment_guard("$top", root_rel)
         + _ao_lookup(fallback)
         + f"exec \"$ao\" -C \"$root\" {command}\n"
     ).encode(UTF8)
@@ -628,11 +717,13 @@ def _legacy_hook_role(data):
         return None
     version, declaration = markers[0][len(marker_prefix):].split(" role=", 1)
     # Each version renders its own exact bodies, so a hook an older ao installed reads as legacy and
-    # `ao hooks install` replaces it: a v3 hook took a drive-letter index for a relative one (HOOK-V4).
+    # `ao hooks install` replaces it: a v3 hook took a drive-letter index for a relative one (HOOK-V4),
+    # and a v4 hook stood aside when its marker queries failed (LEADS-GATE).
     renderers = {
         "2": (_render_v2_local_hook, _render_v2_scoped_hook),
         "3": (_render_v3_local_hook, _render_v3_scoped_hook),
-        "4": (_render_local_hook, _render_scoped_hook),
+        "4": (_render_v4_local_hook, _render_v4_scoped_hook),
+        "5": (_render_local_hook, _render_scoped_hook),
     }
     if version not in renderers:
         return None
@@ -707,16 +798,25 @@ def _classify_hook(path, role, local_body=None, scoped_body=None):
     if os.path.islink(path):
         return "foreign", False
     try:
-        data = open(path, "rb").read()
+        with open(path, "rb") as fh:
+            data = fh.read()
+            mode = os.fstat(fh.fileno()).st_mode
         data.decode(UTF8)
     except (OSError, UnicodeError):
         return "foreign", False
     # A body that names the ao which installed it is the same intent as the portable one (SAFE-REMOVE).
     portable = _hook_portable(data) or data
-    if local_body is not None and portable == local_body:
-        return "current-local (behavior unverified)", False
-    if scoped_body is not None and portable == scoped_body:
-        return "current-scoped (behavior unverified)", False
+    current = ("current-local (behavior unverified)" if local_body is not None and portable == local_body
+               else "current-scoped (behavior unverified)" if scoped_body is not None and portable == scoped_body
+               else None)
+    if current:
+        import stat
+        # Git runs a hook only with its owner's execute bit, and ao's exact bytes without it read as
+        # current: install left them, and Git ran nothing. They are ao's to replace, as an older body
+        # is (LEADS-GATE). Git for Windows runs a hook that starts with #!, as ao's do, whatever its mode.
+        if os.name != "nt" and not mode & stat.S_IXUSR:
+            return "legacy (not executable)", False
+        return current, False
     translated = _crlf_translation(data)
     for candidate in (data, translated):
         if candidate is None:
@@ -1077,7 +1177,19 @@ def _authorization_refusal(targets, allow):
     return False
 
 
-def _atomic_hook_write(path, data):
+def _atomic_hook_write(path, data, role=None):
+    """Write one hook whole beside `path`, then put it there over nothing - or, with `role`, over ao's own hook for
+    that role alone (LEADS-GATE).
+
+    Install reads each path, finds it free or holding ao's bytes, and wrote over whatever stood there
+    by the time it wrote: a hook another tool put there in between was lost, though install keeps
+    every hook it did not write. A free path is now taken only while it is free - a hard link on
+    POSIX, a rename on Windows, neither of which writes over a file - and a path that held ao's hook
+    is read again just before it is replaced, and replaced only while it still names the file read
+    (LEADS-GATE-HOOK). No call replaces a file only while it is the file read, so a hook put there in
+    the moment between that last look and the write is the one case left; taking ao's hook aside first
+    would close it by leaving the path with no hook while a commit runs.
+    """
     import tempfile
     directory = os.path.dirname(path)
     fd, temporary = tempfile.mkstemp(prefix=".ao-hook-", dir=directory)
@@ -1091,13 +1203,76 @@ def _atomic_hook_write(path, data):
                 os.fchmod(fh.fileno(), 0o755)
         if not hasattr(os, "fchmod"):
             os.chmod(temporary, 0o755)
-        os.replace(temporary, path)
-    except Exception:
+        before = _file_identity(path) if role else None
+        held = _state_base(_classify_hook(path, role)[0]) if role else "absent"
+        if held == "legacy":
+            # Only while the path still names the file classified: another tool's hook put there since - renamed
+            # into place, or written over - is another file, and is left (LEADS-GATE-HOOK).
+            if _file_identity(path) != before:
+                raise FileExistsError(f"{path}: another hook was put there while install read it; it is left as it "
+                                      "stands, and `ao hooks status` names it")
+            os.replace(temporary, path)
+        elif held != "absent":
+            raise FileExistsError(f"{path}: a {held} hook was written there after install read it; it is left as "
+                                  "it stands, and `ao hooks status` names it")
+        else:
+            _hook_put_on_free_path(temporary, path, data)
+    finally:
         try:
-            os.remove(temporary)
+            if os.path.lexists(temporary):
+                os.remove(temporary)                # still there after a link, or after a failure
         except OSError:
             pass
-        raise
+
+
+def _file_identity(path):
+    """(device, inode, size, modified, changed, a digest of the bytes) of what `path` names, without following a link;
+    None where nothing is there (LEADS-GATE-HOOK).
+
+    A rewrite in place keeps the inode, and another tool can keep the size and set the modified time back; it
+    cannot set back the time the inode changed, and the bytes are read besides.
+    """
+    import hashlib
+    try:
+        st = os.lstat(path)
+        with open(path, "rb") as fh:
+            digest = hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return None
+    return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns, digest
+
+
+def _hook_put_on_free_path(temporary, path, data):
+    """Put a written hook at `path` only while nothing is there (LEADS-GATE): Windows' rename writes over no file, and
+    on POSIX a hard link does not either - or, on a file system that makes none, a file created only while the path
+    is free, written and synced with no one's execute bit, and only then made executable. Created executable, it stood
+    empty while it was written, and Git ran the empty hook, which lets every commit through; not yet executable, Git
+    runs no hook there, as it ran none before install began."""
+    try:
+        if os.name == "nt":
+            os.rename(temporary, path)
+            return
+        try:
+            os.link(temporary, path)
+        except FileExistsError:
+            raise
+        except OSError:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                with os.fdopen(fd, "wb") as fh:
+                    fh.write(data)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                    os.fchmod(fh.fileno(), 0o755)                 # executable once whole, never before
+            except BaseException:
+                try:
+                    os.remove(path)                 # the file this created, half written
+                except OSError:
+                    pass
+                raise
+    except FileExistsError:
+        raise FileExistsError(f"{path}: a hook was written there after install found the path free; it is left "
+                              "as it stands, and `ao hooks status` names it") from None
 
 
 def _print_hook_status(inv):
@@ -1210,6 +1385,17 @@ def cmd_hooks(cfg, args):
         print(f"  {C['dim']}the current hooks stand aside while no {PROJECT_MARKER} is tracked, so installing "
               f"them before it would switch commit authority off{C['reset']}")
         return 1
+    if enrollment["state"] != "uninitialized":
+        # The hook asks ao on a branch not born yet, and ao reads this machine's record that the project is
+        # enrolled: kept from the install on, not from the first commit after it, and an install that cannot keep
+        # it puts in no hook that would read its absence as a new repository (LEADS-GATE). A repository read as
+        # broken is enrolled all the same - an orphan branch of it most of all, where the install passed the record
+        # over and the refs that still told of the marker could then be deleted (LEADS-GATE-HOOK).
+        unkept = A.record_enrollment(root)
+        if unkept:
+            print(f"{C['red']}hooks install refused{C['reset']}: this machine cannot record that the project is "
+                  f"enrolled: {unkept}")
+            return 1
 
     active = _active_hook_targets(inv)
     plan, unavailable = [], []
@@ -1253,7 +1439,9 @@ def cmd_hooks(cfg, args):
             return 1
         for target in fresh_plan:
             try:
-                _atomic_hook_write(target["path"], target["body"])
+                # ao's own hook is written over; a free path is taken only while it is still free (LEADS-GATE).
+                _atomic_hook_write(target["path"], target["body"],
+                                   target["role"] if _state_base(target["static_state"]) == "legacy" else None)
                 print(f"installed {target['role']} — {target['path']}")
             except OSError as exc:
                 print(f"{C['red']}failed to install{C['reset']} {target['role']}: {exc}")

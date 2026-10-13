@@ -631,6 +631,7 @@ def test_common_fallback_is_never_remove_inert_local(project):
     path = os.path.join(root, ".git", "hooks", "pre-commit")
     with open(path, "wb") as fh:
         fh.write(cli._render_local_hook("pre-commit", "."))
+    os.chmod(path, 0o755)                   # as install writes it: without the bit it is no current hook (LEADS-GATE)
 
     inv = cli._ao_hook_inventory(root)
     target = _active(inv, "pre-commit")
@@ -913,7 +914,8 @@ def test_non_executable_current_body_is_not_installed(project, tmp_path, monkeyp
 
     assert proof["installed"] is False
     assert proof["exit"] != 0
-    assert "without AO's nonce-bound refusal proof" in proof["detail"]
+    # Read as what install replaces before Git is asked to run it (LEADS-GATE).
+    assert "legacy (not executable)" in proof["detail"]
 
 
 @pytest.mark.skipif(os.name == "nt", reason=SHARED_HOOKS_REFUSED)
@@ -1194,7 +1196,7 @@ def test_public_clone_marker_without_state_refuses_with_init_remediation(
     assert "unconfigured" not in output
 
 
-def test_exact_v2_hook_is_legacy_and_upgrades_to_v4(project):
+def test_exact_v2_hook_is_legacy_and_upgrades_to_the_current_hook(project):
     root = project["root"]
     path = Path(root) / ".git" / "hooks" / "pre-commit"
     path.write_bytes(cli._render_v2_local_hook("pre-commit", "."))
@@ -1205,7 +1207,7 @@ def test_exact_v2_hook_is_legacy_and_upgrades_to_v4(project):
     assert cli.cmd_hooks(project, _args("install")) == 0
     # In the git directory the body also names the ao that installed it (SAFE-REMOVE).
     assert path.read_bytes() == cli._render_local_hook("pre-commit", ".", cli._hook_fallback())
-    assert b"ao-hook-v4" in path.read_bytes()
+    assert b"ao-hook-v5" in path.read_bytes()
 
 
 def test_init_writes_exact_unstaged_marker_and_refuses_wrong_reinit(

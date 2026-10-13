@@ -428,6 +428,108 @@ def registered_key(root):
     return next((name for name, row in project_registry().items() if row.get("root") == real), None)
 
 
+# What binds git to a repository other than the one it is asked about, from ao's own environment (LEADS-GATE-HOOK).
+_GIT_BINDING = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_PREFIX", "GIT_OBJECT_DIRECTORY",
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM")
+
+
+def repository_identity(root):
+    """The repository a working tree belongs to, the same for each of its linked worktrees: its common git
+    directory, resolved (LEADS-GATE). RuntimeError where git cannot name it.
+
+    Asked with no repository binding inherited, as the hook inventory asks: `GIT_DIR=/other ao -C /victim hooks
+    install` recorded /other as enrolled while the hook went into /victim (LEADS-GATE-HOOK).
+    """
+    env = {name: value for name, value in os.environ.items()
+           if name not in _GIT_BINDING and not name.startswith("GIT_CONFIG")}
+    try:
+        done = run_as_group([git_binary(), "--literal-pathspecs", "-C", str(root), "rev-parse", "--git-common-dir"],
+                            20, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError(f"cannot ask git for the repository: {exc}") from exc
+    if done.returncode:
+        detail = done.stderr.decode(UTF8, "replace").strip()[:200]
+        raise RuntimeError(f"cannot ask git for the repository: {detail or 'git exit ' + str(done.returncode)}")
+    common = os.fsdecode(done.stdout.strip())
+    return os.path.realpath(os.path.join(root, common))
+
+
+# The record that a repository is enrolled, in its common git directory (LEADS-GATE-HOOK).
+ENROLLMENT_RECORD = "ao-enrolled.json"
+
+
+def enrollment_record_path(root):
+    """(where the record that the repository `root` belongs to is enrolled is kept, that repository): in the
+    repository's own common git directory, beside its refs, outside the tree an agent writes (LEADS-GATE-HOOK).
+
+    It was kept in `~/.ao`, found through `HOME`: `HOME=<empty> git commit` had the hook's ao read a home with
+    no record in it, and under a project key, which a `.ao/project-key` in a tree claims once the project's `.ao/`
+    is gone. The git directory is the repository's, the one every linked worktree of it shares, and no
+    environment the commit is given names another. RuntimeError where git cannot name the repository.
+    """
+    identity = repository_identity(root)
+    return os.path.join(identity, ENROLLMENT_RECORD), identity
+
+
+def enrollment_record(root):
+    """What this machine recorded of the repository `root` belongs to being enrolled, or None (LEADS-GATE-HOOK).
+
+    The record is kept in the repository's common git directory, so a linked worktree of an enrolled
+    repository finds it too, and it is never read through a `.ao/` an agent can empty, nor through `HOME`. One
+    that cannot be read, or names another repository, is one all the same: {"unreadable": why}.
+    """
+    try:
+        path, identity = enrollment_record_path(root)
+    except (RuntimeError, OSError) as exc:
+        return {"unreadable": f"git cannot name the repository: {' '.join(str(exc).split())[:160]}"}
+    try:
+        with open(path, encoding=UTF8) as fh:
+            data = json.load(fh)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        return {"unreadable": " ".join(str(exc).split())[:160]}
+    if not isinstance(data, dict):
+        return {"unreadable": "it is not a JSON object"}
+    if data.get("repository") != identity:
+        return {"unreadable": f"it names another repository, {str(data.get('repository'))[:160]!r}"}
+    return data
+
+
+def record_enrollment(root):
+    """Record outside the tree, once, that the repository `root` belongs to is enrolled: None once it is, or why it
+    could not be (LEADS-GATE-HOOK).
+
+    A branch not born yet asks for it: an implementer that deleted every ref whose history tracked the
+    marker left Git no answer that the repository was ever enrolled, and the hook stood aside. Written by
+    `ao hooks install`, which puts the hook that asks for it in place, and by each commit check of an
+    enrolled project; each refuses where it cannot be written, since a record missing is that branch read
+    as a new repository's. A record of another repository under the same name is never written over.
+    """
+    try:
+        path, identity = enrollment_record_path(root)
+    except (RuntimeError, OSError) as exc:
+        return f"git cannot name the repository: {' '.join(str(exc).split())[:160]}"
+    try:
+        with open(path, encoding=UTF8) as fh:
+            kept = json.load(fh)
+    except FileNotFoundError:
+        kept = None
+    except (OSError, ValueError) as exc:
+        return f"{path} cannot be read: {' '.join(str(exc).split())[:160]}"
+    if isinstance(kept, dict) and kept.get("repository") == identity:
+        return None
+    if kept is not None:
+        return f"{path} names another repository, {str((kept or {}).get('repository'))[:160]!r}, and stays"
+    from .storage import replace_file_durably
+    try:
+        replace_file_durably(path, json.dumps({"root": os.path.realpath(root), "repository": identity,
+                                               "at": int(time.time())}).encode(UTF8))
+    except OSError as exc:
+        return f"{path} could not be written: {' '.join(str(exc).split())[:160]}"
+    return None
+
+
 def forget_project(root):
     """Take this project's rows out of the machine registry, under its lock; the names they held (SAFE-REMOVE).
 

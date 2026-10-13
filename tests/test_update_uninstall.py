@@ -437,6 +437,7 @@ def test_a_tracked_ao_hook_stays_and_the_uninstall_says_it_is_not_complete(machi
         (web / ".git" / "hooks" / role).unlink()
     (web / ".githooks").mkdir()
     (web / ".githooks" / "pre-commit").write_bytes(cli._render_local_hook("pre-commit", "."))
+    (web / ".githooks" / "pre-commit").chmod(0o755)      # tracked as a hook Git runs (LEADS-GATE)
     _commit(web, "the team's hooks")
     _git(web, "config", "core.hooksPath", ".githooks")
 

@@ -144,6 +144,7 @@ def test_doctor_reports_both_hook_states_with_safe_ownership_check(
     open(paths["pre-commit"], "wb").write(
         cli._render_local_hook("pre-commit", ".")
     )
+    os.chmod(paths["pre-commit"], 0o755)        # as install writes it (LEADS-GATE)
     open(paths["pre-push"], "w", encoding="utf-8").write(
         "#!/bin/sh\necho foreign\n"
     )

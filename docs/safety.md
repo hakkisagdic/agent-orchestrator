@@ -185,6 +185,42 @@ second invocation may remove `.ao/` and the remaining AO-owned surfaces. Pre-pus
 remains informational rather than a doctor alarm because a repository may
 intentionally retain its own custom push hook.
 
+*In ao since slice LEADS-GATE: the commit hook is version 5. It stands aside only where Git answers
+that the project's `.ao-project` is neither in the index nor in HEAD, asked for by its path from the
+top of the working tree; any other answer goes on to ao, and a hook that finds no ao refuses. The
+version 4 hook stood aside whenever its two queries failed, and a project in a subdirectory failed
+both twice over: with its directory moved away, and with its marker's deletion staged, since
+`HEAD:.ao-project` names a marker at the top of the repository. Either let a commit through
+unchecked. Nor does it stand aside on a branch not born yet - `git switch --orphan` with the marker
+unstaged: there it goes on to ao, which refuses the commit until the marker is committed on that branch
+where the repository's history tracks the marker on another branch, or where this machine recorded the
+project as enrolled. `ao hooks install`, which puts that hook in place, and each check of a commit of
+an enrolled project - one read as broken, an orphan branch of it among them, too - record it in
+`ao-enrolled.json` in the repository's common git directory, the one each of its linked worktrees
+shares, outside the tree: not under a project key, which a `.ao/project-key` in a tree can claim, nor
+in `~/.ao`, found through a `HOME` a commit can be given; and they refuse where they cannot write it,
+since a record missing is that branch read as a new repository's: an agent that deleted every ref whose
+history tracked the marker, and the tree's `.ao/` with them, left Git no answer that the repository
+was ever enrolled, and the hook stood aside for its unreviewed root commit. A born branch that tracks no
+marker - one made from a commit before the marker's - goes on to ao too while any ref's history tracks
+one, and ao refuses it where the record stands and its history never tracked the marker; a history that
+did is a removal committed, and passes. A project a person removed by hand, its hook left in place,
+asks ao too, and `ao hooks uninstall` takes the hook; `ao remove --yes` takes the hook and the record
+with the project. A repository's first commit therefore needs ao, as every commit of an enrolled one
+does; an ao that finds nothing tracked and nothing recorded lets it in. `ao doctor` reads a version 4 hook as
+legacy, and each enrolled repository reinstalls with `ao hooks install`. Install also replaces ao's
+exact hook without its owner's execute bit, which Git does not run and ao read as current, now
+`legacy (not executable)`; it puts a hook on a path it found
+free only while the path is still free - a hard link, or Windows' rename - and over ao's own hook only
+after reading it again, and only while the path still names the file it read - the same device, inode,
+size, times and bytes, the time its inode changed among them, which no tool sets back - so a hook another
+tool wrote or renamed into place before that last look is kept. One
+put there in the instant between that look and the write is replaced: no file operation replaces a
+file only while it holds what was read, and taking ao's hook aside first would leave the path with no
+hook while a commit runs, an unchecked commit where the other costs another tool its hook. A Git query ao makes, the
+execution proof's `git hook run` among them, leads a process group of its own and is stopped with
+what it started when it runs past its time.*
+
 The chain is tamper-evidence, not writer authentication. It detects an edit, deletion,
 reorder, or append whose successor/predecessor links were not recomputed. It cannot
 cryptographically exclude a process with the same user's write access: that process can
