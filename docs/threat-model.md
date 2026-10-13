@@ -45,6 +45,9 @@ A finding that needs one of these assumptions is a hardening note, not a blocker
 - The interpreter fails at an arbitrary line - a MemoryError, a thread that cannot start - with no
   attacker able to cause it.
 - The operating system, the kernel or the hardware is compromised, or someone has physical access.
+- A service the person gave a credential to turns it against them: an A2A agent registered with a
+  token in `~/.ao/a2a-agents.json` echoes it back, encoded or not, or acts with it. The person chose
+  to trust that service with the credential, and no reading of its answers can take it back.
 - A vendor command's own bug that ao cannot observe. Where one of ao's guarantees rests on a vendor's
   behaviour, ao measures it and records the measurement, as KIRO-READONLY does for kiro-cli.
 
