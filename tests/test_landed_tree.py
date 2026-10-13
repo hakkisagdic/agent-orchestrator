@@ -34,26 +34,24 @@ def _race(root):
     os.chmod(hook, os.stat(hook).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
-def test_a_path_staged_after_the_check_is_reported_and_recorded(project, monkeypatch, capsys):
+def _rev(root, *args):
+    return subprocess.run(["git", "rev-parse", *args], cwd=root, check=True, capture_output=True,
+                          text=True).stdout.strip()
+
+
+def test_a_hook_that_would_stage_after_the_check_does_not_run_and_the_granted_tree_lands(project, monkeypatch, capsys):
+    """Git wrote the tree after the hook returned, so a hook that staged a path landed it (#64): ao commit writes the
+    granted tree itself and runs no hook (LEADS-GATE)."""
     root = project["root"]
     cfg = _granted_candidate(project, monkeypatch)
     granted = A.latest_authority_decision(root)["candidate"]["index_tree"]
     _race(root)
-    capsys.readouterr()
 
-    assert cli.cmd_commit(cfg, SimpleNamespace(message="land a", file=None)) == 1
+    assert cli.cmd_commit(cfg, SimpleNamespace(message="land a", file=None)) == 0
 
-    landed = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=root, check=True,
-                            capture_output=True, text=True).stdout.strip()
-    assert landed != granted
-    out = capsys.readouterr().out
-    assert "LANDED OUTSIDE ITS GRANT" in out and f"bound tree {granted[:12]}" in out
-    refusal = A.latest_authority_decision(root)
-    assert refusal["granted"] is False and "landed tree" in refusal["reasons"][0]
-    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
-                          capture_output=True, text=True).stdout.strip()
-    assert A.commits_without_grant(root) == [head]
-    assert any(key == "landed-without-grant" for key, _ in cli.doctor_problems(cfg))
+    assert _rev(root, "HEAD^{tree}") == granted
+    assert not os.path.exists(os.path.join(root, "src", "unreviewed.py"))
+    assert A.commits_without_grant(root) == []
 
 
 def test_a_commit_of_the_granted_tree_is_quiet(project, monkeypatch, capsys):

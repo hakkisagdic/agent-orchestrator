@@ -90,8 +90,8 @@ runs it against Git's active index and revalidates the latest persisted grant, i
 verification and review or live waiver, plus current plan drift, holds, and urgent mail.
 It neither issues nor consumes a grant. Its limit: Git writes the commit's tree from the
 index after the hook returns, so a process that stages a path in that window lands it
-inside an authorised commit, and no hook can prevent that. `ao commit` compares the tree
-that landed with the one the grant bound and reports and records a difference, and
+inside a plain `git commit`, and no hook can prevent that. `ao commit` writes the commit
+itself from the tree the grant bound, so nothing staged after its check lands, and
 `ao doctor` reports any commit since the first grant whose tree no grant bound, and the
 watchdog tells the architect about one within a cycle - which is what holds when the
 implementer's harness is granted every tool and could commit with `--no-verify`.
@@ -116,6 +116,19 @@ closed by one only when a person states that its slice only moved code, with
 `ao catchup --move-only <slices> --by <name>`, and then only when the proof holds; the statement
 is recorded beside the proof, and no actor's grant admits it. A retrospective
 `ao review --commits` artifact can reconcile landed work but can never authorize a candidate.
+
+*In ao since slice LEADS-GATE: `ao commit` writes the commit itself: `git commit-tree` of the tree
+the grant bound, on the commit the grant was built on, then the branch moved from that commit only,
+compared and swapped, with no hook run. `git commit` read the index again once its hooks returned, so
+a path another process staged in between landed inside the granted commit, as did one a hook staged
+into the index Git handed it, or one written into a copy of it; the branch could be switched under it;
+and the hooks it ran were files an implementer edits where a repository keeps them in its tree, run
+as the person committing. A path staged after the check now stays staged, uncommitted, and a branch
+that moved meanwhile is left where it is, with nothing landed. The message is cleaned as `git commit
+-F` cleans one, by `commit.cleanup`; `commit.gpgSign` signs it; and a merge, cherry-pick, revert or
+rebase in progress is sent back to git: a grant binds one parent, so ao lands no merge, and a lane
+lands squashed ([gates](gates.md#a-commit-names-its-grant)). Git's own commit hooks - a `commit-msg` a project keeps among them - do not run under
+`ao commit`; they run under a plain `git commit`, which the commit hook checks.*
 
 Two more acts weaken what a review is independent of, and both are a person's in the same way
 ([review tiers](roles.md#review-tiers)). `ao person-review --by <name>` records a person's verdict on

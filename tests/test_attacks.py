@@ -72,7 +72,8 @@ def test_attack_01_stage_swap(project, capsys):
 
 
 def test_attack_02_index_race(project, capsys, monkeypatch):
-    """Detected, not prevented: Git writes the tree after the hook returns (#64)."""
+    """Git wrote the tree after the hook returned (#64): prevented, since ao commit writes the granted tree itself and
+    runs no hook (LEADS-GATE)."""
     for name in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"):
         monkeypatch.setenv(name, "t")
     for name in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
@@ -85,10 +86,9 @@ def test_attack_02_index_race(project, capsys, monkeypatch):
     os.chmod(hook, os.stat(hook).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     capsys.readouterr()
 
-    assert cli.cmd_commit(cfg, SimpleNamespace(message="land", file=None)) == 1
-    assert "LANDED OUTSIDE ITS GRANT" in capsys.readouterr().out
-    assert A.latest_authority_decision(root)["granted"] is False
-    assert A.commits_without_grant(root) == [_git(root, "rev-parse", "HEAD")]
+    assert cli.cmd_commit(cfg, SimpleNamespace(message="land", file=None)) == 0
+    assert not os.path.exists(os.path.join(root, "src", "smuggled.py"))
+    assert A.landed_commit_problem(root) is None and A.commits_without_grant(root) == []
 
 
 def test_attack_03_forged_review_evidence(project, capsys):

@@ -1333,10 +1333,9 @@ def cmd_commit(cfg, args):
     """Commit the staged candidate in the one form a tool grant can safely allow (#58).
 
     A grant of `git commit:*` is a grant of `git commit --no-verify`, the flag that
-    skips the only commit-time enforcement. This takes a message and nothing else,
-    runs the same authority check the pre-commit hook runs before Git is asked to
-    commit - so a deleted or redirected hook does not skip it - drops inherited
-    configuration that could redirect the hooks, and lets them run as usual.
+    skips the only commit-time enforcement. This takes a message and nothing else and
+    runs the same authority check the pre-commit hook runs, so a deleted or redirected
+    hook does not skip it.
 
     The message ends with the grant that check held the index to, as git trailers
     (COMMIT-TRAILER): the grant stays in this checkout's ledger while the commit
@@ -1345,9 +1344,18 @@ def cmd_commit(cfg, args):
     Ao- trailers is refused, not rewritten: they could only be another commit's,
     copied with its message, or typed by hand, and ao does not edit what a person
     wrote into a claim it did not make.
+
+    What lands is the tree the grant bound, on the commit it was built on, and nothing
+    else (LEADS-GATE). `git commit` read the index again once its hooks returned, so a
+    path staged in between - by another process, by a hook into the index Git handed
+    it, or written into a copy of the index - landed inside the granted commit; the
+    branch could be switched under it; and the hooks it ran were files an implementer
+    can edit where a repository keeps them in its tree, run as the person committing.
+    So ao writes the commit itself, `git commit-tree` of the granted tree on the granted
+    commit, and moves the branch from that commit only, compared and swapped; no hook
+    runs. A path staged after the check stays staged, uncommitted. A project ao does not
+    govern passes the check with no grant, and `git commit` commits it as before.
     """
-    import subprocess
-    from types import SimpleNamespace
     message, file = getattr(args, "message", None), getattr(args, "file", None)
     if message is not None and file is not None:
         print("ao commit takes exactly one of -m MESSAGE or -F FILE")
@@ -1356,48 +1364,154 @@ def cmd_commit(cfg, args):
         # An empty message was told it had given both or neither (GRANTS-AUDIT-2).
         print("ao commit needs a message: -m MESSAGE with text in it, or -F FILE")
         return 2
+    from types import SimpleNamespace
     check = SimpleNamespace()
     code = cmd_commit_check(cfg, check)
     if code:
         return code
+    grant = getattr(check, "granted", None)
+    if grant is None:
+        # A project ao does not govern passes the check with no grant, and its commit stays git's alone.
+        return _git_commit(cfg, message, file)
+    return _commit_the_grant(cfg, grant, message, file)
+
+
+def _git_commit(cfg, message, file):
+    """`git commit` with the message ao commit was given, for a project ao does not govern: its exit code."""
+    import subprocess
     env = {name: value for name, value in os.environ.items()
            if not name.startswith(("GIT_CONFIG", "GIT_DIR", "GIT_WORK_TREE"))}
-    source, data = (["-m", message] if message else ["-F", file]), None
-    grant = getattr(check, "granted", None)
-    if grant is not None:
-        # A project ao does not govern passes the check with no grant, and its message stays git's alone.
-        try:
-            trailers = A.grant_trailers(grant)
-        except ValueError as exc:
-            print(f"{C['red']}{C['b']}COMMIT REFUSED{C['reset']}\n  {C['red']}·{C['reset']} {exc}")
-            return 1
-        try:
-            text = _message_bytes(cfg["root"], message, file).decode(UTF8, "surrogateescape")
-            data = A.with_trailers(text, trailers).encode(UTF8, "surrogateescape")
-        except OSError as exc:
-            print(f"ao commit cannot read the message file {file}: {exc}")
-            return 2
-        except ValueError as exc:
-            print(f"{C['red']}{C['b']}COMMIT REFUSED{C['reset']}\n  {C['red']}·{C['reset']} {exc}")
-            return 2
-        source = ["-F", "-"]
+    source = ["-m", message] if message else ["-F", file]
     # The git ao measures with, never one Windows finds in the current directory first (WINDOWS-NO-CWD-EXEC).
-    code = subprocess.run([A.git_binary(), "commit", *source], cwd=cfg["root"], env=env, input=data).returncode
-    if code:
+    return subprocess.run([A.git_binary(), "commit", *source], cwd=cfg["root"], env=env).returncode
+
+
+def _plumbing(root, *args, data=None, timeout=60):
+    """One git command `ao commit` writes with: no hook runs - core.hooksPath names no directory, so neither the
+    reference-transaction hook nor any other is found - and no repository binding is inherited (LEADS-GATE)."""
+    env = _hook_git_env()
+    try:
+        return A.run_as_group([A.git_binary(), "-c", f"core.hooksPath={os.devnull}", "-C", str(root), *args],
+                              timeout, env=env, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise _HookResolutionError(f"git {args[0]} failed: {' '.join(str(exc).split())[:160]}") from exc
+
+
+def _plumbing_out(root, *args, data=None):
+    done = _plumbing(root, *args, data=data)
+    if done.returncode:
+        detail = done.stderr.decode(UTF8, "replace").strip()[:200] or f"git exit {done.returncode}"
+        raise _HookResolutionError(f"git {args[0]}: {detail}")
+    return done.stdout
+
+
+def _branch_before(root):
+    """(the ref HEAD names, or HEAD where it is detached; the commit it points at, or None on a branch not born yet):
+    the ref `ao commit` moves, and the commit it moves it from (LEADS-GATE)."""
+    named = _hook_git(root, "symbolic-ref", "-q", "HEAD")
+    ref = named.stdout.decode(UTF8, "replace").strip() if named.returncode == 0 else "HEAD"
+    head = _hook_git(root, "rev-parse", "--verify", "-q", "HEAD")
+    if head.returncode and (head.stdout or head.stderr):
+        raise _HookResolutionError(head.stderr.decode(UTF8, "replace").strip()[:160] or f"git exit {head.returncode}")
+    return ref, (head.stdout.decode("ascii", "replace").strip() or None) if head.returncode == 0 else None
+
+
+# What `git commit` would have finished: ao commit finishes none of it, and sends it back to git (LEADS-GATE). A merge
+# is no grant's - a grant binds one parent - so a lane lands squashed, as one commit on one parent.
+_IN_PROGRESS = (("MERGE_HEAD", "a merge", "ao lands no merge: git merge --abort, then git merge --squash, which "
+                 "stages the lane as one candidate to verify, review and grant as any"),
+                ("CHERRY_PICK_HEAD", "a cherry-pick", "git cherry-pick --quit"),
+                ("REVERT_HEAD", "a revert", "git revert --quit"),
+                ("rebase-merge", "a rebase", "git rebase --abort, or finish it"),
+                ("rebase-apply", "a rebase or git am", "git rebase --abort or git am --abort, or finish it"))
+
+
+def _git_path(root, name):
+    return os.path.join(root, os.fsdecode(_plumbing_out(root, "rev-parse", "--git-path", name).strip()))
+
+
+def _cleaned_message(root, data):
+    """The message as `git commit -F` would have cleaned it, by `commit.cleanup`: verbatim left as it is, strip
+    without its comment lines, anything else without trailing space, runs of blank lines or blank ends."""
+    done = _plumbing(root, "config", "--get", "commit.cleanup")
+    mode = done.stdout.decode(UTF8, "replace").strip().lower() if done.returncode == 0 else ""
+    if mode == "verbatim":
+        return data
+    return _plumbing_out(root, "stripspace", *(["--strip-comments"] if mode == "strip" else []), data=data)
+
+
+def _commit_the_grant(cfg, grant, message, file):
+    """Write the granted tree as a commit on the granted commit, and move the branch from that commit to it: the exit
+    code (LEADS-GATE)."""
+    root = cfg["root"]
+
+    def refused(why, code=1):
+        print(f"{C['red']}{C['b']}COMMIT REFUSED{C['reset']}\n  {C['red']}·{C['reset']} {why}")
         return code
-    # The hook saw the index before Git wrote the tree; what landed is compared
-    # with what was granted, and a difference is reported and recorded (#64).
-    problem = A.landed_commit_problem(cfg["root"])
-    if problem:
-        print(f"{C['red']}{C['b']}LANDED OUTSIDE ITS GRANT{C['reset']}")
-        print(f"  {C['red']}·{C['reset']} {problem}")
-        A.record_notice(cfg["root"], "commit landed outside its grant", problem,
-                        sent=False, key="landed-outside-grant")
-        try:
-            A.record_authority(cfg["root"], False, [problem], A.tree_digest(cfg["root"], cfg), None)
-        except Exception as exc:
-            print(f"  {C['dim']}the mismatch could not be recorded: {exc}{C['reset']}")
-        return 1
+
+    try:
+        trailers = A.grant_trailers(grant)
+    except ValueError as exc:
+        return refused(exc)
+    try:
+        text = _message_bytes(root, message, file).decode(UTF8, "surrogateescape")
+        data = A.with_trailers(text, trailers).encode(UTF8, "surrogateescape")
+    except OSError as exc:
+        print(f"ao commit cannot read the message file {file}: {exc}")
+        return 2
+    except ValueError as exc:
+        return refused(exc, 2)
+    candidate = grant.get("candidate") or {}
+    tree, head = candidate.get("index_tree"), candidate.get("head")
+    try:
+        ref, old = _branch_before(root)
+        shown = ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else ref
+        if not old or old != head:
+            return refused(f"{shown} points at {(old or 'no commit')[:12]}, not at {str(head)[:12]}, the commit the "
+                           "grant was built on: nothing was committed")
+        for name, what, how in _IN_PROGRESS:
+            if os.path.lexists(_git_path(root, name)):
+                return refused(f"{what} is in progress, which ao commit does not finish - {how}, then ao commit "
+                               "again")
+        cleaned = _cleaned_message(root, data)
+        if not cleaned.strip():
+            return refused("the message is empty once cleaned as git commit cleans one")
+        sign = _plumbing(root, "config", "--type=bool", "--get", "commit.gpgSign")
+        if sign.returncode not in (0, 1):
+            # Git refuses a commit whose commit.gpgSign it cannot read as a boolean; so does ao, rather than read it
+            # as unset and write the commit unsigned (LEADS-GATE).
+            return refused("commit.gpgSign cannot be read: "
+                           + (sign.stderr.decode(UTF8, "replace").strip()[:160] or f"git exit {sign.returncode}"))
+        signed = sign.returncode == 0 and sign.stdout.strip() == b"true"
+        made = _plumbing_out(root, "commit-tree", *(["-S"] if signed else []), tree, "-p", old, data=cleaned)
+        made = made.decode("ascii", "replace").strip()
+        if _plumbing_out(root, "rev-parse", "--verify", f"{made}^{{tree}}").decode("ascii").strip() != tree:
+            return refused(f"the commit written, {made[:12]}, does not hold the granted tree {tree[:12]}")
+        subject = cleaned.decode(UTF8, "replace").split("\n", 1)[0]
+        moved = _plumbing(root, "update-ref", "-m", f"commit: {subject}", ref, made, old)
+        if moved.returncode:
+            detail = moved.stderr.decode(UTF8, "replace").strip()[:200]
+            return refused(f"{shown} moved while ao commit ran, so it was left where it is and nothing landed: "
+                           f"{detail}")
+    except _HookResolutionError as exc:
+        return refused(exc)
+    print(f"[{shown} {made[:7]}] {subject}")
+    try:
+        now = _hook_git(root, "symbolic-ref", "-q", "HEAD")
+        named = now.stdout.decode(UTF8, "replace").strip() if now.returncode == 0 else "HEAD"
+        if named != ref:
+            # Switched while ao commit ran: the commit is on the branch the grant was made on, which is not the one
+            # checked out now (LEADS-GATE).
+            print(f"  {C['yellow']}·{C['reset']} HEAD was switched while ao commit ran: the commit is on {shown}, "
+                  f"and {named} is checked out now")
+    except _HookResolutionError:
+        pass
+    try:
+        stat = _plumbing(root, "diff", "--no-ext-diff", "--no-textconv", "--shortstat", old, made)
+        if stat.returncode == 0 and stat.stdout.strip():
+            print(stat.stdout.decode(UTF8, "replace").rstrip())
+    except _HookResolutionError:
+        pass
     return 0
 
 

@@ -160,7 +160,6 @@ is spent: the reviewer is a stand-in script.
      AUTHORIZED  fee8909bda50bfccb07a607ec406c70638454dae · C-1791663277067680000
      [main 71b3308] feat: add divide, which refuses b == 0
       2 files changed, 14 insertions(+), 1 deletion(-)
-     AUTHORIZED  fee8909bda50bfccb07a607ec406c70638454dae · C-1791663277067680000
    $ git log -1 --format=%B
      feat: add divide, which refuses b == 0
 
@@ -196,8 +195,8 @@ DEMO PASSED  every step behaved as it says. To put ao on a repository of your ow
 docs/getting-started.md, or `ao init --profile claude-kiro` in it.
 ```
 
-AUTHORIZED is printed twice: once by `ao commit`, which runs the hook's check before it asks Git to
-commit, and once by the hook itself.
+AUTHORIZED is `ao commit`'s check, the one the commit hook runs. `ao commit` then writes the commit
+itself, the tree the grant bound on the commit it was built on, and runs no hook.
 
 *In ao since slice DEMO: `ao demo` plays the guarantee on a project of its own. The README states
 it and `ao prove` checks it on a project that has ao, so the first refusal anyone saw was on their
