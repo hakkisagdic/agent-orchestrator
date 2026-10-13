@@ -55,6 +55,12 @@ A finding that needs one of these assumptions is a hardening note, not a blocker
   one any more - every such ref deleted. The commit hook reads what Git answers about the marker, and
   such a repository is one it cannot tell from one never enrolled: it stands aside there, as it does for
   that one.
+- Another program writing a hook path in the instant between `ao hooks install`'s last look at it and
+  its write. Install keeps a hook it did not write wherever it can tell - one there before it read the
+  path, or put there before its last look, compared by device, inode, size, times and bytes - and no
+  file operation replaces a file only while it holds what was read; taking ao's own hook aside first
+  would leave a commit running with no hook at all. What that instant can cost is another tool's hook,
+  never a commit's check.
 - A gate's own code running on after ao stops it. `.ao/gates.json` names the project's checks, the
   implementer writes it, and `ao verify` runs what it names as the person, by design: a test suite is
   code. ao stops a gate past its time with what it can find of it - its process tree, its group, its
