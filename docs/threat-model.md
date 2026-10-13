@@ -48,6 +48,9 @@ A finding that needs one of these assumptions is a hardening note, not a blocker
 - A service the person gave a credential to turns it against them: an A2A agent registered with a
   token in `~/.ao/a2a-agents.json` echoes it back, encoded or not, or acts with it. The person chose
   to trust that service with the credential, and no reading of its answers can take it back.
+- A repository before the commit that tracks its `.ao-project`. Enrollment is that commit: until it
+  lands the marker is only staged, and an agent can unstage it and commit unchecked, with no race at all.
+  The person commits the marker before an agent works in a new repository.
 - A vendor command's own bug that ao cannot observe. Where one of ao's guarantees rests on a vendor's
   behaviour, ao measures it and records the measurement, as KIRO-READONLY does for kiro-cli.
 
