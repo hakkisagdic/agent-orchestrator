@@ -118,8 +118,9 @@ def test_a_submitted_review_is_told_when_it_is_submitted_and_when_it_ends_by_its
     state = cli._review_state(root, rid)
 
     def review(cfg, args):
-        A.record_review(root, "r.md", b"VERDICT: APPROVED\n", {"candidate": {"digest": state["candidate"]}},
-                        "APPROVED", reviewer="reviewer")
+        # A review hands back the row it recorded, which the run reads its end from (LEADS-REVIEW).
+        args.recorded = A.record_review(root, "r.md", b"VERDICT: APPROVED\n",
+                                        {"candidate": {"digest": state["candidate"]}}, "APPROVED", reviewer="reviewer")
         return 0
 
     monkeypatch.setattr(cli, "cmd_review", review)

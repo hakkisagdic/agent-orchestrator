@@ -33,4 +33,6 @@ def test_the_heartbeat_waits_add_up_to_the_timeout_and_no_further(project, monke
 
     out = capsys.readouterr().out
     assert attempt["kind"] == "timeout"
-    assert len(re.findall(r"reviewer slow still working", out)) == 3
+    # Three beats of 0.1s fit in 0.35s, and no more: what a beat spends is its wait or the time that passed, the
+    # stall check's reading of the process table among it, so on a busy machine fewer fit (LEADS-REVIEW).
+    assert len(re.findall(r"reviewer slow still working", out)) <= 3

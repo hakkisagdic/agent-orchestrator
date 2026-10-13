@@ -421,3 +421,17 @@ to every rule `ao catchup --reviewer` holds one to, records the review as the sl
 and, without `--boundary`, judges it against the range's commit messages, as a catch-up review is. The
 catch-up reviews of 2026-09-30 and 10-01 recorded no author family, and 83 of them were made by the
 alibaba family while a Qwen model also implemented; their ranges are reviewed again so.*
+
+*In ao since slice LEADS-REVIEW: a landed range is reviewed whole. `ao review --commits` and
+`ao person-review --commits` built the range's diff whole while the artefact recorded `--paths`, so a
+review said to judge part of a range had judged all of it; `--paths` with `--commits` is refused, and
+narrows a staged candidate only. A reviewer's `review_timeout` is measured on the clock: it was the
+timeout less the waits ao asked for, so the stall check's reading of the process table, the heartbeat
+and a wait that overran were never counted. A route's share of the chain's budget is read after it has
+waited for quota headroom, which can take minutes on the keyflip rotation lock: read before, the route
+ran on that stale time past the walk's deadline, or started after it. What still runs of a reviewer's
+process group once the reviewer has ended - a server or a watcher it started and that let go of its
+pipes - is stopped and named, where only a timeout stopped the group; and the version probe ao runs on
+each reviewer program leads a group of its own, so a probe that does not answer is stopped with what it
+started, where it was stopped alone. Windows has no process groups, and nothing is looked for there once
+a reviewer has ended ([windows.md](windows.md#still-open)).*

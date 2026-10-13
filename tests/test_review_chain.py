@@ -727,9 +727,11 @@ def test_timeout_drain_remains_bounded_after_reviewer_kill(project, monkeypatch)
     monkeypatch.setattr(A, "helper_register", lambda *args, **kwargs: None)
     monkeypatch.setattr(A, "helper_release", lambda *args, **kwargs: None)
     # The tree kill names the fake's pid: on Windows it starts taskkill, which the fake Popen answered,
-    # and elsewhere it would signal whatever process holds that pid (#71).
+    # and elsewhere it would signal whatever process holds that pid (#71). So would the stop of what is left
+    # of the reviewer's group once it has ended (LEADS-REVIEW).
     kills = []
     monkeypatch.setattr(A, "kill_turn", lambda pid, sig: kills.append(pid))
+    monkeypatch.setattr(cli, "_stop_reviewer_leftovers", lambda proc, label: [])
 
     attempt = cli._run_reviewer(
         project["root"], ["reviewer", "prompt"], timeout=0.01
@@ -945,9 +947,11 @@ def test_communication_error_drain_is_bounded_and_closes_pipes(
     monkeypatch.setattr(A, "helper_register", lambda *args, **kwargs: None)
     monkeypatch.setattr(A, "helper_release", lambda *args, **kwargs: None)
     # The tree kill names the fake's pid: on Windows it starts taskkill, which the fake Popen answered,
-    # and elsewhere it would signal whatever process holds that pid (#71).
+    # and elsewhere it would signal whatever process holds that pid (#71). So would the stop of what is left
+    # of the reviewer's group once it has ended (LEADS-REVIEW).
     kills = []
     monkeypatch.setattr(A, "kill_turn", lambda pid, sig: kills.append(pid))
+    monkeypatch.setattr(cli, "_stop_reviewer_leftovers", lambda proc, label: [])
 
     attempt = cli._run_reviewer(
         project["root"], ["reviewer", "prompt"], timeout=0.01

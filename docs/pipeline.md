@@ -76,6 +76,17 @@ that still runs is recorded as one that could not be stopped, keeps its place am
 the command exits 1. A reviewer stopped on its timeout, and an ACP reviewer's session as it closes,
 say the same of what of them still runs ([windows.md](windows.md)).*
 
+*In ao since slice LEADS-REVIEW: a submitted review is run once, and S3 holds for submits made at once.
+The run read its review's state and wrote its own pid into it with nothing held between the two, so a
+second run of one review - its hidden `--run` started again - took it as well: both reviewed its pinned
+index, and the first to end deleted that index under the other. Two submits at once each counted the
+reviews in flight before either had written its own, and both started, past `review.max_inflight`. A
+submit now counts, claims its id, pins the tree and writes the state under one lock,
+`.ao/reviews/submitted.lock`, and a run takes its review under that lock only while the review is
+running and names no runner: a second run is refused, records nothing and leaves the index alone. The
+run records the review it made itself, as the review hands it back; the newest review of the candidate
+after a count taken before it could be one a person ran beside it in the foreground.*
+
 ```bash
 ao review submit --boundary '…'      # returns R-1788… immediately
 ao reviews                            # what is in flight, with elapsed and progress

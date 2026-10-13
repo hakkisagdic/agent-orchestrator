@@ -679,6 +679,17 @@ and scope evidence. `commit-ok` refuses when:
 Unrelated and retrospective artifacts do not supersede a candidate review, and a
 retrospective review never grants commit authority.
 
+*In ao since slice LEADS-REVIEW: a reviewer is shown every byte the grant is bound to. The candidate's
+diff was decoded with replacement characters, so each byte of it that is not UTF-8 read as the same
+U+FFFD: two candidates that differed only there were one prompt, and a reviewer approved bytes it was
+never shown. A diff that is UTF-8 is handed over as it always was. One that is not is shown escaped,
+whole - each backslash as `\\` and each byte that is not UTF-8 as `\xNN` - which reads back to that diff
+alone, under a note above the candidate that says so, in the project's language; the review's evidence
+records `diff_escaped`, and `ao person-review` shows a person the same text with the same words. It is
+not refused: a file a project keeps in Latin-1 or Shift JIS is its own, and a refusal would leave a
+change to it no review at all, in CI or by catch-up. A tool reviewer is handed the bytes themselves, as
+before, and refuses what its contract cannot read.*
+
 The first independent run returned NEEDS_CHANGES with a BLOCKER on work whose
 self-review had been APPROVED with zero findings: three of the acceptance
 boundary's four items were not covered. That is the argument for the separation,

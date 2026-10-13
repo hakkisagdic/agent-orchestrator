@@ -267,6 +267,12 @@ script ao hands it - the table's query, the toast, `bin/ao.ps1`. The lane ran th
   `status` shows other letters in its place.
 - **The toast has never been shown.** A test has PowerShell parse its script, which
   the lane has not yet run, and no test shows a toast on a person's desktop.
+- **What a reviewer leaves running when it ends.** On macOS and Linux ao stops whatever of
+  a reviewer's process group still runs once the reviewer has ended (LEADS-REVIEW). Windows
+  has no process groups: a reviewer stopped on its timeout has its tree stopped with
+  `taskkill /T`, but what a reviewer that answered and exited started, and left running apart
+  from it, is not looked for, as what an ended turn left is not told apart from a turn
+  (above). A Job Object would hold the tree whole; ao makes none yet.
 
 ## Found before the lane first ran
 

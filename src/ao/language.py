@@ -401,6 +401,16 @@ LOW: <n>
                "olmadan, ve sayılmaz. "
                "Bir doğruluk bulgusu eskisi gibi yargılanır. ---\n{model}\n--- TEHDİT MODELİ SONU ---"),
     },
+    # the note ao writes above a candidate whose diff is not UTF-8, which it shows escaped whole (LEADS-REVIEW)
+    "prompt.review-escaped": {
+        "en": ("--- ESCAPED: this candidate's diff is not UTF-8, so ao shows it escaped, whole: `\\\\` is one backslash "
+               "of the files and `\\xNN` one byte of them that is not UTF-8, NN in hexadecimal; every other character "
+               "is as the files hold it. Judge the bytes, not how they are shown. ---"),
+        "tr": ("--- KAÇIŞ DİZİLERİYLE: bu adayın diff'i UTF-8 değil, bu yüzden ao onu bütünüyle kaçış dizileriyle "
+               "gösterir: `\\\\` dosyalardaki tek bir ters eğik çizgi, `\\xNN` dosyalardaki UTF-8 olmayan tek bir "
+               "bayttır, NN onaltılık değeri; geri kalan her karakter dosyalarda olduğu gibidir. Gösterilişini değil, "
+               "baytları yargıla. ---"),
+    },
     # the line above the prompt in a stand-in review request (#75); {nonce}: the request's, which the answer leads with
     "prompt.review-request": {"en": "The FIRST line of your answer must be exactly: NONCE: {nonce}",
                               "tr": "Cevabının İLK satırı tam olarak şu olsun: NONCE: {nonce}"},

@@ -47,6 +47,8 @@ TURKISH = {
     "prompt.review-reask": "efe205b3487739b4e973da8223710cc762a1daa0db032c14c4fe0d00bb3d331d",
     "prompt.review-section": "8063a940247fdbf8be4db5d8445f9945c817b3a0970c601e8bfb39155dc6ce60",
     "prompt.review-request": "1ab6ef78285dbd1b7ed1dd26dfeeb46c167013bde8bdb16d8702007f6c792072",
+    # Added by LEADS-REVIEW: the note above a candidate whose diff is not UTF-8, which is shown escaped.
+    "prompt.review-escaped": "6b9f826e07aaa1773a52b4e761068678c54123161e130462245641e048e703a3",
     "prompt.hunt": "6dfafb32102cade4747e8ff833ee05d5591e5409948142a3bc64331b50042553",
     # Added by BUG-HUNTER-3: the heading of a file a hunt reads a piece at a time.
     "prompt.hunt-part": "5833217b32b84cb335e15a05bb269df155190347e0600bcd653e7c541c6db8c0",

@@ -57,7 +57,9 @@ inputs:
 
 outputs:
   verdict:
-    description: APPROVED, NEEDS_CHANGES, INVALID, UNAVAILABLE, or none when no review was recorded.
+    description: >-
+      APPROVED, NEEDS_CHANGES, INVALID, UNAVAILABLE, or none when no review was recorded or ao cannot show the
+      one it recorded.
     value: ${{ steps.review.outputs.verdict }}
   artefact:
     description: The review artefact's path in the checkout.

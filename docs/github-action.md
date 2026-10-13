@@ -77,7 +77,7 @@ text reaches the reviewer, so use it only where you would show that text to the 
 
 | output | |
 |---|---|
-| `verdict` | APPROVED, NEEDS_CHANGES, INVALID, UNAVAILABLE, or `none` when no review was recorded |
+| `verdict` | APPROVED, NEEDS_CHANGES, INVALID, UNAVAILABLE, or `none` when no review was recorded or ao cannot show the one it recorded |
 | `artefact` | the review artefact's path in the checkout, its header and the reviewer's whole answer |
 | `tier` | the independence the review stands in: another model family, or not established |
 | `blocker`, `high` | the BLOCKER and HIGH findings it counted |
@@ -130,3 +130,11 @@ another family before it is merged. ao reviewed only where it governs, with a re
 the project's config, so a repository without ao had no way to have a change read by another family
 first. The action and `ao ci review` reuse catch-up's review of a range and the API reviewer; nothing
 is published - listing the action anywhere is the owner's step.*
+
+*In ao since slice LEADS-REVIEW: the verdict shown is the one this run recorded, and only one ao can
+show. The run found its review by counting the ledger's rows before it started, which could take
+another review of the same range recorded meanwhile, and a ledger it could not read afterwards was said
+on the log while the exit stayed the review's, APPROVED among them, with `none` in the outputs. The
+review now hands back the row it recorded; its artefact must hold the bytes and the verdict that row
+names, or the run gives no verdict: exit 3, `verdict=none`, and the summary says why. An error that stops
+the review is no verdict too: it exited 1, as NEEDS_CHANGES does, which `fail-on: no-verdict` let pass.*

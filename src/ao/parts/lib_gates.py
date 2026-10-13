@@ -1693,13 +1693,17 @@ def write_review_artefact(root, reviews_dir, name, text, *, evidence, verdict,
     The row comes first. A write that dies after it leaves a newest review that
     cannot be read, and that refuses; written first, a file whose row was never
     appended left the older recorded approval of the candidate deciding (audit).
+
+    Returns the row as the ledger holds it, so the caller knows which review is its own: one found by
+    counting the rows before it could be a review of the same bytes that ran beside it (LEADS-REVIEW).
     """
     from .storage import replace_file_durably
     directory = os.path.join(root, reviews_dir)
     os.makedirs(directory, exist_ok=True)
     data = scan_evidence(text)[0].encode(UTF8)          # scanned before it is recorded or written (#48)
-    record_review(root, name, data, evidence, verdict, reviewer=reviewer, fallback=fallback)
+    row = record_review(root, name, data, evidence, verdict, reviewer=reviewer, fallback=fallback)
     replace_file_durably(os.path.join(directory, name), data)
+    return row
 
 
 # ---- review artefacts: kept while anything rests on them, pruned by age (#38) ----------

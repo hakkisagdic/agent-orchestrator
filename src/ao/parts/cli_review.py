@@ -78,6 +78,24 @@ def _review_prompt_bound(chain, fixed, asked, share, diff_bytes, cfg=None):
     return fixed + REVIEW_DIFF_BYTES - diff_bytes, None
 
 
+def _shown_diff(diff_bytes):
+    """(the text a reviewer is handed for a diff, whether it had to be escaped) (LEADS-REVIEW).
+
+    The diff was decoded with replacement characters, so every byte of it that is not UTF-8 read as the
+    same U+FFFD: two candidates that differed only there were one prompt, and a reviewer approved bytes it
+    was never shown, while the grant is bound to the bytes. A diff that is UTF-8 is handed over as it
+    always was. One that is not is shown escaped, whole - each backslash as two and each byte that is not
+    UTF-8 as \\xNN - which reads back to that diff alone, and the prompt says so above the candidate. It
+    is not refused: a file a project keeps in Latin-1 or Shift JIS is its own, and a refusal would leave
+    a change to it no review at all, in CI or by catch-up, where a tool reviewer, handed the bytes
+    themselves, already refuses what its contract cannot read.
+    """
+    try:
+        return diff_bytes.decode(UTF8), False
+    except UnicodeDecodeError:
+        return diff_bytes.replace(b"\\", b"\\\\").decode(UTF8, "backslashreplace"), True
+
+
 REVIEW_ATTEMPTS = 2
 REVIEW_RETRY_SECONDS = 30
 REVIEW_PROBE_TIMEOUT = 90
@@ -250,6 +268,59 @@ def _say_reviewer_left(pid, left):
               f"{C['reset']}: {left}; {_stop_by_hand()}", flush=True)
 
 
+def _stop_reviewer_leftovers(proc, label):
+    """Stop what still runs of a reviewer's own process group once the reviewer has ended; what of it runs on after
+    (LEADS-REVIEW).
+
+    A reviewer, and a version probe, leads a group of its own (`_reviewer_group`), and what it starts stays in it
+    unless it leaves. Only a timeout stopped that group: a reviewer that answered and exited left running whatever
+    it had started and that had let go of the pipes - a server, a watcher - at work after the review, for nobody.
+    The group is stopped by its id, the reviewer's pid, which no new process is given while a process of the group
+    lives. Windows has no process groups, and nothing is looked for there (docs/windows.md).
+
+    Once ao has reaped the reviewer, a process found at its pid is another's: the pid was free to give, so nothing
+    of the reviewer's group ran then, and a group by that id is the new process's. That group is left alone, where
+    it was stopped as the reviewer's (LEADS-REVIEW). A reviewer not reaped yet holds its pid, and its group's id
+    with it.
+    """
+    if os.name == "nt":
+        return []
+    if proc.returncode is not None:
+        try:
+            os.kill(proc.pid, 0)
+        except ProcessLookupError:
+            pass                                # nobody holds the pid: a group by its id is still the reviewer's
+        except OSError:
+            return []                           # one runs at the pid that this process may not signal: another's
+        else:
+            return []                           # one runs at the pid: the pid was given again
+    try:
+        os.killpg(proc.pid, 0)
+    except ProcessLookupError:
+        return []                               # none of its group runs: how a reviewer ends
+    except OSError:
+        pass                                    # one runs that this process may not signal; it is asked below
+    try:
+        left = sorted(pid for pid, row in A._proc_table().items() if row[1] == proc.pid and A._pid_alive(pid))
+    except Exception:                           # TableUnreadable, or a reader that failed some other way
+        left = None
+    try:
+        os.killpg(proc.pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+    except OSError:
+        pass
+    if left is None:
+        print(f"{C['yellow']}reviewer {label} left processes of its group running after it ended{C['reset']}; ao "
+              "stopped the group, and the process table, which could not be read, does not say what ran", flush=True)
+        return []
+    if not left:
+        return []
+    print(f"{C['yellow']}reviewer {label} left {len(left)} process(es) of its group running after it ended"
+          f"{C['reset']}: {left}; ao stopped them", flush=True)
+    still = A._still_running(left)
+    _say_reviewer_left(proc.pid, still)
+    return still
+
+
 def _reviewer_kill_and_drain(proc):
     """Kill a reviewer with everything it started, and bound pipe draining after (#65).
 
@@ -323,6 +394,11 @@ def _reviewer_communicate(proc, timeout, label, started, stall=None, signed_out=
     review whose sign-in had expired waited ten minutes for a browser nobody would open (KIRO-SIGNED-OUT).
     What it printed so far comes with each beat's TimeoutExpired; where a platform reads the streams only once
     they close, the beat sees nothing and the reviewer's own end says it.
+
+    `timeout` is measured on the clock from the first wait: what was left was the timeout less the waits asked
+    for, so the time between them - the stall check reading the process table, the heartbeat line - and a wait
+    that overran were never counted, and a reviewer ran past its deadline by all of it. Each beat now spends
+    the wait it asked for or the time that passed, whichever is more (LEADS-REVIEW).
     """
     from . import procs
     if stall and os.name == "nt":
@@ -330,13 +406,15 @@ def _reviewer_communicate(proc, timeout, label, started, stall=None, signed_out=
         # was skipped without a word (WINDOWS-SAY-WHY).
         print(f"{C['dim']}reviewer {label}: {WINDOWS_LIMITS['stall check']}{C['reset']}", flush=True)
     remaining = float(timeout)
+    deadline = time.monotonic() + remaining
     last_cpu, quiet_since = None, time.monotonic()
     while True:
-        wait = min(remaining, REVIEW_HEARTBEAT_SECONDS)
+        wait = max(0.0, min(remaining, REVIEW_HEARTBEAT_SECONDS))
         try:
             return proc.communicate(timeout=wait)
         except subprocess.TimeoutExpired as waited:
-            remaining -= wait
+            # Spent: the wait asked for or the time that passed, whichever is more, so each beat counts.
+            remaining = min(remaining - wait, deadline - time.monotonic())
             if signed_out:
                 seen = "".join(part.decode(UTF8, "replace") if isinstance(part, bytes) else str(part)
                                for part in (waited.output, waited.stderr) if part)
@@ -358,6 +436,7 @@ def _reviewer_communicate(proc, timeout, label, started, stall=None, signed_out=
                     raise stalled
             print(f"{C['dim']}reviewer {label} still working: "
                   f"{_elapsed(time.monotonic() - started)} elapsed, pid {proc.pid}{C['reset']}", flush=True)
+            remaining = min(remaining, deadline - time.monotonic())     # the check and the line took time too
 
 
 # ---- a reviewer ao runs as a tool over the candidate, on its own provider (#86) ------------
@@ -1068,9 +1147,17 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
             _DETACHED_RUN["stopped_reviewer"] = proc.pid
             raise
         finally:
-            A.helper_release(root, proc.pid)
-            _review_reviewer(None)
-            handlers_back()
+            # However it ended, nothing of its group outlives the review, and a stop signal waits while the leftovers
+            # are stopped, then comes: put back first, a SIGTERM in between ended ao before it stopped them
+            # (LEADS-REVIEW).
+            handlers_back.hold()
+            try:
+                A.helper_release(root, proc.pid)
+                _review_reviewer(None)
+                _stop_reviewer_leftovers(proc, label)
+            finally:
+                handlers_back()
+                handlers_back.release()
 
         print(f"{C['dim']}reviewer {label} exited {proc.returncode} after "
               f"{_elapsed(time.monotonic() - started)}{C['reset']}")
@@ -1125,35 +1212,55 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
 
 
 def _reviewer_binary_version(root, path, timeout=REVIEW_VERSION_TIMEOUT):
-    """Measure one candidate version under reviewer cwd/Git isolation."""
+    """Measure one candidate version under reviewer cwd/Git isolation.
+
+    The probe leads a process group of its own, as a reviewer does (LEADS-REVIEW). Started in ao's group, a
+    probe that did not answer was stopped alone, by its pid, and what it had started ran on. In a group of
+    its own it hears no signal sent to the run's, so one that comes while it starts waits until ao holds it,
+    as for a reviewer (REVIEWER-ORPHAN-4); and once it has ended, nothing of its group runs on.
+    """
     import tempfile
 
     with tempfile.TemporaryDirectory(prefix="ao-reviewer-version-") as fresh:
         fresh = os.path.realpath(fresh)
         if _reviewer_temp_is_inside(root, fresh):
             return ""
+        handlers_back = _stop_on_signals(held=True)
         try:
             proc = subprocess.Popen(
                 [path, "--version"], cwd=fresh,
                 env=_reviewer_environment(fresh),
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, encoding=UTF8, errors="replace",
+                text=True, encoding=UTF8, errors="replace", **_reviewer_group(),
             )
         except OSError:
+            handlers_back()
+            handlers_back.release()
             return ""
-        A.helper_register(root, proc.pid, "reviewer-version")
+        except BaseException:
+            handlers_back()
+            handlers_back.release()
+            raise
         try:
+            handlers_back.release()
+            A.helper_register(root, proc.pid, "reviewer-version")
             try:
                 stdout, stderr = proc.communicate(timeout=timeout)
-            except KeyboardInterrupt:
-                _reviewer_kill_and_drain(proc)             # stopped with the run (REVIEWER-ORPHAN)
-                raise
             except (OSError, subprocess.TimeoutExpired):
                 stdout, stderr = _reviewer_kill_and_drain(proc)
                 _reviewer_terminal_output(stdout, stderr)
                 return ""
+        except KeyboardInterrupt:
+            _reviewer_kill_and_drain(proc)             # stopped with the run (REVIEWER-ORPHAN)
+            raise
         finally:
-            A.helper_release(root, proc.pid)
+            handlers_back.hold()
+            try:
+                A.helper_release(root, proc.pid)
+                _stop_reviewer_leftovers(proc, f"{os.path.basename(path)} --version")
+            finally:
+                handlers_back()
+                handlers_back.release()
         if proc.returncode != 0:
             _reviewer_terminal_output(stdout, stderr)
             return ""
@@ -1923,6 +2030,9 @@ def _section_journal(root, evidence, boundary, sections, chain):
     if evidence.get("threat_model"):
         # Nor is one judged under another threat model, or none (REVIEW-THREAT-MODEL).
         keyed.append(evidence["threat_model"].get("digest"))
+    if evidence.get("diff_escaped"):
+        # Nor one given on the replacement characters such a diff used to be shown as (LEADS-REVIEW).
+        keyed.append("diff-escaped")
     key = A.hashlib.sha256(json.dumps(keyed, sort_keys=True).encode(UTF8)).hexdigest()[:24]
     return os.path.join(root, ".ao", "reviews", "sections", f"{key}.jsonl")
 
@@ -2062,7 +2172,7 @@ def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
         failure["retryable"] = False
         failures[position] = failure
 
-    def invoke(position, route_timeout):
+    def invoke(position, again=False):
         cand = chain[position]
         # The one machine-wide lock a review can wait on: a spent window is rotated under it (#32). The run
         # says it waits there only once the window is read spent, as it is about to wait. A route no person has
@@ -2079,6 +2189,18 @@ def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
                                   "retryable": False, "reason": headroom["text"]}
             print(f"{C['dim']}{labels[position]} unavailable: {headroom['text']}{C['reset']}")
             return None
+        # The rotation waits on its lock for up to three minutes and runs keyflip for two more: the time the route
+        # gets is read after it, where it was read before and the route ran on that stale time past the walk's
+        # deadline - or started once the deadline had passed (LEADS-REVIEW).
+        if room() <= 0:
+            if again:
+                not_retried(position)
+            else:
+                not_reached(position)
+            print(f"{C['dim']}review chain budget of {budget:.0f}s spent while a route waited for quota headroom; "
+                  f"it was not started.{C['reset']}")
+            return None
+        route_timeout = min(float(timeout), room())
         tool_route = not strict and _tool_route(cand)
         label, binary, version, attempt = _reviewer_route_invocation(
             root, cand, treeless if tool_route and treeless is not None else prompt, route_timeout, strict,
@@ -2112,7 +2234,7 @@ def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
             print(f"{C['dim']}review chain budget of {budget:.0f}s spent; "
                   f"{len(chain) - position} route(s) not tried.{C['reset']}")
             break
-        result = invoke(position, min(float(timeout), room()))
+        result = invoke(position)
         if result is not None:
             return result
         if failures[position].get("retryable") is True:
@@ -2134,7 +2256,7 @@ def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
                 if room() <= 0:
                     not_retried(position)
                     continue
-                result = invoke(position, min(float(timeout), room()))
+                result = invoke(position, again=True)
                 if result is not None:
                     return result
 
@@ -2712,14 +2834,14 @@ def _collect_review(cfg, args, root, by, model, read_chained_jsonl):
         "limits": list(A.STANDIN_LIMITS)}}
     if isinstance(request.get("threat_model"), dict):
         carried["evidence"]["threat_model"] = request["threat_model"]   # the one its prompt carried
-    before = A.review_row_count(root)
-    code = cmd_review(cfg, SimpleNamespace(boundary=request.get("boundary"), paths=request.get("paths"),
-                                           commits=None, carried=carried))
-    from .storage import read_chained_jsonl
-    recorded = [row for row in read_chained_jsonl(A.review_ledger_path(root), A.REVIEW_CHAIN)[before:]
-                if isinstance(row, dict) and row.get("reviewer") == route["id"]]
+    asked = SimpleNamespace(boundary=request.get("boundary"), paths=request.get("paths"), commits=None,
+                            carried=carried)
+    code = cmd_review(cfg, asked)
+    # The review this collect recorded, as the review hands it back: the newest row of this route after a count
+    # taken before it could be another request's, carried from a session of the same model meanwhile (LEADS-REVIEW).
+    recorded = getattr(asked, "recorded", None)
     if recorded:
-        A.mark_review_request_collected(root, request["nonce"], recorded[-1].get("artefact"), by)
+        A.mark_review_request_collected(root, request["nonce"], recorded.get("artefact"), by)
         for limit in A.STANDIN_LIMITS:
             print(f"{C['dim']}limit: {limit}{C['reset']}")
     return code
@@ -2849,6 +2971,10 @@ def _show_person_review(person, diff, evidence, boundary, args, criteria=()):
         ["--paths"] + [shlex.quote(path) for path in args.paths]) if args.paths else ""
     base = " ".join(part for part in ("ao person-review", f"--by {shlex.quote(person['by'])}", scope) if part)
     print(f"\n{C['b']}what a reviewer would be handed{C['reset']}  {evidence['diff_digest']}")
+    if evidence.get("diff_escaped"):
+        # Shown as a reviewer is handed it, and read the same way (LEADS-REVIEW).
+        print(f"  {C['yellow']}the diff is not UTF-8{C['reset']}: it is shown escaped, whole - \\\\ is one backslash "
+              "of the files and \\xNN one byte that is not UTF-8")
     print(f"  boundary: {A.review_header_value(boundary)}")
     if criteria:
         print(f"  {C['dim']}it lists {len(criteria)} criteria; answer each in the findings file, on a line of its own: "
@@ -3050,6 +3176,13 @@ def _write_review_state(root, state):
                          (json.dumps(state, indent=2, ensure_ascii=False) + "\n").encode(UTF8))
 
 
+def _reviews_held(root):
+    """The lock a submit holds while it counts the reviews in flight and writes its own, and a run while it takes its
+    review (LEADS-REVIEW)."""
+    from .storage import _exclusive_lock
+    return _exclusive_lock(os.path.join(_reviews_dir(root), "submitted.lock"))
+
+
 def _claim_review_id(root):
     """A new review id whose state file this submit created, so no other submit holds it (#71).
 
@@ -3187,20 +3320,26 @@ def _stop_on_signals(held=False):
     raised while it was being started, before ao held its pid, left it running with nobody to stop
     it (REVIEWER-ORPHAN-4).
     """
-    fired, waiting = [], [held]
+    fired, waiting, raised = [], [held], []
 
     def stop(signum, frame):
         if fired:
             return
         fired.append(signum)
         if not waiting[0]:
+            raised.append(signum)
             raise ReviewRunStopped(signum)
 
     def release():
         if waiting[0]:
             waiting[0] = False
-            if fired:
+            if fired and not raised:
+                raised.append(fired[0])
                 raise ReviewRunStopped(fired[0])
+
+    def hold():
+        # A signal from here waits for release(): a cleanup it would cut short runs whole first (LEADS-REVIEW).
+        waiting[0] = True
 
     before = {}
     for signum in (getattr(signal, "SIGTERM", None), getattr(signal, "SIGHUP", None), getattr(signal, "SIGINT", None)):
@@ -3218,6 +3357,7 @@ def _stop_on_signals(held=False):
             except (OSError, ValueError):
                 pass
     put_back.release = release
+    put_back.hold = hold
     return put_back
 
 
@@ -3297,7 +3437,12 @@ def _review_finished_event(root, state):
 
 
 def cmd_review_submit(cfg, args):
-    """Pin the staged candidate as a tree, start its review detached, and return its id at once (S1-S3)."""
+    """Pin the staged candidate as a tree, start its review detached, and return its id at once (S1-S3).
+
+    The reviews in flight are counted, and this one's state is written, under one lock: two submits at once each
+    counted before either had written its own, and both started, past review.max_inflight and past one slice per
+    worktree (LEADS-REVIEW).
+    """
     root = cfg["root"]
     try:
         candidate = A.index_candidate(root)
@@ -3307,40 +3452,43 @@ def cmd_review_submit(cfg, args):
     if not candidate["changed_paths"]:
         print(f"{C['dim']}Nothing staged to review — stage the exact candidate first.{C['reset']}")
         return 2
-    flying = [state for state in _review_states(root) if _review_in_flight(state)]
-    limit = S.get(cfg, "review.max_inflight")
-    if len(flying) >= limit:
-        # The reviewer shares a person's model window; fan-out spends someone else's quota (S3).
-        print(f"{C['red']}refused{C['reset']}: {len(flying)} review(s) in flight and review.max_inflight is "
-              f"{limit}; collect first: {', '.join(state['id'] for state in flying)}")
-        return 2
-    running = A.running_slice(root)
-    slice_id = (running or {}).get("id")
-    elsewhere = [state for state in flying if state.get("slice") != slice_id]
-    if elsewhere:
-        # One slice, one worktree, one index: a pinned tree is never another slice's (S2).
-        print(f"{C['red']}refused{C['reset']}: {elsewhere[0]['id']} is in flight in this worktree for slice "
-              f"{elsewhere[0].get('slice')}; one slice per worktree")
-        return 2
-    rid = _claim_review_id(root)
-    index = os.path.join(_reviews_dir(root), f"{rid}.index")
-    pinned = subprocess.run([A.git_binary(), "read-tree", candidate["index_tree"]], cwd=root, capture_output=True,
-                            env=dict(os.environ, GIT_INDEX_FILE=index))
-    if pinned.returncode:
-        try:
-            os.remove(_review_state_path(root, rid))     # the claim; no state was written into it
-        except OSError:
-            pass
-        print(f"{C['red']}could not pin the candidate{C['reset']}: {pinned.stderr.decode(UTF8, 'replace').strip()}")
-        return 2
-    submitted = int(time.time())
-    # Written before the runner is started, so its own first write is never overwritten by this one.
-    state = {"id": rid, "state": "running", "tree": candidate["index_tree"], "head": candidate["head"],
-             "candidate": candidate["digest"], "changed_paths": candidate["changed_paths"],
-             "boundary": getattr(args, "boundary", None), "paths": getattr(args, "paths", None),
-             "slice": slice_id, "worktree": root, "index": index, "submitted_at": submitted,
-             "phase": {"what": "starting", "on": "its runner has not reported yet", "since": submitted}}
-    _write_review_state(root, state)
+    with _reviews_held(root):
+        flying = [state for state in _review_states(root) if _review_in_flight(state)]
+        limit = S.get(cfg, "review.max_inflight")
+        if len(flying) >= limit:
+            # The reviewer shares a person's model window; fan-out spends someone else's quota (S3).
+            print(f"{C['red']}refused{C['reset']}: {len(flying)} review(s) in flight and review.max_inflight is "
+                  f"{limit}; collect first: {', '.join(state['id'] for state in flying)}")
+            return 2
+        running = A.running_slice(root)
+        slice_id = (running or {}).get("id")
+        elsewhere = [state for state in flying if state.get("slice") != slice_id]
+        if elsewhere:
+            # One slice, one worktree, one index: a pinned tree is never another slice's (S2).
+            print(f"{C['red']}refused{C['reset']}: {elsewhere[0]['id']} is in flight in this worktree for slice "
+                  f"{elsewhere[0].get('slice')}; one slice per worktree")
+            return 2
+        rid = _claim_review_id(root)
+        index = os.path.join(_reviews_dir(root), f"{rid}.index")
+        pinned = subprocess.run([A.git_binary(), "read-tree", candidate["index_tree"]], cwd=root, capture_output=True,
+                                env=dict(os.environ, GIT_INDEX_FILE=index))
+        if pinned.returncode:
+            try:
+                os.remove(_review_state_path(root, rid))     # the claim; no state was written into it
+            except OSError:
+                pass
+            print(f"{C['red']}could not pin the candidate{C['reset']}: "
+                  f"{pinned.stderr.decode(UTF8, 'replace').strip()}")
+            return 2
+        submitted = int(time.time())
+        # Written before the runner is started, so its own first write is never overwritten by this one, and before
+        # the lock is let go, so the next submit counts it.
+        state = {"id": rid, "state": "running", "tree": candidate["index_tree"], "head": candidate["head"],
+                 "candidate": candidate["digest"], "changed_paths": candidate["changed_paths"],
+                 "boundary": getattr(args, "boundary", None), "paths": getattr(args, "paths", None),
+                 "slice": slice_id, "worktree": root, "index": index, "submitted_at": submitted,
+                 "phase": {"what": "starting", "on": "its runner has not reported yet", "since": submitted}}
+        _write_review_state(root, state)
     # Told before the run starts, so a run that ends at once is never told first (EVENTS-LOG).
     A.emit_event(root, "review-submitted", {"review": rid, "slice": slice_id, "tree": candidate["index_tree"]})
     try:
@@ -3358,6 +3506,27 @@ def cmd_review_submit(cfg, args):
     return 0
 
 
+def _claim_review_run(root, rid, started):
+    """(the state of the submitted review this run now holds, None), or (None, why it is not this run's) (LEADS-REVIEW).
+
+    The run read its review's state and wrote its own pid into it with nothing held between the two, so
+    two runs of one review - its hidden `--run` started a second time - both took it: the later pid stood
+    in the state, both reviewed its pinned index, and the first to end deleted that index under the other.
+    Under the lock a submit holds, a run now takes a review only while it is running and names no runner.
+    """
+    with _reviews_held(root):
+        state = _review_state(root, rid)
+        if not state or state.get("state") != "running":
+            return None, f"no running review {rid}"
+        if state.get("pid"):
+            return None, (f"{rid} is run already, by pid {state['pid']}: a submitted review is run once; "
+                          f"`ao reviews` shows it, and `ao review cancel {rid}` stops it")
+        state.update(pid=os.getpid(), started_at=int(started),
+                     phase={"what": "preparing", "on": "the candidate and its prompt", "since": int(started)})
+        _write_review_state(root, state)
+    return state, None
+
+
 def cmd_review_run(cfg, rid):
     """The detached half of a submit: review the pinned tree, whatever the live index holds now.
 
@@ -3369,22 +3538,23 @@ def cmd_review_run(cfg, rid):
     from its first step, the write of its own start among them, and an end on an error is told in the
     machine's event log as every other end is (EVENTS-LOG); where the state cannot be written either,
     the run says so on its log and tells nothing.
+
+    A review is run once (LEADS-REVIEW). The run takes it as `_claim_review_run` says, and a run that
+    did not take it - its review is not running, or another run holds it - records nothing over it,
+    and leaves its pinned index alone.
     """
     from types import SimpleNamespace
-    from .storage import read_chained_jsonl
     root = cfg["root"]
-    state = _review_state(root, rid)
-    if not state or state.get("state") != "running":
-        print(f"no running review {rid}")
-        return 2
     started = time.time()
     previous = os.environ.get("GIT_INDEX_FILE")
     put_back = lambda: None                                 # noqa: E731 - what _log_by_line hands back, once it ran
     handlers_back = _stop_on_signals()
+    state = None                                            # the review's state, once this run holds it
     try:
-        state.update(pid=os.getpid(), started_at=int(started),
-                     phase={"what": "preparing", "on": "the candidate and its prompt", "since": int(started)})
-        _write_review_state(root, state)
+        state, refused = _claim_review_run(root, rid, started)
+        if refused:
+            print(refused)
+            return 2
         put_back = _log_by_line()
         print(f"{time.strftime('%H:%M:%S')} {rid} started: runner pid {os.getpid()}, "
               f"{_elapsed(started - float(state.get('submitted_at') or started))} after the submit, "
@@ -3400,12 +3570,12 @@ def cmd_review_run(cfg, rid):
             _write_review_state(root, state)
             _review_finished_event(root, state)
             return 2
-        before = A.review_row_count(root)
-        code = cmd_review(cfg, SimpleNamespace(boundary=state.get("boundary"), paths=state.get("paths"),
-                                               commits=None, pinned=True))
-        rows = [row for row in read_chained_jsonl(A.review_ledger_path(root), A.REVIEW_CHAIN)[before:]
-                if isinstance(row, dict) and row.get("candidate") == state["candidate"]]
-        newest = rows[-1] if rows else None
+        A.review_row_count(root)                # read first, so no review is spent where it could not be recorded
+        asked = SimpleNamespace(boundary=state.get("boundary"), paths=state.get("paths"), commits=None, pinned=True)
+        code = cmd_review(cfg, asked)
+        # Its own review, as cmd_review hands it back: the newest row of the candidate after a count taken before it
+        # could be a review of the same candidate run beside it (LEADS-REVIEW).
+        newest = getattr(asked, "recorded", None)
         verdict = (newest or {}).get("verdict")
         state.pop("phase", None)
         state.update(state="finished" if verdict in REVIEWER_VERDICTS else "unavailable" if code == 3 else "failed",
@@ -3417,8 +3587,9 @@ def cmd_review_run(cfg, rid):
     except ReviewRunStopped as stop:
         # Ended, and said why: the reviewer it had started was stopped on the way out (REVIEWER-ORPHAN).
         name = getattr(signal.Signals(stop.signum), "name", str(stop.signum))
-        if state.get("state") != "running":
-            # It came after the run had recorded its end, which stands.
+        if state is None or state.get("state") != "running":
+            # It came before the run held its review, which is not this run's to record, or after the run had
+            # recorded its end, which stands.
             return 128 + stop.signum
         stopped = _DETACHED_RUN.get("stopped_reviewer")
         state.pop("phase", None)
@@ -3434,6 +3605,8 @@ def cmd_review_run(cfg, rid):
             print(f"{rid}: could not record that the run was stopped: {unwritten}")
         return 128 + stop.signum
     except Exception as exc:
+        if state is None:
+            raise                                       # the review was never this run's: nothing to record
         # Ended, not lost: a failed review is one the watchdog raises until someone collects it.
         state.pop("phase", None)
         state.update(state="failed", finished_at=int(time.time()),
@@ -3456,7 +3629,8 @@ def cmd_review_run(cfg, rid):
         else:
             os.environ["GIT_INDEX_FILE"] = previous
         try:
-            os.remove(state["index"])
+            if state is not None:               # only the run that holds the review deletes the index it reviews
+                os.remove(state["index"])
         except OSError:
             pass
         put_back()                  # last, so the index and the environment are put back whatever the stream does
@@ -3640,6 +3814,13 @@ def cmd_review(cfg, args):
         print(f"{C['red']}--reviewer and --slice go with --commits{C['reset']}: they name who reviews a landed range "
               "and the slice that landed it; a staged candidate is the running slice's, reviewed by the reviewer role")
         return 2
+    if getattr(args, "commits", None) and getattr(args, "paths", None) is not None:
+        # The range's diff was built whole while its artefact recorded the paths, so a review said to judge some of
+        # a range had judged all of it. A landed range is what catch-up closes a waiver on and `ao ci review`
+        # reports on, whole, so it is reviewed whole (LEADS-REVIEW).
+        print(f"{C['red']}--paths goes with a staged candidate{C['reset']}: a landed range is reviewed whole; review "
+              "it without --paths, or stage the paths you mean and review them")
+        return 2
     if actor:
         cfg, refused = _catchup_reviewer(cfg, actor)
         if refused:
@@ -3765,11 +3946,19 @@ def cmd_review(cfg, args):
     if not diff_bytes.strip():
         print(f"{C['dim']}Nothing to review.{C['reset']}")
         return 0
-    if len(diff_bytes) > REVIEW_DIFF_BYTES:
-        print(f"{C['red']}Candidate diff is {len(diff_bytes)} bytes; limit is {REVIEW_DIFF_BYTES}. "
-              f"Stage a smaller candidate rather than approving truncated input.{C['reset']}")
+    diff, escaped = _shown_diff(diff_bytes)
+    shown_bytes = len(diff.encode(UTF8))
+    if shown_bytes > REVIEW_DIFF_BYTES:
+        print(f"{C['red']}Candidate diff is {len(diff_bytes)} bytes"
+              + (f", {shown_bytes} as the reviewer is shown it, escaped" if escaped else "")
+              + f"; limit is {REVIEW_DIFF_BYTES}. Stage a smaller candidate rather than approving truncated input."
+              + C["reset"])
         return 2
-    diff = diff_bytes.decode(UTF8, "replace")
+    if escaped:
+        # Recorded, so a review of these bytes says how its reviewer was shown them (LEADS-REVIEW).
+        evidence["diff_escaped"] = True
+        print(f"{C['yellow']}the diff is not UTF-8{C['reset']}: the reviewer is shown it escaped, a backslash as "
+              "\\\\ and each byte that is not UTF-8 as \\xNN")
     # Size is a tripwire that asks a question, not a gate that reshapes the work (#34).
     size = trip = None
     if candidate is not None:
@@ -3877,8 +4066,10 @@ def cmd_review(cfg, args):
     if threat:
         evidence["threat_model"] = {"path": threat_path,
                                     "digest": "sha256:" + A.hashlib.sha256(threat.encode(UTF8)).hexdigest()}
+    # How an escaped diff reads is said above the candidate, where ao writes and the candidate cannot (LEADS-REVIEW).
+    escape_note = "\n\n" + language.text(cfg, "prompt.review-escaped") if escaped else ""
     smallest = language.text(cfg, "prompt.review", boundary=_claims_statement(statement, "") if wanted else statement) \
-        + threat_note + size_note + f"\n\n{candidate_marker}\n" + diff
+        + threat_note + size_note + escape_note + f"\n\n{candidate_marker}\n" + diff
     # The criteria are asked in a note after the context and the tree's, where a section's question
     # follows too, so the note is measured with the question; a boundary with none adds nothing.
     criteria_note = "" if not criteria else "\n\n" + language.text(
@@ -3887,7 +4078,7 @@ def cmd_review(cfg, args):
     asked = max((len(f"\n\n{section_marker}\n{section['question']}".encode(UTF8)) for section in sections),
                 default=0) + len(criteria_note.encode(UTF8))
     share = S.get(cfg, "review.context_bytes")
-    bound, held = _review_prompt_bound(chain, len(smallest.encode(UTF8)), asked, share, len(diff_bytes), cfg)
+    bound, held = _review_prompt_bound(chain, len(smallest.encode(UTF8)), asked, share, shown_bytes, cfg)
     claims = None
     if wanted:
         # Set only by catchup, without --boundary: a waived range is judged against what its
@@ -3901,7 +4092,7 @@ def cmd_review(cfg, args):
             share -= len(claims["text"].encode(UTF8))
             evidence["claims"] = {key: claims[key] for key in ("commits", "inlined", "redacted", "digest")}
     prompt = language.text(cfg, "prompt.review", boundary=statement) \
-        + threat_note + size_note + f"\n\n{candidate_marker}\n" + diff
+        + threat_note + size_note + escape_note + f"\n\n{candidate_marker}\n" + diff
     budget = _review_context_budget(prompt, bound, share)
     if person:
         context = None                          # a person reads the candidate, and what else they choose
@@ -4027,7 +4218,10 @@ def cmd_review(cfg, args):
                 f"- boundary: {A.review_header_value(boundary)}\n"
                 f"- reviewers tried: {A.review_header_value(why)}\n"
             )
-        A.write_review_artefact(
+        # Each of the three records keeps its ledger row where the caller reads it, `args.recorded`: a review of the
+        # same bytes that ran beside this one records a row too, and one found by counting rows could be that one
+        # (LEADS-REVIEW).
+        args.recorded = A.write_review_artefact(
             root, cfg["reviews"], name,
             unavailable_body + "\nNo review took place. This file is not a round.\n",
             evidence=evidence, verdict="UNAVAILABLE",
@@ -4149,7 +4343,7 @@ def cmd_review(cfg, args):
                 "- paths: " + json.dumps(args.paths, ensure_ascii=True)
             )
         _reviewer_terminal_output(out, "")
-        A.write_review_artefact(
+        args.recorded = A.write_review_artefact(
             root, cfg["reviews"], name, "\n".join(header) + f"\n\n{invalid_reason}.\n",
             evidence=evidence, verdict="INVALID", reviewer=reviewer_label,
             fallback=fallback_used,
@@ -4288,7 +4482,7 @@ def cmd_review(cfg, args):
         )
     if included:
         header.append(f"- new files: {A.review_header_value(', '.join(included))}")
-    A.write_review_artefact(
+    args.recorded = A.write_review_artefact(
         root, cfg["reviews"], name, "\n".join(header) + f"\n\n{out}\n",
         evidence=evidence, verdict=verdict, fallback=fallback_used,
         reviewer=used["identity"]["binding"] if strict else (rv.get("id") or reviewer_executable),
@@ -4387,8 +4581,11 @@ def _ci_append(path, text, what):
         print(f"{C['yellow']}the {what} was not written{C['reset']}: {exc}")
 
 
-def _ci_report(args, start, head, recorded, evidence, findings, author_family, reason=None):
-    """The summary a person reads in the job, and the outputs the next step reads, of one CI review (GITHUB-ACTION)."""
+def _ci_report(args, start, head, recorded, evidence, findings, author_family, reason=None, unshown=False):
+    """The summary a person reads in the job, and the outputs the next step reads, of one CI review (GITHUB-ACTION).
+
+    `unshown`: a review was recorded that ao cannot show, which is no verdict rather than no review (LEADS-REVIEW).
+    """
     from . import tiers as T
     verdict = (recorded or {}).get("verdict") or "none"
     counts = (evidence or {}).get("counts") or {}
@@ -4396,7 +4593,8 @@ def _ci_report(args, start, head, recorded, evidence, findings, author_family, r
     tier = T.label((evidence or {}).get("review_tier")) or "not established"
     lines = [f"### ao review of {start[:12]}..{head[:12]}", ""]
     if recorded is None:
-        lines.append(f"**not reviewed**: {reason or 'ao recorded no review of this range; the step log says why'}")
+        lines.append(f"**{'no verdict' if unshown else 'not reviewed'}**: "
+                     f"{reason or 'ao recorded no review of this range; the step log says why'}")
     else:
         lines.append(f"**{verdict}**" + ("".join(f" · {key} {counts.get(key, 0)}" for key in REVIEW_SEVERITIES)
                                           if verdict in REVIEWER_VERDICTS else ""))
@@ -4431,7 +4629,8 @@ def cmd_ci(cfg, args):
     written but the review's own record. The author's family is the workflow's statement: a reviewer of that family
     is refused, and with `unknown` no independence is claimed. The review grants nothing; the summary and the outputs
     say what it found, and the exit is the review's: 0 APPROVED or nothing to review, 1 NEEDS_CHANGES, 3 no verdict,
-    2 not reviewed.
+    2 not reviewed. What is shown is the review this run recorded, and only while its artefact holds the bytes
+    recorded; a review ao cannot show, and an error that stops the review, are no verdict (LEADS-REVIEW).
     """
     from types import SimpleNamespace
     root = cfg["root"]
@@ -4478,26 +4677,50 @@ def cmd_ci(cfg, args):
     commits = f"{start}..{head}"
     claims = A.review_range_claims(root, commits, CI_CLAIMS_BYTES)
     try:
-        before = A.review_row_count(root)
+        A.review_row_count(root)                # read first, so no review is spent where it could not be recorded
     except Exception as exc:
         print(f"{C['red']}not reviewed{C['reset']}: the review ledger of this checkout cannot be read: {exc}")
         _ci_report(args, start, head, None, None, [], author and family, f"the review ledger cannot be read: {exc}")
         return 2
-    code = cmd_review(review_cfg, SimpleNamespace(boundary=_ci_statement(args.boundary, (claims or {}).get("text")),
-                                                  paths=None, commits=commits, author=author, claims=False))
+    asked = SimpleNamespace(boundary=_ci_statement(args.boundary, (claims or {}).get("text")), paths=None,
+                            commits=commits, author=author, claims=False)
     try:
-        recorded = A.range_review(root, commits, since=before, author=author)
+        code = cmd_review(review_cfg, asked)
     except Exception as exc:
-        recorded = None
-        print(f"{C['red']}the review's record cannot be read{C['reset']}: {exc}")
-    evidence, findings = None, []
-    if recorded:
-        args.artefact = f"{review_cfg.get('reviews', 'semantic-review')}/{recorded.get('artefact')}"
-        try:
-            with open(os.path.join(root, *args.artefact.split("/")), encoding=UTF8) as fh:
-                text = fh.read()
-            evidence, findings = A.review_evidence(text), _ci_findings(text)
-        except OSError as exc:
-            print(f"{C['yellow']}the review artefact cannot be read{C['reset']}: {exc}")
+        # An error is no verdict. It ended the command with exit 1, NEEDS_CHANGES's, which `fail-on: no-verdict`
+        # lets pass. Its words go into the job's summary, scanned as evidence is (#48) (LEADS-REVIEW).
+        reason = A.scan_evidence(f"the review stopped: {type(exc).__name__}: {' '.join(str(exc).split())}")[0]
+        print(f"{C['red']}no verdict{C['reset']}: {reason}")
+        _ci_report(args, start, head, None, None, [], author and family, reason, unshown=True)
+        return 3
+    # The review this run recorded, as cmd_review hands it back. It was found by counting the ledger's rows before the
+    # run, which could take a review of the same range that ran beside it, and a ledger that could not be read
+    # afterwards left the exit at the review's, APPROVED among them, with no verdict or evidence shown (LEADS-REVIEW).
+    recorded = getattr(asked, "recorded", None)
+    if recorded is None:
+        _ci_report(args, start, head, None, None, [], author and family)
+        return code
+    args.artefact = f"{review_cfg.get('reviews', 'semantic-review')}/{recorded.get('artefact')}"
+    evidence, findings, unshown = None, [], None
+    try:
+        with open(os.path.join(root, *args.artefact.split("/")), "rb") as fh:
+            data = fh.read()
+    except OSError as exc:
+        unshown = f"its artefact cannot be read: {exc}"
+    else:
+        text = data.decode(UTF8, "replace")
+        evidence = A.review_evidence(text)
+        if "sha256:" + A.hashlib.sha256(data).hexdigest() != recorded.get("sha256"):
+            unshown = "its artefact is not the file ao recorded: emptied, cut short or rewritten"
+        elif recorded.get("verdict") in REVIEWER_VERDICTS and (evidence or {}).get("verdict") != recorded["verdict"]:
+            unshown = "its artefact does not carry the verdict ao recorded"
+        else:
+            findings = _ci_findings(text)
+    if unshown:
+        # Only what ao can show passes: a verdict it cannot show is none (LEADS-REVIEW).
+        reason = f"ao recorded a review of this range, {recorded.get('artefact')}, and cannot show it: {unshown}"
+        print(f"{C['red']}no verdict{C['reset']}: {reason}")
+        _ci_report(args, start, head, None, None, [], author and family, reason, unshown=True)
+        return 3
     _ci_report(args, start, head, recorded, evidence, findings, author and family)
     return code
