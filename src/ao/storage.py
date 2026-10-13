@@ -33,9 +33,123 @@ class LedgerLockTimeout(TimeoutError):
         self.path, self.timeout = path, timeout
 
 
+class LockThroughLink(OSError):
+    """A lock file that is a link, or not a regular file: ao takes no lock through it (LOCK-LINKS)."""
+
+
 def _call(checkpoint, step):
     if checkpoint is not None:
         checkpoint(step)
+
+
+def _open_lock_nt(path, refused):
+    """A Windows lock file's handle, opened as the link itself where the path is one, never through it (LOCK-LINKS).
+
+    FILE_FLAG_OPEN_REPARSE_POINT opens a link, not what it names, so OPEN_ALWAYS makes nothing through one; the
+    caller refuses the handle when it is a reparse point. A link Windows will not open that way is refused here.
+    """
+    import ctypes
+    import msvcrt
+    import stat as _stat
+    from ctypes import wintypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create, close = kernel32.CreateFileW, kernel32.CloseHandle
+    create.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD,
+                       wintypes.DWORD, wintypes.HANDLE)
+    create.restype = wintypes.HANDLE
+    close.argtypes = (wintypes.HANDLE,)
+    generic_read_write, share_read_write, open_always = 0x80000000 | 0x40000000, 0x1 | 0x2, 4
+    normal_open_reparse_point = 0x80 | 0x00200000
+    raw = create(path, generic_read_write, share_read_write, None, open_always, normal_open_reparse_point, None)
+    if raw is None or raw == wintypes.HANDLE(-1).value:
+        error = ctypes.WinError(ctypes.get_last_error())
+        try:
+            linked = _stat.S_ISLNK(os.lstat(path).st_mode)
+        except OSError:
+            linked = False
+        if linked:
+            raise LockThroughLink(refused) from error
+        raise error
+    try:
+        fd = msvcrt.open_osfhandle(raw, os.O_APPEND)
+    except BaseException:
+        close(raw)
+        raise
+    try:
+        return open(fd, "a+b", buffering=0)
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _open_lock(path):
+    """A lock file's handle: the file reached through no final link, a regular file of one name; LockThroughLink
+    otherwise.
+
+    A lock was opened "a+b", which follows a final link and creates the file it names: a link put where a lock is
+    kept - `.ao/` in the working tree holds several - had ao create a file wherever the link pointed and write a
+    byte into it, outside the tree an agent may write. On POSIX a lock is opened with O_NOFOLLOW, and without
+    blocking, so a FIFO put in its place is refused at once rather than waited on; a POSIX platform without
+    O_NOFOLLOW takes no lock. Windows has no O_NOFOLLOW, and looking at the path before and after a creating open
+    left that open to follow a link put there in between: there the path is opened as the link itself
+    (`_open_lock_nt`), so nothing is made through one. A link, anything but a regular file, or a file that has
+    another name - a hard link put in the lock's place - is then refused before anything is written (LOCK-LINKS).
+    """
+    import stat as _stat
+    refused = (f"{path} is a link, not a regular file, or a file with another name: ao takes no lock through it; "
+               "remove it, and ao makes the lock again")
+    if os.name == "nt":
+        handle = _open_lock_nt(path, refused)
+    else:
+        nofollow = getattr(os, "O_NOFOLLOW", None)
+        if nofollow is None:
+            raise LockThroughLink(f"{path}: this platform opens no file through no link (it has no O_NOFOLLOW), "
+                                  "and ao takes no lock it cannot open that way")
+        flags = nofollow | getattr(os, "O_NONBLOCK", 0)
+        try:
+            handle = open(path, "a+b", buffering=0, opener=lambda name, mode: os.open(name, mode | flags, 0o666))
+        except OSError as exc:
+            if exc.errno in (errno.ELOOP, errno.EMLINK):
+                raise LockThroughLink(refused) from exc     # what O_NOFOLLOW answers a final link with
+            raise
+    try:
+        opened = os.fstat(handle.fileno())
+        reparse = getattr(opened, "st_file_attributes", 0) & getattr(_stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+        if not _stat.S_ISREG(opened.st_mode) or reparse or opened.st_nlink != 1:
+            raise LockThroughLink(refused)
+    except BaseException:
+        handle.close()
+        raise
+    return handle
+
+
+def _lock_still_named(path, handle):
+    """Whether `path` still names, through no link, the one file `handle` holds (LOCK-LINKS)."""
+    import stat as _stat
+    try:
+        at = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    held = os.fstat(handle.fileno())
+    if _stat.S_ISLNK(at.st_mode) or held.st_nlink != 1:
+        return False
+    if not at.st_ino or not held.st_ino:
+        return True         # a file system that numbers no file cannot tell, and has no links to swap in
+    return (at.st_dev, at.st_ino) == (held.st_dev, held.st_ino)
+
+
+def _let_go(handle):
+    try:
+        handle.seek(0)
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        pass
+    handle.close()
 
 
 @contextmanager
@@ -47,45 +161,53 @@ def _exclusive_lock(path, timeout=10.0):
     failed with PermissionError, as four processes appending to a new ledger at once showed on the Windows
     lane. The file is no longer empty then, which is all the write was for, and the handle buffers nothing,
     so nothing is written again when it closes (WINDOWS-LOCK-WRITE).
+
+    A lock is held only while its path still names the file locked: a file whose name was taken away, or given
+    to another file, after it was opened - an agent writes `.ao/` - is let go and the path's file taken instead,
+    where two of ao's writers each held a file of the one name. A lock in the tree orders ao's own writers; an
+    agent that replaces one while it is held could already write the ledger it guards, which the ledger's chain
+    and checkpoints show (LOCK-LINKS).
     """
     parent = os.path.dirname(path) or "."
     os.makedirs(parent, exist_ok=True)
-    handle = open(path, "a+b", buffering=0)
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        handle = _open_lock(path)
+        try:
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                try:
+                    handle.write(b"\0")
+                except PermissionError:
+                    pass
+            while True:
+                try:
+                    handle.seek(0)
+                    if os.name == "nt":
+                        import msvcrt
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    else:
+                        import fcntl
+                        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except (OSError, BlockingIOError):
+                    if time.monotonic() >= deadline:
+                        raise LedgerLockTimeout(f"timed out locking {path}", path, timeout)
+                    time.sleep(0.02)
+            named = _lock_still_named(path, handle)
+        except BaseException:
+            _let_go(handle)
+            raise
+        if named:
+            break
+        _let_go(handle)
+        if time.monotonic() >= deadline:
+            raise LedgerLockTimeout(f"timed out locking {path}: its file was replaced as it was taken", path,
+                                    timeout)
     try:
-        handle.seek(0, os.SEEK_END)
-        if handle.tell() == 0:
-            try:
-                handle.write(b"\0")
-            except PermissionError:
-                pass
-        deadline = time.monotonic() + max(0.0, timeout)
-        while True:
-            try:
-                handle.seek(0)
-                if os.name == "nt":
-                    import msvcrt
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                else:
-                    import fcntl
-                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except (OSError, BlockingIOError):
-                if time.monotonic() >= deadline:
-                    raise LedgerLockTimeout(f"timed out locking {path}", path, timeout)
-                time.sleep(0.02)
         yield
     finally:
-        try:
-            handle.seek(0)
-            if os.name == "nt":
-                import msvcrt
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        except OSError:
-            pass
-        handle.close()
+        _let_go(handle)
 
 
 def _read_jsonl_unlocked(path, allow_partial_tail=True):
