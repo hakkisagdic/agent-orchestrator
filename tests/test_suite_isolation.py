@@ -94,6 +94,18 @@ def test_git_reads_the_suites_home_so_a_commit_that_names_nobody_is_the_suites()
     assert asked == ["user.name " + conftest.GIT_IDENTITY[0], "user.email " + conftest.GIT_IDENTITY[1]]
 
 
+def test_git_runs_no_maintenance_of_its_own_in_a_tests_repository(tmp_path):
+    """A commit started Git's maintenance detached, and it pruned what a test had just made in the repository
+    as the test read it (SUITE-MAINTENANCE)."""
+    asked = subprocess.run([conftest.GIT, "config", "--global", "--get-regexp", "^(maintenance|gc)\\.auto$"],
+                           capture_output=True, text=True, check=True).stdout.splitlines()
+
+    assert sorted(asked) == ["gc.auto 0", "maintenance.auto false"]
+    subprocess.run([conftest.GIT, "init", "-q", str(tmp_path)], check=True)
+    assert subprocess.run([conftest.GIT, "-C", str(tmp_path), "config", "--type=bool", "maintenance.auto"],
+                          capture_output=True, text=True, check=True).stdout.strip() == "false"
+
+
 def test_path_is_the_suites_bin_then_the_directory_that_holds_git_alone_then_the_systems_own():
     entries = os.environ["PATH"].split(os.pathsep)
     git = [conftest.GIT_DIRECTORY] if conftest.GIT_DIRECTORY else []
