@@ -51,6 +51,10 @@ A finding that needs one of these assumptions is a hardening note, not a blocker
 - A repository before the commit that tracks its `.ao-project`. Enrollment is that commit: until it
   lands the marker is only staged, and an agent can unstage it and commit unchecked, with no race at all.
   The person commits the marker before an agent works in a new repository.
+- A commit on a born branch that tracks no `.ao-project`, in a repository none of whose refs tracks
+  one any more - every such ref deleted. The commit hook reads what Git answers about the marker, and
+  such a repository is one it cannot tell from one never enrolled: it stands aside there, as it does for
+  that one.
 - A gate's own code running on after ao stops it. `.ao/gates.json` names the project's checks, the
   implementer writes it, and `ao verify` runs what it names as the person, by design: a test suite is
   code. ao stops a gate past its time with what it can find of it - its process tree, its group, its
