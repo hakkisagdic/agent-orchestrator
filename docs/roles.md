@@ -165,6 +165,11 @@ discards it with `ao hunt discard <id>`. Each lead carries a fingerprint (file, 
 category), so a repeat is not sent again and a discard is remembered. A lead never blocks a
 slice or raises a human alarm.
 
+*In ao since slice LEADS-OPS: a hunt chooses its new leads, mails them and records them sent under
+one lock, `.ao/hunter.lock`. Two hunts at once - the watchdog's and one started by hand - each read
+the leads already sent before either recorded its own, so both sent the same lead, and in the same
+minute the second hunt's mail was written over the first's.*
+
 Every line of every tracked file up to `hunter.max_file_kb` is read in some hunt (BUG-HUNTER-3). A file that does not fit
 what is left of a hunt's budget starts the next hunt, where it was passed over and the cursor
 went on beyond it; a file larger than a whole hunt is read a piece a hunt, cut at a line - where

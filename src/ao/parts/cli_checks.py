@@ -613,6 +613,14 @@ def _watchdog_first_cycle_due(root, now=None):
     unless its heartbeat had already stopped when this check last ran - a watchdog that
     died while the check was watching is not given another cycle. A check with no
     record counts as back: at worst a dead watchdog is paged one run later.
+
+    A watchdog with no heartbeat at all has its cycle too when this check saw its heartbeat
+    at its last run: `ao watchdog uninstall` takes the heartbeat with the jobs, and the check
+    that ran first after `ao watchdog install` paged what that cycle was about to name, a
+    reading two weeks old among it. Each run records the heartbeat it saw for that. A check
+    that saw none at its last run, or has no run of its own yet, gives none, as before: it
+    knows of no watchdog to come back, and one run by hand where none is installed would
+    hold its pages on every run (LEADS-OPS).
     """
     from .storage import replace_file_durably
     now = time.time() if now is None else now
@@ -628,13 +636,16 @@ def _watchdog_first_cycle_due(root, now=None):
     age = A.heartbeat_age(root)
     beat = None if age is None else now - age
     if last is None or now - last > DOCTOR_SILENT_AFTER:
-        stopped_first = last is not None and beat is not None and last - beat > WATCHDOG_SILENT_AFTER
+        seen = beat if beat is not None else record.get("beat") if isinstance(record.get("beat"), (int, float)) \
+            else None               # with none now, the heartbeat this check's last run saw
+        stopped_first = seen is None or (last is not None and last - seen > WATCHDOG_SILENT_AFTER)
         back = None if stopped_first else now
     try:
-        replace_file_durably(path, json.dumps({"at": int(now), "back": back}).encode("utf-8"))
+        replace_file_durably(path, json.dumps({"at": int(now), "back": back,
+                                               "beat": None if beat is None else int(beat)}).encode("utf-8"))
     except OSError:
         return None                 # a check that cannot keep its record gives no cycle: it pages as it did
-    if back is None or beat is None or beat >= back:
+    if back is None or (beat is not None and beat >= back):
         return None
     due = back + _watchdog_interval(root)
     return due if now < due else None
@@ -695,6 +706,7 @@ def _doctor_credit_lines(cfg):
     told so: no credit alarm can ring for it, and a check that cannot exist must not look
     like one that passes. A blind check is shown only for the implementer's own account.
     """
+    from .watchdog import credit_reset
     own = _implementer_credits(cfg)
     if not own["readable"]:
         return [f"credits         {C['dim']}{_no_account(own['adapter'])}{C['reset']}"]
@@ -702,6 +714,10 @@ def _doctor_credit_lines(cfg):
     last = (own["samples"] or [None])[-1]
     # A reading already over the limit is exhausted; a date ahead would say otherwise.
     over = bool(last and last.get("limit") and float(last.get("used") or 0) >= float(last["limit"]))
+    # Unless its own reset has passed: it says nothing of the plan after it, as the check reads it (OCT1-FIXES).
+    # The panel still said exhausted, in red, of a plan the check no longer paged about (LEADS-OPS).
+    reset = credit_reset(last.get("reset_at")) if over else None
+    reset_passed = reset is not None and reset <= time.time()
     if br and not over:
         when = time.strftime('%d %b', time.localtime(br['exhausts_at'])) if br['exhausts_at'] else '—'
         tone = C['red'] if br['before_reset'] else C['green']
@@ -709,7 +725,11 @@ def _doctor_credit_lines(cfg):
                      f"{tone}{when}{C['reset']}"
                      + (f"  {C['red']}before the reset — new account / ao features off{C['reset']}"
                         if br['before_reset'] else ""))
-    if (over or not br) and last and last.get("limit"):
+    if reset_passed:
+        lines.append(f"credits         {C['dim']}{float(last.get('used') or 0):.0f}/{float(last['limit']):.0f} at the "
+                     f"last reading, taken before its reset on {time.strftime('%d %b %H:%M', time.localtime(reset))}"
+                     f" — unknown since; `ao credits` reads them now{C['reset']}")
+    elif (over or not br) and last and last.get("limit"):
         used, limit = float(last.get("used") or 0), float(last["limit"])
         lines.append(f"credits         {C['red'] if used >= limit else C['green']}{used:.0f}/{limit:.0f}{C['reset']} "
                      "at the last reading" + (f"  {C['red']}exhausted{C['reset']}" if used >= limit else ""))
@@ -931,7 +951,8 @@ def cmd_cost(cfg, args):
     c = A.turn_costs(cfg, since=since)
     if not c["turns"]:
         print("no transcript"); return 0
-    tot = c["total"] or 1
+    # Nothing spent has no shares: the total was printed as 1, and each class as 0% of it (LEADS-OPS).
+    tot = c["total"]
     print(f"{C['b']}implementer spend by turn class{C['reset']}  {C['dim']}({c['unit']}; "
           f"{window or 'whole transcript'}){C['reset']}")
     # What the subagents a turn started spent is inside that turn's spend; a column says how much, when any did.
@@ -944,7 +965,8 @@ def cmd_cost(cfg, args):
             continue
         w = f"{b['wasted']} ({b['wasted_usage']:.0f})" if b["wasted"] else ""
         d = f"{b.get('delegated', 0.0):>11.0f}" if delegated else ""
-        print(f"  {cls:<14}{b['turns']:>6}{b['usage']:>10.0f}{100 * b['usage'] / tot:>6.0f}%{d}   {w:>12}")
+        share = f"{100 * b['usage'] / tot:>6.0f}%" if tot else f"{'—':>7}"
+        print(f"  {cls:<14}{b['turns']:>6}{b['usage']:>10.0f}{share}{d}   {w:>12}")
     d = f"{'':>7}{sum(b.get('delegated', 0.0) for b in c['by_class'].values()):>11.0f}" if delegated else ""
     # A turn the model never answered is the implementer's work in no class, and in no total of turns.
     work = [b for cls, b in c["by_class"].items() if cls != A.UNANSWERED]
@@ -958,18 +980,28 @@ def cmd_cost(cfg, args):
     overhead = sum(c["by_class"].get(k, {}).get("usage", 0) for k in ("ceremony", "coordination"))
     for line in _account_beside_share(cfg, since):
         print(f"  {line}")
-    print(f"\n  coordination + ceremony: {C['b']}{100 * overhead / tot:.0f}%{C['reset']} of spend"
+    told = f"{C['b']}{100 * overhead / tot:.0f}%{C['reset']} of spend" if tot else "no share: nothing was spent"
+    print(f"\n  coordination + ceremony: {told}"
           f"  ·  ao commands: {', '.join(f'{k} {v}' for k, v in c['ao_commands'].most_common(6))}")
     # the reviewer's side: files, wasted, sizes
     d = os.path.join(root, cfg["reviews"])
     if os.path.isdir(d):
-        files = [f for f in os.listdir(d) if f.endswith(".md") and (not since or os.path.getmtime(os.path.join(d, f)) >= since)]
-        una = sum(1 for f in files if A.reviews(root, cfg["reviews"], limit=10_000) and False)  # placeholder
+        # Each file is looked at once, and one removed since it was listed - a prune running beside this - is
+        # not counted: listed, then looked at again for its time and its size, it ended the command (LEADS-OPS).
+        sizes = {}
+        for name in os.listdir(d):
+            if not name.endswith(".md"):
+                continue
+            try:
+                found = os.stat(os.path.join(d, name))
+            except OSError:
+                continue
+            if not since or found.st_mtime >= since:
+                sizes[name] = found.st_size
         verdicts = dict(A.reviews(root, cfg["reviews"], limit=10_000))
-        una = sum(1 for f in files if verdicts.get(f) in ("UNAVAILABLE", "INVALID"))
-        size = sum(os.path.getsize(os.path.join(d, f)) for f in files)
-        print(f"  reviews: {len(files)} files ({una} unavailable/invalid, cost nothing), "
-              f"{size // 1000}k chars of verdict text; each review sends the slice diff to the reviewer model")
+        una = sum(1 for name in sizes if verdicts.get(name) in ("UNAVAILABLE", "INVALID"))
+        print(f"  reviews: {len(sizes)} files ({una} unavailable/invalid, cost nothing), "
+              f"{sum(sizes.values()) // 1000}k chars of verdict text; each review sends the slice diff to the reviewer model")
     return 0
 
 
@@ -1279,7 +1311,7 @@ def _catchup_mail(root, cfg, waiver, rng, artefact):
     body = (f"# The waived review of {slice_id} needs changes\n\n## Decision required\n\n"
             f"The retrospective review of {rng}, which landed under waiver {wid} ({by}: {why}), "
             f"returned NEEDS_CHANGES. The findings are in {findings}.\n\n"
-            "The waiver is closed. Decide the fix slice.\n")
+            "The waiver closes on this review. Decide the fix slice.\n")
     return A.write_mail(root, cfg, name, body, {"kind": "review", "class": "needs-decision", "from": sender,
                                                  "to": architect, "slice": slice_id})
 
@@ -1378,6 +1410,18 @@ def cmd_catchup(cfg, args):
             failed.append(wid)
             return False
 
+    def request(waiver, rng, artefact):
+        # The architect's decision request is written before its waiver closes: closed first, a request
+        # that could not be written left no open waiver, and no later run wrote it (LEADS-OPS).
+        try:
+            _catchup_mail(root, cfg, waiver, rng, artefact)
+            return True
+        except OSError as exc:
+            print(f"  {C['red']}the architect's decision request was not written{C['reset']}: {exc}; "
+                  f"{waiver['id']} stays open, and the next run writes it")
+            failed.append(waiver["id"])
+            return False
+
     if plan:
         print(f"{C['b']}catchup plan{C['reset']}{C['dim']}: nothing is reviewed or written{C['reset']}")
     try:
@@ -1468,16 +1512,11 @@ def cmd_catchup(cfg, args):
             who = _person_line(person.get("person"))
             if plan:
                 print(f"  {label}: {rng}, {size}: {person['verdict']} in a person's review ({who}); a run closes on it")
-            elif close(w["id"], f"reviewed by a person: {person['verdict']}",
-                       {"review": person.get("artefact"), "person": person.get("person")}):
+            elif (person["verdict"] != "NEEDS_CHANGES" or request(w, rng, person.get("artefact"))) \
+                    and close(w["id"], f"reviewed by a person: {person['verdict']}",
+                              {"review": person.get("artefact"), "person": person.get("person")}):
                 print(f"  {label}: {rng}, {size}: closed on a person's review ({who}): {person['verdict']}")
                 did += 1
-                if person["verdict"] == "NEEDS_CHANGES":
-                    try:
-                        _catchup_mail(root, cfg, w, rng, person.get("artefact"))
-                    except OSError as exc:
-                        print(f"  {C['red']}the architect's decision request was not written{C['reset']}: {exc}")
-                        failed.append(w["id"])
             continue
         author = _catchup_author(item, statement)
         families = _author_families(author)
@@ -1541,13 +1580,8 @@ def cmd_catchup(cfg, args):
             if close(w["id"], "reviewed: APPROVED"):
                 did += 1
         elif verdict == "NEEDS_CHANGES":
-            if close(w["id"], "reviewed: NEEDS_CHANGES — fix slice needed"):
+            if request(w, rng, recorded.get("artefact")) and close(w["id"], "reviewed: NEEDS_CHANGES — fix slice needed"):
                 did += 1
-                try:
-                    _catchup_mail(root, cfg, w, rng, recorded.get("artefact"))
-                except OSError as exc:
-                    print(f"  {C['red']}the architect's decision request was not written{C['reset']}: {exc}")
-                    failed.append(w["id"])
         elif verdict is None and code == 0 and A.range_unchanged(root, item["start"], item["end"]) is not True:
             # A review that exits 0 with no verdict recorded for exactly this range closes it only when the
             # range has no net change; one whose record ao cannot find, or a range it cannot size, was taken
@@ -1563,10 +1597,12 @@ def cmd_catchup(cfg, args):
         elif verdict == "INVALID":
             # An INVALID review exits 3 as an unavailable one does: the verdict tells them apart (OCT1-FIXES).
             print(f"  the reviewer returned no valid verdict; {w['id']} stays open")
-        elif code == 3 or verdict == "UNAVAILABLE":
+        elif verdict == "UNAVAILABLE":
+            # An unavailable reviewer is recorded so before `ao review` exits 3. One that exits 3 with nothing
+            # recorded asked no reviewer - another review of the range held its sections - and was told as an
+            # unavailable reviewer; it is told as what it is, and holds no other review (LEADS-OPS).
             print(f"  reviewer still unavailable; {w['id']} stays open")
-            if verdict == "UNAVAILABLE":
-                unavailable = w["id"]
+            unavailable = w["id"]
         elif code == 2:
             print(f"  reviewer configuration invalid, or the range cannot be reviewed; {w['id']} stays open")
         else:

@@ -2047,9 +2047,17 @@ def reviews(root, reviews_dir, limit=4):
     # Review artefacts only. `ao init` leaves semantic-review/.gitkeep, and as the
     # newest file it was reported as an INVALID review and written into every
     # verification record as the review the tree had been measured against.
-    files = sorted((f for f in os.listdir(d)
-                    if not f.startswith(".") and os.path.isfile(os.path.join(d, f))),
-                   key=lambda f: os.path.getmtime(os.path.join(d, f)), reverse=True)[:limit]
+    # One removed after it was listed - a prune running beside the reader - is not
+    # one: its time was read for the order, and `ao cost` ended on it (LEADS-OPS).
+    dated = []
+    for f in os.listdir(d):
+        if f.startswith(".") or not os.path.isfile(os.path.join(d, f)):
+            continue
+        try:
+            dated.append((os.path.getmtime(os.path.join(d, f)), f))
+        except OSError:
+            continue
+    files = [f for _, f in sorted(dated, key=lambda pair: pair[0], reverse=True)[:limit]]
     out = []
     for f in files:
         verdict = "INVALID"

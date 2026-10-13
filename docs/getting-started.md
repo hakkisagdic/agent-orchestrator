@@ -181,3 +181,9 @@ runs no program, ao included, and reads no project. Every word from the parser i
 script as a literal quoted for its shell, and every word the script completes is quoted again on the
 command line, so a choice holding a quote or a `$` can neither break the script nor run anything.
 Where a word has no choices, the shell completes file names.*
+
+*In ao since slice LEADS-OPS: a script knows how many words each option takes - the next alone, an
+optional one that does not begin with `-`, a count, each word up to the next option, as
+`ao review --paths` takes, or every word after it - and completes each of them as that option's.
+Every option that took any word was taken for one that takes the next alone, so the word after
+`ao review --paths a.py` was offered `ao review`'s actions instead of a file name.*

@@ -150,6 +150,10 @@ reset has passed says nothing of the plan after it, and the scheduled check page
 on it: until a fresh reading is taken the credits are unknown, and a usage check that
 cannot read them is reported as such.
 
+*In ao since slice LEADS-OPS: `ao doctor` shows such a reading as the last reading, taken before
+its reset, and the credits as unknown since, where it said exhausted, in red, of a plan the
+scheduled check no longer paged about.*
+
 A slice parked on the implementer's usage limit ([watchdog.md](watchdog.md#a-slice-parked-on-quota))
 is raised on every cycle its park stands, whichever guard ends the cycle, and rings once for the
 items and the words they stopped on. With a reset named, it turns red only an hour past that
@@ -262,3 +266,9 @@ backstop, and it pages nothing twice:
   heartbeat had already stopped when the doctor last ran is paged at once, one that does
   not come back is paged at the doctor's next run, and a doctor that cannot write its
   record gives no cycle.
+
+*In ao since slice LEADS-OPS: a watchdog with no heartbeat at all has that cycle too, when the
+doctor saw its heartbeat at its last run - each run records the one it saw. `ao watchdog uninstall`
+takes the heartbeat with the jobs, and the doctor that ran first after `ao watchdog install` paged
+what the first cycle was about to name, a credits reading two weeks old among it. A doctor that saw
+no heartbeat at its last run, or has no run of its own yet, gives no cycle, as before.*

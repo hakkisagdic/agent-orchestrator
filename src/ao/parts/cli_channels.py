@@ -754,33 +754,39 @@ def cmd_hunt(cfg, args):
         result = {"ok": False, "out": "", "reason": f"{argv[0]} is not installed on any path ao searches, or only "
                                                     "inside this repository, which an agent writes"}
     leads = A.parse_leads(result.get("out")) if result.get("ok") else []
-    known = A.hunter_known(root)
-    fresh = []
-    for lead in leads:
-        if lead["fingerprint"] not in known and lead["fingerprint"] not in {f["fingerprint"] for f in fresh}:
-            fresh.append(lead)
-    fresh = fresh[:S.get(cfg, "hunter.max_leads")]
-    A.hunter_record(root, "run", files=[path for path, _ in files], cursor=cursor, ok=bool(result.get("ok")),
-                    reason=result.get("reason") or None, leads=len(leads), sent=len(fresh),
-                    hunter=S.get(cfg, "hunter.id"), **({"parts": parts} if parts else {}))
-    if not result.get("ok"):
-        print(f"{C['yellow']}hunt did not run{C['reset']}: {result.get('reason')}")
-        return 3
-    if fresh:
-        _, architect = A.mail_names(cfg)
-        # The first lead's fingerprint names the mail: a second hunt in the same minute wrote over the first
-        # one's, and its leads, recorded as sent, were never sent again (BUG-HUNTER-2).
-        name = (f"{datetime.now():%Y%m%d-%H%M}-hunter-to-{architect}-LEADS-{A.safe_slug(fresh[0]['path'])}"
-                f"-{fresh[0]['fingerprint'][:8]}.md")
-        body = [f"# {len(fresh)} lead(s) from the bug hunter", "",
-                "Leads, not verdicts: triage each into a backlog row or discard it with `ao hunt discard <id>`.", ""]
-        body += [f"- [{lead['category']}] {lead['path']}:{lead['line']} {lead['symbol']} — {lead['finding']}  "
-                 f"(`{lead['fingerprint']}`)" for lead in fresh]
-        A.write_mail(root, cfg, name, "\n".join(body) + "\n", {"kind": "leads", "class": "needs-read",
-                                                               "from": "hunter", "to": architect})
-        for lead in fresh:
-            A.hunter_record(root, "sent", fingerprint=lead["fingerprint"], mail=name, path=lead["path"],
-                            category=lead["category"])
+    # What a hunt sends is chosen, mailed and recorded sent under one lock: two hunts at once each read the
+    # leads already sent before either recorded its own, both sent one lead, and in the same minute the
+    # second wrote its mail over the first's (LEADS-OPS).
+    from .storage import _exclusive_lock
+    with _exclusive_lock(os.path.join(root, ".ao", "hunter.lock"), timeout=60):
+        known = A.hunter_known(root)
+        fresh = []
+        for lead in leads:
+            if lead["fingerprint"] not in known and lead["fingerprint"] not in {f["fingerprint"] for f in fresh}:
+                fresh.append(lead)
+        fresh = fresh[:S.get(cfg, "hunter.max_leads")]
+        A.hunter_record(root, "run", files=[path for path, _ in files], cursor=cursor, ok=bool(result.get("ok")),
+                        reason=result.get("reason") or None, leads=len(leads), sent=len(fresh),
+                        hunter=S.get(cfg, "hunter.id"), **({"parts": parts} if parts else {}))
+        if not result.get("ok"):
+            print(f"{C['yellow']}hunt did not run{C['reset']}: {result.get('reason')}")
+            return 3
+        if fresh:
+            _, architect = A.mail_names(cfg)
+            # The first lead's fingerprint names the mail: a second hunt in the same minute wrote over the first
+            # one's, and its leads, recorded as sent, were never sent again (BUG-HUNTER-2).
+            name = (f"{datetime.now():%Y%m%d-%H%M}-hunter-to-{architect}-LEADS-{A.safe_slug(fresh[0]['path'])}"
+                    f"-{fresh[0]['fingerprint'][:8]}.md")
+            body = [f"# {len(fresh)} lead(s) from the bug hunter", "",
+                    "Leads, not verdicts: triage each into a backlog row or discard it with `ao hunt discard <id>`.",
+                    ""]
+            body += [f"- [{lead['category']}] {lead['path']}:{lead['line']} {lead['symbol']} — {lead['finding']}  "
+                     f"(`{lead['fingerprint']}`)" for lead in fresh]
+            A.write_mail(root, cfg, name, "\n".join(body) + "\n", {"kind": "leads", "class": "needs-read",
+                                                                   "from": "hunter", "to": architect})
+            for lead in fresh:
+                A.hunter_record(root, "sent", fingerprint=lead["fingerprint"], mail=name, path=lead["path"],
+                                category=lead["category"])
     print(f"hunted {len(files)} file(s): {len(leads)} lead(s), {len(fresh)} new")
     return 0
 

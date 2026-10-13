@@ -57,24 +57,48 @@ def _completion_choices(action):
     return [word for word in dict.fromkeys(words) if _completable(word)]
 
 
+def _completion_arity(nargs):
+    """How many words an option takes past its own, as the scripts read it: "1" for the next word alone, None for
+    none, and otherwise "?" for one that does not begin with -, "*" for each up to one that does, "..." for every
+    word after it, or the count (LEADS-OPS)."""
+    if nargs == 0:
+        return None
+    if nargs is None or nargs == 1:
+        return "1"
+    if nargs == "?":
+        return "?"
+    if nargs in ("*", "+"):
+        return "*"
+    if nargs in (argparse.REMAINDER, argparse.PARSER):
+        return "..."
+    return str(nargs) if isinstance(nargs, int) and nargs > 1 else "1"
+
+
 def _completion_words(parser):
     """What one parser offers, as the scripts read it (SHELL-COMPLETION).
 
-    {options, valued, values, slots, repeat}: its long options, less those whose help is suppressed; every
-    option string that takes the next word as its value, suppressed ones too, so that word is never counted as
-    an argument; the choices of each option that declares them; the choices of each positional word in order,
-    None where it has none; and whether the last slot takes every word after it, as nargs *, + and ... do.
-    A subcommand's name is one slot, whose choices are the subcommands.
+    {options, valued, arity, values, slots, repeat}: its long options, less those whose help is suppressed;
+    every option string that takes the next word alone as its value, and how many words each other one that
+    takes any takes, suppressed ones too, so no word an option takes is counted as an argument; the choices of
+    each option that declares them; the choices of each positional word in order, None where it has none; and
+    whether the last slot takes every word after it, as nargs *, + and ... do. A subcommand's name is one slot,
+    whose choices are the subcommands.
+
+    An option's words were one bit, takes the next word or not: the word after `ao review --paths a.py` was
+    counted as the command's first positional word, and `ao review`'s actions offered for a path (LEADS-OPS).
     """
-    options, valued, values, slots, repeat = set(), set(), {}, [], False
+    options, valued, arity, values, slots, repeat = set(), set(), {}, {}, [], False
     for action in parser._actions:
         choices = _completion_choices(action)
         if action.option_strings:
+            takes = _completion_arity(action.nargs)
             for flag in filter(_completable, action.option_strings):
-                if action.nargs != 0:
+                if takes == "1":
                     valued.add(flag)
-                    if choices:
-                        values[flag] = choices
+                elif takes:
+                    arity[flag] = takes
+                if takes and choices:
+                    values[flag] = choices
                 if flag.startswith("--") and action.help != argparse.SUPPRESS:
                     options.add(flag)
         elif not repeat:
@@ -83,7 +107,8 @@ def _completion_words(parser):
                 repeat = True
             else:
                 slots.extend([choices or None] * (action.nargs if isinstance(action.nargs, int) else 1))
-    return {"options": sorted(options), "valued": sorted(valued), "values": values, "slots": slots, "repeat": repeat}
+    return {"options": sorted(options), "valued": sorted(valued), "arity": arity, "values": values, "slots": slots,
+            "repeat": repeat}
 
 
 def _completion_model(parser):
@@ -102,15 +127,17 @@ def _completion_model(parser):
 
 
 def _completion_arms(model):
-    """(command, kind, key, words) for every list a script holds, kind one of valued, options, values and slot.
+    """(command, kind, key, words) for every list a script holds, kind one of valued, arity, options, values and
+    slot.
 
-    key is the option for values, the slot's index for slot, and None otherwise; a slot that takes every word
-    after it has the key (index, "and after").
+    key is the option for arity and values, the slot's index for slot, and None otherwise; a slot that takes every
+    word after it has the key (index, "and after"). An arity's words are one, what _completion_arity says.
     """
     arms = []
     for name, words in model.items():
         if words["valued"]:
             arms.append((name, "valued", None, words["valued"]))
+        arms.extend((name, "arity", flag, [takes]) for flag, takes in sorted(words["arity"].items()))
         if words["options"]:
             arms.append((name, "options", None, words["options"]))
         arms.extend((name, "values", flag, choices) for flag, choices in sorted(words["values"].items()))
@@ -153,10 +180,11 @@ def _completion_sh_quote(word):
 def _completion_sh_functions(model):
     """The functions the bash and the zsh script share, each setting the array `reply` (SHELL-COMPLETION).
 
-    `_ao_valued COMMAND` sets the option strings that take the next word as their value, `_ao_options COMMAND`
-    the long options, `_ao_values COMMAND OPTION` an option's choices and `_ao_arguments COMMAND SLOT` a
-    positional word's; COMMAND is empty before the command. Each selects by `case` on quoted patterns, which
-    both shells match as written, and sets reply from quoted literals, so a word is never read as syntax.
+    `_ao_valued COMMAND` sets the option strings that take the next word alone as their value, `_ao_arity
+    COMMAND OPTION` how many words another option takes (LEADS-OPS), `_ao_options COMMAND` the long options,
+    `_ao_values COMMAND OPTION` an option's choices and `_ao_arguments COMMAND SLOT` a positional word's;
+    COMMAND is empty before the command. Each selects by `case` on quoted patterns, which both shells match as
+    written, and sets reply from quoted literals, so a word is never read as syntax.
     """
     q, arms = _completion_sh_quote, _completion_arms(model)
 
@@ -176,7 +204,7 @@ def _completion_sh_functions(model):
                 continue
             lines += [f"        {q(command)})", "            case $2 in"]
             for _, _, key, words in mine:
-                if kind == "values":
+                if kind in ("values", "arity"):
                     lines += assign(q(key), words, "                ")
                 elif isinstance(key, tuple):
                     lines += assign("*", words, "                ", f'[ "$2" -ge {key[0]} ] && ')
@@ -185,8 +213,10 @@ def _completion_sh_functions(model):
             lines += ["            esac;;"]
         return lines + ["    esac", "}", ""]
 
-    return (function("_ao_valued", "The option strings of command $1 that take the next word as their value.",
+    return (function("_ao_valued", "The option strings of command $1 that take the next word alone as their value.",
                      "valued", False)
+            + function("_ao_arity", "How many words option $2 of command $1 takes, when not the next alone: a "
+                                    "count, ?, * or ...", "arity", True)
             + function("_ao_options", "The long options of command $1; before any command, those of ao itself.",
                        "options", False)
             + function("_ao_values", "The choices option $2 of command $1 declares.", "values", True)
@@ -194,7 +224,7 @@ def _completion_sh_functions(model):
                                         "command, the commands.", "slot", True))
 
 
-_COMPLETION_SH_TAKES_VALUE = r'''# Whether word $2 takes the next word as its value, among the words of command $1 or before any.
+_COMPLETION_SH_TAKES_VALUE = r'''# Whether word $2 takes the next word alone as its value, among the words of command $1 or before any.
 _ao_takes_value() {
     local option
     _ao_valued "$1"
@@ -205,11 +235,15 @@ _ao_takes_value() {
 }
 '''
 
+# Readline quotes the words a completion function offers only when it is told they are file names (`-o
+# filenames`), which `complete -o default -F _ao ao` does not say: offered as %q printed it, `a\ b` was read
+# back as one word, `a b`, and offered bare, as two (LEADS-OPS).
 _COMPLETION_BASH = r'''
 # The words before the cursor name the command, then the positional word the cursor is on, or the
 # option whose value it is. With = in COMP_WORDBREAKS, bash splits --option=value into three words.
+# An option takes up to `take` words after it; one that `stops` takes none that begins with -.
 _ao() {
-    local cur="${COMP_WORDS[COMP_CWORD]}" cmd= rest= option= word= quoted= i=1 slot=0 n=0
+    local cur="${COMP_WORDS[COMP_CWORD]}" cmd= rest= option= stops= word= quoted= i=1 slot=0 n=0 take=0
     local -a reply
     COMPREPLY=()
     while [[ $i -lt $COMP_CWORD ]]; do
@@ -217,13 +251,28 @@ _ao() {
         if [[ -z $rest && -n $cmd && $word == "--" ]]; then
             rest=1
         elif [[ -z $rest && $word == -?* ]]; then
-            n=1
+            take=0
+            stops=
             if [[ ${COMP_WORDS[i+1]-} == "=" ]]; then
-                n=3
+                take=2
             elif _ao_takes_value "$cmd" "$word"; then
-                n=2
+                take=1
+            else
+                _ao_arity "$cmd" "$word"
+                case ${reply[0]-} in
+                    '') ;;
+                    '?') take=1 stops=1;;
+                    '*') take=$COMP_CWORD stops=1;;
+                    '...') take=$COMP_CWORD;;
+                    *) take=${reply[0]};;
+                esac
             fi
-            if [[ $n -gt 1 && $((i + n - 1)) -ge $COMP_CWORD ]]; then
+            n=1
+            while [[ $n -le $take && $((i + n)) -lt $COMP_CWORD ]]; do
+                [[ -n $stops && ${COMP_WORDS[i+n]} == -?* ]] && break
+                n=$((n + 1))
+            done
+            if [[ $n -le $take && $((i + n)) -eq $COMP_CWORD ]]; then
                 option="$word"
                 break
             fi
@@ -235,7 +284,7 @@ _ao() {
         fi
         i=$((i + 1))
     done
-    if [[ -n $option ]]; then
+    if [[ -n $option && ( -z $stops || $cur != -* ) ]]; then
         [[ $cur == "=" ]] && cur=
         _ao_values "$cmd" "$option"
     elif [[ -z $rest && $cur == -* ]]; then
@@ -259,19 +308,37 @@ complete -o default -F _ao ao
 
 _COMPLETION_ZSH = r'''
 # The words before the cursor name the command, then the positional word the cursor is on, or the
-# option whose value it is.
+# option whose value it is. An option takes up to `take` words after it; one that `stops` takes none
+# that begins with -.
 _ao() {
-    local cmd= rest= option= word=
+    local cmd= rest= option= stops= word=
     local -a reply
-    local -i i=2 slot=0 n=0
+    local -i i=2 slot=0 n=0 take=0
     while (( i < CURRENT )); do
         word="${words[i]}"
         if [[ -z $rest && -n $cmd && $word == "--" ]]; then
             rest=1
         elif [[ -z $rest && $word == -?* ]]; then
+            take=0
+            stops=
+            if _ao_takes_value "$cmd" "$word"; then
+                take=1
+            else
+                _ao_arity "$cmd" "$word"
+                case ${reply[1]-} in
+                    '') ;;
+                    '?') take=1 stops=1;;
+                    '*') take=CURRENT stops=1;;
+                    '...') take=CURRENT;;
+                    *) take=${reply[1]};;
+                esac
+            fi
             n=1
-            _ao_takes_value "$cmd" "$word" && n=2
-            if (( n > 1 && i + 1 >= CURRENT )); then
+            while (( n <= take && i + n < CURRENT )); do
+                [[ -n $stops && ${words[i+n]} == -?* ]] && break
+                n=$(( n + 1 ))
+            done
+            if (( n <= take && i + n == CURRENT )); then
                 option="$word"
                 break
             fi
@@ -285,9 +352,10 @@ _ao() {
     done
     if [[ -z $option && -z $rest && $PREFIX == -?*=* ]]; then
         option="${PREFIX%%=*}"
+        stops=
         compset -P 1 '*='
     fi
-    if [[ -n $option ]]; then
+    if [[ -n $option && ( -z $stops || $PREFIX != -* ) ]]; then
         _ao_values "$cmd" "$option"
     elif [[ -z $rest && $PREFIX == -* ]]; then
         _ao_options "$cmd"
@@ -352,7 +420,7 @@ def _completion_fish_functions(model):
         lines, first = [f"function {name} --argument-names {parameters}"], True
         for command, _, key, words in (arm for arm in arms if arm[1] == kind):
             test = f'contains -- "$cmd" {q(command)}'
-            if kind == "values":
+            if kind in ("values", "arity"):
                 test += f'; and contains -- "$option" {q(key)}'
             elif kind == "slot":
                 test += f'; and test "$slot" -ge {key[0]}' if isinstance(key, tuple) else f'; and test "$slot" -eq {key}'
@@ -360,8 +428,10 @@ def _completion_fish_functions(model):
             first = False
         return lines + ([] if first else ["    end"]) + ["end", ""]
 
-    return (["# The option strings of a command that take the next word as their value."]
+    return (["# The option strings of a command that take the next word alone as their value."]
             + function("__ao_valued", "cmd", "valued")
+            + ["# How many words an option of a command takes, when not the next alone: a count, ?, * or ..."]
+            + function("__ao_arity", "cmd option", "arity")
             + ["# The long options of a command; before any command, those of ao itself."]
             + function("__ao_options", "cmd", "options")
             + ["# The choices an option of a command declares."]
@@ -371,28 +441,55 @@ def _completion_fish_functions(model):
 
 
 _COMPLETION_FISH = r'''# What completes the word at the cursor: the command, a long option, or the choices of an option or a
-# positional word. It fails when there is none, and fish then completes files.
+# positional word. It fails when there is none, and fish then completes files. An option takes up to
+# `take` words after it; one that `stops` takes none that begins with -.
 function __ao_candidates
     set -l tokens (commandline -opc)
     set -l cur (commandline -ct)
     set -l cmd ''
     set -l rest ''
     set -l option ''
+    set -l stops ''
     set -l prefix ''
     set -l slot 0
+    set -l take 0
+    set -l n 0
     set -l i 2
     while test $i -le (count $tokens)
         set -l word $tokens[$i]
         if test -z "$rest"; and test -n "$cmd"; and contains -- "$word" '--'
             set rest 1
         else if test -z "$rest"; and string match -q -- '-?*' "$word"
+            set take 0
+            set stops ''
             if contains -- "$word" (__ao_valued "$cmd")
-                if test $i -eq (count $tokens)
-                    set option "$word"
+                set take 1
+            else
+                set -l arity (__ao_arity "$cmd" "$word")
+                if test "$arity" = '?'
+                    set take 1
+                    set stops 1
+                else if test "$arity" = '*'
+                    set take (count $tokens)
+                    set stops 1
+                else if test "$arity" = '...'
+                    set take (count $tokens)
+                else if test -n "$arity"
+                    set take $arity
+                end
+            end
+            set n 1
+            while test $n -le $take; and test (math $i + $n) -le (count $tokens)
+                if test -n "$stops"; and string match -q -- '-?*' $tokens[(math $i + $n)]
                     break
                 end
-                set i (math $i + 1)
+                set n (math $n + 1)
             end
+            if test $n -le $take; and test (math $i + $n) -gt (count $tokens)
+                set option "$word"
+                break
+            end
+            set i (math $i + $n - 1)
         else if test -z "$cmd"
             set cmd "$word"
         else
@@ -403,9 +500,10 @@ function __ao_candidates
     if test -z "$option"; and test -z "$rest"; and string match -q -- '-?*=*' "$cur"
         set option (string split -m 1 -- '=' "$cur")[1]
         set prefix "$option="
+        set stops ''
     end
     set -l reply
-    if test -n "$option"
+    if test -n "$option"; and begin; test -z "$stops"; or not string match -q -- '-*' "$cur"; end
         set reply (__ao_values "$cmd" "$option")
     else if test -z "$rest"; and string match -q -- '-*' "$cur"
         set reply (__ao_options "$cmd")
@@ -461,7 +559,7 @@ def _completion_ps_functions(model):
         for command in commands:
             lines += [f"            {q(command)} {{"]
             mine = [arm for arm in arms if arm[:2] == (command, kind)]
-            if kind == "values":
+            if kind in ("values", "arity"):
                 lines += ["                switch -Exact -CaseSensitive ($Option) {"]
                 for _, _, flag, words in mine:
                     lines += [f"                    {q(flag)} {{"] + returned(words, "                        ") \
@@ -478,8 +576,10 @@ def _completion_ps_functions(model):
             lines += ["        }"]
         return lines + ["        return @()", "    }", ""]
 
-    return (["    # The option strings of a command that take the next word as their value."]
+    return (["    # The option strings of a command that take the next word alone as their value."]
             + function("Get-AoValued", "[string]$Command", "valued")
+            + ["    # How many words an option of a command takes, when not the next alone: a count, ?, * or ..."]
+            + function("Get-AoArity", "[string]$Command, [string]$Option", "arity")
             + ["    # The long options of a command; before any command, those of ao itself."]
             + function("Get-AoOptions", "[string]$Command", "options")
             + ["    # The choices an option of a command declares."]
@@ -500,9 +600,11 @@ _COMPLETION_POWERSHELL = r'''
             $words += $element.Extent.Text
         }
     }
+    # An option takes up to $take words after it; one that $stops takes none that begins with -.
     $command = ''
     $rest = $false
     $option = $null
+    $stops = $false
     $slot = 0
     $i = 1
     while ($i -lt $words.Count) {
@@ -510,13 +612,37 @@ _COMPLETION_POWERSHELL = r'''
         if (-not $rest -and $command -cne '' -and $word -ceq '--') {
             $rest = $true
         } elseif (-not $rest -and $word.Length -gt 1 -and $word.StartsWith('-', [System.StringComparison]::Ordinal)) {
+            $take = 0
+            $stops = $false
             if (@(Get-AoValued $command) -ccontains $word) {
-                if ($i + 1 -ge $words.Count) {
-                    $option = $word
+                $take = 1
+            } else {
+                $arity = [string](@(Get-AoArity $command $word) | Select-Object -First 1)
+                if ($arity -ceq '?') {
+                    $take = 1
+                    $stops = $true
+                } elseif ($arity -ceq '*') {
+                    $take = $words.Count
+                    $stops = $true
+                } elseif ($arity -ceq '...') {
+                    $take = $words.Count
+                } elseif ($arity -cne '') {
+                    $take = [int]$arity
+                }
+            }
+            $n = 1
+            while ($n -le $take -and $i + $n -lt $words.Count) {
+                $next = [string]$words[$i + $n]
+                if ($stops -and $next.Length -gt 1 -and $next.StartsWith('-', [System.StringComparison]::Ordinal)) {
                     break
                 }
-                $i++
+                $n++
             }
+            if ($n -le $take -and $i + $n -ge $words.Count) {
+                $option = $word
+                break
+            }
+            $i += $n - 1
         } elseif ($command -ceq '') {
             $command = $word
         } else {
@@ -530,8 +656,9 @@ _COMPLETION_POWERSHELL = r'''
         $option = $Matches[1]
         $prefix = $option + '='
         $current = $current.Substring($prefix.Length)
+        $stops = $false
     }
-    if ($null -ne $option) {
+    if ($null -ne $option -and -not ($stops -and $current.StartsWith('-', [System.StringComparison]::Ordinal))) {
         $candidates = @(Get-AoValues $command $option)
     } elseif (-not $rest -and $current.StartsWith('-', [System.StringComparison]::Ordinal)) {
         $candidates = @(Get-AoOptions $command)

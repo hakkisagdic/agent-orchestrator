@@ -31,6 +31,11 @@ ao features off review --by Ada  # a person's act, on the record; gates still de
 ao features off architect_wake   # anomalies are written and alarmed, nobody is woken
 ```
 
+*In ao since slice LEADS-OPS: `ao cost` prints a window whose turns spent nothing - each one
+unanswered, or a harness that counts no usage - with a total of 0 and no share beside each class,
+where the total read 1 and every class 0% of it. A review file a prune removes while `ao cost`
+counts them is left out, where the command ended on it.*
+
 What each switch changes when off:
 
 - `review` off — `ao commit-ok` no longer requires an APPROVED review; the
@@ -133,6 +138,14 @@ had nothing to do: an idle catch-up is no failure. Rehearsing the catch-up plann
 2026-10-01, a run whose every review found the reviewer unavailable exited 0, as a run that
 closed ten waivers did. `ao catchup --plan` exits `0`, or `1` when the waivers cannot be read,
 and a sitting repeats `ao catchup --limit 10` until `ao catchup --plan` counts 0 review(s).
+
+*In ao since slice LEADS-OPS: the architect's decision request after a NEEDS_CHANGES review, a
+model's or a person's, is written before its waiver closes. Closed first, a request that could not
+be written left no open waiver, and no later run wrote it, so the review's findings reached nobody;
+now the waiver stays open, the run exits `1`, and the next run writes the request and closes it. A
+review that exits 3 with nothing recorded - another review of the same range was asking its
+sections - asked no reviewer: it is told as no review recorded, not as an unavailable reviewer, and
+holds no other review.*
 
 *In ao since slice CATCHUP-REVIEWER: `--reviewer` names an actor `ao role set reviewer` composed,
 read from the table and never written to it; the implementer's actor, or one no reviewer composition
