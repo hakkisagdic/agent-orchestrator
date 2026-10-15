@@ -447,6 +447,10 @@ def _unschedule(name):
 def cmd_remove(cfg, args):
     """Take ao off only after every reachable hook target passes one preflight, and while no lane stands."""
     root = cfg["root"]
+    redirected = _commit_repository_binding(root)
+    if redirected:
+        print(f"{C['red']}remove refused; AO state kept intact{C['reset']}: {redirected}")
+        return 1
     key, owned = _remove_key(root)
     from . import skillkit
     harness_files, _ = skillkit.ao_files(root)
@@ -508,7 +512,7 @@ def cmd_remove(cfg, args):
         return 1
 
     enrollment = _project_enrollment(root)
-    if enrollment["state"] == "broken":
+    if enrollment["state"] in ("broken", "redirected"):
         print(f"{C['red']}remove refused; AO state kept intact{C['reset']}: "
               f"{enrollment['detail']}")
         return 1
@@ -1617,8 +1621,11 @@ def cmd_prove(cfg, args):
     root = cfg["root"]
     results = []
     worktree = None
-    probe = _hook_execution_probe(_ao_hook_inventory(root))
     enrollment = _project_enrollment(root)
+    if enrollment["state"] == "redirected":
+        print(f"{C['red']}prove refused{C['reset']}: {enrollment['detail']}")
+        return 1
+    probe = _hook_execution_probe(_ao_hook_inventory(root))
     # A hook whose /bin/sh finds no ao is not fixed by installing it again (SAFE-REMOVE), and a project no
     # tracked marker covers refuses `ao hooks install` until it is adopted; a current hook there failed its
     # proof with the adoption's own text, which is said once (INIT-ADOPTION).
@@ -1812,6 +1819,9 @@ def cmd_doctor(cfg, args):
             return _doctor_check(cfg, page=True)
         return _doctor_check(cfg)
     root, impl, adapter = _ctx(cfg)
+    redirected = _commit_repository_binding(root)
+    if redirected:
+        print(f"{C['red']}repository redirect{C['reset']}: {redirected}")
     ok = lambda b: f"{C['green']}ok{C['reset']}" if b else f"{C['red']}missing{C['reset']}"
 
     # Run outside a project, every check is "missing" and none of it is a fault.
@@ -1827,7 +1837,7 @@ def cmd_doctor(cfg, args):
                 print(f"  {C['b']}ao -C {r['path']} doctor{C['reset']}  {C['dim']}{age}{C['reset']}")
         else:
             print(f"{C['dim']}No local agent sessions found. See docs/adapters.md.{C['reset']}")
-        return
+        return 1 if redirected else None
     print(f"root            {root}")
     # Configuration is optional: discovery covers the common case, so its absence
     # is a fact, not a fault. Red is reserved for things that need fixing.
@@ -1911,14 +1921,18 @@ def cmd_doctor(cfg, args):
         print(f"{'push hook':<16}{C['yellow']}{detail}{C['reset']}  AO push-window hook unavailable")
     else:
         active = _active_hook_targets(hook_inventory)
-        legacy_project = _project_enrollment(root)["state"] == "legacy"
+        enrollment = _project_enrollment(root)
+        legacy_project = enrollment["state"] == "legacy"
         for role, label in (("pre-commit", "commit hook"), ("pre-push", "push hook")):
             target = active[role]
             base = _state_base(target["static_state"])
             current = base in ("current-local", "current-scoped")
             tone = C["green"] if current else C["yellow"]
             notes = []
-            if role == "pre-commit" and not current:
+            if enrollment["state"] == "redirected":
+                tone = C["yellow"]
+                notes.append(enrollment["detail"])
+            elif role == "pre-commit" and not current:
                 # `ao hooks install` refuses a project no tracked marker covers; one command adopts it (INIT-ADOPTION).
                 notes.append(
                     f"no {PROJECT_MARKER} tracked yet — {PROJECT_ADOPT_COMMAND}"
@@ -2083,4 +2097,4 @@ def cmd_doctor(cfg, args):
             print(f"                {C['dim']}{c} → {os.path.realpath(c)}{C['reset']}")
         print(f"                {C['dim']}keep one: drop the shell alias, or "
               f"uv tool uninstall ao-orchestrator{C['reset']}")
-    return 0 if reviewer_probe["ok"] else 1
+    return 0 if reviewer_probe["ok"] and not redirected else 1

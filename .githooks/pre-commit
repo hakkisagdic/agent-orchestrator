@@ -1,7 +1,8 @@
 #!/bin/sh
-# agent-orchestrator: ao-hook-v5 role=pre-commit binding=project-local
+# agent-orchestrator: ao-hook-v6 role=pre-commit binding=project-local
 initial_cwd=$(CDPATH= cd -- . && pwd -P)
 root="$initial_cwd"
+AO_COMMIT_TOP="$initial_cwd"; export AO_COMMIT_TOP
 case ${GIT_INDEX_FILE-} in
   ""|/*|[A-Za-z]:[\\/]*) ;;
   *) GIT_INDEX_FILE="$initial_cwd/$GIT_INDEX_FILE"; export GIT_INDEX_FILE ;;

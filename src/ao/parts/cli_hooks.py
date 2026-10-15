@@ -47,7 +47,7 @@ def _hook_git_env():
     return env
 
 
-def _hook_git(cwd, *args, timeout=15, extra_env=None):
+def _hook_git(cwd, *args, timeout=15, extra_env=None, bound=True):
     """Run one literal-path Git query without a shell; return the byte result.
 
     Git leads a process group of its own, so a timeout stops it with whatever it started: the hook
@@ -55,6 +55,8 @@ def _hook_git(cwd, *args, timeout=15, extra_env=None):
     pipes this reads (LEADS-GATE).
     """
     env = _hook_git_env()
+    if bound:
+        env = A.bound_git_environment(env)
     if extra_env:
         env.update(extra_env)
     try:
@@ -632,8 +634,10 @@ def _render_v4_scoped_hook(role, root_rel, family, directory_class):
     ).encode(UTF8)
 
 
-def _render_local_hook(role, root_rel, fallback=None):
-    """Portable bytes for one project-local hook; no machine/family binding unless a fallback ao is named."""
+def _render_v5_local_hook(role, root_rel):
+    """Exact project-local body emitted before the hook named the repository Git runs it in, so ao could not be
+    redirected (NESTED-GIT). Kept so that an installed v5 hook reads as legacy; a fallback ao is taken out before
+    comparing."""
     import shlex
     suffix = "" if root_rel in ("", ".") else "/" + shlex.quote(root_rel)
     command = _role_command(role)
@@ -645,13 +649,13 @@ def _render_local_hook(role, root_rel, fallback=None):
         + _hook_index_case()
         + _hook_repository_unset()
         + _hook_enrollment_guard("$initial_cwd", root_rel)
-        + _ao_lookup(fallback)
+        + _AO_LOOKUP
         + f"exec \"$ao\" -C \"$root\" {command}\n"
     ).encode(UTF8)
 
 
-def _render_scoped_hook(role, root_rel, family, directory_class, fallback=None):
-    """Family-bound bytes for a shared/external target; unknown routing is fail-open."""
+def _render_v5_scoped_hook(role, root_rel, family, directory_class):
+    """Exact shared/external body emitted before the hook named the repository Git runs it in (NESTED-GIT)."""
     import shlex
     suffix = "" if root_rel in ("", ".") else "/" + shlex.quote(root_rel)
     command = _role_command(role)
@@ -670,6 +674,62 @@ def _render_scoped_hook(role, root_rel, family, directory_class, fallback=None):
         + "case $top in /*) ;; *) top=\"$initial_cwd/$top\" ;; esac\n"
         + "top=$(CDPATH= cd \"$top\" 2>/dev/null && pwd -P) || exit 0\n"
         + f"root=\"$top\"{suffix}\n"
+        + _hook_enrollment_guard("$top", root_rel)
+        + _AO_LOOKUP
+        + f"exec \"$ao\" -C \"$root\" {command}\n"
+    ).encode(UTF8)
+
+
+def _render_local_hook(role, root_rel, fallback=None):
+    """Portable bytes for one project-local hook; no machine/family binding unless a fallback ao is named.
+
+    The hook names, in AO_COMMIT_TOP, the top of the working tree Git set as its current directory to run it - the
+    repository whose commit it guards. ao holds its authority to that repository and refuses when `git -C <project>`
+    resolves to another, which a planted `.git` would do (NESTED-GIT). `$initial_cwd` is that top from `pwd -P`, not
+    from a Git query, so a `.git` an agent plants in the project cannot move it.
+    """
+    import shlex
+    suffix = "" if root_rel in ("", ".") else "/" + shlex.quote(root_rel)
+    command = _role_command(role)
+    return (
+        "#!/bin/sh\n"
+        f"# agent-orchestrator: ao-hook-v6 role={role} binding=project-local\n"
+        "initial_cwd=$(CDPATH= cd -- . && pwd -P)\n"
+        f"root=\"$initial_cwd\"{suffix}\n"
+        "AO_COMMIT_TOP=\"$initial_cwd\"; export AO_COMMIT_TOP\n"
+        + _hook_index_case()
+        + _hook_repository_unset()
+        + _hook_enrollment_guard("$initial_cwd", root_rel)
+        + _ao_lookup(fallback)
+        + f"exec \"$ao\" -C \"$root\" {command}\n"
+    ).encode(UTF8)
+
+
+def _render_scoped_hook(role, root_rel, family, directory_class, fallback=None):
+    """Family-bound bytes for a shared/external target; unknown routing is fail-open.
+
+    AO_COMMIT_TOP names the top of the working tree the committed repository resolved to from inside the family it is
+    bound to, so ao refuses when `git -C <project>` resolves elsewhere (NESTED-GIT).
+    """
+    import shlex
+    suffix = "" if root_rel in ("", ".") else "/" + shlex.quote(root_rel)
+    command = _role_command(role)
+    return (
+        "#!/bin/sh\n"
+        f"# agent-orchestrator: ao-hook-v6 role={role} binding={directory_class}\n"
+        "initial_cwd=$(CDPATH= cd -- . && pwd -P)\n"
+        + _hook_index_case()
+        + _hook_repository_unset()
+        + "common=$(git --literal-pathspecs rev-parse --git-common-dir 2>/dev/null) || exit 0\n"
+        + "case $common in /*) ;; *) common=\"$initial_cwd/$common\" ;; esac\n"
+        + "common=$(CDPATH= cd \"$common\" 2>/dev/null && pwd -P) || exit 0\n"
+        + f"expected={shlex.quote(os.path.realpath(family))}\n"
+        + "[ \"$common\" = \"$expected\" ] || exit 0\n"
+        + "top=$(git --literal-pathspecs rev-parse --show-toplevel 2>/dev/null) || exit 0\n"
+        + "case $top in /*) ;; *) top=\"$initial_cwd/$top\" ;; esac\n"
+        + "top=$(CDPATH= cd \"$top\" 2>/dev/null && pwd -P) || exit 0\n"
+        + f"root=\"$top\"{suffix}\n"
+        + "AO_COMMIT_TOP=\"$top\"; export AO_COMMIT_TOP\n"
         + _hook_enrollment_guard("$top", root_rel)
         + _ao_lookup(fallback)
         + f"exec \"$ao\" -C \"$root\" {command}\n"
@@ -718,12 +778,14 @@ def _legacy_hook_role(data):
     version, declaration = markers[0][len(marker_prefix):].split(" role=", 1)
     # Each version renders its own exact bodies, so a hook an older ao installed reads as legacy and
     # `ao hooks install` replaces it: a v3 hook took a drive-letter index for a relative one (HOOK-V4),
-    # and a v4 hook stood aside when its marker queries failed (LEADS-GATE).
+    # a v4 hook stood aside when its marker queries failed (LEADS-GATE), and a v5 hook did not name the
+    # repository it guards, so a planted `.git` could move ao's authority to another (NESTED-GIT).
     renderers = {
         "2": (_render_v2_local_hook, _render_v2_scoped_hook),
         "3": (_render_v3_local_hook, _render_v3_scoped_hook),
         "4": (_render_v4_local_hook, _render_v4_scoped_hook),
-        "5": (_render_local_hook, _render_scoped_hook),
+        "5": (_render_v5_local_hook, _render_v5_scoped_hook),
+        "6": (_render_local_hook, _render_scoped_hook),
     }
     if version not in renderers:
         return None
@@ -1031,7 +1093,7 @@ def _hook_execution_probe(inv):
     enrollment = _project_enrollment(inv["root"])
     if enrollment["state"] == "uninitialized":
         return failed(enrollment["detail"])
-    if enrollment["state"] == "broken":
+    if enrollment["state"] in ("broken", "redirected"):
         return failed(enrollment["detail"])
     if enrollment["state"] == "legacy":
         # A current hook in a legacy project exits in its shell guard before AO
@@ -1376,6 +1438,14 @@ def _hooks_uninstall(inv, allow):
 def cmd_hooks(cfg, args):
     """Manage AO hook intent at Git's effective path without replacing user hooks."""
     root = cfg["root"]
+    enrollment = _project_enrollment(root)
+    # A .git can appear after enrollment was read, before inventory or the record's destination is selected.
+    # Refuse it before either repository is changed, including on an orphan branch outside a hook (NESTED-GIT).
+    redirected = (enrollment["detail"] if enrollment["state"] == "redirected"
+                  else _commit_repository_binding(root))
+    if redirected:
+        print(f"{C['red']}hooks {args.action} refused{C['reset']}: {redirected}")
+        return 1
     inv = _ao_hook_inventory(root)
     if inv["error"]:
         print(f"{C['red']}hook resolver failed{C['reset']}: {inv['error']}")
@@ -1388,7 +1458,6 @@ def cmd_hooks(cfg, args):
     if action == "uninstall":
         return _hooks_uninstall(inv, allow)
 
-    enrollment = _project_enrollment(root)
     if enrollment["state"] == "legacy":
         # The current hooks exit in their shell guard when no marker is tracked, so
         # installing them over a legacy project's enforcing hook would turn commit
@@ -1404,7 +1473,7 @@ def cmd_hooks(cfg, args):
         # it puts in no hook that would read its absence as a new repository (LEADS-GATE). A repository read as
         # broken is enrolled all the same - an orphan branch of it most of all, where the install passed the record
         # over and the refs that still told of the marker could then be deleted (LEADS-GATE-HOOK).
-        unkept = A.record_enrollment(root)
+        unkept = A.record_enrollment(_project_repository_top(root) or root)
         if unkept:
             print(f"{C['red']}hooks install refused{C['reset']}: this machine cannot record that the project is "
                   f"enrolled: {unkept}")

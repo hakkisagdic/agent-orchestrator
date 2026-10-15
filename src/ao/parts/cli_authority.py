@@ -966,6 +966,136 @@ def _project_refusal(problem):
     )
 
 
+# The pre-commit hook names the top of the working tree Git ran it in, so ao can hold its authority to that one
+# repository and refuse a planted `.git` that would move it elsewhere (NESTED-GIT).
+COMMIT_TOP_ENV = "AO_COMMIT_TOP"
+
+
+def _repository_identity(where):
+    """(the working-tree top, the shared git directory) the repository `git -C <where>` resolves to, each a real path.
+
+    Both come from Git run through `_hook_git`, which drops an inherited GIT_DIR and the rest of the repository
+    environment, so what an agent exported cannot move them; only a `.git` in the tree can, which is what the caller
+    tests for (NESTED-GIT).
+    """
+    top = _hook_real(where, _hook_output_path(
+        _hook_git(where, "rev-parse", "--show-toplevel", bound=False), "--show-toplevel"))
+    git_dir = _hook_real(where, _hook_output_path(
+        _hook_git(where, "rev-parse", "--git-common-dir", bound=False), "--git-common-dir"))
+    return top, git_dir
+
+
+def _project_repository_top(root):
+    """Use the hook's top; otherwise find enrollment above the original project path (NESTED-GIT).
+
+    The hook overwrites AO_COMMIT_TOP with Git's physical cwd. No repository discovered through the
+    project, before or after resolving symlinks, may override that authority. Outside a hook, keep
+    the lexical path first: resolving it before searching loses an enrolled ancestor when a project
+    directory is replaced by a symlink. Only without that evidence try the resolved path.
+    """
+    hint = os.environ.get(COMMIT_TOP_ENV)
+    if hint is not None:
+        if not hint:
+            raise _HookResolutionError("AO_COMMIT_TOP is empty")
+        return os.path.realpath(os.path.abspath(os.path.expanduser(hint)))
+    root = os.path.abspath(root)
+    return (_project_ancestor_repository_top(root)
+            or _project_ancestor_repository_top(os.path.realpath(root)))
+
+
+def _project_ancestor_repository_top(root):
+    """Find the outermost ancestor with evidence for this path without resolving it first (NESTED-GIT).
+
+    A planted intermediate repository can track the marker too, so every ancestor must be searched. HEAD and
+    index alone forget enrollment on orphan and pre-marker branches: another ref's history or the record in
+    the common git directory still binds them. An unreadable record is evidence too, as in enrollment itself.
+    The old record names a repository, not all its project paths; without history to distinguish them it must
+    conservatively claim descendants.
+    """
+    anchor = None
+    parent = os.path.dirname(root)
+    while True:
+        if os.path.lexists(os.path.join(parent, ".git")):
+            marker = os.path.relpath(os.path.join(root, PROJECT_MARKER), parent).replace(os.sep, "/")
+            indexed = _hook_git(parent, "ls-files", "--stage", "-z", "--", marker, bound=False)
+            headed = _hook_git(parent, "ls-tree", "-z", "HEAD", "--", marker, bound=False)
+            if (indexed.returncode == 0 and indexed.stdout) or (headed.returncode == 0 and headed.stdout):
+                anchor = parent
+            else:
+                history = _hook_git(parent, "log", "--all", "-1", "--format=%H", "--", marker, bound=False)
+                common = _hook_git(parent, "rev-parse", "--git-common-dir", bound=False)
+                recorded = common.returncode == 0 and os.path.lexists(os.path.join(
+                    _hook_real(parent, _hook_output_path(common, "--git-common-dir")), A.ENROLLMENT_RECORD))
+                if (history.returncode == 0 and history.stdout.strip()) or recorded:
+                    anchor = parent
+        if parent == os.path.dirname(parent):
+            break
+        parent = os.path.dirname(parent)
+    return os.path.realpath(anchor) if anchor else None
+
+
+def _commit_repository_binding(root):
+    """Refuse when the repository `git -C <root>` resolves to is not the one the commit is being made in; else None.
+
+    ao runs every enrollment and candidate query as `git -C <project root>`. Where the project is a subdirectory of
+    its repository, an implementer agent - which may write any file in the working tree (docs/threat-model.md) - can
+    plant `<project>/.git`, or a `.git` anywhere between the project and the repository's top: a directory holding a
+    second repository whose history added and then removed the marker, a `gitdir:` file, or a symlink. Git then
+    resolves `git -C <project>` to that other repository, `_project_enrollment` reads the project as uninitialized,
+    and `ao commit-check` exits 0, so a commit of the outer repository lands unchecked (NESTED-GIT).
+
+    The pre-commit hook names in AO_COMMIT_TOP the top of the working tree Git set as the hook's current directory -
+    the repository whose commit it guards - taken from `pwd -P`, never from a Git query, so a planted `.git` cannot
+    move it. This binds ao's authority to that one repository: the top and shared git directory that `git -C <root>`
+    resolves to must be its. A planted `.git` FILE, directory or symlink all fail the test, because each makes
+    `rev-parse --show-toplevel` answer another repository's top - a `.git` at the project root answers the root
+    itself, one between answers the directory that holds it - and the git-common-dir is checked too, so even a `.git`
+    symlink whose worktree top coincided would part on the shared directory. Where the top cannot be resolved ao
+    refuses rather than guess, and a refusal names what was found and what to do.
+
+    The hook's top takes precedence over all ancestor evidence, including forged history reached through a
+    directory symlink. Without a hook, lexical ancestor evidence is checked before resolved ancestors. No
+    environment variable is needed by hooks, prove, doctor, remove or adoption.
+    """
+    anchor_raw = os.environ.get(COMMIT_TOP_ENV) or "an ancestor repository"
+    try:
+        anchor_raw = _project_repository_top(root)
+        if not anchor_raw:
+            return None
+        resolved_top, resolved_git_dir = _repository_identity(root)
+        anchor_top, anchor_git_dir = _repository_identity(
+            os.path.realpath(os.path.abspath(os.path.expanduser(anchor_raw))))
+    except _HookResolutionError as exc:
+        return (
+            f"ao cannot rule out a repository redirect: it cannot confirm that {root} is the repository being "
+            f"committed at {anchor_raw}: {exc}. It refuses "
+            "rather than judge a repository that may not be the one the commit lands in; look for a .git planted in "
+            "or above the project; remove that redirect, then try again"
+        )
+    # A directory symlink can also substitute a different marker path inside the same repository.
+    # Resolve the spelling above the repository top, but keep every component below it (NESTED-GIT).
+    directory_redirect = False
+    project_path = os.path.abspath(root)
+    parent = project_path
+    while True:
+        if os.path.realpath(parent) == anchor_top and not os.path.islink(parent):
+            expected = os.path.normpath(os.path.join(anchor_top, os.path.relpath(project_path, parent)))
+            directory_redirect = os.path.realpath(project_path) != expected
+            break
+        if parent == os.path.dirname(parent):
+            break
+        parent = os.path.dirname(parent)
+    if resolved_top != anchor_top or resolved_git_dir != anchor_git_dir or directory_redirect:
+        return (
+            f"the commit is being made in the repository at {anchor_top}, but git in {root} resolves to the "
+            f"repository at {resolved_top}: a planted .git or project-directory symlink redirects it. ao "
+            f"will not move its commit authority to another repository — remove the planted .git or directory symlink "
+            f"in or above the project, "
+            f"then retry from {anchor_top}"
+        )
+    return None
+
+
 def _project_index_env(root, index_file=None):
     """Return Git's active-index override without other inherited bindings."""
     if index_file is None:
@@ -1248,7 +1378,13 @@ def _project_enrollment(root, index_file=None):
     staged.  A canonical staged marker permits first adoption before the first
     marker-bearing commit.
     """
-    root = os.path.realpath(os.path.abspath(root))
+    root = os.path.abspath(root)
+    redirected = _commit_repository_binding(root)
+    if redirected is not None:
+        # A `.git` planted in the project would move every query below to another repository, so this is
+        # measured before the marker is read. Unlike a broken enrolled repository, a redirect supplies no
+        # evidence of enrollment and must cause no record to be written in either repository (NESTED-GIT).
+        return {"state": "redirected", "detail": redirected}
     try:
         indexed = _index_project_marker(root, index_file=index_file)
         headed = _head_project_marker(root)
@@ -1593,6 +1729,12 @@ def _commit_range_check(cfg, args):
     when the range cannot be read. Requiring it is a person's step, a repository ruleset, never ao's.
     """
     spec = args.range
+    # A range is held to the same ancestor enrollment evidence as a staged check, even without a hook's
+    # AO_COMMIT_TOP; a planted `.git` must not substitute the history being judged (NESTED-GIT).
+    redirected = _commit_repository_binding(cfg["root"])
+    if redirected is not None:
+        print(f"{C['red']}cannot check {spec}{C['reset']}: {redirected}")
+        return 2
     try:
         audit = A.trailer_audit(cfg["root"], spec, since_first=bool(getattr(args, "since_first_trailer", False)))
     except (ValueError, RuntimeError) as exc:
@@ -1630,6 +1772,33 @@ def _commit_range_check(cfg, args):
 
 
 def cmd_commit_check(cfg, args):
+    """Pin every Git measurement for the check before enrollment or grant validation begins (NESTED-GIT)."""
+    spec = getattr(args, "range", None)
+    if spec is None and getattr(args, "since_first_trailer", False):
+        print("ao commit-check: --since-first-trailer goes with --range")
+        return 2
+    root = cfg["root"]
+    try:
+        top = _project_repository_top(root) or _repository_identity(root)[0]
+        git_dir = _hook_real(top, _hook_output_path(
+            _hook_git(top, "rev-parse", "--absolute-git-dir", bound=False), "--absolute-git-dir"))
+        extra, problem = _project_index_env(root)
+        if problem:
+            raise _HookResolutionError(problem)
+        index = (extra or {}).get("GIT_INDEX_FILE") or os.path.join(git_dir, "index")
+        with A.bound_git_repository(top, git_dir, index):
+            return _bound_commit_check(cfg, args)
+    except _HookResolutionError as exc:
+        if spec is not None:
+            print(f"{C['red']}cannot check {spec}{C['reset']}: cannot bind the repository: {exc}; "
+                  "repair its .git and try again")
+            return 2
+        print(f"{C['red']}{C['b']}COMMIT REFUSED{C['reset']}: cannot bind the repository: {exc}; "
+              "repair its .git and try again")
+        return 1
+
+
+def _bound_commit_check(cfg, args):
     """Revalidate the latest persisted grant against Git's exact active index.
 
     With --range it checks landed commits instead (COMMIT-TRAILER), before anything reads the
@@ -1637,18 +1806,19 @@ def cmd_commit_check(cfg, args):
     """
     if getattr(args, "range", None) is not None:
         return _commit_range_check(cfg, args)
-    if getattr(args, "since_first_trailer", False):
-        print("ao commit-check: --since-first-trailer goes with --range")
-        return 2
     root = cfg["root"]
     enrollment = _project_enrollment(root)
     if enrollment["state"] == "uninitialized":
         return 0
+    if enrollment["state"] == "redirected":
+        print(f"{C['red']}{C['b']}COMMIT REFUSED{C['reset']}")
+        print(f"  {C['red']}·{C['reset']} {enrollment['detail']}")
+        return 1
     if enrollment["state"] == "broken":
         # Refused, and recorded as enrolled all the same: an orphan branch of an enrolled repository is read as
         # broken while a ref still tells of the marker, and an agent can delete the ref next. A record that cannot be
         # written is said with the refusal (LEADS-GATE-HOOK).
-        unkept = A.record_enrollment(root)
+        unkept = A.record_enrollment(_project_repository_top(root) or root)
         print(f"{C['red']}{C['b']}COMMIT REFUSED{C['reset']}")
         print(f"  {C['red']}·{C['reset']} {enrollment['detail']}")
         if unkept:
@@ -1658,9 +1828,11 @@ def cmd_commit_check(cfg, args):
     probe_code = _commit_hook_probe_response(root)
     if probe_code is not None:
         return probe_code
+    # On the hook path writes use its top, never the project: a .git planted after the binding check must
+    # not redirect the enrollment record into another repository (NESTED-GIT).
     # Kept outside the tree, for a branch not born yet to ask where no ref tracks the marker any more; a proof that
     # the hook runs records nothing (LEADS-GATE).
-    unkept = A.record_enrollment(root)
+    unkept = A.record_enrollment(_project_repository_top(root) or root)
     if unkept:
         print(f"{C['red']}{C['b']}COMMIT REFUSED{C['reset']}")
         print(f"  {C['red']}·{C['reset']} this machine cannot record that the project is enrolled, and a branch not "
@@ -1849,6 +2021,10 @@ def cmd_commit_check(cfg, args):
             reasons.append(
                 f"urgent message unacknowledged: {message['id']} — {message['title']}"
             )
+
+    redirected = _commit_repository_binding(root)
+    if redirected:
+        reasons.append(redirected)
 
     if reasons:
         print(f"{C['red']}{C['b']}COMMIT REFUSED{C['reset']}")

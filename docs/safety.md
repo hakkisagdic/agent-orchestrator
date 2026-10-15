@@ -250,6 +250,38 @@ hook while a commit runs, an unchecked commit where the other costs another tool
 execution proof's `git hook run` among them, leads a process group of its own and is stopped with
 what it started when it runs past its time.*
 
+*In ao since slice NESTED-GIT: the commit hook is version 6, and it names in `AO_COMMIT_TOP` the top
+of the working tree Git ran it in. ao holds its commit authority to that one repository and refuses
+when `git -C <project>` resolves to another. A project that is a subdirectory of its repository read
+as uninitialized, so `ao commit-check` exited 0 and a commit of the outer repository landed unchecked,
+when an agent planted a `.git` in the project — a directory holding a second repository, a `gitdir:`
+file, or a symlink, at the project root or anywhere between it and the repository's top. The top comes
+from `pwd -P`, not a Git query, and takes precedence over every repository discovered from the project,
+even when a project-directory symlink resolves into a repository with forged enrollment history.
+Symlinks at any directory below that top cannot substitute another project path either; a redirect fails closed with
+a message naming what was found and what to do. A redirect is distinct from broken enrollment:
+refusing it writes no enrollment record in either repository, and any enrollment record a hook check
+does write is bound to the hook's top, never reached through the project's own `.git`. Remove the
+planted `.git` in or above the project and retry the outer commit; commit a genuine nested repository
+through its own hook. The whole commit check pins Git's directory, working tree and active index:
+a `.git` planted after enrollment is checked cannot substitute another HEAD for the grant's candidate,
+worktree checks or review diff. Outside a hook, ao looks past intervening `.git` entries for an ancestor
+repository that tracks this project's marker in HEAD, its index or any ref's history, or has a machine
+enrollment record in its common Git directory. It searches every ancestor of the original path before
+trying the resolved path: an intermediate repository tracking a forged marker cannot override the enrolled
+outer one. When the hook supplies `AO_COMMIT_TOP`, that top is authoritative without ancestor discovery.
+The history and record keep orphan and pre-marker branches bound too. That repository supplies the
+binding for hook management, prove, doctor, removal and adoption; hook management checks again after
+reading enrollment, before selecting a repository to change. An enrollment record names the whole
+repository, so it conservatively claims descendants even when no history for their marker survives;
+keep an independent nested project outside that recorded ancestor to avoid this ambiguity.
+A project at its repository's top is unchanged, and a genuine nested repository or submodule
+is committed through its own top and governed as its own, even under an ancestor's enrollment record.
+`ao doctor` reports a repository redirect and continues its other checks; `ao doctor --check --notify`
+still sends human alarms, including the redirect. Usage errors and
+unreadable ranges from `ao commit-check` still exit 2. A version 5 hook reads as legacy, and each enrolled
+repository reinstalls with `ao hooks install`.*
+
 The chain is tamper-evidence, not writer authentication. It detects an edit, deletion,
 reorder, or append whose successor/predecessor links were not recomputed. It cannot
 cryptographically exclude a process with the same user's write access: that process can

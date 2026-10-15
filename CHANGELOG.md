@@ -20,6 +20,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Behaviour changes
 
+- The commit hook is version 6 and names the repository Git runs it in through `AO_COMMIT_TOP`; version 5 hooks read as legacy, so enrolled repositories reinstall with `ao hooks install` ([safety](docs/safety.md#3-commit-authority-is-separated)) (NESTED-GIT).
 - A project that set `review.transport` to `acp` reads its reviewer as changed once, until a person runs `ao harness seen`; a stand-in request an older ao left in `.ao/review-requests/` is named and not collected - run `ao review` again and carry the new one ([standin](docs/standin.md), [configuration](docs/configuration.md), REVIEW-PATH-HIGHS).
 - Catch-up boundary replacement requires and records a named person and is audited as a person's act; its documentation states that only the newest 500 commit messages are read and omitted names are bounded, with the remainder counted ([features](docs/features.md)) (TRIAGE-4-REST)
 - `ao commit` lands no merge, and runs no git hook: a project's own `commit-msg` or `post-commit` hook runs under a plain `git commit` only ([safety](docs/safety.md#3-commit-authority-is-separated), LEADS-GATE-COMMIT).
@@ -65,6 +66,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Security
 
+- ao refuses a `.git` directory, gitfile or symlink that redirects a subdirectory project's commit check to another repository, names the redirect and its repair, and records enrollment in neither repository on that refusal; permitted enrollment writes use the hook's repository, where a redirected check could previously let an unchecked outer commit land or mark the planted repository enrolled ([safety](docs/safety.md#3-commit-authority-is-separated)) (NESTED-GIT).
 - Plan baselines reject malformed records, chain new admissions with committed-length checkpoints, and require recorded re-admissions for replacements ([ledger](docs/ledger.md)) (TRIAGE-2-MEDIUM).
 - The grants audit names agent rules admitting `ao doctor --check --notify`, including broad doctor grants and reversed flag order ([alarms](docs/alarms.md)) (TRIAGE-1-LOW)
 - The implementer grants audit names exact-value and unset settings commands, including machine settings mutations ([configuration](docs/configuration.md)) (TRIAGE-1-LOW)

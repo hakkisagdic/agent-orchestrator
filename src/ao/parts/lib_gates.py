@@ -597,6 +597,36 @@ def filter_probe_text(result):
     return f"{where} " + ", and ".join(parts)
 
 
+# A check holds one repository for its whole lifetime, including a nested call; no process-wide environment
+# is changed and a planted project .git cannot move a later measurement (NESTED-GIT).
+from contextlib import contextmanager as _git_contextmanager
+from contextvars import ContextVar as _GitContextVar
+
+_COMMIT_GIT_CONTEXT = _GitContextVar("ao_commit_git", default=None)
+
+
+@_git_contextmanager
+def bound_git_repository(top, git_dir, index):
+    """Pin the hook's repository and active index until the check returns, even on failure (NESTED-GIT)."""
+    token = _COMMIT_GIT_CONTEXT.set((top, git_dir, index))
+    try:
+        yield
+    finally:
+        _COMMIT_GIT_CONTEXT.reset(token)
+
+
+def bound_git_environment(env):
+    """Git reads the pinned repository, never a .git rediscovered from the project cwd (NESTED-GIT)."""
+    binding = _COMMIT_GIT_CONTEXT.get()
+    if binding is None:
+        return env
+    top, git_dir, index = binding
+    clean = {name: value for name, value in env.items()
+             if name not in _GIT_BINDING and not name.startswith("GIT_CONFIG")}
+    clean.update(GIT_DIR=git_dir, GIT_WORK_TREE=top, GIT_INDEX_FILE=index)
+    return clean
+
+
 def _git_output(root, *args, timeout=60):
     """Run git without a shell and return bytes, failing closed on an unreadable tree.
 
@@ -605,7 +635,7 @@ def _git_output(root, *args, timeout=60):
     """
     try:
         result = run_as_group([git_binary(), *args], timeout, cwd=root, stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE)
+                              stderr=subprocess.PIPE, env=bound_git_environment(os.environ.copy()))
     except (OSError, subprocess.TimeoutExpired) as exc:
         left, unasked = getattr(exc, "left", None), getattr(exc, "unasked", None)
         raise RuntimeError(f"cannot measure git tree: {exc}"
@@ -629,7 +659,7 @@ def _git_text(cwd, *args, timeout=20):
     try:
         # In a process group of its own, as every Git query is: a timeout stops git with what it started (LEADS-GATE-RUNS).
         result = run_as_group(argv, timeout, cwd=cwd, capture_output=True, text=True, encoding=UTF8,
-                              errors="replace")
+                              errors="replace", env=bound_git_environment(os.environ.copy()))
     except Exception:
         return ""
     return result.stdout.strip()

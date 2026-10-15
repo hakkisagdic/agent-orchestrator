@@ -788,7 +788,7 @@ def _adopt_project(cfg, args):
               f"{', '.join(given)} belong{'s' if len(given) == 1 else ''} to a new setup: ao init without --adopt")
         return 1
     enrollment = _project_enrollment(root)
-    if enrollment["state"] == "broken":
+    if enrollment["state"] in ("broken", "redirected"):
         print(f"{C['red']}init --adopt refused{C['reset']}: {enrollment['detail']}")
         return 1
     if enrollment["state"] == "uninitialized":
@@ -826,6 +826,9 @@ def _adopt_project(cfg, args):
             print(f"{C['red']}init --adopt stopped{C['reset']}: git could not stage {PROJECT_MARKER}: {failure}")
             return 1
         enrollment = _project_enrollment(root)
+        if enrollment["state"] == "redirected":
+            print(f"{C['red']}init --adopt stopped{C['reset']}: {enrollment['detail']}")
+            return 1
         if enrollment["state"] != "enrolled":
             # A clean filter or an attribute can store other bytes than the file's. Such a marker
             # would read as broken and refuse every commit with another repair; the project is

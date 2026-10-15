@@ -111,7 +111,7 @@ def test_the_v4_hook_reads_as_legacy_and_install_puts_the_current_one_in_its_pla
     for target in cli._ao_hook_inventory(root)["targets"]:
         if target["active"]:
             assert target["static_state"] == "current-local (behavior unverified)"
-            assert b"# agent-orchestrator: ao-hook-v5 " in (hooks / target["role"]).read_bytes()
+            assert b"# agent-orchestrator: ao-hook-v6 " in (hooks / target["role"]).read_bytes()
 
 
 # ---- 39aaf2997fe78820: ao's exact hook without its execute bit is replaced ------------------------

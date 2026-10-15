@@ -279,8 +279,10 @@ def doctor_problems(cfg):
     """What `ao doctor --check` acts on: conditions a person must fix, as (key, text)."""
     from .watchdog import wake_error, STATE_DIR
     root = cfg["root"]
+    redirected = _commit_repository_binding(root)
     key = A.project_key(root)
-    out = []
+    # A redirect is a finding, not a reason to suppress the other checks or their alarms (NESTED-GIT).
+    out = [("repository-redirect", redirected)] if redirected else []
     strict_matrix = M.is_strict(cfg)
     if strict_matrix:
         try:
@@ -548,7 +550,9 @@ def doctor_problems(cfg):
             )
         if reasons:
             enrollment = _project_enrollment(root)
-            if commit["repository_source"] and commit["track_state"] == "tracked" \
+            if enrollment["state"] == "redirected":
+                repair = None if proof["detail"] == enrollment["detail"] else enrollment["detail"]
+            elif commit["repository_source"] and commit["track_state"] == "tracked" \
                     and commit["crlf_only"]:
                 repair = "git restore -- .githooks/pre-commit"
             elif misplaced:
@@ -782,7 +786,7 @@ def _doctor_credit_lines(cfg):
 # may read it and record it as seen (HARNESS-CONFIG). A turn the watchdog refuses to
 # start waits for its configuration to change (TURN-ARGV).
 DOCTOR_RED = {"watchdog-dead", "wake-failed", "transcript-blind", "transcript-missing", "implementer-session",
-              "harness-config", "turn-refused:implementer", "turn-refused:architect"}
+              "harness-config", "turn-refused:implementer", "turn-refused:architect", "repository-redirect"}
 
 
 def _doctor_severity(key, text):

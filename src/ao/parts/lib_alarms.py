@@ -452,6 +452,8 @@ def repository_identity(root):
     """
     env = {name: value for name, value in os.environ.items()
            if name not in _GIT_BINDING and not name.startswith("GIT_CONFIG")}
+    # A commit check has already pinned its repository; enrollment reads and writes share it (NESTED-GIT).
+    env = bound_git_environment(env)
     try:
         done = run_as_group([git_binary(), "--literal-pathspecs", "-C", str(root), "rev-parse", "--git-common-dir"],
                             20, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
