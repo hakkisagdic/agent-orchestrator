@@ -130,6 +130,13 @@ the running slice and hands back an id: a waived range is already landed, and a
 waiver closes only on the review recorded for exactly its range, or on its proof,
 in the run that asked for it. Whatever a run does not reach waits for the next one.
 
+*In ao since slice CATCHUP-ROW: catch-up uses the ledger row its own review call recorded.
+Another review of the same range and author that finishes meanwhile cannot supply its verdict;
+if the call records nothing for a range that changed, the waiver stays open. The review ledger
+is checked before the call starts, including for a range with no net change. An unreadable ledger
+or a failure to record the review keeps the waiver open, is reported, and makes the run exit `1`;
+the run still attempts the later ranges. Repair the ledger or storage problem, then retry catch-up.*
+
 A run exits `3` when it started reviews and none of them decided anything - each ended
 UNAVAILABLE or INVALID, was refused, or recorded no review - whatever needed no reviewer it
 closed; `1` when a waiver's close, a ledger or a decision request could not be written or

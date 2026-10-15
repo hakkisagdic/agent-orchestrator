@@ -1379,6 +1379,7 @@ def cmd_catchup(cfg, args):
     for nothing to do alike. --plan exits 0, or 1 when the waivers cannot be read.
     """
     from types import SimpleNamespace
+    from .storage import LedgerCorruption
     root = cfg["root"]
     plan = bool(getattr(args, "plan", False))
     limit = getattr(args, "limit", None)
@@ -1558,21 +1559,27 @@ def cmd_catchup(cfg, args):
         ns = SimpleNamespace(boundary=args.boundary or f"waived review for {w['slice']}: {w['why']}",
                              paths=None, commits=f"{item['start']}..{item['end']}", author=author,
                              claims=not args.boundary, range_slice=w["slice"])
+        # The row count is only a readability check: without it a broken ledger spent
+        # a reviewer call, or let an unchanged range close unreviewed (CATCHUP-ROW).
         try:
-            before = A.review_row_count(root)
+            A.review_row_count(root)
         except Exception as exc:
             print(f"  {C['red']}review ledger cannot be read{C['reset']}: {exc}; {w['id']} stays open")
             failed.append(w["id"])
             continue
-        code = cmd_review(cfg, ns)
+        try:
+            code = cmd_review(cfg, ns)
+        except (OSError, LedgerCorruption) as exc:
+            # A ledger or artefact can fail after the pre-check; keep this waiver for
+            # another run and still attempt the later ranges (CATCHUP-ROW).
+            print(f"  {C['red']}review could not be recorded{C['reset']}: {exc}; "
+                  f"{w['id']} stays open; retry catch-up once the review can be recorded")
+            failed.append(w["id"])
+            continue
         # The exit code is not a verdict: a review that refused to run exits 1 or 2
-        # too. A waiver closes on the review recorded for exactly this range.
-        try:
-            recorded = A.range_review(root, ns.commits, since=before, author=author) or {}
-        except Exception as exc:
-            print(f"  {C['red']}review ledger cannot be read{C['reset']}: {exc}; {w['id']} stays open")
-            failed.append(w["id"])
-            continue
+        # too. Counting ledger rows took another review of the same range and author
+        # for this call's; cmd_review hands back the row it recorded (CATCHUP-ROW).
+        recorded = getattr(ns, "recorded", None) or {}
         verdict = recorded.get("verdict")
         if verdict in ("APPROVED", "NEEDS_CHANGES") or (verdict is None and code == 0):
             decided += 1                        # the review decided what becomes of the waiver

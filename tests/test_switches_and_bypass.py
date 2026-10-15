@@ -284,9 +284,9 @@ def _catchup_with_recorded_ranges(project, monkeypatch):
         # A review that approves exactly the range it is asked for, as the review ledger records one: a
         # stand-in that only exited 0 closed a range that changed lines as if it had none (WAIVER-BOUND-2).
         seen.append(ns.commits)
-        A.record_review(cfg["root"], f"approved-{len(seen)}.md", b"VERDICT: APPROVED\n",
-                        {"kind": "commit-range", "commits": ns.commits, "author": getattr(ns, "author", None)},
-                        "APPROVED")
+        ns.recorded = A.record_review(
+            cfg["root"], f"approved-{len(seen)}.md", b"VERDICT: APPROVED\n",
+            {"kind": "commit-range", "commits": ns.commits, "author": getattr(ns, "author", None)}, "APPROVED")
         return 0
     monkeypatch.setattr(cli, "cmd_review", fake_review)
     from ao import watchdog as W
