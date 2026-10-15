@@ -95,8 +95,8 @@ def _urgent_banner(cfg):
     print(f"{C['red']}{C['b']}  {len(msgs)} URGENT message(s) from the architect, unacknowledged"
           f"{C['reset']}")
     for m in msgs:
-        print(f"{C['red']}  ·{C['reset']} {C['b']}{m['title']}{C['reset']}")
-        print(f"    {C['dim']}{m['id']}{C['reset']}")
+        print(f"{C['red']}  ·{C['reset']} {C['b']}{A.shown_text(m['title'])}{C['reset']}")
+        print(f"    {C['dim']}{A.shown_text(m['id'])}{C['reset']}")
     print(f"{C['dim']}  Read them (ao_inbox, or the file) and acknowledge before "
           f"continuing.{C['reset']}")
     print(f"{C['red']}{C['b']}{'━' * 62}{C['reset']}\n")
@@ -955,17 +955,17 @@ def cmd_decisions(cfg, args):
         if r["state"] in ("open", A.PROPOSED):
             # A rule proposal's question waits for a person, and parks no slice (RULE-PROPOSALS).
             label = "OPEN" if r["state"] == "open" else "PROPOSED"
-            whose = f", rule proposal {r['proposal']}: a person's to decide" if r.get("proposal") else ""
-            print(f"{C['yellow']}{label}{C['reset']}{' ' * (9 - len(label))}{C['b']}{r['id']}{C['reset']}  "
-                  f"{r['question']}  {C['dim']}{age}m{whose}{C['reset']}")
+            whose = f", rule proposal {A.shown_text(r['proposal'])}: a person's to decide" if r.get("proposal") else ""
+            print(f"{C['yellow']}{label}{C['reset']}{' ' * (9 - len(label))}{C['b']}{A.shown_text(r['id'])}{C['reset']}  "
+                  f"{A.shown_text(r['question'])}  {C['dim']}{age}m{whose}{C['reset']}")
             for o in r["options"]:
-                print(f"           {C['dim']}{o['key']}){C['reset']} {o['label']}")
+                print(f"           {C['dim']}{A.shown_text(o['key'])}){C['reset']} {A.shown_text(o['label'])}")
         else:
             rows = r.get("answers") or []
-            was = f"; was {rows[-2].get('answer')}" if len(rows) > 1 else ""
-            print(f"{C['green']}answered{C['reset']} {C['b']}{r['id']}{C['reset']}  "
-                  f"{r['question']}  {C['dim']}→ {r['answer']} "
-                  f"({r.get('answered_by')}{was}){C['reset']}")
+            was = f"; was {A.shown_text(rows[-2].get('answer'))}" if len(rows) > 1 else ""
+            print(f"{C['green']}answered{C['reset']} {C['b']}{A.shown_text(r['id'])}{C['reset']}  "
+                  f"{A.shown_text(r['question'])}  {C['dim']}→ {A.shown_text(r['answer'])} "
+                  f"({A.shown_text(r.get('answered_by'))}{was}){C['reset']}")
     return 0
 
 

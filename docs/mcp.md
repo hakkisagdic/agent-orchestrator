@@ -25,6 +25,13 @@ service. It reads and writes exactly the same mailbox and repository state the C
 so the two can be mixed: an architect using files and an implementer using MCP interoperate
 without knowing about each other.
 
+*In ao since slice LEADS-OPEN: both stdio servers refuse a request whose id is
+not a string, finite number or null before dispatching its tool, answer with
+invalid-request code -32600 and a null id, and read the next line. A nested id
+could previously end the server while its reply was encoded. The A2A bridge
+also reads on after JSON exceeds the parser's integer or nesting limit, as the
+orchestration server already did.*
+
 *In ao since slice WINDOWS-CLOSE:* a request is read as UTF-8 and every reply is seven-bit
 JSON, whatever the platform's code page, in this server and in the A2A bridge below. On a
 default Windows install a reply holding a Turkish letter or an arrow ended the server

@@ -1334,6 +1334,19 @@ def _hooks_uninstall(inv, allow):
     failed = False
     for target in plan:
         try:
+            # A plan may precede other removal work. Re-read ownership and topology, then check that the
+            # file read still stands there; unlink has no compare-and-remove operation (LEADS-OPEN).
+            before = _file_identity(target["path"])
+            fresh = _ao_hook_inventory(inv["root"])
+            current = next((item for item in _hook_removal_plan(fresh)
+                            if item["path"] == target["path"] and item["role"] == target["role"]), None)
+            if (fresh["error"] or current is None or before is None
+                    or _authorization_refusal([current], allow)
+                    or _file_identity(target["path"]) != before):
+                failed = True
+                print(f"left {A.shown_text(target['path'])}: its ownership, location or file changed; "
+                      "inspect ao hooks status before uninstalling again")
+                continue
             os.remove(target["path"])
             print(f"removed {target['role']} — {target['path']}")
         except OSError as exc:

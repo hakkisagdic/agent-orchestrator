@@ -890,7 +890,7 @@ def cmd_commit_ok(cfg, args):
     if reasons:
         print(f"{C['red']}{C['b']}REFUSED{C['reset']}")
         for reason in reasons:
-            print(f"  {C['red']}·{C['reset']} {reason}")
+            print(f"  {C['red']}·{C['reset']} {A.shown_text(reason)}")
         try:
             A.record_authority(
                 root, False, reasons, now, (ver or {}).get("id"),
@@ -1853,7 +1853,7 @@ def cmd_commit_check(cfg, args):
     if reasons:
         print(f"{C['red']}{C['b']}COMMIT REFUSED{C['reset']}")
         for reason in reasons:
-            print(f"  {C['red']}·{C['reset']} {reason}")
+            print(f"  {C['red']}·{C['reset']} {A.shown_text(reason)}")
         if enrollment["state"] == "legacy":
             print(f"  {C['dim']}{enrollment['detail']}{C['reset']}")
         return 1

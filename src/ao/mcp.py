@@ -20,6 +20,7 @@ reviewer could act as the architect (HUNT-LEADS-SEC).
 JSON-RPC 2.0 over stdio, standard library only.
 """
 import json
+import math
 import os
 import sys
 import time
@@ -512,6 +513,13 @@ def main():
             sys.stdout.flush()
             continue
         rid, method = req.get("id"), req.get("method")
+        # Never dispatch or echo a container id: encoding a deeply nested one ended the server (LEADS-OPEN).
+        if (rid is not None and type(rid) not in (str, int, float)) or (
+                isinstance(rid, float) and not math.isfinite(rid)):
+            sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": None, "error": {
+                "code": -32600, "message": "a request id must be a string, finite number or null"}}) + "\n")
+            sys.stdout.flush()
+            continue
         try:
             if method == "initialize":
                 result = {"protocolVersion": PROTOCOL,

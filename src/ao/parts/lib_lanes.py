@@ -77,7 +77,7 @@ def lane_records(root):
         try:
             with open(os.path.join(directory, entry), encoding=UTF8) as fh:
                 record = json.load(fh)
-        except (OSError, ValueError):
+        except (OSError, ValueError, RecursionError):
             record = None
         out.append(dict(record if isinstance(record, dict) else {"state": "unreadable"}, name=entry[:-5]))
     return out

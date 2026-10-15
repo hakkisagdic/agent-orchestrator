@@ -27,6 +27,13 @@ The reader **deletes** the message once it has been fully processed or explicitl
 rejected. A deleted file is the acknowledgement — there is no separate ack channel and
 no state to keep in sync.
 
+*In ao since slice LEADS-OPEN: `ao mail ack` under `AO_ROLE=implementer` or
+`AO_ROLE=architect` accepts only mail addressed to that role, using the inbox's
+address check. If any name matched by a glob belongs to another reader, nothing
+in that glob is acknowledged. An unknown or non-mail role is refused; a person
+with no role set can acknowledge either inbox. This applies to deletion and to
+the append-only store's handled records.*
+
 Consequences worth internalising:
 
 - A message still present means *not yet handled*, not *not yet seen*.

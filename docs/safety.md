@@ -152,6 +152,12 @@ person's record in `.ao/ledger/opt-ins.jsonl` says so. Each records the name, th
 terminal was attached, refuses a name that belongs to an agent or a role, and is on the list of commands
 no actor's grant may admit; ao still cannot prove that no agent typed it.
 
+*In ao since slice LEADS-OPEN: the commands printed after `ao person-review`
+quote the person's name and every scope argument for the platform's shells.
+On Windows, a value that cmd.exe or PowerShell could expand suppresses both
+copyable commands; ao keeps the diff and digest visible and asks the person
+to enter a command using their shell's literal quoting.*
+
 Hook ownership is content- and topology-sensitive, not marker-based. Project
 enrollment is marker-based: only a root `.ao-project` with exact
 `ao-project-v1\n` bytes in HEAD or the active index activates enforcement. The
@@ -200,6 +206,13 @@ enforcement; after that marker deletion is staged, granted, and committed, the
 second invocation may remove `.ao/` and the remaining AO-owned surfaces. Pre-push
 remains informational rather than a doctor alarm because a repository may
 intentionally retain its own custom push hook.
+
+*In ao since slice LEADS-OPEN: hook uninstall reads ownership, tracking and
+location again just before each removal, and compares the file's identity and
+bytes across that reading. A changed or newly protected hook stays, with exit
+1 and a request to inspect `ao hooks status`. This narrows the stale-plan race;
+there is still no atomic compare-and-unlink operation, so a replacement in the
+instant after the last comparison can be removed.*
 
 *In ao since slice LEADS-GATE: the commit hook is version 5. It stands aside only where Git answers
 that the project's `.ao-project` is neither in the index nor in HEAD, asked for by its path from the
@@ -427,6 +440,12 @@ in a turn's command is escaped too, as `\x0a`, where it started a line that read
 
 *In ao since slice HARNESS-SEEN-OWN: what ao writes into what a harness reads is seen already, and a
 person's own tool approvals are seen in one step.*
+
+*In ao since slice LEADS-OPEN: the record of ao's own writes and a person's
+acceptance share a per-project lock outside the tree. Each reads and merges the
+record while holding it, so concurrent writers keep each other's entries. A
+person's new snapshot still replaces the previous person's snapshot; ao's own
+writes stay alongside it. A write that cannot acquire the lock records nothing.*
 
 `ao init` and `ao skill install` record each file they write from ao's own declarations - the playbook,
 the coordination steering, the MCP entry - as seen, by the digest of what ao renders, while the file holds

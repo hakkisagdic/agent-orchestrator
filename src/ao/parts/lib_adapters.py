@@ -1365,7 +1365,7 @@ def record_harness_written(root, files, by):
     for an ao project: a folder with no .ao/ shares a key with whatever project bears its name. What cannot be read or
     written is not recorded, and the files read as unseen, which holds until a person sees them.
     """
-    from .storage import replace_file_durably
+    from .storage import _exclusive_lock, replace_file_durably
     if not os.path.isdir(os.path.join(root, ".ao")):
         return []
     try:
@@ -1386,13 +1386,16 @@ def record_harness_written(root, files, by):
             ours[rel] = {"path": rel, "sha256": expected, "by": by, "at": now}
     if not ours:
         return []
-    record = harness_seen_record(root) or {}
-    record["written"] = [item for item in record.get("written") or []
-                         if isinstance(item, dict) and item.get("path") not in ours] + list(ours.values())
     target = project_file(root, "harness-seen")
     try:
-        os.makedirs(os.path.dirname(target), exist_ok=True)
-        replace_file_durably(target, (json.dumps(record, indent=1, sort_keys=True) + "\n").encode(UTF8))
+        # Init and a person's acceptance shared an unlocked read-modify-write and lost each other's entries
+        # (LEADS-OPEN). Only the record merge needs the lock, not reading the project's files.
+        with _exclusive_lock(project_file(root, "harness-seen-lock")):
+            record = harness_seen_record(root) or {}
+            record["written"] = [item for item in record.get("written") or []
+                                 if isinstance(item, dict) and item.get("path") not in ours] + list(ours.values())
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            replace_file_durably(target, (json.dumps(record, indent=1, sort_keys=True) + "\n").encode(UTF8))
     except OSError:
         return []
     return sorted(ours)
@@ -1417,18 +1420,20 @@ def record_harness_seen(root, changes, by, digest):
     person was shown; beside the name they gave, ao records what it can check, the login and whether a terminal was
     attached, as a waiver does.
     """
-    from .storage import replace_file_durably
+    from .storage import _exclusive_lock, replace_file_durably
     user, interactive = _login_and_terminal()
     # The HEAD it was seen at is measured from after it: what is committed later is a change again (HARNESS-CONFIG).
     head = _git_text(root, "rev-parse", "--verify", "-q", "HEAD")
-    record = {"digest": digest, "by": by, "at": int(time.time()), "user": user, "interactive": interactive,
-              "head": head if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head) else None,
-              "changes": [{"path": path, "state": state, "sha256": sha} for path, state, sha in changes],
-              # What ao wrote itself stays seen beside it (HARNESS-SEEN-OWN).
-              "written": list((harness_seen_record(root) or {}).get("written") or [])}
-    path = project_file(root, "harness-seen")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    replace_file_durably(path, (json.dumps(record, indent=1, sort_keys=True) + "\n").encode(UTF8))
+    # Keep ao's own writes beside the person's snapshot, read under the same lock (LEADS-OPEN).
+    with _exclusive_lock(project_file(root, "harness-seen-lock")):
+        record = {"digest": digest, "by": by, "at": int(time.time()), "user": user, "interactive": interactive,
+                  "head": head if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head) else None,
+                  "changes": [{"path": path, "state": state, "sha256": sha} for path, state, sha in changes],
+                  # What ao wrote itself stays seen beside it (HARNESS-SEEN-OWN).
+                  "written": list((harness_seen_record(root) or {}).get("written") or [])}
+        path = project_file(root, "harness-seen")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        replace_file_durably(path, (json.dumps(record, indent=1, sort_keys=True) + "\n").encode(UTF8))
     # A role's command seen is the one accepted from now on, and a change from it is measured from there (TURN-ARGV).
     record_turns_seen(root, changes, by)
     return record

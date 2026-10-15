@@ -24,6 +24,7 @@ because a card that omits its version is more common than one that lies about it
 Standard library only.
 """
 import json
+import math
 import os
 import re
 import sys
@@ -494,7 +495,8 @@ def main():
             continue
         try:
             req = json.loads(line)
-        except json.JSONDecodeError:
+        except (ValueError, RecursionError):
+            # Parser limits must not end the bridge and take every tool away (LEADS-OPEN).
             continue
         if not isinstance(req, dict):
             # A JSON array or a scalar is no request, and reading it as one ended the server (A2A-HARDEN).
@@ -503,6 +505,13 @@ def main():
             sys.stdout.flush()
             continue
         rid, method = req.get("id"), req.get("method")
+        # Never dispatch or echo a container id: encoding a deeply nested one ended the server (LEADS-OPEN).
+        if (rid is not None and type(rid) not in (str, int, float)) or (
+                isinstance(rid, float) and not math.isfinite(rid)):
+            sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": None, "error": {
+                "code": -32600, "message": "a request id must be a string, finite number or null"}}) + "\n")
+            sys.stdout.flush()
+            continue
         try:
             if method == "initialize":
                 result = {"protocolVersion": PROTOCOL, "capabilities": {"tools": {}},

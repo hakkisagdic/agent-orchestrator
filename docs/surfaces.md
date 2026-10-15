@@ -90,6 +90,13 @@ command is made of it. A tab is shown escaped too, where it moved what followed 
 id ao makes (`R-` and digits); its record is a file in the tree, and one with another id is named as
 none ao made. `ao status --json` prints the text as it is, for a program.*
 
+*In ao since slice LEADS-OPEN: urgent banners before `ao lock` and `ao verify`,
+commit refusal reasons, `ao reviews`, `ao decisions`, and `ao notices` also
+escape terminal controls and direction overrides. List rows escape embedded
+line breaks; a notice's detail body keeps its lines. Stored text and notice
+JSON retain their original values. The broader `ao doctor` diagnostics are
+not included in this sweep.*
+
 *In ao since slice JSON-OUTPUT: `ao status --json` prints what the panel shows as one JSON document
 and nothing else on stdout - no colour, no banner - for a program to read where it had to read the
 panel. The panel is drawn from the same reading, so the two cannot disagree; `-m` and `--window`

@@ -663,6 +663,16 @@ def cmd_mail(cfg, args):
         hits = [f for f in A.mailbox(root, cfg["mailbox"]) if f == pattern or fnmatch.fnmatch(f, pattern)]
         if not hits:
             print(f"no message matches {pattern}"); return 1
+        # An agent acknowledged another reader's mail, including its append-only handled record. Check the
+        # whole glob before consuming any of it; an unknown role is no person's session (LEADS-OPEN).
+        role = (os.environ.get("AO_ROLE") or "").strip().lower()
+        refused = hits if role and role not in A.ROLES else [
+            f for f in hits if not A.addressed_to(f, cfg, role or None)]
+        if refused:
+            print("not acknowledged: these messages belong to another reader, or AO_ROLE names no mail reader: "
+                  + ", ".join(A.shown_text(f) for f in refused))
+            print("  ask their reader to acknowledge them with ao mail ack; no matching message was consumed")
+            return 1
         store = A.mail_store_mode(root) == "append-only"
         if store:
             A.ingest_mail(root, cfg)

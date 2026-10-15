@@ -3132,13 +3132,16 @@ def _show_person_review(person, diff, evidence, boundary, args, criteria=()):
     A boundary's criteria are listed with it, since a person answers them as a reviewer does,
     in the findings file (CRITERIA-VERDICTS).
     """
-    import shlex
     sys.stdout.write(diff if diff.endswith("\n") else diff + "\n")
     # The whole digest (REVIEW-TIERS-2), of the diff and of what it is judged against (REVIEW-PATH-HIGHS).
     short = _person_read(evidence, boundary, criteria)[len("sha256:"):]
-    scope = f"--commits {shlex.quote(args.commits)}" if args.commits else " ".join(
-        ["--paths"] + [shlex.quote(path) for path in args.paths]) if args.paths else ""
-    base = " ".join(part for part in ("ao person-review", f"--by {shlex.quote(person['by'])}", scope) if part)
+    # A command copied on Windows must survive both cmd.exe and PowerShell (LEADS-OPEN).
+    words = [person["by"]] + ([args.commits] if args.commits else list(args.paths or []))
+    quoted = [A.copyable_word(word) for word in words]
+    base = None
+    if all(word is not None for word in quoted):
+        scope = (["--commits", quoted[1]] if args.commits else ["--paths"] + quoted[1:] if args.paths else [])
+        base = " ".join(["ao person-review", "--by", quoted[0]] + scope)
     print(f"\n{C['b']}what a reviewer would be handed{C['reset']}  {evidence['diff_digest']}")
     if evidence.get("diff_escaped"):
         # Shown as a reviewer is handed it, and read the same way (LEADS-REVIEW).
@@ -3154,8 +3157,12 @@ def _show_person_review(person, diff, evidence, boundary, args, criteria=()):
             print(f"    {criterion['id']}. {A.review_header_value(criterion['text'])}")
     print(f"  {C['dim']}nothing was recorded; judge the diff above against the boundary, then record the verdict on "
           f"exactly these bytes, judged against this slice{' and its criteria' if criteria else ''}:{C['reset']}")
-    print(f"  {base} --verdict APPROVED --digest {short}" + (" --findings <file>" if criteria else ""))
-    print(f"  {base} --verdict NEEDS_CHANGES --digest {short} --findings <file>")
+    if base is None:
+        print("  ao cannot safely quote the name or scope for a command to copy; enter the verdict command "
+              f"with your shell's literal quoting and this review digest: {short}")
+    else:
+        print(f"  {base} --verdict APPROVED --digest {short}" + (" --findings <file>" if criteria else ""))
+        print(f"  {base} --verdict NEEDS_CHANGES --digest {short} --findings <file>")
     print(f"  {C['dim']}a findings file holds one finding a line: - [BLOCKER|HIGH|MEDIUM|LOW] file:line - what "
           f"breaks; only BLOCKER and HIGH decide{C['reset']}")
 
@@ -3948,8 +3955,8 @@ def cmd_reviews(cfg, args):
     for state in reversed(states):
         ended = state.get("finished_at") or now
         shown, doing = _review_shown(state, now)
-        print(f"  {state['id']}  {shown:<11} {str(state.get('slice') or '—'):<18} "
-              f"{_elapsed(ended - state.get('submitted_at', ended)):>8}  {state.get('verdict') or doing}"
+        print(f"  {A.shown_text(state['id'])}  {A.shown_text(shown):<11} {A.shown_text(state.get('slice') or '—'):<18} "
+              f"{_elapsed(ended - state.get('submitted_at', ended)):>8}  {A.shown_text(state.get('verdict') or doing)}"
               f"{'  ' + T.label(state.get('tier')) if T.weaker(state.get('tier')) else ''}"
               f"{'  collected' if state.get('collected_at') else ''}")
     return 0

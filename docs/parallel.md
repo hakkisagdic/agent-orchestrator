@@ -51,6 +51,11 @@ lanes and each needs its own worktree.
 *In ao since slice LANE-START: `ao lane start`, `ao lane list` and `ao lane remove`, and the
 `lane.*` settings that prepare a lane ([configuration.md](configuration.md)).*
 
+*In ao since slice LEADS-OPEN: a lane record nested beyond the JSON parser's
+limit is listed as unreadable, just like malformed JSON, without hiding the
+other lanes or ending a removal's inventory. Inspect and repair that record
+before relying on its lane state.*
+
 ```bash
 ao lane start B3        # a READY board item gets a worktree of its own, on a branch of its own
 ao lane list            # each lane this checkout started: its state, its item's, what it holds

@@ -830,17 +830,17 @@ def cmd_notices(cfg, args):
         row = next((r for r in A.notices(root, 10**9, include_suppressed=True) if r.get("id") == wanted), None)
         if not row:
             missing = f"no notice {wanted}; `ao notices --all` lists them with their ids"
-            print(json.dumps({"notice": None, "error": missing}, ensure_ascii=False) if as_json else missing)
+            print(json.dumps({"notice": None, "error": missing}, ensure_ascii=False) if as_json else A.shown_text(missing))
             return 1
         if as_json:
             print(json.dumps({"notice": _notice_facts(row)}, ensure_ascii=False))
             return 0
         when = datetime.fromtimestamp(row["at"]).strftime("%d %b %H:%M")
-        print(f"{C['b']}{row['title']}{C['reset']}  {C['dim']}{wanted} · {when} · "
-              f"{'sent' if row.get('sent') else 'held'} · key {row.get('key')}{C['reset']}")
-        print(f"  {row.get('msg')}")
+        print(f"{C['b']}{A.shown_text(row['title'])}{C['reset']}  {C['dim']}{A.shown_text(wanted)} · {when} · "
+              f"{'sent' if row.get('sent') else 'held'} · key {A.shown_text(row.get('key'))}{C['reset']}")
+        print(f"  {_shown_lines(row.get('msg'))}")
         for line in A.evidence_lines(row.get("evidence")):
-            print(f"  {line}")
+            print(f"  {A.shown_text(line)}")
         return 0
     rows = A.notices(root, args.n, include_suppressed=args.all)
     if as_json:
@@ -854,8 +854,8 @@ def cmd_notices(cfg, args):
         when = datetime.fromtimestamp(r["at"]).strftime("%d %b %H:%M")
         tag = (f"{C['green']}sent{C['reset']}" if r.get("sent")
                else f"{C['dim']}held{C['reset']}")
-        print(f"  {C['dim']}{when}{C['reset']}  {tag}  {C['b']}{r['title']}{C['reset']}  {r['msg']}"
-              + (f"  {C['dim']}{r['id']}{' · evidence' if r.get('evidence') else ''}{C['reset']}"
+        print(f"  {C['dim']}{when}{C['reset']}  {tag}  {C['b']}{A.shown_text(r['title'])}{C['reset']}  {A.shown_text(r['msg'])}"
+              + (f"  {C['dim']}{A.shown_text(r['id'])}{' · evidence' if r.get('evidence') else ''}{C['reset']}"
                  if r.get("id") else ""))
     if not args.all:
         print(f"{C['dim']}  (--all also shows alerts the rate limit suppressed){C['reset']}")
