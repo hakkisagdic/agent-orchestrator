@@ -31,14 +31,15 @@ def usage_limits(api, timeout=20):
 
     Returns None when there is no usable token; the caller falls back rather than
     presenting an error as a balance. The token is used and never stored, logged
-    or returned. When the CLI cannot be found or run it returns {"error": ...}
-    naming the step, so a caller can report a broken check instead of a silent one.
+    or returned. A missing token store, a CLI that cannot run or a failed request
+    returns {"error": ...} naming the step without the exception's text, so a caller
+    can report a broken check without copying a credential (TRIAGE-3-MEDIUM).
     """
     from . import lib as A
     token = api.get("token") or {}
     db = A._home_path(token.get("sqlite"))
     if not db or not os.path.exists(db):
-        return None
+        return {"error": "the CLI's token store is missing; sign in to the CLI and retry the usage check"}
     # The store's path and the query are arguments, never shell text: through cmd.exe the
     # JSON-quoted path reached sqlite3 with every backslash doubled (#71). The sqlite3 is one
     # on PATH, never one the current directory holds (WINDOWS-NO-CWD-EXEC).
@@ -114,8 +115,8 @@ def usage_limits(api, timeout=20):
                              "the endpoint moved to belongs in the adapter's billing.api.endpoint, which ships with "
                              "ao - report it, and read the transcripts meanwhile with ao credits --offline"}
         return {"error": f"HTTP {e.code}"}
-    except Exception:
-        return None
+    except Exception as exc:
+        return {"error": f"the usage request failed ({type(exc).__name__}); check connectivity and retry"}
     # The answer is read as the store is: JSON that is no object, or a field of another shape, is said, not raised.
     if not isinstance(d, dict):
         return {"error": "the response is no JSON object"}

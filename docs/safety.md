@@ -365,6 +365,15 @@ included - so `Bash(rm agent-mail/*)` admits `rm agent-mail/x src/app.py`, and `
 rule in an architect's grant that writes outside ao's coordination files, and an architect grant
 composed before its adapter's current one (`architect-grant`).
 
+The grant check reads every word following a multi-value tool flag, so
+`--allowedTools Read "Bash(git commit:*)"` is checked just like the comma-separated
+form. This includes trailing values after an equals form, such as
+`--allowedTools=Read "Bash(git commit:*)"`, and every `--trust-tools` value.
+Reviewer and watchdog checks carry the expanded prompt separately, so its commas
+and tool names remain prompt text. Permission-bypass modes and the shipped adapter's own trust-all flag count as
+granting every tool, including Copilot's `--allow-all-tools`. Doctor names them, and a
+turn whose grant exceeds its role's shipped grant is refused (TRIAGE-3-MEDIUM).
+
 *In ao since slice ALLOWLIST-NORMALIZE: a rule is also read as the command it runs. Each program that
 runs the command after it - `env`, `xargs`, `timeout`, `nice`, `nohup`, `time`, `command`, `exec`,
 `stdbuf`, `caffeinate`, `sudo` - is taken off with its own options, as are a rewriter's wrappers

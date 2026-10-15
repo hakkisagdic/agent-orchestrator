@@ -103,6 +103,11 @@ ships without every flag of its adapter's `trust_none`, as the bug hunter's comm
 `claude-code` and `codex` pin their mode, and `pi -p`, `omp -p` or `hermes -z` with none of those
 flags edits and runs commands.
 
+Reviewer and hunter routes must name their program directly. A known command wrapper,
+such as `env`, `timeout` or `/usr/bin/env NAME=value`, is refused even after a person
+accepts the route: it hides which harness must pass the independence and read-only checks.
+Put the harness itself at the start of the command (TRIAGE-3-MEDIUM).
+
 A reviewer's verdict is read only where it stands at the start of a line. `kiro-cli`'s text output
 runs a turn's messages together where a tool call came between them, so a verdict written after a
 remark went on from the remark's last word, was not read, and the review was asked again and paid

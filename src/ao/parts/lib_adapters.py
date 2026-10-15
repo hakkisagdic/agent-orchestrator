@@ -1908,7 +1908,7 @@ def _same_program(path, other):
     return os.path.normcase(os.path.realpath(path)) == os.path.normcase(os.path.realpath(other))
 
 
-def turn_refusal(role, ident, argv, root=None, resolved=None, search=None, values=None):
+def turn_refusal(role, ident, argv, root=None, resolved=None, search=None, values=None, prompt=None):
     """Why the watchdog refuses to start a turn of `role` with `argv`, as a person reads it; None when it may
     (TURN-ARGV).
 
@@ -1945,7 +1945,7 @@ def turn_refusal(role, ident, argv, root=None, resolved=None, search=None, value
         return (f"{head} it runs {shown_text(program)}, which is not where ao finds {ident}'s program ({listed}) on "
                 "the path it searches")
     own = {(reason, command) for reason, command, _ in AL.problems(role_commands(shipped).get(role) or [], {}, role)}
-    for reason, command, rule in AL.problems(list(argv), {}, role):
+    for reason, command, rule in AL.problems(list(argv), {}, role, prompt=prompt):
         if (reason, command) not in own:
             return (f"{head} its grant admits `{command}` ({reason}) through {shown_text(rule)}, which {ident}'s own "
                     f"{role} command does not")
@@ -1980,8 +1980,12 @@ def route_refusal(kind, ident, argv, root=None, resolved=None, values=None):
     names it. Whether it can write is allowlist.reviewer_problems' and reading_problems' to say, where it starts. No
     person's record lets a refused route start: its configuration must change.
     """
+    from . import allowlist as AL
     head = f"ao refuses the {kind}'s command:"
     program = str(argv[0]) if argv else ""
+    # A wrapper hid both the reviewer's engine and its tool permissions (TRIAGE-3-MEDIUM).
+    if _program_name(program) in AL.WRAPPERS:
+        return f"{head} a wrapper hides its harness; name the harness program directly"
     if not program:
         return f"{head} it names no program"
     named = str(ident or "").strip()

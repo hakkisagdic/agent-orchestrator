@@ -27,6 +27,11 @@ reads the binding from there alone, and the review compares the candidate, scope
 with it before it records anything. A request an older ao left in the tree is named and never read: run
 `ao review` again and carry the request it writes.*
 
+Collection records the slice and boundary the request named, even if another slice is now
+running or the original slice has disappeared from the board. The request kept outside the
+tree remains the source for a carried answer's attribution. Submitted reviews still require
+their original slice to remain on the board (TRIAGE-3-MEDIUM).
+
 When the architect or the reviewer cannot be reached — out of quota, asleep, away for a weekend —
 the work does not have to stop. The person opens a second session with **a different model**,
 points it at the same checkout, and it takes that role for as long as it is needed. The two agents

@@ -90,6 +90,12 @@ or at once when no architect will act on it, in place of a "needs you" about the
 decision. Rebuilt in a temporary project, one decision nobody answered rang the desktop and
 the phone every hour, 23 times in a day, and was mailed under two keys.
 
+Each anomaly keyed by an individual decision, review or report has its own throttle.
+Grouped implementer mailbox reports still share one throttle. A decision's
+`anomaly:decision-requested:<id>` record suppresses only that decision, so a second
+decision gets a report the architect's wake path can see even after the first was
+handed over (TRIAGE-3-MEDIUM).
+
 A decision request nobody has been shown rings as it crosses each of its thresholds (#30):
 the architect is told at `mail.unseen_yellow_minutes`, the desktop and the phone at
 `mail.unseen_orange_minutes`, and at `mail.unseen_red_minutes` it turns red, rings them again

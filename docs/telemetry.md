@@ -97,6 +97,12 @@ Only that adapter's samples give the implementer its burn rate, its exhaustion p
 the credits finding, page and line of `ao doctor`. A sample that names no adapter is nobody's,
 and so is every sample written before samples named one.
 
+A declared usage lookup that returns no reading is a broken check. A missing token store
+or a failed request names the step to repair, without copying credentials or exception
+messages into the record. The watchdog records the attempt, waits half an hour before
+retrying, and doctor reports `credits-check` while that implementer is being driven
+(TRIAGE-3-MEDIUM).
+
 ## In US dollars: an estimate
 
 `ao cost` counts spend in the unit the implementer's harness bills - credits, or tokens - and a
@@ -283,3 +289,12 @@ the candidate staged now, and one git tracks never moves. The rest leave once ol
 `ao prune` says how many it kept and why; if any of those references cannot be read,
 nothing moves. `ao doctor` names a review a grant rests on that git does not hold -
 evidence on one disk is one disk failure from gone - so commit those.
+
+Pruning validates the grant, verification, waiver and decision chains and includes
+references in their sealed segments; missing archived rows stop the prune too.
+Verification, waiver and decision ledgers retain support for a legacy unchained prefix.
+A missing, truncated or corrupt ledger whose recorded length shows it held rows, or an
+unreadable staged candidate, stops the prune. The review directory must stay inside the project with no linked component;
+linked entries are skipped, and the directory and entries are checked again before
+moving a file. Repair an unreadable reference or directory before retrying
+(TRIAGE-3-MEDIUM).

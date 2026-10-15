@@ -780,7 +780,7 @@ def architect_command(root, cfg, prompt):
         return None, "held", held
     values = {"session": sess, "prompt": arch.get("prompt")}
     refused = A.turn_refusal("architect", A.block_adapter(arch), argv, root=root, search=search, values=values,
-                             resolved=argv[0] if os.path.isabs(argv[0]) else None)
+                             resolved=argv[0] if os.path.isabs(argv[0]) else None, prompt=prompt)
     if refused:
         return None, "refused", refused
     return {"argv": argv, "session": sess, "plan": plan, "pinned": pinned, "values": values,
@@ -908,6 +908,9 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
     asked = {decision.get("id"): decision for decision in A.decisions(root, "open")}
     for a in found:
         key = f"anomaly:{a['kind']}"
+        # A handed decision must not suppress the next decision's report (TRIAGE-3-MEDIUM).
+        if a.get("key") and a["key"] != "implementer":
+            key += ":" + str(a["key"])
         # An open decision reaches a person under its own alarm, `decision-open:<id>`, which names its
         # question and rings whatever the architect does (#20); it is not told as "needs you" as well.
         decision = asked.get(a.get("key")) if a["kind"] == "decision-requested" else None
@@ -915,9 +918,8 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
         window = 600 if a["kind"] == "decision-requested" else 3600
         if a["kind"] == "report-waiting" and not open_work(cfg, root):
             continue                     # nothing is stuck; it can wait for a human
-        # The first anomaly of a kind is the one its alarm speaks for: any after it shares its key and
-        # is held by the row the first one wrote. A decision speaks under its own alarm, so a request
-        # behind it is the one the anomaly's alarm names (NOISE-REPEATS).
+        # Grouped implementer reports share an alarm; individual decisions and reviews each
+        # speak under their own key, so an earlier instance cannot hold the next (TRIAGE-3-MEDIUM).
         standing.setdefault(alarm, a)
         # Suppression is read-only and therefore part of explain's decision path.
         # A dry-run must not claim it would write a report that a live cycle would
@@ -1186,7 +1188,7 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
         # The command a wake starts runs the harness of an adapter the package ships, with no grant beyond the one ao
         # composes from it, before anything is spent on it (TURN-ARGV).
         refused = A.turn_refusal("architect", A.block_adapter(arch), argv, root=root, resolved=resolved,
-                                 search=search, values=dict(command["values"], session=sess)) if resolved else None
+                                 search=search, values=dict(command["values"], session=sess), prompt=prompt) if resolved else None
         if refused:
             print(f"{refused}; not waking the architect")
             tell_turn_refused(root, "architect", refused)
@@ -2232,7 +2234,7 @@ def _sample_credits(root, st, adapter_id, project, now=None):
     except Exception as exc:
         acct = {"error": f"the usage check raised {type(exc).__name__}"}
     if acct is None:
-        return
+        acct = {"error": "the declared usage lookup returned no reading; check the CLI's login and retry"}
     st["last_credit_attempt"] = now
     if not acct.get("limit"):
         reason = acct.get("error") or ("the CLI's token has expired" if acct.get("expired")
@@ -3091,7 +3093,7 @@ def _cycle_impl(args, root):
                 return 0
             # As in escalate(): the shipped adapter's harness, and no grant beyond its own (TURN-ARGV).
             refused = A.turn_refusal("architect", A.block_adapter(arch), argv, root=root, resolved=resolved,
-                                     search=search, values=values)
+                                     search=search, values=values, prompt=prompt)
             if refused:
                 print(f"queue low ({depth}); {refused}; not waking the architect to refill")
                 tell_turn_refused(root, "architect", refused)
@@ -3352,7 +3354,7 @@ def _cycle_impl(args, root):
     # and no grant beyond its own, before anything is spent on it (TURN-ARGV).
     refused = A.turn_refusal("implementer", impl.get("adapter"), [named] + argv[1:], root=root, resolved=resolved,
                              search=search, values={"session": sess, "model": impl.get("model"),
-                                                    "effort": impl.get("effort")})
+                                                    "effort": impl.get("effort")}, prompt=prompt)
     if refused:
         print(f"idle {int(age)}s · {', '.join(reasons)} · {refused}; not nudging")
         tell_turn_refused(root, "implementer", refused)

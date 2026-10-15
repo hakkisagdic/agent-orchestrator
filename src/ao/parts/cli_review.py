@@ -1537,7 +1537,7 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, can
         # pins, or is granted every tool, is refused here as the hunter and an ACP command are, not only
         # named by `ao doctor` (REVIEWER-REACH).
         from . import allowlist
-        reach = allowlist.reviewer_problems(argv)
+        reach = allowlist.reviewer_problems(argv, prompt=prompt)
         # So is one that runs a harness ao ships without every flag its adapter declares leaves it only reading,
         # as the hunter's is: a pin is what a setting must not widen, and only claude-code and codex pin their mode,
         # so a qwen, qoder, pi, omp, hermes, kilo, reasonix or kiro route without them could write (REVIEWER-REACH-2).
@@ -2758,8 +2758,11 @@ def _review_decision(cfg, route, sessions=None, author=None):
     from . import tiers as T
     if not isinstance(route, dict):
         return None, "route", "it is not a reviewer route"
+    from . import allowlist as AL
     sessions = _implementer_sessions(cfg) if sessions is None else sessions
     argv = route.get("argv") or []
+    if argv and A._program_name(str(argv[0])) in AL.WRAPPERS:
+        return None, "wrapper", A.route_refusal("reviewer", route.get("adapter"), argv)
     declared, why = A.declared_family(route)
     reviewer = {"identity": _reviewer_is_implementer(route, sessions), "tool": _tool_route(route),
                 "family": _stated_family(route), "declared": declared, "model": _route_model(route),
@@ -3658,12 +3661,17 @@ def cmd_review_submit(cfg, args):
             print(f"{C['red']}could not pin the candidate{C['reset']}: "
                   f"{pinned.stderr.decode(UTF8, 'replace').strip()}")
             return 2
+        # Keep the boundary's contents as well as its label before the board moves (TRIAGE-3-MEDIUM).
+        boundary = getattr(args, "boundary", None)
+        source = None if boundary else A.read_boundary(root, running)
+        boundary = boundary or (source or {}).get("label") or A.slice_boundary(running)
+        boundary = boundary or "not declared — say so as a finding"
         submitted = int(time.time())
         # Written before the runner is started, so its own first write is never overwritten by this one, and before
         # the lock is let go, so the next submit counts it.
         state = {"id": rid, "state": "running", "tree": candidate["index_tree"], "head": candidate["head"],
                  "candidate": candidate["digest"], "changed_paths": candidate["changed_paths"],
-                 "boundary": getattr(args, "boundary", None), "paths": getattr(args, "paths", None),
+                 "boundary": boundary, "boundary_source": source, "paths": getattr(args, "paths", None),
                  "slice": slice_id, "worktree": root, "index": index, "submitted_at": submitted,
                  "phase": {"what": "starting", "on": "its runner has not reported yet", "since": submitted}}
         _write_review_state(root, state)
@@ -3749,7 +3757,8 @@ def cmd_review_run(cfg, rid):
             _review_finished_event(root, state)
             return 2
         A.review_row_count(root)                # read first, so no review is spent where it could not be recorded
-        asked = SimpleNamespace(boundary=state.get("boundary"), paths=state.get("paths"), commits=None, pinned=True)
+        asked = SimpleNamespace(boundary=state.get("boundary"), paths=state.get("paths"), commits=None, pinned=True,
+                                pinned_slice=state.get("slice"), pinned_boundary_source=state.get("boundary_source"))
         code = cmd_review(cfg, asked)
         # Its own review, as cmd_review hands it back: the newest row of the candidate after a count taken before it
         # could be a review of the same candidate run beside it (LEADS-REVIEW).
@@ -4160,6 +4169,14 @@ def cmd_review(cfg, args):
             return 2
 
     running = A.running_slice(root)
+    # A submitted review belongs to the slice that asked, including no slice (TRIAGE-3-MEDIUM).
+    if hasattr(args, "pinned_slice"):
+        pinned_slice = args.pinned_slice
+        running = next((item for items in A.board(root).values() for item in items
+                        if item.get("id") == pinned_slice), None) if pinned_slice else None
+        if pinned_slice and running is None:
+            print(f"{C['red']}stale review{C['reset']}: slice {pinned_slice} is gone; request a new review")
+            return 2
     waived = getattr(args, "range_slice", None)
     if waived:
         # Set only by catchup: a waived range is the waived slice's work, whatever runs now. Its
@@ -4175,7 +4192,8 @@ def cmd_review(cfg, args):
         running = next((item for items in A.board(root).values() for item in items if item.get("id") == owner),
                        {"id": owner, "title": "", "notes": {}}) if owner else None
     # A boundary file is read at the commit its row names; a later change travels as a diff (#73).
-    source = None if args.boundary else A.read_boundary(root, running)
+    source = (args.pinned_boundary_source if hasattr(args, "pinned_boundary_source")
+              else None if args.boundary else A.read_boundary(root, running))
     boundary = args.boundary or (source or {}).get("label") or A.slice_boundary(running)
     boundary = boundary or "not declared — say so as a finding"
     # Candidate/HEAD identity is deliberately insufficient here: two slices can

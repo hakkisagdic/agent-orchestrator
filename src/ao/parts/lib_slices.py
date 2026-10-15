@@ -274,13 +274,19 @@ def worktree_facts(root, cfg, sizes=False):
         slice_state = next((state for state, item in owners
                             if (item["notes"].get("worktree") and os.path.realpath(item["notes"]["worktree"]) == real)
                             or (branch and item["notes"].get("branch") == branch)), None)
-        merged = bool(branch and target and branch != target and subprocess.run(
-            [git_binary(), "merge-base", "--is-ancestor", tree["head"], target], cwd=root,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0)
+        targets = [target, "origin/" + target] if target else []
+        merged_into = next((ref for ref in targets if branch and branch != target and subprocess.run(
+            [git_binary(), "merge-base", "--is-ancestor", tree["head"], ref], cwd=root,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0), None)
+        merged = merged_into is not None
         exists = os.path.isdir(path)
-        dirty = product_dirty(path, cfg) if exists else []
-        flying = reviews_in_flight(path) if exists else []
         keep = []
+        try:
+            dirty = product_dirty(path, cfg, strict=True) if exists else []
+        except RuntimeError:
+            dirty = []
+            keep.append("status unreadable; inspect the worktree and retry pruning")
+        flying = reviews_in_flight(path) if exists else []
         if index == 0:
             keep.append("the main checkout")
         if real == here:
@@ -291,7 +297,7 @@ def worktree_facts(root, cfg, sizes=False):
             keep.append(f"review in flight: {', '.join(flying)}")
         if os.path.normcase(real) in lanes:
             keep.append(lanes[os.path.normcase(real)])
-        why = "merged into " + target if merged else "its slice was rejected" if slice_state == "rejected" \
+        why = "merged into " + merged_into if merged else "its slice was rejected" if slice_state == "rejected" \
             else "its directory is gone" if not exists or tree["prunable"] else None
         may_go = bool(why) and not keep
         # Sizes are for what may go: walking every dependency tree on disk is not free.
@@ -305,8 +311,8 @@ class WorktreeCleanupRefused(RuntimeError):
     """Unsafe administration refuses cleanup; an ordinary Git failure remains distinct (PRUNE-LINKS)."""
 
 
-def _git_worktree_cleanup(root, *args):
-    """Git follows linked worktree administration while deleting; refuse it before every cleanup (PRUNE-LINKS)."""
+def _check_worktree_cleanup(root):
+    """Refuse linked or unreadable worktree administration before cleanup (PRUNE-LINKS)."""
     import stat
     try:
         common = _git_output(root, "rev-parse", "--git-common-dir").decode(UTF8, "surrogateescape").strip()
@@ -341,10 +347,15 @@ def _git_worktree_cleanup(root, *args):
     except OSError as exc:
         raise WorktreeCleanupRefused(f"cannot read {path}: {exc}; restore access or remove the unreadable entry; "
                                     "ao prunes no worktree while it cannot be read") from exc
+
+
+def _git_worktree_cleanup(root, *args):
+    """Git follows linked worktree administration while deleting; refuse it before every cleanup (PRUNE-LINKS)."""
+    _check_worktree_cleanup(root)
     return _git_output(root, "worktree", *args)
 
 
-def prune_worktree(root, fact, apply=False, now=None):
+def prune_worktree(root, fact, apply=False, now=None, lane=None):
     """Retire one worktree that may go: archive its coordination state and branch tip, then remove both (#42).
 
     The `.ao/` state and review artefacts go to ~/.ao/archive/<project>/, and the
@@ -352,6 +363,20 @@ def prune_worktree(root, fact, apply=False, now=None):
     worktree held can still be read after it is gone.
     """
     import shutil
+
+    def changes():
+        # A lane's prepared files stay exempt at both rechecks (TRIAGE-3-MEDIUM).
+        return lane_changes(fact["path"], lane) if lane is not None else \
+            product_dirty(fact["path"], load_config(root), strict=True)
+
+    # Refuse unsafe administration before a status failure can mask it (PRUNE-LINKS).
+    if apply:
+        _check_worktree_cleanup(root)
+
+    # Facts shown earlier are no permission to discard changes made since (TRIAGE-3-MEDIUM).
+    if apply and os.path.isdir(fact["path"]):
+        if changes():
+            raise RuntimeError("uncommitted product changes appeared; keep the worktree and commit or save them first")
     stamp = datetime.fromtimestamp(time.time() if now is None else now).strftime("%Y%m%d-%H%M%S")
     name = os.path.basename(os.path.normpath(fact["path"]))
     archive = os.path.join(HOME, ".ao", "archive", project_key(root), f"worktree-{name}-{stamp}")
@@ -368,6 +393,8 @@ def prune_worktree(root, fact, apply=False, now=None):
             _git_output(root, "update-ref", f"refs/ao/archive/{fact['branch']}-{stamp}", fact["head"])
     steps.append(f"remove the worktree {fact['path']}")
     if apply and os.path.isdir(fact["path"]):
+        if changes():
+            raise RuntimeError("uncommitted product changes appeared while archiving; keep the worktree and save them")
         _git_worktree_cleanup(root, "remove", "--force", fact["path"])
     # Before the branch: git will not delete a branch a worktree it lists holds, and a worktree whose
     # directory someone deleted stays listed until a prune, so its branch could never go (LANE-START).

@@ -818,7 +818,7 @@ def remove_lane(root, item, now=None):
     branch = LANE_BRANCH + name
     head = git_text(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")
     steps += prune_worktree(root, {"path": path, "branch": branch if head else None, "head": head},
-                            apply=True, now=now)
+                            apply=True, now=now, lane=lane)
     _forget_lane(root, name)
     try:
         os.rmdir(home)          # only once it is empty: ao made it for its lanes, and the last one is gone

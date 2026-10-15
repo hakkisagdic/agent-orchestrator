@@ -113,7 +113,10 @@ links and the file ao put there, or a review in flight, and names them. Otherwis
 ao's links first, so nothing can reach through one into the main checkout, and retires the rest
 as `ao worktrees prune` does: the lane's `.ao/` state archived, its branch tip kept at
 `refs/ao/archive/lane/<lane>-<stamp>`, its worktree and its branch removed. A lane whose
-directory someone deleted is retired all the same. `ao remove` refuses while a lane stands:
+directory someone deleted is retired all the same. Both status rechecks during removal
+use the lane's prepared-file rules, even if Git's ignore entries have disappeared;
+new uncommitted user files still stop removal. A lane's unmerged commits are preserved
+by the archived branch tip (TRIAGE-3-MEDIUM). `ao remove` refuses while a lane stands:
 the lane's record is in `.ao/`, and without it no ao command could retire the lane.
 
 Not built yet: a lane's role, read lanes, and one panel for every lane. Today a review runs in
@@ -249,6 +252,11 @@ or prove, but an ordinary Git cleanup error after this check is reported on one
 line and leaves the verdict unchanged; cleanup remains best-effort. An add that
 made no worktree triggers no Git cleanup. Prove's final line says whether its
 throwaway worktree is gone, remains at the named path, or was never made (PRUNE-LINKS).
+
+A merge into either the local default branch or its `origin/` tracking branch is enough
+for retirement. An unreadable Git status keeps the worktree and says why; removal reads
+status again before retiring it and refuses newly uncommitted product changes. Inspect
+the worktree and save those changes before retrying (TRIAGE-3-MEDIUM).
 
 ## What not to parallelise
 

@@ -1,3 +1,4 @@
+"""Watchdog effects and per-decision suppression stay observable (TRIAGE-3-MEDIUM)."""
 import os
 from types import SimpleNamespace
 
@@ -277,11 +278,11 @@ def test_dry_cycle_escalation_has_no_alarm_or_channel_side_effects(
     monkeypatch.setattr(A, "record_notice", unexpected)
     monkeypatch.setattr(
         A, "notice_recently_sent",
-        lambda target, key, window: key == "anomaly:decision-requested",
+        lambda target, key, window: key == "anomaly:decision-requested:D-1",
     )
     monkeypatch.setattr(
         A, "notice_recently_recorded",
-        lambda target, key, window: key == "anomaly:decision-requested",
+        lambda target, key, window: key == "anomaly:decision-requested:D-1",
     )
     monkeypatch.setattr(A, "architect_present", lambda target, architect=None: False)
     monkeypatch.setattr(A, "agent_pids", lambda target, adapter, **kw: [])

@@ -170,7 +170,7 @@ GRANT_ALL = ("--dangerously-skip-permissions", "--trust-all-tools", "--yolo", "-
 
 # The tool a `--trust-tools` list trusts every command through: Kiro trusts tools by name, and its shell
 # tool runs whatever command it is given (kiro.dev/docs/reference/built-in-tools, read 2026-09-30).
-SHELL_TOOLS = ("shell", "execute_bash", "execute_cmd", "*")
+SHELL_TOOLS = ("bash", "shell", "execute_bash", "execute_cmd", "*")
 
 
 def admits(rule, command):
@@ -246,32 +246,32 @@ def interpreter_rule(rule):
     return _program_name(words[0])
 
 
-def rules(argv):
-    """The permission rules an argv grants through --allowedTools, in order."""
+def _permission_values(argv, flags, prompt=None):
+    """Read both variadic grant forms without treating ao's prompt as a tool (TRIAGE-3-MEDIUM)."""
     out = []
     for i, arg in enumerate(argv):
-        arg = str(arg)
-        if arg in ("--allowedTools", "--allowed-tools") and i + 1 < len(argv):
-            out.extend(part.strip() for part in str(argv[i + 1]).split(",") if part.strip())
-        elif arg.startswith(("--allowedTools=", "--allowed-tools=")):
-            out.extend(part.strip() for part in arg.split("=", 1)[1].split(",") if part.strip())
+        flag, equals, value = str(arg).partition("=")
+        if flag not in flags:
+            continue
+        values = [value] if equals else []
+        after = i + 1
+        while after < len(argv) and not str(argv[after]).startswith("-"):
+            values.append(str(argv[after]))
+            after += 1
+        for value in values:
+            if value != prompt and not re.fullmatch(r"\{[a-z_]+\}", value):
+                out.extend(part.strip() for part in value.split(",") if part.strip())
     return out
 
 
-def trusted_tools(argv):
-    """The tools an argv trusts by name through --trust-tools, in order (GRANTS-AUDIT-2).
+def rules(argv, prompt=None):
+    """Every word of a multi-value tool grant, excluding ao's prompt (TRIAGE-3-MEDIUM)."""
+    return _permission_values(argv, ("--allowedTools", "--allowed-tools"), prompt)
 
-    It scopes a grant as an allowlist does, and names no command: the audit read no rule from it,
-    so a grant that trusted the shell tool was reported as admitting nothing.
-    """
-    out = []
-    for i, arg in enumerate(argv):
-        arg = str(arg)
-        if arg == "--trust-tools" and i + 1 < len(argv):
-            out.extend(part.strip() for part in str(argv[i + 1]).split(",") if part.strip())
-        elif arg.startswith("--trust-tools="):
-            out.extend(part.strip() for part in arg.split("=", 1)[1].split(",") if part.strip())
-    return out
+
+def trusted_tools(argv, prompt=None):
+    """Tools trusted by name, including every variadic value (TRIAGE-3-MEDIUM)."""
+    return _permission_values(argv, ("--trust-tools",), prompt)
 
 
 def grants_everything(argv, options=None):
@@ -284,7 +284,10 @@ def grants_everything(argv, options=None):
     """
     from . import lib as A
     args = [str(arg) for arg in argv]
-    if any(arg in GRANT_ALL for arg in args):
+    adapter = A.command_adapter(args)
+    trust = ((adapter or {}).get("options") or {}).get("trust_all") or []
+    if (any(arg in GRANT_ALL for arg in args) or A.bypass_arguments(args)
+            or (trust and any(args[i:i + len(trust)] == trust for i in range(len(args))))):
         return True
     if A.carries_scope(args):
         return False
@@ -294,7 +297,7 @@ def grants_everything(argv, options=None):
     return "trust_all" in options
 
 
-def problems(argv, options=None, role=None):
+def problems(argv, options=None, role=None, prompt=None):
     """(reason, command, rule) for everything this grant admits that it must not.
 
     A grant of every tool is one finding with command and rule '*'. The rules are the
@@ -306,10 +309,10 @@ def problems(argv, options=None, role=None):
     if grants_everything(argv, options):
         return [("grants every tool", "*", "*")]
     appended = A.unattended_flags({"options": options or {}}, argv)[0]
-    shell = next((tool for tool in trusted_tools(list(argv) + appended) if tool.lower() in SHELL_TOOLS), None)
+    shell = next((tool for tool in trusted_tools(list(argv) + appended, prompt=prompt) if tool.lower() in SHELL_TOOLS), None)
     if shell:
         return [("trusts the shell tool, which runs every command", "*", f"--trust-tools {shell}")]
-    granted = rules(A.admit_rewrites(list(argv))[0] + appended)
+    granted = rules(A.admit_rewrites(list(argv))[0] + appended, prompt=prompt)
     forbidden = FORBIDDEN + (IMPLEMENTER_FORBIDDEN if role == "implementer" else ()) \
         + (ARCHITECT_FORBIDDEN if role == "architect" else ())
     found = []
@@ -471,7 +474,7 @@ REVIEWER_TOOL_KINDS = ("read", "search")
 WRITING_TOOL_KINDS = ("edit", "delete", "move", "execute")
 
 
-def reviewer_problems(argv):
+def reviewer_problems(argv, prompt=None):
     """What a reviewer's argv can reach beyond reading, as short phrases (#24).
 
     On 2026-09-07 a reviewer run as `claude -p … --allowedTools ""` started four MCP
@@ -486,7 +489,7 @@ def reviewer_problems(argv):
     found = []
     if any(arg in GRANT_ALL for arg in args):
         found.append("it is granted every tool")
-    extra = sorted({rule.split("(", 1)[0] for rule in rules(args)} - set(REVIEWER_TOOLS))
+    extra = sorted({rule.split("(", 1)[0] for rule in rules(args, prompt=prompt)} - set(REVIEWER_TOOLS))
     if extra:
         found.append("its allowed tools go beyond reading: " + ", ".join(extra))
     # Which harness starts MCP servers unless told not to, and with which flags, is its

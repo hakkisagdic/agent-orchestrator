@@ -31,6 +31,11 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- Individual decisions receive their own report throttle, so an earlier decision cannot suppress the next ([alarms](docs/alarms.md)) (TRIAGE-3-MEDIUM).
+- Missing credit readings become recorded broken checks with retry throttling and doctor visibility ([telemetry](docs/telemetry.md)) (TRIAGE-3-MEDIUM).
+- Worktree retirement requires readable status, rechecks product changes before removal and recognizes remote default-branch merges ([parallel work](docs/parallel.md)) (TRIAGE-3-MEDIUM).
+- Review pruning preserves live and sealed references and refuses linked directories, missing references and unreadable candidates ([telemetry](docs/telemetry.md)) (TRIAGE-3-MEDIUM).
+- Deferred reviews retain their original slice and boundary, including boundary-file contents, and refuse a removed slice ([pipeline](docs/pipeline.md), [stand-in sessions](docs/standin.md)) (TRIAGE-3-MEDIUM).
 - Init preserves a configuration appearing at its first write, replacements retain POSIX modes despite umask, shared rule links receive one pointer through their target, hold notes precede release, concurrent harness records survive, imports retain items without usable IDs, and board, status, fleet and adapter validation report their formerly missed cases correctly ([getting started](docs/getting-started.md), [safety](docs/safety.md), [sources](docs/sources.md), [adapters](docs/adapters.md)) (LEADS-ADAPTERS).
 - Reviewer mail stays outside the implementer inbox, and broken board IDs cannot satisfy dependencies ([roles](docs/roles.md), [slices](docs/slices.md)) (TRIAGE-3-LOW)
 - Wake, refill and nudge launches stop when added flags cannot be recorded, and same-second report rewrites become pending again ([watchdog](docs/watchdog.md)) (TRIAGE-3-LOW)
@@ -67,6 +72,8 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Security
 
+- Reviewer and hunter routes refuse known command wrappers that hide the harness being checked ([adapters](docs/adapters.md)) (TRIAGE-3-MEDIUM).
+- Grant checks recognize every word of multi-value tool lists, permission-bypass modes and shipped trust-all flags ([safety](docs/safety.md)) (TRIAGE-3-MEDIUM).
 - Harness digests distinguish special files and follow every declared directory view; `ao init` and `ao skill install` use held folders, opt-in records and locks stay in the held tree, known MCP formats are merged directly while unsafe vendor writes are refused, and source imports cannot inject board lines ([safety](docs/safety.md), [getting started](docs/getting-started.md), [sources](docs/sources.md)) (LEADS-ADAPTERS).
 - ao refuses a `.git` directory, gitfile or symlink that redirects a subdirectory project's commit check to another repository, names the redirect and its repair, and records enrollment in neither repository on that refusal; permitted enrollment writes use the hook's repository, where a redirected check could previously let an unchecked outer commit land or mark the planted repository enrolled ([safety](docs/safety.md#3-commit-authority-is-separated)) (NESTED-GIT).
 - Plan baselines reject malformed records, chain new admissions with committed-length checkpoints, and require recorded re-admissions for replacements ([ledger](docs/ledger.md)) (TRIAGE-2-MEDIUM).

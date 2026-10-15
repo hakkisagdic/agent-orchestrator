@@ -648,17 +648,18 @@ def implementer_inbox(root, cfg):
     return [m for m in mailbox(root, box) if addressed_to(m, cfg, "implementer")]
 
 
-def product_dirty(root, cfg):
+def product_dirty(root, cfg, strict=False):
     """Uncommitted paths outside the coordination directories."""
     out = []
     # Not sh(): it strips its output, and the first line's leading status column
     # went with it - " M .ao/ledger/notices.jsonl" became "M .ao/...", the path
     # lost its first character, and a coordination file read as a product change.
-    # A failure still reads as no uncommitted paths, as it did through sh(); no
-    # caller decides authority from this.
+    # Retirement needs a successful status read; advisory callers keep their fallback (TRIAGE-3-MEDIUM).
     try:
         status = _git_output(root, "status", "--porcelain").decode(UTF8, "replace")
     except Exception:
+        if strict:
+            raise RuntimeError("status unreadable; inspect the worktree and retry pruning")
         status = ""
     for line in status.split("\n"):
         if not line.strip():

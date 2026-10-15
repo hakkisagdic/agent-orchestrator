@@ -95,6 +95,12 @@ ao review collect R-1788…             # a specific one
 ao review cancel R-1788…              # stop it, and the reviewer it started
 ```
 
+A submitted review keeps the slice that submitted it and the boundary read then. Without
+an explicit boundary, this includes the boundary file's contents and metadata, not just its
+name. Moving the board to another running slice does not change the review's attribution or
+question. If the original slice is no longer on the board, the runner refuses the stale
+review; submit a new review under the intended slice (TRIAGE-3-MEDIUM).
+
 At submit time ao records, in `.ao/reviews/R-<id>.json`:
 
 | field | why |

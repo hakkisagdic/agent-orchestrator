@@ -1856,12 +1856,30 @@ def unverified_merges(root, cfg):
     return out
 
 
+def _review_artefact_directory(root, reviews_dir):
+    """Pruning follows no directory link and never leaves the project (TRIAGE-3-MEDIUM)."""
+    base = os.path.abspath(root)
+    directory = os.path.abspath(os.path.join(base, reviews_dir))
+    if not _within(directory, base) or directory == base:
+        raise RuntimeError("review directory leaves the project; configure a directory inside it before pruning")
+    part = directory
+    while part != base:
+        if os.path.islink(part):
+            raise RuntimeError("review directory contains a link; replace it with a directory before pruning")
+        parent = os.path.dirname(part)
+        if parent == part:
+            raise RuntimeError("review directory leaves the project; correct it before pruning")
+        part = parent
+    return directory
+
+
 def review_artefact_names(root, reviews_dir):
-    """The review artefacts on disk: the files in the reviews directory, dotfiles aside."""
-    directory = os.path.join(root, reviews_dir)
+    """The regular review files on disk, excluding links (TRIAGE-3-MEDIUM)."""
+    import stat
+    directory = _review_artefact_directory(root, reviews_dir)
     try:
         return sorted(name for name in os.listdir(directory)
-                      if not name.startswith(".") and os.path.isfile(os.path.join(directory, name)))
+                      if not name.startswith(".") and stat.S_ISREG(os.lstat(os.path.join(directory, name)).st_mode))
     except FileNotFoundError:
         return []
 
@@ -1882,7 +1900,7 @@ def review_artefact_references(root, cfg):
     every review, not a reason to keep one. Whatever cannot be read raises, so
     nothing is pruned on a guess.
     """
-    from .storage import read_chained_jsonl
+    from .storage import _load_seal, read_chained_jsonl, sealed_rows
     names = review_artefact_names(root, cfg["reviews"])
     kept = {}
 
@@ -1892,7 +1910,18 @@ def review_artefact_references(root, cfg):
             reasons.append(why)
 
     texts = []
+    chains = {"grant": AUTHORITY_CHAIN, "verification": VERIFICATION_CHAIN,
+              "waiver": WAIVER_CHAIN, "decision": DECISION_CHAIN}
     for why, parts in REVIEW_REFERENCE_FILES:
+        if why in chains:
+            path = os.path.join(root, *parts)
+            rows = read_chained_jsonl(path, chains[why], legacy_prefix=why != "grant")
+            archived = sealed_rows(path)
+            # A missing archive reads as empty; its seal still names how many rows it held (TRIAGE-3-MEDIUM).
+            if len(archived) != (_load_seal(path) or {}).get("retired", 0):
+                raise RuntimeError("sealed review references are missing; restore the ledger archives before pruning")
+            texts.append((why, json.dumps(list(rows) + archived, ensure_ascii=False)))
+            continue
         try:
             with open(os.path.join(root, *parts), encoding=UTF8, errors="replace") as fh:
                 texts.append((why, fh.read()))
@@ -1909,10 +1938,7 @@ def review_artefact_references(root, cfg):
                 keep(name, why)
     open_slices = {item["id"] for state, items in board(root).items() if state not in ("done", "rejected")
                    for item in items}
-    try:
-        staged = index_candidate(root)["digest"]
-    except RuntimeError:
-        staged = None
+    staged = index_candidate(root)["digest"]
     for row in read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN):
         name = row.get("artefact") if isinstance(row, dict) else None
         if name not in names:
@@ -1937,6 +1963,7 @@ def prune_review_artefacts(root, cfg, days, apply=False, now=None):
     were recent, what was moved (or would be), its bytes and where it went.
     """
     import shutil
+    import stat
     from .storage import read_chained_jsonl
     now = time.time() if now is None else now
     kept = review_artefact_references(root, cfg)
@@ -1961,6 +1988,10 @@ def prune_review_artefacts(root, cfg, days, apply=False, now=None):
     if apply and moving:
         os.makedirs(archive, exist_ok=True)
         for name in moving:
+            # Recheck after reading the references, before each move (TRIAGE-3-MEDIUM).
+            directory = _review_artefact_directory(root, cfg["reviews"])
+            if not stat.S_ISREG(os.lstat(os.path.join(directory, name)).st_mode):
+                raise RuntimeError("review artefacts changed during pruning; inspect them and retry")
             shutil.move(os.path.join(directory, name), os.path.join(archive, name))
             record_archived(root, name, archive)     # where it went stays on the record (#47)
     return {"kept": kept, "recent": recent, "moved": moving, "bytes": size, "archive": archive}

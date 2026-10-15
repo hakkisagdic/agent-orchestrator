@@ -168,7 +168,7 @@ def test_a_refused_value_rings_the_human_instead_of_holding_the_anomaly(
     W.escalate(project["root"], project, {}, 0, SimpleNamespace(idle_minutes=6.0, dry_run=False), {})
 
     assert not marker.exists()
-    anomaly = [(msg, kw) for msg, kw in sent if kw.get("key") == "anomaly:decision-requested"]
+    anomaly = [(msg, kw) for msg, kw in sent if kw.get("key") == "anomaly:decision-requested:D-1"]
     assert len(anomaly) == 1 and anomaly[0][1]["audience"] == "human", sent
     assert f"its {field} `--x` would be read as a flag" in anomaly[0][0]
 
