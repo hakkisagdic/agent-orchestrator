@@ -960,9 +960,11 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
                    quiet_until=st.get("arch_quota_until") if hold["code"] == "quota-block" else None)
         print(f"anomaly {a['kind']}: {'reported as ' + name if name else 'already reported'}")
         woke = True
-    if told is not None and standing:
+    if not args.dry_run and told is not None and standing:
         # An anomaly no architect will act on reaches a person as "needs you", and stands for the
         # requests it groups whether or not its window let it ring this cycle (CATCHUP-POLISH).
+        # A dry cycle delivered no alarm: checking its coverage prepared and probed a wake before
+        # building the implementer's nudge (ARCH-PROBE-ORDER-2).
         hold = hold or architect_hold_reason(root, cfg, adapter, st, found)
         if not hold["holdable"]:
             told.update(name for anomaly in standing.values() for name in anomaly.get("reports") or [])

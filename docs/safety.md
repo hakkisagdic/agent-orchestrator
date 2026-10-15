@@ -490,6 +490,11 @@ a program. No candidate comes from inside the tree. A refused command leaves not
 the doctor's architect line says `not asked` with the reason; a person corrects the named value or command
 before another wake can start.*
 
+A dry cycle reports anomalies without delivering their alarms, so it does not prepare or probe an
+architect wake merely to count which requests those alarms cover. It still builds the implementer's
+nudge in the project's language. A dry refill still prepares and checks the architect's command without
+probing its program (ARCH-PROBE-ORDER-2).
+
 The watchdog composed the implementer's nudge from its adapter as every layer loads it - the project's
 `.ao/adapters/` among them - and started the architect's wake and refill with the argv its block in
 `.ao/config.json` names. Both are files an agent can write, so a change to either could start a command the

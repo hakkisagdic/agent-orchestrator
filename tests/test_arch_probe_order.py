@@ -3,6 +3,8 @@
 Resolving a program runs it. The notice holder and doctor skipped the wake's command checks, then checked without
 its session and prompt values. The first tests hid the refusal behind a config present only in memory. These tests
 accept the configuration actually on disk, exercise each boundary separately, and observe both probes and alarms.
+Dry escalation also accounted for alarms it never delivered, preparing a wake prompt and probing the architect
+before building the implementer's nudge. Only live alarm bookkeeping needs that check (ARCH-PROBE-ORDER-2).
 """
 import os
 from pathlib import Path
@@ -10,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, watchdog as W
+from ao import cli, language, lib as A, watchdog as W
 from tests import standin
 from tests.test_turn_argv import _seen, _store
 
@@ -169,3 +171,31 @@ def test_a_refused_value_rings_the_human_instead_of_holding_the_anomaly(
     anomaly = [(msg, kw) for msg, kw in sent if kw.get("key") == "anomaly:decision-requested"]
     assert len(anomaly) == 1 and anomaly[0][1]["audience"] == "human", sent
     assert f"its {field} `--x` would be read as a flag" in anomaly[0][0]
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+@pytest.mark.parametrize("recent", [False, True])
+@pytest.mark.parametrize("session", ["test-session", "--x"])
+def test_only_live_anomaly_alarm_bookkeeping_prepares_and_probes_the_architect(
+        project, tmp_path, monkeypatch, available, dry_run, recent, session):
+    program, marker = _program(tmp_path / "bin", tmp_path)
+    monkeypatch.setattr(W, "child_path", lambda: str(tmp_path / "bin"))
+    _configured(project, argv=[program, "--resume", "{session}", "-p", "{prompt}"], session=session)
+    handed, plan = [], A.prompt_plan
+    monkeypatch.setattr(A, "prompt_plan", lambda template, text, *args, **kwargs:
+                        handed.append(text) or plan(template, text, *args, **kwargs))
+    sent = []
+    monkeypatch.setattr(W, "notify", lambda title, msg, root=None, **kw: sent.append(kw["audience"]))
+    monkeypatch.setattr(A, "anomalies", lambda *args, **kwargs: [
+        {"kind": "decision-requested", "facts": {"decision": "D-1"}, "key": "D-1", "reports": ["request.md"]}])
+    monkeypatch.setattr(A, "notice_recently_recorded", lambda *args, **kwargs: recent)
+    monkeypatch.setattr(A, "write_report", lambda *args, **kwargs: "report.md")
+    monkeypatch.setattr(A, "mailbox", lambda *args, **kwargs: [])
+    told = set()
+
+    W.escalate(project["root"], project, {}, 0, SimpleNamespace(idle_minutes=6.0, dry_run=dry_run), {}, told=told)
+
+    assert handed == ([] if dry_run else [language.text(project, "prompt.wake")])
+    assert marker.exists() == (not dry_run and session == "test-session")
+    assert told == ({"request.md"} if not dry_run and session == "--x" else set())
+    assert sent == ([] if dry_run or recent else ["human" if session == "--x" else "architect"])
