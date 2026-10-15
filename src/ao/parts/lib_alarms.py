@@ -306,7 +306,8 @@ def project_key(root):
     project takes its basename - the name its files already had, so an existing
     install keeps them - unless a path that is still an ao project holds that
     name, compared without case because launchd labels are lower-cased; then it
-    takes the basename and eight hex digits of its resolved path. The name is
+    takes the basename and at least eight hex digits of its resolved path,
+    lengthened until no live project holds it (TRIAGE-2-MEDIUM). The name is
     also written to `.ao/project-key` with the path, so a lost registry gives
     each project its own name back and a copied `.ao/` does not claim another's.
     A directory with no `.ao/` is not an ao project: it gets its basename and
@@ -342,7 +343,13 @@ def project_key(root):
                 elif base.lower() not in held:
                     mine = base
                 else:
-                    mine = f"{base}-{hashlib.sha256(real.encode('utf-8')).hexdigest()[:8]}"
+                    digest = hashlib.sha256(real.encode(UTF8)).hexdigest()
+                    mine = next((f"{base}-{digest[:length]}" for length in (8, 12, 16, 64)
+                                 if f"{base}-{digest[:length]}".lower() not in held), None)
+                    suffix = 2
+                    while mine is None or mine.lower() in held:
+                        mine = f"{base}-{digest}-{suffix}"
+                        suffix += 1
                 known = {name: row for name, row in known.items() if name.lower() != mine.lower()}
                 known[mine] = {"root": real, "at": int(time.time())}
                 replace_file_durably(registry, json.dumps(known, indent=1, sort_keys=True).encode("utf-8"))
@@ -362,6 +369,8 @@ def project_key_collisions():
     """Registered projects that share a directory name, and the name each is kept under."""
     groups = {}
     for name, row in sorted(project_registry().items()):
+        if not os.path.isdir(os.path.join(row["root"], ".ao")):
+            continue
         base = os.path.basename(str(row["root"]).rstrip("/\\")).lower()
         groups.setdefault(base, []).append((name, row["root"]))
     return {base: rows for base, rows in groups.items() if len(rows) > 1}

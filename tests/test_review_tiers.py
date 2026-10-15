@@ -10,6 +10,8 @@ reviewer with no implementer, compared the reviewer with nobody while `ao doctor
 Three tiers now, decided by one rule: another model family, the default; another model of
 the implementer's family, only where a person opted in on the record, labeled "same family:
 weaker independence" wherever it shows; and a person's own review of the bytes shown to them.
+The stats fixture lands its reviewed candidate with grant trailers: permission alone is no
+outcome, and withdrawing an opt-in is checked on a still-staged candidate (TRIAGE-2-MEDIUM).
 """
 import json
 import os
@@ -271,12 +273,28 @@ def test_another_model_of_the_implementers_family_reviews_once_a_person_opted_in
     assert re.search(rf"{rid}\s+finished.*APPROVED\s+{T.SAME_FAMILY_LABEL}", _plain(capsys))        # ao reviews
     code, out = _commit_ok(cfg, monkeypatch, capsys, review=rid)
     assert code == 0 and f"tier {T.SAME_FAMILY_LABEL}" in out                                       # ao commit-ok
-    assert cli.cmd_stats(cfg, SimpleNamespace(all=False, since=None, until=None, slices=True)) == 0
+    # The tier belongs in landed stats only after the granted candidate lands (TRIAGE-2-MEDIUM).
+    stats_args = SimpleNamespace(all=False, since=None, until=None, slices=True)
+    assert cli.cmd_stats(cfg, stats_args) == 1
+    assert "no landed slice with a recorded grant" in _plain(capsys)
+    grant = A.latest_authority_decision(root)
+    message = A.with_trailers("land the same-family slice", A.grant_trailers(grant))
+    subprocess.run([A.git_binary(), "-c", "core.hooksPath=", "commit", "-q", "-m", message],
+                   cwd=root, check=True, capture_output=True)
+    assert cli.cmd_stats(cfg, stats_args) == 0
     stats = _plain(capsys)                                                                          # ao stats
     assert f"1 slice(s) on {T.SAME_FAMILY_LABEL}" in stats
     assert re.search(rf"S1\s+APPROVED\s+{T.SAME_FAMILY_LABEL}", stats)
 
-    # Withdrawn on the record, the opt-in leaves the review granting nothing.
+
+def test_withdrawing_same_family_opt_in_refuses_the_still_staged_review(project, monkeypatch, capsys):
+    root = project["root"]
+    _repo_with_change(root)
+    cfg = _same_family(project)
+    assert cli.cmd_review(cfg, _args()) == 0
+    assert _commit_ok(cfg, monkeypatch, capsys)[0] == 0
+
+    # Keep the candidate staged: a landed review cannot prove withdrawal refused it (TRIAGE-2-MEDIUM).
     withdraw = SimpleNamespace(action="set", key="review.same_family", value="refused", machine=False, by=PERSON)
     assert cli.cmd_config(_write(root, cfg), withdraw) == 0
     assert A.recorded_opt_in(root, "review.same_family")["value"] == "refused"

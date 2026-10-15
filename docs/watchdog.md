@@ -82,7 +82,10 @@ Order matters: each guard sees only what the ones above left standing.
 | any turn | its command | the command a wake, refill or nudge would start, against the adapter the package ships - its program, its grant, the values filled into it - and against the command last accepted for its role, asked before its program is looked for; the reviewer's routes and `hunter.argv` against the ones accepted | refused: start none and tell a person once (`turn-refused:<role>`); changed: start none until a person sees it, as harness configuration |
 
 Anomalies (`anomalies()`) are computed before the chain and delivered as facts:
-one file per condition, grouped per kind with a count.
+one file per condition, grouped per kind with a count. Handling a report lets that
+condition be reported again with a new mail ID. Its envelope keeps the anomaly's
+identity, so a delivery suffix such as `-2.md` does not produce another report on
+every cycle while it remains unprocessed (TRIAGE-2-MEDIUM).
 
 *In ao since slice HARNESS-CONFIG: a cycle names to a person each change to what a harness reads from
 the tree that nobody has seen, under one alarm, `harness-config`, that rings once for what the changes
@@ -129,7 +132,14 @@ from the agent being one agent.
   the agent to wait on blockers that belong to people.
 - **A person's blocker reaches a person.** A blocked item marked `waiting: human` is
   delivered to the human channel directly on the next cycle and never held for an agent
-  whose reachability was only assumed.
+  whose reachability was only assumed. This runs even when there is no implementer
+  configured or its transcript is missing.
+
+An idle-answer decision compares work and inputs captured before the child starts.
+Product edits and board changes during its startup wait therefore count as work.
+The work fingerprint includes each dirty file's nanosecond modification time and size,
+and the same measurements for review, decision and agent-ledger files, so edits within
+one second still reset backoff.
 
 ## A slice parked on quota
 

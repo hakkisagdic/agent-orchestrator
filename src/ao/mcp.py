@@ -387,7 +387,7 @@ def call(name, args, cfg, allow_verify, role=None):
         evidence = A.verification_evidence(root)
         if evidence:
             text += f"**Verification:** {evidence}\n"
-        A.write_mail(root, cfg, name_, text, {"kind": kind, "from": impl, "to": arch,
+        name_ = A.write_mail(root, cfg, name_, text, {"kind": kind, "from": impl, "to": arch,
                                               "slice": args.get("slice")})
         delivered = 0
         if kind == "blocked":

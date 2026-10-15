@@ -607,24 +607,25 @@ def _ao_trailers(trailers):
 
 
 def landed_commits(root, revisions):
-    """[{sha, tree, parents, trailers}] of the commits `revisions` names, parents first (COMMIT-TRAILER).
+    """[{sha, tree, parents, trailers, at}] of the commits `revisions` names, parents first (COMMIT-TRAILER).
 
     Git reads the trailers itself, through `%(trailers)`: the last paragraph of the message, never its
     subject, continuations unfolded, one (key, value) a trailer. `revisions` reaches git as one
     argument. RuntimeError when git cannot list them.
     """
     raw = _git_output(root, "log", "--no-show-signature", "--topo-order", "--reverse", "-z",
-                      "--format=%H%n%T%n%P%n%(trailers:only,unfold)", revisions, "--", timeout=300)
+                      "--format=%H%n%T%n%P%n%ct%n%(trailers:only,unfold)", revisions, "--", timeout=300)
     commits = []
     for record in raw.decode(UTF8, "replace").split("\0"):
         lines = record.lstrip("\n").split("\n")
         if not lines[0]:
             continue
-        if len(lines) < 3 or not _OBJECT_ID.fullmatch(lines[0]) or not _OBJECT_ID.fullmatch(lines[1]):
+        if len(lines) < 4 or not lines[3].isdigit() or not _OBJECT_ID.fullmatch(lines[0]) or not _OBJECT_ID.fullmatch(lines[1]):
             raise RuntimeError(f"git listed a commit ao cannot read: {lines[0][:40]!r}")
         trailers = [(key.strip(), value.strip()) for key, colon, value in
-                    (line.partition(":") for line in lines[3:]) if colon and key.strip()]
-        commits.append({"sha": lines[0], "tree": lines[1], "parents": lines[2].split(), "trailers": trailers})
+                    (line.partition(":") for line in lines[4:]) if colon and key.strip()]
+        commits.append({"sha": lines[0], "tree": lines[1], "parents": lines[2].split(), "trailers": trailers,
+                        "at": int(lines[3])})
     return commits
 
 
@@ -1101,10 +1102,11 @@ def write_report(root, cfg, kind, facts, key=None):
                 break
         _, arch = mail_names(cfg)
         name = f"watchdog-to-{arch}-ANOMALY-{kind}{src}.md"
-        path = os.path.join(box, name)
-        # one standing anomaly of a kind, whichever name the architect's mail had when it was written (#72)
-        if any(os.path.exists(os.path.join(box, f"watchdog-to-{other}-ANOMALY-{kind}{src}.md"))
-               for other in architect_mail_names(cfg)):
+        # A handled delivery keeps its ID; the next gets a suffix. Match the anomaly's
+        # original name, not that delivery's ID, without conflating numbered keys (TRIAGE-2-MEDIUM).
+        identities = {f"watchdog-to-{other}-ANOMALY-{kind}{src}.md" for other in architect_mail_names(cfg)}
+        if any(mail_meta(os.path.join(box, pending)).get("anomaly", pending) in identities
+               for pending in os.listdir(box) if pending.endswith(".md")):
             return None
         text = (f"# ANOMALY — {kind}\n\n"
                 f"Watchdog observation at {time.strftime('%Y-%m-%d %H:%M:%S')}. "
@@ -1114,7 +1116,7 @@ def write_report(root, cfg, kind, facts, key=None):
                 + "\n## Asked of the architect\n\n"
                 "Decide whether this needs intervention, and what. If it is normal, "
                 "delete this message; if not, act and record what you did.\n")
-        return write_mail(root, cfg, name, text, {"kind": "anomaly", "from": "watchdog", "to": arch})
+        return write_mail(root, cfg, name, text, {"kind": "anomaly", "from": "watchdog", "to": arch, "anomaly": name})
     except OSError:
         return None
 
@@ -1831,9 +1833,9 @@ def proposal_evidence(root):
     from .storage import read_chained_jsonl
     try:
         read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN)
+        landed = sorted((o for o in slice_outcomes(root) if o.get("landed_at")), key=lambda o: o["landed_at"])
     except Exception as exc:
         return {"slices": [], "stats": outcome_stats([]), "unread": f"{type(exc).__name__}: {exc}"[:200]}
-    landed = sorted((o for o in slice_outcomes(root) if o.get("landed_at")), key=lambda o: o["landed_at"])
     recent = landed[-PROPOSAL_EVIDENCE_SLICES:]
     return {"slices": [o["slice"] for o in recent], "stats": outcome_stats(recent)}
 

@@ -16,6 +16,12 @@ State lives per project in `.ao/` (config, board, ledgers); the machine's regist
 `~/.ao/projects.json` only maps project names to paths. Nothing is shared between projects,
 so a runaway lane in one cannot touch another.
 
+A project keeps its directory name unless another live project holds it, compared without
+case. Then its key adds 8 hex digits of its resolved path's hash, lengthened to 12, 16 or
+64 if those names are held too, with a numbered suffix if even the full hash is occupied.
+No live project's registry row is replaced. Collision reports omit roots whose `.ao/`
+directory is gone.
+
 This axis is cheap. The only shared resource is your machine.
 
 *In ao since slice JSON-OUTPUT: `ao fleet --json` prints the rows as one JSON document and nothing

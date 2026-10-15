@@ -460,27 +460,27 @@ def slice_outcomes(root, project=None):
     """
     from .storage import read_chained_jsonl
     project = project or project_key(root)
-    try:
-        reviews = [row for row in read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN) if isinstance(row, dict)]
-        grants = [row for row in authority_rows(root) if isinstance(row, dict) and row.get("granted") is True]
-    except Exception:
-        return []
-    try:
-        verifications = [row for row in read_chained_jsonl(os.path.join(root, ".ao", "ledger", "verifications.jsonl"),
-                                                           VERIFICATION_CHAIN, legacy_prefix=True)
-                         if isinstance(row, dict)]
-    except Exception:
-        verifications = []
-    try:
-        waivers = {row.get("id"): row for row in waiver_rows(root)
-                   if isinstance(row, dict) and row.get("event") == "waived"}
-    except Exception:
-        waivers = {}
+    reviews = [row for row in read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN) if isinstance(row, dict)]
+    grants = [row for row in authority_rows(root) if isinstance(row, dict) and row.get("granted") is True]
+    # Permission to commit was counted as a landing even when abandoned (TRIAGE-2-MEDIUM).
+    landed = {}
+    if grants:
+        for commit in landed_commits(root, "HEAD"):
+            tokens = _ao_trailers(commit["trailers"]).get("Ao-Grant", [])
+            if len(tokens) == 1:
+                landed.setdefault(tokens[0], commit["at"])
+    verifications = [row for row in read_chained_jsonl(os.path.join(root, ".ao", "ledger", "verifications.jsonl"),
+                                                       VERIFICATION_CHAIN, legacy_prefix=True)
+                     if isinstance(row, dict)]
+    waivers = {row.get("id"): row for row in waiver_rows(root)
+               if isinstance(row, dict) and row.get("event") == "waived"}
     by_artefact = {row.get("artefact"): row for row in reviews}
     items = {item["id"]: item for state_items in board(root).values() for item in state_items}
     fixed = {item["notes"]["fixes"].strip() for item in items.values() if item["notes"].get("fixes")}
     out = {}
     for grant in grants:
+        if grant.get("token") not in landed:
+            continue
         linked = by_artefact.get(grant.get("review")) or {}
         slice_id = linked.get("slice") or (waivers.get(grant.get("waiver")) or {}).get("slice")
         if not slice_id or slice_id in out:
@@ -493,14 +493,14 @@ def slice_outcomes(root, project=None):
                      if (row.get("candidate") or {}).get("digest") == candidate and row.get("candidate_size")), None)
         started = _since_epoch((items.get(slice_id) or {}).get("notes", {}).get("since", "")) \
             or (min(float(row.get("at") or 0) for row in mine) if mine else None)
-        landed = float(grant.get("at") or 0) or None
+        landed_at = landed[grant["token"]]
         retro = [row for row in mine if row.get("kind") == "commit-range" and row.get("verdict") == "NEEDS_CHANGES"]
         out[slice_id] = {
             "project": project, "slice": slice_id, "verdicts": [row.get("verdict") for row in prospective],
             "rounds": len(prospective), "first_pass": bool(prospective) and prospective[0].get("verdict") == "APPROVED",
             "waived": not prospective and bool(grant.get("waiver")),
-            "started_at": started, "landed_at": landed,
-            "hours": round((landed - started) / 3600, 2) if landed and started and landed >= started else None,
+            "started_at": started, "landed_at": landed_at,
+            "hours": round((landed_at - started) / 3600, 2) if started and landed_at >= started else None,
             "size": size, "defect_found": bool(retro) or slice_id in fixed,
             # The tier of the review the grant stood on, so weaker independence is counted (REVIEW-TIERS).
             "tier": linked.get("tier"),
@@ -514,7 +514,12 @@ def outcome_stats(outcomes):
         values = sorted(v for v in values if v is not None)
         if not values:
             return None
-        return {"median": values[len(values) // 2], "p90": values[min(len(values) - 1, int(len(values) * 0.9))],
+        from statistics import median
+        from math import ceil
+        middle = median(values)
+        if isinstance(middle, float) and middle.is_integer():
+            middle = int(middle)
+        return {"median": middle, "p90": values[ceil(len(values) * 0.9) - 1],
                 "n": len(values)}
     reviewed = [o for o in outcomes if not o["waived"]]
     return {

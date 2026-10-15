@@ -29,6 +29,19 @@ leaves one that exists alone. A gate passes on exit code zero, or with `"expect"
 printing nothing; `timeout` is in seconds, at most a week, and `gates.default_timeout` when a gate
 names none.
 
+Detection checks the root and its immediate child directories for Node, Python, .NET,
+Go, Rust, Maven, Gradle and Swift manifests. A child gets commands run in that directory
+and `inputs` scoped to it. Children with no detected gates need no shell quoting. If a
+child with gates cannot be quoted safely, init refuses before writing files: rename it
+or supply `.ao/gates.json` by hand. An existing gate file bypasses detection entirely.
+Coverage recognizes runners at command starts, including after shell separators and
+`npx` or `uv run`. These wrappers also count with flags or packages such as
+`npx --no-install tsc`, `npx eslint .` and `uv run --frozen pytest`; printing
+`pytest` with `echo` covers nothing.
+`ao doctor` reports `gates-unusable` for a missing, unreadable or malformed gate file,
+including malformed gates outside the selected profile and an absent or empty default
+profile, so other problems still reach its notification check. Fix the definitions before relying on the coverage report.
+
 A gate may declare the paths it reads as `inputs`, a list of globs (`"inputs": ["src/**", "tests/**"]`).
 An unstaged or untracked path refuses verification and commit authority only when it is part of
 the staged candidate or a gate reads it; when **every** gate declares inputs, a dirty path outside

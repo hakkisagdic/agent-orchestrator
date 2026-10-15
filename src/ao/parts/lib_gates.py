@@ -1286,7 +1286,28 @@ def _gate_covers(gate, tree, chain):
     import fnmatch
     run = str((gate or {}).get("run") or "")
     runners = TOOLCHAINS[chain]["runners"]
-    if not any(re.search(rf"(?:^|[\s/;&|(]){re.escape(runner)}(?:$|[\s.;&|)])", run) for runner in runners):
+    # A runner printed by echo is no check; quoted separators start no command (TRIAGE-2-MEDIUM).
+    import shlex
+    try:
+        lexer = shlex.shlex(run, posix=False, punctuation_chars=";&|()")
+        lexer.whitespace_split = True
+        words = list(lexer)
+    except ValueError:
+        return False
+    starts = [0] + [i + 1 for i, word in enumerate(words) if word in ("&&", ";", "|", "||", "(")]
+    commands = []
+    for start in starts:
+        command = words[start:]
+        # The wrapper is itself a runner, even with flags or an unfamiliar package (TRIAGE-2-MEDIUM).
+        if command:
+            commands.append(command[0].strip("\"'").replace("\\", "/").rsplit("/", 1)[-1])
+        if command[:2] == ["uv", "run"]:
+            command = command[2:]
+        elif command[:1] == ["npx"]:
+            command = command[1:]
+        if command:
+            commands.append(command[0].strip("\"'").replace("\\", "/").rsplit("/", 1)[-1])
+    if not any(command in runners for command in commands):
         return False
     inputs = (gate or {}).get("inputs")
     if not isinstance(inputs, list) or not inputs:
@@ -1298,7 +1319,8 @@ def _gate_covers(gate, tree, chain):
 def gate_coverage_gaps(root, spec, minimum, names=None):
     """(tree, toolchain, files) for every tree's toolchain that no gate - or none of `names` - exercises."""
     gates = (spec or {}).get("gates") or {}
-    chosen = [gate for name, gate in gates.items() if names is None or name in names]
+    chosen = [gate for name, gate in gates.items() if isinstance(gate, dict)
+              and (names is None or name in names)]
     gaps = []
     for tree, chains in sorted(source_trees(root, minimum).items()):
         for chain, files in sorted(chains.items()):

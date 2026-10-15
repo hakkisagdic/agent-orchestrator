@@ -1,5 +1,7 @@
+"""Outcomes count grants carried by commits, never abandoned permissions (TRIAGE-2-MEDIUM)."""
 import os
 import time
+import subprocess
 from types import SimpleNamespace
 
 from ao import cli, lib as A
@@ -28,6 +30,10 @@ def test_a_respecified_slice_keeps_its_history_and_the_outcome_is_read_from_the_
     A.record_authority(root, True, [], "sha256:t", "V-1", "C-1", review="r3.md",
                        candidate={"digest": "sha256:c1"}, scope={})
 
+    subprocess.run([A.git_binary(), "-c", "core.hooksPath=", "commit", "--allow-empty", "-m",
+                    "land\n\nAo-Grant: C-1"],
+                   cwd=root, check=True, capture_output=True)
+
     [outcome] = A.slice_outcomes(root)
 
     assert outcome["verdicts"] == ["NEEDS_CHANGES", "NEEDS_CHANGES", "APPROVED"] and outcome["rounds"] == 3
@@ -46,6 +52,10 @@ def test_a_waived_slice_counts_as_landed_without_rounds(project):
     waiver = A.waive(root, "review", "S2", "the reviewer is out of credits", "a person")
     A.record_authority(root, True, [], "sha256:t", "V-2", "C-2", candidate={"digest": "sha256:c2"}, scope={},
                        waiver=waiver["id"])
+
+    subprocess.run([A.git_binary(), "-c", "core.hooksPath=", "commit", "--allow-empty", "-m",
+                    "land\n\nAo-Grant: C-2"],
+                   cwd=root, check=True, capture_output=True)
 
     [outcome] = A.slice_outcomes(root)
 

@@ -2343,18 +2343,29 @@ def plan_digest(root, item_id):
     return "sha256:" + h.hexdigest()
 
 
-def plan_baseline(root):
-    """Plan hashes as they stood when each item was admitted."""
-    # A torn or malformed row fails closed instead of silently dropping the
-    # baselines around it, which switched the plan-drift refusal off (#68).
-    from .storage import read_jsonl
+PLAN_CHAIN = "ao-plan-row-v1"
+
+
+def _plan_baselines(rows):
+    """Reject a missing baseline and an unrecorded replacement (TRIAGE-2-MEDIUM)."""
+    from .storage import LedgerCorruption
     out = {}
-    for rec in read_jsonl(os.path.join(root, ".ao", "ledger", "plans.jsonl")):
-        if not isinstance(rec, dict):
-            continue
-        if rec.get("item") and rec.get("digest"):
-            out[rec["item"]] = rec["digest"]
+    for rec in rows:
+        if not isinstance(rec, dict) or not all(isinstance(rec.get(key), str) and rec[key]
+                                               for key in ("item", "digest")):
+            raise LedgerCorruption("plan baseline needs a nonempty item and digest; restore the ledger")
+        item = rec["item"]
+        if item in out and (rec.get("event") != "readmitted" or rec.get("replaces") != out[item]):
+            raise LedgerCorruption(f"plan baseline {item} was replaced without re-admission; restore the ledger")
+        out[item] = rec["digest"]
     return out
+
+
+def plan_baseline(root):
+    """Plan hashes at admission, chained from the legacy prefix (TRIAGE-2-MEDIUM)."""
+    from .storage import read_chained_jsonl
+    return _plan_baselines(read_chained_jsonl(os.path.join(root, ".ao", "ledger", "plans.jsonl"),
+                                             PLAN_CHAIN, legacy_prefix=True))
 
 
 def plan_drift(root):
@@ -2375,9 +2386,16 @@ def plan_drift(root):
 
 
 def record_plan(root, item_id, digest):
-    from .storage import append_jsonl
-    append_jsonl(os.path.join(root, ".ao", "ledger", "plans.jsonl"),
-                 {"item": item_id, "digest": digest, "at": int(time.time())})
+    from .storage import append_chained_jsonl
+
+    def admission(rows):
+        base = _plan_baselines(rows)
+        _plan_baselines([{"item": item_id, "digest": digest}])
+        return {"event": "readmitted", "replaces": base[item_id]} if item_id in base else {"event": "admitted"}
+
+    append_chained_jsonl(os.path.join(root, ".ao", "ledger", "plans.jsonl"),
+                         {"item": item_id, "digest": digest, "at": int(time.time())},
+                         PLAN_CHAIN, legacy_prefix=True, prepare=admission)
 
 
 def board_append(root, state, line):
@@ -3718,7 +3736,14 @@ def work_fingerprint(root, cfg=None):
     """
     cfg = cfg if cfg is not None else load_config(root)
     lines, churn = _product_changes(root, cfg)
-    parts = [_git_text(root, "rev-parse", "--short", "HEAD"), "\n".join(lines), str(churn)]
+    parts = [_git_text(root, "rev-parse", "--short", "HEAD"), "\n".join(lines)]
+    for line in lines:
+        name = line[3:].split(" -> ")[-1].strip().strip('"')
+        try:
+            stat = os.stat(os.path.join(root, name))
+            parts.append(f"{name}:{stat.st_mtime_ns}:{stat.st_size}")
+        except OSError:
+            pass
     # A review that did not take place is a file, not progress: an unavailable
     # reviewer written every turn reset the nudge backoff every turn (audit).
     not_reviews = set()
@@ -3733,14 +3758,15 @@ def work_fingerprint(root, cfg=None):
         if os.path.isdir(d):
             try:
                 parts.append("|".join(sorted(
-                    f"{f}:{int(os.path.getmtime(os.path.join(d, f)))}"
+                    f"{f}:{os.stat(os.path.join(d, f)).st_mtime_ns}:{os.path.getsize(os.path.join(d, f))}"
                     for f in os.listdir(d) if f not in not_reviews)))
             except OSError:
                 pass
     ledger = os.path.join(root, ".ao", "ledger")
     for name in AGENT_LEDGERS:
         try:
-            parts.append(f"{name}:{int(os.path.getmtime(os.path.join(ledger, name)))}")
+            stat = os.stat(os.path.join(ledger, name))
+            parts.append(f"{name}:{stat.st_mtime_ns}:{stat.st_size}")
         except OSError:
             pass
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]

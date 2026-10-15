@@ -8,6 +8,7 @@ landed and closes the waiver on it with no reviewer; a proof that no longer hold
 waiver open, and a range whose grant recorded no proof is reviewed as before - unless a
 person states that its slice only moved code, and then it too closes on the proof alone.
 A catch-up review is recorded as the waived slice's, not as the slice running at the time.
+Its outcome fixture carries the grant trailer that proves it landed (TRIAGE-2-MEDIUM).
 """
 import hashlib
 import json
@@ -77,12 +78,15 @@ def _grant(project, monkeypatch, capsys, slice_id, files, note="move-only"):
     return waiver, A.latest_authority_decision(root), capsys.readouterr().out
 
 
-def _land(project, monkeypatch, capsys, slice_id, files, note="move-only"):
+def _land(project, monkeypatch, capsys, slice_id, files, note="move-only", trailers=False):
     """What _grant does, then the commit: (waiver, grant, commit-ok's output, the range that landed)."""
     root = project["root"]
     waiver, grant, out = _grant(project, monkeypatch, capsys, slice_id, files, note)
     parent = _git(root, "rev-parse", "HEAD")
-    _git(root, "commit", "-q", "-m", f"{slice_id}: split")
+    message = f"{slice_id}: split"
+    if trailers:
+        message = A.with_trailers(message, A.grant_trailers(grant))
+    _git(root, "commit", "-q", "-m", message)
     _running(root)
     return waiver, grant, out, f"{parent}..{_git(root, 'rev-parse', 'HEAD')}"
 
@@ -359,7 +363,7 @@ def test_a_person_states_which_waived_slices_only_moved_code_and_each_closes_onl
 def test_a_catchup_review_is_recorded_as_the_waived_slices_whatever_runs_now(project, monkeypatch, capsys, tmp_path):
     _base(project, monkeypatch)
     root = project["root"]
-    waiver, _, _, landed = _land(project, monkeypatch, capsys, "B7", {"src/a.py": "value = 1\n"}, note=None)
+    waiver, _, _, landed = _land(project, monkeypatch, capsys, "B7", {"src/a.py": "value = 1\n"}, note=None, trailers=True)
     # Another slice runs during the sitting, and its board line asks for a lens of its own.
     _running(root, "[B9] the slice running now · lenses: +clock")
     findings = ("VERDICT: NEEDS_CHANGES", "BLOCKER: 1", "HIGH: 0", "MEDIUM: 0", "LOW: 0",

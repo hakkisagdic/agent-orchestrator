@@ -158,7 +158,7 @@ itself. Authority lives in `.ao/authority.md`, not in mail. `push` is never your
 """
 
 
-def _detect_gates(root):
+def _detect_gates(root, children=True):
     """Guess the project's gates from what is already there. A wrong guess costs a
     failed verify, which is visible; no guess costs an empty gate file nobody
     notices, which is not.
@@ -205,6 +205,38 @@ def _detect_gates(root):
         gates["cargo-check"] = {"run": "cargo check", "expect": "exit_zero", "timeout": 1200}
         gates["cargo-test"] = {"run": "cargo test", "expect": "exit_zero", "timeout": 2400, "serialise": True}
         quick.append("cargo-check")
+    for manifest, runner, check, test in (("pom.xml", "mvn", "compile", "test"),
+                                           ("build.gradle", "gradle", "classes", "test"),
+                                           ("Package.swift", "swift", "build", "test")):
+        if os.path.isfile(os.path.join(root, manifest)):
+            gates[f"{runner}-check"] = {"run": f"{runner} {check}", "expect": "exit_zero", "timeout": 1200}
+            gates[f"{runner}-test"] = {"run": f"{runner} {test}", "expect": "exit_zero", "timeout": 2400,
+                                      "serialise": True}
+            quick.append(f"{runner}-check")
+    for gate in gates.values():
+        gate["inputs"] = ["**"]
+    # A backend one level down was left out beside a root package.json (TRIAGE-2-MEDIUM).
+    if children:
+        for child in sorted(os.listdir(root)):
+            path = os.path.join(root, child)
+            if child.startswith(".") or child in ("node_modules", "vendor", "target", "venv") \
+                    or not os.path.isdir(path) or os.path.islink(path):
+                continue
+            found = _detect_gates(path, children=False)
+            # An unrelated directory needs no shell spelling (TRIAGE-2-MEDIUM).
+            if set(found["gates"]) == {"diff-check"}:
+                continue
+            quoted = A.copyable_word(child)
+            if quoted is None:
+                raise ValueError(f"cannot quote gate directory {child!r}; rename it or declare its gates by hand")
+            for name, gate in found["gates"].items():
+                if name == "diff-check":
+                    continue
+                scoped = f"{child}/{name}"
+                gates[scoped] = dict(gate, run=f"cd {quoted} && {gate['run']}",
+                                     inputs=[f"{child}/**"])
+                if name in found["profiles"]["quick"]:
+                    quick.append(scoped)
     gates["diff-check"] = {"run": "git diff --check", "expect": "exit_zero", "timeout": 60}
     quick.append("diff-check")
     return {"gates": gates,
@@ -437,8 +469,14 @@ def cmd_init(cfg, args):
         return 1
     # A quick profile that exercises none of the code gives every verify a green it did
     # not earn (#5). Checked while planning, before anything is written.
-    detected_gates = _detect_gates(root)
+    detected_gates = None
     if not os.path.lexists(os.path.join(root, ".ao", "gates.json")):
+        # Handwritten gates are also the recovery for an unquotable child (TRIAGE-2-MEDIUM).
+        try:
+            detected_gates = _detect_gates(root)
+        except ValueError as exc:
+            print(f"{C['red']}init refused{C['reset']}: {exc}")
+            return 1
         minimum = S.default("gates.coverage_min_files")
         trees = A.source_trees(root, minimum)
         quick = detected_gates["profiles"]["quick"]
@@ -556,7 +594,10 @@ def cmd_init(cfg, args):
     put(".ao/board.md", language.text(runtime_cfg, "init.board"))
     put(".ao/backlog.md", language.text(runtime_cfg, "init.backlog", name=name))
     put(".ao/authority.md", language.text(runtime_cfg, "init.authority"))
-    put(".ao/gates.json", json.dumps(detected_gates, indent=2) + "\n")
+    if detected_gates is not None:
+        put(".ao/gates.json", json.dumps(detected_gates, indent=2) + "\n")
+    else:
+        kept.append(".ao/gates.json")
     put(".ao/ledger/.gitkeep", "")
     put(".ao/decisions/.gitkeep", "")
     put("semantic-review/.gitkeep", "")
@@ -1259,7 +1300,7 @@ def cmd_hold(cfg, args):
             impl, arch = A.mail_names(cfg)
             name = f"{datetime.now():%Y%m%d-%H%M}-{arch}-to-{impl}-INFO-hold-released.md"
             # Through write_mail, as every mail ao writes; it was written past it (ROLE-TABLE-2).
-            A.write_mail(root, cfg, name, language.text(cfg, "hold.released", minutes=st.get("minutes", 0),
+            name = A.write_mail(root, cfg, name, language.text(cfg, "hold.released", minutes=st.get("minutes", 0),
                                                         reason=st.get("reason", ""), note=args.note),
                          {"kind": "info", "class": "fyi", "from": arch, "to": impl})
             print(f"handover note → {cfg['mailbox']}/{name}")

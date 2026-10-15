@@ -355,9 +355,26 @@ def doctor_problems(cfg):
     try:
         with open(os.path.join(root, ".ao", "gates.json"), encoding=UTF8) as fh:
             gate_spec = json.load(fh)
-    except (OSError, ValueError):
-        gate_spec = None
-    if gate_spec is not None:
+        names, gate_problem = _profile_gates(gate_spec, gate_spec.get("default_profile", "quick")
+                                             if isinstance(gate_spec, dict) else "quick", cfg)
+        # Verification refuses an absent or empty default even when other gates exist (TRIAGE-2-MEDIUM).
+        if not gate_problem and not names:
+            gate_problem = "the default profile selects no gates"
+        if not gate_problem:
+            for profile in gate_spec.get("profiles", {}):
+                _, gate_problem = _profile_gates(gate_spec, profile, cfg)
+                if gate_problem:
+                    break
+        if not gate_problem:
+            gate_problem = next((_gate_shape_problem(gate) for gate in gate_spec.get("gates", {}).values()
+                                 if _gate_shape_problem(gate)), None)
+        if not gate_problem and not gate_spec.get("gates"):
+            gate_problem = "no gates are declared"
+    except (OSError, ValueError) as exc:
+        gate_problem = str(exc)
+    if gate_problem:
+        out.append(("gates-unusable", f".ao/gates.json cannot be used: {gate_problem}; fix the gate definitions"))
+    else:
         for tree, chain, files in A.gate_coverage_gaps(root, gate_spec, S.get(cfg, "gates.coverage_min_files")):
             out.append((f"gate-uncovered:{tree}", f"{tree}/ holds {files} {chain} files that no gate in "
                                                   ".ao/gates.json exercises"))

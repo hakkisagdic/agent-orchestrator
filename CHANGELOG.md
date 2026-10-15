@@ -30,6 +30,11 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- Colliding mail filenames preserve both messages, role names produce safe filenames, and long decision requests retain their escalation class ([messaging](docs/messaging.md)) (TRIAGE-2-MEDIUM).
+- Human blockers reach a person without an implementer session, and work completed during nudge startup or within one second counts as progress ([watchdog](docs/watchdog.md)) (TRIAGE-2-MEDIUM).
+- Slice outcomes count commits carrying recorded grants, use commit timestamps, name unreadable evidence, and calculate median and p90 correctly ([slices](docs/slices.md)) (TRIAGE-2-MEDIUM).
+- Project keys preserve every live registry entry when hash suffixes collide, and collision reports omit retired projects ([parallel execution](docs/parallel.md)) (TRIAGE-2-MEDIUM).
+- Gate discovery includes immediate child toolchains and JVM/Swift projects, doctor names unusable gate definitions, and printing a runner no longer counts as coverage ([gates](docs/gates.md)) (TRIAGE-2-MEDIUM).
 - Reviewer documentation distinguishes closed state metadata from valid stdout or stderr answers retained after credential scanning ([roles](docs/roles.md)) (TRIAGE-1-LOW)
 - `ao doctor` names authority and verification ledgers past their live-row bound, and `ao prune` accurately describes plans as kept whole and never sealed ([ledger](docs/ledger.md)) (TRIAGE-1-LOW)
 - Machine role names no longer appear as unknown settings, while unknown keys in those groups are still named ([configuration](docs/configuration.md)) (TRIAGE-1-LOW)
@@ -56,6 +61,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Security
 
+- Plan baselines reject malformed records, chain new admissions with committed-length checkpoints, and require recorded re-admissions for replacements ([ledger](docs/ledger.md)) (TRIAGE-2-MEDIUM).
 - The grants audit names agent rules admitting `ao doctor --check --notify`, including broad doctor grants and reversed flag order ([alarms](docs/alarms.md)) (TRIAGE-1-LOW)
 - The implementer grants audit names exact-value and unset settings commands, including machine settings mutations ([configuration](docs/configuration.md)) (TRIAGE-1-LOW)
 - A borrowed Kiro agent whose `prompt` names a file outside the project loads none: the prompt is taken out and named, as an outside resource is ([upstream](docs/upstream.md), REVIEW-PATH-HIGHS).

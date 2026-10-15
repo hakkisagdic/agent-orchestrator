@@ -197,6 +197,12 @@ that asked for changes or a board item marked `fixes:` it. `--all` spans every r
 project; `--since` and `--until` cut the window a change is compared across, each a date such
 as `2026-09-10` or a span back from now such as `7d`.
 
+A grant counts only when a commit reachable from HEAD carries its `Ao-Grant` trailer;
+ready-to-landed time ends at that commit's committer timestamp. Abandoned grants are
+left out. An unreadable ledger is named with its project under `--all`, and proposal
+evidence names the failure too. The median averages the two middle values for an even
+sample; p90 uses nearest rank, so ten observations take the ninth value.
+
 ## Commands
 
 A slice is a row on `.ao/board.md` and moves between its sections as it is worked:

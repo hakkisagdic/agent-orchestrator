@@ -651,7 +651,7 @@ def cmd_mail(cfg, args):
         impl, arch = A.mail_names(cfg)
         name = f"{stamp}-{arch}-to-{impl}-{A.safe_slug(args.type.upper(), 'INFO')}-{topic}.md"
         body = args.body if args.body else sys.stdin.read()
-        A.write_mail(root, cfg, name, body.rstrip() + "\n",
+        name = A.write_mail(root, cfg, name, body.rstrip() + "\n",
                      {"kind": args.type.lower(), "from": arch, "to": impl,
                       "class": getattr(args, "mail_class", None)})
         print(name)

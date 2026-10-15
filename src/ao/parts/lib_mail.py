@@ -712,7 +712,7 @@ def mail_names(cfg):
     """(implementer, architect) mail names; defaults keep the historical files valid."""
     impl = (settings.get(cfg, "implementer.name") or implementer_actor_name(cfg)).strip()
     arch = settings.get(cfg, "architect.name").strip()
-    return impl, arch
+    return safe_slug(impl, "implementer"), safe_slug(arch, "architect")
 
 
 # The architect's name in mail was a model's, "fable", by default (#72). A project that never named its architect
@@ -854,7 +854,6 @@ def write_mail(root, cfg, name, body, meta=None):
     os.makedirs(box, exist_ok=True)
     meta = dict(meta or {})
     meta.setdefault("ao", 1)
-    meta.setdefault("id", name)
     meta.setdefault("at", time.strftime("%Y-%m-%dT%H:%M:%S%z"))
     # The address is the role; the name beside it is display (#31).
     meta.setdefault("from_role", role_of(meta.get("from"), cfg))
@@ -863,13 +862,38 @@ def write_mail(root, cfg, name, body, meta=None):
     keys = [k for k in order if k in meta] + [k for k in meta if k not in order]
     meta = scan_record(meta)
     body = scan_evidence(body)[0]                     # scanned before it is written (#48)
-    head = "---\n" + "".join(f"{k}: {meta[k]}\n" for k in keys if meta[k] not in (None, "")) + "---\n"
-    with open(os.path.join(box, name), "w", encoding=UTF8) as fh:
-        fh.write(head + body.lstrip("\n"))
-    summary = next((l.lstrip("# ").strip() for l in body.split("\n") if l.startswith("#")), "")
-    mail_ledger_append(root, {"event": "written", "id": name, "kind": meta.get("kind"),
-                              "from": meta.get("from"), "to": meta.get("to"),
-                              "slice": meta.get("slice"), "summary": summary[:200]})
+    # A handled message leaves its view but still owns its ID. Serialize allocation through
+    # recording so a concurrent writer cannot reuse an ID after the view vanishes (TRIAGE-2-MEDIUM).
+    from .storage import _exclusive_lock
+    with _exclusive_lock(os.path.join(root, ".ao", "mail", "write.lock")):
+        reserved = {row.get("id") for row in mail_log(root, limit=None) if isinstance(row, dict)}
+        reserved.update(row.get("id") for row in mail_store_rows(root))
+        store = os.path.join(root, ".ao", "mail", "store")
+        if os.path.isdir(store):
+            reserved.update(os.listdir(store))
+        stem, extension = os.path.splitext(name)
+        attempt = 1
+        while True:
+            if name in reserved:
+                attempt += 1
+                name = f"{stem}-{attempt}{extension}"
+                continue
+            try:
+                fh = open(os.path.join(box, name), "x", encoding=UTF8)
+                break
+            except FileExistsError:
+                attempt += 1
+                name = f"{stem}-{attempt}{extension}"
+        meta["id"] = name
+        if "id" not in keys:
+            keys.insert(1, "id")
+        head = "---\n" + "".join(f"{k}: {meta[k]}\n" for k in keys if meta[k] not in (None, "")) + "---\n"
+        with fh:
+            fh.write(head + body.lstrip("\n"))
+        summary = next((l.lstrip("# ").strip() for l in body.split("\n") if l.startswith("#")), "")
+        mail_ledger_append(root, {"event": "written", "id": name, "kind": meta.get("kind"),
+                                  "from": meta.get("from"), "to": meta.get("to"),
+                                  "slice": meta.get("slice"), "summary": summary[:200]})
     # Named, never quoted: the log is read by programs a message's body was not written for (EVENTS-LOG).
     emit_event(root, "mail-sent", {"message": name, "kind": meta.get("kind"), "from": meta.get("from"),
                                    "to": meta.get("to")})
@@ -970,7 +994,7 @@ def unseen_messages(root, cfg):
         # classed by its name and envelope, and aged by its file (UNREAD-AGE-2).
         try:
             with open(path, errors="replace", encoding=UTF8) as fh:
-                body = fh.read(4000)
+                body = fh.read(1_000_000)
         except OSError:
             body = ""
         try:
@@ -1455,7 +1479,7 @@ def mail_log(root, limit=200):
             rows.append(json.loads(line))
         except ValueError:
             pass
-    return rows[-limit:]
+    return rows if limit is None else rows[-limit:]
 
 
 def reconcile_mail_ledger(root, cfg):

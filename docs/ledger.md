@@ -107,6 +107,20 @@ append a correctly linked forged row, or cut a valid tail and rewrite the length
 match, because AO has no external trusted head or signing key. See the exact security boundary in
 [`safety.md`](safety.md).
 
+## Plan baselines
+
+`.ao/ledger/plans.jsonl` records each item's admitted plan digest. New rows are chained
+under `ao-plan-row-v1`, with the committed length recorded outside the tree as for authority.
+A complete row without a nonempty string `item` and `digest` is corruption: verification
+and commit authority refuse with "plan baselines cannot be read". Edited chained digests
+and deleted committed rows are refused too.
+
+Existing unchained rows are accepted only as a legacy prefix, as for waivers; the first
+new append links to its last row. That prefix was not authenticated retroactively.
+Re-admitting an item appends `event: readmitted` and `replaces` naming its previous digest.
+A duplicate item without that record cannot silently replace the baseline. Appends select
+the previous baseline under the ledger lock, so concurrent admissions remain ordered.
+
 ## Slices
 
 Not built yet: one line per lifecycle transition — see [`slices.md`](slices.md). A slice's

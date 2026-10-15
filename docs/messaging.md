@@ -71,6 +71,15 @@ Everything else is derived. Inbox: addressed to me, no `handled` by me. Unanswer
 `needs-decision` with no `handled`. Thread: follow `in_reply_to`. Nothing to keep in sync, because
 there is no second copy of the truth.
 
+Mail filenames use safe slugs for the implementer and architect names. Every write
+creates a new file exclusively: a repeated timestamp and topic, including two topics
+that sanitize to the same slug, get `-2`, `-3` and so on before the extension. The envelope,
+ledger, event and caller all name the file actually created; neither body is overwritten.
+IDs in the complete mail ledger, store records or stored bodies remain reserved after
+the view is acknowledged or removed. Allocation and recording share a writer lock, so
+a second delivery keeps its own unseen and unhandled state. An unreadable store ledger
+refuses a write rather than risk reusing an ID.
+
 ## Class decides the channel, and most classes are silent
 
 The failure this module must not repeat is not lost messages — it is **noise**. In one minute on
@@ -90,7 +99,9 @@ pages anyone (notification belongs to the scheduled watcher), and a resolution i
 than the raise. Escalation by age belongs to `needs-decision` alone.
 
 What exists today, before the store below: a message declares its class in its envelope
-(`ao mail send --class needs-decision`), or it is read from its kind and headings. When a
+(`ao mail send --class needs-decision`), or it is read from its kind and headings. Unseen-message classification reads up to
+1,000,000 characters of the body, so a decision heading after a long introduction still
+escalates; beyond that bound, declare the class explicitly in the envelope. When a
 reader's own command puts a message in front of it - `ao mail list` or `read`, `ao_inbox`,
 the urgent banner - `.ao/ledger/mail.jsonl` records `seen` once, apart from deletion, so
 "nobody has been shown this" is no longer the same as "someone is working on it". An

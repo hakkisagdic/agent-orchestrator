@@ -242,7 +242,7 @@ def poll(root, cfg_project, seconds=25):
         who = (m.get("from") or {}).get("username") or chat
         # Through write_mail, as every mail ao writes - its envelope, the credential scan, the mail ledger - where
         # a person's message was written past all three (ROLE-TABLE-2).
-        A.write_mail(root, dict(project, mailbox=box), name,
+        name = A.write_mail(root, dict(project, mailbox=box), name,
                      f"# {text.splitlines()[0][:120]}\n\n{language.marker(project, 'urgent')}\n\n{text}\n\n"
                      f"_Telegram, {who}, {time.strftime('%Y-%m-%d %H:%M')}_\n",
                      {"kind": language.marker(project, "urgent-kind"), "class": "urgent", "from": "human",

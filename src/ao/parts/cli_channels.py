@@ -518,8 +518,12 @@ def cmd_stats(cfg, args):
     until = A.parse_time(args.until).moment() if getattr(args, "until", None) else None
     outcomes = []
     for project, path in roots:
-        outcomes += [o for o in A.slice_outcomes(path, project)
-                     if (since is None or (o["landed_at"] or 0) >= since) and (until is None or (o["landed_at"] or 0) < until)]
+        try:
+            outcomes += [o for o in A.slice_outcomes(path, project)
+                         if (since is None or (o["landed_at"] or 0) >= since)
+                         and (until is None or (o["landed_at"] or 0) < until)]
+        except (OSError, ValueError, RuntimeError) as exc:
+            print(f"{project}: cannot read outcomes: {exc}; repair this project's evidence before comparing it")
     if not outcomes:
         print(f"{C['dim']}no landed slice with a recorded grant in this window{C['reset']}")
         return 1
@@ -782,7 +786,7 @@ def cmd_hunt(cfg, args):
                     ""]
             body += [f"- [{lead['category']}] {lead['path']}:{lead['line']} {lead['symbol']} — {lead['finding']}  "
                      f"(`{lead['fingerprint']}`)" for lead in fresh]
-            A.write_mail(root, cfg, name, "\n".join(body) + "\n", {"kind": "leads", "class": "needs-read",
+            name = A.write_mail(root, cfg, name, "\n".join(body) + "\n", {"kind": "leads", "class": "needs-read",
                                                                    "from": "hunter", "to": architect})
             for lead in fresh:
                 A.hunter_record(root, "sent", fingerprint=lead["fingerprint"], mail=name, path=lead["path"],
@@ -1163,11 +1167,11 @@ def cmd_handoff(cfg, args):
     # A name no mail had before: the minute and the roles were all of it, so a second handoff in the same minute was
     # written over the first, and a message store, which takes an id in once, never took the second (LEADS-SECRETS).
     name = A._unwritten_mail_name(root, cfg, f"{datetime.now():%Y%m%d-%H%M}-{A.mail_names(cfg)[1]}-to-anyone-{kind}")
-    path = os.path.join(root, cfg["mailbox"], name)
     # As every mail ao writes: an envelope with its roles, scanned for credentials, mirrored in the mail
     # ledger. The note was written past write_mail, and so were none of those (ROLE-TABLE-2).
-    A.write_mail(root, cfg, name, text + "\n",
+    name = A.write_mail(root, cfg, name, text + "\n",
                  {"kind": kind, "class": "needs-read", "from": A.mail_names(cfg)[1], "to": "anyone"})
+    path = os.path.join(root, cfg["mailbox"], name)
     print(text)
 
     if not args.no_send:

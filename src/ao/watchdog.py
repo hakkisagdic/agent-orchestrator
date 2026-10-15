@@ -2692,6 +2692,13 @@ def _cycle_impl(args, root):
             A.expire_alarms(A.project_key(root), quiet_for=resume.get("quiet") or A._alarm_reset_after())
         print(f"resume: no watchdog cycle for {_span(restart - float(resume['since']))} before this one; what "
               "stands is named in one notice when this cycle ends, and its clocks restart")
+    # A person's blocker stands even with no implementer or transcript (TRIAGE-2-MEDIUM).
+    project = A.project_key(root)
+    # What the implementer declares needs a person reaches a person, never held for an agent (#92).
+    for item in A.human_waits(root):
+        needs = item["notes"].get("needs") or item["title"]
+        notify(f"{project}: needs you", f"{item['id']} waits on a person: {needs}", root,
+               key=f"waiting-human:{item['id']}", window=6 * 3600, audience="human", what=needs)
     impl = cfg.get("implementer") or {}
     if not impl:
         print("no implementer session; nothing to watch")
@@ -2803,11 +2810,6 @@ def _cycle_impl(args, root):
                f"set by {hs.get('by', '?')}: {hs.get('reason', '')} — ao hold release when done",
                root, key="hold-standing", window=6 * 3600, audience="human", level="red")
 
-    # What the implementer declares needs a person reaches a person, never held for an agent (#92).
-    for item in A.human_waits(root):
-        needs = item["notes"].get("needs") or item["title"]
-        notify(f"{project}: needs you", f"{item['id']} waits on a person: {needs}", root,
-               key=f"waiting-human:{item['id']}", window=6 * 3600, audience="human", what=needs)
     # Harness configuration an agent changed here reaches a person, held or not: a person who starts a session in
     # this tree runs it too (HARNESS-CONFIG).
     tell_harness_config(root, project)
@@ -3378,6 +3380,9 @@ def _cycle_impl(args, root):
     if refused:
         print(f"the nudge's prompt cannot be handed over: {refused}; not nudging")
         return 1
+    # A child can finish its useful work inside the startup wait (TRIAGE-2-MEDIUM).
+    nudged_fp = A.work_fingerprint(root)
+    nudged_inputs = A.nudge_inputs(root, cfg)
     with open(log_path, "a", encoding=UTF8) as log:
         log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} nudge"
                   f"{' (added: ' + ' '.join(added) + ')' if added else ''} ===\n")
@@ -3408,12 +3413,11 @@ def _cycle_impl(args, root):
             early = proc.returncode
             break
 
-    nudged_fp = A.work_fingerprint(root)
     st.update(attempts=st.get("attempts", 0) + 1, last_nudge=time.time(),
               last_size=size, child_pid=proc.pid, child_start=child_start,
               last_fingerprint=nudged_fp,
               nudge_size=size, nudge_fingerprint=nudged_fp,
-              nudge_inputs=A.nudge_inputs(root, cfg))
+              nudge_inputs=nudged_inputs)
     # Told once its first seconds are over, with the exit of a turn that did not outlive them (EVENTS-LOG).
     A.emit_event(root, "nudge", {"pid": proc.pid, "attempt": st["attempts"], "exit": early})
     if early not in (None, 0):
