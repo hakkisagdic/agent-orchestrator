@@ -32,6 +32,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- A new board item goes under the heading it names - a line that is exactly `## <state>`, never text inside an item or another heading - and is refused, said, where the board has none; starting a slice clears its `waiting:` note from whichever state it starts from; and `ao slice` and `ao slices` escape what agents wrote, as the board's own listing does ([slices](docs/slices.md)) (SLICE-LIFECYCLE-3).
 - No mail ao writes goes over another or through a link left at its name: each is created under a name no file has, `-2` after its own when that is taken, and `ao note`, `ao mail send`, `ao_report`, a hold's release, `ao handoff`, `ao hunt` and the Telegram poller say and record the name it went under, where a second mail of the same minute and subject replaced the first. A new Telegram bot token drops `~/.ao/telegram-offset`, whose old count had Telegram take the new bot's first messages as read; and `ao doctor` names `ao pings setup` for the dead man's switch, where it named `ao ping set <url>`, which never existed ([messaging](docs/messaging.md), [telegram](docs/telegram.md), SECRETS-2).
 - Email settings whose provider is a list or object disable the channel without raising, so malformed settings no longer interrupt notification callers ([alarms](docs/alarms.md)) (TRIAGE-2-LOW)
 - `ao status` names the most recently active secondary project while the primary session is slowing, stopped or idle ([watchdog](docs/watchdog.md)) (TRIAGE-2-LOW)

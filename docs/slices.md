@@ -103,6 +103,11 @@ and the last move ao recorded put it under another - and list a row removed by h
 last move. Landing is still a hand move: the playbook moves a slice to `done` after
 `ao commit`.*
 
+An entry uses the state's heading on its own line: text such as `## queued` inside
+a title or note, `### queued` and `## queued-later` are not that section. If the
+destination heading is missing, admission writes no entry or move; add the heading
+to `.ao/board.md` and run the command again.
+
 *A move is decided and made on one reading of the board. ao's writers hold the board's lock,
 `.ao/board.md.lock`, from their reading to their write, so two of them take turns - the
 watchdog takes it only to write, since its decision can wait on keyflip - and each makes its
@@ -284,10 +289,11 @@ grant that admits `ao slice abandon` (`actor-grant`), as it names one that admit
 `ao decide --scope`; the grants ao ships admit `ao slice start`, `ao slice block` and
 `ao slice status` to the implementer, and every `ao slice` command to the architect.
 
-A start writes `since:`, and one the architect or a person makes of an item that is not
-READY records why it was not. A block's reason becomes the row's `needs:`; a `needs:` the
-slice carried is kept in `held-needs:` and given back when it resumes, as the watchdog's
-quota park keeps it, and a slice the watchdog parked is given back by the watchdog when the
+A start writes `since:` and clears `waiting:`, whether the slice was queued or blocked,
+so a later block does not inherit a wait that ended. One the architect or a person makes
+of an item that is not READY records why it was not. A block's reason becomes the row's
+`needs:`; a `needs:` the slice carried is kept in `held-needs:` and given back when it resumes,
+as the watchdog's quota park keeps it, and a slice the watchdog parked is given back when the
 limit resets, or by the architect or a person. `--boundary-file` points a slice at a file
 committed in the repository as it stands, `boundary: <path>@<commit>`, in place of its
 acceptance sentence, which the ledger keeps. `--slice` names the slice when more than one is
@@ -303,6 +309,10 @@ file as it stands, as its rounds are counted, and the status says that no row re
 `ao slices` lists every slice by state, with since when; `--open` leaves out done and
 rejected. A move ao recorded whose board write failed is in the status's moves, marked as one
 that did not happen, and nowhere else.
+
+Both commands, and the messages from starting, blocking or abandoning a slice, show
+titles, notes, move reasons and review findings with control and invisible characters
+escaped, as `ao board` does.
 
 ## A split is a pure move, proven mechanically
 

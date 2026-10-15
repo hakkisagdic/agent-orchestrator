@@ -2238,6 +2238,12 @@ A2A_STATE = {
 }
 
 
+def _board_heading(line):
+    """Only a state's whole heading line opens its section (SLICE-LIFECYCLE-3)."""
+    match = re.match(r"^##\s+([a-z]+)\s*$", line.strip())
+    return match.group(1) if match and match.group(1) in BOARD_STATES else None
+
+
 def board(root, data=None):
     """.ao/board.md — where each pre-authorised item currently is.
 
@@ -2268,8 +2274,7 @@ def board(root, data=None):
         line = line.rstrip()
         if line.lstrip().startswith("##"):
             # Every heading ends a section; only a state's own heading starts one (#33).
-            m = re.match(r"^##\s+([a-z]+)\s*$", line.strip())
-            state = m.group(1) if m and m.group(1) in out else None
+            state = _board_heading(line)
             continue
         if not state or not line.lstrip().startswith("- "):
             continue
@@ -2606,8 +2611,7 @@ class BoardEdit:
         lines, section, found = list(self.lines), None, None
         for index, line in enumerate(lines):
             if line.lstrip().startswith("##"):
-                m = re.match(r"^##\s+([a-z]+)\s*$", line.strip())
-                section = m.group(1) if m and m.group(1) in BOARD_STATES else None
+                section = _board_heading(line)
                 continue
             m = re.match(r"^\s*- \s*\[([^\]]+)\]\s*(.*)$", line)
             if section and m and m.group(1) == item_id:
@@ -2630,8 +2634,7 @@ class BoardEdit:
                                "replaced": {key: held[key] for key in changed
                                             if held.get(key) and held[key] != changed[key]}})
             del lines[index]
-            head = next((i for i, text in enumerate(lines)
-                         if re.match(r"^##\s+" + re.escape(state) + r"\s*$", text.strip())), None)
+            head = next((i for i, text in enumerate(lines) if _board_heading(text) == state), None)
             if head is None:
                 while lines and not lines[-1].strip():
                     lines.pop()
@@ -2642,23 +2645,26 @@ class BoardEdit:
         return True
 
     def append(self, state, line, by=None, why=None):
-        """Put one item line first under `## <state>`, making the section where the board has none.
+        """Put one item line first under the state's heading, refusing a board without it.
 
         The rest of the board stays as the implementer wrote it. The item's entry is recorded in the slice
         ledger, with the title and the notes it entered with, when the board is written (SLICE-LIFECYCLE).
+        A title, note or another heading containing `## <state>` is no section (SLICE-LIFECYCLE-3).
         """
-        text, head = "\n".join(self.lines), f"## {state}"
-        if head not in text:
-            text = text.rstrip("\n") + f"\n\n{head}\n"
-        nl = text.find("\n", text.index(head) + len(head))
-        if nl < 0:                                      # the heading is the board's last line, with no newline
-            text, nl = text + "\n", len(text)
+        lines = list(self.lines)
+        head = next((i for i, text in enumerate(lines) if _board_heading(text) == state), None)
+        if head is None:
+            raise ValueError(f"the board has no ## {shown_text(state)} heading; nothing was appended: "
+                             "add that heading on its own line in .ao/board.md and run it again")
+        if head == len(lines) - 1:
+            lines.append("")
+        lines.insert(head + 1, line.rstrip())
         entered = re.match(r"^\s*- \s*\[([^\]]+)\]\s*(.*)$", line.rstrip())
         if entered:
             chunks = [chunk.strip() for chunk in entered.group(2).split("·")]
             self.moves.append({"item_id": entered.group(1), "before": None, "after": state, "by": by, "why": why,
                                "notes": _line_notes(chunks[1:]), "title": chunks[0]})
-        self._changed_to((text[:nl + 1] + line.rstrip() + "\n" + text[nl + 1:]).split("\n"))
+        self._changed_to(lines)
 
     def write(self):
         """Record what this edit moved and write the board once, if it still holds what was read; False: nothing to.
@@ -2706,7 +2712,7 @@ class BoardEdit:
 
 
 def board_append(root, state, line, by=None, why=None):
-    """Append one item line under `## <state>`, creating the section if needed: one BoardEdit, held and written.
+    """Append one item line under an existing `## <state>` heading: one BoardEdit, held and written.
 
     Append rather than rewrite: the implementing agent edits this same file, and a write that replaced what it
     wrote between our read and our write would silently drop it. The edit's write refuses that instead
