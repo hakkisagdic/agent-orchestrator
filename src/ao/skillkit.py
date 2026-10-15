@@ -18,9 +18,10 @@ import json
 import os
 import re
 import shutil
+import shlex
 import subprocess
 
-from . import lib as A, matrix as M
+from . import lib as A, matrix as M, storage
 UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 MARK_START = "<!-- ao-playbook:start -->"
@@ -134,22 +135,35 @@ def _shipped(ident, adapter, read):
     return shipped is not None and read(shipped) == read(adapter)
 
 
-def _write_marked(path, body, header=""):
-    """Write `body` between markers; replace an earlier rendering; keep the rest."""
+def _write_marked(root, rel, body, header=""):
+    """Write `body` between markers in the file `rel` of the project at `root`; replace an earlier rendering; keep the
+    rest.
+
+    The file is read and replaced whole in its folder, held open from the root down, and never through a link: a
+    `.ao/PLAYBOOK.md` or a rule file that was a link had ao's block added to the file of the person's it led to, and
+    one put on the way after a look did the same (LEADS-ADAPTERS). Such a file is "not written: <why>", and nothing
+    else is touched.
+    """
     block = _marked(body)
-    if os.path.exists(path):
-        old = open(path, encoding=UTF8, errors="replace").read()
+    try:
+        raw = storage.read_in_tree(root, rel)
+        if raw is None:
+            # Made only where nothing stands: one that appeared since the read is not written over.
+            done = storage.create_in_tree(root, rel, _as_written(header + block))
+            return done if done == "wrote" else "not written: it appeared while ao wrote it; run this again"
+        # As a text-mode read gave it: every line break read as "\n".
+        old = raw.decode(UTF8, "replace").replace("\r\n", "\n").replace("\r", "\n")
         if MARK_START in old and MARK_END in old:
             new = old[:old.index(MARK_START)] + block + old[old.index(MARK_END) + len(MARK_END):].lstrip("\n")
-            if new != old:
-                open(path, "w", encoding=UTF8).write(new)
-                return "updated"
-            return "kept"
-        open(path, "a", encoding=UTF8).write("\n\n" + block)
+            if new == old:
+                return "kept"
+            storage.replace_in_tree(root, rel, _as_written(new))
+            return "updated"
+        # Added after the bytes as they stand, as an append left them.
+        storage.replace_in_tree(root, rel, raw + _as_written("\n\n" + block))
         return "appended"
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    open(path, "w", encoding=UTF8).write(header + block)
-    return "wrote"
+    except storage.InTheWay as exc:
+        return f"not written: {exc}"
 
 
 RULE_POINTER = ("## ao\n\nThis repository runs under agent-orchestrator. Load the `ao` playbook "
@@ -170,8 +184,14 @@ def steering_dirs(root=None):
     return sorted({(adapter.get("directives") or {}).get("steering_dir") for _, adapter in setup_adapters(root)} - {None})
 
 
-def install_playbook(root, agents, rules=False, ours=None):
-    """Render the playbook for each agent. Returns {relpath: wrote|updated|kept|appended}.
+def _through_a_link(rel):
+    """Why `rel`, a path an adapter declares within the project by its words, is not written: `_local` found it resolve
+    out of the project, which only a link on its way or at its name makes it do (LEADS-ADAPTERS)."""
+    return f"{rel} leads out of the project through a link, and ao writes through none"
+
+
+def install_playbook(root, agents, rules=False, ours=None, unwritten=None):
+    """Render the playbook for each agent. Returns {relpath: wrote|updated|kept|appended|not written: <why>}.
 
     Only files ao owns are written: the file each adapter declares as its playbook
     and `.ao/PLAYBOOK.md`. The owner's rule files sit on the authority boundary: a
@@ -183,23 +203,40 @@ def install_playbook(root, agents, rules=False, ours=None):
     `ours`, a list when given, gets (path, the bytes ao's rendering leaves there) for each file a shipped adapter
     declares that holds nothing but ao's text when ao has written it, for `A.record_harness_written` to record as seen
     where the file holds exactly that (HARNESS-SEEN-OWN).
+
+    `unwritten`, a list when given, gets (relpath, why) for each file not written for what stood in its way - a link,
+    or a file where a folder goes - which `_write_marked` reads and writes through none (LEADS-ADAPTERS). A path an
+    adapter declares outside the project by its words is no such file: it is the adapter's, said as before.
     """
     front, body = playbook()
     out = {}
-    p = os.path.join(root, ".ao", "PLAYBOOK.md")
+
+    def write(rel, text, header):
+        out[rel] = what = _write_marked(root, rel, text, header=header)
+        if what.startswith("not written") and unwritten is not None:
+            unwritten.append((rel, what[len("not written: "):]))
+        return not what.startswith("not written")
+
     note = ("<!-- No agent reads this file until a rule file points at it. Paste into "
             + " or ".join(rule_file_names(root)) + ": "
             + RULE_POINTER.split("\n\n", 1)[1].replace("\n", " ")
             + " (or run `ao init --rules`). `ao doctor` reports rules-not-wired until then. -->\n\n")
-    out[".ao/PLAYBOOK.md"] = _write_marked(p, body, header=note)
+    write(".ao/PLAYBOOK.md", body, note)
     for ident, adapter in setup_adapters(root, agents):
         target = (adapter.get("directives") or {}).get("playbook") or {}
         if not target.get("path"):
             continue
         header = front if target.get("header") == "frontmatter" else str(target.get("header") or "")
         place = _local(root, target["path"])
-        out[target["path"]] = _write_marked(place, body, header=header) if place else "not written: outside the project"
-        if place and ours is not None \
+        if place is None:
+            if _escapes(target["path"]):
+                out[target["path"]] = "not written: outside the project"
+            else:
+                out[target["path"]] = "not written: " + _through_a_link(target["path"])
+                if unwritten is not None:
+                    unwritten.append((target["path"], _through_a_link(target["path"])))
+            continue
+        if write(target["path"], body, header) and ours is not None \
                 and _shipped(ident, adapter, lambda a: (a.get("directives") or {}).get("playbook")):
             ours.append((place, _as_written(_marked(body, header))))
     if rules:
@@ -207,14 +244,33 @@ def install_playbook(root, agents, rules=False, ours=None):
                   for name in (adapter.get("directives") or {}).get("rule_files") or [])
         shipped = {name for adapter in A.package_adapters().values()
                    for name in (adapter.get("directives") or {}).get("rule_files") or []} | {SHARED_RULE_FILE}
-        for name in rule_file_names(root):
+        planned = [name for name in rule_file_names(root)
+                   if os.path.lexists(os.path.join(root, name)) or name == SHARED_RULE_FILE and not own]
+        links = {}
+        for name in planned:
             p = os.path.join(root, name)
-            if os.path.exists(p) or name == SHARED_RULE_FILE and not own:
-                header = "# Agents\n\n" if name == SHARED_RULE_FILE else ""
-                out[name] = _write_marked(p, RULE_POINTER, header=header)
-                # A pointer added to a person's rule file leaves their text beside it: that file is never all ao's.
-                if ours is not None and name in shipped:
-                    ours.append((p, _as_written(_marked(RULE_POINTER, header))))
+            if os.path.islink(p):
+                # Resolve only to choose among writes this run already makes. Never write through this link;
+                # the target still goes through the tree primitive, even if the link changes (LEADS-ADAPTERS).
+                try:
+                    target = os.path.relpath(os.path.realpath(p), os.path.realpath(root)).replace(os.sep, "/")
+                except ValueError:
+                    # Windows has no relative path across drives or shares; name the refusal (LEADS-ADAPTERS).
+                    why = _through_a_link(name)
+                    out[name] = "not written: " + why
+                    if unwritten is not None:
+                        unwritten.append((name, why))
+                    continue
+                links[name] = target
+                continue
+            header = "# Agents\n\n" if name == SHARED_RULE_FILE else ""
+            if write(name, RULE_POINTER, header) and ours is not None and name in shipped:
+                ours.append((p, _as_written(_marked(RULE_POINTER, header))))
+        for name, target in links.items():
+            if target in planned and target not in links and target in out and not out[target].startswith("not written"):
+                out[name] = f"link to {target}; pointer written there once"
+            else:
+                write(name, RULE_POINTER, "")
     return out
 
 
@@ -279,7 +335,7 @@ def _snippet(template, exe, root, args):
     return re.sub(r"\{(exe|root|args)\}", lambda match: values[match.group(1)], str(template or ""))
 
 
-def register_mcp(root, agents, exe=None, ours=None):
+def register_mcp(root, agents, exe=None, ours=None, unwritten=None):
     """Register the ao MCP server for each agent, in the file its adapter declares.
 
     Merged, never clobbered: other servers in the same file survive. Returns
@@ -290,17 +346,24 @@ def register_mcp(root, agents, exe=None, ours=None):
     `ours`, a list when given, gets (path, the bytes a file holding ao's entry alone has) for each file a shipped
     adapter declares, as install_playbook's does (HARNESS-SEEN-OWN). One the harness's own `register` command wrote is
     in that harness's words, not ao's, and is left for a person to see.
+
+    The file is read and replaced whole in its folder, held open from the root down, never through a link: one that
+    was a link, or was made one after `_local` looked where it resolves, had the person's file it led to read and
+    written over with ao's entry beside what it held (LEADS-ADAPTERS). `unwritten`, a list when given, gets
+    (file, why) for each registration not written for what stood in its way, as install_playbook's does. A harness's
+    own `register` command cannot promise that: known JSON formats use ao's merge, other formats are refused.
     """
     # The ao the registration names runs as the person whenever a harness starts it: one named by an absolute path,
     # never one the current directory holds (WINDOWS-NO-CWD-EXEC).
     exe = exe or A.ao_program()
     out = {}
 
-    def merge(path, server, key="mcpServers", extra=None):
+    def merge(rel, server, key="mcpServers", extra=None):
         data = {}
-        if os.path.exists(path):
+        raw = storage.read_in_tree(root, rel)
+        if raw is not None:
             try:
-                data = json.load(open(path, encoding=UTF8))
+                data = json.loads(raw.decode(UTF8))
             except ValueError:
                 data = {}
         servers = data.setdefault(key, {})
@@ -308,9 +371,14 @@ def register_mcp(root, agents, exe=None, ours=None):
         if servers.get("ao") == entry:
             return "kept"
         servers["ao"] = entry
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        json.dump(data, open(path, "w", encoding=UTF8), indent=2)
+        storage.replace_in_tree(root, rel, _as_written(json.dumps(data, indent=2)))
         return "registered"
+
+    def refused(ident, rel, why):
+        out[ident] = f"not written: {why}; add ao to it by hand, or make it a file of the project's own and run ao " \
+                     "init again"
+        if unwritten is not None:
+            unwritten.append((rel, why))
 
     for ident, adapter in setup_adapters(root, agents):
         mcp = adapter.get("mcp") or {}
@@ -329,21 +397,28 @@ def register_mcp(root, agents, exe=None, ours=None):
             continue
         path = _local(root, mcp["file"])
         if path is None:
-            out[ident] = f"not written: {mcp['file']} lies outside the project; add ao to it by hand"
+            if _escapes(mcp["file"]):
+                out[ident] = f"not written: {mcp['file']} lies outside the project; add ao to it by hand"
+            else:
+                refused(ident, mcp["file"], _through_a_link(mcp["file"]))
             continue
         server = {"command": exe, "args": args}
-        # A command ao runs comes from a shipped adapter alone, never a layer an agent can write (HARNESS-SETUP-2).
+        # A command named for a person comes from a shipped adapter alone (HARNESS-SETUP-2, LEADS-ADAPTERS).
         register = ((A.package_adapters().get(ident) or {}).get("mcp") or {}).get("register") or []
-        program = A.program_path(register[0]) if register else None
         key, extra = mcp.get("key", "mcpServers"), mcp.get("extra")
-        if program and not os.path.exists(path):
-            argv = [program] + [part.replace("{exe}", exe).replace("{args}", json.dumps(args))
-                                for part in register[1:]]
-            r = subprocess.run(argv, capture_output=True, text=True, encoding=UTF8, errors="replace", cwd=root)
-            if r.returncode == 0:
-                out[ident] = "registered"
-                continue
-        out[ident] = merge(path, server, key, extra)
+        known = mcp.get("format", "json" if mcp["file"].lower().endswith(".json") else None) == "json"
+        if not known:
+            command = [part.replace("{exe}", exe).replace("{args}", json.dumps(args)) for part in register]
+            why = "ao cannot write this MCP format through no link"
+            if command:
+                why += "; run this command yourself: " + shlex.join(command)
+            refused(ident, mcp["file"], why)
+            continue
+        try:
+            out[ident] = merge(mcp["file"], server, key, extra)
+        except storage.InTheWay as exc:
+            refused(ident, mcp["file"], str(exc))
+            continue
         if ours is not None and _shipped(ident, adapter, lambda a: a.get("mcp")):
             ours.append((path, _as_written(json.dumps({key: {"ao": dict(server, **(extra or {}))}}, indent=2))))
     return out

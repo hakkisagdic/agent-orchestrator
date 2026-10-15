@@ -161,6 +161,10 @@ def status_facts(cfg, msg_count=8, window_hours=24.0, shown=False):
     return facts
 
 
+# The narrowest a panel is laid out to: past its indents, every line it wraps keeps a column to wrap in.
+PANEL_MIN_COLUMNS = 20
+
+
 def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0, shown=True):
     """Render the panel from status_facts. When max_lines is given the output never exceeds it:
     the fixed sections are laid out first and the message log — the only elastic
@@ -169,7 +173,10 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0, show
     urgent messages it names are not recorded as seen, as in the document (status_facts)."""
     facts = status_facts(cfg, msg_count, window_hours, shown=shown)
     impl = cfg.get("implementer") or {}
-    w = min(width or shutil.get_terminal_size((120, 40)).columns, 130)
+    # A terminal a few columns wide gets the narrowest panel, which wraps there, and a short one no line: textwrap
+    # raised on a width it was handed below one, and -1 lines kept all but the last (LEADS-ADAPTERS).
+    w = max(PANEL_MIN_COLUMNS, min(width or shutil.get_terminal_size((120, 40)).columns, 130))
+    max_lines = None if max_lines is None else max(0, max_lines)
     L = []
     a = L.append
     # What the panel shows of a transcript, a session's record, mail, the board, a file's name or a vendor's output
@@ -337,9 +344,10 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0, show
     # Board — one line, because a parked item is invisible by construction: work
     # moved on past it, so no other signal in this panel looks wrong.
     board = facts["board"]
-    if any(board["counts"].values()):
-        counts = " · ".join(f"{board['counts'][k]} {k}" for k in
-                            ("running", "blocked", "queued", "verified", "done") if board["counts"][k])
+    counts = " · ".join(f"{board['counts'][k]} {k}" for k in
+                        ("running", "blocked", "queued", "verified", "done") if board["counts"][k])
+    # Drawn when it names something: a board holding only the inbox drew a `Board:` naming nothing (LEADS-ADAPTERS).
+    if counts:
         a(f"   {C['b']}Board:{C['reset']}   {counts}")
         for it in board["blocked"]:
             why = it["why"] or "reason not recorded"
@@ -531,7 +539,8 @@ def _fleet_rows():
         except Exception:
             continue
         impl = cfg.get("implementer") or {}
-        adapter = A.load_adapter(impl.get("adapter", "")) if impl else {}
+        # Read as `ao status` reads it there, its project's adapter layer included (LEADS-ADAPTERS).
+        adapter = A.load_adapter(impl.get("adapter", ""), root) if impl else {}
         state, age, desc = A.busy(cfg, adapter) if impl else ("unknown", None, "")
         session = _session_facts(A.session_state(cfg, "implementer"))
         bd = A.board(root)
@@ -554,7 +563,7 @@ def fleet_facts():
 
 
 def render_fleet(width=None):
-    w = min(width or shutil.get_terminal_size((120, 40)).columns, 130)
+    w = max(PANEL_MIN_COLUMNS, min(width or shutil.get_terminal_size((120, 40)).columns, 130))
     facts = fleet_facts()
     L = [f"{C['b']}{C['cyan']}{'═' * w}{C['reset']}",
          f"{C['b']}  ALL PROJECTS{C['reset']}{C['dim']}   agent-orchestrator   "

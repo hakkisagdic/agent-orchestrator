@@ -393,6 +393,21 @@ def _init_tier_hints(args):
     return lines
 
 
+def _append_to_project_file(path, text):
+    """Add `text` to the end of the project's own file at `path`, made where it is missing; None, or why it was not
+    (LEADS-ADAPTERS).
+
+    `ao init` read and added to `.gitignore` through whatever stood there: a link, or a file with a second name - a hard
+    link to a file of the person's - took its lines into that file, a shell's startup file among them. Only a regular
+    file with this one name is written, opened without following a link and without waiting on a FIFO."""
+    from . import storage
+    try:
+        storage.append_in_tree(os.path.dirname(path), os.path.basename(path), text.encode(UTF8))
+    except OSError as exc:
+        return f"it is not a writable file of the project's alone ({exc})"
+    return None
+
+
 def cmd_init(cfg, args):
     """Put `ao` on a project. Idempotent: existing files are left alone.
 
@@ -537,38 +552,51 @@ def cmd_init(cfg, args):
         )
         print(f"{C['red']}init refused{C['reset']}: {_project_refusal(problem)}")
         return 1
+    # Every file init writes in the project is made, replaced or read in folders held open from the root down, never
+    # through a link (storage.create_in_tree and its kin): one on the way, there before init or put there while it
+    # writes, took the configuration, the board, the playbook and the manifest wherever it led (LEADS-ADAPTERS).
+    from . import storage
+    # What init keeps of the project goes into .ao/, a folder of the project's own and never a link.
+    if storage.not_a_folder_of_its_own(os.path.join(root, ".ao")):
+        print(f"{C['red']}init refused{C['reset']}: .ao is a link or a file, where init keeps the project's "
+              "configuration, board and ledgers: make it a folder of the project's, then run ao init again")
+        return 1
 
-    wrote, kept = [], []
+    wrote, kept, unwritten = [], [], []
 
-    def put(rel, content, mode=None):
-        p = os.path.join(root, rel)
-        if os.path.lexists(p):
-            kept.append(rel)
-            return
-        os.makedirs(os.path.dirname(p), exist_ok=True)
+    def put(rel, content):
         # The bytes as given on every platform: Windows text mode wrote the marker with
         # CRLF, and the marker check below refused the init that had just written it (#71).
-        with open(p, "w", encoding=UTF8, newline="\n") as fh:
-            fh.write(content)
-        if mode:
-            os.chmod(p, mode)
-        wrote.append(rel)
+        try:
+            done = storage.create_in_tree(root, rel, content.encode(UTF8))
+        except storage.InTheWay as exc:
+            unwritten.append((rel, f"{exc}: make it a folder, then run ao init again"))
+            return
+        (wrote if done == "wrote" else kept).append(rel)
 
     # The config is replaced whole or not at all (#56); a crash never leaves it
-    # empty of the opt-ins it held.
+    # empty of the opt-ins it held. A link put in place of .ao after the look above is never written through: the
+    # configuration is refused, before anything else is written (LEADS-ADAPTERS).
+    if not config_existed or added:
+        try:
+            if not config_existed:
+                done = storage.create_in_tree(root, ".ao/config.json", config_text.encode(UTF8))
+                if done != "wrote":
+                    print(f"{C['red']}init refused{C['reset']}: .ao/config.json appeared while init ran, after it "
+                          "planned the project without one: kept it; run ao init again to plan from it")
+                    return 1
+            else:
+                storage.replace_in_tree(root, ".ao/config.json", config_text.encode(UTF8))
+        except storage.InTheWay as exc:
+            print(f"{C['red']}init refused{C['reset']}: {exc}: init keeps the project's configuration, board and "
+                  "ledgers in .ao; make it a folder of the project's own, then run ao init again")
+            return 1
     if config_existed:
         kept.append(".ao/config.json")
-        if added:
-            A.write_project_config(root, config_text)
-            wrote.append(".ao/config.json (+" + ", ".join(added) + ")")
     else:
-        if os.path.lexists(config_path):
-            kept.append(".ao/config.json")
-        else:
-            A.write_project_config(root, config_text)
-            wrote.append(".ao/config.json")
-        if added:
-            wrote.append(".ao/config.json (+" + ", ".join(added) + ")")
+        wrote.append(".ao/config.json")
+    if added:
+        wrote.append(".ao/config.json (+" + ", ".join(added) + ")")
 
     config_problem = _project_config_problem(root)
     if config_problem:
@@ -604,7 +632,14 @@ def cmd_init(cfg, args):
     put("agent-mail/README.md", language.text(runtime_cfg, "init.mail-readme"))
 
     gi = os.path.join(root, ".gitignore")
-    lines = open(gi, encoding=UTF8).read().split("\n") if os.path.exists(gi) else []
+    # Read only as the project's own file: a FIFO there held init for as long as its writer liked, and a link was read
+    # through (LEADS-ADAPTERS). What is no such file is added to by nothing below either.
+    try:
+        raw = storage.read_in_tree(root, ".gitignore")
+    except storage.InTheWay:
+        raw = None
+    # Each line as a text-mode read gave it, a CRLF checkout's among them.
+    lines = [] if raw is None else raw.decode(UTF8, "replace").replace("\r\n", "\n").replace("\r", "\n").split("\n")
     # The sessions ao settles for this checkout's roles are this machine's, never the repository's (SESSION-IDENTITY),
     # and so are the lanes it starts from here: each names a directory on this machine (LANE-START).
     add = [l for l in ("agent-mail/*.md", "!agent-mail/README.md", ".ao/inbox/", ".ao/hold", ".ao/sessions.json",
@@ -614,10 +649,13 @@ def cmd_init(cfg, args):
     # (README-QUICKSTART-7); one the repository already tracks is the repository's, and stays so.
     add += [l for l in ([] if args.no_mcp else _mcp_files_in_tree(root, args)) if l not in lines and l not in add]
     if add:
-        with open(gi, "a", encoding=UTF8) as fh:
-            fh.write("\n# agent-orchestrator: mail is transient; the ledger and reviews are not\n"
-                     + "\n".join(add) + "\n")
-        wrote.append(".gitignore (+%d)" % len(add))
+        refused = _append_to_project_file(gi, "\n# agent-orchestrator: mail is transient; the ledger and reviews are "
+                                              "not\n" + "\n".join(add) + "\n")
+        if refused:
+            unwritten.append((".gitignore", f"{refused}; add these lines to the project's own .gitignore yourself: "
+                                            + " ".join(add)))
+        else:
+            wrote.append(".gitignore (+%d)" % len(add))
 
     # Steering for whichever agent this repo uses. Kiro reads .kiro/steering;
     # Claude Code and most others read CLAUDE.md / AGENTS.md.
@@ -637,8 +675,11 @@ def cmd_init(cfg, args):
         present = any(os.path.isdir(skillkit._local(root, path) or "\0") for path in detect.get("dirs") or []) \
             or any(os.path.isfile(skillkit._local(root, path) or "\0") for path in detect.get("files") or [])
         if coordination and (ident == requested or present):
-            if skillkit._local(root, coordination) is None:
+            if skillkit._escapes(coordination):
                 print(f"  {C['yellow']}not written{C['reset']}  {coordination}: it lies outside the project (HARNESS-SETUP-2)")
+                continue
+            if skillkit._local(root, coordination) is None:
+                unwritten.append((coordination, skillkit._through_a_link(coordination)))
                 continue
             steering = STEERING_COORD.format(urgent=language.marker(runtime_cfg, "urgent"))
             put(coordination, steering)
@@ -649,6 +690,8 @@ def cmd_init(cfg, args):
         print(f"  {C['green']}wrote{C['reset']}  {rel}")
     for rel in kept:
         print(f"  {C['dim']}kept   {rel}{C['reset']}")
+    for rel, why in unwritten:
+        print(f"  {C['yellow']}not written{C['reset']}  {rel}: {why}")
 
     # The ao the MCP registrations name, by an absolute path, never one the current directory - the repository being
     # enrolled - holds, which Windows looks in first (WINDOWS-NO-CWD-EXEC); the watchdog's install below re-enters
@@ -660,20 +703,31 @@ def cmd_init(cfg, args):
     # the tool itself does not ask.
     from . import skillkit
     _, agents = skillkit.detect_agents(root, args.agent)
-    playbook_files = skillkit.install_playbook(root, agents, rules=getattr(args, "rules", False), ours=ours)
-    for rel, what in playbook_files.items():
-        print(f"  {C['green'] if what != 'kept' else C['dim']}{what:<8}{C['reset']} {rel}")
+    # The playbook and the registrations are read and written as init's own files are, never through a link: what
+    # they did not write for one is named and counted with the rest (LEADS-ADAPTERS).
+    refused = []
+    playbook_files = skillkit.install_playbook(root, agents, rules=getattr(args, "rules", False), ours=ours,
+                                               unwritten=refused)
+    _print_playbook_files(playbook_files)
     if not getattr(args, "rules", False):
         print(f"  {C['dim']}rule files untouched — paste this into {' / '.join(skillkit.rule_file_names(root))} "
               f"yourself, or re-run with --rules:{C['reset']}")
         for line in skillkit.RULE_POINTER.split("\n"):
             print(f"      {line}")
-    registered = {} if args.no_mcp else skillkit.register_mcp(root, agents, exe, ours=ours)
+    registered = {} if args.no_mcp else skillkit.register_mcp(root, agents, exe, ours=ours, unwritten=refused)
+    unwritten += refused
     # What init wrote, so `ao remove` can take exactly that away again.
-    manifest = {"at": int(time.time()), "wrote": list(wrote) + [r for r, w in playbook_files.items() if w != "kept"],
-                "mcp": [k for k, v in registered.items() if v == "registered"], "gitignore": bool(add)}
-    with open(os.path.join(root, ".ao", "init-manifest.json"), "w", encoding=UTF8) as fh:
-        json.dump(manifest, fh, indent=2)
+    manifest = {"at": int(time.time()),
+                "wrote": list(wrote) + [r for r, w in playbook_files.items() if w in ("wrote", "updated", "appended")],
+                "mcp": [k for k, v in registered.items() if v == "registered"],
+                "gitignore": any(rel.startswith(".gitignore") for rel in wrote)}
+    # Replaced whole under a name no file had, so a link an agent left at its name is replaced, never written through
+    # (LEADS-ADAPTERS).
+    try:
+        storage.replace_in_tree(root, ".ao/init-manifest.json", json.dumps(manifest, indent=2).encode(UTF8))
+    except storage.InTheWay as exc:
+        unwritten.append((".ao/init-manifest.json", str(exc)))
+        print(f"  {C['yellow']}not written{C['reset']}  .ao/init-manifest.json: {exc}")
     # A person adopted the tree as it stands: its harness configuration is measured from this HEAD, once (HARNESS-CONFIG).
     A.record_harness_baseline(root, "ao init")
     # The role blocks init composed are its own commands, and the rest are accepted as they stand, once (TURN-ARGV).
@@ -705,7 +759,20 @@ def cmd_init(cfg, args):
     print(f"\n{C['b']}Next, for a person:{C['reset']}")
     for line in skillkit.next_steps(agents, registered):
         print(f"  · {line}")
+    if unwritten:
+        print(f"{C['yellow']}init wrote the rest; {len(unwritten)} file(s) were not written, each named above with "
+              f"why: make each a file or folder of the project's own, then run ao init again{C['reset']}")
+        return 1
     return 0
+
+
+def _print_playbook_files(written):
+    """Each playbook file `install_playbook` wrote, kept or did not write, the last with why (LEADS-ADAPTERS)."""
+    for rel, what in written.items():
+        if what.startswith("not written: "):
+            print(f"  {C['yellow']}not written{C['reset']}  {rel}: {what[len('not written: '):]}")
+        else:
+            print(f"  {C['green'] if what != 'kept' else C['dim']}{what:<8}{C['reset']} {rel}")
 
 
 # What a new setup chooses, or asks init to write. Adoption takes a project as it was set up and
@@ -1165,8 +1232,10 @@ def _board_lines(cfg):
                 # Named when the item is registered, while widening or splitting is cheap (#35).
                 for advice in A.boundary_advice(root, cfg, it):
                     lines.append(f"      {C['yellow']}boundary: {shown(advice)}{C['reset']}")
-    if not any(b.values()):
-        lines.append(f"{C['dim']}Board is empty.{C['reset']}")
+    if not any(b[st] for st in colours):
+        # A board holding only what waits for a boundary printed nothing at all (LEADS-ADAPTERS).
+        lines.append(f"{C['dim']}No item is admitted: {len(b['inbox'])} wait(s) in the inbox of .ao/board.md for an "
+                     f"acceptance boundary.{C['reset']}" if b["inbox"] else f"{C['dim']}Board is empty.{C['reset']}")
     return lines
 
 
@@ -1218,7 +1287,7 @@ def cmd_source(cfg, args):
     if not files:
         print(f"{C['dim']}Nothing in .ao/inbox/ to import.{C['reset']}")
         return 0
-    admitted = held = 0
+    admitted = held = refused = 0
     for f in files:
         try:
             doc = json.load(open(f, encoding=UTF8))
@@ -1229,14 +1298,32 @@ def cmd_source(cfg, args):
         if err:
             print(f"{C['red']}REFUSED{C['reset']} {os.path.basename(f)}: {err}")
             continue
-        sid = doc.get("source", "?")
-        for it in doc.get("items", []):
-            iid, title = it.get("id"), it.get("title", "")
-            if not iid:
+        # Each text a board line carries is one line, as `ao board add` writes it: a tracker item's title is anyone's
+        # text, and a line break in it wrote items and sections of its own into the board, an acceptance boundary
+        # among them that nobody wrote (LEADS-ADAPTERS).
+        sid = " ".join(str(doc.get("source", "?")).split())
+        refused_here = 0
+        for number, it in enumerate(doc.get("items", []), 1):
+            iid = it.get("id") if isinstance(it, dict) else None
+            # An id is a text or a whole number: an item with none, an empty one or a false one was dropped without a
+            # word and its file marked imported, so nobody could correct it (the review of LEADS-ADAPTERS).
+            if isinstance(iid, bool) or not isinstance(iid, (str, int)) or not str(iid).strip():
+                print(f"{C['red']}REFUSED{C['reset']} item {number} in {os.path.basename(f)}: "
+                      + ("it has no id, a text or a whole number the board names it by" if isinstance(it, dict)
+                         else "it is no object with an id"))
+                refused_here += 1
+                continue
+            iid = str(iid)
+            title = " ".join(str(it.get("title") or "").split())
+            acc = " ".join(str(it.get("acceptance") or "").split())
+            why = " ".join(str(it.get("shape") or "").split()) or "no acceptance boundary written"
+            problem = _source_item_problem(iid, (sid, title, acc, why))
+            if problem:
+                print(f"{C['red']}REFUSED{C['reset']} {A.shown_text(iid)} in {os.path.basename(f)}: {problem}")
+                refused_here += 1
                 continue
             if any(x["id"] == iid for st in A.BOARD_STATES for x in A.board(root)[st]):
                 continue                                  # already on the board
-            acc = (it.get("acceptance") or "").strip()
             if acc:
                 A.board_append(root, "queued",
                                f"- [{iid}] {title} · source: {sid} · acceptance: {acc}")
@@ -1245,14 +1332,33 @@ def cmd_source(cfg, args):
                     A.record_plan(root, iid, dg)   # baseline: the plan as admitted
                 admitted += 1
             else:
-                why = it.get("shape") or "no acceptance boundary written"
                 A.board_append(root, "inbox",
                                f"- [{iid}] {title} · source: {sid} · needs: {why}")
                 held += 1
-        os.rename(f, f + ".imported")
+        refused += refused_here
+        if refused_here:
+            # Kept to be imported again once corrected: what it admitted is on the board, and is not added twice.
+            print(f"{C['yellow']}kept{C['reset']} {os.path.basename(f)}: correct its refused item(s) and run "
+                  "ao source import again")
+        else:
+            os.rename(f, f + ".imported")
     print(f"{C['green']}{admitted} admitted{C['reset']} to queued · "
-          f"{C['yellow']}{held} held{C['reset']} in inbox (no acceptance boundary)")
-    return 0
+          f"{C['yellow']}{held} held{C['reset']} in inbox (no acceptance boundary)"
+          + (f" · {C['red']}{refused} refused{C['reset']}" if refused else ""))
+    return 1 if refused else 0
+
+
+def _source_item_problem(iid, texts):
+    """Why an imported item cannot be a board line as it reads, or None: its id must be one the board reads whole and a
+    needs note can name, and no text of its line may hold the '·' that separates a line's notes - what `ao board add`
+    holds an item to (BOARD-ADD-2, LEADS-ADAPTERS)."""
+    import re
+    if not re.fullmatch(BOARD_ID, iid):
+        return ("its id cannot be one: an id holds no space, comma, ']', backslash or '·' and does not start with '(' "
+                "or '/', so that a board line carries it whole")
+    if any("·" in text for text in texts):
+        return "its source, title, boundary or reason holds a '·', which separates a board line's notes"
+    return None
 
 
 def cmd_hold(cfg, args):
@@ -1295,17 +1401,21 @@ def cmd_hold(cfg, args):
             print(f"{C['dim']}No hold to release.{C['reset']}")
             return 0
         st = A.hold_state(root) or {}
-        os.remove(path)
-        print(f"{C['green']}released{C['reset']} after {st.get('minutes', 0)}m")
+        name = None
         if args.note:
             # The agent wakes into a tree it did not change. Say what moved, or it
             # spends its first turns rediscovering it — or worse, mistrusting it.
             impl, arch = A.mail_names(cfg)
             name = f"{datetime.now():%Y%m%d-%H%M}-{arch}-to-{impl}-INFO-hold-released.md"
-            # Through write_mail, as every mail ao writes; it was written past it (ROLE-TABLE-2).
+            # Through write_mail, as every mail ao writes; it was written past it (ROLE-TABLE-2). Written while the hold
+            # stands: the watchdog starts a turn as soon as it finds none, and a turn started before the note was
+            # written woke without it (LEADS-ADAPTERS).
             name = A.write_mail(root, cfg, name, language.text(cfg, "hold.released", minutes=st.get("minutes", 0),
                                                         reason=st.get("reason", ""), note=args.note),
                          {"kind": "info", "class": "fyi", "from": arch, "to": impl})
+        os.remove(path)
+        print(f"{C['green']}released{C['reset']} after {st.get('minutes', 0)}m")
+        if name:
             print(f"handover note → {cfg['mailbox']}/{name}")
         return 0
 
@@ -1761,9 +1871,13 @@ def cmd_skill(cfg, args):
         print(skillkit.playbook()[1])
         return 0
     _, agents = skillkit.detect_agents(root, args.agent)
-    ours = []
-    for rel, what in skillkit.install_playbook(root, agents, ours=ours).items():
-        print(f"  {C['green'] if what != 'kept' else C['dim']}{what:<8}{C['reset']} {rel}")
+    ours, refused = [], []
+    # Written as init writes it, never through a link: what was not is named, and the command exits 1 (LEADS-ADAPTERS).
+    _print_playbook_files(skillkit.install_playbook(root, agents, ours=ours, unwritten=refused))
     _print_seen_own(A.record_harness_written(root, ours, "ao skill install"))
     print(f"{C['dim']}agents: {', '.join(sorted(agents))} · regenerate any time; hand edits outside the markers survive{C['reset']}")
+    if refused:
+        print(f"{C['yellow']}{len(refused)} file(s) were not written, each named above with why: make each a file or "
+              f"folder of the project's own, then run ao skill install again{C['reset']}")
+        return 1
     return 0

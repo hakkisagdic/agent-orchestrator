@@ -734,18 +734,30 @@ def shown_text(text):
                         str(text).encode(UTF8, "surrogatepass").decode(UTF8, "replace"))
 
 
+def _kind_digest(kind, data):
+    """The digest of what stands where a harness reads that is no regular file's bytes - a link, a FIFO, a socket or a
+    device, a link to nothing - which names its kind before the sha256 of `data` (LEADS-ADAPTERS).
+
+    A regular file's digest is the sha256 of its bytes alone, 64 hex digits, and these were the sha256 of a marker ao
+    wrote: a file holding `special:a FIFO` read like a FIFO, so a person who saw that file had seen the FIFO an agent
+    put in its place, whose writer sends a harness whatever it likes; and a file holding a link's marker read like the
+    link. No file's bytes can be given a digest that starts with its kind."""
+    return f"{kind}:{hashlib.sha256(data).hexdigest()}"
+
+
 def _harness_read(full):
     """(sha256, view) of what a harness reads at `full`, through a link where one stands (HARNESS-CONFIG).
 
     Only a regular file is read. A FIFO or a device there - or a link to one, /dev/zero - would hold the reader for as
     long as its writer liked, so it is opened without waiting and named for what it is. The view is ("file", its bytes
-    or None past HARNESS_CONFIG_SHOW_BYTES, its size), ("special", what it is) or ("missing",) for a link to nothing.
+    or None past HARNESS_CONFIG_SHOW_BYTES, its size), ("special", what it is) or ("missing",) for a link to nothing;
+    the digest of each but a file names its kind (_kind_digest).
     """
     import stat
     try:
         fd = os.open(full, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
     except FileNotFoundError:
-        return hashlib.sha256(b"missing").hexdigest(), ("missing",)
+        return _kind_digest("missing", b""), ("missing",)
     except OSError as exc:
         raise RuntimeError(f"{full} cannot be read ({exc.strerror or exc})") from None
     try:
@@ -757,7 +769,7 @@ def _harness_read(full):
         os.close(fd)
         kind = ("a folder" if stat.S_ISDIR(mode) else "a FIFO" if stat.S_ISFIFO(mode)
                 else "a socket" if stat.S_ISSOCK(mode) else "a device")
-        return hashlib.sha256(("special:" + kind).encode(UTF8)).hexdigest(), ("special", kind)
+        return _kind_digest("special", kind.encode(UTF8)), ("special", kind)
     digest, kept, size = hashlib.sha256(), [], 0
     with os.fdopen(fd, "rb") as fh:
         for chunk in iter(lambda: fh.read(1 << 16), b""):
@@ -781,14 +793,21 @@ def harness_baseline(root):
 
 def record_harness_baseline(root, why):
     """Keep HEAD as the commit this project's harness configuration is measured from when no grant or person says
-    later, once: the first record stands, so code that runs `ao init` again moves nothing (HARNESS-CONFIG)."""
-    from .storage import replace_file_durably
+    later, once: the first record stands, so code that runs `ao init` again moves nothing (HARNESS-CONFIG).
+
+    Two first readings at once - `ao init` and a watchdog cycle - each found no record and wrote one, the later over
+    the earlier; the record is looked for again and written under the project's harness lock (LEADS-ADAPTERS)."""
+    from .storage import _exclusive_lock, replace_file_durably
     path = project_file(root, "harness-base")
     head = _git_text(root, "rev-parse", "--verify", "-q", "HEAD")
     if os.path.exists(path) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head):
         return None
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    replace_file_durably(path, (json.dumps({"head": head, "at": int(time.time()), "why": why}) + "\n").encode(UTF8))
+    with _exclusive_lock(project_file(root, "harness-lock")):
+        if os.path.exists(path):
+            return None
+        record = {"head": head, "at": int(time.time()), "why": why}
+        replace_file_durably(path, (json.dumps(record) + "\n").encode(UTF8))
     return head
 
 
@@ -840,8 +859,7 @@ def harness_worktree_dirs():
     dirs = set()
     for adapter in package_adapters().values():
         for name in adapter.get("worktree_dirs") or []:
-            if isinstance(name, str) and name.strip() and not name.startswith(("/", "~")) and "\\" not in name \
-                    and ".." not in name.split("/"):
+            if _within_its_folder(name):
                 dirs.add(tuple(_config_part(part) for part in name.split("/") if part not in ("", ".")))
     return dirs
 
@@ -1129,7 +1147,8 @@ def project_config_changes(root, names=None, shown=None):
     folder git names without descending is read here only when it is configuration itself, or the start of a declared
     name such as `.github` of `.github/hooks`, so a node_modules/ is never walked. A folder that holds a repository of
     its own is read like any other - a plugin cloned into .opencode/plugin/ is configuration - unless it is a worktree
-    of this repository, a tree of its own that is checked where something runs. A tracked file git is told to skip
+    of this repository at the path where a harness keeps its lanes. A configuration alias to that worktree is read
+    under the alias, where the harness reaches it (LEADS-ADAPTERS). A tracked file git is told to skip
     (`update-index --assume-unchanged` or `--skip-worktree`) is left out of git status, so it is compared with HEAD's
     blob by content; one a sparse checkout leaves out of the tree is no change. What Python runs as it starts from
     inside the tree - a .pth file, a sitecustomize or usercustomize - is configuration in the same way, under the state
@@ -1143,7 +1162,7 @@ def project_config_changes(root, names=None, shown=None):
     firsts = {entry[0] for entry in names}
     worktree_dirs = harness_worktree_dirs()
     top = os.fsdecode(_git_output(root, "rev-parse", "--show-toplevel")).strip()
-    changes, visited, worktrees, startup, startup_folders = {}, set(), [], set(), {}
+    changes, visited, walking, worktrees, startup, startup_folders = {}, set(), set(), [], set(), {}
 
     def parts_of(rel):
         return [_config_part(part) for part in rel.split("/") if part not in ("", ".")]
@@ -1190,19 +1209,19 @@ def project_config_changes(root, names=None, shown=None):
             worktrees.append({os.path.normcase(os.path.realpath(tree["path"])) for tree in worktree_list(top)})
         return os.path.normcase(os.path.realpath(full)) in worktrees[0]
 
-    def take(rel, state):
+    def take(rel, state, everything=True):
         full = full_path(rel)
         if os.path.islink(full):
             target = os.readlink(full)
             link = b"link\0" + os.fsencode(target)
             if os.path.isdir(full):
-                record(rel, state, hashlib.sha256(link).hexdigest(), ("link", target, None))
-                walk(rel, state, everything=True)
+                record(rel, state, _kind_digest("link", link), ("link", target, None))
+                walk(rel, state, everything=everything)
                 return
             inner, view = _harness_read(full)
-            record(rel, state, hashlib.sha256(link + b"\0" + inner.encode(UTF8)).hexdigest(), ("link", target, view))
+            record(rel, state, _kind_digest("link", link + b"\0" + inner.encode(UTF8)), ("link", target, view))
         elif os.path.isdir(full):
-            walk(rel, state, everything=True)          # a submodule, or a folder git named
+            walk(rel, state, everything=everything)    # a submodule, or a folder git named
         elif not os.path.lexists(full):
             record(rel, "deleted", None, ("deleted",))
         else:
@@ -1211,29 +1230,38 @@ def project_config_changes(root, names=None, shown=None):
     def walk(rel, state, everything):
         full = full_path(rel)
         real = os.path.normcase(os.path.realpath(full))
-        if real in visited:
+        # A completed walk stands only for its declared path: another harness name can read the same directory,
+        # even a worktree skipped at its lane path. Active walks keep their scope too: .github/hooks -> . must
+        # read the whole directory while its .github parent is reading declared names only (LEADS-ADAPTERS).
+        if (real, everything) in walking or (rel, True) in visited or (rel, everything) in visited:
             return
-        visited.add(real)
         if os.path.lexists(os.path.join(full, ".git")) and tuple(parts_of(rel)[:-1]) in worktree_dirs \
                 and own_worktree(full):
             return
+        walking.add((real, everything))
         try:
-            entries = sorted(os.listdir(full))
-        except OSError as exc:
-            raise RuntimeError(f"{rel}/ cannot be read ({exc.strerror or exc})") from None
-        for name in entries:
-            sub = f"{rel}/{name}"
-            if name == ".git":
-                continue
-            if os.path.isdir(os.path.join(full, name)) and not os.path.islink(os.path.join(full, name)):
-                if _config_part(name) == "node_modules":
+            try:
+                entries = sorted(os.listdir(full))
+            except OSError as exc:
+                raise RuntimeError(f"{rel}/ cannot be read ({exc.strerror or exc})") from None
+            for name in entries:
+                sub = f"{rel}/{name}"
+                if name == ".git":
                     continue
-                if everything or member(sub):
-                    walk(sub, state, everything=True)
-                elif leads_to(sub):
-                    walk(sub, state, everything=False)
-            elif everything or member(sub):
-                take(sub, state)
+                if os.path.isdir(os.path.join(full, name)) and not os.path.islink(os.path.join(full, name)):
+                    if _config_part(name) == "node_modules":
+                        continue
+                    if everything or member(sub):
+                        walk(sub, state, everything=True)
+                    elif leads_to(sub):
+                        walk(sub, state, everything=False)
+                elif everything or member(sub):
+                    take(sub, state)
+                elif leads_to(sub) and os.path.islink(full_path(sub)):
+                    take(sub, state, everything=False)
+        finally:
+            walking.remove((real, everything))
+        visited.add((rel, everything))
 
     listed = {}
     for item in _git_output(top, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching",
@@ -1254,6 +1282,10 @@ def project_config_changes(root, names=None, shown=None):
                 walk(folder, state, everything=False)
         elif member(rel):
             take(rel, "python" if starts_python(rel) else state)
+        elif leads_to(rel) and os.path.islink(full_path(rel)):
+            # A declared prefix can itself be a link: .github -> settings still exposes its hooks, though the
+            # prefix is no configuration name of its own (LEADS-ADAPTERS).
+            take(rel, state, everything=False)
     # What Python runs as it starts, in a folder git names without descending into it - an ignored environment's
     # site-packages - is read there; one git tracks unchanged is HEAD's, and no change (PYTHON-ENV).
     folders = [rel for rel in listed if rel.endswith("/")]
@@ -1273,9 +1305,12 @@ def project_config_changes(root, names=None, shown=None):
     for item in _git_output(top, "ls-files", "-s", "-z").split(b"\0"):
         meta, _, path = item.partition(b"\t")
         rel = os.fsdecode(path)
-        if meta.startswith(b"120000 ") and rel not in changes and member(rel):
-            take(rel, "linked")
-    _hidden_config_changes(top, member, take, record, changes)
+        if meta.startswith(b"120000 ") and rel not in changes and (member(rel) or leads_to(rel)):
+            take(rel, "linked", everything=member(rel))
+    # A tracked ordinary file at a prefix can become a directory link while assume-unchanged hides it from
+    # status; its declared children still count, without reading the rest of its target (LEADS-ADAPTERS).
+    _hidden_config_changes(top, lambda rel: member(rel) or (leads_to(rel) and os.path.islink(full_path(rel))),
+                           lambda rel, state: take(rel, state, everything=member(rel)), record, changes)
     return sorted(((rel, state, sha) for rel, (state, sha) in changes.items()), key=lambda change: change[0])
 
 
@@ -1731,20 +1766,30 @@ def turn_record(root):
     return {role: entry for role, entry in record.items() if role in HELD_COMMANDS and isinstance(entry, dict)}
 
 
-def _keep_turns(root, accepted, by):
-    """Accept each role of `accepted`, {role: (digest, what its block says)}, by `by`, beside the roles accepted before;
-    the roles kept, [] when they could not be written (TURN-ARGV)."""
-    from .storage import replace_file_durably
-    record, now = turn_record(root), int(time.time())
-    for role, (digest, identity) in accepted.items():
-        record[role] = {"sha256": digest, "identity": identity, "by": by, "at": now}
+def _keep_turns(root, accepted, by, only_new=False):
+    """Accept each role of `accepted`, {role: (digest, what its block says)}, by `by`, beside the roles accepted before,
+    and with `only_new` only a role none is accepted for yet, as a first reading accepts; the roles kept, [] when they
+    could not be written (TURN-ARGV).
+
+    Read and written under the project's harness lock. Two acceptances at once - `ao harness seen` and a watchdog's
+    first reading - each read the record, added its roles and wrote it back, and the later dropped the earlier's; and a
+    first reading that wrote a role accepted meanwhile put the command as it stood over a person's acceptance
+    (LEADS-ADAPTERS)."""
+    from .storage import _exclusive_lock, replace_file_durably
     target = project_file(root, "harness-turns")
     try:
         os.makedirs(os.path.dirname(target), exist_ok=True)
-        replace_file_durably(target, (json.dumps(record, indent=1, sort_keys=True) + "\n").encode(UTF8))
+        with _exclusive_lock(project_file(root, "harness-lock")):
+            record, now = turn_record(root), int(time.time())
+            kept = [role for role in accepted if not (only_new and role in record)]
+            for role in kept:
+                digest, identity = accepted[role]
+                record[role] = {"sha256": digest, "identity": identity, "by": by, "at": now}
+            if kept:
+                replace_file_durably(target, (json.dumps(record, indent=1, sort_keys=True) + "\n").encode(UTF8))
     except OSError:
         return []
-    return [role for role in HELD_COMMANDS if role in accepted]
+    return [role for role in HELD_COMMANDS if role in kept]
 
 
 def _as_composed(cfg, roles):
@@ -1763,7 +1808,7 @@ def record_turn_baseline(root, why):
     document = project_config_document(root) if missing else None
     if not missing or (document["problem"] and os.path.lexists(os.path.join(root, ".ao", "config.json"))):
         return []
-    return _keep_turns(root, _as_composed(turn_config(root, document["config"]), missing), why)
+    return _keep_turns(root, _as_composed(turn_config(root, document["config"]), missing), why, only_new=True)
 
 
 def record_turns_written(root, cfg, roles, by):
@@ -2209,11 +2254,13 @@ def tool_review_problems(adapter, argv=None):
     for name in ("prompt", "diff_file", "output"):
         if used.count(name) != 1:
             problems.append(f"a tool reviewer's argv must carry {{{name}}} exactly once")
-    environment = review.get("environment") or {}
+    # Null is no environment, and so is nothing; any other value that is no object is refused, not read as one: an
+    # empty list or string was taken for no rules (LEADS-ADAPTERS).
+    environment = {} if review.get("environment") is None else review["environment"]
     if not isinstance(environment, dict):
         return problems + ["`review.environment` must be an object"]
     for key in ("remove", "keep"):
-        patterns = environment.get(key) or []
+        patterns = [] if environment.get(key) is None else environment[key]
         if not isinstance(patterns, list) or not all(isinstance(pattern, str) for pattern in patterns):
             problems.append(f"`review.environment.{key}` must be a list of regular expressions")
             continue
@@ -2222,7 +2269,7 @@ def tool_review_problems(adapter, argv=None):
                 re.compile(pattern)
             except re.error as exc:
                 problems.append(f"`review.environment.{key}` holds {pattern!r}, which does not compile: {exc}")
-    pinned = environment.get("set") or {}
+    pinned = {} if environment.get("set") is None else environment["set"]
     if not isinstance(pinned, dict) or not all(isinstance(name, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name)
                                                and isinstance(value, str) for name, value in pinned.items()):
         return problems + ["`review.environment.set` must map variable names to strings"]
@@ -2264,9 +2311,20 @@ def acp_problems(adapter):
     return problems
 
 
+def _within_its_folder(name):
+    """Whether a path an adapter declares stays in the folder it is read against, by its words: relative, with no `~`,
+    `..`, backslash or drive. `C:/outside` reads as relative on POSIX and is absolute on Windows, where a folder joined
+    to it is `C:/outside` alone (LEADS-ADAPTERS)."""
+    import ntpath
+    return isinstance(name, str) and bool(name.strip()) and not name.startswith(("/", "~")) and "\\" not in name \
+        and ".." not in name.split("/") and not ntpath.splitdrive(name)[0]
+
+
 def reviewer_agent_problems(adapter):
-    """What keeps ao from writing the reviewer agent an adapter declares in `options.reviewer_agent` (KIRO-READONLY)."""
-    agent = ((adapter or {}).get("options") or {}).get("reviewer_agent")
+    """What keeps ao from writing the reviewer agent an adapter declares in `options.reviewer_agent` (KIRO-READONLY).
+    Options that are no object declare none, and `validate_adapter` names them (LEADS-ADAPTERS)."""
+    options = (adapter or {}).get("options")
+    agent = options.get("reviewer_agent") if isinstance(options, dict) else None
     if agent is None:
         return []
     if not isinstance(agent, dict):
@@ -2276,8 +2334,7 @@ def reviewer_agent_problems(adapter):
     if not (isinstance(argv, list) and argv and all(isinstance(part, str) for part in argv)
             and str(argv[0]).startswith("-") and sum("{agent}" in part for part in argv) == 1):
         problems.append("`options.reviewer_agent.argv` must be a flag, carrying {agent} in exactly one argument")
-    if not (isinstance(path, str) and "{agent}" in path and not path.startswith("/") and "\\" not in path
-            and ".." not in path.split("/")):
+    if not (isinstance(path, str) and "{agent}" in path and _within_its_folder(path)):
         problems.append("`options.reviewer_agent.path` must be a path within the reviewer's directory, carrying {agent}")
     # A harness names an agent's tools as a list, or as permissions by tool, as opencode does (OPENCODE-REVIEWER).
     if not (isinstance(config, dict) and (isinstance(config.get("tools"), list) or isinstance(config.get("permission"), dict))):
@@ -2313,16 +2370,16 @@ def validate_adapter(adapter):
             problems.append(f"`{field}` is missing")
     if adapter.get("verified") and adapter["verified"] not in ADAPTER_VERIFIED:
         problems.append(f"`verified` is {adapter['verified']!r}; one of {', '.join(ADAPTER_VERIFIED)}")
+    if adapter.get("options") is not None and not isinstance(adapter["options"], dict):
+        # Every check below reads them as an object: `ao adapters validate` ended in a traceback (LEADS-ADAPTERS).
+        problems.append("`options` must be an object")
+        adapter = {key: value for key, value in adapter.items() if key != "options"}
     config = adapter.get("project_config")
-    if config is not None and not (isinstance(config, list) and all(
-            isinstance(name, str) and name.strip() and not name.startswith("/") and "\\" not in name
-            and ".." not in name.split("/") for name in config)):
+    if config is not None and not (isinstance(config, list) and all(_within_its_folder(name) for name in config)):
         problems.append("`project_config` must list the files and folders its harness reads from a project, each a "
                         "path within it")
     worktrees = adapter.get("worktree_dirs")
-    if worktrees is not None and not (isinstance(worktrees, list) and all(
-            isinstance(name, str) and name.strip() and not name.startswith(("/", "~")) and "\\" not in name
-            and ".." not in name.split("/") for name in worktrees)):
+    if worktrees is not None and not (isinstance(worktrees, list) and all(_within_its_folder(name) for name in worktrees)):
         problems.append("`worktree_dirs` must list the folders its harness keeps the worktrees it makes in, each a "
                         "path within the project")
     if "contract" not in adapter:

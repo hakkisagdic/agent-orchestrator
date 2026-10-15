@@ -33,7 +33,7 @@ Never inject into a session that is mid-turn. Two hazards, two mitigations:
 |---|---|
 | Two writers on one session transcript | Ask the OS which agent processes have this repo as their cwd. Start nothing while any of them is alive, and nothing while the OS cannot be asked: a process table the platform could not read is an error that names the platform and why, never a table in which nothing runs, so the watchdog stands down and tells a person (`process-table-unreadable`). |
 | Two writers on one working tree | Write lanes get separate git worktrees: `ao lane start` makes one per board item and refuses a second lane for an item that has one. |
-| A human needs the tree | `ao hold` stops every agent in it and holds the lock; every restart path reads the lock again right before it starts a turn. A hold that cannot wait out a watchdog cycle already running says so and exits 1, and so does one that cannot read the process table: it stands, and stops nothing it cannot see. What still runs after the hold - reading the table again - is named, and the hold exits 1. |
+| A human needs the tree | `ao hold` stops every agent in it and holds the lock; every restart path reads the lock again right before it starts a turn. A hold that cannot wait out a watchdog cycle already running says so and exits 1, and so does one that cannot read the process table: it stands, and stops nothing it cannot see. What still runs after the hold - reading the table again - is named, and the hold exits 1. `ao hold release --note` writes its note while the hold still stands, so no turn wakes before it (LEADS-ADAPTERS). |
 | A lock kept where an agent writes | `.ao/` in the working tree holds locks an agent can replace. ao opens a lock through no final link, and only as a regular file of one name - on Windows it opens a link itself, never what it names: a link, a FIFO or a hard link put in its place is refused and named, where ao used to create the file a link named, outside the tree, and write a byte into it. |
 | A turn ended but its processes did not | `ao writers` shows them as orphans (no terminal, dead group leader) and counts zero writers; the watchdog clears them before every count, and `ao hold` / the reaper stop turns by process group so no new ones are made. Where the process table cannot be read, `ao writers` says the writers are unknown and exits 1. |
 
@@ -431,9 +431,30 @@ compared with HEAD's blob by content. An ignored folder git lists without descen
 only when it is configuration itself, so a `node_modules/` is never walked. A link is read through, so
 what it leads to cannot change unseen; a FIFO or a device is named for what it is and never opened to
 wait on. A repository cloned into a configuration folder, such as a plugin, is read like any folder; a
-worktree of the project's own repository is not, since it is a tree of its own, checked where something
-runs in it. Past 5,000 changes ao stops and says it cannot tell what changed, and a change it cannot
+worktree of the project's own repository is skipped at the path where the harness keeps its lanes,
+since it is checked where something runs in it, but is read through any other declared configuration
+name that reaches it. Past 5,000 changes ao stops and says it cannot tell what changed, and a change it cannot
 read holds as one nobody has seen.
+
+*In ao since slice LEADS-ADAPTERS: what is no regular file's bytes is digested by its kind, and a folder
+read whole is read whole by every name it is reached by.* A FIFO's digest was the sha256 of a marker ao
+wrote, so a file holding those bytes, once a person had seen it, stood for the FIFO an agent put in its place,
+whose writer sends a harness whatever it likes; a link's was the sha256 of bytes a file could hold as well. The
+digest of a link, a FIFO, a socket, a device or a link to nothing now starts with its kind, which no file's
+bytes can be given, and one a person saw before this release reads as unseen once more. A folder git lists
+without descending into it, walked for the few names declared in it - `.github/` for `.github/hooks` - hid
+`.kiro`, a link to it that kiro reads whole: its steering went unnamed. A folder is walked again whole when a
+name a harness reads whole reaches it. Completed walks are remembered by their declared path, not by
+the real directory: `.kiro -> .claude` is read under both names, and a link to an otherwise excluded
+`.claude/worktrees/<lane>` is read under the link's configuration name. Only directories on the active
+recursion path stop a cycle, with partial and whole walks tracked separately: an active partial walk
+of ignored `.github` does not hide `.github/hooks -> .` reading the same folder whole. A link at a declared
+prefix, such as `.github -> settings`, is also read for its declared children, whether git tracks or
+ignores the link, even when an ordinary tracked file became that link behind an assume-unchanged flag.
+Unrelated files beside those children stay outside that partial walk. An earlier
+sibling walk does not suppress another alias. The commit the configuration is first read at, and each
+role's command as accepted, are read and written under one lock: two first readings at once each wrote a record, the later
+over the earlier, and an acceptance that landed during another was dropped by it.
 
 - `ao verify` prints each change nobody has seen with the command that records it, and keeps them in its
   verification record as `harness_config`. It does not fail for them: a slice may change the rules its
@@ -489,6 +510,20 @@ see: ao's pointer added to a person's rule file (`ao init --rules`), an MCP file
 server, a playbook a project's own adapter declares - a layer an agent can write - a file changed after
 ao wrote it, and an MCP file a harness's own `mcp add` command wrote in its own words. `ao harness seen`
 says which changes ao wrote itself and which a person recorded.
+
+*In ao since slice LEADS-ADAPTERS: those files are written in the project alone.* A `.ao/PLAYBOOK.md`,
+rule file or MCP file that was a link had ao's text added to the person's file it led to, and a folder
+swapped for a link after ao looked did the same. Init and skill install now open files in held folders:
+POSIX uses relative opens with `O_NOFOLLOW`; Windows pins every folder with native handles without
+delete sharing and refuses reparse points. If neither safe way exists, the operation is refused.
+The opt-in ledger, its lock and seal use the held tree too. Reading before any opt-in creates no lock,
+including during an init plan that is refused; seals and the recorded length are still checked, and
+an interrupted seal is still recovered under lock. Known JSON MCP formats are merged by ao;
+other formats are refused with the vendor command named for a person, since ao cannot constrain that
+command's writes. A link where ao adds text is refused, except a rule link resolving inside the project
+to another rule file this run writes: the target receives the pointer once and the link is named.
+A configuration appearing at init's exclusive first open is kept, named and refused; replacements keep
+the existing POSIX mode despite the umask ([getting started](getting-started.md), [windows](windows.md)).
 
 Claude Code writes `.claude/settings.local.json` each time you allow a tool for good, and ao cannot tell
 your write from an agent's: an allow rule there widens every turn ao starts on that harness, so it is a

@@ -20,6 +20,7 @@ What works, what does not, and how hosted runners exercise it.
 | the reviewer stall check (`review.stall_minutes`) | does not apply: Windows has no process group to read a reviewer's CPU from, so the review's timeout ends a reviewer that hangs, and the review says so (below) |
 | the machine read before a gate run, `ao lock` and a lane start | not measured: ao reads memory, paging and disk on macOS and Linux, so the run says once that it read none and goes on, never refused on its account; the gate lock still keeps two suites apart, and `ao doctor`'s `machine` line says so ([gates.md](gates.md#serialisation-and-machine-pressure)) |
 | a transcript read without following a link | holds: where there is no O_NOFOLLOW the path is looked at before it is opened, and the file opened must be the one looked at (below) |
+| the files `ao init` and `ao skill install` write in a project | held through native Windows handles: each folder is opened as itself without delete sharing until the operation ends, so links and junctions are refused and no folder can be swapped out meanwhile (below) |
 | the grant audit (`ao doctor`, an actor's grant) | asks `py -c`, `powershell -Command` and `cmd /c`, with their kin, as it asks `python -c` (below) |
 
 *In ao since slice WINDOWS-LANE-PARITY: the Windows lane runs the reviewer and authority tests the
@@ -182,6 +183,23 @@ The program is judged once it is resolved, just before it starts: a `.cmd` or `.
 case. A prompt file is no channel for it, since its path is an argument too.
 `tests/test_windows_cmd_channel.py` holds it on every platform by deciding as Windows does; the
 lane has not yet started an agent CLI through a `.cmd`.*
+
+*In ao since slice LEADS-ADAPTERS: files init and skill install write stay in held folders on Windows.*
+Each folder, from the volume root through the project's destination folder, is opened with
+`CreateFileW`, `FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT`, and sharing that omits
+`FILE_SHARE_DELETE`. ao refuses a reparse point or anything but a directory, and keeps every handle
+open until the leaf operation ends: another process cannot rename, delete or replace a folder meanwhile.
+The project root and its ancestors are opened as existing directories; only relative folders below the
+root are created, so a shared ancestor needs no create-directory permission. With `ao init --rules`,
+a rule link to another drive or UNC share is named as unwritten and the command exits 1.
+Leaves are opened with `FILE_FLAG_OPEN_REPARSE_POINT` and checked before reading or writing; new files
+and replacement temporaries use `CREATE_NEW`. A replacement is renamed in the held folder.
+The opt-in ledger and its lock are held this way too. Known JSON MCP files are written by ao's own
+primitive; a vendor command whose writes ao cannot keep in the project is named for a person, never run.
+The choice depends on available APIs, not `os.name` alone, and a platform with neither these handles nor
+POSIX relative opens refuses the operation. `tests/test_leads_adapters_3.py` checks the choice and API
+contract on every platform, with native Windows tests for links, junctions and attempts to rename held
+folders. Windows still has no POSIX file modes or directory fsync guarantee.
 
 The hosted `tests` workflow runs Windows and macOS every week on Python 3.12, Windows twice -
 once without Python's UTF-8 mode - and any environment on demand (`gh workflow run tests -f

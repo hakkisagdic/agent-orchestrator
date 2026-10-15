@@ -30,6 +30,11 @@ def checkpoint(name):
 def replace(path, data, **kwargs):
     return original(path, data, _checkpoint=checkpoint)
 storage.replace_file_durably = replace
+# ao init writes the config in its folder held open from the project's root down, through no link (LEADS-ADAPTERS).
+original_in_tree = storage.replace_in_tree
+def replace_in_tree(root, rel, data, **kwargs):
+    return original_in_tree(root, rel, data, _checkpoint=checkpoint)
+storage.replace_in_tree = replace_in_tree
 '''
 
 WRITERS = {

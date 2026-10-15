@@ -19,6 +19,33 @@ or when the quick gates exercise none of your code. Its authority, board, backlo
 files are in English, and so is what ao tells you afterwards - the digest, the handoff, alarms and
 the phone; `ao init --language tr` has them in Turkish ([configuration](configuration.md)).
 
+*In ao since slice LEADS-ADAPTERS: `ao init` writes in the project alone, and keeps files already there.*
+Each file it makes - the marker, the first configuration, the board, backlog, authority and gates of
+`.ao`, the mailbox's README, a harness's coordination - is made exclusively: a file, folder or link
+that appears before the open is kept. A configuration that appears after init planned without one is
+named, and init exits 1 before writing the rest; run init again to plan from it.
+Existing configuration changes and the manifest are replaced whole. On POSIX a link at the manifest's
+name is replaced without following it; Windows refuses it. The same tree primitives write
+`.ao/project-key`; if that write is refused, the machine's registry keeps the name.
+
+What init adds to - the playbook, a rule file with `--rules`, an MCP registration - is read and replaced
+whole through no link. A rule link such as `CLAUDE.md -> AGENTS.md` is named and accepted when it resolves
+inside the project to another rule file this run writes successfully: the pointer is written once,
+through the target's own path. A link outside the project or to a file this run does not write is refused.
+Other links where ao adds text are named, left alone, and init exits 1 having written the rest.
+
+On macOS and Linux each folder is opened from the project's root down, relative to the one before it
+with `O_NOFOLLOW`; the leaf is opened relative to the held folder. On Windows native handles hold every
+folder without delete sharing until the file operation ends, so no folder can be renamed or replaced
+meanwhile; reparse points, including links and junctions, are refused ([windows](windows.md)).
+A platform offering neither safe way refuses the operation. The opt-in ledger used by
+`--review-tier same-family`, its lock and its seal use the same held folders, preserving the chain and
+machine checkpoint. Known JSON MCP formats are merged by ao itself; for another format ao refuses to
+run a vendor command that could be redirected, names the command for you to run, and exits 1.
+Init appends only to a `.gitignore` that is a regular file with one name, opened through no link;
+otherwise it names the lines for you to add. `ao skill install` writes the playbook as init does,
+and exits 1 when it did not write one.
+
 With one harness for both roles, `claude-claude` is refused until you choose a
 [review tier](roles.md#review-tiers): another model of the same family, labeled as weaker
 independence wherever its reviews show, or no model reviewer at all and a person reviewing each

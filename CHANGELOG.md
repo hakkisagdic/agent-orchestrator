@@ -31,6 +31,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- Init preserves a configuration appearing at its first write, replacements retain POSIX modes despite umask, shared rule links receive one pointer through their target, hold notes precede release, concurrent harness records survive, imports retain items without usable IDs, and board, status, fleet and adapter validation report their formerly missed cases correctly ([getting started](docs/getting-started.md), [safety](docs/safety.md), [sources](docs/sources.md), [adapters](docs/adapters.md)) (LEADS-ADAPTERS).
 - Reviewer mail stays outside the implementer inbox, and broken board IDs cannot satisfy dependencies ([roles](docs/roles.md), [slices](docs/slices.md)) (TRIAGE-3-LOW)
 - Wake, refill and nudge launches stop when added flags cannot be recorded, and same-second report rewrites become pending again ([watchdog](docs/watchdog.md)) (TRIAGE-3-LOW)
 - Project config writes refuse excessive encoded size or nesting before replacement, and config and feature commands distinguish changed files from unconfirmed durability ([configuration](docs/configuration.md)) (TRIAGE-3-LOW)
@@ -66,6 +67,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Security
 
+- Harness digests distinguish special files and follow every declared directory view; `ao init` and `ao skill install` use held folders, opt-in records and locks stay in the held tree, known MCP formats are merged directly while unsafe vendor writes are refused, and source imports cannot inject board lines ([safety](docs/safety.md), [getting started](docs/getting-started.md), [sources](docs/sources.md)) (LEADS-ADAPTERS).
 - ao refuses a `.git` directory, gitfile or symlink that redirects a subdirectory project's commit check to another repository, names the redirect and its repair, and records enrollment in neither repository on that refusal; permitted enrollment writes use the hook's repository, where a redirected check could previously let an unchecked outer commit land or mark the planted repository enrolled ([safety](docs/safety.md#3-commit-authority-is-separated)) (NESTED-GIT).
 - Plan baselines reject malformed records, chain new admissions with committed-length checkpoints, and require recorded re-admissions for replacements ([ledger](docs/ledger.md)) (TRIAGE-2-MEDIUM).
 - The grants audit names agent rules admitting `ao doctor --check --notify`, including broad doctor grants and reversed flag order ([alarms](docs/alarms.md)) (TRIAGE-1-LOW)
@@ -103,6 +105,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Windows
 
+- Setup writes hold native directory handles without delete sharing, refuse reparse points and open leaves without following links, while platforms offering neither native handles nor safe relative opens refuse the operation ([windows](docs/windows.md)) (LEADS-ADAPTERS).
 - Processes appending to a new ledger at once no longer fail on Windows: the one that found the lock file empty wrote its byte after another had locked it, and Windows' mandatory lock refused the write with PermissionError ([ledger](docs/ledger.md), WINDOWS-LOCK-WRITE).
 - A reviewer ao starts - a route of `ao review`, the bug hunter - is asked for UTF-8 standard streams, as ao writes its prompt and reads its answer: one written in Python wrote Windows' ANSI code page without UTF-8 mode, so its leads and findings lost the em dash they are read by, and a Turkish letter ended it before it answered ([windows](docs/windows.md), REVIEWER-UTF8).
 - Two tests the Windows lane failed now hold to the platform they run on: a turn's refusal names a relative program as Windows writes its path, and a cycle on a Windows runner records the orphans it could not look for as unknown from its first run ([windows](docs/windows.md), WINDOWS-TESTS-6).

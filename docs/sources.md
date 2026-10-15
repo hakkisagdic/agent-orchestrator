@@ -42,6 +42,16 @@ one it stays in `inbox` with a reason. `ao` enforces that rule and makes no
 judgement of its own — it has no model. An architect turn decides and writes the
 boundary into the inbox file.
 
+*In ao since slice LEADS-ADAPTERS: an imported item is one board line.* A tracker
+item's title is anyone's text, and a line break in it went into `.ao/board.md` as
+it was - an item of its own, admitted under the boundary written for another. Each
+text an item's line carries is one line now, as `ao board add` writes it; an item
+whose id the board cannot read whole, or whose text holds the `·` that separates a
+line's notes, is refused by name, its file stays in `.ao/inbox/` to be corrected
+and imported again, and the import exits 1. So is an item with no id - none, an
+empty one, or one that is no text or whole number - named by its place in the
+file: it was dropped without a word, and its file marked imported.
+
 Size is not a reason to park. A project-shaped item is **decomposed**, not
 deferred: the architect writes a plan of phases, each phase naming the files it
 touches and why, and each phase enters the board as its own item with its own

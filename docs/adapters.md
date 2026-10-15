@@ -474,6 +474,12 @@ because a shape nobody can load is not a capability - see "What ao can reach" be
 ao's own tests run every shipped adapter through the same conformance, so a change in ao that
 would break a third party's adapter breaks ours first.
 
+*In ao since slice LEADS-ADAPTERS:* `validate` holds a path an adapter declares - in `project_config`,
+`worktree_dirs` or `options.reviewer_agent.path` - to one within the folder it is read against: relative,
+with no `~`, `..`, backslash or drive, since `C:/outside` is absolute on Windows. `options` that are no object,
+and a `review` block whose `environment` is no object, are named rather than raising or read as no
+rules; an environment of null still says there are none.
+
 ## What a harness says it supports, asked in ACP
 
 *In ao since slice ACP-PROBE: an adapter's `acp` block and `ao harness probe`. It is the first step of

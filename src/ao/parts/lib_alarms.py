@@ -320,7 +320,7 @@ def project_key(root):
     mine = next((name for name, row in project_registry().items() if row.get("root") == real), None)
     if mine:
         return mine
-    from .storage import _exclusive_lock, replace_file_durably
+    from .storage import _exclusive_lock, replace_file_durably, replace_in_tree
     registry = project_registry_path()
     recorded = os.path.join(real, ".ao", PROJECT_KEY_FILE)
     registered = False
@@ -354,7 +354,10 @@ def project_key(root):
                 known[mine] = {"root": real, "at": int(time.time())}
                 replace_file_durably(registry, json.dumps(known, indent=1, sort_keys=True).encode("utf-8"))
                 registered = True
-            replace_file_durably(recorded, json.dumps({"key": mine, "root": real}).encode("utf-8"))
+            # In the tree an agent writes, through no link: a `.ao` made one after the look above had the first
+            # command to name the project - `ao init` - write this file wherever it led (LEADS-ADAPTERS). One refused
+            # is an OSError, and the name the registry holds stands.
+            replace_in_tree(real, f".ao/{PROJECT_KEY_FILE}", json.dumps({"key": mine, "root": real}).encode("utf-8"))
     except OSError:
         # A name the registry did not record is one another project may hold or take: the bare basename came
         # back here, and a push window allowed in one project of that name opened the other's. The path's
@@ -410,6 +413,9 @@ PROJECT_FILES = {
     "harness-base": "harness-base-{key}.json",
     # Each role's turn command as last accepted, by ao init, the first reading or a person (TURN-ARGV).
     "harness-turns": "harness-turns-{key}.json",
+    # Held while the baseline or the accepted commands are read and written, so two writers never cross
+    # (LEADS-ADAPTERS).
+    "harness-lock": "harness-{key}.lock",
 }
 
 
@@ -1333,17 +1339,17 @@ def record_opt_in(root, setting, value, by):
     what ao can check - the login and whether a terminal was attached. A value of None
     is the setting cleared.
     """
-    from .storage import append_chained_jsonl
+    from .storage import append_chained_in_tree
     user, interactive = _login_and_terminal()
     row = {"at": int(time.time()), "setting": setting, "value": value, "by": by,
            "user": user, "interactive": interactive}
-    return append_chained_jsonl(opt_ins_path(root), row, OPT_IN_CHAIN)
+    return append_chained_in_tree(root, ".ao/ledger/opt-ins.jsonl", row, OPT_IN_CHAIN)
 
 
 def recorded_opt_in(root, setting):
     """The newest recorded row for one setting, or None; raises when the ledger cannot be read."""
-    from .storage import read_chained_jsonl
-    rows = [row for row in read_chained_jsonl(opt_ins_path(root), OPT_IN_CHAIN)
+    from .storage import read_chained_in_tree
+    rows = [row for row in read_chained_in_tree(root, ".ao/ledger/opt-ins.jsonl", OPT_IN_CHAIN)
             if isinstance(row, dict) and row.get("setting") == setting]
     return rows[-1] if rows else None
 

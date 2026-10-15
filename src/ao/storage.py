@@ -11,6 +11,7 @@ import errno
 import hashlib
 import json
 import os
+import stat
 import time
 
 UTF8 = "utf-8"
@@ -157,7 +158,7 @@ def _let_go(handle):
 
 
 @contextmanager
-def _exclusive_lock(path, timeout=10.0):
+def _exclusive_lock(path, timeout=10.0, *, _folder=None):
     """Cross-platform advisory lock on one byte of a sidecar file.
 
     The byte is written once, by whichever process finds the file empty. On Windows a lock is mandatory for
@@ -173,10 +174,18 @@ def _exclusive_lock(path, timeout=10.0):
     and checkpoints show (LOCK-LINKS).
     """
     parent = os.path.dirname(path) or "."
-    os.makedirs(parent, exist_ok=True)
+    if _folder is None:
+        os.makedirs(parent, exist_ok=True)
     deadline = time.monotonic() + max(0.0, timeout)
     while True:
-        handle = _open_lock(path)
+        if _folder is None:
+            handle = _open_lock(path)
+        else:
+            fd = _tree_open(_folder, os.path.basename(path), os.O_RDWR | os.O_CREAT | os.O_APPEND)
+            if os.fstat(fd).st_nlink != 1:
+                os.close(fd)
+                raise LockThroughLink(f"{path} has another name; remove the link before retrying")
+            handle = open(fd, "a+b", buffering=0)
         try:
             handle.seek(0, os.SEEK_END)
             if handle.tell() == 0:
@@ -198,7 +207,16 @@ def _exclusive_lock(path, timeout=10.0):
                     if time.monotonic() >= deadline:
                         raise LedgerLockTimeout(f"timed out locking {path}", path, timeout)
                     time.sleep(0.02)
-            named = _lock_still_named(path, handle)
+            if _folder is None:
+                named = _lock_still_named(path, handle)
+            else:
+                try:
+                    at = _tree_stat(_folder, os.path.basename(path))
+                    held = os.fstat(handle.fileno())
+                    named = not stat.S_ISLNK(at.st_mode) and held.st_nlink == 1 and \
+                        (at.st_dev, at.st_ino) == (held.st_dev, held.st_ino)
+                except FileNotFoundError:
+                    named = False
         except BaseException:
             _let_go(handle)
             raise
@@ -225,6 +243,11 @@ def _read_jsonl_unlocked(path, allow_partial_tail=True):
         data = open(path, "rb").read()
     except FileNotFoundError:
         return []
+    return _jsonl_rows(data, path, allow_partial_tail)
+
+
+def _jsonl_rows(data, path, allow_partial_tail=True):
+    """Parse bytes already read through a held file (LEADS-ADAPTERS)."""
     rows = []
     lines = data.splitlines(keepends=True)
     for index, raw in enumerate(lines):
@@ -339,12 +362,12 @@ def _write_committed_lengths(data):
     replace_file_durably(checkpoint_path(), json.dumps(data, indent=1, sort_keys=True).encode("utf-8"))
 
 
-def _record_committed_length(path, count, digest, sealed=None):
+def _record_committed_length(path, count, digest, sealed=None, *, identity=None):
     store = checkpoint_path()
     os.makedirs(os.path.dirname(store) or ".", exist_ok=True)
     with _exclusive_lock(store + ".lock"):
         data = _load_committed_lengths()
-        key = os.path.realpath(path)
+        key = identity or os.path.realpath(path)
         mark = {"count": count, "digest": digest, "at": int(time.time())}
         previous = data.get(key) if isinstance(data.get(key), dict) else {}
         # A seal is recorded outside the repository too, so one written inside it
@@ -355,9 +378,9 @@ def _record_committed_length(path, count, digest, sealed=None):
         _write_committed_lengths(data)
 
 
-def _check_committed_length(path, rows, chain, seal=None):
+def _check_committed_length(path, rows, chain, seal=None, *, identity=None):
     """Refuse a ledger shorter than its recorded length, or diverging from it (#62), across a seal (#50)."""
-    mark = _load_committed_lengths().get(os.path.realpath(path))
+    mark = _load_committed_lengths().get(identity or os.path.realpath(path))
     if not isinstance(mark, dict) or not isinstance(mark.get("count"), int) or mark["count"] <= 0:
         return
     recorded = mark.get("sealed")
@@ -550,6 +573,14 @@ def _sync_directory(directory, fsync):
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
     fd = os.open(directory or ".", flags)
     try:
+        return _sync_folder_held(fd, fsync)
+    finally:
+        os.close(fd)
+
+
+def _sync_folder_held(fd, fsync):
+    """Persist the entries of a directory held open as `fd`; False where its file system cannot."""
+    try:
         fsync(fd)
     except OSError as exc:
         # Some filesystems expose directories but reject fsync. This is a
@@ -557,13 +588,24 @@ def _sync_directory(directory, fsync):
         if exc.errno in (errno.EINVAL, errno.ENOTSUP, getattr(errno, "EOPNOTSUPP", -1)):
             return False
         raise
-    finally:
-        os.close(fd)
     return True
 
 
 class ReplacedNotDurable(OSError):
     """The replacement happened, but syncing its directory failed (TRIAGE-3-LOW)."""
+
+
+def _write_all(fd, data):
+    """Write every byte of `data` to `fd`, or raise."""
+    remaining = memoryview(data)
+    while remaining:
+        try:
+            count = os.write(fd, remaining)
+        except InterruptedError:
+            continue
+        if count <= 0:
+            raise OSError(errno.EIO, "write made no forward progress")
+        remaining = remaining[count:]
 
 
 def replace_file_durably(path, data, *, mode=None, _checkpoint=None, _fsync=None):
@@ -607,15 +649,7 @@ def replace_file_durably(path, data, *, mode=None, _checkpoint=None, _fsync=None
         opened = True
         try:
             _call(_checkpoint, "temporary-opened")
-            remaining = memoryview(data)
-            while remaining:
-                try:
-                    count = os.write(fd, remaining)
-                except InterruptedError:
-                    continue
-                if count <= 0:
-                    raise OSError(errno.EIO, "write made no forward progress")
-                remaining = remaining[count:]
+            _write_all(fd, data)
             _call(_checkpoint, "temporary-written")
             fsync(fd)
             _call(_checkpoint, "temporary-fsynced")
@@ -638,6 +672,516 @@ def replace_file_durably(path, data, *, mode=None, _checkpoint=None, _fsync=None
                                  "read the file and retry after fixing the storage error") from exc
     if synced:
         _call(_checkpoint, "directory-fsynced")
+
+
+# ---- a file in a project's tree, written and read through no link (LEADS-ADAPTERS) -------------------------------
+#
+# `ao init` writes into a tree an agent writes too, and it wrote by path: each folder on the way was whatever stood
+# there as the file was opened. A `.ao` or an `agent-mail` that was a link - or became one between init's look and its
+# write - took the configuration, the board, the playbook and the manifest out of the project, and a `.ao/PLAYBOOK.md`
+# or an MCP file that was a link had ao's text added to the file of the person's it led to. Where the platform opens a
+# file relative to a folder it holds open, as POSIX does, each folder is opened so from the project's root down, never
+# through a link, and the file is made, replaced or read in the last of them: a link put on the way meanwhile moves
+# nothing. Windows holds every folder handle without delete sharing, so no folder can be renamed or replaced while
+# its path is used; every handle is opened as the reparse point itself and reparse points are refused.
+
+class InTheWay(OSError):
+    """What stands where a file is written or read in a project's tree and is not gone through: a link or a file where
+    a folder goes, a link at the file's own name, or no regular file. `where` is its path in the tree (LEADS-ADAPTERS).
+    """
+
+    def __init__(self, where, what):
+        super().__init__(f"{where} {what}")
+        self.where = where
+
+
+_A_FOLDER = "is a link or a file where a folder of the project's own goes"
+_A_LINK = "is a link, and ao reads and writes through none"
+_NO_FILE = "is no regular file"
+_WINDOWS_LINK_TAG = 0x20000000          # the name-surrogate bit of a reparse tag: a symbolic link's, a junction's
+
+
+def folders_held_open():
+    """Whether this platform opens a file relative to a folder it holds open, as POSIX does and Python on Windows does
+    not (LEADS-ADAPTERS)."""
+    return bool(getattr(os, "O_NOFOLLOW", 0) and getattr(os, "O_DIRECTORY", 0)) and \
+        {os.open, os.mkdir, os.rename, os.stat, os.unlink} <= os.supports_dir_fd
+
+
+def not_a_folder_of_its_own(path):
+    """Whether what stands at `path` is no folder of the project's own: a link, a junction - Windows' link to a folder,
+    which `os.path.islink` does not name before Python 3.12, known by the name-surrogate bit of its reparse tag, which a
+    cloud file's placeholder does not carry - a file, or what cannot be looked at (LEADS-ADAPTERS)."""
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode) \
+        or bool(getattr(info, "st_reparse_tag", 0) & _WINDOWS_LINK_TAG)
+
+
+def _tree_parts(rel):
+    """The names of `rel`, a path within a project, folder by folder."""
+    text = str(rel).replace(os.sep, "/")
+    parts = [part for part in text.split("/") if part not in ("", ".")]
+    if not parts or ".." in parts or (os.name == "nt" and any(":" in part for part in parts)):
+        raise InTheWay(text, "names no file within the project")
+    return parts
+
+
+def _folder_held(root, parts, make):
+    """The descriptor of the folder `parts` names under `root`, each opened relative to the one before it and never
+    through a link, and those missing made where `make`; None where one is missing. InTheWay where one is a link or a
+    file."""
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        for at, part in enumerate(parts):
+            if make:
+                try:
+                    os.mkdir(part, dir_fd=fd)
+                except FileExistsError:
+                    pass
+            try:
+                inner = os.open(part, flags, dir_fd=fd)
+            except FileNotFoundError:
+                if make:
+                    raise
+                os.close(fd)
+                return None
+            except OSError as exc:
+                if exc.errno in (errno.ELOOP, errno.ENOTDIR, errno.EMLINK):
+                    raise InTheWay("/".join(parts[:at + 1]), _A_FOLDER) from None
+                raise
+            held, fd = fd, inner
+            os.close(held)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _windows_tree_available():
+    """Select the native handle path by its APIs, even when a test changes os.name (LEADS-ADAPTERS)."""
+    import ctypes
+    return callable(getattr(ctypes, "WinDLL", None))
+
+
+def _require_windows_tree():
+    if not _windows_tree_available():
+        raise InTheWay("this platform", "cannot hold folders through no link; ao refuses this file operation")
+
+
+def _open_tree_nt(path, flags=None, mode=0o666):
+    """Open the directory or leaf itself, with no delete sharing; reject every reparse point (LEADS-ADAPTERS)."""
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    class Information(ctypes.Structure):
+        _fields_ = [("attributes", wintypes.DWORD), ("created", wintypes.FILETIME),
+                    ("accessed", wintypes.FILETIME), ("written", wintypes.FILETIME),
+                    ("volume", wintypes.DWORD), ("size_high", wintypes.DWORD), ("size_low", wintypes.DWORD),
+                    ("links", wintypes.DWORD), ("index_high", wintypes.DWORD), ("index_low", wintypes.DWORD)]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    create, close, information = kernel.CreateFileW, kernel.CloseHandle, kernel.GetFileInformationByHandle
+    create.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                       wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+    create.restype = wintypes.HANDLE
+    close.argtypes = (wintypes.HANDLE,)
+    close.restype = wintypes.BOOL
+    information.argtypes = (wintypes.HANDLE, ctypes.POINTER(Information))
+    information.restype = wintypes.BOOL
+    directory = flags is None
+    # A folder is opened to list it, not for its attributes alone: Windows records the share mode of a handle that
+    # asks for data access only, so one that asked for none let another process rename the folder it was holding.
+    access = (0x0001 | 0x0080) if directory else (0xC0000000 if flags & os.O_RDWR else
+                                                   0x40000000 if flags & os.O_WRONLY else 0x80000000)
+    disposition = 3 if directory or not flags & os.O_CREAT else (1 if flags & os.O_EXCL else 4)
+    raw = create(os.fspath(path), access, 0x1 | 0x2, None, disposition, 0x02000000 | 0x00200000, None)
+    if raw is None or raw == wintypes.HANDLE(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        info = Information()
+        if not information(raw, ctypes.byref(info)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if info.attributes & 0x400:
+            raise InTheWay(path, _A_FOLDER if directory else _A_LINK)
+        if bool(info.attributes & 0x10) != directory:
+            raise InTheWay(path, _A_FOLDER if directory else _NO_FILE)
+        if directory:
+            return raw, close
+        fd = msvcrt.open_osfhandle(raw, flags & (os.O_APPEND | os.O_RDONLY | os.O_WRONLY | os.O_RDWR)
+                                  | getattr(os, "O_BINARY", 0))
+    except BaseException:
+        close(raw)
+        raise
+    return fd
+
+
+@contextmanager
+def _folders_nt(root, parts, make):
+    """Pin the whole absolute path until the leaf operation ends, including the project's ancestors."""
+    _require_windows_tree()
+    absolute = os.path.abspath(root)
+    drive, tail = os.path.splitdrive(absolute)
+    folder = drive + os.sep
+    ancestors = [part for part in tail.split(os.sep) if part]
+    names = ancestors + list(parts)
+    handles = []
+    try:
+        handles.append(_open_tree_nt(folder))
+        for at, part in enumerate(names):
+            folder = os.path.join(folder, part)
+            # Ancestors and root must already exist; traversal permission need not allow mkdir there
+            # (the round-4 review of LEADS-ADAPTERS).
+            if make and at >= len(ancestors):
+                try:
+                    os.mkdir(folder)
+                except FileExistsError:
+                    pass
+            try:
+                handles.append(_open_tree_nt(folder))
+            except FileNotFoundError:
+                if make:
+                    raise
+                yield None
+                return
+            except OSError as exc:
+                shown = "/".join(parts[:at - len(ancestors) + 1]) if at >= len(ancestors) else folder
+                raise InTheWay(shown, f"{_A_FOLDER}, or cannot be held ({exc})") from exc
+        yield folder
+    finally:
+        for handle, close in reversed(handles):
+            close(handle)
+
+
+@contextmanager
+def _tree_folder(root, parts, make):
+    """A dir_fd on POSIX or a path pinned by native handles on Windows (LEADS-ADAPTERS)."""
+    if folders_held_open():
+        fd = _folder_held(root, parts, make)
+        try:
+            yield fd
+        finally:
+            if fd is not None:
+                os.close(fd)
+    else:
+        with _folders_nt(root, parts, make) as folder:
+            yield folder
+
+
+def _tree_open(folder, name, flags, mode=0o666):
+    if isinstance(folder, int):
+        try:
+            fd = os.open(name, flags | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0), mode, dir_fd=folder)
+        except OSError as exc:
+            if exc.errno in (errno.ELOOP, errno.EMLINK):
+                raise InTheWay(name, _A_LINK) from exc
+            if exc.errno in (errno.ENXIO, errno.ENODEV, getattr(errno, "EOPNOTSUPP", -1)):
+                raise InTheWay(name, _NO_FILE) from exc
+            raise
+    else:
+        try:
+            fd = _open_tree_nt(os.path.join(folder, name), flags, mode)
+        except InTheWay as exc:
+            raise InTheWay(name, str(exc)[len(str(exc.where)) + 1:]) from exc
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise InTheWay(name, _NO_FILE)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _tree_stat(folder, name):
+    return os.stat(name, dir_fd=folder, follow_symlinks=False) if isinstance(folder, int) else \
+        os.lstat(os.path.join(folder, name))
+
+
+def _tree_unlink(folder, name):
+    if isinstance(folder, int):
+        os.unlink(name, dir_fd=folder)
+    else:
+        os.unlink(os.path.join(folder, name))
+
+
+def _tree_sync(folder, fsync):
+    return _sync_folder_held(folder, fsync) if isinstance(folder, int) else False
+
+
+def create_in_tree(root, rel, data):
+    """Make the file `rel` in the project at `root`, holding `data`, where nothing stands at that name: "wrote", or
+    "kept" where a file, a folder or a link stands - kept as it is and never followed. InTheWay where a folder on the
+    way is a link or a file (LEADS-ADAPTERS)."""
+    parts = _tree_parts(rel)
+    with _tree_folder(root, parts[:-1], make=True) as folder:
+        try:
+            out = _tree_open(folder, parts[-1], os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+        except FileExistsError:
+            return "kept"
+        with os.fdopen(out, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        _tree_sync(folder, os.fsync)
+    return "wrote"
+
+
+def replace_in_tree(root, rel, data, *, mode=None, _checkpoint=None, _fsync=None):
+    """Replace the file `rel` in the project at `root` whole, as replace_file_durably does - a temporary under a name no
+    file had, fsynced, renamed over it, the folder fsynced - in the folder held open from the root down: a link at its
+    name is replaced and nothing is written through one. Without `mode` the file keeps the mode it had, or 0644.
+    `_checkpoint` and `_fsync` are replace_file_durably's test seams, at the same steps. InTheWay where a folder on the
+    way is a link or a file, or a folder stands at its name (LEADS-ADAPTERS)."""
+    fsync = _fsync or os.fsync
+    parts = _tree_parts(rel)
+    shown = "/".join(parts)
+
+    def kept_mode(listed):
+        if stat.S_ISDIR(listed.st_mode):
+            raise InTheWay(shown, "is a folder, where a file of the project's goes")
+        return listed.st_mode & 0o7777 if stat.S_ISREG(listed.st_mode) else 0o644
+
+    if not folders_held_open():
+        with _folders_nt(root, parts[:-1], make=True) as folder:
+            path = os.path.join(folder, parts[-1])
+            try:
+                leaf = _open_tree_nt(path, os.O_RDONLY)
+            except FileNotFoundError:
+                kept = 0o644
+            else:
+                try:
+                    kept = kept_mode(os.fstat(leaf))
+                finally:
+                    os.close(leaf)
+            temporary = os.path.join(folder, f".{parts[-1]}.{os.getpid()}.{os.urandom(4).hex()}.tmp")
+            out = _open_tree_nt(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+            try:
+                try:
+                    _call(_checkpoint, "temporary-opened")
+                    _write_all(out, data)
+                    _call(_checkpoint, "temporary-written")
+                    fsync(out)
+                    _call(_checkpoint, "temporary-fsynced")
+                finally:
+                    os.close(out)
+                _replace(temporary, path)
+            except BaseException:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+                raise
+            _call(_checkpoint, "replaced")
+        return
+    fd = _folder_held(root, parts[:-1], make=True)
+    try:
+        name = parts[-1]
+        try:
+            kept = kept_mode(os.stat(name, dir_fd=fd, follow_symlinks=False))
+        except FileNotFoundError:
+            kept = 0o644
+        temporary = f".{name}.{os.getpid()}.{os.urandom(4).hex()}.tmp"
+        out = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                      kept if mode is None else mode, dir_fd=fd)
+        try:
+            try:
+                _call(_checkpoint, "temporary-opened")
+                _write_all(out, data)
+                os.fchmod(out, kept if mode is None else mode)
+                _call(_checkpoint, "temporary-written")
+                fsync(out)
+                _call(_checkpoint, "temporary-fsynced")
+            finally:
+                os.close(out)
+            os.replace(temporary, name, src_dir_fd=fd, dst_dir_fd=fd)
+        except BaseException:
+            try:
+                os.unlink(temporary, dir_fd=fd)
+            except OSError:
+                pass
+            raise
+        _call(_checkpoint, "replaced")
+        if _sync_folder_held(fd, fsync):
+            _call(_checkpoint, "directory-fsynced")
+    finally:
+        os.close(fd)
+
+
+def read_in_tree(root, rel):
+    """The bytes of the regular file `rel` in the project at `root`, or None where nothing is there. InTheWay where it,
+    or a folder on its way, is a link, or it is no regular file - a FIFO is never waited on (LEADS-ADAPTERS)."""
+    parts = _tree_parts(rel)
+    with _tree_folder(root, parts[:-1], make=False) as folder:
+        if folder is None:
+            return None
+        try:
+            leaf = _tree_open(folder, parts[-1], os.O_RDONLY)
+        except FileNotFoundError:
+            return None
+        except InTheWay as exc:
+            raise InTheWay("/".join(parts), str(exc)[len(str(exc.where)) + 1:]) from exc
+        with os.fdopen(leaf, "rb") as fh:
+            return fh.read()
+
+
+def append_in_tree(root, rel, data):
+    """Append only to a single-name regular file opened through no link (LEADS-ADAPTERS)."""
+    parts = _tree_parts(rel)
+    with _tree_folder(root, parts[:-1], make=True) as folder:
+        fd = _tree_open(folder, parts[-1], os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+        try:
+            if os.fstat(fd).st_nlink != 1:
+                raise InTheWay(rel, "is a file with another name")
+            _write_all(fd, data)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        _tree_sync(folder, os.fsync)
+
+
+def _tree_bytes(folder, name):
+    try:
+        fd = _tree_open(folder, name, os.O_RDONLY)
+    except FileNotFoundError:
+        return None
+    with os.fdopen(fd, "rb") as handle:
+        return handle.read()
+
+
+def _tree_rename(folder, source, target):
+    if isinstance(folder, int):
+        os.replace(source, target, src_dir_fd=folder, dst_dir_fd=folder)
+    else:
+        _replace(os.path.join(folder, source), os.path.join(folder, target))
+
+
+def _tree_seal(folder, name, identity):
+    """Read a seal through the held tree, including when its ledger is absent (LEADS-ADAPTERS)."""
+    raw_seal = _tree_bytes(folder, name + ".seal.json")
+    seal = None
+    if raw_seal is not None:
+        try:
+            seal = json.loads(raw_seal.decode(UTF8))
+        except (ValueError, UnicodeError) as exc:
+            raise LedgerCorruption(f"the seal of {identity} cannot be read: {exc}") from exc
+        if not isinstance(seal, dict) or not isinstance(seal.get("retired"), int) or seal["retired"] < 1 \
+                or not isinstance(seal.get("digest"), str):
+            raise LedgerCorruption(f"the seal of {identity} is malformed")
+    return seal
+
+
+def _chained_in_tree(root, rel, chain, record=None):
+    """The opt-in ledger's read or append, including recovery, under its usual sidecar lock (LEADS-ADAPTERS).
+
+    Keep the JSONL, chain, seals and machine checkpoint unchanged. Only this ledger's filesystem operations
+    change: the lock, ledger and seal are opened in the held folder; truncation and rollback use the same
+    descriptor, never a name an agent can redirect. Other ledger callers keep their existing API.
+    """
+    parts = _tree_parts(rel)
+    name = parts[-1]
+    identity = os.path.join(os.path.realpath(root), *parts)
+    with _tree_folder(root, parts[:-1], make=record is not None) as folder:
+        if folder is None:
+            _check_committed_length(identity, [], chain, identity=identity)
+            return []
+        if record is None:
+            # Reading a setting before any opt-in must not create a lock in an otherwise clean project, even
+            # when init refuses during planning. A pending seal still needs locked recovery (LEADS-ADAPTERS).
+            for leaf in (name, name + ".seal.json.pending"):
+                try:
+                    _tree_stat(folder, leaf)
+                except FileNotFoundError:
+                    continue
+                break
+            else:
+                _check_committed_length(identity, [], chain, seal=_tree_seal(folder, name, identity), identity=identity)
+                return []
+        with _exclusive_lock(identity + ".lock", _folder=folder):
+            data = _tree_bytes(folder, name) or b""
+            pending = _tree_bytes(folder, name + ".seal.json.pending")
+            if pending is not None:
+                intent = json.loads(pending.decode(UTF8))
+                rows = _jsonl_rows(data, identity, False)
+                if rows and isinstance(rows[0], dict) and rows[0].get(CHAIN_PREVIOUS_FIELD) == intent["digest"]:
+                    _record_committed_length(identity, intent["retired"] + len(rows),
+                                             chained_row_digest(rows[-1], chain),
+                                             sealed={"retired": intent["retired"], "digest": intent["digest"]},
+                                             identity=identity)
+                    _tree_rename(folder, name + ".seal.json.pending", name + ".seal.json")
+                    _tree_sync(folder, os.fsync)
+                else:
+                    _tree_unlink(folder, name + ".seal.json.pending")
+            seal = _tree_seal(folder, name, identity)
+            rows = _jsonl_rows(data, identity)
+            _validate_chained_rows(identity, rows, chain, CHAIN_PREVIOUS_FIELD, seal=seal)
+            _check_committed_length(identity, rows, chain, seal=seal, identity=identity)
+            if record is None:
+                return rows
+            retired = seal["retired"] if seal else 0
+            previous = chained_row_digest(rows[-1], chain) if rows else (seal["digest"] if seal else None)
+            chained = {CHAIN_PREVIOUS_FIELD: previous, "ordinal": retired + len(rows) + 1}
+            chained.update(record)
+            payload = _encode_jsonl(chained)
+            created = False
+            try:
+                fd = _tree_open(folder, name, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o644)
+                created = True
+            except FileExistsError:
+                fd = _tree_open(folder, name, os.O_RDWR)
+            remove_created = created
+            try:
+                if os.fstat(fd).st_nlink != 1:
+                    raise InTheWay(rel, "has another name; ao appends only to the project's own file")
+                # Refuse a different leaf swapped in since the read; a hard link is refused before any truncation.
+                with os.fdopen(os.dup(fd), "rb") as handle:
+                    current = handle.read()
+                if current != data:
+                    raise InTheWay(rel, "changed while ao read it; retry the opt-in")
+                boundary = len(data) if not data or data.endswith((b"\n", b"\r")) else \
+                    max(data.rfind(b"\n"), data.rfind(b"\r")) + 1
+                os.ftruncate(fd, boundary)
+                if boundary != len(data):
+                    os.fsync(fd)
+                os.lseek(fd, boundary, os.SEEK_SET)
+                try:
+                    _write_all(fd, payload)
+                    os.fsync(fd)
+                    if created:
+                        _tree_sync(folder, os.fsync)
+                    _record_committed_length(identity, retired + len(rows) + 1,
+                                             chained_row_digest(chained, chain), identity=identity)
+                except BaseException:
+                    os.ftruncate(fd, boundary)
+                    os.fsync(fd)
+                    raise
+                remove_created = False
+            finally:
+                held = os.fstat(fd)
+                os.close(fd)
+                if remove_created:
+                    try:
+                        named = _tree_stat(folder, name)
+                        if (held.st_dev, held.st_ino) == (named.st_dev, named.st_ino):
+                            _tree_unlink(folder, name)
+                    except OSError:
+                        pass
+            return chained
+
+
+def append_chained_in_tree(root, rel, record, chain):
+    """Append an opt-in without following a folder or leaf link (LEADS-ADAPTERS)."""
+    return _chained_in_tree(root, rel, chain, record)
+
+
+def read_chained_in_tree(root, rel, chain):
+    """Read opt-ins under the same held-folder lock as their append (LEADS-ADAPTERS)."""
+    return _chained_in_tree(root, rel, chain)
 
 
 def _repair_partial_tail(path, fsync, checkpoint):
