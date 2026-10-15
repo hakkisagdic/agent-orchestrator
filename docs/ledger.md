@@ -20,7 +20,8 @@ The ledger is the fix: an append-only record that outlives the messages.
 ├── reviews.jsonl        # hash-chained: each review artefact, its bytes and verdict
 ├── waivers.jsonl        # hash-chained: a person's waiver of a gate for a slice, and its closing
 ├── opt-ins.jsonl        # hash-chained: a person's opt-in into a weaker review tier, with login and terminal
-└── merges.jsonl         # hash-chained: each merge-check run and the merge it vouches for
+├── merges.jsonl         # hash-chained: each merge-check run and the merge it vouches for
+└── slices.jsonl         # hash-chained: each move of a slice between the board's sections
 ```
 
 ## Decisions
@@ -123,9 +124,46 @@ the previous baseline under the ledger lock, so concurrent admissions remain ord
 
 ## Slices
 
-Not built yet: one line per lifecycle transition — see [`slices.md`](slices.md). A slice's
-state is the section of `.ao/board.md` its row sits in, and that is what a restarted session
-reads to know what it was doing without asking anybody.
+A slice's state is the section of `.ao/board.md` its row sits in, and that is what a
+restarted session reads to know what it was doing without asking anybody. *In ao since slice
+SLICE-LIFECYCLE: `.ao/ledger/slices.jsonl` says how it got there, one line per move ao makes
+between the board's sections - see [`slices.md`](slices.md#states) for which moves those are:*
+
+```jsonc
+{"previous":"sha256:…","ordinal":7,"slice":"claim-admission","from":"running","to":"blocked",
+ "by":"implementer","at":1791830400,"why":"waiting on Authenticode certificate",
+ "title":"claim admission","notes":{"needs":"waiting on Authenticode certificate","waiting":"human"}}
+```
+
+`from` is null for an item that enters the board, and its line carries the notes it entered
+with; every line carries the slice's title, which says what it was once its row is gone. `by`
+is the role of a turn ao started, `person` for a caller it did not start, or `watchdog`.
+`notes` are the notes the move set (null: removed) and `replaced` what they held before it, so
+a boundary or a reason a move overwrote stays on the record. The line is chained under the
+`ao-slice-row-v1` domain and its secrets are masked as in every ledger. A move within a
+section changes notes and is no transition; a move by hand has no line, and where ao recorded
+an earlier move of the slice, `ao slice status` and `ao slices` name the disagreement.
+
+A move is decided on one reading of the board and made on that reading, under the board's lock
+and compared with the board as it stands before the board is replaced
+([slices.md](slices.md#states)): a board that changed while ao decided moves nothing and
+records nothing. The line is written before the board, and a chained ledger is never cut back,
+so a board that cannot be written after it - a full disk, a permission, a rename refused, a
+hand edit that landed while ao wrote - gets a line that voids it:
+
+```jsonc
+{"previous":"sha256:…","ordinal":8,"slice":"claim-admission","from":"running","to":"blocked",
+ "by":"implementer","at":1791830401,"voids":7,"title":"claim admission",
+ "why":"the board could not be written: PermissionError: Permission denied"}
+```
+
+`voids` is the ordinal of the line it voids, and `why` says what stopped the write, with no
+path in it. Whatever reads the ledger - since when a slice is where it is, who blocked it,
+`ao slices` - leaves the voided move and the line voiding it out of the moves the slice made, and
+`ao slice status` shows it in the slice's history, marked as a move that did not happen. A
+retry is recorded once, as a move of its own. A process stopped between the line and the board
+leaves no line voiding it: `ao slice status` then says the board never took ao's last recorded
+move of the slice, or a hand moved it back.
 
 ## Commands
 

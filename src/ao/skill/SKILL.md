@@ -51,11 +51,13 @@ Anything not forbidden there and inside the slice's scope is allowed.
    `ao_ack`. Acknowledge only after acting.
 2. `ao writers` once — exit 0 means you are the only writer. Exit 1: stop, report,
    do not kill anything.
-3. Take the first READY item from `.ao/backlog.md`; on `.ao/board.md` move it
-   `queued → running` with `since: YYYY-MM-DD HH:MM`. `ao board` names a boundary
-   conflict under the item - a declared path missing, a named file or symbol outside
-   its paths: raise it before starting, while widening or splitting is cheap. A row
-   with `boundary: file@commit` is reviewed against that file; omit `--boundary`.
+3. Take the first READY item from `.ao/backlog.md` and start it with
+   `ao slice start <id>`: its row on `.ao/board.md` moves `queued → running` with
+   `since:`, and the move is a line in `.ao/ledger/slices.jsonl`. `ao board` names
+   a boundary conflict under the item - a declared path missing, a named file or
+   symbol outside its paths: raise it before starting, while widening or splitting
+   is cheap. A row with `boundary: file@commit` is reviewed against that file; omit
+   `--boundary`.
 4. If the acceptance boundary is an invariant ("no X can ever produce Y"), write
    the **surface inventory first** (`evidence/…-surface-v1.md`: every path, its
    entry point, its binding, its proof), get it `ao review`ed as APPROVED, then
@@ -106,11 +108,14 @@ Anything not forbidden there and inside the slice's scope is allowed.
    cannot skip it, and ends the message with the grant's Ao- trailers - leave
    those lines out of the message. **No push.**
 8. `ao_report {kind: "done"}`, board `running → done` with the gates named,
-   next item. Blocked by a decision? `ao_ask` with options, board `blocked` with
-   `needs:`, and move to the next READY item — park and continue. Say who it
-   waits on with `waiting: human|architect|decision|external`: `waiting: human`
-   reaches a person directly. With nothing READY here, a nudge may name a
-   secondary project's READY item: continue there.
+   next item. Blocked by a decision? `ao_ask` with options, then
+   `ao slice block "…" --waiting decision` parks the slice under `blocked` with the
+   reason as its `needs:`; move to the next READY item — park and continue.
+   `--waiting human|architect|decision|external` says who it waits on:
+   `waiting: human` reaches a person directly. `ao slice start <id>` resumes a slice
+   you parked; a block the architect, a person or the watchdog made is theirs to
+   lift, and only the architect or a person drops a slice. With nothing READY
+   here, a nudge may name a secondary project's READY item: continue there.
 
 **Working while the architect is away.** The architect is a person's quota and
 attention, and both run out. What you settle alone: which READY item comes
@@ -118,7 +123,7 @@ next, how to split a slice that will not fit, whether a finding is in scope,
 when to park and move on. What you never settle, however long nobody answers:
 landing without an independent review, widening your own authority, anything
 `.ao/authority.md` forbids. Blocked: record the question (`ao_ask`), park the
-slice (`blocked`, `needs: D-…`) and take the next READY item. An unanswered
+slice (`ao slice block "D-…"`) and take the next READY item. An unanswered
 question never stops the queue, and it is never asked twice. The architect
 answers the parked questions in one pass on return (`ao decisions`); `ao doctor`
 shows how long it has been away and how many wait.
@@ -189,8 +194,11 @@ questions with `ao answer`, delete what you processed with
 invariant boundaries, or from a bound source by writing `.ao/inbox/` and running
 `ao source import` — never leave an implementer waiting for lack of a slice.
 Over-budget slice: re-specify (inventory first); the budget restarts at your
-decision. A wake edits `.ao/backlog.md`, `.ao/board.md` and `.ao/inbox/` and no
-other file — never product code, never ao's own source; `ao note` is the only
+decision. A slice that will not be finished is dropped on the record with
+`ao slice abandon --slice <id> --why "…"`, never deleted from the board, and a
+block you made is lifted with `ao slice start <id>`. A wake edits
+`.ao/backlog.md`, `.ao/board.md` and `.ao/inbox/` and no other file — never
+product code, never ao's own source; `ao note` is the only
 door to the mailbox you need. A rule proposal (`ao proposals`) waits for a person,
 not for you: never answer one, and `ao answer` refuses it from a turn ao started. A
 rule of your own that is wrong is proposed the same way, with `ao propose`.
@@ -275,6 +283,8 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao recall <words>` | decisions, answers, waivers, review findings and lessons from every project that share the words |
 | `ao board ready` | exactly the items that may start now; exit 1 names a broken `needs:` edge |
 | `ao board add ID "title" --acceptance "…" [--needs A,B] [--role R]` | admits one item to `queued`, only with its acceptance boundary; refused, it writes nothing |
+| `ao slice start <id> [--boundary-file F]` / `ao slice block "…" [--waiting W]` / `ao slice abandon --why "…"` | move a slice between the board's sections, each move a line in `.ao/ledger/slices.jsonl`: the implementer starts a READY item or resumes a slice it blocked; anyone blocks a running slice; dropping one (to `rejected`) and a boundary file are the architect's or a person's |
+| `ao slice status [<id>]` / `ao slices [--open]` | where a slice stands, since when and how it got there, its rounds and its newest review's findings; every slice one line, a row moved or removed by hand named |
 | `ao fleet` | every project on this machine at a glance |
 | `ao tail` | the implementer's transcript, live |
 | `ao agents` | the sessions this project's harnesses told ao of through their lifecycle hooks, and what each is doing: working, waiting, idle or ended |

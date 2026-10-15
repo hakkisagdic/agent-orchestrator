@@ -2238,7 +2238,7 @@ A2A_STATE = {
 }
 
 
-def board(root):
+def board(root, data=None):
     """.ao/board.md — where each pre-authorised item currently is.
 
     A flat backlog answers "what is next" but not "what stopped, and on what".
@@ -2251,14 +2251,20 @@ def board(root):
     a board a human cannot hand-edit during an incident is a board that goes
     stale during exactly the incident it was built for.
 
+    `data` is the board's bytes as one reading took them, read as the file is: a
+    decision made on a BoardEdit reads the board its moves are made on
+    (SLICE-LIFECYCLE-2).
+
     Returns {state: [{"id", "title", "notes": {k: v}}]}.
     """
     p = os.path.join(root, ".ao", "board.md")
     out = {st: [] for st in BOARD_STATES}
-    if not os.path.exists(p):
+    if data is None and not os.path.exists(p):
         return out
+    import io
     state = None
-    for line in open(p, errors="replace", encoding=UTF8):
+    for line in (open(p, errors="replace", encoding=UTF8) if data is None
+                 else io.TextIOWrapper(io.BytesIO(data), errors="replace", encoding=UTF8)):
         line = line.rstrip()
         if line.lstrip().startswith("##"):
             # Every heading ends a section; only a state's own heading starts one (#33).
@@ -2398,76 +2404,329 @@ def record_plan(root, item_id, digest):
                          PLAN_CHAIN, legacy_prefix=True, prepare=admission)
 
 
-def board_append(root, state, line):
-    """Append one item line under `## <state>`, creating the section if needed.
+SLICE_CHAIN = "ao-slice-row-v1"
+# The note in which a blocked item keeps the `needs:` it carried before the block, as the watchdog's quota park keeps
+# it (QUOTA_HELD there): the block's reason takes `needs:`, and the move that resumes the slice gives the old one back.
+HELD_NEEDS = "held-needs"
 
-    Append rather than rewrite: the implementing agent edits this same file, and
-    a full rewrite would silently drop whatever it wrote between our read and our
-    write.
+
+def slice_ledger_path(root):
+    return os.path.join(root, ".ao", "ledger", "slices.jsonl")
+
+
+def slice_moves(root, voided=False):
+    """Every move between the board's sections ao made, oldest first; raises on a broken chain (SLICE-LIFECYCLE).
+
+    A move is recorded before the board is written, and one whose write failed is followed by a line that voids
+    it (`voids`: the ordinal of the line it voids, `why`: what stopped the write). Neither is a move the slice
+    made, so both are left out: a reader that counts moves, takes the newest or says since when reads only what
+    reached the board. `voided` keeps the voided moves in their place, each with the line that voids it as
+    `void`, for a history that shows them (SLICE-LIFECYCLE-2).
     """
-    p = os.path.join(root, ".ao", "board.md")
-    text = open(p, encoding=UTF8).read() if os.path.exists(p) else "# Board\n"
-    head = f"## {state}"
-    if head not in text:
-        text = text.rstrip("\n") + f"\n\n{head}\n"
-    idx = text.index(head) + len(head)
-    nl = text.index("\n", idx) + 1
-    text = text[:nl] + line.rstrip() + "\n" + text[nl:]
-    open(p, "w", encoding=UTF8).write(text)
-
-
-def board_move(root, item_id, state, notes=None):
-    """Move one item's line under `## <state>`, its notes changed as `notes` says; False when it is not on the board.
-
-    Like an append, a move changes one line of what it read just before and leaves every other
-    line as the implementer wrote it. It also takes that line out of its section, so the file is
-    replaced whole: a reader finds the board before the move or after it, never half of each. A
-    note given None is removed and any other is set; the title and the other notes stay as they
-    were. An item moved to the section it is already in keeps its place there. The item is the
-    first line with its id that `board` reads under a state's heading (QUOTA-PARK).
-
-    A byte that is not UTF-8 - an editor that saved the board in another code page - is read as
-    `board` reads past it, and written back as it was: moving one line rewrites no other.
-    """
-    p = os.path.join(root, ".ao", "board.md")
-    try:
-        with open(p, encoding=UTF8, errors="surrogateescape") as fh:
-            lines = fh.read().split("\n")
-    except OSError:
-        return False
-    section, found = None, None
-    for index, line in enumerate(lines):
-        if line.lstrip().startswith("##"):
-            m = re.match(r"^##\s+([a-z]+)\s*$", line.strip())
-            section = m.group(1) if m and m.group(1) in BOARD_STATES else None
+    from .storage import read_chained_jsonl
+    rows = [row for row in read_chained_jsonl(slice_ledger_path(root), SLICE_CHAIN) if isinstance(row, dict)]
+    voids = {row["voids"]: row for row in rows if isinstance(row.get("voids"), int)}
+    out = []
+    for row in rows:
+        if "voids" in row:
             continue
-        m = re.match(r"^\s*- \s*\[([^\]]+)\]\s*(.*)$", line)
-        if section and m and m.group(1) == item_id:
-            found = (index, section, m.group(2))
-            break
-    if found is None:
+        void = voids.get(row.get("ordinal"))
+        if void is not None and void.get("slice") == row.get("slice"):
+            if voided:
+                out.append(dict(row, void=void))
+            continue
+        out.append(row)
+    return out
+
+
+def _line_notes(chunks):
+    """{key: value} of a board line's notes, as `board` reads them: a chunk with no colon is a key with no value."""
+    out = {}
+    for chunk in chunks:
+        key, _, value = chunk.partition(":")
+        if chunk and key.strip() not in out:
+            out[key.strip()] = value.strip()
+    return out
+
+
+def record_slice_move(root, item_id, before, after, by=None, why=None, notes=None, replaced=None, title=None):
+    """Append one move of a board item to the slice ledger: from one section to another, by whom, when and why.
+
+    A slice's state was the section its row sat in and nothing more: nothing said when it moved, who moved it
+    or why, and a slice dropped from the board left no trace at all, although docs/slices.md calls abandoning
+    one an outcome to record. `before` is None for an item that enters the board. `by` is the role of a turn
+    ao started, or "person" for a caller ao did not start, unless the caller names itself (the watchdog does).
+    `notes` are the notes the move set (None: removed) and `replaced` what they held before, so a boundary or a
+    reason a move overwrote stays on the record; the title says which slice it was once its row is gone.
+    Chained like every ledger that is evidence (SLICE-LIFECYCLE).
+    """
+    from .storage import append_chained_jsonl
+    row = {"slice": item_id, "from": before, "to": after, "by": by or invoking_role() or "person",
+           "at": int(time.time()), "why": why}
+    if title:
+        row["title"] = title
+    if notes:
+        row["notes"] = dict(notes)
+    if replaced:
+        row["replaced"] = dict(replaced)
+    return append_chained_jsonl(slice_ledger_path(root), scan_record(row), SLICE_CHAIN)
+
+
+class BoardChanged(RuntimeError):
+    """The board changed between ao's reading it and its writing it, so ao moved nothing (SLICE-LIFECYCLE-2)."""
+
+
+def board_lock(root, timeout=10.0):
+    """The lock ao's own writers of the board hold from their reading of it to their write (SLICE-LIFECYCLE-2).
+
+    It sits beside the board, as a ledger's lock sits beside the ledger. The implementer's hand edits take no
+    lock: BoardEdit compares the board for those.
+    """
+    from .storage import _exclusive_lock
+    return _exclusive_lock(os.path.join(root, ".ao", "board.md.lock"), timeout=timeout)
+
+
+def _board_bytes(path):
+    """What the board holds as it stands, or None when there is none."""
+    try:
+        with open(path, "rb") as fh:
+            return fh.read()
+    except FileNotFoundError:
+        return None
+
+
+def _board_changed(recorded):
+    said = ", and the slice ledger voids the move it had recorded" if recorded else " and nothing was recorded"
+    return BoardChanged(f"the board changed while ao read it: .ao/board.md was edited after ao read it and before it "
+                        f"wrote it, so nothing moved{said}; run it again, and ao decides on the board as it stands")
+
+
+def _not_written(exc):
+    """Why a board write did not happen, in words a committed ledger may keep: no path, nothing of the machine."""
+    if isinstance(exc, BoardChanged):
+        return "the board was edited after ao read it and before ao wrote it; the edit stands"
+    said = exc.strerror if isinstance(exc, OSError) and exc.strerror else ""
+    return f"the board could not be written: {type(exc).__name__}" + (f": {said}" if said else "")
+
+
+def _void_slice_moves(root, rows, why):
+    """Append, for each recorded move the board never took, a line that voids it (SLICE-LIFECYCLE-2).
+
+    A move is recorded before the board is written, and a chained ledger is never cut back: a write that failed
+    after the line left a transition that never happened, and a retry recorded a second one. So the line stays
+    and the one after it says the move did not happen and why - `voids` is the ordinal of the line it voids - and
+    `slice_moves` leaves both out of what the slice did.
+    """
+    from .storage import append_chained_jsonl
+    for row in rows:
+        void = {"slice": row.get("slice"), "from": row.get("from"), "to": row.get("to"), "by": row.get("by"),
+                "at": int(time.time()), "why": why, "voids": row.get("ordinal")}
+        if row.get("title"):
+            void["title"] = row["title"]
+        append_chained_jsonl(slice_ledger_path(root), scan_record(void), SLICE_CHAIN)
+
+
+class BoardEdit:
+    """One reading of `.ao/board.md`, the moves and entries decided on it, and their one write (SLICE-LIFECYCLE-2).
+
+    `ao slice start` judged an item READY on one reading of the board and moved it on a later one, with no lock
+    and no second look: an implementer that wrote `waiting: architect` on the row in between had ao record an
+    authorized-looking start of a slice that was not READY. The watchdog's quota park, which decides on a reading
+    and may wait on keyflip before it writes, moved a row from wherever a hand had put it meanwhile. A caller now
+    decides on `board`, what this one reading holds (`data` is its bytes, for whatever else reads the board), and
+    `move` and `append` change that same text: nothing is read again.
+
+    ao's own writers hold `board_lock` from their reading to their write (`hold=True`, in a `with`), so two of
+    them take turns instead of each writing over the other's board. The watchdog reads without it, since its
+    decision can wait minutes on keyflip, and its write takes it. The implementer's hand edits take no lock, so
+    `write` looks at the board as it stands twice - before anything is recorded, and once the new board is on
+    disk beside it, right before the rename puts it in place - and anything but the bytes this reading took, an
+    edit or a board made or removed, moves nothing: `BoardChanged` says the board changed while ao read it, and
+    the command is run again on the board as it stands.
+
+    What stays open is the instant between that last look and the rename: a read and a rename, measured on a
+    laptop's disk at a third of a millisecond (under one at the 99th percentile; Windows adds the retries of a
+    rename while another handle holds the board open), against the milliseconds a command's decision takes and
+    the minutes the watchdog's can. An edit landing in it is replaced by ao's board and lost, though what ao
+    decided on is still what stood at its last look. A plain file cannot close it: an editor takes no lock, an
+    advisory lock binds only the processes that take it, and a rename replaces whatever the name holds at that
+    moment - no file system ao runs on replaces a file only while it holds given bytes. Only edits made through
+    ao could close it, and the board is the file the implementer edits by hand.
+    """
+
+    def __init__(self, root, hold=False):
+        import contextlib
+        import io
+        self.root, self.path = root, os.path.join(root, ".ao", "board.md")
+        # A directory with no .ao/ has no board to hold, and its lock is not made there: a write takes it.
+        self.holding = hold and os.path.isdir(os.path.dirname(self.path))
+        self.held, self.moves, self.changed = contextlib.ExitStack(), [], False
+        try:
+            if self.holding:
+                self.held.enter_context(board_lock(root))
+            self.data = _board_bytes(self.path)
+        except BaseException:
+            self.held.close()
+            raise
+        # Read as a move always read it: a byte that is not UTF-8 is written back as it was.
+        self.lines = ["# Board", ""] if self.data is None else io.TextIOWrapper(
+            io.BytesIO(self.data), errors="surrogateescape", encoding=UTF8).read().split("\n")
+        self.board = board(root, self.data) if self.data is not None else {state: [] for state in BOARD_STATES}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *raised):
+        self.held.close()
         return False
-    index, section, rest = found
-    chunks = [chunk.strip() for chunk in rest.split("·")]
-    changed = notes or {}
-    kept = [chunk for chunk in chunks[1:] if chunk and chunk.partition(":")[0].strip() not in changed]
-    line = " · ".join([f"- [{item_id}] {chunks[0]}".rstrip()] + kept
-                      + [f"{key}: {value}" for key, value in changed.items() if value is not None])
-    if section == state:
-        lines[index] = line
-    else:
-        del lines[index]
-        head = next((i for i, text in enumerate(lines)
-                     if re.match(r"^##\s+" + re.escape(state) + r"\s*$", text.strip())), None)
-        if head is None:
-            while lines and not lines[-1].strip():
-                lines.pop()
-            lines += ["", f"## {state}", line, ""]
+
+    def _bytes(self):
+        return "\n".join(self.lines).encode(UTF8, errors="surrogateescape")
+
+    def _changed_to(self, lines):
+        self.lines, self.changed = lines, True
+        self.board = board(self.root, self._bytes())
+
+    def move(self, item_id, state, notes=None, by=None, why=None):
+        """Move one item's line under `## <state>`, its notes changed as `notes` says; False when it is not here.
+
+        Like an append, a move changes one line of what was read and leaves every other line as the implementer
+        wrote it. It also takes that line out of its section, so the file is replaced whole: a reader finds the
+        board before the move or after it, never half of each. A note given None is removed and any other is set;
+        the title and the other notes stay as they were. An item moved to the section it is already in keeps its
+        place there. The item is the first line with its id that `board` reads under a state's heading
+        (QUOTA-PARK).
+
+        A byte that is not UTF-8 - an editor that saved the board in another code page - is read as `board`
+        reads past it, and written back as it was: moving one line rewrites no other.
+
+        A move to another section is recorded in the slice ledger, by `by` and for `why`, when the board is
+        written; a move within a section changes notes, and is no transition (SLICE-LIFECYCLE).
+        """
+        lines, section, found = list(self.lines), None, None
+        for index, line in enumerate(lines):
+            if line.lstrip().startswith("##"):
+                m = re.match(r"^##\s+([a-z]+)\s*$", line.strip())
+                section = m.group(1) if m and m.group(1) in BOARD_STATES else None
+                continue
+            m = re.match(r"^\s*- \s*\[([^\]]+)\]\s*(.*)$", line)
+            if section and m and m.group(1) == item_id:
+                found = (index, section, m.group(2))
+                break
+        if found is None:
+            return False
+        index, section, rest = found
+        chunks = [chunk.strip() for chunk in rest.split("·")]
+        changed = dict(notes or {})
+        kept = [chunk for chunk in chunks[1:] if chunk and chunk.partition(":")[0].strip() not in changed]
+        line = " · ".join([f"- [{item_id}] {chunks[0]}".rstrip()] + kept
+                          + [f"{key}: {value}" for key, value in changed.items() if value is not None])
+        if section == state:
+            lines[index] = line
         else:
-            lines.insert(head + 1, line)
-    from .storage import replace_file_durably
-    replace_file_durably(p, "\n".join(lines).encode(UTF8, errors="surrogateescape"))
-    return True
+            held = _line_notes(chunks[1:])
+            self.moves.append({"item_id": item_id, "before": section, "after": state, "by": by, "why": why,
+                               "notes": changed, "title": chunks[0],
+                               "replaced": {key: held[key] for key in changed
+                                            if held.get(key) and held[key] != changed[key]}})
+            del lines[index]
+            head = next((i for i, text in enumerate(lines)
+                         if re.match(r"^##\s+" + re.escape(state) + r"\s*$", text.strip())), None)
+            if head is None:
+                while lines and not lines[-1].strip():
+                    lines.pop()
+                lines += ["", f"## {state}", line, ""]
+            else:
+                lines.insert(head + 1, line)
+        self._changed_to(lines)
+        return True
+
+    def append(self, state, line, by=None, why=None):
+        """Put one item line first under `## <state>`, making the section where the board has none.
+
+        The rest of the board stays as the implementer wrote it. The item's entry is recorded in the slice
+        ledger, with the title and the notes it entered with, when the board is written (SLICE-LIFECYCLE).
+        """
+        text, head = "\n".join(self.lines), f"## {state}"
+        if head not in text:
+            text = text.rstrip("\n") + f"\n\n{head}\n"
+        nl = text.find("\n", text.index(head) + len(head))
+        if nl < 0:                                      # the heading is the board's last line, with no newline
+            text, nl = text + "\n", len(text)
+        entered = re.match(r"^\s*- \s*\[([^\]]+)\]\s*(.*)$", line.rstrip())
+        if entered:
+            chunks = [chunk.strip() for chunk in entered.group(2).split("·")]
+            self.moves.append({"item_id": entered.group(1), "before": None, "after": state, "by": by, "why": why,
+                               "notes": _line_notes(chunks[1:]), "title": chunks[0]})
+        self._changed_to((text[:nl + 1] + line.rstrip() + "\n" + text[nl + 1:]).split("\n"))
+
+    def write(self):
+        """Record what this edit moved and write the board once, if it still holds what was read; False: nothing to.
+
+        The moves are recorded first, as before: a ledger that cannot take a line leaves the board as it was. A
+        board that cannot be written after them - a full disk, a permission, a rename refused, or a hand edit that
+        landed meanwhile - leaves a line voiding each move it recorded, saying why, and the error goes to the
+        caller: the ledger never holds a move the board did not make, and a retry records the move once
+        (SLICE-LIFECYCLE-2). Only a directory that could not be synced after the rename leaves the moves standing,
+        since the board took them.
+        """
+        import contextlib
+        from .storage import replace_file_durably
+        data = self._bytes()
+        if not self.moves and (not self.changed or data == self.data):
+            return False
+        with contextlib.ExitStack() as held:
+            if not self.holding:
+                held.enter_context(board_lock(self.root))
+            if _board_bytes(self.path) != self.data:
+                raise _board_changed(())
+            recorded = []
+            try:
+                for move in self.moves:
+                    recorded.append(record_slice_move(self.root, **move))
+            except BaseException as exc:
+                _void_slice_moves(self.root, recorded, "the board was not written: the slice ledger refused another "
+                                                       f"move of the same write ({type(exc).__name__})")
+                raise
+            looked = []
+
+            def as_read():
+                if _board_bytes(self.path) != self.data:
+                    raise _board_changed(recorded)
+                looked.append(True)
+
+            try:
+                replace_file_durably(self.path, data, before_replace=as_read)
+            except BaseException as exc:
+                if not (looked and _board_bytes(self.path) == data):
+                    _void_slice_moves(self.root, recorded, _not_written(exc))
+                raise
+        self.data, self.moves, self.changed = data, [], False
+        return True
+
+
+def board_append(root, state, line, by=None, why=None):
+    """Append one item line under `## <state>`, creating the section if needed: one BoardEdit, held and written.
+
+    Append rather than rewrite: the implementing agent edits this same file, and a write that replaced what it
+    wrote between our read and our write would silently drop it. The edit's write refuses that instead
+    (SLICE-LIFECYCLE-2), and records the item's entry in the slice ledger (SLICE-LIFECYCLE).
+    """
+    with BoardEdit(root, hold=True) as edit:
+        edit.append(state, line, by=by, why=why)
+        edit.write()
+
+
+def board_move(root, item_id, state, notes=None, by=None, why=None):
+    """Move one item's line under `## <state>` as BoardEdit.move does; False when it is not on the board.
+
+    One BoardEdit, held and written (QUOTA-PARK, SLICE-LIFECYCLE): a caller that decides on what it read moves on
+    that reading instead, so the move is made on the board the decision was made on (SLICE-LIFECYCLE-2).
+    """
+    with BoardEdit(root, hold=True) as edit:
+        moved = edit.move(item_id, state, notes, by=by, why=why)
+        edit.write()
+    return moved
 
 
 def record_progress(root, cfg):

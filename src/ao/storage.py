@@ -608,7 +608,7 @@ def _write_all(fd, data):
         remaining = remaining[count:]
 
 
-def replace_file_durably(path, data, *, mode=None, _checkpoint=None, _fsync=None):
+def replace_file_durably(path, data, *, mode=None, before_replace=None, _checkpoint=None, _fsync=None):
     """Replace a whole file so it is only ever seen with its old bytes or its new ones.
 
     ``open(path, "w")`` truncates first. A crash, kill or full disk before the new
@@ -617,6 +617,11 @@ def replace_file_durably(path, data, *, mode=None, _checkpoint=None, _fsync=None
     This writes a temporary file beside the target, fsyncs it, renames it over the
     target and fsyncs the directory. ``_checkpoint`` and ``_fsync`` are the private
     test seams the ledger appends take.
+
+    ``before_replace`` is called once the new bytes are durable beside the target and
+    right before the rename: the last moment a caller that must not replace what
+    someone changed since its reading can look, and what it raises leaves the target
+    as it was and takes the temporary file away (SLICE-LIFECYCLE-2).
 
     ``mode`` is for a file that holds a credential. Its temporary file is created
     with that mode, under a name no file had (``O_EXCL``, and ``O_NOFOLLOW`` where
@@ -655,6 +660,8 @@ def replace_file_durably(path, data, *, mode=None, _checkpoint=None, _fsync=None
             _call(_checkpoint, "temporary-fsynced")
         finally:
             os.close(fd)
+        if before_replace is not None:
+            before_replace()
         _replace(temporary, path)
     except BaseException:
         # Only a file this call made goes: what stood at an exclusive name before it is not this call's.

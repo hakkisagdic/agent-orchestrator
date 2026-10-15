@@ -1959,10 +1959,16 @@ def quota_park(root, cfg, st, dry_run=False, now=None, adapter=None):
     as the nudge it stands in front of would, and one that holds asks again every fifteen minutes:
     an account with headroom ends it at once. A board line that already says what the park says is
     left as it is. Dry, it neither rotates nor writes (QUOTA-PARK).
+
+    It decides on one reading of the board and moves on that same reading. Each move read the board
+    again, so a row a hand moved while the park was decided - to done, say, while keyflip was asked -
+    was moved on from wherever it had gone. A board that changed meanwhile moves nothing: the cycle
+    stands down, and the next decides again on the board as it stands (SLICE-LIFECYCLE-2).
     """
     now = time.time() if now is None else now
     adapter = A.implementer_adapter(cfg) if adapter is None else adapter
-    board = A.board(root)
+    edit = A.BoardEdit(root)
+    board = edit.board
     parked = [item["id"] for item in board["blocked"] if parked_on_quota(item)]
     said = {item["id"]: item["notes"].get("needs") for item in board["blocked"]}
     standing = st.get("quota_park") if isinstance(st.get("quota_park"), dict) else None
@@ -1987,21 +1993,25 @@ def quota_park(root, cfg, st, dry_run=False, now=None, adapter=None):
     items = ", ".join(park.get("items") or ())
     if action in ("clear", "resume"):
         back = [item for item in park.get("items") or () if item in parked] if action == "resume" else []
-        if action == "clear":
-            print(f"{items} taken off blocked on quota by someone else; the park is over")
-        elif dry_run:
+        if action == "resume" and dry_run:
             print(f"DRY RUN: would end the park of {items} on quota and go on to resume the implementer's session")
             return True
-        else:
-            print(f"{quota_park_ended(park)}: {items} {'running again' if back else 'not parked'}; the cycle goes "
-                  "on to resume the implementer's session")
         if not dry_run:
             # The `needs:` each item had before the park: the park's own record, or the board's where the
             # watchdog's state lost the park (QUOTA-PARK-2).
             held = {item["id"]: item["notes"].get(QUOTA_HELD) for item in board["blocked"]}
             for item in back:
-                A.board_move(root, item, "running",
-                             {"needs": (park.get("needs") or {}).get(item) or held.get(item), QUOTA_HELD: None})
+                edit.move(item, "running",
+                          {"needs": (park.get("needs") or {}).get(item) or held.get(item), QUOTA_HELD: None},
+                          by="watchdog", why=quota_park_ended(park))
+            if not _park_written(edit):
+                return True
+        if action == "clear":
+            print(f"{items} taken off blocked on quota by someone else; the park is over")
+        else:
+            print(f"{quota_park_ended(park)}: {items} {'running again' if back else 'not parked'}; the cycle goes "
+                  "on to resume the implementer's session")
+        if not dry_run:
             st.pop("quota_park", None)
             st.pop("quota_rotation_asked", None)
             st["quota_resumed"] = max(park.get("at") or 0, st.get("quota_resumed") or 0)
@@ -2028,7 +2038,10 @@ def quota_park(root, cfg, st, dry_run=False, now=None, adapter=None):
                               and item["id"] not in park["needs"]})
         for item in park["items"]:
             if said.get(item) != quota_needs(park):
-                A.board_move(root, item, "blocked", {"needs": quota_needs(park), QUOTA_HELD: park["needs"].get(item)})
+                edit.move(item, "blocked", {"needs": quota_needs(park), QUOTA_HELD: park["needs"].get(item)},
+                          by="watchdog", why="the implementer stopped on its usage limit")
+        if not _park_written(edit):
+            return True
         st["quota_park"] = park
         save_state(root, st)
         touch_quota_park(root, st, cfg)
@@ -2038,11 +2051,29 @@ def quota_park(root, cfg, st, dry_run=False, now=None, adapter=None):
         # A newer stop named another end: the board says the one that stands, and a person is told.
         for item in park.get("items") or ():
             if item in parked and said.get(item) != quota_needs(park):
-                A.board_move(root, item, "blocked", {"needs": quota_needs(park)})
+                edit.move(item, "blocked", {"needs": quota_needs(park)}, by="watchdog",
+                          why="a newer stop named another reset")
+        if not _park_written(edit):
+            return True
         st["quota_park"] = park
         save_state(root, st)
         touch_quota_park(root, st, cfg)
     print(f"{items} parked on quota {wait}; not nudging")
+    return True
+
+
+def _park_written(edit):
+    """Write what the park moved on the board it read; False, said, when the board changed meanwhile.
+
+    Nothing moved then, and nothing of the park is saved: the cycle stands down and the next one decides on
+    the board as it stands (SLICE-LIFECYCLE-2).
+    """
+    try:
+        edit.write()
+    except A.BoardChanged:
+        print("the board changed while the watchdog read it: nothing moved on quota this cycle, and the next "
+              "cycle decides again on the board as it stands")
+        return False
     return True
 
 

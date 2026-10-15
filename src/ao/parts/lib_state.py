@@ -2159,7 +2159,7 @@ def _edge_ids(item, field):
     return [token for token in re.split(r"[,\s]+", text) if token]
 
 
-def board_graph(root):
+def board_graph(root, data=None):
     """READY, derived from the board's dependency edges, and what is wrong with them (#33).
 
     A dependency graph, not a handoff mechanism. The valuable part of "backend
@@ -2177,9 +2177,12 @@ def board_graph(root):
     someone. READY is derived here and nowhere else: a hand-written `## ready`
     section is a problem too.
 
+    `data` is the board's bytes as one reading took them (BoardEdit), so a move is decided on the board it is
+    made on (SLICE-LIFECYCLE-2).
+
     Returns {"ready": [item with its role], "problems": [text]}.
     """
-    b = board(root)
+    b = board(root, data)
     # What a problem touches is not READY: an id listed twice and an item that unlocks what is not on the
     # board were named and still returned READY (READY-GRAPH-2).
     problems, where, broken = [], {}, set()
@@ -2190,10 +2193,15 @@ def board_graph(root):
                 broken.add(item["id"])
             where.setdefault(item["id"], state)
     try:
-        with open(os.path.join(root, ".ao", "board.md"), encoding=UTF8, errors="replace") as fh:
-            if any(re.match(r"^\s*##\s+ready\s*$", line, re.I) for line in fh):
-                problems.append("the board has a hand-written READY section; READY is derived from `needs:`, "
-                                "so its items belong under `## queued`")
+        if data is None:
+            with open(os.path.join(root, ".ao", "board.md"), encoding=UTF8, errors="replace") as fh:
+                lines = fh.readlines()
+        else:
+            import io
+            lines = io.TextIOWrapper(io.BytesIO(data), encoding=UTF8, errors="replace").readlines()
+        if any(re.match(r"^\s*##\s+ready\s*$", line, re.I) for line in lines):
+            problems.append("the board has a hand-written READY section; READY is derived from `needs:`, "
+                            "so its items belong under `## queued`")
     except OSError:
         pass
     edges = {item["id"]: set(_edge_ids(item, "needs")) for item in b["queued"]}

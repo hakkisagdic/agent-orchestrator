@@ -253,7 +253,8 @@ Stopping for a question is not stopping the queue. The playbook writes down what
 implementer settles alone while the architect is away (the next READY item, how to split
 a slice, whether a finding is in scope, when to park), what it never settles however
 long nobody answers (landing without review, its own authority), and what it does when
-blocked: ask, park the slice with `needs:` and take the next READY item. The watchdog
+blocked: ask, park the slice with `ao slice block "…"` - the move is recorded, and the
+reason becomes its `needs:` - and take the next READY item. The watchdog
 keeps to it: an open decision stands the implementer down only when nothing is READY;
 otherwise the nudge names the question that waits and the item to take instead. The
 questions accumulate for the architect to answer in one pass, and `ao doctor` says how

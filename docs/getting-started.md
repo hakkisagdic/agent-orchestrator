@@ -131,6 +131,7 @@ describes:
 ```bash
 ao board add FIRST "what the slice does" --acceptance "what it must meet; the suite passes"
 ao board ready                       # what may start now
+ao slice start FIRST                 # it runs, and the move is recorded
 # work, then stage exactly the candidate
 ao verify -p quick
 ao review

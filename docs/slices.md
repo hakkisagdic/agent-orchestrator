@@ -86,13 +86,54 @@ specified → in-progress → in-review → changes-requested ─┐
                               └──────────────────────────┘
 ```
 
-Not built yet: these states, and a ledger line for each transition. Today a slice's state is
-the section of `.ao/board.md` its row sits in - inbox, queued, running, blocked, verified,
-done or rejected - and that is what a restarted session reads back.
+A slice's state is the section of `.ao/board.md` its row sits in - inbox, queued, running,
+blocked, verified, done or rejected - and that is what a restarted session reads back. The
+stages above are read onto it: specified is `queued`, in progress is `running`, the review
+stages inside it are the verdicts the review ledger holds for the slice, and committed is
+`done`.
+
+*In ao since slice SLICE-LIFECYCLE: every move ao makes between those sections is a line in
+`.ao/ledger/slices.jsonl` - which slice, from which section to which, who moved it, when and
+why - chained like the other evidence ([ledger.md](ledger.md#slices)). ao makes a move with
+`ao slice start`, `ao slice block` and `ao slice abandon`; an item enters the board with
+`ao board add` or `ao source import`; and the watchdog parks a slice on quota and gives it
+back. A row moved by hand has no line, and where ao recorded an earlier move of it
+`ao slice status` and `ao slices` name the disagreement - the board holds it under one section
+and the last move ao recorded put it under another - and list a row removed by hand from that
+last move. Landing is still a hand move: the playbook moves a slice to `done` after
+`ao commit`.*
+
+*A move is decided and made on one reading of the board. ao's writers hold the board's lock,
+`.ao/board.md.lock`, from their reading to their write, so two of them take turns - the
+watchdog takes it only to write, since its decision can wait on keyflip - and each makes its
+moves on the text it judged, never on a fresh reading: an item judged READY on one reading and
+moved on the next would be started on the record although the implementer had marked it
+`waiting:` in between, as the review of this slice found. The implementer's hand edits take no
+lock, so ao compares the board with what it read before it replaces it - once before anything
+is recorded, and again right before the new board is renamed into place - and a board that
+changed meanwhile moves nothing: the command says the board changed while ao read it and to
+run it again, and the watchdog decides again on its next cycle. What stays open is the instant
+between that last comparison and the rename, a third of a millisecond on a laptop's disk: an
+edit landing in it is replaced and lost. No plain file closes it - an editor takes no lock,
+and a rename replaces whatever the name holds at that moment - and the board is the file the
+implementer edits by hand.*
+
+*The line is written before the board, so a ledger that cannot take it leaves the board as it
+was. A board that cannot be written after it - a full disk, a permission, a rename refused, an
+edit that landed while ao wrote - gets a second line voiding the first and saying why, so the
+ledger never holds a move the board did not make, and a retry is recorded once
+([ledger.md](ledger.md#slices)). A process stopped between the two writes leaves no such line,
+and `ao slice status` says the board never took ao's last recorded move of the slice, or a hand
+moved it back.*
 
 Two states people forget to model: **blocked** (waiting on a human decision or supplied
 input — see escalation in [`protocol.md`](protocol.md)) and **abandoned**, which is a
-legitimate outcome and should be recorded rather than quietly dropped.
+legitimate outcome and should be recorded rather than quietly dropped. *In ao since slice
+SLICE-LIFECYCLE: `ao slice block "…"` parks the running slice under `blocked` with the reason
+as its `needs:`, and `ao slice abandon --why "…"` moves a slice to `rejected` with the reason
+as its `abandoned:` note. `rejected` is the section the board already keeps for work that
+will not land: its review artefacts may be archived and its worktree retired, and the row
+stays, with its reason, where a restarted session reads it.*
 
 ## Before adding a mechanism, walk the ladder
 
@@ -217,16 +258,51 @@ A dependency is satisfied only by a `done` or `verified` id with no graph proble
 listed both queued and done cannot make a dependent READY: resolve the duplicate first
 (TRIAGE-3-LOW).
 
-Not built yet: commands that start, block and abandon a slice and record each transition.
+*In ao since slice SLICE-LIFECYCLE: commands that start, block and abandon a slice, each move
+a line in the slice ledger, and two that read where slices stand.*
 
-<!-- not built: ao has no slice or slices command; a slice is a board row -->
 ```bash
-ao slice start claim-admission --boundary-file boundary.yml
-ao slice status                  # state, rounds used, cost, open findings
-ao slice block "waiting on Authenticode certificate"
+ao slice start claim-admission --boundary-file docs/slices/claim-admission.md
+ao slice status                  # state and since when, its moves, rounds used, its newest review
+ao slice block "waiting on Authenticode certificate" --waiting human
 ao slice abandon --why "superseded by the metadata authority slice"
-ao slices --open
+ao slices --open                 # every open slice, one line each
 ```
+
+| command | moves | whose |
+|---|---|---|
+| `ao slice start <id>` | queued → running, blocked → running | the implementer's for a READY item, or a slice it blocked itself; the architect's or a person's for any queued or blocked item |
+| `ao slice block "…" [--slice <id>] [--waiting <who>]` | running → blocked | anyone's |
+| `ao slice abandon --why "…" [--slice <id>]` | any open section → rejected | the architect's or a person's |
+| `ao slice status [<id>]` · `ao slices [--open]` | none: they read | anyone's |
+
+The implementer settles alone which READY item comes next, so it starts one; anything else
+chooses scope. A turn ao started for the implementer (`AO_ROLE`) is refused an item that is
+not READY - `ao slice start` names why, as `ao lane start` does - a block someone else made,
+a boundary file and an abandon, and nothing is written. `ao doctor` names an implementer's
+grant that admits `ao slice abandon` (`actor-grant`), as it names one that admits
+`ao decide --scope`; the grants ao ships admit `ao slice start`, `ao slice block` and
+`ao slice status` to the implementer, and every `ao slice` command to the architect.
+
+A start writes `since:`, and one the architect or a person makes of an item that is not
+READY records why it was not. A block's reason becomes the row's `needs:`; a `needs:` the
+slice carried is kept in `held-needs:` and given back when it resumes, as the watchdog's
+quota park keeps it, and a slice the watchdog parked is given back by the watchdog when the
+limit resets, or by the architect or a person. `--boundary-file` points a slice at a file
+committed in the repository as it stands, `boundary: <path>@<commit>`, in place of its
+acceptance sentence, which the ledger keeps. `--slice` names the slice when more than one is
+running, or another than the one that is. Abandoning a running or blocked slice sends no
+mail: the command reminds whoever drops it to tell the implementer with `ao note`.
+
+`ao slice status` says since when the slice is in its section and who moved it there, every
+move ao recorded of it, the rounds it has used against the budget while it is open, and its
+newest review that reached a verdict, with the four counts and, when it asked for changes,
+the findings its file lists - read only while the file holds the bytes the review ledger
+recorded. A slice reviewed only before the review ledger has its newest review read from its
+file as it stands, as its rounds are counted, and the status says that no row records it.
+`ao slices` lists every slice by state, with since when; `--open` leaves out done and
+rejected. A move ao recorded whose board write failed is in the status's moves, marked as one
+that did not happen, and nowhere else.
 
 ## A split is a pure move, proven mechanically
 

@@ -2002,8 +2002,8 @@ def _recorded_review_slice(root, reviews_dir, row):
     return (evidence or {}).get("slice") if isinstance(evidence, dict) else None
 
 
-def rounds(root, reviews_dir):
-    """Completed prospective review rounds spent on the current slice (#65).
+def rounds(root, reviews_dir, item=None):
+    """Completed prospective review rounds spent on the current slice (#65), or on board item `item`.
 
     A round is a review that produced a verdict, read from the chained review
     ledger in the order ao recorded it. Deleting, emptying or back-dating a review
@@ -2017,9 +2017,10 @@ def rounds(root, reviews_dir):
     rounds; nobody completed a review.
 
     Review files from before the ledger have no row and are read as they always
-    were, so a slice that began before it keeps its count.
+    were, so a slice that began before it keeps its count. `ao slice status` counts
+    the same way for any slice it is asked about (SLICE-LIFECYCLE).
     """
-    current = running_slice(root)
+    current = item if item is not None else running_slice(root)
     slice_id = ((current or {}).get("id") or (current or {}).get("key") or "").strip()
     if not slice_id:
         return 0
@@ -2075,6 +2076,80 @@ def rounds(root, reviews_dir):
             break
         n += 1
     return n
+
+
+def latest_slice_review(root, reviews_dir, slice_id):
+    """The newest review of a slice that reached a verdict, and what its file still says (SLICE-LIFECYCLE).
+
+    None when no review that reached a verdict names the slice. Otherwise {"artefact", "at", "kind", "verdict",
+    "counts", "findings", "problem", "recorded"}: the verdict is the ledger's, and the counts and the findings are
+    read from the artefact only while it holds the bytes its row recorded, since a review file is in the tree an
+    implementer writes; `problem` says why they could not be read. A retrospective review (`kind` commit-range)
+    counts too: a catch-up that asked for changes after the slice landed left findings open all the same.
+
+    A review written before the review ledger has no row, and `rounds` reads its file as it always was: a slice
+    that began before the ledger has reviews only there, and an upgraded project said it had none. Where no row
+    names the slice, the newest such file that does is its newest review, read as it stands - nothing records
+    its bytes - and `recorded` is False (SLICE-LIFECYCLE-2).
+    """
+    from .storage import read_chained_jsonl
+    newest, recorded = None, set()
+    for row in read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN):
+        if not isinstance(row, dict):
+            continue
+        recorded.add(row.get("artefact"))
+        if row.get("verdict") not in ("APPROVED", "NEEDS_CHANGES"):
+            continue
+        row_slice = row["slice"] if "slice" in row else _recorded_review_slice(root, reviews_dir, row)
+        if (row_slice or "").strip() == slice_id:
+            newest = row
+    if newest is None:
+        return _unrecorded_slice_review(root, reviews_dir, slice_id, recorded)
+    out = {"artefact": newest.get("artefact"), "at": newest.get("at"), "kind": newest.get("kind"),
+           "verdict": newest.get("verdict"), "counts": None, "findings": [], "problem": None, "recorded": True}
+    try:
+        with open(os.path.join(root, reviews_dir, str(newest.get("artefact"))), "rb") as fh:
+            data = fh.read()
+    except OSError:
+        out["problem"] = "its file is not in the review directory: archived or removed"
+        return out
+    if "sha256:" + hashlib.sha256(data).hexdigest() != newest.get("sha256"):
+        out["problem"] = "its file is not the bytes the review ledger recorded"
+        return out
+    return _review_findings(out, data.decode(UTF8, "replace"))
+
+
+def _review_findings(out, body):
+    """`out` with the counts and the finding lines a review's text holds."""
+    counts = (review_evidence(body) or {}).get("counts")
+    out["counts"] = counts if isinstance(counts, dict) else None
+    out["findings"] = [f"[{found.group(1)}] {found.group(2).strip()}"
+                       for found in (_FINDING_LINE.match(line) for line in body.splitlines()) if found]
+    return out
+
+
+def _unrecorded_slice_review(root, reviews_dir, slice_id, recorded):
+    """The newest review file of a slice the review ledger has no row for, read as `rounds` reads one; or None.
+
+    Newest by when the file was written, as `rounds` orders them, and only a review that reached a verdict and is
+    not an attempt that never took place (SLICE-LIFECYCLE-2).
+    """
+    for name, verdict in reviews(root, reviews_dir, limit=None):
+        if name in recorded or verdict not in ("APPROVED", "NEEDS_CHANGES"):
+            continue
+        path = os.path.join(root, reviews_dir, name)
+        try:
+            at = int(os.path.getmtime(path))
+            body = open(path, errors="replace", encoding=UTF8).read(100_000)
+        except OSError:
+            continue
+        evidence = review_evidence(body)
+        if not evidence or (evidence.get("slice") or "").strip() != slice_id \
+                or evidence.get("review_status") in ("unavailable", "invalid"):
+            continue
+        return _review_findings({"artefact": name, "at": at, "kind": evidence.get("kind"), "verdict": verdict,
+                                 "counts": None, "findings": [], "problem": None, "recorded": False}, body)
+    return None
 
 
 def mailbox(root, mail_dir):

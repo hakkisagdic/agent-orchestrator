@@ -242,23 +242,27 @@ def test_credits_problem_golden_values(case, projection, last, expected):
         assert got[0] == "credits-exhaust" and got[1].startswith(expected), (case, got)
 
 
-# ── lib.rounds: reviews to rounds spent on the running slice ──
+# ── lib.rounds: reviews to rounds spent on the running slice, or on the slice asked about ──
 ROUNDS = [
     # the defect: other slices' reviews at the same HEAD are not this slice's rounds
-    ("other slices at the same HEAD", "R2", [("NEEDS_CHANGES", "R1")] * 3 + [("NEEDS_CHANGES", "R2")], 1),
-    ("an approval ends the count", "R2", [("NEEDS_CHANGES", "R2"), ("APPROVED", "R2")], 0),
-    ("a review that did not take place", "R2", [("NEEDS_CHANGES", "R2"), ("UNAVAILABLE", "R2")], 1),
-    ("nothing running", None, [("NEEDS_CHANGES", "R2")], 0),
+    ("other slices at the same HEAD", "R2", [("NEEDS_CHANGES", "R1")] * 3 + [("NEEDS_CHANGES", "R2")], 1, None),
+    ("an approval ends the count", "R2", [("NEEDS_CHANGES", "R2"), ("APPROVED", "R2")], 0, None),
+    ("a review that did not take place", "R2", [("NEEDS_CHANGES", "R2"), ("UNAVAILABLE", "R2")], 1, None),
+    ("nothing running", None, [("NEEDS_CHANGES", "R2")], 0, None),
+    # `ao slice status` asks about any slice: its own reviews count, whichever runs (SLICE-LIFECYCLE)
+    ("a slice asked about that is not running", "R1", [("NEEDS_CHANGES", "R2")] * 2 + [("NEEDS_CHANGES", "R1")],
+     2, "R2"),
 ]
 
 
-@pytest.mark.parametrize("case,running,reviews,expected", ROUNDS)
-def test_rounds_golden_values(case, running, reviews, expected, project):
+@pytest.mark.parametrize("case,running,reviews,expected,asked", ROUNDS)
+def test_rounds_golden_values(case, running, reviews, expected, asked, project):
     if running:
         _running(project["root"], running)
     for verdict, slice_id in reviews:
         _review(project["root"], verdict, slice_id=slice_id)
-    assert A.rounds(project["root"], "semantic-review") == expected, case
+    item = {"id": asked, "title": "", "notes": {}} if asked else None
+    assert A.rounds(project["root"], "semantic-review", item) == expected, case
 
 
 # ── the tables keep up with the functions ──
@@ -270,7 +274,7 @@ GOLDEN = {
     W.architect_quota_until: (ARCHITECT_QUOTA, 7),
     A.burn_rate: (BURN_RATE, 11),
     cli._credits_problem: (CREDITS_PROBLEM, 12),
-    A.rounds: (ROUNDS, 35),
+    A.rounds: (ROUNDS, 36),
 }
 
 

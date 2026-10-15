@@ -1104,7 +1104,7 @@ def cmd_since(cfg, args):
 BOARD_ID = r"[^\s,\]\\·(/][^\s,\]\\·]*"
 
 
-def _board_add(cfg, args):
+def _board_add(cfg, args, edit):
     """Admit one item to `queued` the way `ao source import` admits one: only with its boundary.
 
     Work entered a board by hand-editing `.ao/board.md` or through a tracker import. Both keep the rule
@@ -1117,6 +1117,7 @@ def _board_add(cfg, args):
     An id is what the board reads between a line's brackets and what a needs note can name: a phase
     item such as ACME-187/1 is one, baselined on the plan ACME-187 (BOARD-ADD-2). `--needs` is read the
     way the board reads a needs note, split at commas and spaces, so what is checked is what is written.
+    The checks and the line they admit are made on one reading of the board, `edit` (SLICE-LIFECYCLE-2).
     """
     import re
     root = cfg["root"]
@@ -1125,9 +1126,9 @@ def _board_add(cfg, args):
     iid, title = (args.id or "").strip(), " ".join((args.title or "").split())
     acceptance, role = " ".join((args.acceptance or "").split()), (args.role or "").strip()
     needs = [token for token in re.split(r"[,\s]+", args.needs or "") if token]
-    board = A.board(root)
+    board = edit.board
     held = {item["id"] for state in A.BOARD_STATES for item in board.get(state, [])}
-    if not os.path.exists(os.path.join(root, ".ao", "board.md")):
+    if edit.data is None:
         problem = "this project has no .ao/board.md; `ao init` writes one"
     elif not re.fullmatch(BOARD_ID, iid):
         problem = (f"`{iid}` cannot be an id: an id holds no space, comma, ']', backslash or '·' and does not "
@@ -1154,7 +1155,8 @@ def _board_add(cfg, args):
         return 2
     notes = [("acceptance", acceptance)] + ([("needs", ", ".join(needs))] if needs else []) \
         + ([("role", role)] if role else [])
-    A.board_append(root, "queued", f"- [{iid}] {title}" + "".join(f" · {key}: {value}" for key, value in notes))
+    edit.append("queued", f"- [{iid}] {title}" + "".join(f" · {key}: {value}" for key, value in notes))
+    edit.write()
     digest = A.plan_digest(root, iid)
     if digest:
         A.record_plan(root, iid, digest)       # the plan as admitted: later edits are measured against it
@@ -1171,7 +1173,8 @@ def cmd_board(cfg, args):
     it, so nothing else in the panel looks wrong.
     """
     if getattr(args, "view", None) == "add":
-        return _board_add(cfg, args)
+        with A.BoardEdit(cfg["root"], hold=True) as edit:
+            return _board_add(cfg, args, edit)
     root = cfg["root"]
     for line in _mailbox_banner(cfg):
         print(line)
@@ -1239,6 +1242,404 @@ def _board_lines(cfg):
     return lines
 
 
+# ---- a slice's moves: start, block, abandon, each a line in the slice ledger (SLICE-LIFECYCLE) ----------
+
+# The sections a slice is open in; done and rejected are where it ends.
+SLICE_OPEN = ("running", "blocked", "queued", "inbox", "verified")
+
+
+def _slice_refused(problem):
+    print(f"{C['red']}REFUSED{C['reset']}  {problem}")
+    return 2
+
+
+def _slice_when(at):
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(float(at or 0)))
+
+
+def _slice_age(seconds):
+    minutes = max(0, int(seconds // 60))
+    if minutes < 60:
+        return f"{minutes}m"
+    if minutes < 24 * 60:
+        return f"{minutes // 60}h {minutes % 60}m"
+    return f"{minutes // (24 * 60)}d {minutes % (24 * 60) // 60}h"
+
+
+def _slice_places(board, iid):
+    """[(state, item)] for each line the board holds with this id: one, unless the board names it twice."""
+    return [(state, item) for state in A.BOARD_STATES for item in board[state] if item["id"] == iid]
+
+
+def _slice_named(board, named):
+    """(id, None) for the slice a command acts on: the one named, else the one running; (None, why) when neither."""
+    named = (named or "").strip()
+    if named:
+        return named, None
+    running = [item["id"] for item in board["running"]]
+    if not running:
+        return None, "nothing is running: name the slice with --slice"
+    if len(running) > 1:
+        return None, f"{len(running)} slices are running ({', '.join(running)}): name one with --slice"
+    return running[0], None
+
+
+def _slice_item(board, iid):
+    """(state, item, None) for one board id, or (None, None, why it cannot be moved)."""
+    places = _slice_places(board, iid)
+    if not places:
+        return None, None, f"{iid} is not on the board; `ao board add` admits an item with its acceptance boundary"
+    if len(places) > 1:
+        return None, None, (f"{iid} is on the board twice, under {places[0][0]} and {places[1][0]}: keep one line "
+                            "of it, then move it")
+    return places[0][0], places[0][1], None
+
+
+def _slice_blocked_by(root, iid):
+    """Who made a blocked slice's block, from the newest move ao recorded of it; None when no move says so."""
+    rows = [row for row in A.slice_moves(root) if row.get("slice") == iid]
+    return rows[-1].get("by") if rows and rows[-1].get("to") == "blocked" else None
+
+
+def _boundary_file_pointer(root, named):
+    """(`path@commit`, None) for the boundary file a slice starts against, or (None, why it cannot be one).
+
+    A boundary file is read at the commit its pointer names (docs/slices.md), so it must be in the repository
+    and committed as it stands: an uncommitted one would be read as the worktree holds it, which the
+    implementer can change. The path is the repository's, from its root, as a row's `paths:` are.
+    """
+    real_root = os.path.realpath(root)
+    full = os.path.realpath(os.path.join(root, named))
+    if not full.startswith(real_root + os.sep) or not os.path.isfile(full):
+        return None, f"--boundary-file {named}: no file of that name inside the repository, from its root"
+    rel = os.path.relpath(full, real_root).replace(os.sep, "/")
+    if "·" in rel or "@" in rel:
+        return None, f"--boundary-file {rel}: a pointer is `path@commit`, and a path holding '·' or '@' cannot be one"
+    try:
+        tracked = rel.encode(UTF8) in A._git_output(root, "ls-files", "-z", "--", rel).split(b"\0")
+        changed = A._git_output(root, "status", "--porcelain", "-z", "--", rel).strip(b"\0")
+    except RuntimeError as exc:
+        return None, f"--boundary-file {rel}: {exc}"
+    if not tracked or changed:
+        what = "has changes nobody committed" if tracked else "is not committed"
+        return None, (f"--boundary-file {rel} {what}: commit it first, since a boundary is read at the commit its "
+                      "pointer names")
+    head = A._git_text(root, "rev-parse", "--short=12", "HEAD")
+    return f"{rel}@{head}", None
+
+
+def _slice_start(cfg, args, edit):
+    """Move a queued slice to running, or resume a blocked one; each start is a line in the slice ledger.
+
+    The playbook has the implementer take the first READY item and settle alone which READY item comes next, so a
+    turn ao started for the implementer may start a READY item - queued, its needs landed, waiting on no one - and
+    resume a slice it blocked itself. Anything else chooses scope, which is the architect's or a person's: an item
+    that is not READY, a block someone else made, a boundary file. Refused, nothing is written (SLICE-LIFECYCLE).
+    Whether it is READY is judged on `edit`, the reading the move is made on (SLICE-LIFECYCLE-2).
+    """
+    root = cfg["root"]
+    iid, role = (args.text or "").strip(), A.invoking_role()
+    if not iid:
+        return _slice_refused("name the item: `ao slice start <id>`; `ao board ready` lists what may start now")
+    state, item, problem = _slice_item(edit.board, iid)
+    if problem:
+        return _slice_refused(problem)
+    if state == "running":
+        if args.boundary_file:
+            return _slice_refused(f"{iid} is running already: a boundary that changes mid-slice is a "
+                                  f"re-specification, recorded with `ao decide \"…\" --scope {iid} --why \"…\"`")
+        print(f"{C['dim']}{iid} is running already; nothing moved{C['reset']}")
+        return 0
+    if state not in ("queued", "blocked"):
+        return _slice_refused({
+            "inbox": f"{iid} is in the inbox, held without an acceptance boundary: it starts once one is written "
+                     "and it is queued",
+            "verified": f"{iid} is verified: its gates passed, and it lands rather than starts again",
+        }.get(state, f"{iid} is {state}: a slice that ended does not start again; `ao board add` admits new work"))
+    not_ready = A.lane_not_ready(root, iid, edit.data) if state == "queued" else None
+    if role == "implementer":
+        if args.boundary_file:
+            return _slice_refused("a boundary is the architect's to write (docs/roles.md): start the item as the "
+                                  "board admitted it, or ask for another boundary with `ao ask`")
+        if not_ready:
+            return _slice_refused(f"{not_ready}; an implementer starts only a READY item, and `ao board ready` "
+                                  "lists them")
+        blocker = _slice_blocked_by(root, iid) if state == "blocked" else "implementer"
+        if blocker != "implementer":
+            return _slice_refused(
+                f"{iid} is parked on quota by the watchdog, which gives it back when the limit resets"
+                if blocker == "watchdog" else
+                f"{iid} was blocked by {blocker or 'a hand edit ao has no record of'}: a block is lifted by whoever "
+                "made it, the architect or a person")
+    notes = {}
+    if state == "queued" or not item["notes"].get("since"):
+        notes["since"] = time.strftime("%Y-%m-%d %H:%M")
+    if state == "blocked":
+        # The block's reason goes; a `needs:` the slice carried before it comes back, as a quota park gives it back.
+        notes.update({"needs": item["notes"].get(A.HELD_NEEDS) or None, A.HELD_NEEDS: None, "waiting": None})
+    if args.boundary_file:
+        pointer, problem = _boundary_file_pointer(root, args.boundary_file)
+        if problem:
+            return _slice_refused(problem)
+        # One source of truth, never two: the file replaces the sentence, which the ledger keeps (docs/slices.md).
+        notes.update({"boundary": pointer, "acceptance": None})
+    why = "; ".join(part for part in (" ".join((args.why or "").split()),
+                                      f"started while not READY: {not_ready}" if not_ready else "") if part) or None
+    others = [other["id"] for other in edit.board["running"]]
+    edit.move(iid, "running", notes, by=role or "person", why=why)
+    edit.write()
+    print(f"{C['green']}running{C['reset']}  {C['b']}{iid}{C['reset']}  {item['title']}  "
+          f"{C['dim']}{state} → running, recorded in .ao/ledger/slices.jsonl{C['reset']}")
+    if why:
+        print(f"  {C['yellow']}{why}{C['reset']}")
+    if others:
+        print(f"  {C['dim']}also running: {', '.join(others)}; reviews now count for {iid}, the first slice under "
+              f"running{C['reset']}")
+    return 0
+
+
+def _slice_block(cfg, args, edit):
+    """Park a running slice under `blocked` with what it waits on, which anyone may do.
+
+    The reason becomes the item's `needs:`, which on a blocked item is its reason in words and what `ao status`
+    shows; a `needs:` the slice carried is kept in `held-needs:` and given back when it resumes, as the watchdog's
+    quota park keeps it. `--waiting human` says it waits on a person, who is told directly (SLICE-LIFECYCLE).
+    """
+    import re
+    why, waiting = " ".join((args.text or args.why or "").split()), (args.waiting or "").strip()
+    if not why:
+        return _slice_refused("say what the slice waits on: `ao slice block \"the vendor's signing key\"`")
+    if "·" in why:
+        return _slice_refused("a reason holds no '·': it separates a board line's notes")
+    if waiting and not re.fullmatch(r"[\w-]+", waiting):
+        return _slice_refused("--waiting is one word: human, architect, decision or external")
+    iid, problem = _slice_named(edit.board, args.slice)
+    state, item, problem = (None, None, problem) if problem else _slice_item(edit.board, iid)
+    if problem:
+        return _slice_refused(problem)
+    if state == "blocked":
+        print(f"{C['dim']}{iid} is blocked already, on {item['notes'].get('needs') or 'nothing it names'}; nothing "
+              f"moved{C['reset']}")
+        return 0
+    if state != "running":
+        return _slice_refused(f"{iid} is {state}: only a running slice is blocked; a queued item that must not "
+                              "start yet carries `waiting:` instead")
+    notes = {"needs": why}
+    if item["notes"].get("needs") and not item["notes"].get(A.HELD_NEEDS):
+        notes[A.HELD_NEEDS] = item["notes"]["needs"]
+    if waiting:
+        notes["waiting"] = waiting
+    edit.move(iid, "blocked", notes, by=A.invoking_role() or "person", why=why)
+    edit.write()
+    print(f"{C['red']}blocked{C['reset']}  {C['b']}{iid}{C['reset']}  {item['title']}  "
+          f"{C['dim']}needs: {why}{' · waiting: ' + waiting if waiting else ''}; running → blocked, recorded in "
+          f".ao/ledger/slices.jsonl{C['reset']}")
+    print(f"  {C['dim']}take the next READY item (`ao board ready`); `ao slice start {iid}` resumes it{C['reset']}")
+    return 0
+
+
+def _slice_abandon(cfg, args, edit):
+    """Drop a slice on the record: its row moves to `rejected`, with the reason as its `abandoned:` note.
+
+    Abandoning is a legitimate outcome (docs/slices.md), and a row deleted from the board said nothing of the
+    slice ever having been dropped, or why. `rejected` is the section the board already keeps for work that will
+    not land: its worktree may be retired and its review artefacts archived. Whether work is dropped is scope, the
+    architect's or a person's to decide, so a turn ao started for the implementer is refused (SLICE-LIFECYCLE).
+    """
+    role = A.invoking_role()
+    if role == "implementer":
+        return _slice_refused("abandoning a slice is the architect's decision or a person's (docs/roles.md): park it "
+                              "with `ao slice block \"…\"` and ask whether to drop it with `ao ask`")
+    why = " ".join((args.why or "").split())
+    if not why:
+        return _slice_refused("--why is required: an abandoned slice is an outcome, and its reason is what is kept "
+                              "of it")
+    if "·" in why:
+        return _slice_refused("a reason holds no '·': it separates a board line's notes")
+    iid, problem = _slice_named(edit.board, args.slice or args.text)
+    state, item, problem = (None, None, problem) if problem else _slice_item(edit.board, iid)
+    if problem:
+        return _slice_refused(problem)
+    if state == "rejected":
+        print(f"{C['dim']}{iid} is rejected already; nothing moved{C['reset']}")
+        return 0
+    if state == "done":
+        return _slice_refused(f"{iid} is done: a slice that landed is not abandoned; undoing what it landed is a "
+                              "slice of its own")
+    edit.move(iid, "rejected", {"abandoned": why}, by=role or "person", why=why)
+    edit.write()
+    print(f"{C['yellow']}abandoned{C['reset']}  {C['b']}{iid}{C['reset']}  {item['title']}  "
+          f"{C['dim']}{state} → rejected, recorded in .ao/ledger/slices.jsonl{C['reset']}")
+    if state in ("running", "blocked"):
+        print(f"  {C['dim']}it was {state}: tell the implementer with `ao note \"…\"`, since what it has in the tree "
+              f"for {iid} belongs to no slice now{C['reset']}")
+    return 0
+
+
+def _slice_status(cfg, args):
+    """Where one slice stands: its state and since when, the moves ao recorded, rounds used and its newest review.
+
+    It reads and writes nothing. The board is what a restarted session reads; the ledger says how the slice got
+    there, and where the two disagree the slice was moved by hand, which is said rather than smoothed over
+    (SLICE-LIFECYCLE).
+    """
+    root, reviews = cfg["root"], cfg.get("reviews", "semantic-review")
+    board = A.board(root)
+    named = (args.text or args.slice or "").strip()
+    if not named:
+        running = [item["id"] for item in board["running"]]
+        if not running:
+            print(f"{C['dim']}Nothing is running.{C['reset']} `ao slice status <id>` for another slice, `ao slices` "
+                  "for every one.")
+            return 0
+        named = running[0]              # the one review accounting reads as current
+    places = _slice_places(board, named)
+    try:
+        history, unreadable = [row for row in A.slice_moves(root, voided=True) if row.get("slice") == named], None
+    except Exception as exc:
+        history, unreadable = [], f"{type(exc).__name__}: {' '.join(str(exc).split())}"
+    # A move whose board write failed is in the history, marked, and nowhere else (SLICE-LIFECYCLE-2).
+    moves = [row for row in history if not row.get("void")]
+    if not places and not moves:
+        print(f"{C['yellow']}{named} is not on the board{C['reset']}, and ao recorded no move of it"
+              + (" that reached the board" if history else "") + "; `ao slices` lists every slice")
+        return 1 if unreadable is None else _slice_unreadable(unreadable)
+    state, item = places[0] if places else (None, None)
+    newest = moves[-1] if moves else None
+    title = item["title"] if item else next((row["title"] for row in history if row.get("title")), "")
+    print(f"{C['b']}{named}{C['reset']}  {title}")
+    if state is None:
+        print(f"  state     {C['red']}not on the board{C['reset']}: ao last recorded it under {newest.get('to')} on "
+              f"{_slice_when(newest.get('at'))}, and its row was removed by hand; `ao slice abandon --why` drops a "
+              "slice on the record")
+    elif newest and newest.get("to") == state:
+        print(f"  state     {state} since {_slice_when(newest.get('at'))}, "
+              f"{_slice_age(time.time() - float(newest.get('at') or 0))} ago, moved by {newest.get('by')}")
+    elif newest:
+        print(f"  state     {state}  {C['yellow']}{_slice_off_record(newest, state)}{C['reset']}")
+    else:
+        since = item["notes"].get("since")
+        print(f"  state     {state}" + (f" since {since}, as the board's since: note says" if since else "")
+              + f"  {C['dim']}no move recorded: put on the board or moved by hand{C['reset']}")
+    if places[1:]:
+        print(f"  {C['red']}on the board twice{C['reset']}, under {places[0][0]} and {places[1][0]}")
+    if item and state in SLICE_OPEN:
+        spent, budget = A.rounds(root, reviews, item), S.get(cfg, "round_budget")
+        colour = C["red"] if spent > budget else C["reset"]
+        print(f"  rounds    {colour}{spent} of {budget}{C['reset']}")
+    try:
+        review = A.latest_slice_review(root, reviews, named)
+    except Exception as exc:
+        review, unreadable = None, unreadable or f"the review ledger: {type(exc).__name__}: {exc}"
+    if review is None:
+        print(f"  review    {C['dim']}none that reached a verdict{C['reset']}")
+    else:
+        kind = " (retrospective)" if review["kind"] == "commit-range" else ""
+        colour = C["green"] if review["verdict"] == "APPROVED" else C["yellow"]
+        print(f"  review    {colour}{review['verdict']}{C['reset']}{kind} on {_slice_when(review['at'])}  "
+              f"{C['dim']}{reviews}/{review['artefact']}{C['reset']}")
+        if not review.get("recorded", True):
+            print(f"            {C['yellow']}no row in the review ledger: a review from before it, read from its file "
+                  f"as it stands{C['reset']}")
+        counts = review["counts"] or {}
+        if counts:
+            print("            " + " · ".join(f"{key} {counts.get(key, 0)}" for key in ("BLOCKER", "HIGH", "MEDIUM",
+                                                                                         "LOW")))
+        if review["problem"]:
+            print(f"            {C['yellow']}{review['problem']}{C['reset']}: its findings cannot be read")
+        elif review["verdict"] == "NEEDS_CHANGES":
+            for finding in review["findings"][:10]:
+                print(f"            - {finding}")
+            if len(review["findings"]) > 10:
+                print(f"            {C['dim']}and {len(review['findings']) - 10} more{C['reset']}")
+    if history:
+        print("  moves")
+        for row in history:
+            arrow = f"{row.get('from')} → {row.get('to')}" if row.get("from") else f"enters {row.get('to')}"
+            void = row.get("void")
+            print(f"    {_slice_when(row.get('at'))}  {arrow:<20}  by {row.get('by')}"
+                  + (f": {row['why']}" if row.get("why") else "")
+                  + (f"  {C['yellow']}did not happen: {void.get('why')}{C['reset']}" if void else ""))
+    if item and item["notes"]:
+        print("  notes     " + " · ".join(f"{key}: {value}" if value else key for key, value in item["notes"].items()))
+    return 0 if unreadable is None else _slice_unreadable(unreadable)
+
+
+def _slice_off_record(row, state):
+    """What it means that the board holds a slice under `state` while ao's newest recorded move put it elsewhere.
+
+    A row moved by hand, mostly. Where the board still holds it in the section that move took it from, the board
+    may never have taken the move: ao records a move before it writes the board, and a process stopped between
+    the two writes leaves no line voiding it (SLICE-LIFECYCLE-2).
+    """
+    if row.get("from") == state:
+        return (f"the board never took ao's last recorded move of it, {state} → {row.get('to')} on "
+                f"{_slice_when(row.get('at'))}: ao stopped between recording it and writing the board, or a hand "
+                "moved it back")
+    return f"moved by hand: ao last recorded it under {row.get('to')} on {_slice_when(row.get('at'))}"
+
+
+def _slice_unreadable(problem):
+    print(f"{C['red']}a ledger cannot be read{C['reset']}: {problem}. Nothing is appended to a chained ledger until "
+          "it is mended, so no move is recorded or made until then (docs/ledger.md)")
+    return 1
+
+
+def cmd_slice(cfg, args):
+    """`ao slice start|block|abandon|status`: a slice's moves between the board's sections, each one recorded.
+
+    A move is decided on one reading of the board and made on that same reading, which ao's other writers wait
+    for and which is compared with the board as it stands before it is replaced (BoardEdit): a row edited
+    meanwhile is never moved on a judgement made before the edit (SLICE-LIFECYCLE-2).
+    """
+    for line in _mailbox_banner(cfg):
+        print(line)
+    if args.action == "status":
+        return _slice_status(cfg, args)
+    with A.BoardEdit(cfg["root"], hold=True) as edit:
+        return {"start": _slice_start, "block": _slice_block, "abandon": _slice_abandon}[args.action](cfg, args, edit)
+
+
+def cmd_slices(cfg, args):
+    """Every slice on the board, by state, with since when; `--open` leaves out done and rejected.
+
+    A slice whose row was removed by hand is listed too, from the last move ao recorded of it: a deleted row is
+    the quiet drop docs/slices.md warns of, and abandoning one on the record is `ao slice abandon` (SLICE-LIFECYCLE).
+    """
+    root = cfg["root"]
+    for line in _mailbox_banner(cfg):
+        print(line)
+    board = A.board(root)
+    try:
+        moves, unreadable = A.slice_moves(root), None
+    except Exception as exc:
+        moves, unreadable = [], f"{type(exc).__name__}: {' '.join(str(exc).split())}"
+    newest, titles = {}, {}
+    for row in moves:
+        newest[row.get("slice")] = row
+        titles[row.get("slice")] = row.get("title") or titles.get(row.get("slice")) or ""
+    held = {item["id"] for items in board.values() for item in items}
+    shown = 0
+    for state in SLICE_OPEN + (() if args.open else ("done", "rejected")):
+        for item in board[state]:
+            row, shown = newest.get(item["id"]), shown + 1
+            since = _slice_when(row.get("at")) if row and row.get("to") == state else "-"
+            why = item["notes"].get("needs") if state == "blocked" else item["notes"].get("abandoned")
+            hand = f"  {C['yellow']}{_slice_off_record(row, state)}{C['reset']}" \
+                if row and row.get("to") != state else ""
+            print(f"  {C['b']}{item['id']:<14}{C['reset']} {state:<9} {since:<16}  {item['title']}"
+                  + (f"  {C['dim']}{why}{C['reset']}" if why else "") + hand)
+    for sid, row in newest.items():
+        if sid not in held and row.get("to") and (not args.open or row.get("to") in SLICE_OPEN):
+            shown += 1
+            print(f"  {C['b']}{sid:<14}{C['reset']} {C['red']}gone{C['reset']}      {_slice_when(row.get('at')):<16}  "
+                  f"{titles.get(sid)}  {C['yellow']}not on the board: ao last recorded it under "
+                  f"{row.get('to')}, and its row was removed by hand{C['reset']}")
+    if not shown:
+        print(f"{C['dim']}No {'open ' if args.open else ''}slices on the board.{C['reset']}")
+    return 0 if unreadable is None else _slice_unreadable(unreadable)
+
+
 def cmd_source(cfg, args):
     """External work queues: what is configured, what is waiting, what may enter.
 
@@ -1283,66 +1684,72 @@ def cmd_source(cfg, args):
         return 0
 
     # import — the only place an item crosses from "someone wrote this" to
-    # "an agent may work on it unattended"
+    # "an agent may work on it unattended". Every item is judged and put on one reading of the board, written
+    # once, and a pull file is marked imported only after that write: a board that changed meanwhile leaves
+    # every file to import again (SLICE-LIFECYCLE-2).
     if not files:
         print(f"{C['dim']}Nothing in .ao/inbox/ to import.{C['reset']}")
         return 0
-    admitted = held = refused = 0
-    for f in files:
-        try:
-            doc = json.load(open(f, encoding=UTF8))
-        except Exception as e:
-            print(f"{C['red']}skip{C['reset']} {os.path.basename(f)}: unreadable ({e})")
-            continue
-        err = A.binding_error(root, doc.get("bound_root"))
-        if err:
-            print(f"{C['red']}REFUSED{C['reset']} {os.path.basename(f)}: {err}")
-            continue
-        # Each text a board line carries is one line, as `ao board add` writes it: a tracker item's title is anyone's
-        # text, and a line break in it wrote items and sections of its own into the board, an acceptance boundary
-        # among them that nobody wrote (LEADS-ADAPTERS).
-        sid = " ".join(str(doc.get("source", "?")).split())
-        refused_here = 0
-        for number, it in enumerate(doc.get("items", []), 1):
-            iid = it.get("id") if isinstance(it, dict) else None
-            # An id is a text or a whole number: an item with none, an empty one or a false one was dropped without a
-            # word and its file marked imported, so nobody could correct it (the review of LEADS-ADAPTERS).
-            if isinstance(iid, bool) or not isinstance(iid, (str, int)) or not str(iid).strip():
-                print(f"{C['red']}REFUSED{C['reset']} item {number} in {os.path.basename(f)}: "
-                      + ("it has no id, a text or a whole number the board names it by" if isinstance(it, dict)
-                         else "it is no object with an id"))
-                refused_here += 1
+    admitted, held, refused, done = [], 0, 0, []
+    with A.BoardEdit(root, hold=True) as edit:
+        for f in files:
+            try:
+                doc = json.load(open(f, encoding=UTF8))
+            except Exception as e:
+                print(f"{C['red']}skip{C['reset']} {os.path.basename(f)}: unreadable ({e})")
                 continue
-            iid = str(iid)
-            title = " ".join(str(it.get("title") or "").split())
-            acc = " ".join(str(it.get("acceptance") or "").split())
-            why = " ".join(str(it.get("shape") or "").split()) or "no acceptance boundary written"
-            problem = _source_item_problem(iid, (sid, title, acc, why))
-            if problem:
-                print(f"{C['red']}REFUSED{C['reset']} {A.shown_text(iid)} in {os.path.basename(f)}: {problem}")
-                refused_here += 1
+            err = A.binding_error(root, doc.get("bound_root"))
+            if err:
+                print(f"{C['red']}REFUSED{C['reset']} {os.path.basename(f)}: {err}")
                 continue
-            if any(x["id"] == iid for st in A.BOARD_STATES for x in A.board(root)[st]):
-                continue                                  # already on the board
-            if acc:
-                A.board_append(root, "queued",
-                               f"- [{iid}] {title} · source: {sid} · acceptance: {acc}")
-                dg = A.plan_digest(root, iid)
-                if dg:
-                    A.record_plan(root, iid, dg)   # baseline: the plan as admitted
-                admitted += 1
+            # Each text a board line carries is one line, as `ao board add` writes it: a tracker item's title is
+            # anyone's text, and a line break in it wrote items and sections of its own into the board, an
+            # acceptance boundary among them that nobody wrote (LEADS-ADAPTERS).
+            sid = " ".join(str(doc.get("source", "?")).split())
+            refused_here = 0
+            for number, it in enumerate(doc.get("items", []), 1):
+                iid = it.get("id") if isinstance(it, dict) else None
+                # An id is a text or a whole number: an item with none, an empty one or a false one was dropped
+                # without a word and its file marked imported, so nobody could correct it (the review of
+                # LEADS-ADAPTERS).
+                if isinstance(iid, bool) or not isinstance(iid, (str, int)) or not str(iid).strip():
+                    print(f"{C['red']}REFUSED{C['reset']} item {number} in {os.path.basename(f)}: "
+                          + ("it has no id, a text or a whole number the board names it by" if isinstance(it, dict)
+                             else "it is no object with an id"))
+                    refused_here += 1
+                    continue
+                iid = str(iid)
+                title = " ".join(str(it.get("title") or "").split())
+                acc = " ".join(str(it.get("acceptance") or "").split())
+                why = " ".join(str(it.get("shape") or "").split()) or "no acceptance boundary written"
+                problem = _source_item_problem(iid, (sid, title, acc, why))
+                if problem:
+                    print(f"{C['red']}REFUSED{C['reset']} {A.shown_text(iid)} in {os.path.basename(f)}: {problem}")
+                    refused_here += 1
+                    continue
+                if any(x["id"] == iid for st in A.BOARD_STATES for x in edit.board[st]):
+                    continue                                  # already on the board
+                if acc:
+                    edit.append("queued", f"- [{iid}] {title} · source: {sid} · acceptance: {acc}")
+                    admitted.append(iid)
+                else:
+                    edit.append("inbox", f"- [{iid}] {title} · source: {sid} · needs: {why}")
+                    held += 1
+            refused += refused_here
+            if refused_here:
+                # Kept to be imported again once corrected: what it admitted is on the board, and is not added twice.
+                print(f"{C['yellow']}kept{C['reset']} {os.path.basename(f)}: correct its refused item(s) and run "
+                      "ao source import again")
             else:
-                A.board_append(root, "inbox",
-                               f"- [{iid}] {title} · source: {sid} · needs: {why}")
-                held += 1
-        refused += refused_here
-        if refused_here:
-            # Kept to be imported again once corrected: what it admitted is on the board, and is not added twice.
-            print(f"{C['yellow']}kept{C['reset']} {os.path.basename(f)}: correct its refused item(s) and run "
-                  "ao source import again")
-        else:
-            os.rename(f, f + ".imported")
-    print(f"{C['green']}{admitted} admitted{C['reset']} to queued · "
+                done.append(f)
+        edit.write()
+    for iid in admitted:
+        dg = A.plan_digest(root, iid)
+        if dg:
+            A.record_plan(root, iid, dg)   # baseline: the plan as admitted
+    for f in done:
+        os.rename(f, f + ".imported")
+    print(f"{C['green']}{len(admitted)} admitted{C['reset']} to queued · "
           f"{C['yellow']}{held} held{C['reset']} in inbox (no acceptance boundary)"
           + (f" · {C['red']}{refused} refused{C['reset']}" if refused else ""))
     return 1 if refused else 0

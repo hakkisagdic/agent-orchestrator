@@ -151,6 +151,22 @@ def build_parser(root=None):
     bd.add_argument("--needs", help="add: the ids this item waits for, comma-separated")
     bd.add_argument("--role", help="add: the role that takes it, when that is not the implementer")
     bd.set_defaults(fn=cmd_board)
+    sl = sub.add_parser("slice", help="start, block or abandon a slice, each move a line in the slice ledger; "
+                                      "status: where one stands and how it got there")
+    sl.add_argument("action", nargs="?", choices=["start", "block", "abandon", "status"], default="status")
+    sl.add_argument("text", nargs="?", help="start, status, abandon: the item's id; block: what it waits on")
+    sl.add_argument("--slice", help="block, abandon, status: the item (default: the running slice)")
+    sl.add_argument("--why", help="abandon: why it is dropped, required; start: why, kept with the move")
+    sl.add_argument("--waiting", help="block: who it waits on - human, architect, decision or external")
+    sl.add_argument("--boundary-file", dest="boundary_file",
+                    help="start: a file committed in the repository that the slice is judged against, in place of "
+                         "its acceptance sentence; the architect's or a person's")
+    sl.set_defaults(fn=cmd_slice)
+    sls = sub.add_parser("slices", help="every slice on the board, its state and since when; --open leaves out "
+                                        "the done and the rejected")
+    sls.add_argument("--open", action="store_true", help="only the open ones: running, blocked, queued, inbox, "
+                                                         "verified")
+    sls.set_defaults(fn=cmd_slices)
     ak = sub.add_parser("ask", help="pose a decision, answerable in one tap")
     ak.add_argument("question", nargs="?")
     ak.add_argument("options", nargs="*")
@@ -668,7 +684,9 @@ def main(argv=None):
     keeps its traceback for whoever has to find where it came from. The standard streams are
     UTF-8 before anything is read or printed, whatever the platform's code page (#71). A
     process table the platform could not read stops the command where it was asked, and says
-    so: what the command decides from it is not decided (WINDOWS-TABLE-CLOSED).
+    so: what the command decides from it is not decided (WINDOWS-TABLE-CLOSED). A board that
+    changed while a command read it is named with what to do, and nothing was moved
+    (SLICE-LIFECYCLE-2).
     """
     A.utf8_streams()
     command, root = "ao", None
@@ -705,6 +723,9 @@ def main(argv=None):
     except TableUnreadable as exc:
         print(f"{command} stopped: {exc}. It decides nothing from processes it cannot see; "
               "run it again once the table can be read", file=sys.stderr)
+        return 1
+    except A.BoardChanged as exc:
+        print(f"{command}: {exc}", file=sys.stderr)
         return 1
     except Exception as exc:
         if os.environ.get("AO_DEBUG", "") not in ("", "0"):

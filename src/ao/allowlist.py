@@ -125,6 +125,8 @@ def admits_act(rule, words, flags=()):
 IMPLEMENTER_FORBIDDEN = (
     ("re-specifies a slice, restarting its round budget", "ao decide x --scope s"),
     ("changes the settings that govern its own review", "ao config set review_timeout 1"),
+    # Whether work is dropped is scope; the implementer parks a slice instead (SLICE-LIFECYCLE).
+    ("abandons a slice, which the architect decides", "ao slice abandon --why w"),
 )
 
 # The architect decides and edits ao's coordination files; a wake writes no product code

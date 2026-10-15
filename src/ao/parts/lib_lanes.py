@@ -89,16 +89,18 @@ def lane_record(root, item):
     return next((record for record in lane_records(root) if record["name"] == name), None)
 
 
-def lane_not_ready(root, item):
+def lane_not_ready(root, item, data=None):
     """Why a board item may not start now, as a sentence; None when it is READY (#33).
 
     READY is board_graph's alone. This only says which of its reasons holds, so a refusal
-    names what to do: land a dependency, answer who it waits on, or mend an edge.
+    names what to do: land a dependency, answer who it waits on, or mend an edge. `data` is
+    the board as one reading took it, which `ao slice start` moves the item on
+    (SLICE-LIFECYCLE-2).
     """
-    graph = board_graph(root)
+    graph = board_graph(root, data)
     if any(entry["id"] == item for entry in graph["ready"]):
         return None
-    b = board(root)
+    b = board(root, data)
     state, entry = next(((column, row) for column in BOARD_STATES for row in b[column] if row["id"] == item),
                         (None, None))
     if state is None:

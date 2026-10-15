@@ -203,6 +203,11 @@ as `held-needs:`, and gets it back when the park ends, where only the watchdog's
 state lost - torn or deleted - and read back from the board resumed its items without it. A park made
 again on a fresh stop after the state lost it keeps the `held-needs:` its items' lines hold.*
 
+*In ao since slice SLICE-LIFECYCLE: each move a park makes, and each one its end makes, is a line in
+the slice ledger by `watchdog`, with why ([ledger.md](ledger.md#slices)). The park moves on the reading
+of the board it was decided on: a board a hand changed meanwhile - a slice landed by hand while keyflip
+was asked - moves nothing, and the cycle stands down, saying so, and decides again on the next.*
+
 ## The architect at its usage limit
 
 *In ao since slice ARCHITECT-WAKE-QUOTA: a wake that stopped on the architect's usage limit is not

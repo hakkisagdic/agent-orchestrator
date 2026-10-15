@@ -9,6 +9,8 @@ Her `ao` komutu ve ne yaptığı. [README](../README.tr.md) her değişiklikte k
 | `ao watch --web [--port N]` | panel, pano ve tüm projeler 127.0.0.1'de salt okunur sayfalar olarak: terminal yerine bir tarayıcı sekmesi ([surfaces.md](surfaces.md)) |
 | `ao board` | her iş nerede; READY = `needs:` bağımlılıkları tamamlanmış kuyruk maddeleri |
 | `ao board add ID "başlık" --acceptance "…"` | bir maddeyi yalnız kabul sınırıyla birlikte kuyruğa alır |
+| `ao slice start <id>` · `ao slice block "…"` · `ao slice abandon --why "…"` | bir dilimi taşır: kuyruktakini başlatır ya da park edilmiş olanı sürdürür, çalışanı neyi beklediğiyle birlikte park eder, birini gerekçesiyle kayda geçirerek `rejected`'a bırakır; her taşıma `.ao/ledger/slices.jsonl`'de bir satırdır, dilimi bırakmak mimarın ya da bir insanın kararıdır ([slices.md](slices.md#commands)) |
+| `ao slice status [<id>]` · `ao slices [--open]` | bir dilimin nerede durduğu, ne zamandan beri ve oraya nasıl geldiği, turları ve en yeni review'ının bulguları; tüm dilimler satır satır, elle taşınmış ya da silinmiş bir satır adıyla anılır |
 | `ao verify [-p full]` | tanımlı gate'leri koştur, sonucu kaydet |
 | `ao commit-ok [--verify]` | bu ağaç commit edilebilir mi? kanıttan karar |
 | `ao commit -m …` · `ao commit-check --range A..B` | yetki verilen adayı commit et, mesajı yetkiyi adlandıran Ao- trailer'larıyla biter; inmiş her commit'in trailer'larının adlandırdığı ağaca sahip olduğunu `.ao/` gerekmeden, CI'ın koştuğu gibi denetle ([gates.md](gates.md#a-commit-names-its-grant)) |

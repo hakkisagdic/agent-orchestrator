@@ -9,6 +9,8 @@ Every `ao` command and what it does. The [README](../README.md) starts with the 
 | `ao watch --web [--port N]` | the panel, the board and the fleet as read-only pages on 127.0.0.1: a browser tab in place of a terminal ([surfaces.md](surfaces.md)) |
 | `ao board` | where each item is; READY = queued items whose `needs:` are done |
 | `ao board add ID "title" --acceptance "…"` | admit one item, only with its acceptance boundary |
+| `ao slice start <id>` · `ao slice block "…"` · `ao slice abandon --why "…"` | move a slice: start a queued one or resume a blocked one, park the running one with what it waits on, drop one on the record to `rejected`; each move is a line in `.ao/ledger/slices.jsonl`, and dropping one is the architect's or a person's ([slices.md](slices.md#commands)) |
+| `ao slice status [<id>]` · `ao slices [--open]` | where a slice stands, since when and how it got there, its rounds and its newest review's findings; every slice on one line, a row moved or removed by hand named |
 | `ao verify [-p full]` | run the declared gates, record the result |
 | `ao commit-ok [--verify]` | may this tree be committed? decided from evidence |
 | `ao commit -m …` · `ao commit-check --range A..B` | commit the granted candidate, its message ending with Ao- trailers that name the grant; check that each landed commit has the tree its trailers name, with no `.ao/` needed, as CI runs it ([gates.md](gates.md#a-commit-names-its-grant)) |

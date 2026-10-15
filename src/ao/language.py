@@ -117,6 +117,7 @@ Row format: `- [ID] title · key: value` — `needs:` is required for `blocked`.
 Dependency: `needs: B1, B2` (on a queued item) → it becomes READY once those are done.
 
 The implementer edits this file directly. `ao board` reads it, and `ao board add` admits one item to it, with its acceptance boundary.
+`ao slice start`, `ao slice block` and `ao slice abandon` move an item and record each move in `.ao/ledger/slices.jsonl`.
 
 ## running
 
@@ -140,6 +141,7 @@ Satır biçimi: `- [ID] başlık · anahtar: değer` — `blocked` için `needs:
 Bağımlılık: `needs: B1, B2` (kuyruk maddesinde) → tamamlanınca READY olur.
 
 Bu dosyayı uygulayıcı doğrudan düzenler. `ao board` okur; `ao board add` kabul sınırıyla birlikte bir madde ekler.
+`ao slice start`, `ao slice block` ve `ao slice abandon` bir maddeyi taşır ve her taşımayı `.ao/ledger/slices.jsonl`'e kaydeder.
 
 ## running
 
@@ -161,9 +163,10 @@ Bu dosyayı uygulayıcı doğrudan düzenler. `ao board` okur; `ao board add` ka
 This file lists, in order, the work that may start **without waiting for the architect's
 decision**. Each item's acceptance boundary was written in advance.
 
-**Rule:** If the open slice is stuck on an architectural decision, DO NOT STOP. Mark the slice
-`blocked` (with `needs:`), leave a `DECISION REQUIRED` message in `agent-mail/` — or ask a
-question with options with `ao_ask` — and move to the first **open** item here.
+**Rule:** If the open slice is stuck on an architectural decision, DO NOT STOP. Park the slice
+with `ao slice block "…"` (it moves to `blocked`, the reason its `needs:`), leave a
+`DECISION REQUIRED` message in `agent-mail/` — or ask a question with options with `ao_ask` —
+and move to the first **open** item here.
 
 ---
 
@@ -184,9 +187,9 @@ question with options with `ao_ask` — and move to the first **open** item here
 Bu dosya, **mimarın kararı beklenmeden** başlanabilecek işleri sırayla listeler.
 Her maddenin kabul sınırı önceden yazılmıştır.
 
-**Kural:** Açık dilim bir mimari karara takılırsa DURMA. Dilimi `blocked` işaretle
-(`needs:` ile), `agent-mail/`'e `KARAR GEREKLİ` mesajı bırak — ya da `ao_ask` ile
-seçenekli soru sor — ve buradaki ilk **açık** maddeye geç.
+**Kural:** Açık dilim bir mimari karara takılırsa DURMA. Dilimi `ao slice block "…"` ile
+park et (`blocked`'a geçer, gerekçe `needs:` olur), `agent-mail/`'e `KARAR GEREKLİ` mesajı
+bırak — ya da `ao_ask` ile seçenekli soru sor — ve buradaki ilk **açık** maddeye geç.
 
 ---
 
