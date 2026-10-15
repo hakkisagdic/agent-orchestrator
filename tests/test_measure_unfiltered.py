@@ -1,3 +1,4 @@
+"""Measurements bypass PATH filters and report unknown hooks as unverified (TRIAGE-2-LOW)."""
 import json
 import os
 import shlex
@@ -84,7 +85,7 @@ def test_the_doctor_names_a_script_in_front_of_git_and_a_hook_that_rewrites_comm
 
     text = "\n".join(cli._measurement_lines(project))
 
-    assert "2 possible filter(s)" in text
+    assert "3 possible filter(s)" in text
     assert f"git on PATH is {script}, a script in front of git" in text
     assert "`rtk hook claude`" in text and "write-tree" in text
-    assert "identity-guard" not in text
+    assert "identity-guard" in text and "unverified" in text

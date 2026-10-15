@@ -31,6 +31,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- Email settings whose provider is a list or object disable the channel without raising, so malformed settings no longer interrupt notification callers ([alarms](docs/alarms.md)) (TRIAGE-2-LOW)
+- `ao status` names the most recently active secondary project while the primary session is slowing, stopped or idle ([watchdog](docs/watchdog.md)) (TRIAGE-2-LOW)
+- `ao doctor` names an executable `AO_GIT` script and lists unrecognised shell hooks as unverified instead of silently omitting them ([gates](docs/gates.md)) (TRIAGE-2-LOW)
+- Gate summaries preserve stdout/stderr write order, require both named counts and record pytest errors even when no tests passed or failed ([gates](docs/gates.md)) (TRIAGE-2-LOW)
 - Individual decisions receive their own report throttle, so an earlier decision cannot suppress the next ([alarms](docs/alarms.md)) (TRIAGE-3-MEDIUM).
 - Missing credit readings become recorded broken checks with retry throttling and doctor visibility ([telemetry](docs/telemetry.md)) (TRIAGE-3-MEDIUM).
 - Worktree retirement requires readable status, rechecks product changes before removal and recognizes remote default-branch merges ([parallel work](docs/parallel.md)) (TRIAGE-3-MEDIUM).
@@ -124,6 +128,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Under the hood
 
+- Documentation checks reject unused path strings as evidence and require JSON file examples to contain exactly one value, while retaining multiple-value JSONL examples ([release](docs/release.md)) (TRIAGE-2-LOW)
 - The F11 fuzz oracle accepts an answering message alongside a blocked report, with a forced scenario proving the resulting nudge ([watchdog](docs/watchdog.md)) (TRIAGE-3-LOW)
 - The weekly and on-demand test lanes have an hour: the Windows suite took 37 minutes on Python 3.9 and ran past the 40 it had on 2026-10-12, cancelled before it said a result (CI-WINDOWS-TIME).
 - A test reads `lib.py`, `cli.py` and the parts each loads as the one namespace they are, and fails when two of its files bind a name to two things: a part loaded later had replaced an earlier one's function without a word ([slices](docs/slices.md), PARTS-ONE-NAME).

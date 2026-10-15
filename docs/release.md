@@ -25,6 +25,12 @@ command rows and adapter table, in both languages, match `ao --help` and `ao ada
 still owed for what ships: `ao catchup --plan` lists each open review waiver and writes nothing, and
 releasing over one is the owner's decision, not the checklist's.
 
+The documentation checks in `tests/test_docs_names.py` count a path only when it reaches
+path construction, a file open, a write or printed output. An unused string or tuple is no
+evidence that ao names it. A block showing a JSON file must contain exactly one JSON value;
+JSONL examples may contain several. These checks prevent an unused constant or an unchecked
+second value from making an incorrect example pass (TRIAGE-2-LOW).
+
 ```bash
 git log --oneline "$(git describe --tags --abbrev=0)"..HEAD
 ao catchup --plan

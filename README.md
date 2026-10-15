@@ -52,6 +52,10 @@ guarantees on a throwaway candidate instead of describing them. With one harness
 `claude-claude` asks for a [review tier](docs/roles.md#review-tiers): another model of the same
 family, labelled as weaker independence, or a person.
 
+`ao status` names the most recently active secondary project while the primary session
+is slowing, stopped or idle. `ao doctor` reports a script selected by `AO_GIT` and
+unrecognised shell hooks as possible filters; see [gates](docs/gates.md).
+
 ## How a change lands
 
 ```text

@@ -299,7 +299,9 @@ def gate_counts(output, summary=None):
     Only the last lines are read, and the last summary in them counts: a test name,
     a log line or a fixture the implementer wrote can print "# pass 900" anywhere
     earlier. A gate can name its runner's summary with `summary`, a regex with `pass`
-    and `fail` groups. Nothing found is None - unparsed, never a number.
+    and `fail` groups. Nothing found is None - unparsed, never a number. Both groups
+    must capture numbers; an unmatched group is not zero. A pytest closing line with
+    errors alone counts them as failures (TRIAGE-2-LOW).
     """
     tail = "\n".join(str(output or "").splitlines()[-GATE_SUMMARY_TAIL_LINES:])
     if summary:
@@ -311,8 +313,8 @@ def gate_counts(output, summary=None):
             return None
         groups = found[-1].groupdict()
         try:
-            return int(groups.get("pass") or 0), int(groups.get("fail") or 0)
-        except ValueError:
+            return int(groups["pass"]), int(groups["fail"])
+        except (KeyError, TypeError, ValueError):
             return None
     # Each summary a runner closes with is found where it ends, and the one that ends last counts. A node
     # pair was taken before any pytest line wherever it stood, so a `# pass 900` / `# fail 0` a test printed
@@ -328,7 +330,7 @@ def gate_counts(output, summary=None):
     # pytest closes with "3 failed, 461 passed, 2 skipped in 12.30s".
     for closing in re.finditer(r"^=*[ \t]*((?:\d+ [a-z]+(?:, )?)+) in [\d.]+s\b", tail, re.M):
         counts = {word: int(n) for n, word in re.findall(r"(\d+) ([a-z]+)", closing.group(1))}
-        if "passed" in counts or "failed" in counts:
+        if {"passed", "failed", "error", "errors"}.intersection(counts):
             found.append((closing.end(), (counts.get("passed", 0),
                                           counts.get("failed", 0) + counts.get("error", 0) + counts.get("errors", 0))))
     return max(found)[1] if found else None

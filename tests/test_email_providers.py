@@ -1,3 +1,4 @@
+"""Mail providers send through saved settings; malformed provider names disable sending (TRIAGE-2-LOW)."""
 import json
 import os
 import stat
@@ -122,3 +123,11 @@ def test_the_formsubmit_file_from_before_providers_still_sends(conf):
     conf.write_text(json.dumps({"token": "tok", "to": "me@example.test"}))
 
     assert email.config()["provider"] == "formsubmit"
+
+
+@pytest.mark.parametrize("provider", [[], {}, ["smtp"], {"name": "smtp"}, None, 1, True])
+def test_a_non_string_provider_disables_email(conf, provider):
+    conf.write_text(json.dumps({"provider": provider, "token": "tok"}), encoding="utf-8")
+
+    assert email.config() is None
+    assert email.send("red", "the queue is empty") is False

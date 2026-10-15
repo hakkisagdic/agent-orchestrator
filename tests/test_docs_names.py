@@ -14,12 +14,13 @@ reads the same documents, under the same not-built markers, for four more kinds 
   project, read otherwise;
 - a path: `.ao/…` or `~/.ao/…` anywhere, and each entry of a tree drawn under one. The code
   names it in the same place, `~/.ao` on the machine or `.ao` in a project: in an os.path.join
-  of literals, constants, loop values and what a function returns, or in a string it writes or
-  prints. A docstring names nothing. `<placeholder>` stands for one name, and a directory is
+  of literals, constants, loop values and what a function returns, in a storage tree primitive's
+  path argument (a string or relative parts), or in a string it writes or prints. A docstring or
+  an unused constant names nothing. `<placeholder>` stands for one name, and a directory is
   named when a path the code names lies inside it;
 - a file's content: a block marked json, jsonc, yaml or toml shows a file when its first line is
   a comment naming the file, or when the paragraph directly above names one file and ends with
-  a colon. A JSON file is shown as JSON, and a YAML or TOML file ao does not name must not stand
+  a colon. A JSON file is shown as exactly one JSON value, and a YAML or TOML file ao does not name must not stand
   in for the JSON file of that name that ao does read. A gates example holds only what
   `ao verify` reads, and a config or settings example must pass the checks ao runs on one:
   settings.problems, the role table and the capability matrix;
@@ -38,6 +39,8 @@ import json
 import re
 import shutil
 from pathlib import Path
+
+import pytest
 
 from ao import cli, lib as A, matrix, mcp, settings as S, telegram
 from tests.test_docs_commands import FENCE, ROOT, _documents, _marker_problems, _option_like, _placeholder, _read
@@ -193,6 +196,7 @@ class _Code:
         self.trees = [ast.parse(path.read_text(encoding="utf-8")) for path in sorted(Path(source).rglob("*.py"))]
         self.constants, self.functions, self.enclosing = {}, {}, {}
         self.bindings, self.returns, self.busy = {}, {}, set()
+        self.calls = collections.defaultdict(list)
         for tree in self.trees:
             statements = list(tree.body)
             while statements:                          # the module's own level, through if and try
@@ -207,6 +211,8 @@ class _Code:
             stack = [(tree, None)]
             while stack:                               # the function each node is read in
                 node, scope = stack.pop()
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                    self.calls[node.func.id].append(node)
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     self.functions.setdefault(node.name, []).append(node)
                 inner = node if isinstance(node, SCOPES) else scope
@@ -217,7 +223,8 @@ class _Code:
     def _bound_in(self, scope, name):
         """How `name` is bound in one function, or None.
 
-        Each binding is ("param", default), ("value", expr) or ("each", iterable, index).
+        Each binding is ("param", default), ("value", expr), ("each", iterable, index)
+        or ("suffix", text) for a name selected by endswith (TRIAGE-2-LOW).
         """
         if (scope, name) not in self.bindings:
             found, arguments = [], scope.args
@@ -225,6 +232,14 @@ class _Code:
             defaults = dict(zip([arg.arg for arg in positional][::-1], arguments.defaults[::-1]))
             defaults.update((arg.arg, default) for arg, default in zip(arguments.kwonlyargs, arguments.kw_defaults))
             found.extend(("param", defaults.get(name)) for arg in positional + arguments.kwonlyargs if arg.arg == name)
+            # A local writer receives the path at its call, as init's put does (TRIAGE-2-LOW).
+            outer = self.enclosing.get(scope)
+            if outer is not None:
+                for call in self.calls.get(getattr(scope, "name", None), []):
+                    if self.enclosing.get(call) is not outer:
+                        continue
+                    found.extend(("value", value) for arg, value in zip(positional, call.args) if arg.arg == name)
+                    found.extend(("value", kw.value) for kw in call.keywords if kw.arg == name)
             for node in ast.walk(scope):
                 if isinstance(node, ast.Assign):
                     for target in node.targets:
@@ -233,7 +248,13 @@ class _Code:
                         and node.target.id == name and node.value is not None:
                     found.append(("value", node.value))
                 elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
-                    found.extend(self._targets(node.target, ("each", node.iter, None), name))
+                    bindings = self._targets(node.target, ("each", node.iter, None), name)
+                    suffixes = [test.args[0].value for test in getattr(node, "ifs", [])
+                                if isinstance(test, ast.Call) and isinstance(test.func, ast.Attribute)
+                                and isinstance(test.func.value, ast.Name) and test.func.value.id == name
+                                and test.func.attr == "endswith" and len(test.args) == 1
+                                and isinstance(test.args[0], ast.Constant) and isinstance(test.args[0].value, str)]
+                    found.extend([("suffix", suffixes[0])] if bindings and suffixes else bindings)
             self.bindings[scope, name] = tuple(found) or None
         return self.bindings[scope, name]
 
@@ -274,11 +295,21 @@ class _Code:
                 and node.func.id in ("sorted", "list", "tuple", "set", "reversed"):
             return self._elements(node.args[0], depth + 1, indexing)
         if isinstance(node, (ast.Name, ast.Attribute)):
-            return [element for binding in self._resolve(node) if binding[0] == "value"
-                    for element in self._elements(binding[1], depth + 1, indexing)]
+            out = []
+            for binding in self._resolve(node):
+                if binding[0] == "value":
+                    out.extend(self._elements(binding[1], depth + 1, indexing))
+                elif binding[0] == "each":
+                    for element in self._elements(binding[1], depth + 1):
+                        index = binding[2]
+                        if index is not None and isinstance(element, (ast.Tuple, ast.List)) and index < len(element.elts):
+                            out.extend(self._elements(element.elts[index], depth + 1, indexing))
+            return out
         return []
 
     def _bound(self, binding, depth):
+        if binding[0] == "suffix":
+            return [UNKNOWN + binding[1]]
         if binding[0] == "value":
             return self.values(binding[1], depth + 1)
         if binding[0] == "param":
@@ -316,6 +347,9 @@ class _Code:
             return [node.value] if isinstance(node.value, str) else [UNKNOWN]
         if isinstance(node, ast.JoinedStr):
             return ["".join(part.value if isinstance(part, ast.Constant) else "*" for part in node.values)]
+        if isinstance(node, (ast.Tuple, ast.List)):
+            return ["/".join(pieces) for pieces in
+                    itertools.islice(itertools.product(*(more(part) for part in node.elts)), 256)]
         if isinstance(node, (ast.Name, ast.Attribute)):
             if (node.id if isinstance(node, ast.Name) else node.attr) == "HOME":
                 return [HOME]
@@ -330,14 +364,16 @@ class _Code:
         if isinstance(node, ast.Subscript):
             return [value for element in self._elements(node.value, depth + 1, indexing=True)
                     for value in more(element)] or [UNKNOWN]
-        if not isinstance(node, ast.Call) or any(isinstance(arg, ast.Starred) for arg in node.args):
+        if not isinstance(node, ast.Call):
             return [UNKNOWN]
         func, first = node.func, node.args[0] if node.args else None
         name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
         owner = func.value if isinstance(func, ast.Attribute) else None
         if name == "join" and _os_path(owner):
+            args = [element for arg in node.args for element in
+                    (self._elements(arg.value, depth + 1) if isinstance(arg, ast.Starred) else [arg])]
             return ["/".join(piece for piece in pieces if piece) for pieces in
-                    itertools.islice(itertools.product(*(more(arg) for arg in node.args)), 256)]
+                    itertools.islice(itertools.product(*(more(arg) for arg in args)), 256)]
         if name == "expanduser" and first is not None:
             return [HOME + value[1:] if value.startswith("~") else value for value in more(first)]
         if name in ("abspath", "realpath", "normpath", "fspath", "str", "Path") and first is not None:
@@ -351,26 +387,27 @@ class _Code:
         return self._returned(name) if name in self.functions else [UNKNOWN]
 
     def named(self):
-        """Every path under an .ao directory the code names, as `~/.ao/…` or `.ao/…`, `*` where it computes."""
+        """Paths reaching join, storage, open, write or print; unused strings prove nothing (TRIAGE-2-LOW)."""
         found = set()
         for tree in self.trees:
-            docstrings = {id(node.body[0].value) for node in ast.walk(tree)
-                          if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
-                          and node.body and isinstance(node.body[0], ast.Expr)
-                          and isinstance(node.body[0].value, ast.Constant)}
-            formatted = {id(part) for node in ast.walk(tree) if isinstance(node, ast.JoinedStr) for part in node.values}
             for node in ast.walk(tree):
-                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
-                        and node.func.attr in ("join", "expanduser") and _os_path(node.func.value):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+                if name == "join" and isinstance(func, ast.Attribute) and _os_path(func.value):
                     values = self.values(node)
-                elif isinstance(node, (ast.Tuple, ast.List)) and node.elts \
-                        and all(isinstance(e, ast.Constant) and isinstance(e.value, str) for e in node.elts) \
-                        and node.elts[0].value == ".ao":
-                    values = ["/".join(element.value for element in node.elts)]
-                elif isinstance(node, ast.JoinedStr) or isinstance(node, ast.Constant) and isinstance(node.value, str) \
-                        and id(node) not in docstrings and id(node) not in formatted:
-                    values = [match.group(0).rstrip(".") for value in self.values(node)
-                              for match in CODE_PATH.finditer(value)]
+                elif name in ("create_in_tree", "replace_in_tree", "read_in_tree", "append_in_tree",
+                              "append_chained_in_tree", "read_chained_in_tree", "no_link_on_the_way"):
+                    index, keyword = (0, "path") if name == "no_link_on_the_way" else (1, "rel")
+                    args = node.args[index:index + 1] + [kw.value for kw in node.keywords if kw.arg == keyword]
+                    values = [value for arg in args for value in self.values(arg)]
+                elif name in ("open", "write", "write_text", "write_bytes", "print"):
+                    args = list(node.args) + [keyword.value for keyword in node.keywords]
+                    if isinstance(func, ast.Attribute):
+                        args.append(func.value)
+                    values = [match.group(0).rstrip(".") for arg in args for value in self.values(arg)
+                              for match in CODE_PATH.finditer(value.replace(HOME, "~"))]
                 else:
                     continue
                 found.update(pattern for pattern in map(_pattern, values) if pattern)
@@ -454,6 +491,8 @@ def _content_problems(file, language, body, code):
             documents.append(document)
     except ValueError as error:
         return [f"ao reads {file} as JSON, and this block does not parse: {error}"]
+    if file.endswith(".json") and len(documents) != 1:
+        return [f"ao reads {file} as exactly one JSON value; this block holds {len(documents)}"]
     if file == ".ao/gates.json":
         return _gates_problems(documents[0])
     if file in (".ao/config.json", "~/.ao/settings.json"):
@@ -667,8 +706,102 @@ def config(root):
 
 
 def hint(key):
-    return f"refill .ao/backlog.md, or read ~/.ao/watchdog-{key}.log"
+    print(f"refill .ao/backlog.md, or read ~/.ao/watchdog-{key}.log")
+    for name, parts in CHAINED:
+        os.path.join(root, *parts)
 '''
+
+
+def test_only_paths_reaching_file_or_output_operations_are_named(tmp_path):
+    """Unused constants and returned hints once vouched for paths ao never used (TRIAGE-2-LOW)."""
+    source = '''import os
+UNUSED = ".ao/unused.json"
+PARTS = (".ao", "unused-parts.json")
+USED = ".ao/used.json"
+def unused():
+    return f"read .ao/unused-hint.json"
+def hint():
+    return "read .ao/hint.json"
+def run(root, stream):
+    def put(path, unused):
+        open(path)
+    put(".ao/argument.json", ".ao/unused-argument.json")
+    path = USED
+    open(path)
+    stream.write("read .ao/written.json")
+    print(hint())
+    os.path.join(root, ".ao", "joined.json")
+'''
+    (tmp_path / "paths.py").write_text(source, encoding="utf-8")
+
+    assert _code_paths(str(tmp_path)) == {".ao/used.json", ".ao/written.json", ".ao/hint.json", ".ao/joined.json",
+                                         ".ao/argument.json"}
+
+
+@pytest.mark.parametrize("operation, positional, keyword", [
+    ("create_in_tree", 'root, PATH, ".ao/payload.json"', 'root=root, rel=PATH, data=".ao/payload.json"'),
+    ("replace_in_tree", 'root, PATH, ".ao/payload.json"', 'root=root, rel=PATH, data=".ao/payload.json"'),
+    ("read_in_tree", 'root, PATH', 'root=root, rel=PATH'),
+    ("append_in_tree", 'root, PATH, ".ao/payload.json"', 'root=root, rel=PATH, data=".ao/payload.json"'),
+    ("append_chained_in_tree", 'root, PATH, ".ao/payload.json", chain',
+     'root=root, rel=PATH, record=".ao/payload.json", chain=chain'),
+    ("read_chained_in_tree", 'root, PATH, chain', 'root=root, rel=PATH, chain=chain'),
+    ("no_link_on_the_way", 'PATH', 'path=PATH'),
+])
+@pytest.mark.parametrize("qualified", [False, True])
+@pytest.mark.parametrize("use_keyword", [False, True])
+@pytest.mark.parametrize("path", ['".ao/tree.json"', '(".ao", "tree.json")'])
+def test_tree_primitives_name_only_their_path_argument(tmp_path, operation, positional, keyword,
+                                                     qualified, use_keyword, path):
+    call = ("storage." if qualified else "") + operation
+    arguments = (keyword if use_keyword else positional).replace("PATH", path)
+    source = f'''""".ao/docstring.json"""
+UNUSED = ".ao/unused.json"
+PARTS = (".ao", "unused-parts.json")
+def unused():
+    return ".ao/unused-return.json"
+def run():
+    root = ".ao/not-the-rel.json"
+    chain = ".ao/not-the-chain.json"
+    {call}({arguments})
+'''
+    (tmp_path / "paths.py").write_text(source, encoding="utf-8")
+
+    assert _code_paths(str(tmp_path)) == {".ao/tree.json"}
+
+
+def test_tree_paths_flow_through_bindings_returns_loops_and_local_writers(tmp_path):
+    source = '''PARTS = (".ao", "bound.json")
+CHAINED = (("grant", (".ao", "ledger", "authority.jsonl")),)
+def returned():
+    return (".ao", "returned.json")
+def run(root):
+    def put(rel, content):
+        storage.create_in_tree(root, rel, content)
+    put(".ao/authority.md", ".ao/unused-content.json")
+    put((".ao", "local-parts.json"), ".ao/unused-content.json")
+    rel = PARTS
+    storage.replace_in_tree(root, rel, b"")
+    storage.read_in_tree(root, returned())
+    for chain, parts in CHAINED:
+        storage.read_chained_in_tree(root, parts, chain)
+'''
+    (tmp_path / "paths.py").write_text(source, encoding="utf-8")
+
+    assert _code_paths(str(tmp_path)) == {".ao/authority.md", ".ao/local-parts.json", ".ao/bound.json",
+                                         ".ao/returned.json", ".ao/ledger/authority.jsonl"}
+
+
+@pytest.mark.parametrize("file", [".ao/config.json", ".ao/gates.json", "~/.ao/email.json"])
+@pytest.mark.parametrize("body", [[], ["// no value"], ["{}", "{}"]])
+def test_a_json_file_example_holds_exactly_one_value(file, body):
+    """A second JSON value was ignored, and an empty block could raise (TRIAGE-2-LOW)."""
+    problems = _content_problems(file, "jsonc", body, set())
+    assert problems and "exactly one JSON value" in problems[0]
+
+
+def test_jsonl_examples_can_hold_multiple_values():
+    assert _content_problems(".ao/ledger/notices.jsonl", "json", ["{}", "{}"], set()) == []
 
 SAMPLE = """# Names
 

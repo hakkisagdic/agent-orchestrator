@@ -1,10 +1,11 @@
+"""Secondary activity follows the newest transcript and is shown while slowing (TRIAGE-2-LOW)."""
 import json
 import os
 import time
 
 import pytest
 
-from ao import lib as A, watchdog as W
+from ao import cli, lib as A, watchdog as W
 from tests.scenarios import World
 
 
@@ -73,3 +74,32 @@ def test_a_blocker_declared_for_a_person_reaches_a_person_and_is_never_held(worl
 
     told = [notice for notice in world.notices if "B1 waits on a person: a new token" in notice[1]]
     assert len(told) == 1 and told[0][2] == "human"
+
+
+def test_working_elsewhere_picks_the_newest_active_transcript(project, monkeypatch):
+    others = [{"name": name, "root": name, "cfg": {"root": name}}
+              for name in ("old", "missing", "new", "stale")]
+    monkeypatch.setattr(A, "secondary_projects", lambda cfg: others)
+    monkeypatch.setattr(A, "session_paths", lambda cfg: (cfg["root"], None))
+    monkeypatch.setattr(A, "implementer_adapter", lambda cfg: {})
+    monkeypatch.setattr(A.time, "time", lambda: 1000)
+
+    def written(path, shape):
+        if path == "missing":
+            raise OSError("transcript gone")
+        return {"old": 950, "new": 990, "stale": 800}[path]
+
+    monkeypatch.setattr(A, "last_write", written)
+    assert A.working_elsewhere(project, 60) == {"name": "new", "root": "new", "age": 10}
+    assert A.working_elsewhere(project, 10) is None
+
+
+def test_status_names_secondary_activity_while_slowing(project, monkeypatch):
+    monkeypatch.setattr(A, "busy", lambda cfg, adapter: ("slowing", 100, "waiting"))
+    monkeypatch.setattr(A, "working_elsewhere", lambda cfg, idle: {"name": "ao", "root": "other", "age": 1})
+    monkeypatch.setattr(A, "quota", lambda adapter: None)
+
+    facts = cli.status_facts(project)
+
+    assert facts["implementer"]["state"] == "slowing"
+    assert facts["implementer"]["working_elsewhere"]["name"] == "ao"

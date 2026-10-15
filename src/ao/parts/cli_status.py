@@ -98,7 +98,7 @@ def status_facts(cfg, msg_count=8, window_hours=24.0, shown=False):
         session = _session_facts(A.session_state(cfg, "implementer"))
         # The agent may be writing in a secondary project; the panel says where (#22).
         elsewhere = A.working_elsewhere(cfg, S.get(cfg, "watchdog.idle_minutes") * 60) \
-            if state in ("stopped", "idle") else None
+            if state in ("stopped", "idle", "slowing") else None
         facts["implementer"] = {
             "adapter": impl.get("adapter"), "state": state, "seconds_since_write": age, "doing": desc,
             "session": session,

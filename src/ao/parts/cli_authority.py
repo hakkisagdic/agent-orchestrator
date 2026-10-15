@@ -169,7 +169,9 @@ def _run_gate(cfg, g, cwd):
     timeout = g.get("timeout") or S.get(cfg, "gates.default_timeout")
     saved = A._hear_stop_signals()
     try:
-        ran = A.run_as_group(g["run"], timeout, shell=True, cwd=cwd, capture_output=True, text=True,
+        # One pipe keeps a stderr summary before the stdout summary written after it (TRIAGE-2-LOW).
+        ran = A.run_as_group(g["run"], timeout, shell=True, cwd=cwd, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True,
                              encoding=UTF8, errors="replace", executable=A.shell_program())
     except subprocess.TimeoutExpired as expired:
         left, unasked = getattr(expired, "left", None), getattr(expired, "unasked", None)
@@ -182,7 +184,7 @@ def _run_gate(cfg, g, cwd):
         return f"could not start: {' '.join(str(exc).split())[:200]}", 127
     finally:
         A._restore_signals(saved)
-    return (ran.stdout or "") + (ran.stderr or ""), ran.returncode
+    return ran.stdout or "", ran.returncode
 
 
 def _profile_gates(spec, profile, cfg=None):
@@ -244,6 +246,15 @@ def _gate_shape_problem(g):
     for key in ("expect", "summary"):
         if g.get(key) is not None and not isinstance(g[key], str):
             return f"its {key} is not text"
+    if g.get("summary") is not None:
+        # A missing group used to invent a zero count; refuse it before running (TRIAGE-2-LOW).
+        import re
+        try:
+            groups = re.compile(g["summary"]).groupindex
+        except re.error:
+            return "its summary is not a valid regex; use named pass and fail groups"
+        if not {"pass", "fail"} <= set(groups):
+            return "its summary must have both named pass and fail groups"
     min_tests = g.get("min_tests")
     # A whole number of tests or nothing: `[]` and `""` read as zero and the gate passed without its floor, and
     # 1e309 read as infinity, which no int holds (LEADS-GATE).

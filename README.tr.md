@@ -54,6 +54,10 @@ yerine atılacak bir adayda koşturur. Her rol için tek harness kullanıyorsan 
 [gözden geçirme katmanı](docs/roles.md#review-tiers) ister: aynı aileden başka bir model ("daha
 zayıf bağımsızlık" etiketiyle) ya da bir kişi.
 
+`ao status`, ana oturum yavaşlarken, durmuşken veya boştayken en son etkin olan ikincil
+projeyi gösterir. `ao doctor`, `AO_GIT` ile seçilen bir betiği ve tanımadığı shell
+hook'larını olası filtreler olarak bildirir; bkz. [gate'ler](docs/gates.md).
+
 ## Bir değişiklik nasıl iner
 
 ```text

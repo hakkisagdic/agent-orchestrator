@@ -174,15 +174,18 @@ def _hook_text(hook):
 def measurement_filters(root):
     """What could stand between a number and its source, one sentence each (#51).
 
-    A script named git ahead of any compiled git on PATH, AO_GIT naming nothing
-    executable, and a Claude Code PreToolUse hook that rewrites the shell commands
-    an agent runs. A hook is recognised here by its command; `probe_filters` asks
-    it what it does (#52).
+    A script named git ahead of any compiled git on PATH, AO_GIT naming no compiled
+    executable, and shell PreToolUse hooks. Unknown hooks are unverified: a command
+    without the recognised keywords used to disappear here (TRIAGE-2-LOW).
+    `probe_filters` asks eligible hooks what they do (#52).
     """
     found = []
     explicit = os.environ.get("AO_GIT")
     if explicit and not (os.path.isfile(explicit) and os.access(explicit, os.X_OK)):
         found.append(f"AO_GIT names {explicit}, which is not an executable file; ao measures with {git_binary()}")
+    elif explicit and not _native_executable(os.path.realpath(explicit)):
+        found.append(f"AO_GIT names {explicit}, which is not a compiled program; ao measures through it: "
+                     "set AO_GIT to a compiled git for unfiltered measurements")
     first = program_path("git")
     if first and not _native_executable(os.path.realpath(first)):
         chosen = git_binary()
@@ -196,6 +199,9 @@ def measurement_filters(root):
                 found.append(f"{path}: the PreToolUse hook `{command}` can rewrite the shell commands an "
                              f"agent runs, so what an agent reads of {', '.join(MEASUREMENTS)} may be "
                              "compressed; take such numbers from ao's records, which do not pass through it")
+            else:
+                found.append(f"{path}: the PreToolUse shell hook `{command}` is unverified; inspect it before "
+                             "trusting measurements read through the agent's shell")
     return found
 
 

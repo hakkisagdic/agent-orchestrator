@@ -30,7 +30,8 @@ def config():
     """The mail channel's settings from `~/.ao/email.json`, or None when it cannot send.
 
     0600, outside any repository. `provider` names one of PROVIDERS; a file written
-    before there was a choice is formsubmit's.
+    before there was a choice is formsubmit's. A non-string provider disables mail,
+    where a list or object raised before send could return False (TRIAGE-2-LOW).
     """
     if not os.path.exists(CONF):
         return None
@@ -42,7 +43,7 @@ def config():
         return None
     c.setdefault("name", "ao")
     c.setdefault("provider", "formsubmit")
-    provider = PROVIDERS.get(c["provider"])
+    provider = PROVIDERS.get(c["provider"]) if isinstance(c["provider"], str) else None
     if provider is None or any(not c.get(field) for field in provider.required):
         return None
     return c

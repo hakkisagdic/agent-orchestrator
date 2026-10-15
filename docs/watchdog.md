@@ -134,7 +134,9 @@ from the agent being one agent.
 
 - **Presence is the agent's.** When the implementer's transcript in a secondary project
   moved within the idle window, it is working, whatever this tree's transcript says: the
-  watchdog does not nudge it back, and `ao status` names the project it is in. On
+  watchdog does not nudge it back. When several secondary transcripts are fresh, the
+  most recently written one is named; ties keep configuration order. `ao status`
+  names it while the primary session is slowing, stopped or idle. On
   2026-09-07 the primary's watchdog nudged an agent that was working elsewhere.
 - **An empty queue here is not an empty queue.** With nothing READY in the primary and no
   open work, the nudge names the secondary project's first READY item instead of leaving

@@ -437,15 +437,17 @@ def working_elsewhere(cfg, idle_seconds):
     back. Presence belongs to the agent: a transcript moving in a secondary
     project is the agent working.
     """
+    newest, now = None, time.time()
     for other in secondary_projects(cfg):
         try:
             transcript, _ = session_paths(other["cfg"])
-            age = time.time() - last_write(transcript, transcript_shape(implementer_adapter(other["cfg"])))
+            age = now - last_write(transcript, transcript_shape(implementer_adapter(other["cfg"])))
         except (OSError, TypeError, ValueError):
             continue
-        if age < idle_seconds:
-            return {"name": other["name"], "root": other["root"], "age": age}
-    return None
+        # Configuration order said where the agent was, even with newer activity elsewhere (TRIAGE-2-LOW).
+        if age < idle_seconds and (newest is None or age < newest["age"]):
+            newest = {"name": other["name"], "root": other["root"], "age": age}
+    return newest
 
 
 def secondary_ready(cfg):

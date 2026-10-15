@@ -99,8 +99,12 @@ Two properties that are not negotiable:
   only from the summary a runner ends with - node's `# pass`/`# fail` lines, pytest's
   closing line, or the regex a gate names in `summary` with `pass` and `fail` groups -
   read from the last lines of output, so a test name printing `# pass 900` earlier
-  counts for nothing. A summary that cannot be found is recorded as `counts: null`, and
-  a gate with `min_tests` then fails.
+  counts for nothing. Standard output and standard error share one pipe, preserving the
+  order the processes write them. Pytest's `error` or `errors` count as failures even
+  when no tests passed or failed. An invalid `summary` regex, or one missing either
+  named group, is refused before the gate runs. Both groups must capture numbers;
+  a missing capture or a summary that cannot be found is recorded as `counts: null`,
+  and a gate with `min_tests` then fails.
 - **The result names what ran.** The record carries each gate's command and the digest of
   the profile's definitions, and the ledger is hash-chained like the authority ledger.
   `ao commit-ok` and `ao commit-check` refuse when `.ao/gates.json` no longer matches that
@@ -110,12 +114,17 @@ Two properties that are not negotiable:
 - **The measurement is not filtered.** ao takes its numbers itself - candidate paths and
   size, `git status`, `rev-parse`, `write-tree`, gate output - never from an agent's
   terminal, and runs git as the first compiled `git` on `PATH` or in the system
-  directories (or `AO_GIT`), so a script standing in front of git is passed over. On
+  directories, so a script standing in front of git is passed over. An executable
+  `AO_GIT` overrides that choice, including a script; `ao doctor` names a non-compiled
+  override as a possible filter and asks for a compiled git. On
   macOS `/usr/bin/git` is a stub that asks xcrun for the real git on every call; ao asks
   `xcrun --find git` once per process instead and runs the compiled git it names. The
   record says how in `measured_by`. What an agent reads through its own shell can be
   rewritten by a token-saving proxy; `ao doctor` names such a hook or wrapper, and asks
   each filter hook it may run what it does to the commands an agent measures with (below).
+  Every shell PreToolUse command hook it does not recognise is listed as unverified,
+  with its settings file and command, for a person to inspect; reporting it grants no
+  permission to run it.
 
 *In ao since slice HARNESS-CONFIG: `ao verify` names each change to what a harness reads from the tree -
 hooks, plugins, MCP servers, instructions - that no person has seen, with `ao harness seen --by <name>`,
