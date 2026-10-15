@@ -1315,16 +1315,15 @@ def urgent_messages(root, cfg, role="implementer"):
     Marked messages only. Everything routine waits for `ao_inbox`, or the channel
     becomes noise and gets skimmed — which is how it fails.
 
-    Urgency is resolved for a role, not hardcoded to the implementer (#29): mail
-    addressed to the architect's role is the architect's, the rest the
-    implementer's, and role None takes both. An implementer report marked urgent
-    sat unread for four hours because this skipped everything bound for the architect.
+    Urgency follows inbox addressing, including the reviewer, and role None takes
+    all recipients. Reviewer mail otherwise blocked commits while the implementer
+    could neither see nor acknowledge it (TRIAGE-3-LOW).
     """
     box = cfg.get("mailbox", "agent-mail")
     out = []
     for m in mailbox(root, box):
-        addressed = "architect" if to_architect(m, cfg) else "implementer"
-        if role and addressed != role:
+        addressed = "architect" if to_architect(m, cfg) else "reviewer" if to_reviewer(m, cfg) else "implementer"
+        if role and (addressed != role or not addressed_to(m, cfg, role)):
             continue
         try:
             body = open(os.path.join(root, box, m), errors="replace", encoding=UTF8).read(8000)
@@ -2230,7 +2229,8 @@ def board_graph(root):
     for node in sorted(edges):
         if node not in colour:
             visit(node)
-    done = {item["id"] for state in ("done", "verified") for item in b[state]}
+    # A duplicate's done copy cannot satisfy another item's dependency (TRIAGE-3-LOW).
+    done = {item["id"] for state in ("done", "verified") for item in b[state]} - broken
     ready_items = [{**item, "role": item["notes"].get("role", "")} for item in b["queued"]
                    if item["id"] not in broken and "waiting" not in item["notes"]
                    and all(dep in done for dep in edges.get(item["id"], ()))]

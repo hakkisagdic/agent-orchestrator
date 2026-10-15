@@ -84,7 +84,7 @@ INVARIANTS = (
     ("the nudge switch off means no nudge",
      lambda facts, trace: not (not facts["nudge_on"] and _nudged(trace))),
     ("F11: an implementer waiting on the architect is not nudged",
-     lambda facts, trace: not (facts["blocked_report"] and _nudged(trace))),
+     lambda facts, trace: not (facts["blocked_report"] and not facts["inbox"] and _nudged(trace))),
     ("#20: an open decision is not nudged past",
      lambda facts, trace: not (facts["decision"] and _nudged(trace))),
     ("F14: over the round budget a person is told instead",

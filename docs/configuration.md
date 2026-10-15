@@ -18,6 +18,13 @@ event log, where binaries are found, how busy the machine may be when a suite st
 read from `~/.ao/settings.json` only. Both files are written whole or not at all. A dotted name
 is nested in the file: `alarms.red_after_minutes` is `{"alarms": {"red_after_minutes": 60}}`.
 
+Project writes check the final UTF-8 bytes against the reader's 1,048,576-byte limit and
+64 levels of container nesting before replacing the file. An oversized or over-nested change
+leaves the old file intact. For both project and machine settings (`--machine`), if replacement
+succeeds but syncing the directory fails, `ao config` says the file changed and durability is
+unconfirmed; read it and retry after fixing storage. No project opt-in is recorded on that
+failure (TRIAGE-3-LOW).
+
 A value that is set but cannot be used - text where a number belongs, a number out of
 range - is passed over for the next layer, and `ao doctor` names it with the value ao
 uses instead. So does a name under one of these groups that ao does not read, and a

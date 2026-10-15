@@ -30,6 +30,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- Reviewer mail stays outside the implementer inbox, and broken board IDs cannot satisfy dependencies ([roles](docs/roles.md), [slices](docs/slices.md)) (TRIAGE-3-LOW)
+- Wake, refill and nudge launches stop when added flags cannot be recorded, and same-second report rewrites become pending again ([watchdog](docs/watchdog.md)) (TRIAGE-3-LOW)
+- Project config writes refuse excessive encoded size or nesting before replacement, and config and feature commands distinguish changed files from unconfirmed durability ([configuration](docs/configuration.md)) (TRIAGE-3-LOW)
+- `ao doctor` checks reviewer reading flags across inline and capability-matrix routes, including fallbacks ([roles](docs/roles.md)) (TRIAGE-3-LOW)
 - Colliding mail filenames preserve both messages, role names produce safe filenames, and long decision requests retain their escalation class ([messaging](docs/messaging.md)) (TRIAGE-2-MEDIUM).
 - Human blockers reach a person without an implementer session, and work completed during nudge startup or within one second counts as progress ([watchdog](docs/watchdog.md)) (TRIAGE-2-MEDIUM).
 - Slice outcomes count commits carrying recorded grants, use commit timestamps, name unreadable evidence, and calculate median and p90 correctly ([slices](docs/slices.md)) (TRIAGE-2-MEDIUM).
@@ -108,6 +112,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Under the hood
 
+- The F11 fuzz oracle accepts an answering message alongside a blocked report, with a forced scenario proving the resulting nudge ([watchdog](docs/watchdog.md)) (TRIAGE-3-LOW)
 - The weekly and on-demand test lanes have an hour: the Windows suite took 37 minutes on Python 3.9 and ran past the 40 it had on 2026-10-12, cancelled before it said a result (CI-WINDOWS-TIME).
 - A test reads `lib.py`, `cli.py` and the parts each loads as the one namespace they are, and fails when two of its files bind a name to two things: a part loaded later had replaced an earlier one's function without a word ([slices](docs/slices.md), PARTS-ONE-NAME).
 - docs/evidence.md gives what ao's own ledgers show about the guarantee on its own repository - every first-parent commit since the first grant with a tree a grant bound, the reviews by family and tier, every waiver closed, and what the ledgers cannot show - and tools/evidence.py makes each number again from a checkout, or the trailers alone from any clone ([evidence](docs/evidence.md)) (EVIDENCE).

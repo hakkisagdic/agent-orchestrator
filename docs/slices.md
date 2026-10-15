@@ -213,6 +213,10 @@ ao board ready                   # exactly the queued items whose needs: have la
 ao stats --slices                # one line per landed slice: rounds, time, size, later defects
 ```
 
+A dependency is satisfied only by a `done` or `verified` id with no graph problem. An id
+listed both queued and done cannot make a dependent READY: resolve the duplicate first
+(TRIAGE-3-LOW).
+
 Not built yet: commands that start, block and abandon a slice and record each transition.
 
 <!-- not built: ao has no slice or slices command; a slice is a board row -->

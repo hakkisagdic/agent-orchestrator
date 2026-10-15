@@ -36,6 +36,11 @@ unanswered, or a harness that counts no usage - with a total of 0 and no share b
 where the total read 1 and every class 0% of it. A review file a prune removes while `ao cost`
 counts them is left out, where the command ended on it.*
 
+A switch write observes the same byte and nesting limits as every project config write
+([configuration.md](configuration.md)). A directory-sync failure after replacement is reported
+as a changed file whose durability is unconfirmed, not an unchanged switch; no opt-in is
+recorded, so retry after fixing storage to record a switch that requires one (TRIAGE-3-LOW).
+
 What each switch changes when off:
 
 - `review` off — `ao commit-ok` no longer requires an APPROVED review; the

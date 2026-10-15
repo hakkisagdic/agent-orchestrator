@@ -562,6 +562,10 @@ def _sync_directory(directory, fsync):
     return True
 
 
+class ReplacedNotDurable(OSError):
+    """The replacement happened, but syncing its directory failed (TRIAGE-3-LOW)."""
+
+
 def replace_file_durably(path, data, *, mode=None, _checkpoint=None, _fsync=None):
     """Replace a whole file so it is only ever seen with its old bytes or its new ones.
 
@@ -627,7 +631,12 @@ def replace_file_durably(path, data, *, mode=None, _checkpoint=None, _fsync=None
                 pass
         raise
     _call(_checkpoint, "replaced")
-    if _sync_directory(parent, fsync):
+    try:
+        synced = _sync_directory(parent, fsync)
+    except OSError as exc:
+        raise ReplacedNotDurable(f"{path} changed, but durability could not be confirmed ({exc}); "
+                                 "read the file and retry after fixing the storage error") from exc
+    if synced:
         _call(_checkpoint, "directory-fsynced")
 
 

@@ -291,7 +291,9 @@ shell access on your machine.
 
 The orchestrator records which trust level each turn ran at, so "what could that turn have
 done?" has an answer after the fact: a flag ao adds to a turn's command is written, with why, to
-`.ao/ledger/actor-flags.jsonl`.
+`.ao/ledger/actor-flags.jsonl`. If that record fails, no wake, refill or nudge starts; the
+watchdog names the refusal to a person under the existing turn-refusal alarm. Restore access
+to the ledger before retrying (TRIAGE-3-LOW).
 
 ### A turn runs in the mode ao pins, not in a person's default
 

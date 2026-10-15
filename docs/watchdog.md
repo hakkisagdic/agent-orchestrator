@@ -117,6 +117,15 @@ decision and the wake `## URGENT` for a message that must reach the implementer 
 and `## ACİL` in Turkish - and the headings of both languages are read in every project. A Turkish
 project's turns are told what they always were, byte for byte.
 
+A report handed to the architect is remembered by its nanosecond modification time and
+size, so a same-second rewrite waits for a fresh wake too. Older state holding whole-second
+markers is treated as stale once. This detects ordinary rewrites, not content changes that
+preserve both measurements (TRIAGE-3-LOW).
+
+The F11 fuzz invariant treats a blocked report as waiting only while the implementer has no
+mail to read. A forced world with both the report and an answer must nudge and satisfy the
+invariant; the old oracle incorrectly rejected that healthy cycle (TRIAGE-3-LOW).
+
 ## One agent, more than one queue
 
 An implementer can hold work in two projects: a primary one and a secondary one named in

@@ -233,6 +233,11 @@ we decide whether the work may land — so an unread urgent message becomes a cl
 gate rather than a missed notification. That is the same authority the tool already
 owns, pointed at a delivery problem.
 
+Urgent checks use the same recipient filtering as the inbox. A note to a reviewer, including
+its normalized model-based address, is not implementer mail: it stays outside `ao_inbox`,
+`ao_ack` and the implementer's commit checks, even when marked urgent. It remains visible
+when a person reads all recipients' urgent mail (TRIAGE-3-LOW).
+
 Only messages marked `## URGENT` or `## STOP` travel this way - or `## ACİL` and `## DUR`,
 their Turkish forms, read in every project ([protocol.md](protocol.md#markers)). Routine
 coordination waits for the turn-start inbox check, because a channel that carries everything is

@@ -645,7 +645,7 @@ def _name_time(name):
 def implementer_inbox(root, cfg):
     """Mail addressed to the implementer: not its own reports, not the watchdog's."""
     box = cfg.get("mailbox", "agent-mail")
-    return [m for m in mailbox(root, box) if not to_architect(m, cfg) and not from_watchdog(m)]
+    return [m for m in mailbox(root, box) if addressed_to(m, cfg, "implementer")]
 
 
 def product_dirty(root, cfg):
@@ -729,6 +729,18 @@ def architect_mail_names(cfg):
         # never the implementer's own name: its mail stays its own
         names.update(legacy for legacy in LEGACY_ARCHITECT_NAMES if legacy != impl.lower())
     return names
+
+
+def reviewer_mail_names(cfg):
+    """Raw and note-normalized reviewer addresses: model ids may contain slashes or exceed 40 chars (TRIAGE-3-LOW)."""
+    reviewer = cfg.get("reviewer") or {}
+    names = {str(reviewer[key]).strip() for key in ("actor", "name", "id") if reviewer.get(key)}
+    return {"reviewer"} | names | {safe_slug(name) for name in names}
+
+
+def to_reviewer(name, cfg):
+    """Reviewer mail must not become implementer work (TRIAGE-3-LOW)."""
+    return any(f"-to-{reviewer.lower()}-" in name.lower() for reviewer in reviewer_mail_names(cfg))
 
 
 def to_architect(name, cfg):
@@ -960,7 +972,7 @@ def addressed_to(name, cfg, role):
     if role == "architect":
         return to_architect(name, cfg)
     if role == "implementer":
-        return not to_architect(name, cfg) and not from_watchdog(name)
+        return not to_architect(name, cfg) and not to_reviewer(name, cfg) and not from_watchdog(name)
     return True
 
 

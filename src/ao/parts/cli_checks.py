@@ -14,23 +14,32 @@ def _actor_grant_problems(cfg):
     adapter = A.load_adapter(impl["adapter"]) if impl.get("adapter") else {}
     if impl.get("adapter"):
         grants.append(("implementer", impl["adapter"],
-                       (adapter.get("resume") or {}).get("argv") or [], adapter.get("options") or {}))
+                       (adapter.get("resume") or {}).get("argv") or [], adapter.get("options") or {}, False))
         # Another launch whose argv carries a grant of its own is asked what it admits too; only the resume's
         # was, and a grant written into another launch went unread (GRANTS-AUDIT-2).
         for key in sorted(adapter):
             block = adapter[key]
             argv = block.get("argv") if key != "resume" and isinstance(block, dict) else None
             if isinstance(argv, list) and (A.carries_scope(argv) or any(str(arg) in AL.GRANT_ALL for arg in argv)):
-                grants.append((f"implementer {key}", impl["adapter"], argv, {}))
+                grants.append((f"implementer {key}", impl["adapter"], argv, {}, False))
     for role in ("architect", "reviewer"):
         actor = cfg.get(role) or {}
         if actor.get("argv"):
-            grants.append((role, actor.get("id") or actor.get("name") or role, actor["argv"], {}))
+            grants.append((role, actor.get("id") or actor.get("name") or role, actor["argv"], {}, _tool_route(actor)))
     for fallback in (cfg.get("reviewer") or {}).get("fallbacks") or []:
         if fallback.get("argv"):
-            grants.append(("reviewer fallback", fallback.get("id") or "fallback", fallback["argv"], {}))
+            grants.append(("reviewer fallback", fallback.get("id") or "fallback", fallback["argv"], {},
+                           _tool_route(fallback)))
+    if M.is_strict(cfg):
+        # Doctor reads the routes a strict review starts, not its ignored inline argv (TRIAGE-3-LOW).
+        grants = [grant for grant in grants if not grant[0].startswith("reviewer")]
+        try:
+            for route in _resolve_matrix(cfg, require_independent=False)["reviewers"]:
+                grants.append(("reviewer", route["identity"]["binding"], M.expand_argv(route, "{prompt}"), {}, False))
+        except M.MatrixError:
+            pass                            # the matrix check names the error (TRIAGE-3-LOW).
     out = []
-    for role, name, argv, options in grants:
+    for role, name, argv, options, tool in grants:
         if role == "implementer":
             # A turn that would turn off its harness's own sandbox is not started until a person allows it,
             # and the doctor says what allowing it costs (GRANTS-PINNED).
@@ -49,7 +58,13 @@ def _actor_grant_problems(cfg):
             out.append((f"actor-grant:{role.replace(' ', '-')}", text))
         # A reviewer reads, and starts no MCP server it was not given (#24).
         if role.startswith("reviewer"):
+            # File tools do not read a tree; review invocation skips these checks too (TRIAGE-3-LOW).
+            if tool:
+                continue
+            argv, _ = A.pinned_argv(argv, "reviewer")
             reach = AL.reviewer_problems(argv)
+            if A.command_adapter(argv) is not None:
+                reach += A.reading_problems(argv)
             if reach:
                 out.append((f"reviewer-tools:{name}", f"{role} ({name}): " + "; ".join(reach)))
         elif A.pin_conflicts(argv, role):
@@ -1029,6 +1044,7 @@ def cmd_config(cfg, args):
     from; `get` prints one; `set` and `unset` change the project's config, or with
     --machine the machine's settings. Both are written whole or not at all.
     """
+    from .storage import ReplacedNotDurable
     root = cfg["root"]
     key = getattr(args, "key", None)
     if args.action == "list":
@@ -1082,6 +1098,9 @@ def cmd_config(cfg, args):
     if machine:
         try:
             S.write_machine(S.assign(S.machine_settings(), key, value))
+        except ReplacedNotDurable as exc:
+            print(f"{C['red']}{exc}{C['reset']}")
+            return 1
         except OSError as exc:
             print(f"{C['red']}not changed{C['reset']}: {exc}")
             return 1
@@ -1094,7 +1113,10 @@ def cmd_config(cfg, args):
         try:
             A.write_project_config(root, json.dumps(S.assign(document["config"], key, value), indent=2,
                                                     ensure_ascii=False))
-        except OSError as exc:
+        except ReplacedNotDurable as exc:
+            print(f"{C['red']}{exc}{C['reset']}; no opt-in was recorded; retry this command to record one if required")
+            return 1
+        except (OSError, ValueError) as exc:
             print(f"{C['red']}not changed{C['reset']}: {exc}")
             return 1
         if key in S.RECORDED:
@@ -1127,6 +1149,7 @@ def _feature_cell(measured, key):
 
 def cmd_features(cfg, args):
     """The switches and what each costs. All off: deterministic ao, zero model spend."""
+    from .storage import ReplacedNotDurable
     from . import features as F
     root = cfg["root"]
     if args.action in ("on", "off"):
@@ -1148,6 +1171,9 @@ def cmd_features(cfg, args):
             return 2
         try:
             F.set_switch(root, args.key, args.action == "on")
+        except ReplacedNotDurable as exc:
+            print(f"{C['red']}{exc}{C['reset']}; no opt-in was recorded; retry this command to record one if required")
+            return 1
         except (OSError, ValueError) as exc:
             print(f"{C['red']}not changed{C['reset']}: {exc}")
             return 1

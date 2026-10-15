@@ -32,6 +32,19 @@ What ao reads is a table in `.ao/config.json`: `actors`, each the block a role r
 `ao role set reviewer claude-code --model <model>` composed that reviewer from its adapter; a
 reviewer's argv is never written by hand.
 
+Mail addressed to `reviewer` or its configured actor carries `to_role: reviewer` and stays
+out of the implementer's inbox and urgent commit checks, even when marked urgent. Model ids
+containing slashes or longer than 40 characters are recognized after the same address
+normalization `ao note` uses. Reviewers do not read that mailbox automatically; such a note
+remains for a person to read (TRIAGE-3-LOW).
+
+`ao doctor` checks every configured reviewer route, including capability-matrix bindings and
+fallbacks, with the permission flags a review appends. Its `reviewer-tools` findings include
+missing or widened read-only tool flags, such as Kiro's nonempty trust-tools list; correct the
+route before retrying a review. File-based tool reviewers such as `openai-api` and `pr-agent`
+are not subjected to tree-reading flags, on primary or fallback routes; their file contract
+is checked when a review starts (TRIAGE-3-LOW).
+
 Not built yet: actors and roles in a file of their own, the orchestrator itself as an actor,
 and the roles beyond implementer, architect and reviewer.
 

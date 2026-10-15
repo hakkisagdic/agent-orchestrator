@@ -87,13 +87,15 @@ def assignment_problem(actors, roles, repository="tool", hotfix=False):
 
 
 def role_of(name, cfg):
-    """The role a name in a message stands for: architect, implementer, watchdog or human (#31)."""
+    """The role a mail name stands for, including the reviewer actor (TRIAGE-3-LOW)."""
     implementer, _ = mail_names(cfg)
     lowered = str(name or "").strip().lower()
     if lowered in {arch.lower() for arch in architect_mail_names(cfg)}:
         return "architect"
     if lowered in (implementer.lower(), "implementer"):
         return "implementer"
+    if lowered in {name.lower() for name in reviewer_mail_names(cfg)}:
+        return "reviewer"
     if lowered == "watchdog":
         return "watchdog"
     return "human" if lowered in ("human", "person", "owner") else None
@@ -167,9 +169,15 @@ def grant_author(cfg, matrix_identity=None):
 
 
 def write_project_config(root, text):
-    """Write `.ao/config.json` whole or not at all (#56)."""
+    """Write `.ao/config.json` whole, within the reader's byte and depth limits (TRIAGE-3-LOW)."""
     from .storage import replace_file_durably
-    replace_file_durably(os.path.join(root, ".ao", "config.json"), text.encode(UTF8))
+    raw = text.encode(UTF8)
+    if len(raw) > PROJECT_CONFIG_MAX_BYTES:
+        raise ValueError(f".ao/config.json exceeds the {PROJECT_CONFIG_MAX_BYTES:,}-byte limit; reduce it first")
+    problem = _json_container_depth_problem(raw)
+    if problem:
+        raise ValueError(problem + "; reduce its nesting first")
+    replace_file_durably(os.path.join(root, ".ao", "config.json"), raw)
 
 
 # ---- adapters load from outside the package too (#77) ------------------------------------

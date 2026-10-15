@@ -1009,7 +1009,9 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
     mtimes = {}
     for m in pending:
         try:
-            mtimes[m] = int(os.path.getmtime(os.path.join(root, cfg["mailbox"], m)))
+            # Whole seconds missed a report rewritten in the same second it was handed (TRIAGE-3-LOW).
+            info = os.stat(os.path.join(root, cfg["mailbox"], m))
+            mtimes[m] = [info.st_mtime_ns, info.st_size]
         except OSError:
             continue                  # acknowledged while this cycle ran
     stale = [m for m in pending if m in mtimes and handed.get(m) != mtimes[m]]
@@ -1210,7 +1212,8 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
             resolved = None
         if resolved:
             argv[0] = resolved
-            record_pinned(root, pinned)
+            if not record_pinned(root, pinned):
+                return woke
             given, refused = A.prompt_input(plan, root, argv)
             if refused:
                 print(f"the architect's prompt cannot be handed over: {refused}; not waking")
@@ -1362,15 +1365,25 @@ def secondary_note(cfg, found):
     return language.text(cfg, "prompt.nudge-secondary", name=found["name"], root=found["root"], item=found["item"])
 
 
-def record_pinned(root, pinned):
-    """Record the flags a wake's argv gained from its adapter's pin, with why; never appended silently (#69)."""
-    if not pinned:
-        return
+def record_turn_flags(root, role, flags, reason):
+    """A turn whose added flags cannot be recorded starts nothing (TRIAGE-3-LOW)."""
+    if not flags:
+        return True
     try:
-        A.record_actor_flags(root, "architect", pinned,
-                             "the architect's command names no permission mode, so ao appends the one its adapter pins")
+        A.record_actor_flags(root, role, flags, reason)
     except Exception as exc:
-        print(f"could not record the flags added to the architect: {exc}")
+        refused = (f"could not record the flags added to the {role}: {A.redact(str(exc))}; "
+                   "no turn started; restore access to .ao/ledger/actor-flags.jsonl and retry")
+        print(refused)
+        tell_turn_refused(root, role, refused)
+        return False
+    return True
+
+
+def record_pinned(root, pinned):
+    """Record a wake's added flags before allowing its launch (TRIAGE-3-LOW)."""
+    return record_turn_flags(root, "architect", pinned,
+                             "the architect's command names no permission mode, so ao appends the one its adapter pins")
 
 
 def _schedule_hunt(root, cfg, st):
@@ -3116,7 +3129,8 @@ def _cycle_impl(args, root):
                 if failed.get("kind") in ("binary", "session") and failed.get("binary") == f"{resolved} {ver}":
                     print(f"the last refill with this binary failed ({failed.get('kind')}); not retrying")
                     return 0
-            record_pinned(root, pinned)
+            if not record_pinned(root, pinned):
+                return 0
             given, refused = A.prompt_input(plan, root, argv)
             if refused:
                 print(f"queue low, but the architect's prompt cannot be handed over: {refused}")
@@ -3366,12 +3380,8 @@ def _cycle_impl(args, root):
     log_path = os.path.join(STATE_DIR, A.project_file_name("nudge-log", key))
     os.makedirs(STATE_DIR, exist_ok=True)
     env = dict(os.environ, PATH=search, AO_ROLE="implementer")
-    if added:
-        # Recorded with its reason whenever it changes, never appended silently (#69).
-        try:
-            A.record_actor_flags(root, "implementer", added, added_why)
-        except Exception as exc:
-            print(f"could not record the flags added to the implementer: {exc}")
+    if not record_turn_flags(root, "implementer", added, added_why):
+        return 0
     held = A.hold_state(root)
     if held:
         print(f"held by {held.get('by')} since this cycle began; not nudging")
