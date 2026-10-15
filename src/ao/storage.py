@@ -94,14 +94,18 @@ def _open_lock(path):
     left that open to follow a link put there in between: there the path is opened as the link itself
     (`_open_lock_nt`), so nothing is made through one. A link, anything but a regular file, or a file that has
     another name - a hard link put in the lock's place - is then refused before anything is written (LOCK-LINKS).
+
+    The way is chosen by what the platform offers - O_NOFOLLOW where it has one - and not by `os.name`, which a
+    test of Windows' behaviour sets on another platform: there the lock went the Windows way, to a kernel32 that
+    platform has not, and the hold the test ran failed where its lock was taken (LOCK-LINKS-2).
     """
     import stat as _stat
     refused = (f"{path} is a link, not a regular file, or a file with another name: ao takes no lock through it; "
                "remove it, and ao makes the lock again")
-    if os.name == "nt":
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None and os.name == "nt":
         handle = _open_lock_nt(path, refused)
     else:
-        nofollow = getattr(os, "O_NOFOLLOW", None)
         if nofollow is None:
             raise LockThroughLink(f"{path}: this platform opens no file through no link (it has no O_NOFOLLOW), "
                                   "and ao takes no lock it cannot open that way")

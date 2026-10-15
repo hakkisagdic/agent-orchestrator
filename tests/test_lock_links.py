@@ -7,7 +7,9 @@ and write into it. A lock is now opened through no final link, and only as a reg
 and named (LOCK-LINKS).
 """
 import os
+import sys
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -146,6 +148,19 @@ def test_a_ledger_append_through_a_link_left_at_its_lock_writes_nothing(tmp_path
         storage.append_jsonl(str(ledger), {"kind": "row"})
 
     assert not ledger.exists() and not (outside / "made").exists()
+
+
+@pytest.mark.skipif(not hasattr(os, "O_NOFOLLOW"), reason="the platform's own way is the one taken")
+def test_a_test_that_names_the_platform_windows_takes_its_lock_the_way_this_platform_offers(tmp_path, monkeypatch):
+    """A test of Windows' behaviour sets `os.name` and a stand-in msvcrt on another platform: its lock went the
+    Windows way, to a kernel32 that platform has not, and the hold the test ran failed (LOCK-LINKS-2)."""
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setitem(sys.modules, "msvcrt", SimpleNamespace(LK_NBLCK=2, LK_UNLCK=0, locking=lambda *args: None))
+    lock = tmp_path / "ledger.jsonl.lock"
+
+    _take(lock)
+
+    assert lock.read_bytes() == b"\0"
 
 
 def test_a_lock_that_is_a_regular_file_still_locks_and_holds_its_byte(tmp_path):
