@@ -753,6 +753,40 @@ def provider_degraded(root, window=900):
     return None
 
 
+def architect_command(root, cfg, prompt):
+    """Prepare a wake or refill before asking any program its version (ARCH-PROBE-ORDER).
+
+    The notice holder and doctor checked without the session and prompt values, so they ran version probes and
+    held notices for a wake that refused to start. All four callers use this order and these values; a refusal
+    returns (None, code, reason), a command (prepared, None, None). Preparation starts no program.
+    """
+    arch = cfg.get("architect") or {}
+    template = arch.get("argv") or []
+    if not template:
+        return None, "no-architect", "no architect is configured"
+    sess, withheld = A.session_to_resume(cfg, "architect")
+    if "{session}" in " ".join(template) and not sess:
+        return None, "session-unresolved", f"architect session not resolvable ({withheld})"
+    # Keep the adapter's pinned mode, rewritten grants and prompt channel in every caller's check
+    # (ARCH-PROBE-ORDER).
+    template, pinned = A.pinned_argv(A.admit_rewrites(template)[0], "architect")
+    plan, refused = A.prompt_plan(template, prompt, A.block_adapter(arch), detached=True)
+    if refused:
+        return None, "prompt-refused", f"the architect's prompt cannot be handed over: {refused}"
+    argv = [x.replace("{prompt}", prompt).replace("{session}", sess or "") for x in plan["argv"]]
+    search = child_path()
+    held = turn_hold(root, cfg, "architect")
+    if held:
+        return None, "held", held
+    values = {"session": sess, "prompt": arch.get("prompt")}
+    refused = A.turn_refusal("architect", A.block_adapter(arch), argv, root=root, search=search, values=values,
+                             resolved=argv[0] if os.path.isabs(argv[0]) else None)
+    if refused:
+        return None, "refused", refused
+    return {"argv": argv, "session": sess, "plan": plan, "pinned": pinned, "values": values,
+            "search": search, "path": A.outside_repository(search, root)}, None, None
+
+
 def architect_hold_reason(root, cfg, adapter, st, found=None, now=None):
     """May a notice be held for the architect? {"holdable", "code", "reason"}.
 
@@ -763,9 +797,10 @@ def architect_hold_reason(root, cfg, adapter, st, found=None, now=None):
     "architect will be woken" while the only architect was an interactive session
     that acts when someone prompts it.
 
-    Built from the predicates the wake in escalate() uses, and pure: it starts
-    nothing and writes nothing. Blockers are checked before in-flight wakes, so a
-    wake that has already failed is never counted as one that is coming.
+    Built from the predicates the wake in escalate() uses; once its command is
+    accepted, resolving it asks candidates their version (ARCH-PROBE-ORDER).
+    Blockers are checked before in-flight wakes, so a wake that has already
+    failed is never counted as one that is coming.
     """
     from . import features as F
     now = now or time.time()
@@ -801,11 +836,10 @@ def architect_hold_reason(root, cfg, adapter, st, found=None, now=None):
     urgent = any(item.get("kind") == "decision-requested" for item in (found or []))
     if left is not None and left < reserve and not urgent:
         return no("window-reserve", f"the machine's {provider} window has {left}% left, below the {reserve}% reserve")
-    # The session a wake would resume, as the config resolved it, and never the implementer's (SESSION-IDENTITY).
-    resumable, withheld = A.session_to_resume(cfg, "architect") if "{session}" in " ".join(argv) else (True, None)
-    if not resumable:
-        return no("session-unresolved", f"the architect session cannot be resolved: {withheld}")
-    resolved, ver = A.resolve_binary(argv[0], path=child_path())
+    command, code, stopped = architect_command(root, cfg, language.text(cfg, "prompt.wake"))
+    if stopped:
+        return no(code, stopped)
+    resolved, ver = A.resolve_binary(command["argv"][0], path=command["path"])
     if not resolved:
         return no("binary-missing", f"{argv[0]} cannot be found")
     key = A.project_key(root)
@@ -1073,49 +1107,15 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
         woke = False
     if woke and arch.get("argv") and not args.dry_run:
         prompt = language.text(cfg, "prompt.wake")
-        # Resolve the session at wake time. A resumed architect carries the whole
-        # history -- what was decided and why -- where a fresh one knows only what
-        # is on disk. Claude Code forks a copy rather than double-writing when the
-        # session is already running, so resuming cannot repeat the two-writer
-        # incident. Pinning an id in config would go stale the moment the human
-        # opens a new conversation, and a watchdog waking a dead session fails
-        # silently, which is the worst shape of failure. The session is the one the
-        # config resolved when this cycle loaded it, never the newest transcript: where
-        # the implementer's sessions are kept beside the architect's, the newest was the
-        # implementer's own, and a wake resumed it as the architect (SESSION-IDENTITY).
-        sess, withheld = A.session_to_resume(cfg, "architect")
-        if "{session}" in " ".join(arch["argv"]) and not sess:
-            print(f"architect session not resolvable ({withheld}); reported only")
+        command, code, stopped = architect_command(root, cfg, prompt)
+        if stopped:
+            print(f"{stopped}; not waking the architect")
+            if code == "refused":
+                tell_turn_refused(root, "architect", stopped)
             return woke
-        # The permission mode is the one the architect's adapter pins, appended to a block composed
-        # before it was pinned (GRANTS-PINNED), and its grant admits what a command rewriter makes of
-        # each command it names, whenever the block was composed (GRANTS-RTK). Past what one argument
-        # carries, the prompt goes on standard input where the adapter declares it may; a detached
-        # turn takes no file ao would remove after it (PROMPT-CHANNEL). A batch program on Windows
-        # takes it there whatever its size, as prompt_input decides once argv[0] is resolved
-        # (WINDOWS-CMD-CHANNEL).
-        template, pinned = A.pinned_argv(A.admit_rewrites(arch["argv"])[0], "architect")
-        plan, refused = A.prompt_plan(template, prompt, A.block_adapter(arch), detached=True)
-        if refused:
-            print(f"the architect's prompt cannot be handed over: {refused}; reported only")
-            return woke
-        argv = [x.replace("{prompt}", prompt) .replace("{session}", sess or "")
-                for x in plan["argv"]]
-        search = child_path()
-        # A command no person accepted, or one that names a program inside this repository, is stopped before its
-        # program is resolved: resolving asks each candidate its version, which runs it, and TURN-ARGV asked only
-        # after that. No candidate is taken from inside the tree (ROUTE-ARGV).
-        held = turn_hold(root, cfg, "architect")
-        if held:
-            print(f"{held}; not waking the architect")
-            return woke
-        refused = A.turn_refusal("architect", A.block_adapter(arch), argv, root=root, search=search,
-                                 values={"session": sess}, resolved=argv[0] if os.path.isabs(argv[0]) else None)
-        if refused:
-            print(f"{refused}; not waking the architect")
-            tell_turn_refused(root, "architect", refused)
-            return woke
-        resolved, ver = A.resolve_binary(argv[0], path=A.outside_repository(search, root))
+        sess, plan, pinned = command["session"], command["plan"], command["pinned"]
+        argv, search = command["argv"], command["search"]
+        resolved, ver = A.resolve_binary(argv[0], path=command["path"])
         key = A.project_key(root)
         log_path = os.path.join(STATE_DIR, A.project_file_name("escalate-log", key))
         # Read what the previous wake said before starting another. Same binary,
@@ -1182,7 +1182,7 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
         # The command a wake starts runs the harness of an adapter the package ships, with no grant beyond the one ao
         # composes from it, before anything is spent on it (TURN-ARGV).
         refused = A.turn_refusal("architect", A.block_adapter(arch), argv, root=root, resolved=resolved,
-                                 search=search, values={"session": sess}) if resolved else None
+                                 search=search, values=dict(command["values"], session=sess)) if resolved else None
         if refused:
             print(f"{refused}; not waking the architect")
             tell_turn_refused(root, "architect", refused)
@@ -3036,12 +3036,9 @@ def _cycle_impl(args, root):
                 print("queue low, but an architect wake is already running")
                 return 0
             if args.dry_run:
-                # A dry cycle says what a live one would decide, the harness configuration a refill waits for among it
-                # (HARNESS-CONFIG), and a command it would refuse, as composed before a session is chosen (TURN-ARGV).
-                ident, template = A.turn_command(cfg, "architect")
-                unseen = A.turn_refusal("architect", ident, template or [], root=root,
-                                        values={"prompt": arch.get("prompt")}) \
-                    or harness_config_hold(root) or turn_hold(root, cfg, "architect")
+                # A dry refill prepares the live command too, without a version probe (ARCH-PROBE-ORDER).
+                _, _, unseen = architect_command(root, cfg, arch.get("prompt", language.text(cfg, "prompt.refill")))
+                unseen = unseen or harness_config_hold(root)
                 print(f"queue low ({depth}); {unseen}; not waking the architect to refill" if unseen
                       else f"queue low ({depth}); would wake the architect to refill")
                 return 0
@@ -3062,45 +3059,16 @@ def _cycle_impl(args, root):
             if st.get("arch_quota_until", 0) > time.time():
                 print("queue low, but the architect is at quota; waiting")
                 return 0
-            # Resolve the session at wake time. A resumed architect carries the whole
-            # history -- what was decided and why -- where a fresh one knows only what
-            # is on disk. Claude Code forks a copy rather than double-writing when the
-            # session is already running, so resuming cannot repeat the two-writer
-            # incident. Pinning an id in config would go stale the moment the human
-            # opens a new conversation, and a watchdog waking a dead session fails
-            # silently, which is the worst shape of failure. As in escalate(): the session
-            # the config resolved, never the implementer's (SESSION-IDENTITY).
-            sess, withheld = A.session_to_resume(cfg, "architect")
-            if "{session}" in " ".join(arch["argv"]) and not sess:
-                print(f"architect session not resolvable ({withheld}); reported only")
-                return 0
             prompt = arch.get("prompt", language.text(cfg, "prompt.refill"))
-            # As in escalate(): the pinned mode (GRANTS-PINNED), a grant that admits what a command
-            # rewriter makes of its commands (GRANTS-RTK), past one argument, standard input where
-            # the adapter declares it (PROMPT-CHANNEL), and a batch program's prompt there at any size
-            # (WINDOWS-CMD-CHANNEL).
-            template, pinned = A.pinned_argv(A.admit_rewrites(arch["argv"])[0], "architect")
-            plan, refused = A.prompt_plan(template, prompt, A.block_adapter(arch), detached=True)
-            if refused:
-                print(f"queue low, but the architect's prompt cannot be handed over: {refused}")
+            command, code, stopped = architect_command(root, cfg, prompt)
+            if stopped:
+                print(f"queue low ({depth}); {stopped}; not waking the architect to refill")
+                if code == "refused":
+                    tell_turn_refused(root, "architect", stopped)
                 return 0
-            argv = [x.replace("{prompt}", prompt) .replace("{session}", sess or "")
-                    for x in plan["argv"]]
-            search = child_path()
-            # As in escalate(): held or refused before its program is resolved, which runs it, and no candidate is
-            # taken from inside the tree (ROUTE-ARGV).
-            held = turn_hold(root, cfg, "architect")
-            if held:
-                print(f"queue low ({depth}); {held}; not waking the architect to refill")
-                return 0
-            values = {"session": sess, "prompt": arch.get("prompt")}
-            refused = A.turn_refusal("architect", A.block_adapter(arch), argv, root=root, search=search, values=values,
-                                     resolved=argv[0] if os.path.isabs(argv[0]) else None)
-            if refused:
-                print(f"queue low ({depth}); {refused}; not waking the architect to refill")
-                tell_turn_refused(root, "architect", refused)
-                return 0
-            resolved, ver = A.resolve_binary(argv[0], path=A.outside_repository(search, root))
+            sess, plan, pinned = command["session"], command["plan"], command["pinned"]
+            argv, search, values = command["argv"], command["search"], command["values"]
+            resolved, ver = A.resolve_binary(argv[0], path=command["path"])
             if not resolved:
                 print(f"architect command {argv[0]} not on PATH")
                 return 0

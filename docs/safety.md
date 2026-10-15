@@ -480,6 +480,16 @@ scheduled check - and holds no turn: only the person who set it up can move it.
 checked against it before they start, and a change to what a role's block says of its command waits for a
 person.*
 
+*In ao since slice ARCH-PROBE-ORDER: the architect's program is asked its version - which runs it - only
+where a wake would ask it. The watchdog's check of whether a notice may wait for the architect, which every
+cycle that weighs one runs, and `ao doctor`'s architect line resolved the block's `argv[0]` first, a program
+an agent left in the tree among them. Both now share the wake and refill's command preparation: resolve
+the architect's own session, plan the prompt channel, hold a command no person accepted, and refuse a
+program inside the repository or a session or configured prompt that reads as a flag, before looking for
+a program. No candidate comes from inside the tree. A refused command leaves notices for a person, and
+the doctor's architect line says `not asked` with the reason; a person corrects the named value or command
+before another wake can start.*
+
 The watchdog composed the implementer's nudge from its adapter as every layer loads it - the project's
 `.ao/adapters/` among them - and started the architect's wake and refill with the argv its block in
 `.ao/config.json` names. Both are files an agent can write, so a change to either could start a command the

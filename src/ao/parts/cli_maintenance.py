@@ -1916,17 +1916,26 @@ def cmd_doctor(cfg, args):
         # not by PATH order; say which one, and whether the last wake died on it.
         arch = cfg.get("architect") or {}
         if arch.get("argv"):
-            from .watchdog import child_path, wake_error, STATE_DIR
-            rb, rv = A.resolve_binary(arch["argv"][0], path=child_path())
-            others = [c for c in A.binary_candidates(arch["argv"][0], child_path()) if c != rb]
-            print(f"architect bin   {C['green'] if rb else C['red']}{rb or 'not found'}{C['reset']} {C['dim']}{rv}{C['reset']}"
-                  + (f"  {C['dim']}({len(others)} older copy: {', '.join(others)}){C['reset']}" if others else ""))
+            from .watchdog import wake_error, STATE_DIR, architect_command
+            # Use the wake's preparation and refusal values before any version probe (ARCH-PROBE-ORDER).
+            command, _, stopped = architect_command(root, cfg, arch.get("prompt", language.text(cfg, "prompt.refill")))
+            rb, rv = (None, "") if stopped else A.resolve_binary(command["argv"][0], path=command["path"])
+            others = [] if stopped else [c for c in A.binary_candidates(command["argv"][0], command["path"]) if c != rb]
+            if stopped:
+                print(f"architect bin   {C['red']}not asked{C['reset']} {C['dim']}{A.shown_text(stopped)}{C['reset']}")
+            else:
+                print(f"architect bin   {C['green'] if rb else C['red']}{rb or 'not found'}{C['reset']} {C['dim']}{rv}"
+                      f"{C['reset']}" + (f"  {C['dim']}({len(others)} older copy: {', '.join(others)}){C['reset']}"
+                                         if others else ""))
             key = A.project_key(root)
             we = wake_error(os.path.join(STATE_DIR, A.project_file_name("escalate-log", key)))
             if we:
                 text, used, when = we["text"], we["binary"], we["when"]
                 print(f"last wake       {C['red']}failed{C['reset']} {when} [{used or '?'}]: {text[:90]}")
-                if not used:
+                if stopped:
+                    print(f"                {C['dim']}no wake starts while the architect's command is held or refused"
+                          f"{C['reset']}")
+                elif not used:
                     print(f"                {C['dim']}binary not recorded (older log); the next wake uses the one above{C['reset']}")
                 elif used != f"{rb} {rv}":
                     print(f"                {C['dim']}a different binary resolves now; the next wake will use it{C['reset']}")
