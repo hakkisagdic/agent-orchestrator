@@ -1751,6 +1751,10 @@ def _commit_range_check(cfg, args):
     except (ValueError, RuntimeError) as exc:
         print(f"{C['red']}cannot check {spec}{C['reset']}: {exc}")
         return 2
+    if audit["unreadable"]:
+        print(f"{C['red']}cannot check {spec}{C['reset']}: the authority ledger cannot be read: "
+              f"{audit['unreadable']}")
+        return 2
     commits = audit["commits"]
     if not commits:
         print(f"no commits in {spec}")
@@ -1769,10 +1773,7 @@ def _commit_range_check(cfg, args):
         why = (f"older than {audit['first'][:12]}, the first commit carrying Ao- trailers" if audit["first"]
                else f"no commit in the history of {audit['end']} carries Ao- trailers yet")
         print(f"  {C['dim']}{exempt} commit(s) not checked: {why}{C['reset']}")
-    if audit["unreadable"]:
-        print(f"  {C['yellow']}checked by tree alone{C['reset']}: the authority ledger cannot be read: "
-              f"{audit['unreadable']}")
-    elif not audit["ledger"]:
+    if not audit["ledger"]:
         print(f"  {C['dim']}checked by tree alone: this checkout keeps no authority ledger{C['reset']}")
     if failing:
         print(f"{C['red']}{C['b']}TRAILERS DO NOT MATCH{C['reset']}  {len(failing)} of {len(checked)} commit(s) "

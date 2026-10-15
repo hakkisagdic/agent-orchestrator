@@ -103,7 +103,7 @@ index after the hook returns, so a process that stages a path in that window lan
 inside a plain `git commit`, and no hook can prevent that. `ao commit` writes the commit
 itself from the tree the grant bound, so nothing staged after its check lands, and
 `ao doctor` reports any commit since the first grant whose tree no grant bound, and the
-watchdog tells the architect about one within a cycle - which is what holds when the
+watchdog tells a person about one within a cycle - which is what holds when the
 implementer's harness is granted every tool and could commit with `--no-verify`.
 `tests/test_attacks.py` names ten attacks on commit authority, each of which fails closed. A review
 waiver (`ao waive review`) is a person's
@@ -141,6 +141,23 @@ that moved meanwhile is left where it is, with nothing landed. The message is cl
 rebase in progress is sent back to git: a grant binds one parent, so ao lands no merge, and a lane
 lands squashed ([gates](gates.md#a-commit-names-its-grant)). Git's own commit hooks - a `commit-msg` a project keeps among them - do not run under
 `ao commit`; they run under a plain `git commit`, which the commit hook checks.*
+
+*In ao since slice LEDGER-HISTORY: the landed-tree check reads every commit since the first grant. The
+doctor read the newest 50 and the watchdog the newest 20, so an ungranted commit with more granted ones
+landed on top fell out of the window for good; and it read no merge, so an edit made while merging, or a
+tree committed with `git commit-tree` over two granted parents, was never named. Every merge is named,
+as `ao commit-check --range` names it - a grant binds one parent - and nothing is merged to say so. The
+grants are the whole authority history, sealed rows included ([ledger](ledger.md#every-store-is-bounded)):
+read from the live rows, a seal moved the first grant, and the commits before it went unmeasured. A check
+that cannot run - a ledger or a git ao cannot read - is named as such, where it read as nothing to
+name. What the check finds is one alarm to a person, `landed-without-grant`: the watchdog raises it
+every cycle, before a cycle can end for want of an
+implementer block or a transcript, and the scheduled doctor pages it under the same alarm. It was a notice
+row for the architect that nothing sent, raised only in a cycle that went on to watch a transcript. It
+rings the desktop and the phone once for the commits it names, turns red and mails while they stand, and
+rings again when another lands; `ao alarms snooze landed-without-grant --until <date> --why <reason>` holds
+it while a person deals with them. On ao's own history - 428 commits since the first grant's head, none a
+merge - the whole check takes about 25 ms.*
 
 Two more acts weaken what a review is independent of, and both are a person's in the same way
 ([review tiers](roles.md#review-tiers)). `ao person-review --by <name>` records a person's verdict on

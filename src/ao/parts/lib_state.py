@@ -60,16 +60,14 @@ def consistency_findings(root, cfg):
         out.append({"kind": kind, "text": text, "repair": repair})
 
     reviews_dir = cfg.get("reviews", "semantic-review")
+    # What was ever granted and verified, the rows a seal retired included, held to the seal (LEDGER-HISTORY).
     try:
-        grants = [row for row in authority_rows(root) if isinstance(row, dict) and row.get("granted") is True]
+        grants = [row for row in authority_history(root) if isinstance(row, dict) and row.get("granted") is True]
     except Exception as exc:
         grants = []
         found("authority", f"the authority ledger cannot be read: {exc}")
     try:
-        from .storage import sealed_rows
-        ledger = os.path.join(root, ".ao", "ledger", "verifications.jsonl")
-        verifications = {row.get("id") for row in list(read_chained_jsonl(
-            ledger, VERIFICATION_CHAIN, legacy_prefix=True)) + sealed_rows(ledger) if isinstance(row, dict)}
+        verifications = {row.get("id") for row in verification_history(root) if isinstance(row, dict)}
     except Exception as exc:
         verifications = None
         found("verifications", f"the verification ledger cannot be read: {exc}")
@@ -175,8 +173,11 @@ def repair_consistency(root, findings):
 
 
 def grant_artefacts_at_risk(root, cfg):
-    """(name, "untracked" or "missing") for each review a grant rests on that git does not hold (#38)."""
-    granted = sorted({row["review"] for row in authority_rows(root)
+    """(name, "untracked" or "missing") for each review a grant rests on that git does not hold (#38).
+
+    Every grant's, the sealed ones too (LEDGER-HISTORY).
+    """
+    granted = sorted({row["review"] for row in authority_history(root)
                       if isinstance(row, dict) and row.get("granted") is True and row.get("review")})
     if not granted:
         return []
@@ -275,6 +276,19 @@ def authority_rows(root):
     from .storage import read_chained_jsonl
     path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
     return read_chained_jsonl(path, AUTHORITY_CHAIN)
+
+
+def authority_history(root):
+    """Every authority row ever committed, oldest first: those a seal retired, then the live ones, as one chain.
+
+    What was ever granted is asked here - the candidates a waiver authorised, the trees and the
+    first head the landed-tree check measures from, the reviews a grant rests on - and the newest
+    decision from `authority_rows`. Asked of the live rows, a seal made a spent waiver look unused,
+    so it stood in for a review of other bytes, and moved the landed-tree check's first grant past
+    commits it had not measured (the review of BOUNDED-STORES, LEDGER-HISTORY).
+    """
+    from .storage import read_chained_history
+    return read_chained_history(os.path.join(root, ".ao", "ledger", "authority.jsonl"), AUTHORITY_CHAIN)
 
 
 def latest_authority_decision(root):
@@ -440,14 +454,20 @@ def latest_verification(root):
     return chained[-1] if chained else None
 
 
+def verification_history(root):
+    """Every verification row ever committed, oldest first, the sealed ones held to their seal (LEDGER-HISTORY)."""
+    from .storage import read_chained_history
+    return read_chained_history(os.path.join(root, ".ao", "ledger", "verifications.jsonl"), VERIFICATION_CHAIN,
+                                legacy_prefix=True)
+
+
 def verification_by_id(root, vid):
-    """One verification row by id, from the ledger or the rows a seal retired from it (#50)."""
-    from .storage import read_chained_jsonl, sealed_rows
-    path = os.path.join(root, ".ao", "ledger", "verifications.jsonl")
-    for row in list(read_chained_jsonl(path, VERIFICATION_CHAIN, legacy_prefix=True)) + sealed_rows(path):
-        if isinstance(row, dict) and row.get("id") == vid:
-            return row
-    return None
+    """One verification row by id, the newest of that id, from the ledger or the rows a seal retired from it (#50).
+
+    The retired rows are held to their seal: an archived row edited after it was returned as edited (LEDGER-HISTORY).
+    """
+    return next((row for row in reversed(verification_history(root))
+                 if isinstance(row, dict) and row.get("id") == vid), None)
 
 
 def record_verification(root, record):
@@ -474,8 +494,12 @@ def record_verification(root, record):
 
 
 def _granted_trees(root):
-    """The index trees authority was granted for, and the commit the first grant built on."""
-    rows = [row for row in authority_rows(root)
+    """The index trees authority was granted for, and the commit the first grant built on, from the whole history.
+
+    Read from the live rows, a seal moved the first grant forward, and every commit between the
+    two went unmeasured (the review of BOUNDED-STORES, LEDGER-HISTORY).
+    """
+    rows = [row for row in authority_history(root)
             if isinstance(row, dict) and row.get("granted") is True]
     trees = {(row.get("candidate") or {}).get("index_tree") for row in rows}
     trees.discard(None)
@@ -497,7 +521,10 @@ def landed_commit_problem(root, commit="HEAD"):
         tree = _git_output(root, "rev-parse", "--verify", f"{commit}^{{tree}}").decode("ascii").strip()
     except (RuntimeError, UnicodeError) as exc:
         return f"cannot read {commit}: {exc}"
-    _, _, rows = _granted_trees(root)
+    # The newest grant is a newest decision, read from the live rows; the history only when a seal retired it
+    # with nothing but refusals after it, so a commit does not wait on reading every archive (LEDGER-HISTORY).
+    rows = [row for row in authority_rows(root) if isinstance(row, dict) and row.get("granted") is True] \
+        or _granted_trees(root)[2]
     grant = rows[-1] if rows else None
     granted = ((grant or {}).get("candidate") or {}).get("index_tree")
     if not granted:
@@ -508,23 +535,68 @@ def landed_commit_problem(root, commit="HEAD"):
     return None
 
 
-def commits_without_grant(root, limit=50):
+def commits_without_grant(root, why=None):
     """Landed commits, newest first, whose tree no grant bound (#64).
 
     Only commits on top of the one the first grant was built on are measured;
     history from before the authority ledger has nothing to be compared with.
-    Merges are left out: their trees are Git's, not a candidate's.
+
+    Every one of them is measured. The doctor read the newest 50 and the watchdog the
+    newest 20, without merges: an ungranted commit with more granted ones on top fell
+    out of the window for good, and a merge whose tree was not its parents' - an edit
+    made while merging, or a tree committed with `git commit-tree` - was not read at
+    all (the reviews of LANDED-TREE and ATTACK-SUITE). A merge is named, whatever it
+    carries, as `ao commit-check --range` names it (`_merge_problems`): a grant binds one
+    parent, and ao lands no merge; nothing is merged to say so. The grants are every one
+    in the history, sealed ones too. `why`, a dict, is given the reason each commit is named. A ledger
+    or a git that cannot be read raises: a check that cannot run passes nothing
+    (LEDGER-HISTORY).
+
+    On ao's own history, 428 commits from the first grant's head with no merge, the
+    walk took about 25 ms of git.
     """
     trees, base, _ = _granted_trees(root)
     if base is None:
         return []
+    if not _OBJECT_ID.fullmatch(str(base)):
+        # A head comes from a ledger an agent can write; it reaches git as a revision, never as an option.
+        raise ValueError(f"the first grant names {str(base)[:80]!r} as the commit it was built on, which is no "
+                         "commit id")
+    stray = []
+    for commit in landed_commits(root, f"{base}..HEAD"):
+        if len(commit["parents"]) > 1:
+            reason = _merge_problems(commit)[0]
+        elif commit["tree"] in trees:
+            continue
+        else:
+            reason = "no grant bound its tree"
+        stray.append(commit["sha"])
+        if why is not None:
+            why[commit["sha"]] = reason
+    return stray[::-1]
+
+
+def landed_without_grant(root):
+    """What the landed-tree check finds, in the one line `ao doctor` and the watchdog say it in, or None (LEDGER-HISTORY).
+
+    The doctor names it as `landed-without-grant` and the watchdog raises the alarm of that name
+    with these words as what it says, so the one alarm both raise rings once for the commits it
+    names, and again when others land. A check that cannot run says so: it is never a pass.
+    """
+    why = {}
     try:
-        log = _git_output(root, "log", f"--max-count={int(limit)}", "--no-merges",
-                          "--format=%H %T", f"{base}..HEAD", "--").decode("ascii")
-    except (RuntimeError, UnicodeError):
-        return []
-    return [sha for sha, tree in (line.split() for line in log.splitlines() if line.strip())
-            if tree not in trees]
+        stray = commits_without_grant(root, why)
+    except Exception as exc:
+        return ("the landed-tree check cannot run, so no commit since the first grant is known to have been granted: "
+                f"{' '.join(str(exc).split())[:300]} — ao doctor --consistency names what does not read")
+    if not stray:
+        return None
+    merges = sum(1 for sha in stray if why.get(sha) != "no grant bound its tree")
+    return (f"{len(stray)} commit(s) landed with a tree no grant bound: "
+            + ", ".join(sha[:12] for sha in stray[:5]) + (f" and {len(stray) - 5} more" if len(stray) > 5 else "")
+            + (f", {merges} of them a merge, which ao lands none of" if merges else "")
+            + " — made outside ao commit, or with a path staged after commit-check; read each with git show, then "
+            "revert it or have it reviewed (ao review --commits <sha>^..<sha>)")
 
 
 # ---- a commit names the grant it was made under (COMMIT-TRAILER) --------------------------------
@@ -637,13 +709,13 @@ def ledger_grants(root):
     (None, None) where there is no authority ledger at all: a clone, as in CI (COMMIT-TRAILER).
     """
     path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
-    if not os.path.exists(path):
-        return None, None
-    from .storage import sealed_rows
     try:
-        rows = list(authority_rows(root)) + list(sealed_rows(path))
+        # The sealed rows held to their seal: an archived grant edited after it was taken as recorded (LEDGER-HISTORY).
+        rows = authority_history(root)
     except Exception as exc:
         return None, str(exc)
+    if not rows and not os.path.exists(path):
+        return None, None
     return {row["token"]: row for row in rows if isinstance(row, dict) and isinstance(row.get("token"), str)}, None
 
 

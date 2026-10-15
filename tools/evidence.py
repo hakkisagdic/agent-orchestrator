@@ -48,12 +48,16 @@ def _ledger(state, name, chain, legacy_prefix=False):
     Read as ao reads it, less the lock: an append in flight leaves a line without its newline, which is no row.
     """
     path = os.path.join(state, ".ao", "ledger", name)
+    seal = storage._load_seal(path)
+    # Refuse missing recorded ledgers and unfinished seals even when there are no live rows to read.
+    retired = storage.sealed_rows(path, chain, legacy_prefix=legacy_prefix, seal=seal)
     if not os.path.exists(path):
         return None
-    seal = storage._load_seal(path)
     rows = storage._read_jsonl_unlocked(path)
     storage._validate_chained_rows(path, rows, chain, storage.CHAIN_PREVIOUS_FIELD, legacy_prefix, seal=seal)
-    return list(storage.sealed_rows(path)) + rows
+    storage._check_committed_length(path, rows, chain, seal=seal)
+    # The sealed rows are held to the seal, as one chain ending at its digest (LEDGER-HISTORY).
+    return retired + rows
 
 
 def _reviews_folder(state):

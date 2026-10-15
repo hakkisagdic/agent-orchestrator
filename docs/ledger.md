@@ -103,6 +103,11 @@ nothing is appended onto it, and `ao commit-check` refuses. A fresh machine has 
 to compare with. Retiring a ledger on purpose means archiving the file and removing its
 entry from that record by hand; sealing old rows instead is #50.
 
+*In ao since slice LEDGER-HISTORY: the record is replaced whole as ao's other whole files are - under a
+name no file had, synced, renamed, and its folder synced after the rename. It was renamed into place
+with no sync of its folder, so a power cut could take back the record of an append that had returned,
+and a row then cut from the ledger matched the length recorded before it.*
+
 This is tamper-evidence, not authentication. Same-user write access can recompute a suffix,
 append a correctly linked forged row, or cut a valid tail and rewrite the length record to
 match, because AO has no external trusted head or signing key. See the exact security boundary in
@@ -222,6 +227,25 @@ with the committed length, so a seal written by hand, or a sealed prefix removed
 like any broken chain. `ao commit-check` reads the same newest rows from a sealed ledger as from
 an unsealed one. A verification a grant names stays readable by its id from the sealed archive,
 and review artefacts are kept by reference ([telemetry](telemetry.md)).
+
+*In ao since slice LEDGER-HISTORY: a seal records its intent - the rows it retires, the digest of the
+last of them, its archives, and the length and newest digest the ledger had - in
+`~/.ao/ledger-checkpoints.json`, under that record's lock, before it rewrites the ledger, and a seal cut
+short is finished or undone from that record alone. The intent was a `.pending` file beside the ledger,
+which the implementer can write: a ledger cut to its newest rows, beside one naming the cut rows as
+sealed, was accepted and the record outside the repository rewritten to match, and so was a chain of
+the writer's own with any genesis, whose newest grant then read as the newest decision. A `.pending`
+there now names a seal this machine did not begin: the ledger is not read while it stands, and it stays
+where it is for a person to read and move away. The archives are held to their seal - one chain ending
+at its digest, with exactly the rows it retired - and every reader of what was ever granted or verified
+reads them and the live rows as one chain: the candidates a waiver authorised, the waivers `ao catchup`
+reviews, the trees and the first grant the landed-tree check measures from ([safety](safety.md#3-commit-authority-is-separated)),
+the reviews grants rest on, `ao backup`, `ao restore` and `ao doctor --consistency`. Read from the live
+rows alone, a waiver whose grant a seal retired stood in for a review of other bytes, and catch-up closed
+it unreviewed as unused. The newest decision is still read from the live rows. Measured here with 10,000
+authority rows sealed to the 500 kept live, the whole history reads in about 50 ms, and in 114 ms on a
+machine that did not seal it, where the archives' chain is walked link by link; the live rows read in
+7 ms.*
 
 ## Rules
 

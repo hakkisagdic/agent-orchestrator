@@ -1,4 +1,8 @@
-"""Round 3: a held tree, an exclusive first config, kept modes and shared rules (LEADS-ADAPTERS)."""
+"""Round 3: a held tree, an exclusive first config, kept modes and shared rules (LEADS-ADAPTERS).
+
+Opt-in recovery missed checkpoint intents after LEDGER-HISTORY changed seals; it now shares
+settlement with path-based readers while keeping seal and archive access in the held folder.
+"""
 import json
 import os
 import stat
@@ -360,22 +364,132 @@ def test_failed_first_opt_in_removes_new_ledger(project, monkeypatch):
 
 
 @pytest.mark.parametrize("rewrite_done", [False, True])
-def test_opt_in_recovers_pending_seal(project, monkeypatch, rewrite_done):
+@pytest.mark.parametrize("operation", ["read", "append"])
+@pytest.mark.parametrize("already_sealed", [False, True])
+def test_opt_in_recovers_pending_seal(project, rewrite_done, operation, already_sealed):
+    path = _pending_opt_in_seal(project, rewrite_done, already_sealed)
+    root = project["root"]
+    if operation == "read":
+        assert A.recorded_opt_in(root, "features.probe")["ordinal"] == 3
+    else:
+        assert A.record_opt_in(root, "features.probe", False, "Person")["ordinal"] == 4
+    mark = storage._checkpoint_entry(path)
+    assert "intent" not in mark
+    assert mark["count"] == (3 if operation == "read" else 4)
+    if rewrite_done:
+        assert mark["sealed"]["retired"] == 2 and mark["sealed"]["archives"].startswith("sha256:")
+    assert not os.path.exists(storage.seal_path(path) + ".pending")
+    assert A.record_opt_in(root, "features.probe", False, "Person")["ordinal"] == mark["count"] + 1
+    assert len(storage.read_chained_history(path, A.OPT_IN_CHAIN)) == mark["count"] + 1
+
+
+def _pending_opt_in_seal(project, rewrite_done=True, already_sealed=False):
     root = project["root"]
     for value in (True, False, True):
         A.record_opt_in(root, "features.probe", value, "Person")
     path = A.opt_ins_path(root)
-    replace = storage.replace_file_durably
-    def interrupted(where, *args, **kwargs):
-        if where == path:
-            if rewrite_done:
-                replace(where, *args, **kwargs)
+    if already_sealed:
+        storage.seal_chained_jsonl(path, A.OPT_IN_CHAIN, keep=2)
+
+    def interrupted(step):
+        if step == ("ledger-rewritten" if rewrite_done else "intent-recorded"):
             raise OSError("interrupted seal")
-        return replace(where, *args, **kwargs)
-    with monkeypatch.context() as patch:
-        patch.setattr(storage, "replace_file_durably", interrupted)
-        with pytest.raises(OSError, match="interrupted seal"):
-            storage.seal_chained_jsonl(path, A.OPT_IN_CHAIN, keep=1)
-    assert A.recorded_opt_in(root, "features.probe")["ordinal"] == 3
-    assert not os.path.exists(storage.seal_path(path) + ".pending")
-    assert A.record_opt_in(root, "features.probe", False, "Person")["ordinal"] == 4
+    with pytest.raises(OSError, match="interrupted seal"):
+        storage.seal_chained_jsonl(path, A.OPT_IN_CHAIN, keep=1, _checkpoint=interrupted)
+    return path
+
+
+def test_opt_in_refuses_tree_intent_without_changing_evidence(project):
+    root = project["root"]
+    for value in (True, False, True):
+        A.record_opt_in(root, "features.probe", value, "Person")
+    path = Path(A.opt_ins_path(root))
+    lines = path.read_bytes().splitlines(keepends=True)
+    path.write_bytes(lines[-1])
+    pending = Path(storage.seal_path(str(path)) + ".pending")
+    pending.write_text(json.dumps({"chain": A.OPT_IN_CHAIN, "retired": 2,
+                                  "digest": json.loads(lines[-1])["previous"], "archives": []}), encoding="utf-8")
+    before = pending.read_bytes(), path.read_bytes(), Path(storage.checkpoint_path()).read_bytes()
+    with pytest.raises(storage.LedgerCorruption, match="did not begin"):
+        A.recorded_opt_in(root, "features.probe")
+    with pytest.raises(storage.LedgerCorruption, match="did not begin"):
+        A.record_opt_in(root, "features.probe", False, "Person")
+    assert (pending.read_bytes(), path.read_bytes(), Path(storage.checkpoint_path()).read_bytes()) == before
+    assert not Path(storage.seal_path(str(path))).exists()
+
+
+@pytest.mark.parametrize("damage", ["intent", "checkpoint", "chain", "archive", "missing archive", "live rows"])
+def test_opt_in_refuses_damaged_seal_recovery(project, damage):
+    path = _pending_opt_in_seal(project)
+    checkpoint = Path(storage.checkpoint_path())
+    record = json.loads(checkpoint.read_text(encoding="utf-8"))
+    entry = record[os.path.realpath(path)]
+    archive = Path(path).parent / "sealed" / entry["intent"]["archives"][0]
+    if damage == "intent":
+        entry["intent"].pop("before")
+    elif damage == "checkpoint":
+        entry["count"] += 1
+    elif damage == "chain":
+        entry["intent"]["chain"] = "another-chain"
+    elif damage == "archive":
+        rows = [json.loads(line) for line in archive.read_bytes().splitlines()]
+        rows[0]["value"] = "edited"
+        archive.write_bytes(b"".join(storage._encode_jsonl(row) for row in rows))
+    elif damage == "missing archive":
+        archive.unlink()
+    else:
+        Path(path).write_bytes(b"")
+    checkpoint.write_text(json.dumps(record), encoding="utf-8")
+    before = checkpoint.read_bytes(), Path(path).read_bytes()
+    with pytest.raises(storage.LedgerCorruption):
+        A.recorded_opt_in(project["root"], "features.probe")
+    with pytest.raises(storage.LedgerCorruption):
+        A.record_opt_in(project["root"], "features.probe", False, "Person")
+    assert (checkpoint.read_bytes(), Path(path).read_bytes()) == before
+    assert not Path(storage.seal_path(path)).exists()
+
+
+@pytest.mark.parametrize("link", ["folder", "archive"])
+def test_opt_in_recovery_refuses_archive_links(project, tmp_path, link):
+    _can_link(tmp_path)
+    path = _pending_opt_in_seal(project)
+    sealed = Path(path).parent / "sealed"
+    target = sealed if link == "folder" else next(sealed.iterdir())
+    outside = tmp_path / "outside"
+    target.rename(outside)
+    target.symlink_to(outside, target_is_directory=link == "folder")
+    checkpoint = Path(storage.checkpoint_path()).read_bytes()
+    with pytest.raises(storage.LedgerCorruption, match="cannot be read"):
+        A.recorded_opt_in(project["root"], "features.probe")
+    assert Path(storage.checkpoint_path()).read_bytes() == checkpoint
+    assert not Path(storage.seal_path(path)).exists()
+
+
+@pytest.mark.skipif(os.open not in os.supports_dir_fd, reason="POSIX held descriptor race")
+@pytest.mark.parametrize("when", ["lock", "archive"])
+def test_opt_in_recovery_stays_in_held_folder(project, tmp_path, monkeypatch, when):
+    _can_link(tmp_path)
+    path = _pending_opt_in_seal(project)
+    identity = os.path.realpath(path)
+    ledger = Path(path).parent
+    moved, outside = ledger.with_name("ledger-moved"), tmp_path / "outside"
+    outside.mkdir()
+    original, swapped = os.open, []
+    trigger = "opt-ins.jsonl.lock" if when == "lock" else "opt-ins.jsonl.1-2.jsonl"
+
+    def opened(name, flags, *args, **kwargs):
+        fd = original(name, flags, *args, **kwargs)
+        if not swapped and os.path.basename(name) == trigger:
+            ledger.rename(moved)
+            ledger.symlink_to(outside, target_is_directory=True)
+            swapped.append(True)
+        return fd
+
+    monkeypatch.setattr(os, "open", opened)
+    monkeypatch.setattr(os, "supports_dir_fd", os.supports_dir_fd | {opened})
+    assert A.record_opt_in(project["root"], "features.probe", False, "Person")["ordinal"] == 4
+    assert swapped and list(outside.iterdir()) == []
+    mark = storage._checkpoint_entry(identity, identity=identity)
+    assert mark["count"] == 4 and mark["sealed"]["retired"] == 2 and "intent" not in mark
+    assert json.loads((moved / "opt-ins.jsonl.seal.json").read_text(encoding="utf-8"))["retired"] == 2
+    assert len((moved / "opt-ins.jsonl").read_bytes().splitlines()) == 2

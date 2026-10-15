@@ -578,15 +578,11 @@ def doctor_problems(cfg):
             out.append(("commit-hook", "; ".join(reasons) + (f" — {repair}" if repair else "")))
     out.extend(_actor_grant_problems(cfg))
     if _project_enrollment(root)["state"] in ("enrolled", "legacy"):
-        try:
-            stray = A.commits_without_grant(root)
-        except Exception:
-            stray = []
-        if stray:
-            out.append(("landed-without-grant",
-                        f"{len(stray)} commit(s) landed with a tree no grant bound: "
-                        + ", ".join(sha[:12] for sha in stray[:5])
-                        + " — a path staged after commit-check, or a commit made outside ao"))
+        # Every commit since the first grant, merges among them, and a check that cannot run named as such: an
+        # error read as no commit to name (LEDGER-HISTORY).
+        landed = A.landed_without_grant(root)
+        if landed:
+            out.append(("landed-without-grant", landed))
     return out
 
 
@@ -604,7 +600,10 @@ DOCTOR_WATCHDOG_ALARMS = {"credits-exhaust": {"key": "credits-exhaust", "level":
                           "turn-refused:implementer": {"key": "turn-refused:implementer", "level": None,
                                                        "window": 6 * 3600},
                           "turn-refused:architect": {"key": "turn-refused:architect", "level": None,
-                                                     "window": 6 * 3600}}
+                                                     "window": 6 * 3600},
+                          # A commit no grant bound, in the words the watchdog raises it in (LEDGER-HISTORY).
+                          "landed-without-grant": {"key": "landed-without-grant", "level": None,
+                                                   "window": 6 * 3600}}
 
 # A heartbeat older than this is a watchdog that stopped.
 WATCHDOG_SILENT_AFTER = 360
@@ -784,9 +783,12 @@ def _doctor_credit_lines(cfg):
 # else a doctor finds is an advisory: recorded for the architect, never paged (#40).
 # Harness configuration nobody has seen holds every turn ao starts, and only a person
 # may read it and record it as seen (HARNESS-CONFIG). A turn the watchdog refuses to
-# start waits for its configuration to change (TURN-ARGV).
+# start waits for its configuration to change (TURN-ARGV). A commit no grant bound is
+# the backstop for a harness that can commit around the hook, and was an advisory row
+# nobody sends (LEDGER-HISTORY).
 DOCTOR_RED = {"watchdog-dead", "wake-failed", "transcript-blind", "transcript-missing", "implementer-session",
-              "harness-config", "turn-refused:implementer", "turn-refused:architect", "repository-redirect"}
+              "harness-config", "turn-refused:implementer", "turn-refused:architect", "repository-redirect",
+              "landed-without-grant"}
 
 
 def _doctor_severity(key, text):
@@ -838,12 +840,14 @@ def _doctor_check(cfg, page=False):
         elif shared:
             # A failed wake says what the watchdog's own raise of it says, so the same failure rings once
             # whoever sees it (NOISE-REPEATS); so does harness configuration nobody has seen (HARNESS-CONFIG),
-            # and a refused turn, in the words the watchdog refuses it in (TURN-ARGV).
+            # and a refused turn, in the words the watchdog refuses it in (TURN-ARGV), and a commit no grant
+            # bound, in the words the watchdog raises it in (LEDGER-HISTORY).
             from .watchdog import STATE_DIR, wake_error, wake_failure_told
             failed = wake_error(os.path.join(STATE_DIR, A.project_file_name("escalate-log", project))) \
                 if key == "wake-failed" else None
             what = wake_failure_told(failed) if failed else _harness_config_told(root) \
-                if key == "harness-config" else text if key.startswith("turn-refused:") else None
+                if key == "harness-config" else text \
+                if key.startswith("turn-refused:") or key == "landed-without-grant" else None
             notify(f"{project}: {key}", text, root, key=shared["key"], window=shared["window"],
                    audience="human", level=shared["level"], what=what)
         else:

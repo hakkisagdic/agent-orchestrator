@@ -127,6 +127,22 @@ def test_a_clone_with_no_ao_state_checks_by_tree_alone(project, monkeypatch, cap
     assert "on record" not in out
 
 
+@pytest.mark.parametrize("empty", [False, True])
+def test_a_range_check_refuses_a_missing_recorded_ledger_even_when_its_trailers_match(
+        project, monkeypatch, capsys, empty):
+    root, base, _ = _landed(project, monkeypatch)
+    span = "HEAD..HEAD" if empty else f"{base}..HEAD"
+    assert _check(root, capsys, span)[0] == 0
+    path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
+    os.unlink(path)
+
+    code, out = _check(root, capsys, span)
+
+    assert code == 2
+    assert "authority ledger cannot be read" in out and path in out
+    assert "TRAILERS MATCH" not in out and "checked by tree alone" not in out
+
+
 def test_a_merge_with_no_trailers_does_not_match_and_a_bad_range_is_refused(project, monkeypatch, capsys):
     """A merge carrying no trailers was skipped; it lands through ao commit now, as any commit, since two changes
     reviewed alone can act together where neither review looked (LEADS-GATE)."""

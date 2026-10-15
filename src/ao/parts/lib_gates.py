@@ -1906,7 +1906,7 @@ def review_artefact_references(root, cfg):
     every review, not a reason to keep one. Whatever cannot be read raises, so
     nothing is pruned on a guess.
     """
-    from .storage import _load_seal, read_chained_jsonl, sealed_rows
+    from .storage import read_chained_history
     names = review_artefact_names(root, cfg["reviews"])
     kept = {}
 
@@ -1916,17 +1916,13 @@ def review_artefact_references(root, cfg):
             reasons.append(why)
 
     texts = []
-    chains = {"grant": AUTHORITY_CHAIN, "verification": VERIFICATION_CHAIN,
-              "waiver": WAIVER_CHAIN, "decision": DECISION_CHAIN}
+    chains = {"grant": (AUTHORITY_CHAIN, False), "verification": (VERIFICATION_CHAIN, True),
+              "waiver": (WAIVER_CHAIN, True), "decision": (DECISION_CHAIN, True)}
     for why, parts in REVIEW_REFERENCE_FILES:
         if why in chains:
-            path = os.path.join(root, *parts)
-            rows = read_chained_jsonl(path, chains[why], legacy_prefix=why != "grant")
-            archived = sealed_rows(path)
-            # A missing archive reads as empty; its seal still names how many rows it held (TRIAGE-3-MEDIUM).
-            if len(archived) != (_load_seal(path) or {}).get("retired", 0):
-                raise RuntimeError("sealed review references are missing; restore the ledger archives before pruning")
-            texts.append((why, json.dumps(list(rows) + archived, ensure_ascii=False)))
+            chain, legacy = chains[why]
+            rows = read_chained_history(os.path.join(root, *parts), chain, legacy_prefix=legacy)
+            texts.append((why, json.dumps(rows, ensure_ascii=False)))
             continue
         try:
             with open(os.path.join(root, *parts), encoding=UTF8, errors="replace") as fh:
@@ -1945,7 +1941,7 @@ def review_artefact_references(root, cfg):
     open_slices = {item["id"] for state, items in board(root).items() if state not in ("done", "rejected")
                    for item in items}
     staged = index_candidate(root)["digest"]
-    for row in read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN):
+    for row in read_chained_history(review_ledger_path(root), REVIEW_CHAIN):
         name = row.get("artefact") if isinstance(row, dict) else None
         if name not in names:
             continue
@@ -1970,11 +1966,11 @@ def prune_review_artefacts(root, cfg, days, apply=False, now=None):
     """
     import shutil
     import stat
-    from .storage import read_chained_jsonl
+    from .storage import read_chained_history
     now = time.time() if now is None else now
     kept = review_artefact_references(root, cfg)
     written = {}
-    for row in read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN):
+    for row in read_chained_history(review_ledger_path(root), REVIEW_CHAIN):
         if isinstance(row, dict) and row.get("artefact"):
             written[row["artefact"]] = max(written.get(row["artefact"], 0), int(row.get("at") or 0))
     directory = os.path.join(root, cfg["reviews"])

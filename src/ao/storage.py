@@ -357,25 +357,41 @@ def _write_committed_lengths(data):
 
     Through replace_file_durably, under a name no file had and never through a link: `<store>.<pid>.tmp`, opened to
     truncate, wrote the target of a link left at that name, and AO_LEDGER_CHECKPOINTS can name a store in a folder an
-    agent writes (STORAGE-TMP).
+    agent writes (STORAGE-TMP). It syncs the folder after the rename too: renamed into place with no sync, an append
+    returned on a record a power cut could still take back (the review of LEDGER-LENGTH, LEDGER-HISTORY).
     """
     replace_file_durably(checkpoint_path(), json.dumps(data, indent=1, sort_keys=True).encode("utf-8"))
 
 
-def _record_committed_length(path, count, digest, sealed=None, *, identity=None):
+def _checkpoint_entry(path, *, identity=None):
+    """What the checkpoint store records for one ledger: {} when nothing."""
+    entry = _load_committed_lengths().get(identity or os.path.realpath(path))
+    return entry if isinstance(entry, dict) else {}
+
+
+def _update_checkpoint(path, change, *, identity=None):
+    """Replace one ledger's record in the checkpoint store with `change(record)`, under the store's lock."""
     store = checkpoint_path()
     os.makedirs(os.path.dirname(store) or ".", exist_ok=True)
     with _exclusive_lock(store + ".lock"):
         data = _load_committed_lengths()
         key = identity or os.path.realpath(path)
+        data[key] = change(dict(data[key]) if isinstance(data.get(key), dict) else {})
+        _write_committed_lengths(data)
+
+
+def _record_committed_length(path, count, digest, sealed=None, *, identity=None):
+    def change(previous):
         mark = {"count": count, "digest": digest, "at": int(time.time())}
-        previous = data.get(key) if isinstance(data.get(key), dict) else {}
         # A seal is recorded outside the repository too, so one written inside it
         # cannot retire rows this machine never retired (#50).
         if sealed is not None or previous.get("sealed"):
             mark["sealed"] = sealed if sealed is not None else previous["sealed"]
-        data[key] = mark
-        _write_committed_lengths(data)
+        # A seal under way is settled before any append; kept, one an append met anyway is refused, not lost.
+        if previous.get("intent"):
+            mark["intent"] = previous["intent"]
+        return mark
+    _update_checkpoint(path, change, identity=identity)
 
 
 def _check_committed_length(path, rows, chain, seal=None, *, identity=None):
@@ -413,11 +429,27 @@ def seal_path(path):
     return path + ".seal.json"
 
 
-def _load_seal(path):
+def _check_missing_chained_ledger(path, chain, seal=None, *, identity=None):
+    """A file missing where a checkpoint or seal records rows is unreadable, never an empty history."""
+    _check_committed_length(path, [], chain, seal=seal, identity=identity)
+    entry = _checkpoint_entry(path, identity=identity)
+    if seal or entry.get("sealed") or "intent" in entry or \
+            (isinstance(entry.get("count"), int) and entry["count"] > 0):
+        raise LedgerCorruption(f"{path} is absent but its checkpoint or seal records rows: rows were removed; "
+                               "restore the ledger before reading its history")
+
+
+def _load_seal(path, *, _folder=None):
     """The seal that retired a ledger's prefix, or None (#50)."""
     try:
-        with open(seal_path(path), encoding="utf-8") as handle:
-            seal = json.load(handle)
+        if _folder is None:
+            with open(seal_path(path), encoding="utf-8") as handle:
+                seal = json.load(handle)
+        else:
+            data = _tree_bytes(_folder, os.path.basename(seal_path(path)))
+            if data is None:
+                return None
+            seal = json.loads(data.decode(UTF8))
     except FileNotFoundError:
         return None
     except (OSError, ValueError) as exc:
@@ -428,30 +460,112 @@ def _load_seal(path):
     return seal
 
 
-def _settle_seal(path, chain, previous_field):
-    """Finish or undo a seal a crash interrupted; the caller holds the ledger lock (#50).
+def _seal_intent(path, entry):
+    """The seal of `path` under way that this machine recorded in `entry`, its checkpoint record, or None."""
+    intent = entry.get("intent")
+    if "intent" not in entry:
+        return None
+    before = intent.get("before") if isinstance(intent, dict) else None
+    if not isinstance(intent, dict) or not isinstance(intent.get("retired"), int) or intent["retired"] < 1 \
+            or not isinstance(intent.get("digest"), str) or not isinstance(intent.get("archives"), list) \
+            or not isinstance(before, dict) or not isinstance(before.get("count"), int) \
+            or before["count"] <= intent["retired"] \
+            or not isinstance(before.get("digest"), str):
+        raise LedgerCorruption(f"the seal of {path} under way, as {checkpoint_path()} records it, is malformed: "
+                               "nothing is read from the ledger until a person compares the two")
+    return intent
 
-    A seal writes its intent before it rewrites the ledger. If the ledger already
-    starts after the retired rows, the seal is completed; otherwise the intent is
-    dropped and the ledger is as it was.
+
+def _settle_seal(path, chain, previous_field, legacy_prefix=False, *, _folder=None, identity=None):
+    """Finish or undo a seal a crash interrupted, from the intent this machine recorded; the caller holds the ledger lock (#50).
+
+    The intent was read from `<ledger>.seal.json.pending`, in the tree the implementer writes: a
+    ledger cut to its newest rows, beside an intent naming the cut rows as sealed, was finished
+    as a seal and the record outside the repository rewritten to match, so the cut, or a whole
+    chain of the writer's own with any genesis, read as authority (the review of BOUNDED-STORES).
+    A seal now records its intent in the checkpoint store, under that store's lock, before it
+    rewrites the ledger, and only that intent is settled: finished when the ledger starts after
+    the rows it retires, holds exactly the rows it kept and the archives hold exactly those it
+    retired; undone when the ledger is still the one it was taken from; refused otherwise. ao
+    writes no intent in the tree, so a `.pending` found there is none of its own: it is refused,
+    named and left where it is (LEDGER-HISTORY). The opt-in reader uses the same settlement,
+    with every tree operation relative to its held folder and its checkpoint identity fixed
+    before the folder can move (LEADS-ADAPTERS).
     """
-    pending = seal_path(path) + ".pending"
-    if not os.path.exists(pending):
-        return
-    with open(pending, encoding="utf-8") as handle:
-        intent = json.load(handle)
-    rows = _read_jsonl_unlocked(path, allow_partial_tail=False) if os.path.exists(path) else []
-    if rows and isinstance(rows[0], dict) and rows[0].get(previous_field) == intent["digest"]:
-        last = rows[-1]
-        _record_committed_length(path, intent["retired"] + len(rows), chained_row_digest(last, chain),
-                                 sealed={"retired": intent["retired"], "digest": intent["digest"]})
-        _replace(pending, seal_path(path))
-        _sync_directory(os.path.dirname(path) or ".", os.fsync)
+    stray = seal_path(path) + ".pending"
+    if _folder is None:
+        stray_exists = os.path.lexists(stray)
     else:
-        os.remove(pending)
+        try:
+            _tree_stat(_folder, os.path.basename(stray))
+            stray_exists = True
+        except FileNotFoundError:
+            stray_exists = False
+    if stray_exists:
+        raise LedgerCorruption(
+            f"{stray} names a seal of {os.path.basename(path)} that this machine did not begin: ao records a seal's "
+            f"intent in {checkpoint_path()}, never in the tree. It is left where it is and the ledger is not read "
+            "while it stands; read it, then move it out of .ao/ledger/"
+        )
+    entry = _checkpoint_entry(path, identity=identity)
+    intent = _seal_intent(path, entry)
+    if intent is None:
+        return
+    before = intent["before"]
+    if (entry.get("count"), entry.get("digest")) != (before["count"], before["digest"]):
+        raise LedgerCorruption(
+            f"the record of {path} in {checkpoint_path()} changed while a seal of it was under way: nothing is read "
+            "from the ledger until a person compares the two"
+        )
+    if intent.get("chain") != chain:
+        raise LedgerCorruption(f"the seal of {path} under way was begun for another chain than {chain!r}")
+    if _folder is None:
+        rows = _read_jsonl_unlocked(path, allow_partial_tail=False) if os.path.exists(path) else []
+    else:
+        rows = _jsonl_rows(_tree_bytes(_folder, os.path.basename(path)) or b"", path, allow_partial_tail=False)
+    if rows and isinstance(rows[0], dict) and rows[0].get(previous_field) == intent["digest"]:
+        # Rewritten: what stands must be the newest rows the intent kept, and the archives the rows it retired.
+        seal = {key: intent.get(key) for key in ("chain", "retired", "digest", "archives", "at")}
+        _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix, seal=seal)
+        if intent["retired"] + len(rows) != before["count"] or chained_row_digest(rows[-1], chain) != before["digest"]:
+            raise LedgerCorruption(
+                f"{path} was rewritten by a seal and no longer holds the rows it kept, through row {before['count']}: "
+                "rows were changed or removed after it"
+            )
+        _, archived = _sealed_rows_held(path, chain, seal, previous_field, legacy_prefix, _folder=_folder)
+        data = (json.dumps(seal, sort_keys=True) + "\n").encode(UTF8)
+        if _folder is None:
+            replace_file_durably(seal_path(path), data)
+        else:
+            _tree_replace_bytes(_folder, os.path.basename(seal_path(path)), data)
+
+        def finished(record):
+            record.pop("intent", None)
+            record.update(count=before["count"], digest=before["digest"], at=int(time.time()),
+                          sealed={"retired": intent["retired"], "digest": intent["digest"], "archives": archived})
+            return record
+        _update_checkpoint(path, finished, identity=identity)
+        return
+    # Not rewritten: the ledger must still be the one the seal was taken from.
+    seal = _load_seal(path, _folder=_folder)
+    _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix, seal=seal)
+    held = (seal["retired"] if seal else 0) + len(rows)
+    if held != before["count"] or not rows or chained_row_digest(rows[-1], chain) != before["digest"]:
+        raise LedgerCorruption(
+            f"{path} changed while a seal of it was under way: it holds {held} rows where the seal found "
+            f"{before['count']}"
+        )
+    _check_committed_length(path, rows, chain, seal=seal, identity=identity)
+    _sealed_rows_held(path, chain, seal, previous_field, legacy_prefix, _folder=_folder)
+
+    def undone(record):
+        record.pop("intent", None)
+        return record
+    _update_checkpoint(path, undone, identity=identity)
 
 
-def seal_chained_jsonl(path, chain, keep, *, previous_field=CHAIN_PREVIOUS_FIELD, legacy_prefix=False):
+def seal_chained_jsonl(path, chain, keep, *, previous_field=CHAIN_PREVIOUS_FIELD, legacy_prefix=False,
+                       _checkpoint=None):
     """Retire all but the newest `keep` rows of a chained ledger into an archive, never deleting one (#50).
 
     The retired rows are written whole to `sealed/<ledger>.<first>-<last>.jsonl`
@@ -460,12 +574,19 @@ def seal_chained_jsonl(path, chain, keep, *, previous_field=CHAIN_PREVIOUS_FIELD
     the same seal is recorded outside the repository with the committed length.
     A sealed ledger and the unsealed one give every reader the same newest rows.
     Returns the seal, or None when there is nothing to retire.
+
+    Before the ledger is rewritten, the seal's intent - what it retires, the digest of
+    the last of those, its archives, and the length and newest digest the ledger had -
+    is recorded in the checkpoint store under that store's lock, and a seal cut short
+    is settled from that record alone (LEDGER-HISTORY). `_checkpoint` is the private
+    test seam the appends take.
     """
     if keep < 1:
         raise ValueError("a seal keeps at least one row")
     with _exclusive_lock(path + ".lock"):
-        _settle_seal(path, chain, previous_field)
+        _settle_seal(path, chain, previous_field, legacy_prefix)
         if not os.path.exists(path):
+            _check_missing_chained_ledger(path, chain, seal=_load_seal(path))
             return None
         rows = _read_jsonl_unlocked(path, allow_partial_tail=False)
         seal = _load_seal(path)
@@ -476,27 +597,99 @@ def seal_chained_jsonl(path, chain, keep, *, previous_field=CHAIN_PREVIOUS_FIELD
         retire, kept = rows[:-keep], rows[-keep:]
         if any(not isinstance(row, dict) or previous_field not in row for row in kept):
             return None                        # rows from before the chain cannot start a sealed ledger
+        # A seal adds its archive to ones that hold: stacked on a broken one, it would carry the break on.
+        _sealed_rows_held(path, chain, seal, previous_field, legacy_prefix)
         base = seal["retired"] if seal else 0
         first, last = base + 1, base + len(retire)
         archive = os.path.join(os.path.dirname(path) or ".", "sealed", f"{os.path.basename(path)}.{first}-{last}.jsonl")
         replace_file_durably(archive, b"".join(_encode_jsonl(row) for row in retire))
         intent = {"chain": chain, "retired": last, "digest": chained_row_digest(retire[-1], chain),
                   "archives": list((seal or {}).get("archives") or []) + [os.path.basename(archive)],
-                  "at": int(time.time())}
-        replace_file_durably(seal_path(path) + ".pending", (json.dumps(intent, sort_keys=True) + "\n").encode(UTF8))
+                  "at": int(time.time()),
+                  "before": {"count": base + len(rows), "digest": chained_row_digest(rows[-1], chain)}}
+
+        def begun(record):
+            record.update(count=intent["before"]["count"], digest=intent["before"]["digest"], at=intent["at"],
+                          intent=intent)
+            return record
+        _update_checkpoint(path, begun)
+        _call(_checkpoint, "intent-recorded")
         replace_file_durably(path, b"".join(_encode_jsonl(row) for row in kept))
-        _settle_seal(path, chain, previous_field)
+        _call(_checkpoint, "ledger-rewritten")
+        _settle_seal(path, chain, previous_field, legacy_prefix)
         return _load_seal(path)
 
 
-def sealed_rows(path):
-    """Every row a seal retired from a ledger, oldest first, read from its archives (#50)."""
-    seal = _load_seal(path)
-    rows = []
-    for name in (seal or {}).get("archives") or []:
-        rows.extend(_read_jsonl_unlocked(os.path.join(os.path.dirname(path) or ".", "sealed", name),
-                                         allow_partial_tail=False))
-    return rows
+def _sealed_rows_held(path, chain, seal, previous_field, legacy_prefix, recorded=None, *, _folder=None):
+    """(the rows `seal` retired, oldest first, the digest of its archives' bytes), held to the seal (LEDGER-HISTORY).
+
+    The archives were read as they stood: a row edited in one was returned as it was, and a reader
+    took its id for one ao had recorded (the review of BOUNDED-STORES). They must now be one chain,
+    from the ledger's first row to the seal's digest, and hold exactly the rows it retired, or
+    LedgerCorruption names what does not hold. Archives whose bytes are those this machine held to
+    the seal when it sealed them - `recorded`, the digest the checkpoint store keeps - are not
+    walked link by link again: a reader of a long history pays for parsing it, not for its chain.
+    """
+    if not seal:
+        return [], None
+    folder = os.path.join(os.path.dirname(path) or ".", "sealed")
+    names = seal.get("archives")
+    if not isinstance(names, list) or not names \
+            or not all(isinstance(name, str) and name and os.path.basename(name) == name for name in names):
+        raise LedgerCorruption(f"the seal of {path} names no archives ao can read")
+    parts, whole = [], hashlib.sha256()
+    for name in names:
+        archive = os.path.join(folder, name)
+        try:
+            if _folder is None:
+                with open(archive, "rb") as handle:
+                    data = handle.read()
+            else:
+                with _tree_folder(_folder, ["sealed"], make=False) as held:
+                    data = _tree_bytes(held, name) if held is not None else None
+                if data is None:
+                    raise FileNotFoundError(archive)
+        except OSError as exc:
+            raise LedgerCorruption(f"{archive}, which the seal of {path} names, cannot be read: {exc}") from exc
+        whole.update(data)
+        parts.append((archive, data))
+    digest = "sha256:" + whole.hexdigest()
+    rows, expected = [], None
+    for archive, data in parts:
+        part = _jsonl_rows(data, archive, allow_partial_tail=False)
+        if digest != recorded:
+            _validate_chained_rows(archive, part, chain, previous_field, legacy_prefix and not rows,
+                                   seal={"digest": expected, "retired": len(rows)} if rows else None)
+            if part:
+                expected = chained_row_digest(part[-1], chain)
+        rows.extend(part)
+    if len(rows) != seal["retired"] or not rows or chained_row_digest(rows[-1], chain) != seal["digest"]:
+        raise LedgerCorruption(
+            f"the archives of {path} hold {len(rows)} rows ending at "
+            f"{chained_row_digest(rows[-1], chain) if rows else 'none'}, where its seal retired {seal['retired']} "
+            f"ending at {seal['digest']}"
+        )
+    return rows, digest
+
+
+def sealed_rows(path, chain, *, previous_field=CHAIN_PREVIOUS_FIELD, legacy_prefix=False, seal=None):
+    """Every row a seal retired from a ledger, oldest first, read from its archives and held to its seal (#50).
+
+    `seal` is the ledger's own when not given. The caller holds the ledger's lock, or reads a copy
+    no one appends to; `read_chained_history` reads the whole history under the lock (LEDGER-HISTORY).
+    """
+    # Snapshot readers do not settle or write. They must refuse an unfinished seal rather than measure half of it.
+    stray = seal_path(path) + ".pending"
+    if os.path.lexists(stray):
+        raise LedgerCorruption(f"{stray} names a seal this machine did not begin: ao records its intent in "
+                               f"{checkpoint_path()}, never in the tree; the ledger is not read while it stands")
+    if "intent" in _checkpoint_entry(path):
+        raise LedgerCorruption(f"the seal of {path} awaits settlement; read the ledger under its lock before "
+                               "reading its archives")
+    seal = seal if seal is not None else _load_seal(path)
+    if not os.path.exists(path):
+        _check_missing_chained_ledger(path, chain, seal=seal)
+    return _sealed_rows_held(path, chain, seal, previous_field, legacy_prefix)[0]
 
 
 def _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix=False, seal=None):
@@ -554,16 +747,46 @@ def read_chained_jsonl(path, chain, allow_partial_tail=True, timeout=10.0, *,
     The chain proves no row was changed or inserted; the recorded length proves
     none was cut off the end, including all of them (#62).
     """
-    if not os.path.exists(path) and not os.path.exists(seal_path(path) + ".pending"):
-        _check_committed_length(path, [], chain, seal=_load_seal(path))
+    if not os.path.exists(path) and not os.path.lexists(seal_path(path) + ".pending") \
+            and "intent" not in _checkpoint_entry(path):
+        _check_missing_chained_ledger(path, chain, seal=_load_seal(path))
         return []
     with _exclusive_lock(path + ".lock", timeout=timeout):
-        _settle_seal(path, chain, previous_field)
-        seal = _load_seal(path)
-        rows = _read_jsonl_unlocked(path, allow_partial_tail) if os.path.exists(path) else []
-        _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix, seal=seal)
-        _check_committed_length(path, rows, chain, seal=seal)
-        return rows
+        return _read_chained_unlocked(path, chain, allow_partial_tail, previous_field, legacy_prefix)[0]
+
+
+def _read_chained_unlocked(path, chain, allow_partial_tail, previous_field, legacy_prefix):
+    """(the live rows, the seal they follow), validated; the caller holds the ledger lock."""
+    _settle_seal(path, chain, previous_field, legacy_prefix)
+    seal = _load_seal(path)
+    if not os.path.exists(path):
+        _check_missing_chained_ledger(path, chain, seal=seal)
+    rows = _read_jsonl_unlocked(path, allow_partial_tail) if os.path.exists(path) else []
+    _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix, seal=seal)
+    _check_committed_length(path, rows, chain, seal=seal)
+    return rows, seal
+
+
+def read_chained_history(path, chain, timeout=10.0, *, previous_field=CHAIN_PREVIOUS_FIELD, legacy_prefix=False):
+    """Every row a chained ledger ever committed, oldest first: those its seal retired, then the live ones (LEDGER-HISTORY).
+
+    One chain, read under the ledger's lock: the archives end at the seal's digest with exactly
+    the rows it retired, and the live rows go on from it as `read_chained_jsonl` holds them. A
+    reader that asks what was ever granted, verified or waived reads this; one that asks for the
+    newest decision reads the live rows. Read from the live rows alone, a seal made a spent waiver
+    look unused and moved the first grant the landed-tree check starts from (the review of
+    BOUNDED-STORES).
+    """
+    if not os.path.exists(path) and not os.path.lexists(seal_path(path) + ".pending") \
+            and "intent" not in _checkpoint_entry(path):
+        _check_missing_chained_ledger(path, chain, seal=_load_seal(path))
+        return []
+    with _exclusive_lock(path + ".lock", timeout=timeout):
+        rows, seal = _read_chained_unlocked(path, chain, True, previous_field, legacy_prefix)
+        recorded = _checkpoint_entry(path).get("sealed")
+        retired, _ = _sealed_rows_held(path, chain, seal, previous_field, legacy_prefix,
+                                       recorded=recorded.get("archives") if isinstance(recorded, dict) else None)
+        return retired + rows
 
 
 def _sync_directory(directory, fsync):
@@ -743,7 +966,7 @@ def _folder_held(root, parts, make):
     through a link, and those missing made where `make`; None where one is missing. InTheWay where one is a link or a
     file."""
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    fd = os.dup(root) if isinstance(root, int) else os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
     try:
         for at, part in enumerate(parts):
             if make:
@@ -1083,6 +1306,26 @@ def _tree_seal(folder, name, identity):
     return seal
 
 
+def _tree_replace_bytes(folder, name, data):
+    """Publish a recovered seal in the folder held for its ledger, even if that folder moved (LEDGER-HISTORY)."""
+    temporary = f".{name}.{os.getpid()}.{os.urandom(4).hex()}.tmp"
+    fd = _tree_open(folder, temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    try:
+        try:
+            _write_all(fd, data)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        _tree_rename(folder, temporary, name)
+    except BaseException:
+        try:
+            _tree_unlink(folder, temporary)
+        except OSError:
+            pass
+        raise
+    _tree_sync(folder, os.fsync)
+
+
 def _chained_in_tree(root, rel, chain, record=None):
     """The opt-in ledger's read or append, including recovery, under its usual sidecar lock (LEADS-ADAPTERS).
 
@@ -1093,13 +1336,15 @@ def _chained_in_tree(root, rel, chain, record=None):
     parts = _tree_parts(rel)
     name = parts[-1]
     identity = os.path.join(os.path.realpath(root), *parts)
-    with _tree_folder(root, parts[:-1], make=record is not None) as folder:
+    recovering = "intent" in _checkpoint_entry(identity, identity=identity)
+    with _tree_folder(root, parts[:-1], make=record is not None or recovering) as folder:
         if folder is None:
-            _check_committed_length(identity, [], chain, identity=identity)
+            _check_missing_chained_ledger(identity, chain, identity=identity)
             return []
-        if record is None:
+        if record is None and not recovering:
             # Reading a setting before any opt-in must not create a lock in an otherwise clean project, even
-            # when init refuses during planning. A pending seal still needs locked recovery (LEADS-ADAPTERS).
+            # when init refuses during planning. A checkpoint intent needs locked recovery; an in-tree intent
+            # needs locked refusal (LEADS-ADAPTERS, LEDGER-HISTORY).
             for leaf in (name, name + ".seal.json.pending"):
                 try:
                     _tree_stat(folder, leaf)
@@ -1107,24 +1352,15 @@ def _chained_in_tree(root, rel, chain, record=None):
                     continue
                 break
             else:
-                _check_committed_length(identity, [], chain, seal=_tree_seal(folder, name, identity), identity=identity)
+                _check_missing_chained_ledger(identity, chain, seal=_tree_seal(folder, name, identity), identity=identity)
                 return []
         with _exclusive_lock(identity + ".lock", _folder=folder):
-            data = _tree_bytes(folder, name) or b""
-            pending = _tree_bytes(folder, name + ".seal.json.pending")
-            if pending is not None:
-                intent = json.loads(pending.decode(UTF8))
-                rows = _jsonl_rows(data, identity, False)
-                if rows and isinstance(rows[0], dict) and rows[0].get(CHAIN_PREVIOUS_FIELD) == intent["digest"]:
-                    _record_committed_length(identity, intent["retired"] + len(rows),
-                                             chained_row_digest(rows[-1], chain),
-                                             sealed={"retired": intent["retired"], "digest": intent["digest"]},
-                                             identity=identity)
-                    _tree_rename(folder, name + ".seal.json.pending", name + ".seal.json")
-                    _tree_sync(folder, os.fsync)
-                else:
-                    _tree_unlink(folder, name + ".seal.json.pending")
-            seal = _tree_seal(folder, name, identity)
+            _settle_seal(identity, chain, CHAIN_PREVIOUS_FIELD, _folder=folder, identity=identity)
+            data = _tree_bytes(folder, name)
+            seal = _load_seal(identity, _folder=folder)
+            if data is None:
+                _check_missing_chained_ledger(identity, chain, seal=seal, identity=identity)
+                data = b""
             rows = _jsonl_rows(data, identity)
             _validate_chained_rows(identity, rows, chain, CHAIN_PREVIOUS_FIELD, seal=seal)
             _check_committed_length(identity, rows, chain, seal=seal, identity=identity)
@@ -1331,7 +1567,9 @@ def append_chained_jsonl(path, record, chain, timeout=10.0, *,
 
     with _exclusive_lock(path + ".lock", timeout=timeout):
         _call(_checkpoint, "locked")
-        _settle_seal(path, chain, previous_field)
+        _settle_seal(path, chain, previous_field, legacy_prefix)
+        if not os.path.exists(path):
+            _check_missing_chained_ledger(path, chain, seal=_load_seal(path))
         _repair_partial_tail(path, fsync, _checkpoint)
         rows = _read_jsonl_unlocked(path, allow_partial_tail=False)
         seal = _load_seal(path)

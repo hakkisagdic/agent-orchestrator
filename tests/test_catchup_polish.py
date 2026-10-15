@@ -342,8 +342,8 @@ def test_a_grant_whose_head_git_does_not_have_is_found_from_the_waivers_date_and
     before = _commits(root, 600, int(time.time()) - 30 * DAY, "earlier.txt")
     waiver, grant, landed = _granted_and_landed(project, monkeypatch, capsys)
     _commits(root, 500, int(time.time()), "later.txt")
-    rows, waivers = A.authority_rows, A.waiver_rows
-    monkeypatch.setattr(A, "authority_rows", lambda target: [
+    rows, waivers = A.authority_history, A.waiver_rows
+    monkeypatch.setattr(A, "authority_history", lambda target: [
         dict(row, candidate=dict(row["candidate"], head="0" * 40)) if row.get("waiver") == waiver["id"] else row
         for row in rows(target)])
     walked = _logs(monkeypatch)

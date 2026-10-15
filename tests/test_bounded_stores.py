@@ -23,7 +23,7 @@ def test_the_authority_chain_verifies_across_a_seal_and_gives_the_same_answer(pr
 
     assert seal["retired"] == 6
     assert A.latest_authority_decision(root) == before and A.authority_rows(root) == newest
-    assert len(storage.sealed_rows(path)) == 6
+    assert len(storage.sealed_rows(path, A.AUTHORITY_CHAIN)) == 6
     A.record_authority(root, True, [], "sha256:new", "V-new", "C-new")
     assert [row["token"] for row in A.authority_rows(root)][-2:] == ["C-8", "C-new"]
     assert A.authority_rows(root)[-1]["ordinal"] == 10
@@ -52,7 +52,10 @@ def test_a_seal_removed_or_forged_is_refused_like_a_broken_chain(project):
     assert len(A.authority_rows(root)) == 2
 
 
-def test_a_seal_interrupted_after_its_intent_is_finished_or_undone(project):
+def test_a_seal_intent_in_the_tree_is_refused_and_left_where_it_is(project):
+    """LEDGER-HISTORY: an intent in the tree was settled - finished when the ledger started after it, dropped
+    otherwise - whoever wrote it. ao records its intent outside the repository now (tests/test_ledger_history.py),
+    so one in the tree is no seal of its own: refused, named and kept, the ledger and its record untouched."""
     root = project["root"]
     path = os.path.join(root, ".ao", "ledger", "authority.jsonl")
     _grants(root, 4)
@@ -61,8 +64,11 @@ def test_a_seal_interrupted_after_its_intent_is_finished_or_undone(project):
     with open(storage.seal_path(path) + ".pending", "w", encoding="utf-8") as fh:
         json.dump(intent, fh)
 
-    assert len(A.authority_rows(root)) == 4                 # the ledger was never rewritten: the intent is dropped
-    assert open(path, "rb").read() == whole and not os.path.exists(storage.seal_path(path) + ".pending")
+    with pytest.raises(storage.LedgerCorruption, match="did not begin"):
+        A.authority_rows(root)
+    assert open(path, "rb").read() == whole and os.path.exists(storage.seal_path(path) + ".pending")
+    os.remove(storage.seal_path(path) + ".pending")         # what a person does once they have read it
+    assert len(A.authority_rows(root)) == 4
 
 
 def test_a_referenced_verification_survives_a_prune_that_removes_its_neighbours(project):

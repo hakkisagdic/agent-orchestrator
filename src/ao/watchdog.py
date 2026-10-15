@@ -2374,30 +2374,27 @@ def ring_decision(root, project, decision, now=None, why=None):
                   root, key=f"decision-open:{did}", window=3600, audience="human", what=decision_told(decision))
 
 
-def report_ungranted_commits(root, project, st, limit=20):
-    """Tell the architect once about commits whose tree no grant bound (#109).
+def report_ungranted_commits(root, project):
+    """Tell a person about commits whose tree no grant bound, every cycle while they stand (#109).
 
     A harness granted every tool can run `git commit --no-verify`, and nothing in
     its grant keeps that out. The landed-tree check cannot stop such a commit; run
-    every cycle, it makes one visible within a cycle. Commits already told are kept
-    in the watchdog state, so a standing one is not re-reported every two minutes.
-    Returns how many there are.
+    every cycle, it makes one visible within a cycle.
+
+    It was told to the architect, as a notice row nobody sends - recorded, never rung,
+    hidden by `ao notices` - about the newest 20 commits, and not in a cycle that ended
+    for want of an implementer or a transcript (the review of ATTACK-SUITE). It is now
+    the alarm the scheduled doctor raises for the same finding, `landed-without-grant`,
+    to a person, saying what `A.landed_without_grant` says: it rings the desktop and
+    the phone once for the commits it names, climbs to red and mails while they stand,
+    and rings again when others land; a check that cannot run is that alarm too, saying
+    why (LEDGER-HISTORY). Returns what it said, or None.
     """
-    try:
-        stray = A.commits_without_grant(root, limit=limit)
-    except Exception:
-        return 0
-    told = set(st.get("ungranted_told") or [])
-    new = [sha for sha in stray if sha not in told]
-    if new:
-        notify(f"{project}: {len(new)} commit(s) landed without a grant",
-               ", ".join(sha[:12] for sha in new[:5])
-               + ": no grant bound their trees — a path staged after commit-check, "
-               "or a commit made outside ao", root, key=f"ungranted-commits:{new[0][:12]}",
-               window=30 * 86400, audience="architect")
-        st["ungranted_told"] = sorted(told | set(new))[-200:]
-        save_state(root, st)
-    return len(stray)
+    told = A.landed_without_grant(root)
+    if told:
+        notify(f"{project}: landed without a grant", told, root, key="landed-without-grant", window=6 * 3600,
+               audience="human", what=told)
+    return told
 
 
 # ---- after a silence: one notice, and clocks that restart (RESUME-QUIET) ----------------------
@@ -2745,6 +2742,12 @@ def _cycle_impl(args, root):
         needs = item["notes"].get("needs") or item["title"]
         notify(f"{project}: needs you", f"{item['id']} waits on a person: {needs}", root,
                key=f"waiting-human:{item['id']}", window=6 * 3600, audience="human", what=needs)
+    # Before anything that can end the cycle: a commit made around the hook was not measured in a cycle that
+    # ended for want of an implementer block or a transcript, and an agent can take either away (the review of
+    # ATTACK-SUITE, LEDGER-HISTORY).
+    if not args.dry_run:
+        landed = report_ungranted_commits(root, A.project_key(root))
+        _FACTS["ungranted_commits"] = landed[:120] if landed else None
     impl = cfg.get("implementer") or {}
     if not impl:
         print("no implementer session; nothing to watch")
@@ -2832,8 +2835,6 @@ def _cycle_impl(args, root):
         fe = []
         _FACTS["process_table"] = str(exc)
     _FACTS["foreign_edits"] = fe
-    if not args.dry_run:
-        _FACTS["ungranted_commits"] = report_ungranted_commits(root, project, st)
     _FACTS["decisions_ringing"] = escalate_open_decisions(root, project, dry_run=args.dry_run, since=restart)
     parked = A.reviewer_state(root)
     if parked.get("pending_review") and not parked.get("until") and not args.dry_run:

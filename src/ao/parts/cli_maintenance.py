@@ -1755,9 +1755,10 @@ def cmd_backup(cfg, args):
         return 1
     print(f"{C['green']}backed up{C['reset']} {len(manifest['files'])} governance file(s) → {manifest['where']}")
     try:
-        A.authority_rows(cfg["root"])
+        A.authority_history(cfg["root"])
     except Exception as exc:
         # Which artefacts a grant rests on is the chain's word; without it every one was kept (GOVERNANCE-BACKUP-2).
+        # The word of the whole chain, the archives a seal wrote held to it (LEDGER-HISTORY).
         print(f"  {C['yellow']}the authority chain does not validate{C['reset']} ({exc}): every review artefact "
               "was backed up, not only those a grant names")
     return 0
@@ -1781,7 +1782,7 @@ def cmd_restore(cfg, args):
               + ("no file was restored" if not restored else ".ao/config.json is not among what was restored"))
         return 1
     try:
-        A.authority_rows(root)
+        A.authority_history(root)            # the sealed archives too, as one chain (LEDGER-HISTORY)
         A.board(root)
         print(f"{C['green']}the authority chain and the board validate{C['reset']}")
     except Exception as exc:

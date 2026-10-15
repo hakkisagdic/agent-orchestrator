@@ -1372,9 +1372,14 @@ def open_waivers(root, gate=None, slice_id=None):
 
 
 def _waiver_candidates(root):
-    """Candidate digests each waiver has already authorised, from the grants that used it."""
+    """Candidate digests each waiver has already authorised, from the grants that used it.
+
+    Every grant, the sealed ones too: read from the live rows, a waiver whose grant a seal retired
+    looked unused and stood in for the review of other bytes (the review of BOUNDED-STORES,
+    LEDGER-HISTORY).
+    """
     bound = {}
-    for row in authority_rows(root):
+    for row in authority_history(root):
         if isinstance(row, dict) and row.get("granted") is True and row.get("waiver"):
             bound.setdefault(row["waiver"], set()).add((row.get("candidate") or {}).get("digest"))
     return bound
@@ -1390,7 +1395,8 @@ def review_waiver_for(root, running, candidate_digest, now=None, wanted=None):
     for the same slice since read as a different waiver and refused it (WAIVER-BOUND-2).
     """
     now = time.time() if now is None else now
-    bound = _waiver_candidates(root)
+    # The whole authority history is read only for a waiver that could stand in: `ao commit-ok` asks every time.
+    bound = None
     notes = []
     for waiver in reversed(open_waivers(root, gate="review")):
         wid, slice_id = waiver.get("id"), waiver.get("slice")
@@ -1408,6 +1414,7 @@ def review_waiver_for(root, running, candidate_digest, now=None, wanted=None):
             notes.append(f"waiver {wid} for {slice_id} expired "
                          f"{time.strftime('%d %b %H:%M', time.localtime(expires))}")
             continue
+        bound = _waiver_candidates(root) if bound is None else bound
         used = bound.get(wid, set())
         if used and candidate_digest not in used:
             notes.append(f"waiver {wid} already authorised other bytes; it covers one candidate")
@@ -1541,7 +1548,9 @@ def review_waiver_ranges(root):
     if not waived:
         return []
     granted = {}
-    for row in authority_rows(root):
+    # A grant a seal retired is still the one its waiver stood in for: read from the live rows, the waiver
+    # read as unused and catch-up closed it with no review (the review of BOUNDED-STORES, LEDGER-HISTORY).
+    for row in authority_history(root):
         if isinstance(row, dict) and row.get("granted") is True and row.get("waiver"):
             granted.setdefault(row["waiver"], []).append(row)
     try:

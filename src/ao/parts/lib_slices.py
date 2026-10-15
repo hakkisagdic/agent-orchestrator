@@ -487,10 +487,11 @@ def slice_outcomes(root, project=None):
     by kind, and whether a defect was later found in what landed - a
     retrospective review that asked for changes, or a board item `fixes:` it.
     """
-    from .storage import read_chained_jsonl
+    from .storage import read_chained_history
     project = project or project_key(root)
-    reviews = [row for row in read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN) if isinstance(row, dict)]
-    grants = [row for row in authority_rows(root) if isinstance(row, dict) and row.get("granted") is True]
+    reviews = [row for row in read_chained_history(review_ledger_path(root), REVIEW_CHAIN) if isinstance(row, dict)]
+    # Include grants retired into sealed history (LEDGER-HISTORY).
+    grants = [row for row in authority_history(root) if isinstance(row, dict) and row.get("granted") is True]
     # Permission to commit was counted as a landing even when abandoned (TRIAGE-2-MEDIUM).
     landed = {}
     if grants:
@@ -498,10 +499,8 @@ def slice_outcomes(root, project=None):
             tokens = _ao_trailers(commit["trailers"]).get("Ao-Grant", [])
             if len(tokens) == 1:
                 landed.setdefault(tokens[0], commit["at"])
-    verifications = [row for row in read_chained_jsonl(os.path.join(root, ".ao", "ledger", "verifications.jsonl"),
-                                                       VERIFICATION_CHAIN, legacy_prefix=True)
-                     if isinstance(row, dict)]
-    waivers = {row.get("id"): row for row in waiver_rows(root)
+    verifications = [row for row in verification_history(root) if isinstance(row, dict)]
+    waivers = {row.get("id"): row for row in read_chained_history(waivers_path(root), WAIVER_CHAIN, legacy_prefix=True)
                if isinstance(row, dict) and row.get("event") == "waived"}
     by_artefact = {row.get("artefact"): row for row in reviews}
     items = {item["id"]: item for state_items in board(root).values() for item in state_items}
@@ -848,7 +847,8 @@ def governance_files(root, cfg):
                     out.append(rel)
     reviews_dir = cfg.get("reviews", "semantic-review")
     try:
-        for name in {row.get("review") for row in authority_rows(root)
+        # Every grant's review, a sealed grant's too, read from the archives held to their seal (LEDGER-HISTORY).
+        for name in {row.get("review") for row in authority_history(root)
                      if isinstance(row, dict) and row.get("granted") is True and row.get("review")}:
             rel = f"{reviews_dir}/{name}"
             if os.path.isfile(os.path.join(root, rel)):

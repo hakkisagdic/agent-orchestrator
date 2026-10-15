@@ -1,11 +1,12 @@
 """Partial walks hid fuller link targets; empty opt-in reads dirtied setup plans (LEADS-ADAPTERS)."""
 import json
 import os
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
-from ao import cli, lib as A, storage
+from ao import cli, features as F, lib as A, storage
 from tests.test_harness_config import _seen_by_a_person
 from tests.test_leads_adapters import _can_link, _git, _ignored, _write
 from tests.test_profiles import _init_args
@@ -115,7 +116,7 @@ def test_an_absent_opt_in_still_checks_for_removed_rows_without_creating_a_lock(
     assert not lock.exists()
 
 
-def test_an_absent_opt_in_still_reads_its_seal_without_creating_a_lock(project):
+def test_an_absent_opt_in_ledger_with_a_recorded_seal_is_refused_without_creating_a_lock(project):
     root = project["root"]
     path = A.opt_ins_path(root)
     seal = {"retired": 1, "digest": "retired-row-digest"}
@@ -123,18 +124,123 @@ def test_an_absent_opt_in_still_reads_its_seal_without_creating_a_lock(project):
     Path(storage.seal_path(path)).write_text(json.dumps(seal), encoding="utf-8")
     storage._record_committed_length(path, 1, seal["digest"], sealed=seal)
 
-    assert A.recorded_opt_in(root, "features.review") is None
+    with pytest.raises(storage.LedgerCorruption, match="rows were removed"):
+        A.recorded_opt_in(root, "features.review")
 
     assert not Path(path + ".lock").exists()
 
 
-def test_an_absent_opt_in_with_a_pending_seal_still_recovers_under_lock(project):
+def _watch_opt_in_settlement(monkeypatch, path):
+    """Observe settlement inside the real ledger lock, not merely beside an existing lock file."""
+    original_lock, original_settle = storage._exclusive_lock, storage._settle_seal
+    held, settled = [], []
+
+    @contextmanager
+    def locked(target, *args, **kwargs):
+        with original_lock(target, *args, **kwargs):
+            if target == path + ".lock":
+                held.append(target)
+                try:
+                    yield
+                finally:
+                    held.pop()
+            else:
+                yield
+
+    def settle(target, *args, **kwargs):
+        if target == path:
+            assert held == [path + ".lock"]
+            settled.append(target)
+        return original_settle(target, *args, **kwargs)
+
+    monkeypatch.setattr(storage, "_exclusive_lock", locked)
+    monkeypatch.setattr(storage, "_settle_seal", settle)
+    return settled
+
+
+@pytest.mark.parametrize("ledger_exists", [False, True])
+def test_an_absent_opt_in_with_an_in_tree_intent_is_refused_under_lock(project, monkeypatch, ledger_exists):
+    """An in-tree intent is not ao's: refuse it under the ledger lock, unread and unchanged (LEDGER-HISTORY)."""
     root = project["root"]
     path = A.opt_ins_path(root)
+    if ledger_exists:
+        A.record_opt_in(root, "features.probe", True, "Person")
     pending = Path(storage.seal_path(path) + ".pending")
     pending.parent.mkdir(exist_ok=True)
     pending.write_text(json.dumps({"retired": 1, "digest": "interrupted-seal"}), encoding="utf-8")
+    before = pending.read_bytes()
+    checkpoint = Path(storage.checkpoint_path())
+    recorded = checkpoint.read_bytes() if checkpoint.exists() else None
+    settled = _watch_opt_in_settlement(monkeypatch, path)
+    original_bytes = storage._tree_bytes
+
+    def unread(folder, name):
+        assert name != Path(path).name, "the opt-in ledger was read despite the in-tree intent"
+        return original_bytes(folder, name)
+
+    monkeypatch.setattr(storage, "_tree_bytes", unread)
+    with pytest.raises(storage.LedgerCorruption, match="did not begin") as refused:
+        A.recorded_opt_in(root, "features.review")
+
+    assert str(pending) in str(refused.value)
+    assert pending.read_bytes() == before and settled == [path]
+    assert (checkpoint.read_bytes() if checkpoint.exists() else None) == recorded
+
+
+@pytest.mark.parametrize("stop", ["intent-recorded", "ledger-rewritten"])
+def test_an_absent_setting_settles_a_checkpoint_intent_under_lock(project, monkeypatch, stop):
+    root = project["root"]
+    for value in (True, False, True):
+        A.record_opt_in(root, "features.probe", value, "Person")
+    path = A.opt_ins_path(root)
+
+    def interrupted(step):
+        if step == stop:
+            raise OSError("interrupted seal")
+
+    with pytest.raises(OSError, match="interrupted seal"):
+        storage.seal_chained_jsonl(path, A.OPT_IN_CHAIN, keep=1, _checkpoint=interrupted)
+    assert storage._checkpoint_entry(path)["intent"]["retired"] == 2
+    assert not Path(storage.seal_path(path) + ".pending").exists()
+    settled = _watch_opt_in_settlement(monkeypatch, path)
 
     assert A.recorded_opt_in(root, "features.review") is None
 
-    assert not pending.exists() and Path(path + ".lock").exists()
+    assert settled == [path]
+    mark = storage._checkpoint_entry(path)
+    assert "intent" not in mark and mark["count"] == 3
+    if stop == "ledger-rewritten":
+        assert mark["sealed"]["retired"] == 2
+    else:
+        assert not Path(storage.seal_path(path)).exists()
+    assert len(storage.read_chained_history(path, A.OPT_IN_CHAIN)) == 3
+
+
+def test_an_unreadable_opt_in_keeps_review_required_and_same_family_refused_and_says_so(project):
+    cfg = _write_config(project["root"], dict(_same_family(project), features={"review": False}))
+    A.record_opt_in(cfg["root"], "features.review", False, "Person")
+    assert not F.enabled(cfg, "review") and cli._same_family_opt_in(cfg) is not None
+    pending = Path(storage.seal_path(A.opt_ins_path(cfg["root"])) + ".pending")
+    pending.write_text("{}", encoding="utf-8")
+
+    assert not F.recorded_off(cfg, "review") and F.enabled(cfg, "review")
+    assert cli._same_family_opt_in(cfg) is None
+    assert cli._reviewer_ineligible(cfg, cfg["reviewer"])
+    problems = dict(cli.doctor_problems(cfg))
+    assert "so it stays on" in problems["unrecorded-switch:review"]
+    assert "is still refused" in problems["review-opt-in"]
+    assert pending.read_text(encoding="utf-8") == "{}"
+
+
+def test_init_refuses_and_names_an_unreadable_opt_in(project, monkeypatch, capsys):
+    cfg = _write_config(project["root"], dict(_same_family(project, opted=False), review={"same_family": "labeled"}))
+    path = A.opt_ins_path(cfg["root"])
+    pending = Path(storage.seal_path(path) + ".pending")
+    pending.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(cli, "_reviewer_probe", lambda cfg: {"ok": True})
+
+    assert cli.cmd_init(cfg, _init_args(profile=None, review_tier="same-family", by="Person")) == 1
+
+    out = capsys.readouterr().out
+    assert "init stopped" in out and "not in force" in out and str(pending) in out
+    assert pending.read_text(encoding="utf-8") == "{}" and not Path(path).exists()
