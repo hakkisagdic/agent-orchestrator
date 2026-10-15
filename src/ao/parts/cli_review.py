@@ -3987,6 +3987,9 @@ def cmd_review(cfg, args):
     # in every structured artifact so round accounting has an explicit owner.
     evidence["slice"] = (running or {}).get("id")
     evidence["boundary"] = boundary
+    # Catch-up names the person who replaced its commit claims (TRIAGE-4-REST).
+    if args.commits and getattr(args, "boundary_by", None):
+        evidence["boundary_by"] = args.boundary_by
     if source:
         evidence["boundary_file"] = {key: source[key] for key in ("file", "commit", "sha256", "changed")}
     evidence["measured_by"] = A.measured_by()

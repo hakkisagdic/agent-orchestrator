@@ -1067,7 +1067,9 @@ def _content_refusal(root, harness, target, kept):
         return f"{target} is not a path inside the project"
     if not any(target.startswith(home + "/") for home in homes):
         return f"{target} is outside {harness}'s own directory ({', '.join(homes) or 'the package declares none'})"
-    if any(target == rel or (rel.endswith("/") and target.startswith(rel)) for rel in kept):
+    # A content import has the same owners on case-sensitive and insensitive volumes (TRIAGE-4-REST).
+    folded = target.casefold()
+    if any(folded == rel.casefold() or (rel.endswith("/") and folded.startswith(rel.casefold())) for rel in kept):
         return f"{target} is a file a harness or ao keeps for itself"
     real = os.path.realpath(root)
     if os.path.normcase(os.path.realpath(os.path.join(root, *steps))) != os.path.normcase(os.path.join(real, *steps)):
@@ -1217,14 +1219,15 @@ def _content_refusals(root, items):
         label = f"{key} {item['name']}"
         for target, (harness, data) in sorted(item["files"].items()):
             why = _content_refusal(root, harness, target, kept)
-            if not why and target in writers:
-                why = f"{target} would be written by both {writers[target]} and {label}"
-            writers.setdefault(target, label)
+            folded = target.casefold()
+            if not why and folded in writers:
+                why = f"{target} would be written by both {writers[folded]} and {label}"
+            writers.setdefault(folded, label)
             # A file another entry vendored is that entry's, whatever its bytes: equal bytes left two entries
             # owning one file, and removing either took it from the other (KIRO-CONTENT-2).
             owner = next((f"{dict(CONTENT_KINDS)[kind]} {entry.get(dict(CONTENT_KINDS)[kind])}"
                           for kind, entries in record.items() for entry in entries
-                          if target in (entry.get("files") or {})
+                          if any(target.casefold() == rel.casefold() for rel in (entry.get("files") or {}))
                           and not (kind == item["kind"] and entry.get(key) == item["name"])), None)
             if not why and owner:
                 why = f"{target} was vendored as {owner}: remove that first"
@@ -1234,10 +1237,14 @@ def _content_refusals(root, items):
             elif not why and os.path.exists(path):
                 with open(path, "rb") as fh:
                     current = fh.read()
-                # A file ao vendored here before is ao's to replace; any other file is someone's work.
-                vendored = any(target in (entry.get("files") or {}) for entry in record[item["kind"]]
-                               if entry.get(key) == item["name"])
-                if current != data and not vendored:
+                # A manifest names an owner, not permission to discard a later hand edit (TRIAGE-4-REST).
+                recorded = [digest for entry in record[item["kind"]] if entry.get(key) == item["name"]
+                            for rel, digest in (entry.get("files") or {}).items()
+                            if target.casefold() == rel.casefold()]
+                digest = "sha256:" + hashlib.sha256(current).hexdigest()
+                if recorded and any(previous != digest for previous in recorded):
+                    why = f"{target} changed since it was vendored: move it aside first"
+                elif current != data and not recorded:
                     why = f"{target} exists and ao did not vendor it as {label}: move it aside first"
             if why:
                 refused.append(why)

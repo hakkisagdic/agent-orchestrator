@@ -8,8 +8,8 @@ turns hunting for a repository that was not there until its service gave up and 
 The tree the review pinned is now unpacked into that directory: the same isolation, with the code.
 
 A tool reviewer is neither given it nor told of one (REVIEW-TREE-2): it reads the diff ao hands it in
-a file of its own there. An unpacking that fails partway leaves the directory empty again, which is
-what the note tells the reviewer an empty one means.
+a file of its own there. An unpacking that fails partway removes candidate/ again; an existing
+empty candidate/ means everything was withheld, as the note explains (TRIAGE-4-REST).
 """
 import errno
 import os
@@ -201,7 +201,7 @@ def test_a_tool_reviewer_is_handed_its_own_files_and_neither_the_tree_nor_a_note
 def test_a_tree_the_file_system_cannot_hold_leaves_the_directory_empty(tmp_path):
     """A name longer than a file system takes stops the unpacking, and what was written before it goes again.
 
-    The reviewer is told that an empty directory means the unpacking failed. No member here is faked: on
+    The reviewer is told that a missing candidate/ means unpacking failed (TRIAGE-4-REST). No member here is faked: on
     Linux and macOS the two before the long name are written, then the long name fails.
     """
     repo, tree = _tree_of(tmp_path, {"a.txt": b"first\n", "b/c.txt": b"second\n",

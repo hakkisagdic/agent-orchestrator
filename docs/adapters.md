@@ -73,6 +73,8 @@ Its answer is the `response` of the one JSON record it prints, and a tool its ru
 named in the reason the review gives (AGY-REVIEWER). An agent file holds none of a project's hooks,
 and agy runs `.agents/hooks.json` from the folder it starts in: like every reviewer, it reads the
 candidate's tree in `candidate/`, less what any harness reads from a project (REVIEW-TREE-3).
+The review-tree note distinguishes a missing `candidate/` (unpacking failed; only the diff
+is available) from an empty one (everything in the tree was withheld), in both languages.
 
 ```bash
 ao role set reviewer claude-code --model claude-opus-5

@@ -1210,28 +1210,33 @@ def _catchup_statement(cfg, args):
     """(what a person states for this run, or None; why the command is refused, or None).
 
     A person may name the family that wrote the waived ranges (--author-family) and the
-    waived slices that were pure moves (--move-only). Either is a person's statement. It is
+    waived slices that were pure moves (--move-only), or replace the commit claims with
+    --boundary (TRIAGE-4-REST). Each is a person's statement. It is
     recorded with what it decides, beside what ao can check about who made it - the login
     and whether a terminal was attached - as a waiver is. A statement of moves closes
     nothing by itself: a waiver closes only on the move proof, run on what landed (#44).
     """
     family = str(getattr(args, "author_family", None) or "").strip().lower()
+    boundary = bool(getattr(args, "boundary", None))
     named = getattr(args, "move_only", None)
     moves = list(dict.fromkeys(part.strip() for part in str(named or "").split(",") if part.strip()))
     by = str(getattr(args, "by", None) or "").strip()
     if named is not None and (not moves or not all(move.isprintable() and len(move) <= 200 for move in moves)):
         return None, "--move-only names waived slices as the board writes them, separated by commas"
-    if not family and not moves:
-        return None, ("--by names the person who states --author-family or --move-only; give one with it"
+    if not family and not moves and not boundary:
+        return None, ("--by names the person who states --author-family, --move-only or --boundary; give one with it"
                       if by else None)
     if family and not A.re.fullmatch(r"[a-z0-9][a-z0-9._:-]{0,63}", family):
         return None, "--author-family is one family name, such as the lowercase id its model family goes by"
+    if not by and boundary:
+        return None, "--by is required with --boundary: name the person who replaces the commit claims"
     if not by:
         return None, ("--by is required with --author-family: name the person who says which family wrote the ranges"
                       if family else "--by is required with --move-only: name the person who says those slices "
                                      "only moved code")
     if by.lower() in _agent_names(cfg):
-        what = "naming the author's family" if family else "saying which slices only moved code"
+        what = ("replacing the commit claims" if boundary else
+                "naming the author's family" if family else "saying which slices only moved code")
         return None, f"--by names an agent or a role ({by}); {what} is a person's statement"
     user, interactive = A._login_and_terminal()
     return {"family": family or None, "move_only": moves, "by": by, "user": user, "interactive": interactive}, None
@@ -1473,6 +1478,9 @@ def cmd_catchup(cfg, args):
         lines = A.range_changed_lines(root, item["start"], item["end"])
         size = f"{item['landed']} commit(s), {'unknown' if lines is None else lines} changed line(s)"
         granted_proof = item.get("move_only")
+        # Older grants could record a different running slice's proof (TRIAGE-4-REST).
+        if not isinstance(granted_proof, dict) or granted_proof.get("slice") != w.get("slice"):
+            granted_proof = None
         stated = w.get("slice") in moves
         if granted_proof or stated:
             # A semantic review of a proven pure move reads nothing the proof did not. Its grant
@@ -1558,7 +1566,9 @@ def cmd_catchup(cfg, args):
         # are the statement it is judged against; a person's --boundary replaces them.
         ns = SimpleNamespace(boundary=args.boundary or f"waived review for {w['slice']}: {w['why']}",
                              paths=None, commits=f"{item['start']}..{item['end']}", author=author,
-                             claims=not args.boundary, range_slice=w["slice"])
+                             claims=not args.boundary, range_slice=w["slice"],
+                             boundary_by={key: statement[key] for key in ("by", "user", "interactive")}
+                             if args.boundary else None)
         # The row count is only a readability check: without it a broken ledger spent
         # a reviewer call, or let an unchanged range close unreviewed (CATCHUP-ROW).
         try:

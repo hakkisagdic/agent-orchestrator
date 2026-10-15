@@ -78,11 +78,15 @@ the source's `hooks/` is named as skipped, with what `directives.hook_files` say
 A write lands only inside the harness's own directory as the package's adapter declares it
 (`detect.dirs`). A directory a user's or a project's adapter layer names elsewhere, a path through a
 symbolic link, a file a harness or ao keeps for itself (a playbook, an MCP registration, settings),
-a file that exists and was not vendored there, and a file two entries would both write are refused,
+a file that exists with different bytes and was not vendored there, a vendored file whose current
+SHA-256 no longer matches its manifest entry, and a file two entries would both write are refused,
 and one refusal writes nothing. `--dry-run` prints the same account - what would be written where,
 what is skipped, unsupported or refused - and writes nothing, `.ao/content.json` included.
 Otherwise the digest of every written file is recorded in `.ao/content.json`; `ao content verify`
-and `ao doctor` name a vendored file that drifted from its pin.
+and `ao doctor` name a vendored file that drifted from its pin. Refusal checks compare reserved
+paths and content ownership without case on every file system, so `Guide.md` and `guide.md`
+cannot acquire separate owners. Re-import never discards a hand edit to a vendored file:
+move it aside first, then import again.
 
 `ao doctor` also checks the project's agent configuration by AgentShield's categories, natively and
 with no dependency: a credential in an agent file (CLAUDE.md, AGENTS.md, `.claude/settings*.json`,

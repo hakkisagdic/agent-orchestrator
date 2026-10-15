@@ -268,12 +268,16 @@ code does. Code that already landed and runs code of its own choosing by other m
 part's file before it loads, starts a process - was reviewed when it landed, as
 [the threat model](threat-model.md) has it.
 
-The grant records that proof: the slice that declared the move and how many definitions moved.
+The grant records that proof: the slice that declared the move and how many definitions moved,
+only when its authorising waiver or review names that slice and no other move-only slice is
+running. Otherwise it records no proof and says why; another running slice's declaration
+cannot stand for the candidate's own.
 A split that lands under a review waiver with that record is not reviewed afterwards: `ao catchup`
-runs the same proof on the commit that landed, from the parent it landed on, and closes the
-waiver on it with no reviewer; the closing record carries the range, the grant and what moved
-where. When what landed is not a pure move the waiver stays open, and the reason is printed. The
-proof reads Python definitions and nothing else, so a candidate that also changes another file
+runs the same proof on the commit that landed, from the parent it landed on, only when the
+recorded proof names the waiver's slice, and closes the waiver on it with no reviewer; the
+closing record carries the range, the grant and what moved where. When what landed is not a
+pure move the waiver stays open, and the reason is printed. The proof reads Python definitions
+and nothing else, so a candidate that also changes another file
 is granted as before but records no proof, and its waiver is reviewed like any other - as is the
 waiver of every split granted before grants recorded the proof. A person who knows such a split
 only moved code says so with `ao catchup --move-only <slices> --by <name>`: the same proof runs on
@@ -283,4 +287,3 @@ proof does not read the document; its waiver waits for a review.
 
 What a reviewer reads of a split is its seams — which names a part uses from the rest of its
 module, and which the rest uses from it — not thousands of moved lines.
-

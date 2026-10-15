@@ -31,6 +31,7 @@ FORBIDDEN = (
     ("switches the inventory review off", "ao features off inventory_review --by p"),
     ("names the family that wrote a waived range", "ao catchup --author-family f --by b"),
     ("states which waived slices only moved code", "ao catchup --move-only s --by b"),
+    ("replaces a waived range's commit claims", "ao catchup --boundary text --by b"),
     # What a person has seen of the harness configuration an agent changed lets every turn start again (HARNESS-CONFIG),
     # by its digest or by a yes at the terminal (HARNESS-SEEN-OWN).
     ("records harness configuration as seen", "ao harness seen --by p --digest d"),
@@ -84,6 +85,7 @@ PERSON_ACTS = (
     ("opts into same-family review", ("ao", "init"), ("--review-tier",)),
     ("names the family that wrote a waived range", ("ao", "catchup"), ("--author-family",)),
     ("states which waived slices only moved code", ("ao", "catchup"), ("--move-only",)),
+    ("replaces a waived range's commit claims", ("ao", "catchup"), ("--boundary",)),
     ("switches review off", ("ao", "features", "off", "review"), ()),
     ("switches the inventory review off", ("ao", "features", "off", "inventory_review"), ()),
     ("opens a push window", ("ao", "push", "allow"), ()),

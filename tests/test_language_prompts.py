@@ -38,8 +38,9 @@ TURKISH = {
     "prompt.review": "7a6c3729fefefa5754896c3b350501c6447f2ed4f1dba9f4fbabfb72e96bf2b5",
     "prompt.review-candidate": "7bf44715ae9eb215bd3b32103c60c71fa279428f260f58022c0f3cf18615f3ea",
     "prompt.review-context": "9bfb71d0c42537524d6beab52e7c014721d8e9261e56cad906c29ac581b6cfb1",
-    "prompt.review-tree": "8d735f0d15c33ac5cb7c341512c2a55465d9b17fb54013c89bde04744bb12a50",
-    "prompt.review-range-tree": "265977276ce6752d3daa2d982705c31e261cad98195ba49a7e00a5f68092d0f4",       # REVIEW-RANGE-TREE
+    # Empty withheld trees are distinguished from failed unpacking in both notes (TRIAGE-4-REST).
+    "prompt.review-tree": "48875a3fa1d8fdfafc9351a71c170e02528cad89d94ce6b5acca6710c8c70462",
+    "prompt.review-range-tree": "cdc95470e65d6d1a081b5c81a3f92c58e9bd0f915cd929d4b52f4458562258c4",
     # Added by CRITERIA-VERDICTS, after the tree's note: a boundary that lists criteria is asked about each.
     "prompt.review-criteria": "6c45e0b98838460856ce9c6054e9686cb6f8c4427e454486d15610b2149beb8a",
     "prompt.review-threat-model": "dafd320aebf4702a38a9ad5a670ae7eebec4d0bf3cbcdcb275b84edc4fa7891a",

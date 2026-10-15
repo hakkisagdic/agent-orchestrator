@@ -89,19 +89,28 @@ The reviewer is given the range's commit messages as the statement it judges the
 diff against - what each says was wrong, what changed and what the tests prove -
 and is told they are claims to verify, not facts. Each message is scanned for
 credentials first; its subject stays on one line and its body is indented, so no
-line of it can pass for a line of the prompt; and one the prompt has no room for
-is named by its commit and subject, never cut. The room is `review.context_bytes`,
+line of it can pass for a line of the prompt. Only the newest 500 messages are read,
+shown oldest first within that set. A message the prompt has no room for is named
+by its commit and subject, never cut, while the bounded omission list has room;
+the rest, including commits older than the newest 500, are counted without names.
+The omission list allows at most 2,000 characters of names and separators, and
+fewer when the prompt budget requires it. The room is `review.context_bytes`,
 shared with any read-only context and never more than the diff budget leaves beside
 the diff, unless a reviewer route that takes its prompt only in its argument holds
 it to one argument's worth ([configuration.md](configuration.md)). A person's
-`--boundary` replaces them. The review is recorded as the waived slice's, not as
-whichever slice runs during the sitting, so a defect it finds counts against the
-slice that landed it in `ao stats`.
+`--boundary <text> --by <name>` replaces them; it requires a person's name, refuses
+an agent or role, and records the name, login and terminal status as `boundary_by`
+in the review evidence. No actor's grant admits this act. The review is recorded
+as the waived slice's, not as whichever slice runs during the sitting, so a
+defect it finds counts against the slice that landed it in `ao stats`.
 
 A split closes by proof instead: the grant for a slice the board marks
-`move-only` records its `ao split-check` proof, and `ao catchup` runs that proof
-again on the commit that landed and closes the waiver on it, with the proof as
-the closing record's evidence and no reviewer started. When what landed is not a
+`move-only` records its `ao split-check` proof only when the authorising waiver or
+review names that slice and no second move-only slice is running. Otherwise the
+grant explains why it records no proof. `ao catchup` accepts a recorded proof only
+for the waiver's own slice, runs that proof again on the commit that landed and
+closes the waiver on it, with the proof as the closing record's evidence and no
+reviewer started. When what landed is not a
 pure move, or also changes a file the proof does not read, the waiver stays open
 and the reason is printed. A grant that recorded no proof, which is every grant
 from before this, is reviewed like any other, however much its diff looks like a

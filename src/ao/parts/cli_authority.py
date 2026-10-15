@@ -846,6 +846,19 @@ def cmd_commit_ok(cfg, args):
                        or "no APPROVED prospective review is bound to this staged candidate")
         reasons.extend(waiver_notes)
 
+    # A proof from another running slice cannot retire this slice's waiver (TRIAGE-4-REST).
+    proof_note = None
+    if move_proof:
+        authorising_slice = (waiver.get("slice") if review_required and waiver
+                             else evidence.get("slice") if evidence else None)
+        if len(move_only) != 1:
+            proof_note = "more than one move-only slice is running; review the range or name it with --move-only --by"
+        elif authorising_slice != move_proof["slice"]:
+            proof_note = ("the authorising waiver or review does not name the running move-only slice; "
+                          "review the range or name it with --move-only --by")
+        if proof_note:
+            move_proof = None
+
     held = A.hold_state(root)
     if held:
         reasons.append(f"project is held by {held.get('by')}: {held.get('reason','')}")
@@ -907,6 +920,8 @@ def cmd_commit_ok(cfg, args):
     if move_proof:
         print(f"  {C['dim']}move proof{C['reset']} {move_proof['moved']} definition(s) moved byte for byte, "
               "recorded with the grant")
+    elif proof_note:
+        print(f"  {C['dim']}no move proof recorded: {proof_note}{C['reset']}")
     elif unproven:
         print(f"  {C['dim']}no move proof recorded: it reads Python definitions, and the candidate also "
               f"changes {', '.join(unproven)}{C['reset']}")

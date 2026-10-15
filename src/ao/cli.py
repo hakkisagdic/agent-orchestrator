@@ -543,7 +543,7 @@ def build_parser(root=None):
                                     "exits 3 when the reviews it started decided nothing, 1 when something could "
                                     "not be written or read, 2 when it is refused, and otherwise 0, whether it made "
                                     "progress or had nothing to do.")
-    cu.add_argument("--boundary")
+    cu.add_argument("--boundary", help="replace the range's commit claims with a person's boundary; needs --by")
     cu.add_argument("--plan", action="store_true",
                     help="list each open review waiver, its range, commits and changed lines, whether it closes "
                          "by proof, and the totals; review nothing and write nothing")
@@ -556,7 +556,7 @@ def build_parser(root=None):
     cu.add_argument("--move-only", dest="move_only",
                     help="a person states that these waived slices, separated by commas, only moved code; each "
                          "closes only if the move proof holds on what it landed, never on the statement. Needs --by")
-    cu.add_argument("--by", help="with --author-family or --move-only: the person who states it, recorded with "
+    cu.add_argument("--by", help="with --author-family, --move-only or --boundary: the person who states it, recorded with "
                                  "what it decides")
     cu.add_argument("--reviewer", metavar="ACTOR",
                     help="a reviewer actor of the project's table reviews this run in place of the reviewer role, "

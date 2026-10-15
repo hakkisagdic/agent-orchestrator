@@ -110,7 +110,9 @@ HEAD's line, among the commits made from a day before the waiver was opened; a w
 granted tree landed nowhere there stays open as UNRESOLVED. That reviewer judges the
 commit against its own message, handed over as claims to verify rather than facts, scanned for
 credentials first. The one other way such a waiver retires is a proof: the grant for a slice the
-board marks `move-only` records the `ao split-check` proof it stood on, `ao catchup` runs that
+board marks `move-only` records the `ao split-check` proof it stood on only when its
+authorising waiver or review names that slice and it is the only running move-only slice.
+`ao catchup` accepts that record only when its slice matches the waiver's, runs that
 proof again on the commit that landed, and the waiver closes on it, with the proof as the
 closing record's evidence, or stays open with the reason. A grant that recorded no proof is
 closed by one only when a person states that its slice only moved code, with

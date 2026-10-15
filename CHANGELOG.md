@@ -20,6 +20,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Behaviour changes
 
+- Catch-up boundary replacement requires and records a named person and is audited as a person's act; its documentation states that only the newest 500 commit messages are read and omitted names are bounded, with the remainder counted ([features](docs/features.md)) (TRIAGE-4-REST)
 - `ao commit` lands no merge, and runs no git hook: a project's own `commit-msg` or `post-commit` hook runs under a plain `git commit` only ([safety](docs/safety.md#3-commit-authority-is-separated), LEADS-GATE-COMMIT).
 - After the first commit that carries Ao- trailers, `ao commit-check --range` - the check CI runs - matches no merge: a lane lands squashed, `git merge --squash` and then verify, review, commit-ok and `ao commit` as for any candidate ([gates](docs/gates.md#a-commit-names-its-grant), LEADS-GATE-MERGE).
 - `ao verify`, `ao merge-check` and `ao lock -- <command>`, once they hold the machine gate lock, read the machine's memory free, swap-ins a second - the lower median of four one-second samples - and disk free on the home volume, and wait up to `--wait` while one is past its limit, then exit 2 naming what they read, the limit and what to do; `ao lane start` reads it before it makes a lane and refuses at once, and refuses a lane past `limits.max_write_lanes` (2). The limits are machine settings no flag skips, `ao doctor` shows the reading on one line, and on Windows the machine is not measured, said once ([gates](docs/gates.md#serialisation-and-machine-pressure), MACHINE-PRESSURE).
@@ -28,6 +29,9 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- Reviewers are told in both languages that a missing candidate folder means unpacking failed, while an empty one means everything was withheld ([adapters](docs/adapters.md)) (TRIAGE-4-REST)
+- Content imports refuse case aliases with competing owners and preserve hand edits by checking the manifest's recorded digest before re-import ([upstream](docs/upstream.md)) (TRIAGE-4-REST)
+- A move proof belongs only to the slice whose waiver or review authorises the candidate; ambiguous running moves record no proof, and catch-up reviews a range whose recorded proof names another slice ([slices](docs/slices.md)) (TRIAGE-4-REST)
 - `ao catchup` closes a waiver on its own review's verdict even when another review of the same range and author finishes meanwhile, checks the review ledger readable before it starts a review, and keeps a waiver open, said, and goes on where a review's record cannot be written ([features](docs/features.md), CATCHUP-ROW).
 - A submitted review is run once and submits made at once keep to `review.max_inflight`; a reviewer's timeout and its share of the chain's budget are measured on the clock, after any wait for quota headroom; what a reviewer or its version probe started is stopped with it, once it has exited too; and `--paths` is refused with `--commits`, since a landed range is reviewed whole ([pipeline](docs/pipeline.md), [roles](docs/roles.md), LEADS-REVIEW).
 - `ao hooks install` replaces ao's own hook that lost its execute bit, which Git does not run and install read as current, and writes over no hook another tool put on the path before its last reading of it, the instant after that reading named as the one left ([safety](docs/safety.md#3-commit-authority-is-separated), LEADS-GATE-HOOK).
