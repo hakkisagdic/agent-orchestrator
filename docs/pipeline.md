@@ -246,6 +246,14 @@ stand-in's answer is read against the criteria its request asked about. A landed
 retrospective review grants nothing and is asked none. A single sentence lists none: its prompt,
 its evidence and its grant are what they were.*
 
+*In ao since slice REVIEW-PATH-HIGHS: the criteria a stand-in's answer is read against, with its
+candidate, scope, diff, boundary and slice, come from the request ao keeps outside the tree
+([standin.md](standin.md)): in `.ao/review-requests/` the implementer could empty them, and the answer
+was recorded as whatever slice ran when a person collected it, where it is the request's now. A person's
+verdict is refused when the slice, boundary or criteria shown with the diff are not the ones its digest
+was given for, so a board moved while they wrote their findings cannot record their approval against
+other criteria, or none.*
+
 ## 3 — No deadline on thinking; a deadline on silence
 
 *In ao since slice SILENCE-DEADLINE (#25): a reviewer whose process group spends no CPU for

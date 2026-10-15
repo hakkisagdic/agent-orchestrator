@@ -88,6 +88,9 @@ written as `[redacted:<rule>]` ([safety.md](safety.md#7b-what-ao-writes-is-scann
   `ao-enrolled.json` holds the project's path, that directory, and when ao first installed its hook or
   checked a commit there, so a branch not born yet is still known as the enrolled repository's
   ([safety](safety.md)).
+- `~/.ao/review-requests/<project>/` - each stand-in review request ao writes when no reviewer can be
+  reached: the prompt a person carries to a session, the candidate's diff in it, and what binds the
+  answer to that candidate, kept outside the tree the implementer writes ([standin.md](standin.md)).
 - `~/.ao/events.jsonl` - one line each time ao records a verification, submits a review or sees one
   end, grants commit authority, sends mail, or nudges or wakes an agent, for `ao events` to read; its
   oldest lines go past `retention.events_kb` ([surfaces.md](surfaces.md)).

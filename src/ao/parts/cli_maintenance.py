@@ -470,6 +470,10 @@ def cmd_remove(cfg, args):
         print(f"   {kind} {name}")
     for path in _project_home_files(key, root) if owned else []:
         print(f"   {_home_relative(path)}")
+    requests = A.review_requests_dir(root, key) if owned else None
+    if requests and os.path.isdir(requests) and not os.path.islink(requests):
+        # Its stand-in review requests, kept outside the tree since REVIEW-PATH-HIGHS, as .ao/ kept them before.
+        print(f"   {_home_relative(requests)}/: the review requests ao wrote for it")
     for name in _registry_names(root):
         print(f"   {_home_relative(A.project_registry_path())}: the `{name}` entry (other projects stay)")
     archive = os.path.join(A.HOME, ".ao", "archive", key)
@@ -600,6 +604,18 @@ def cmd_remove(cfg, args):
             print(f"{C['red']}left{C['reset']} {_home_relative(path)}: {exc}")
     if removed:
         print(f"removed {removed} file(s) of {key} from {_home_relative(os.path.join(A.HOME, '.ao'))}")
+    # Its stand-in review requests, which ao keeps outside the tree, each file by name and then their folder, which
+    # no other project's name reaches (REVIEW-PATH-HIGHS).
+    requests = A.review_requests_dir(root, key) if owned else None
+    if requests and os.path.isdir(requests) and not os.path.islink(requests):
+        try:
+            for name in os.listdir(requests):
+                os.remove(os.path.join(requests, name))
+            os.rmdir(requests)
+            print(f"removed {_home_relative(requests)}/, the review requests ao wrote for it")
+        except OSError as exc:
+            left.append(requests)
+            print(f"{C['red']}left{C['reset']} {_home_relative(requests)}/: {exc}")
     registry = _home_relative(A.project_registry_path())
     try:
         for name in A.forget_project(root) if owned else []:

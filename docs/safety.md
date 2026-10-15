@@ -144,7 +144,8 @@ lands squashed ([gates](gates.md#a-commit-names-its-grant)). Git's own commit ho
 
 Two more acts weaken what a review is independent of, and both are a person's in the same way
 ([review tiers](roles.md#review-tiers)). `ao person-review --by <name>` records a person's verdict on
-the exact bytes it showed them, bound to the candidate as a model's review is.
+the exact bytes it showed them, judged against the slice, boundary and criteria it showed with them, and
+bound to the candidate as a model's review is.
 `ao config set review.same_family labeled --by <name>` lets another model of the implementer's family
 review, labeled as weaker independence wherever its reviews show, and it is in force only while a
 person's record in `.ao/ledger/opt-ins.jsonl` says so. Each records the name, the login and whether a
@@ -567,8 +568,9 @@ reviewed.
   review` alike; one only a user's or a project's layer declares is refused, and says so. The hunter's
   program is found as a reviewer's is, by ao's own search: it was started by its name, and on Windows the
   current directory comes before PATH.
-- What the routes say of their commands - every field of the reviewer and each fallback, and the capability
-  matrix - and the effective `hunter.argv` are accepted as a role's block is: by `ao init` for a reviewer it
+- What the routes say of their commands - every field of the reviewer and each fallback, the capability
+  matrix, and how a review reaches them once `review.transport` is not spawn - and the effective
+  `hunter.argv` are accepted as a role's block is: by `ao init` for a reviewer it
   composes, else at the first reading, and by a person with `ao harness seen`, which shows the command a review
   or a hunt would start and what changed. A change is harness configuration nobody has seen, named as
   `the reviewer's command (changed)` or `the hunter's command (changed)`. While it stands, a review starts
@@ -580,6 +582,17 @@ reviewed.
 - The architect's wake and refill now ask whether their command is accepted, and refuse one inside the
   repository, before they look for its program, which runs each candidate for its version; no candidate is
   taken from inside the tree for a turn either (ROUTE-ARGV).
+
+*In ao since slice REVIEW-PATH-HIGHS: what a person approves is bound where the implementer cannot rewrite
+it, and an ACP reviewer only reads. A stand-in request's binding and the text a person carries are kept in
+`~/.ao/review-requests/<project>/`, not in `.ao/review-requests/`, where an implementer that rewrote one had
+a person's genuine approval recorded for bytes it staged after, and the review compares the bytes it
+measures with that binding before it records anything ([standin.md](standin.md)). The digest a person
+quotes to `ao person-review` covers the slice, boundary and criteria shown with the diff, which a board
+moved meanwhile no longer matches. `review.transport` is part of the reviewer a person accepts and is
+judged as ao read it; only an ACP command measured to hold a reviewer to reads answers over ACP, a read is
+let run only inside the directory the review runs in, and a write the agent reports voids its answer
+whatever it ended as ([adapters.md](adapters.md#what-a-harness-says-it-supports-asked-in-acp)).*
 
 ## 6. Capability gating on MCP
 

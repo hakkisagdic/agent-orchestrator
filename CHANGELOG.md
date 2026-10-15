@@ -20,6 +20,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Behaviour changes
 
+- A project that set `review.transport` to `acp` reads its reviewer as changed once, until a person runs `ao harness seen`; a stand-in request an older ao left in `.ao/review-requests/` is named and not collected - run `ao review` again and carry the new one ([standin](docs/standin.md), [configuration](docs/configuration.md), REVIEW-PATH-HIGHS).
 - Catch-up boundary replacement requires and records a named person and is audited as a person's act; its documentation states that only the newest 500 commit messages are read and omitted names are bounded, with the remainder counted ([features](docs/features.md)) (TRIAGE-4-REST)
 - `ao commit` lands no merge, and runs no git hook: a project's own `commit-msg` or `post-commit` hook runs under a plain `git commit` only ([safety](docs/safety.md#3-commit-authority-is-separated), LEADS-GATE-COMMIT).
 - After the first commit that carries Ao- trailers, `ao commit-check --range` - the check CI runs - matches no merge: a lane lands squashed, `git merge --squash` and then verify, review, commit-ok and `ao commit` as for any candidate ([gates](docs/gates.md#a-commit-names-its-grant), LEADS-GATE-MERGE).
@@ -29,6 +30,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- A stand-in's answer is recorded as the slice its request was made for, not the one running when a person collects it, and `ao remove` takes a project's review requests with it ([pipeline](docs/pipeline.md), [privacy](docs/privacy.md), REVIEW-PATH-HIGHS).
 - Reviewers are told in both languages that a missing candidate folder means unpacking failed, while an empty one means everything was withheld ([adapters](docs/adapters.md)) (TRIAGE-4-REST)
 - Content imports refuse case aliases with competing owners and preserve hand edits by checking the manifest's recorded digest before re-import ([upstream](docs/upstream.md)) (TRIAGE-4-REST)
 - A move proof belongs only to the slice whose waiver or review authorises the candidate; ambiguous running moves record no proof, and catch-up reviews a range whose recorded proof names another slice ([slices](docs/slices.md)) (TRIAGE-4-REST)
@@ -51,6 +53,9 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Security
 
+- A borrowed Kiro agent whose `prompt` names a file outside the project loads none: the prompt is taken out and named, as an outside resource is ([upstream](docs/upstream.md), REVIEW-PATH-HIGHS).
+- An ACP reviewer only reads: `review.transport` is part of the reviewer a person accepts with `ao harness seen` and is judged as the review read it, only an ACP command measured to hold a reviewer to reads answers (qoder's reviewer is spawned with its read-only flags), a read or a search is let run only inside the folder the review runs in, and any write the agent reports voids its answer, whatever it ended as ([adapters](docs/adapters.md), [safety](docs/safety.md), REVIEW-PATH-HIGHS).
+- What a person approves is bound where the implementer cannot rewrite it: a stand-in review request - its binding and the text a person carries - is kept in `~/.ao/review-requests/<project>/` and its answer is recorded only for the bytes it was made for, where one in `.ao/review-requests/` could be turned to other bytes or written whole; and the digest `ao person-review` shows covers the slice, boundary and criteria with the diff ([standin](docs/standin.md), [roles](docs/roles.md), REVIEW-PATH-HIGHS).
 - Worktree cleanup - lanes, slices, `ao merge-check` and `ao prove` - refuses to prune or remove while the repository's worktree administration holds a link, a junction or an entry it cannot read, naming what to remove, where Git followed such a link as it deleted; an ordinary Git cleanup error leaves merge-check's and prove's verdict as it was ([parallel](docs/parallel.md#a-worktree-lives-as-long-as-its-slice), PRUNE-LINKS).
 - The watchdog and `ao doctor` ask the architect's program its version only after the checks a wake makes, through one step the wake and the refill share: an unseen command, a program in the repository, an unresolved session, or a session or prompt that reads as a flag starts no probe; a refused wake leaves its notices for a person, and doctor says `not asked` ([safety](docs/safety.md#the-command-a-turn-starts-with-is-the-packages-not-the-trees), ARCH-PROBE-ORDER).
 - A reviewer is shown every byte a grant is bound to, and `ao ci review` passes only a verdict it can show: a diff that is not UTF-8 read as replacement characters, so two candidates that differed only there were one prompt, and is shown escaped now; CI found its review by counting ledger rows, so it could report another review of the same range, and an unreadable record or an error left an exit `fail-on` passed ([safety](docs/safety.md), [github-action](docs/github-action.md), LEADS-REVIEW).

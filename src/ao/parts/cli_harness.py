@@ -159,7 +159,12 @@ def _harness_change_lines(root, path, state, view):
         lines = list(difflib.unified_diff(_turn_lines(accepted), _turn_lines(identity), lineterm="",
                                           fromfile="accepted" if accepted else "nothing accepted",
                                           tofile=".ao/config.json"))
-        return [f"{A.HELD_COMMANDS[role]} would start: {starts}"] + lines
+        # With the transport at acp a route is reached another way than the command shown, which a person accepts with
+        # it (REVIEW-PATH-HIGHS).
+        through = [f"or, as review.transport is {A.shown_text(identity['transport'])}, through its adapter's ACP "
+                   "command, where that was measured to hold a reviewer to reads"] \
+            if role == "reviewer" and isinstance(identity, dict) and identity.get("transport") else []
+        return [f"{A.HELD_COMMANDS[role]} would start: {starts}"] + through + lines
     if kind == "deleted":
         return ["deleted: HEAD holds it, and a harness started here reads none"]
     if kind == "special":

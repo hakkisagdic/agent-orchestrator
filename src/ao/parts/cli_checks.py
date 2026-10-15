@@ -1090,6 +1090,10 @@ def cmd_config(cfg, args):
         cfg = dict(A.load_config(root), root=root)
     value, source, _ = S.resolve(cfg, key)
     print(f"{key} = {value!r} ({source})" + (f", recorded as set by {by}" if key in S.RECORDED else ""))
+    if key == "review.transport" and value != S.default(key):
+        # How a review reaches its routes is part of the reviewer a person accepts, as the routes are (REVIEW-PATH-HIGHS).
+        print(f"{C['dim']}a review starts its routes this way once a person has read the change: "
+              f"ao harness seen --by <name>{C['reset']}")
     return 0
 
 

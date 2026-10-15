@@ -323,7 +323,7 @@ repository and where ao's files for it go are fields of its adapter, and core re
 | `directives.coordination` | a steering file ao writes the coordination rules into | `ao init` |
 | `directives.rule_files` | the owner's rule files this harness reads (AGENTS.md is shared and needs no entry) | `--rules`, `ao doctor` |
 | `directives.steering_dir`, `directives.skills_dir` | directories the harness reads by itself | `ao doctor`, `ao content add` |
-| `directives.agents_dir`, `directives.agent_format` | where the harness reads agent definitions, and their format: `extension`, the fields that run a command (`commands`, taken out), those that grant trust (`grants`, named) and the one that loads context (`context`, named when empty) | `ao content add` |
+| `directives.agents_dir`, `directives.agent_format` | where the harness reads agent definitions, and their format: `extension`, the fields that run a command (`commands`, taken out), those that grant trust (`grants`, named), the one that loads context (`context`, named when empty) and those whose `file://` value it loads as text (`loads`, taken out when it lies outside the project) | `ao content add` |
 | `directives.steering_inclusion`, `directives.hook_files` | which steering inclusion the harness honours (`field`, `default`, `honoured`, and `unhonoured`, the reason it gives), and the header a skill becomes a steering file under (`skill_header`); what a hook file's suffix says of its format | `ao content add` |
 | `directives.ao_files` | every path ao may have written for this harness; `ao remove` deletes the ones the package's adapter names, and names and leaves those only another layer does | `ao remove` |
 | `mcp` | `{file, key, extra, register, remove_when_empty}` or `{manual, snippet}`; a snippet's `{exe}` and `{root}` are written escaped for a double-quoted TOML string, and its `{args}` as a list of such strings: the server's arguments, with the role the registration names ([mcp.md](mcp.md#roles)) | `ao init`, `ao remove`, `ao uninstall` (the `ao` entry under `key`, the file itself only when nothing else is left in it) |
@@ -529,21 +529,23 @@ asks, and a turn that does not end even so is a timeout; the agent is stopped wi
 *In ao since slice ACP-REVIEWER: a reviewer answers its review through its adapter's `acp.argv` where the
 project sets `review.transport` to `acp`. The three declared commands were seen to answer `initialize`;
 none has yet been measured answering a review, which is why the transport is a project's choice and
-spawning stays the default.* A harness that reviews as an agent of ao's that only reads answers over
-ACP only where its adapter says the agent was measured to hold there: kiro's does (KIRO-READONLY-2),
-and `opencode acp` takes no `--agent`, so its session would be opencode's own agent and an opencode
-reviewer is spawned, with a line saying why (OPENCODE-REVIEWER-2). The command is read from the package's adapters alone, as a review contract
+spawning stays the default.* A harness answers over ACP only where its adapter says its ACP command
+was measured to hold a reviewer to reads, as kiro's reviewer agent was (KIRO-READONLY-2); `opencode acp`
+takes no `--agent`, so its session would be opencode's own agent (OPENCODE-REVIEWER-2), and
+`qodercli --acp` carries none of the flags that hold qoder's spawned reviewer to reads; each is spawned,
+with a line saying why. The command is read from the package's adapters alone, as a review contract
 and a prompt channel are: a layer an agent can write does not choose what its reviewer runs. It is found as
 a spawned reviewer's program is, and it runs where one does - a directory of its own outside the
 repository, holding the candidate's tree, with Git's bindings removed from its environment - where its
 session opens with no MCP server. It is sent the prompt the route would have been handed as one text
 block, and its answer, the message chunks joined, is read as a spawned reviewer's output is. The session
 lets the reviewer read and nothing else: a tool call of kind `read` or `search` is given the option that
-allows that one call, and every other kind - an edit, a deletion, a move, a command, a fetch, a change of
-mode - is refused; an option that allows a tool always is never picked, since it would leave a standing
-rule in the harness's own settings. What a harness runs without asking is its own, so a turn in which a
-tool of kind `edit`, `delete`, `move` or `execute` is seen to have completed is no review, whatever it
-answered, and neither is one in which a call ao refused is seen to have completed, whatever its kind
+allows that one call where every path it names lies in the directory the review runs in, and every other
+kind - an edit, a deletion, a move, a command, a fetch, a change of mode - is refused; an option that
+allows a tool always is never picked, since it would leave a standing rule in the harness's own settings.
+What a harness runs without asking is its own, so a turn in which the agent reports a tool of kind `edit`,
+`delete`, `move` or `execute` that ao never refused is no review, whatever it answered and whatever that
+call ended as, and neither is one in which a call ao refused is seen to have completed, whatever its kind
 (ACP-REVIEWER-3). A later report under the same id takes back neither, and a refused call without an id,
 which no report can be tied to, is taken to have run (ACP-REVIEWER-5). The whole exchange has `review_timeout`: a turn past it is cancelled and is a timeout, as a
 spawned reviewer killed at its timeout is. A route whose adapter declares no ACP command, or whose adapter
@@ -551,6 +553,27 @@ may not review (no `options.trust_none`), and a route that names a model, which 
 cannot carry, are spawned as before, each with a line saying why; so is a tool reviewer. What else a
 route's command carries, an effort or an agent profile, belongs to the spawned command and does not reach
 the session ([roles.md](roles.md) says what a review records of it).
+
+*In ao since slice REVIEW-PATH-HIGHS: an ACP reviewer is held to reads. `review.transport` sat in
+`.ao/config.json`, which the implementer writes, outside the reviewer command a person accepts, and it was
+read from the file again where a route started; `qodercli --acp` reviewed with none of
+`--tools Read,Grep,Glob`, `--permission-mode dont_ask` and `--strict-mcp-config`, held by nothing but its
+asking first, which nobody has measured; every read it asked for was allowed, a key in the person's home
+among them; and a write it ran without asking that ended `failed` was no write, its answer taken as a
+review. A transport other than spawn is now part of the reviewer a person accepts - turned to acp, it is
+`the reviewer's command (changed)`, and no review starts until `ao harness seen` - and a review reaches
+its routes as it read the configuration whose reviewer it judged. Only an ACP command measured to hold a
+reviewer to reads answers, kiro's agent alone today. Every string value in a call's `locations` and
+`rawInput`, under any key and through nested objects and lists, is judged as a path it could read;
+an innocent location cannot hide an outside path in a glob or grep pattern. A `file://` URI is decoded
+before checking, and a host, query, fragment, remaining percent escape or NUL is refused. Home paths
+are expanded and paths followed through their links. Literal paths and simple `*` and `?` patterns
+are allowed only inside the review folder; a pattern's fixed directory prefix must lie there too,
+and `..` anywhere is refused. Other syntax, empty values, and calls that name no path or exceed the
+input limit are refused because ao cannot classify where they read. This deliberately also refuses
+a grep for an absolute outside path or a complex expression: use a simple contained search instead.
+That holds what an agent asks leave for: a read the harness runs without asking is its own, and what
+kiro-cli asks before over ACP is not measured.*
 
 ## Support matrix
 

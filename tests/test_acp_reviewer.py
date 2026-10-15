@@ -30,8 +30,11 @@ def receive():
     return json.loads(line)
 
 def ask(session, kind):
+    call = {"toolCallId": kind, "title": kind, "kind": kind}
+    if kind == "read":
+        call["locations"] = [{"path": "a.py"}]          # what it reads, in the folder it runs in (REVIEW-PATH-HIGHS)
     say({"jsonrpc": "2.0", "id": "perm-" + kind, "method": "session/request_permission",
-         "params": {"sessionId": session, "toolCall": {"toolCallId": kind, "title": kind, "kind": kind},
+         "params": {"sessionId": session, "toolCall": call,
                     "options": [{"optionId": "always", "name": "Always", "kind": "allow_always"},
                                 {"optionId": "once", "name": "Allow", "kind": "allow_once"},
                                 {"optionId": "no", "name": "Reject", "kind": "reject_once"}]}})
@@ -66,7 +69,8 @@ while True:
             if turn == "ignored-empty-overwritten":
                 # A read ao lets run, under the same empty id, that fails: its report replaces the one of the run.
                 say({"jsonrpc": "2.0", "id": "perm-r", "method": "session/request_permission",
-                     "params": {"sessionId": session, "toolCall": {"toolCallId": call, "title": "r", "kind": "read"},
+                     "params": {"sessionId": session, "toolCall": {"toolCallId": call, "title": "r", "kind": "read",
+                                                                   "locations": [{"path": "a.py"}]},
                                 "options": [{"optionId": "once", "name": "Allow", "kind": "allow_once"},
                                             {"optionId": "no", "name": "Reject", "kind": "reject_once"}]}})
                 receive()
@@ -94,15 +98,6 @@ def _review(project, monkeypatch, turn, timeout=30, answer=ANSWER):
                                  "qoder-reviewer")
 
 
-def _transport(project, value):
-    path = f"{project['root']}/.ao/config.json"
-    with open(path, encoding="utf-8") as fh:
-        config = json.load(fh)
-    config["review"] = dict(config.get("review") or {}, transport=value)
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(config, fh)
-
-
 def test_an_answer_through_acp_is_read_as_a_spawned_reviewers_output_and_says_where_it_came_from(
         project, monkeypatch):
     attempt = _review(project, monkeypatch, "answer")
@@ -113,18 +108,24 @@ def test_an_answer_through_acp_is_read_as_a_spawned_reviewers_output_and_says_wh
     assert attempt["acp"] == {"adapter": "qoder", "agent": "fake-reviewer 1.0"}
 
 
-def test_a_reviewer_is_let_read_once_and_refused_an_edit(project, monkeypatch, capsys):
+def test_a_reviewer_is_let_read_once_and_refused_an_edit(project, monkeypatch, capsys, tmp_path):
     attempt = _review(project, monkeypatch, "ask")
 
     assert attempt["ok"], attempt
     assert "it asked leave 2 time(s), 1 refused" in capsys.readouterr().out
-    assert cli._acp_reviewer_permission({"kind": "read"}, [{"optionId": "a", "kind": "allow_always"},
-                                                           {"optionId": "o", "kind": "allow_once"}]) == "o"
-    assert cli._acp_reviewer_permission({"kind": "search"}, [{"optionId": "o", "kind": "allow_once"}]) == "o"
+    # What it reads lies in the folder the review runs in (REVIEW-PATH-HIGHS).
+    folder, here = str(tmp_path), [{"path": str(tmp_path / "a.py")}]
+    assert cli._acp_reviewer_permission({"kind": "read", "locations": here},
+                                        [{"optionId": "a", "kind": "allow_always"},
+                                         {"optionId": "o", "kind": "allow_once"}], folder) == "o"
+    assert cli._acp_reviewer_permission({"kind": "search", "locations": here}, [{"optionId": "o", "kind": "allow_once"}],
+                                        folder) == "o"
     for kind in ("edit", "delete", "move", "execute", "fetch", "switch_mode", None):
-        assert cli._acp_reviewer_permission({"kind": kind}, [{"optionId": "o", "kind": "allow_once"}]) is None
+        assert cli._acp_reviewer_permission({"kind": kind, "locations": here}, [{"optionId": "o", "kind": "allow_once"}],
+                                            folder) is None
     # Only a standing rule is offered: nothing is picked, so the session rejects.
-    assert cli._acp_reviewer_permission({"kind": "read"}, [{"optionId": "a", "kind": "allow_always"}]) is None
+    assert cli._acp_reviewer_permission({"kind": "read", "locations": here}, [{"optionId": "a", "kind": "allow_always"}],
+                                        folder) is None
 
 
 def test_a_turn_that_ran_an_edit_without_leave_is_no_review_whatever_it_answered(project, monkeypatch):
@@ -173,10 +174,11 @@ def test_a_turn_that_did_not_end_its_answer_or_said_nothing_is_no_review(project
 
 
 def test_the_transport_decides_whether_a_route_answers_through_acp(project, monkeypatch, capsys):
+    # The transport a review passes is the one it read with its configuration (REVIEW-PATH-HIGHS), and kiro's is the
+    # ACP command measured to hold a reviewer to reads: qoder's is spawned now (tests/test_review_path_highs.py).
+    from ao import lib as A
     root = project["root"]
-    route = {"id": "qoder-reviewer", "adapter": "qoder",
-             "argv": ["qodercli", "-p", "{prompt}", "--tools", "Read,Grep,Glob", "--permission-mode", "dont_ask",
-                      "--strict-mcp-config"]}
+    route = A.compose_reviewer("kiro")
     through, spawned = [], []
     monkeypatch.setattr(cli, "_reviewer_resolve_binary", lambda root, name: (f"/agents/{name}", "1.0"))
     monkeypatch.setattr(cli, "_run_acp_reviewer", lambda root, argv, adapter, prompt, timeout, label, **kw:
@@ -188,14 +190,13 @@ def test_the_transport_decides_whether_a_route_answers_through_acp(project, monk
     cli._reviewer_route_invocation(root, route, "review this", 60, False, route)
     assert len(spawned) == 1 and through == []
 
-    _transport(project, "acp")
     capsys.readouterr()
-    _, _, _, attempt = cli._reviewer_route_invocation(root, route, "review this", 60, False, route)
-    assert attempt["ok"] and through == [(["/agents/qodercli", "--acp"], "qoder")] and len(spawned) == 1
+    _, _, _, attempt = cli._reviewer_route_invocation(root, route, "review this", 60, False, route, transport="acp")
+    assert attempt["ok"] and through == [(["/agents/kiro-cli", "acp"], "kiro")] and len(spawned) == 1
 
     claude = {"id": "claude-reviewer", "adapter": "claude-code",
               "argv": ["claude", "-p", "{prompt}", "--allowedTools", "Read,Grep,Glob", "--strict-mcp-config"]}
-    cli._reviewer_route_invocation(root, claude, "review this", 60, False, claude)
+    cli._reviewer_route_invocation(root, claude, "review this", 60, False, claude, transport="acp")
     assert len(spawned) == 2
     assert "claude-reviewer is spawned, not run through ACP: adapter claude-code declares no ACP command" \
         in capsys.readouterr().out
@@ -203,17 +204,17 @@ def test_the_transport_decides_whether_a_route_answers_through_acp(project, monk
 
 def test_a_route_that_cannot_answer_through_acp_says_why(project):
     root = project["root"]
-    _transport(project, "acp")
 
     named = {"adapter": "qoder", "argv": ["qodercli", "-p", "{prompt}"], "model": "some-model"}
-    assert "it names a model (some-model)" in cli._acp_reviewer_command(root, named, False)[1]
+    assert "it names a model (some-model)" in cli._acp_reviewer_command(root, named, False, "acp")[1]
     # OPENCODE-REVIEWER-2: opencode reviews as an agent of ao's, and `opencode acp` takes no --agent.
     agent = {"adapter": "opencode", "argv": ["opencode", "run", "{prompt}", "--pure"]}
-    assert "nobody measured that its ACP command runs as one" in cli._acp_reviewer_command(root, agent, False)[1]
+    assert "nobody measured that its ACP command runs as one" in cli._acp_reviewer_command(root, agent, False,
+                                                                                         "acp")[1]
     tool = {"kind": "tool", "adapter": "pr-agent", "argv": ["pr-agent"]}
-    assert "tool reviewer" in cli._acp_reviewer_command(root, tool, False)[1]
+    assert "tool reviewer" in cli._acp_reviewer_command(root, tool, False, "acp")[1]
     stranger = {"adapter": "no-such-harness", "argv": ["x"]}
-    assert "no-such-harness is no adapter ao ships" in cli._acp_reviewer_command(root, stranger, False)[1]
+    assert "no-such-harness is no adapter ao ships" in cli._acp_reviewer_command(root, stranger, False, "acp")[1]
 
 
 def test_a_review_through_acp_records_its_transport(project):
@@ -288,6 +289,8 @@ def _call(kind, call_id, status=None, variant="tool_call"):
 
 def _ask(kind, call_id):
     body = {"title": kind, "kind": kind}
+    if kind == "read":
+        body["locations"] = [{"path": "a.py"}]      # a read ao lets run, in the folder it runs in (REVIEW-PATH-HIGHS)
     if call_id is not ABSENT:
         body["toolCallId"] = call_id
     return {"ask": body}
@@ -333,22 +336,21 @@ def test_a_review_whose_agent_ran_what_it_should_not_is_not_accepted(project, mo
 def test_an_adapter_that_may_not_review_is_not_reached_over_acp_either(project, monkeypatch):
     from ao import lib as A
     root = project["root"]
-    _transport(project, "acp")
     writer = {"id": "writer", "acp": {"argv": ["writer", "acp"], "measured": "writer 1.0 answered initialize, 2026-10-07"},
               "send": {"argv": ["writer", "{prompt}"]}, "options": {"trust_none": None, "trust_none_why": "it writes"}}
     shipped = dict(A.package_adapters(), writer=writer)
     monkeypatch.setattr(A, "package_adapters", lambda: shipped)
 
-    assert "adapter writer may not review" in cli._acp_reviewer_command(root, {"adapter": "writer"}, False)[1]
+    assert "adapter writer may not review" in cli._acp_reviewer_command(root, {"adapter": "writer"}, False, "acp")[1]
 
 
 def test_a_kiro_reviewer_is_reached_over_acp_as_its_agent_was_measured_to_hold_there(project):
     """KIRO-READONLY-2 measured kiro-cli acp running as ao's agent; its adapter says so, and opencode's does not."""
     from ao import lib as A
     root = project["root"]
-    _transport(project, "acp")
 
-    assert cli._acp_reviewer_command(root, {"adapter": "kiro", "argv": ["kiro-cli", "chat", "{prompt}"]}, False)[0] \
+    assert cli._acp_reviewer_command(root, {"adapter": "kiro", "argv": ["kiro-cli", "chat", "{prompt}"]}, False,
+                                    "acp")[0] \
         == {"argv": ["kiro-cli", "acp"], "adapter": "kiro"}
     assert A.load_adapter("kiro")["options"]["reviewer_agent"]["acp"] is True
     assert "acp" not in A.load_adapter("opencode")["options"]["reviewer_agent"]

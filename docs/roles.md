@@ -247,7 +247,7 @@ implementer's own binding never is.
 **Person.** A person reviews in two steps, so what they approve is exactly what they read:
 
 ```bash
-ao person-review --by <name>                                        # the staged diff and its digest; records nothing
+ao person-review --by <name>                                        # the staged diff, what it is judged against, and their digest; records nothing
 ao person-review --by <name> --verdict APPROVED --digest <digest>   # recorded on those bytes, or refused
 ao person-review --by <name> --verdict NEEDS_CHANGES --digest <digest> --findings <file>
 ```
@@ -256,6 +256,11 @@ ao person-review --by <name> --verdict NEEDS_CHANGES --digest <digest> --finding
 command it prints quotes it. Any 12 or more of its hex digits matched before, and 64 bits are
 few enough that an author controlling the candidate could find a second diff sharing them and
 swap it in after the person read the first.*
+
+*In ao since slice REVIEW-PATH-HIGHS: the digest is of the diff and of the slice, boundary and
+criteria shown with it. It was the diff's alone, and the board was read again when the verdict was
+recorded, so a slice moved to running in between - one listing no criteria - had a person's approval
+recorded with none, a criterion they found not met holding nothing up.*
 
 A findings file holds one finding a line, `- [BLOCKER|HIGH|MEDIUM|LOW] file:line - what
 breaks`; the counts are read from it and decide as a reviewer's do, so an approval with a

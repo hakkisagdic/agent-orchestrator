@@ -1662,7 +1662,17 @@ def turn_identity(cfg, role):
         # reviewers come from (ROUTE-ARGV).
         routes = [_route_fields(route) for route in reviewer_routes(cfg) if route]
         matrix = cfg.get("capability_matrix")
-        return {"routes": routes, "capability_matrix": matrix} if routes or matrix is not None else None
+        if not routes and matrix is None:
+            return None
+        identity = {"routes": routes, "capability_matrix": matrix}
+        # And how a review reaches them, once that is not by spawning each: set to acp, a route answers through its
+        # adapter's ACP command, which carries none of the route's own flags, and the setting sat in the file the
+        # implementer writes, outside what a person accepted. Spawn, the default, adds nothing, so a reviewer accepted
+        # before is still the one accepted (REVIEW-PATH-HIGHS).
+        transport = settings.get(cfg, "review.transport")
+        if transport != settings.default("review.transport"):
+            identity["transport"] = transport
+        return identity
     if not block:
         return None
     if role == "implementer":

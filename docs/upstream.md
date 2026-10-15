@@ -121,6 +121,13 @@ The kiro adapter declares what Kiro's documentation says (read 2026-09-17), and 
   agents hold empty `hooks` and `mcpServers`, so nothing is taken out; their `allowedTools` are
   named - 30 of the 33 run `shell` without asking - and so are their empty `resources`, since a
   custom agent loads no steering and no skills unless its resources name them.
+
+  *In ao since slice REVIEW-PATH-HIGHS: an agent's `prompt` is held as a resource is. A Kiro prompt is
+  inline or a `file://` path, and a borrowed agent kept one outside the project's tree as written - a
+  key, a credential, any file of this machine the source chose, loaded into the agent's instructions
+  when a person ran it. A field the adapter names in `agent_format.loads`, the package's and any
+  layer's together, is taken out and named when its `file://` path is absolute, starts at a home or
+  a drive, or climbs with `..`; one inside the project is kept.*
 - Kiro CLI reads hooks from an agent's `hooks` or, in the v1 format, from JSON files in
   `.kiro/hooks`; ECC's `.kiro.hook` files are IDE hooks in the 0.x format, which it does not read.
   None is imported, and each is named with that reason. The scripts, the MCP example and the guides

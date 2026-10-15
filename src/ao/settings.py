@@ -101,8 +101,9 @@ SETTINGS = {
         "family may review, labeled weaker independence, once a person opts in with --by, on the record"),
     "review.transport": Setting(
         "spawn", str, None, None, "project",
-        "spawn: each reviewer route runs as its command; acp: a route whose adapter declares acp.argv answers "
-        "through ACP, and any other is spawned with a line saying why"),
+        "spawn: each reviewer route runs as its command; acp: a route whose adapter's ACP command was measured to "
+        "hold a reviewer to reads answers through ACP, and any other is spawned with a line saying why; a change "
+        "is the reviewer's, held until a person accepts it with ao harness seen"),
     "hunter.every_hours": Setting(
         24, int, 1, None, "project",
         "hours between bug hunts the watchdog starts, when the hunter feature is on"),

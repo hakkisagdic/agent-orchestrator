@@ -140,7 +140,10 @@ def test_a_persons_review_is_bound_to_the_bytes_shown_and_grants_as_a_models_doe
         (f"person:{PERSON}", T.PERSON, "APPROVED", True)
     body = _artefact(cfg, row)
     evidence = A.review_evidence(body)
-    assert evidence["diff_digest"].startswith("sha256:" + digest) and evidence["transport"] == "person"
+    # The digest the person quoted is of what they read: the diff the review records, with the slice and boundary it
+    # records it was judged against (REVIEW-PATH-HIGHS).
+    assert cli._person_read(evidence, evidence["boundary"], []) == "sha256:" + digest
+    assert evidence["transport"] == "person"
     assert evidence["person"]["by"] == PERSON and set(evidence["person"]) == {"by", "user", "interactive"}
     assert "- tier: person review" in body.splitlines()
 

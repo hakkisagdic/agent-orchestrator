@@ -5,17 +5,27 @@
 > produced, or an open human waiver, and this page had implied more; #86 called that refusal
 > correct, because nothing recorded where a stand-in's answer came from. #75 (decided 2026-09-16)
 > is that record. When no reviewer can be reached for a staged candidate, ao writes a review
-> request — the exact prompt and a nonce — to `.ao/review-requests/`. A person pastes it into a
-> session of their choosing, saves the answer, and runs
+> request — the exact prompt and a nonce — to `~/.ao/review-requests/<project>/`, outside the tree
+> the implementer writes. A person pastes it into a session of their choosing, saves the answer, and runs
 > `ao collect-review <nonce> --response <file> --model <model> --by <name>`. ao checks that the
-> answer leads with the nonce and that the staged bytes are still the ones the request named, then
-> records an ordinary review whose reviewer is `human-assisted:<model>`, with the transport, the
+> answer leads with the nonce, that the request's text is the one it wrote and that the staged bytes
+> are still the ones the request named, then records an ordinary review, as the slice the request was
+> made for, whose reviewer is `human-assisted:<model>`, with the transport, the
 > person and two limits in its evidence: ao cannot verify which model answered, and a same-user
 > actor could have written the answer — the nonce binds it to one candidate, nothing more. It
 > counts as a round and can authorise. Independence is the person's choice of session, which is
 > why no agent grant admits the command; a capability-matrix project refuses it. Hand-writing an
 > artefact still forges provenance, and a waiver still says *a person vouched*, not *a review
 > happened*.
+
+*In ao since slice REVIEW-PATH-HIGHS: a request is kept in `~/.ao/review-requests/<project>/`, its
+binding and the text a person carries, and `ao remove` takes them with the project. In
+`.ao/review-requests/` both were the implementer's to rewrite: a request turned to name bytes it staged
+after - or one written whole that ao never made - had a person's genuine approval recorded for bytes no
+session was shown, and emptied criteria let one the session found not met hold nothing up. A collect
+reads the binding from there alone, and the review compares the candidate, scope and diff it measures
+with it before it records anything. A request an older ao left in the tree is named and never read: run
+`ao review` again and carry the request it writes.*
 
 When the architect or the reviewer cannot be reached — out of quota, asleep, away for a weekend —
 the work does not have to stop. The person opens a second session with **a different model**,

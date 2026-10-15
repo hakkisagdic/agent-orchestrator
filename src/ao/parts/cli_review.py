@@ -1412,7 +1412,8 @@ def _reviewer_matrix_route(cand, plan):
     return dict(cand, argv=argv)
 
 
-def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, candidate=None, tree=None):
+def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, candidate=None, tree=None,
+                               transport="spawn"):
     """Resolve and invoke one declared route without a shell.
 
     A tool route (#86) is handed `candidate`, the exact bytes the review names. A prompt
@@ -1421,7 +1422,7 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, can
 
     A route starts only as a person accepted it, and only as the shipped adapter it names or runs would start it
     (ROUTE-ARGV): one whose change nobody has seen, or that A.route_refusal refuses, is a configuration to change, and
-    the next route is tried.
+    the next route is tried. `transport` is `review.transport` as the review read it (REVIEW-PATH-HIGHS).
     """
     tool = None
     held = cand.get("_unseen") if isinstance(cand, dict) else None
@@ -1520,7 +1521,7 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, can
                                    "kind": "configuration-error", "retryable": False}
     # Where the project asks for it, a route that can answers through its adapter's ACP command, handed
     # this same prompt; one that cannot is spawned below as it always was, and says why (ACP-REVIEWER).
-    through, spawned = _acp_reviewer_command(root, cand, strict)
+    through, spawned = _acp_reviewer_command(root, cand, strict, transport)
     if through is not None:
         return _acp_route_invocation(root, label, fallback, through, prompt, timeout, tree=tree)
     if spawned:
@@ -1614,10 +1615,10 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, can
 ACP_AGENT_CHARS = 100
 
 
-def _acp_reviewer_command(root, route, strict):
+def _acp_reviewer_command(root, route, strict, transport="spawn"):
     """({"argv", "adapter"}, None): the ACP command a reviewer route answers through; else (None, why it is spawned).
 
-    `review.transport` spawn, the default, gives (None, None): nothing is said and every route runs as
+    `transport` spawn, the default, gives (None, None): nothing is said and every route runs as
     its command, as it always did. With acp a route answers through the command its adapter declares in
     `acp.argv`, read from the package's adapters alone, as a review contract and a prompt channel are: a
     layer an agent can write must not choose what its reviewer runs. A route that cannot is spawned as it
@@ -1625,15 +1626,20 @@ def _acp_reviewer_command(root, route, strict):
     mixes harnesses, so a refusal would leave a review without a reviewer over how one is reached, where
     the spawned route is the reviewer it always was, held by its own flags.
 
+    `transport` is `review.transport` as the review read its configuration, whose reviewer a person accepted with
+    it: it was read here from .ao/config.json again, which the implementer can turn to acp between the two readings
+    (REVIEW-PATH-HIGHS).
+
     A route cannot when it is a tool reviewer, which ao runs over the candidate file as its contract
     says; when its adapter declares no ACP command, or one the reviewer's rules refuse
     (allowlist.reviewer_problems); when its adapter may not review at all, since one that cannot be run
     without tools (`options.trust_none`) is not taken to ask before it writes either; and when it names
     a model. The declared command names none, so its session would run whichever model the harness
     picks while the review records, and stands in the tier of, the model the route names. A capability
-    matrix binding always names one (ACP-REVIEWER).
+    matrix binding always names one (ACP-REVIEWER). Nor when nobody measured that its adapter's ACP command
+    holds a reviewer to reads (below).
     """
-    if S.get(A.project_config_document(root)["config"] or {}, "review.transport") != "acp":
+    if transport != "acp":
         return None, None
     route = route if isinstance(route, dict) else {}
     if not strict and _tool_route(route):
@@ -1651,16 +1657,26 @@ def _acp_reviewer_command(root, route, strict):
     eligible, why = A.reviewer_eligibility(adapter)
     if not eligible:
         return None, f"adapter {ident} may not review: {why}"
-    # An agent of ao's holds a harness to reading only where it was measured to: kiro's ACP command runs as one
-    # (KIRO-READONLY-2), and `opencode acp` takes no --agent, so its session would be opencode's own (OPENCODE-REVIEWER-2).
-    agent = (adapter.get("options") or {}).get("reviewer_agent")
-    if isinstance(agent, dict) and agent.get("acp") is not True:
-        return None, (f"adapter {ident} reviews as an agent of ao's that only reads, and nobody measured that its ACP "
-                      "command runs as one")
     model = identity.get("model_argument") if strict else _route_model(route)
     if model:
         return None, (f"it names a model ({model}), and the ACP command adapter {ident} declares names none, so "
                       "its session would run whichever model the harness picks")
+    # A harness reviews over ACP only where its adapter says its ACP command was measured to hold a reviewer to reads,
+    # as kiro's does: it runs as an agent of ao's that only reads (KIRO-READONLY-2). `opencode acp` takes no --agent,
+    # so its session would be opencode's own (OPENCODE-REVIEWER-2). And qoder's `qodercli --acp` carries none of the
+    # flags that hold its spawned route to reads - --tools Read,Grep,Glob, --permission-mode dont_ask and
+    # --strict-mcp-config - and nobody measured whether it asks before every tool without them, reads a person's own
+    # allow rules or starts their MCP servers: it was taken over ACP as it stands, held by nothing but its asking
+    # (REVIEW-PATH-HIGHS).
+    agent = (adapter.get("options") or {}).get("reviewer_agent")
+    if isinstance(agent, dict) and agent.get("acp") is not True:
+        return None, (f"adapter {ident} reviews as an agent of ao's that only reads, and nobody measured that its ACP "
+                      "command runs as one")
+    if not isinstance(agent, dict):
+        held = " ".join(str(flag) for flag in (adapter.get("options") or {}).get("trust_none") or [])
+        return None, (f"nobody measured that the ACP command adapter {ident} declares, "
+                      f"`{' '.join(str(part) for part in adapter['acp']['argv'])}`, holds a reviewer to reads, as the "
+                      + (f"flags its spawned command carries ({held}) do" if held else "spawned command does"))
     from . import allowlist
     argv = [str(part) for part in adapter["acp"]["argv"]]
     refused = allowlist.reviewer_problems(argv)
@@ -1726,19 +1742,111 @@ def _acp_route_invocation(root, label, fallback, through, prompt, timeout, tree=
     return label, exe, version, attempt
 
 
-def _acp_reviewer_permission(tool_call, options):
-    """What a reviewer's ACP session is let run when it asks: a read or a search, once, and nothing else (ACP-REVIEWER).
+def _acp_reviewer_permission(tool_call, options, folder=None):
+    """What a reviewer's ACP session is let run when it asks: a read or a search of `folder`, once, and nothing else
+    (ACP-REVIEWER).
 
     A reviewer reads (allowlist.REVIEWER_TOOLS). A tool call of a kind that reads or searches is given
     the option that allows that one call; any other kind - an edit, a deletion, a move, a command, a
     fetch, a change of mode, or none named - is given none, and the session answers with the agent's
     reject option. An option that allows always is never picked: it would leave a standing rule in the
     harness's own settings.
+
+    `folder` is the directory the review runs in, which holds the candidate's tree and ao's own files. A read was
+    allowed whatever it named, and a key in the person's home went to the model's provider as readily as the
+    candidate's code: a read or a search is let run only where every path it names lies inside `folder`
+    (_acp_read_beyond), and with no folder given, nowhere (REVIEW-PATH-HIGHS).
     """
     from . import allowlist
-    if tool_call.get("kind") not in allowlist.REVIEWER_TOOL_KINDS:
+    if tool_call.get("kind") not in allowlist.REVIEWER_TOOL_KINDS or _acp_read_beyond(tool_call, folder):
         return None
     return next((option["optionId"] for option in options if option.get("kind") == "allow_once"), None)
+
+
+# A call that names more values than ao can check is refused, locations and raw input together (REVIEW-PATH-HIGHS).
+ACP_RAW_INPUT_VALUES = 1000
+
+
+def _acp_named_paths(tool_call):
+    """Every string value in locations and raw input, regardless of key, or None for input ao cannot classify.
+
+    A search pattern and an unfamiliar nested key could name an outside file beside an innocent location. No input
+    key earns an exemption now; numbers, booleans and null carry no path (REVIEW-PATH-HIGHS).
+    """
+    named = []
+    locations = tool_call.get("locations")
+    if locations is not None:
+        if not isinstance(locations, list):
+            return None
+        for location in locations:
+            if not isinstance(location, dict) or not isinstance(location.get("path"), str):
+                return None
+    pending, read = [locations, tool_call.get("rawInput")], 0
+    while pending and read < ACP_RAW_INPUT_VALUES:
+        value, read = pending.pop(), read + 1
+        if isinstance(value, (dict, list)):
+            if len(value) + len(pending) > ACP_RAW_INPUT_VALUES - read:
+                return None
+            pending.extend(value.values() if isinstance(value, dict) else value)
+        elif isinstance(value, str):
+            named.append(value)
+        elif value is not None and not isinstance(value, (bool, int, float)):
+            return None
+    return None if pending else named
+
+
+def _acp_read_beyond(tool_call, folder):
+    """Why a read or search reaches beyond the review's folder; None only for contained paths and simple patterns.
+
+    Every string could name what the tool reads, even a grep pattern. File URIs are decoded before containment is
+    judged; hosts, leftover escapes and ambiguous syntax are refused. Simple * and ? patterns are checked from
+    their fixed directory prefix, and no .. segment is allowed anywhere (REVIEW-PATH-HIGHS).
+    """
+    from urllib.parse import unquote, urlsplit
+    if not folder:
+        return "no folder holds it"
+    named = _acp_named_paths(tool_call)
+    if named is None:
+        return "it names a location ao cannot read"
+    if not named:
+        return "it names no path, so ao cannot tell where it reads"
+    for path in named:
+        shown = A.shown_text(path[:200])
+        text = path
+        try:
+            if not text or text != text.strip() or not text.isprintable():
+                raise ValueError("empty text, whitespace or a control character")
+            if text.lower().startswith("file://"):
+                uri = urlsplit(text)
+                if uri.netloc or uri.query or uri.fragment or not uri.path.startswith("/"):
+                    raise ValueError("a file URI with a host or an ambiguous path")
+                text = unquote(uri.path, errors="strict")
+                if "%" in text or "\0" in text:
+                    raise ValueError("a file URI still holding an escape or a NUL")
+                if os.name == "nt" and A.re.match(r"^/[a-zA-Z]:/", text):
+                    text = text[1:]
+            text = os.path.expanduser(text)
+            if text.startswith("~"):
+                raise ValueError("a home ao cannot resolve")
+            if os.name == "nt":
+                text = text.replace("\\", "/")
+            drive, tail = os.path.splitdrive(text)
+            if drive and (not A.re.fullmatch(r"[a-zA-Z]:", drive) or not tail.startswith("/")):
+                raise ValueError("a drive-relative path or a network host")
+            # Only literal path characters and simple globs have one meaning here. Regex alternatives, braces,
+            # escapes, URI schemes and other tool-specific syntax do not earn leave (REVIEW-PATH-HIGHS).
+            if not A.re.fullmatch(r"[\w ./~*?-]+", tail) or tail.startswith("//"):
+                raise ValueError("a path or pattern ao cannot classify")
+            if ".." in text.split("/"):
+                return f"it names {shown}, which climbs out with .."
+            fixed = A.re.split(r"[*?]", text, maxsplit=1)[0]
+            prefix = os.path.dirname(fixed) if fixed != text else text
+            inside = A._within(prefix if os.path.isabs(prefix) else os.path.join(folder, prefix), folder)
+        except (OSError, ValueError):
+            return f"it names {shown}, which ao cannot follow to where it leads"
+        if not inside:
+            return f"it names {shown}, outside the folder the review runs in"
+    return None
 
 
 def _acp_agent_name(agent):
@@ -1756,8 +1864,9 @@ def _run_acp_reviewer(root, argv, adapter_id, prompt, timeout, label, fallback=F
     `initialize`, opens its session in that directory with no MCP server, and is sent the prompt the
     spawned route would be handed, whole, as one text block. Its answer is its message chunks joined,
     read as a spawned reviewer's output is. Each permission it asks is decided by
-    `_acp_reviewer_permission`, and a turn in which a tool of a kind that changes something is seen to
-    have run is no review, whatever it answered: the agent ran it without that leave. A turn that ended
+    `_acp_reviewer_permission`, held to this directory, and a turn in which a tool of a kind that changes
+    something is seen to have run, or to have been tried, is no review, whatever it answered: the agent
+    ran it without that leave (REVIEW-PATH-HIGHS). A turn that ended
     for any reason but end_turn - a token limit, a refusal - gave no whole answer and is unavailable.
 
     The exchange shares `timeout`, as a spawned reviewer's run does. A turn past it is cancelled with
@@ -1792,12 +1901,23 @@ def _run_acp_reviewer(root, argv, adapter_id, prompt, timeout, label, fallback=F
         argv, refused = _reviewer_agent(fresh, argv)
         if refused:
             return failed("isolation-error", refused)
+
+        def permission(tool_call, options):
+            # A read or a search of the folder this review runs in, and nothing else; one refused for where it would
+            # read is said, so a person sees what the reviewer reached for (REVIEW-PATH-HIGHS).
+            chosen = _acp_reviewer_permission(tool_call, options, fresh)
+            beyond = None if chosen or tool_call.get("kind") not in allowlist.REVIEWER_TOOL_KINDS \
+                else _acp_read_beyond(tool_call, fresh)
+            if beyond:
+                print(f"{C['dim']}reviewer {label} was refused a {tool_call.get('kind')}: {beyond}{C['reset']}",
+                      flush=True)
+            return chosen
+
         started = time.monotonic()
         deadline = started + float(timeout)
         handlers_back = _stop_on_signals(held=True)         # as a spawned reviewer is (REVIEWER-ORPHAN-3, -4)
         try:
-            session = acp.Session(argv, fresh, env=_reviewer_environment(fresh),
-                                  permission=_acp_reviewer_permission)
+            session = acp.Session(argv, fresh, env=_reviewer_environment(fresh), permission=permission)
         except acp.ProbeError as exc:
             handlers_back()
             handlers_back.release()
@@ -1879,17 +1999,22 @@ def _run_acp_reviewer(root, argv, adapter_id, prompt, timeout, label, fallback=F
     # (ACP-REVIEWER-3). A refused call with an empty id, or none, is tied to no report of it: every call without
     # an id shares one key, where a later call's report replaces the one that said it ran, and an empty id and none
     # are two keys. ao cannot see that it did not run, so it is taken to have run (ACP-REVIEWER-5).
+    # A call of a kind that changes something which ao never refused - the agent ran it without asking - leaves
+    # reads whatever it ended as: one reported `failed` was counted as no write and its answer taken, though a
+    # write that failed may have written part of a file, and one still `in_progress` may be writing yet. Only a
+    # call ao refused needs to be seen completing, since a refused call reports `failed` (REVIEW-PATH-HIGHS).
     refusals = [decision for decision in session.decisions if decision.get("decision") != "allow_once"]
     refused_ids = {decision["id"] for decision in refusals if decision.get("id")}
     wrote = sorted({str(decision.get("kind") or "other") for decision in refusals if not decision.get("id")}
                    | {str(kind or "other") for call in turn["tool_calls"]
-                      if call.get("completed") or call.get("status") == "completed"
                       for kind in (call.get("kinds") or [call.get("kind")])
-                      if kind in allowlist.WRITING_TOOL_KINDS or call.get("id") in refused_ids})
+                      if (kind in allowlist.WRITING_TOOL_KINDS and call.get("id") not in refused_ids)
+                      or ((call.get("completed") or call.get("status") == "completed")
+                          and (kind in allowlist.WRITING_TOOL_KINDS or call.get("id") in refused_ids))})
     if wrote:
         _reviewer_terminal_output(text, "")
-        return failed("wrote", f"it ran a tool that changes something or that ao refused ({', '.join(wrote)}) "
-                               "without ao's leave; a reviewer reads, so its answer is no review")
+        return failed("wrote", f"it ran, or tried, a tool that changes something or that ao refused "
+                               f"({', '.join(wrote)}) without ao's leave; a reviewer reads, so its answer is no review")
     if ended == "timeout" or allowed <= 0:
         # Cancelled at its time: what it said after, even an answer, came too late, as a spawned one's would.
         _reviewer_terminal_output(text, "")
@@ -2038,7 +2163,7 @@ def _section_journal(root, evidence, boundary, sections, chain):
 
 
 def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, strict, primary=None,
-                              candidate=None, cfg=None, tree=None, treeless=None):
+                              candidate=None, cfg=None, tree=None, treeless=None, transport="spawn"):
     """Ask each section as its own call, each answer durable before the next (#26, P1-P4).
 
     A section answered before, for the same candidate, boundary, sections and
@@ -2063,7 +2188,8 @@ def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, s
             asked = f"\n\n{marker}\n{section['question']}"
             invocation = _invoke_reviewer_chain(root, chain, prompt + asked, timeout, strict, primary=primary,
                                                 candidate=candidate, tree=tree,
-                                                treeless=None if treeless is None else treeless + asked)
+                                                treeless=None if treeless is None else treeless + asked,
+                                                transport=transport)
             if invocation["used"] is None:
                 partial = [f.get("partial") for f in invocation["failures"].values() if f.get("kind") == "stalled"]
                 if partial:
@@ -2073,7 +2199,7 @@ def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, s
                 return dict(invocation, sections=[_section_summary(r) for r in rows])
             invocation = _reask_once(cfg, root, invocation, prompt + asked, timeout, strict, primary=primary,
                                      candidate=candidate, tree=tree,
-                                     treeless=None if treeless is None else treeless + asked)
+                                     treeless=None if treeless is None else treeless + asked, transport=transport)
             reasked = invocation.get("reasked")
             out = invocation["attempt"]["out"]
             counts = {key: A.re.findall(rf"^{key}:[ \t]*([0-9]{{1,9}})[ \t]*\r?$", out, A.re.M)
@@ -2139,7 +2265,7 @@ def _section_summary(row):
 
 
 def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
-                           validate=None, candidate=None, tree=None, treeless=None):
+                           validate=None, candidate=None, tree=None, treeless=None, transport="spawn"):
     """Walk fallbacks now; retry only structurally transient route positions.
 
     The whole walk shares one deadline (#100). A route starts only while the
@@ -2150,6 +2276,7 @@ def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
     a tool route is handed (#86); every other route reads it in the prompt. A tool
     route is handed `treeless` where one is given: the prompt without the note about
     the candidate's tree, which `_run_reviewer` unpacks for no tool (REVIEW-TREE-2).
+    `transport` is `review.transport` as the review read its configuration (REVIEW-PATH-HIGHS).
     """
     failures, transient, labels = {}, [], {}
     budget = _review_chain_budget(timeout)
@@ -2204,7 +2331,7 @@ def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
         tool_route = not strict and _tool_route(cand)
         label, binary, version, attempt = _reviewer_route_invocation(
             root, cand, treeless if tool_route and treeless is not None else prompt, route_timeout, strict,
-            primary, tree=tree, **({"candidate": candidate} if tool_route else {})
+            primary, tree=tree, transport=transport, **({"candidate": candidate} if tool_route else {})
         )
         labels[position] = label
         if attempt["ok"] and validate is not None:
@@ -2359,6 +2486,8 @@ def _reviewer_probe(cfg, timeout=REVIEW_PROBE_TIMEOUT):
             "unexpected probe response" if attempt["out"] != expected else None
         ),
         candidate=_reviewer_probe_diff(),
+        # As this configuration was read and its reviewer judged, never the file read again (REVIEW-PATH-HIGHS).
+        transport=S.get(cfg, "review.transport"),
     )
     if invocation["used"] is not None:
         position = invocation["used_position"]
@@ -2757,6 +2886,9 @@ def cmd_collect_review(cfg, args):
     this records the model the person declares, the person, and the transport, and
     binds the answer to one candidate through the nonce - nothing more. It is a
     person's command; no agent grant admits it.
+
+    The binding is read from where ao wrote the request, outside the tree, with the request's slice, scope, boundary,
+    criteria and threat model; the review records the answer only for the bytes the request names (REVIEW-PATH-HIGHS).
     """
     from types import SimpleNamespace
     root = cfg["root"]
@@ -2773,6 +2905,12 @@ def cmd_collect_review(cfg, args):
     if not model or not model.isprintable() or len(model) > 80:
         print("--model is required: the model the stand-in session ran, as you know it"); return 2
     request = A.review_request(root, args.nonce)
+    if not request and A.tree_review_request(root, args.nonce):
+        # Kept in the tree, a request's binding was the implementer's to rewrite: it binds nothing (REVIEW-PATH-HIGHS).
+        print(f"{C['red']}refused{C['reset']}: request {args.nonce} is in .ao/review-requests/, where an older ao kept "
+              f"requests and the implementer can rewrite them; ao keeps them in {A.review_requests_dir(root)} now. Run "
+              "ao review again, carry the request it writes there, and collect that one")
+        return 2
     if not request:
         print(f"{C['red']}refused{C['reset']}: there is no review request {args.nonce}"); return 2
     # One collect at a time for a request: two at once both recorded a review of one answer (JOURNAL-7).
@@ -2820,6 +2958,17 @@ def _collect_review(cfg, args, root, by, model, read_chained_jsonl):
         print(f"{C['red']}refused{C['reset']}: the staged candidate changed since the request; "
               "the answer is about other bytes")
         return 1
+    # The text a person carried is the one ao wrote for these bytes, as the request recorded it when it wrote both
+    # outside the tree (REVIEW-PATH-HIGHS).
+    try:
+        with open(os.path.join(A.review_requests_dir(root), f"{request['nonce']}.md"), "rb") as fh:
+            text = "sha256:" + A.hashlib.sha256(fh.read()).hexdigest()
+    except OSError as exc:
+        text = f"unreadable ({exc.strerror or type(exc).__name__})"
+    if text != request.get("text"):
+        print(f"{C['red']}refused{C['reset']}: request {args.nonce}'s text is not the one ao wrote for these bytes "
+              f"({text}), so a session may have answered other text: run ao review again and carry the new request")
+        return 1
     # The criteria the request's prompt asked about, which its boundary - for a boundary file, only the
     # file's name - cannot give back (CRITERIA-VERDICTS).
     criteria = request.get("criteria")
@@ -2829,9 +2978,15 @@ def _collect_review(cfg, args, root, by, model, read_chained_jsonl):
         print(f"{C['red']}refused{C['reset']}: request {args.nonce} records criteria ao cannot read")
         return 2
     route = {"id": f"human-assisted:{model}", "family": "human-assisted"}
-    carried = {"route": route, "out": out, "criteria": criteria, "evidence": {
-        "transport": "human-carried", "collected_by": by, "nonce": request["nonce"],
-        "limits": list(A.STANDIN_LIMITS)}}
+    # What the request was made for goes with the answer: its candidate, scope and diff, which the review compares
+    # with what it measures before it records anything, and its slice, which the review is recorded as, whatever runs
+    # when a person collects it (#12, REVIEW-PATH-HIGHS).
+    scope = request.get("scope") if isinstance(request.get("scope"), dict) else {}
+    carried = {"route": route, "out": out, "criteria": criteria, "slice": request.get("slice"),
+               "bound": {"candidate": request.get("candidate"), "scope": scope.get("digest"),
+                         "diff": request.get("diff_digest")},
+               "evidence": {"transport": "human-carried", "collected_by": by, "nonce": request["nonce"],
+                            "request": request["text"], "limits": list(A.STANDIN_LIMITS)}}
     if isinstance(request.get("threat_model"), dict):
         carried["evidence"]["threat_model"] = request["threat_model"]   # the one its prompt carried
     asked = SimpleNamespace(boundary=request.get("boundary"), paths=request.get("paths"), commits=None,
@@ -2892,7 +3047,7 @@ def _unread_lines(out):
 
 
 def _reask_once(cfg, root, invocation, prompt, timeout, strict, primary=None, candidate=None, tree=None,
-                treeless=None):
+                treeless=None, transport="spawn"):
     """Ask the reviewer that answered once more when ao cannot read its answer (REVIEW-REASK).
 
     An answer without a verdict line ao reads, or without the four counts once each, was INVALID at
@@ -2916,7 +3071,7 @@ def _reask_once(cfg, root, invocation, prompt, timeout, strict, primary=None, ca
     note = "\n\n" + language.text(cfg, "prompt.review-reask", lines=lines) + "\n"
     again = _invoke_reviewer_chain(root, [invocation["used"]], prompt + note, timeout, strict, primary=primary,
                                    candidate=candidate, tree=tree,
-                                   treeless=None if treeless is None else treeless + note)
+                                   treeless=None if treeless is None else treeless + note, transport=transport)
     if again.get("used") is None:
         return dict(invocation, reasked=unread)
     return dict(invocation, attempt=again["attempt"], reasked=unread)
@@ -2945,6 +3100,19 @@ def _person_line(person):
             f"{'a terminal attached' if person.get('interactive') else 'no terminal attached'}")
 
 
+def _person_read(evidence, boundary, criteria):
+    """The digest of what a person's review shows them: the diff, and the slice, boundary and criteria it is judged
+    against (REVIEW-PATH-HIGHS).
+
+    The digest a person quoted was the diff's alone, and the board was read again when they recorded their verdict:
+    an implementer that moved another slice to running in between, one listing no criteria, had a person's approval
+    recorded with none - a criterion they had found not met then held nothing up - and as a slice they never judged.
+    """
+    shown = {"diff": evidence.get("diff_digest"), "slice": evidence.get("slice"), "boundary": boundary,
+             "criteria": [[criterion.get("id"), criterion.get("text")] for criterion in criteria or ()]}
+    return "sha256:" + A.hashlib.sha256(json.dumps(shown, sort_keys=True).encode(UTF8)).hexdigest()
+
+
 def _digest_read(given, digest):
     """Whether the digest a person quotes is the diff's whole SHA-256, with or without its `sha256:` prefix.
 
@@ -2966,7 +3134,8 @@ def _show_person_review(person, diff, evidence, boundary, args, criteria=()):
     """
     import shlex
     sys.stdout.write(diff if diff.endswith("\n") else diff + "\n")
-    short = evidence["diff_digest"][len("sha256:"):]                  # the whole digest (REVIEW-TIERS-2)
+    # The whole digest (REVIEW-TIERS-2), of the diff and of what it is judged against (REVIEW-PATH-HIGHS).
+    short = _person_read(evidence, boundary, criteria)[len("sha256:"):]
     scope = f"--commits {shlex.quote(args.commits)}" if args.commits else " ".join(
         ["--paths"] + [shlex.quote(path) for path in args.paths]) if args.paths else ""
     base = " ".join(part for part in ("ao person-review", f"--by {shlex.quote(person['by'])}", scope) if part)
@@ -2975,6 +3144,7 @@ def _show_person_review(person, diff, evidence, boundary, args, criteria=()):
         # Shown as a reviewer is handed it, and read the same way (LEADS-REVIEW).
         print(f"  {C['yellow']}the diff is not UTF-8{C['reset']}: it is shown escaped, whole - \\\\ is one backslash "
               "of the files and \\xNN one byte that is not UTF-8")
+    print(f"  slice: {A.review_header_value(evidence.get('slice') or 'none running')}")
     print(f"  boundary: {A.review_header_value(boundary)}")
     if criteria:
         print(f"  {C['dim']}it lists {len(criteria)} criteria; answer each in the findings file, on a line of its own: "
@@ -2983,7 +3153,7 @@ def _show_person_review(person, diff, evidence, boundary, args, criteria=()):
         for criterion in criteria:
             print(f"    {criterion['id']}. {A.review_header_value(criterion['text'])}")
     print(f"  {C['dim']}nothing was recorded; judge the diff above against the boundary, then record the verdict on "
-          f"exactly these bytes:{C['reset']}")
+          f"exactly these bytes, judged against this slice{' and its criteria' if criteria else ''}:{C['reset']}")
     print(f"  {base} --verdict APPROVED --digest {short}" + (" --findings <file>" if criteria else ""))
     print(f"  {base} --verdict NEEDS_CHANGES --digest {short} --findings <file>")
     print(f"  {C['dim']}a findings file holds one finding a line: - [BLOCKER|HIGH|MEDIUM|LOW] file:line - what "
@@ -3057,7 +3227,8 @@ def cmd_person_review(cfg, args):
     diff - or a landed range's, with --commits - and the digest of those bytes, and records
     nothing. With --verdict and that digest it records a review bound to the candidate exactly
     as a model's is, so `ao commit-ok` grants on it as it does on any; a range's review is what
-    `ao catchup` closes a waiver on. The candidate must still be the bytes shown.
+    `ao catchup` closes a waiver on. The candidate must still be the bytes shown, and the slice,
+    boundary and criteria it is judged against the ones shown with it (REVIEW-PATH-HIGHS).
 
     It is a person's command, as `ao waive` and `ao collect-review` are: ao cannot know that no
     agent typed it. So --by names a person and never an agent or a role, the login and whether a
@@ -3937,6 +4108,17 @@ def cmd_review(cfg, args):
             "candidate": candidate, "scope": scope,
             "diff_digest": "sha256:" + A.hashlib.sha256(diff_bytes).hexdigest(),
         }
+        if carried is not None:
+            # A carried answer is about the bytes its request was made for, as ao kept them outside the tree: the
+            # collect compared the candidate once, and bytes staged since are measured here, where the review is
+            # recorded, never taken for those (REVIEW-PATH-HIGHS).
+            bound = carried.get("bound") if isinstance(carried.get("bound"), dict) else {}
+            moved = [what for what, now in (("candidate", candidate["digest"]), ("scope", scope["digest"]),
+                                            ("diff", evidence["diff_digest"])) if bound.get(what) != now]
+            if moved:
+                print(f"{C['red']}refused{C['reset']}: the staged {', '.join(moved)} is not the one the request was "
+                      "made for, and the answer is about those bytes; nothing was recorded")
+                return 1
     if author is not None:
         # The family it was held to, and who said so: the grant's record, or a named person.
         evidence["author"] = author
@@ -3978,6 +4160,13 @@ def cmd_review(cfg, args):
         # is counted against the slice that landed it (#49).
         running = next((item for items in A.board(root).values() for item in items if item.get("id") == waived),
                        {"id": waived, "title": "", "notes": {}})
+    if carried is not None:
+        # A carried answer is the slice's its request was made for, whatever runs when a person collects it: it was
+        # recorded as the running one, so a board moved meanwhile had its next slice take a review it never asked
+        # for (#12, REVIEW-PATH-HIGHS).
+        owner = carried.get("slice")
+        running = next((item for items in A.board(root).values() for item in items if item.get("id") == owner),
+                       {"id": owner, "title": "", "notes": {}}) if owner else None
     # A boundary file is read at the commit its row names; a later change travels as a diff (#73).
     source = None if args.boundary else A.read_boundary(root, running)
     boundary = args.boundary or (source or {}).get("label") or A.slice_boundary(running)
@@ -4004,9 +4193,13 @@ def cmd_review(cfg, args):
         if not person.get("verdict"):
             _show_person_review(person, diff, evidence, boundary, args, criteria)
             return 0
-        if not _digest_read(person.get("digest"), evidence["diff_digest"]):
-            print(f"{C['red']}refused{C['reset']}: the diff is not the one you read - it is "
-                  f"{evidence['diff_digest']} now; read it again with ao person-review --by <name>")
+        # And judged against what they were shown: the slice, the boundary and its criteria are read from the board
+        # again here, which the implementer writes (REVIEW-PATH-HIGHS).
+        if not _digest_read(person.get("digest"), _person_read(evidence, boundary, criteria)):
+            print(f"{C['red']}refused{C['reset']}: the diff, or the slice, boundary or criteria it is judged against, "
+                  f"is not the one you read - the diff is {evidence['diff_digest']} and the slice "
+                  f"{A.review_header_value(evidence.get('slice') or 'none running')} now; read it again with "
+                  "ao person-review --by <name>")
             return 1
 
     # The candidate is what may land; the context is committed source it is judged
@@ -4155,6 +4348,9 @@ def cmd_review(cfg, args):
             return 2
         if lenses:
             evidence["lenses"] = lenses
+        # How the routes are reached is read from the configuration their reviewer was judged on, as the routes are
+        # (REVIEW-PATH-HIGHS).
+        transport = S.get(cfg, "review.transport")
         if sections:
             # A review of eight questions is eight bounded calls, resumable one by one (#26). One review asks a
             # journal's sections at a time: two at once both asked the open ones and paid for each (JOURNAL-7).
@@ -4168,16 +4364,16 @@ def cmd_review(cfg, args):
                 invocation = _invoke_reviewer_sections(
                     root, chain, prompt, sections, journal, _review_timeout(cfg), strict,
                     primary=rv if not strict else None, candidate=diff_bytes, cfg=cfg, tree=review_tree,
-                    treeless=treeless)
+                    treeless=treeless, transport=transport)
             evidence["sections"] = invocation.get("sections")
         else:
             invocation = _invoke_reviewer_chain(
                 root, chain, prompt, _review_timeout(cfg), strict, primary=rv if not strict else None,
-                candidate=diff_bytes, tree=review_tree, treeless=treeless,
+                candidate=diff_bytes, tree=review_tree, treeless=treeless, transport=transport,
             )
             invocation = _reask_once(
                 cfg, root, invocation, prompt, _review_timeout(cfg), strict, primary=rv if not strict else None,
-                candidate=diff_bytes, tree=review_tree, treeless=treeless)
+                candidate=diff_bytes, tree=review_tree, treeless=treeless, transport=transport)
     # The lines a first answer lacked, when it was asked for again: of this answer, or of the section a
     # sectioned review stopped on (REVIEW-REASK).
     reasked = invocation.get("reasked")
@@ -4240,8 +4436,9 @@ def cmd_review(cfg, args):
                 request = None
                 print(f"{C['dim']}no stand-in request was written: {exc}{C['reset']}")
             if request:
+                # Outside the tree, where the implementer cannot rewrite what a person carries (REVIEW-PATH-HIGHS).
                 print(f"{C['dim']}A stand-in review request is in "
-                      f"{os.path.relpath(request['path'], root)}; a person carries it to another "
+                      f"{request['path']}; a person carries it to another "
                       f"session and runs `ao collect-review {request['nonce']} --response <file> "
                       f"--model <model> --by <name>` on the answer.{C['reset']}")
         A.set_reviewer_state(

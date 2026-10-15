@@ -47,7 +47,7 @@ machine setting written into a project.
 | `review.lenses` | `declared` | project | declared: lenses only where a slice names them; auto: defaults from what the candidate touches; off: none |
 | `review.stall_minutes` | `10` | project | minutes a reviewer may spend no CPU before it is killed as stalled, its partial answer kept; not on Windows, which has no process group to read the CPU from - the review says so, and its timeout ends a hung reviewer ([windows.md](windows.md)) |
 | `review.context_bytes` | `100000` | project | bytes of commit-message claims and read-only context a review prompt may carry beside its diff, where no reviewer route holds it to one argument |
-| `review.transport` | `spawn` | project | spawn: each reviewer route runs as its command; acp: a route whose adapter declares acp.argv answers through ACP, and any other is spawned with a line saying why |
+| `review.transport` | `spawn` | project | spawn: each reviewer route runs as its command; acp: a route whose adapter's ACP command was measured to hold a reviewer to reads answers through ACP, and any other is spawned with a line saying why; a change is the reviewer's, held until a person accepts it with `ao harness seen` ([adapters.md](adapters.md#what-a-harness-says-it-supports-asked-in-acp)) |
 | `review.same_family` | `refused` | project | refused: a reviewer of the implementer's model family is refused; labeled: another model of that family may review, labeled weaker independence, once a person opts in with --by, on the record |
 | `hunter.every_hours` | `24` | project | hours between bug hunts the watchdog starts, when the hunter feature is on |
 | `hunter.files_per_run` | `8` | project | tracked files one hunt reads, going round the tree run by run |

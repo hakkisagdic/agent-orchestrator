@@ -1225,6 +1225,19 @@ def _agent_item(name, path, tree, blobs, declared, takes_agents):
                                             "imported"))
             definition[context["field"]] = [value for value in resources if not _resource_outside(value)]
             taken.append(context["field"])
+        # So does a field whose `file://` value the agent loads as text - Kiro's prompt is inline or a file: one outside
+        # the project's tree was kept as written, and loaded a file of this machine the source chose into the agent's
+        # instructions. The package's list and a layer's are read together, so a layer cannot take one back in
+        # (REVIEW-PATH-HIGHS).
+        loads = _declared(shape.get("loads"), _declared(shipped.get("agent_format")).get("loads"))
+        for field in sorted(loads):
+            value = definition.get(field)
+            if isinstance(value, str) and _resource_outside(value):
+                definition.pop(field)
+                item["skipped"].append((f"agents/{name}.json {field} {value}",
+                                        f"{loads[field]}, outside the project's tree, which the source chose: never "
+                                        "imported"))
+                taken.append(field)
         target = f"{directives['agents_dir']}/{name}.json"
         item["files"][target] = (harness, (json.dumps(definition, indent=2, ensure_ascii=False) + "\n").encode(UTF8)
                                  if taken else blobs[oid])

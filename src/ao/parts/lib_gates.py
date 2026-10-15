@@ -1568,8 +1568,24 @@ def review_criteria_lines(criteria):
 REVIEW_CHAIN = "ao-review-row-v1"
 
 
-def review_requests_dir(root):
-    return os.path.join(root, ".ao", "review-requests")
+def review_requests_dir(root, key=None):
+    """Where a project's stand-in review requests are kept: ~/.ao/review-requests/<project>/, outside the tree an agent
+    writes, named by `key` or the project's key (REVIEW-PATH-HIGHS).
+
+    A request binds a person's carried answer to the candidate it was made for, and holds the text the person carries
+    to a session. In .ao/review-requests/ both were the implementer's to rewrite: a `candidate` turned to bytes it
+    staged after had a person's genuine approval recorded for bytes no session was shown, emptied `criteria` let it
+    land past a criterion the session found not met, and a text changed while a person copied it had the session judge
+    another diff than the one ao bound.
+    """
+    return os.path.join(HOME, ".ao", "review-requests", key or project_key(root))
+
+
+def tree_review_request(root, nonce):
+    """Whether the tree holds a request by this nonce where ao kept them before REVIEW-PATH-HIGHS; one found there is
+    named, never read."""
+    return bool(re.fullmatch(r"[0-9a-f]{32}", str(nonce or ""))) and os.path.lexists(
+        os.path.join(root, ".ao", "review-requests", f"{nonce}.json"))
 
 
 STANDIN_LIMITS = (
@@ -1590,21 +1606,14 @@ def write_review_request(root, cfg, candidate, scope, diff_digest, boundary, sli
     keeps the criteria the prompt asks about, if any: the answer is read against those
     when it is collected, although the boundary kept beside them is only a boundary
     file's name (CRITERIA-VERDICTS).
+
+    Both are kept outside the tree (review_requests_dir), and the metadata holds the digest of the text: a collect
+    reads the binding from there alone, and the text a person carries is the one ao wrote (REVIEW-PATH-HIGHS).
     """
     import secrets
     from .storage import replace_file_durably
     nonce = secrets.token_hex(16)
     directory = review_requests_dir(root)
-    meta = {"nonce": nonce, "at": int(time.time()), "candidate": candidate["digest"],
-            "index_tree": candidate["index_tree"], "scope": scope, "diff_digest": diff_digest,
-            "boundary": boundary, "slice": slice_id, "paths": paths, "collected": None}
-    if criteria:
-        meta["criteria"] = criteria
-    if threat_model:
-        meta["threat_model"] = threat_model     # the one its prompt carries, which an answer is judged under
-    path = os.path.join(directory, f"{nonce}.md")
-    replace_file_durably(os.path.join(directory, f"{nonce}.json"),
-                         json.dumps(meta, indent=1, sort_keys=True).encode(UTF8))
     text = (f"# ao review request {nonce}\n\n"
             "No reviewer could be reached for the staged candidate below. Paste everything\n"
             "under the line into a session running a different model family from the\n"
@@ -1612,8 +1621,19 @@ def write_review_request(root, cfg, candidate, scope, diff_digest, boundary, sli
             f"    ao collect-review {nonce} --response <file> --model <the model that answered> --by <your name>\n\n"
             f"The request binds to candidate `{candidate['digest']}`; if the staged bytes change,\n"
             "it no longer applies.\n\n---\n\n"
-            + language.text(cfg, "prompt.review-request", nonce=nonce) + f"\n\n{prompt}\n")
-    replace_file_durably(path, text.encode(UTF8))
+            + language.text(cfg, "prompt.review-request", nonce=nonce) + f"\n\n{prompt}\n").encode(UTF8)
+    meta = {"nonce": nonce, "at": int(time.time()), "candidate": candidate["digest"],
+            "index_tree": candidate["index_tree"], "scope": scope, "diff_digest": diff_digest,
+            "boundary": boundary, "slice": slice_id, "paths": paths, "collected": None,
+            "text": "sha256:" + hashlib.sha256(text).hexdigest()}
+    if criteria:
+        meta["criteria"] = criteria
+    if threat_model:
+        meta["threat_model"] = threat_model     # the one its prompt carries, which an answer is judged under
+    path = os.path.join(directory, f"{nonce}.md")
+    replace_file_durably(os.path.join(directory, f"{nonce}.json"),
+                         json.dumps(meta, indent=1, sort_keys=True).encode(UTF8))
+    replace_file_durably(path, text)
     return dict(meta, path=path)
 
 
