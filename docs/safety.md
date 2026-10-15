@@ -37,6 +37,15 @@ Never inject into a session that is mid-turn. Two hazards, two mitigations:
 | A lock kept where an agent writes | `.ao/` in the working tree holds locks an agent can replace. ao opens a lock through no final link, and only as a regular file of one name - on Windows it opens a link itself, never what it names: a link, a FIFO or a hard link put in its place is refused and named, where ao used to create the file a link named, outside the tree, and write a byte into it. |
 | A turn ended but its processes did not | `ao writers` shows them as orphans (no terminal, dead group leader) and counts zero writers; the watchdog clears them before every count, and `ao hold` / the reaper stop turns by process group so no new ones are made. Where the process table cannot be read, `ao writers` says the writers are unknown and exits 1. |
 
+Git worktree cleanup first inspects the common Git directory's `worktrees` path
+and its immediate entries without following links. The filesystem resolves the
+folder's case as it does for Git. A symbolic link, Windows reparse point,
+non-directory folder entry or unreadable administration stops removal and pruning; ao names what
+must be removed or made readable before retrying. This covers lane and slice
+cleanup, merge-check and prove ([parallel](parallel.md#a-worktree-lives-as-long-as-its-slice),
+PRUNE-LINKS). This check is not atomic with Git's deletion: a concurrent replacement
+after the check remains a race.
+
 **Do not infer this from file timestamps.** That was the original design — status AND
 write-age, ANDed — and it failed twice in one night. A turn retrying a provider 5xx sits
 in backoff writing nothing, which reads exactly like a turn that ended, so the guard

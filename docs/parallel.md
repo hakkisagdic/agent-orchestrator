@@ -226,6 +226,19 @@ worktrees that may go, with their size on disk. A lane's worktree is listed ther
 kept: a lane starts at its base, so it reads as merged the moment it starts. `ao lane remove`
 retires a lane, knowing the links and the file ao put in it.
 
+Before any Git worktree removal or prune, ao reads the repository's common Git
+directory, including when called from a linked checkout. If its `worktrees` folder
+or any entry inside it is a symbolic link or Windows junction, cleanup fails and
+names the link to remove: ao prunes no worktree while it is there. The folder is
+looked up by path, so a filesystem that folds case also checks a folder named
+`Worktrees`. A non-directory entry or unreadable administration stops cleanup too. This applies to lane
+and slice cleanup and the temporary worktrees used by `ao merge-check` and
+`ao prove`; an ordinary stale worktree is still pruned. A refusal fails merge-check
+or prove, but an ordinary Git cleanup error after this check is reported on one
+line and leaves the verdict unchanged; cleanup remains best-effort. An add that
+made no worktree triggers no Git cleanup. Prove's final line says whether its
+throwaway worktree is gone, remains at the named path, or was never made (PRUNE-LINKS).
+
 ## What not to parallelise
 
 - **Contract decisions.** One architect. Two agents deciding boundaries independently

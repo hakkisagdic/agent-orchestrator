@@ -301,6 +301,49 @@ def worktree_facts(root, cfg, sizes=False):
     return out
 
 
+class WorktreeCleanupRefused(RuntimeError):
+    """Unsafe administration refuses cleanup; an ordinary Git failure remains distinct (PRUNE-LINKS)."""
+
+
+def _git_worktree_cleanup(root, *args):
+    """Git follows linked worktree administration while deleting; refuse it before every cleanup (PRUNE-LINKS)."""
+    import stat
+    try:
+        common = _git_output(root, "rev-parse", "--git-common-dir").decode(UTF8, "surrogateescape").strip()
+    except RuntimeError as exc:
+        raise WorktreeCleanupRefused(f"cannot locate the common git directory: {exc}; "
+                                    "repair it before ao prunes any worktree") from exc
+    if not common:
+        raise WorktreeCleanupRefused("cannot locate the common git directory; repair it before ao prunes any worktree")
+    common = os.path.join(root, common)
+    worktrees = os.path.join(common, "worktrees")
+    path = worktrees
+    try:
+        # Let the filesystem fold case as Git does; a name scan missed Worktrees links (PRUNE-LINKS).
+        try:
+            info = os.lstat(worktrees)
+        except FileNotFoundError:
+            info = None
+        if info is not None:
+            if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                raise WorktreeCleanupRefused(f"remove the link or junction at {path}; "
+                                            "ao prunes no worktree while it is there")
+            if not stat.S_ISDIR(info.st_mode):
+                raise WorktreeCleanupRefused(f"remove the non-directory entry at {path}; "
+                                            "ao prunes no worktree while it is there")
+            with os.scandir(worktrees) as entries:
+                for entry in entries:
+                    path = entry.path
+                    info = entry.stat(follow_symlinks=False)
+                    if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                        raise WorktreeCleanupRefused(f"remove the link or junction at {path}; "
+                                                    "ao prunes no worktree while it is there")
+    except OSError as exc:
+        raise WorktreeCleanupRefused(f"cannot read {path}: {exc}; restore access or remove the unreadable entry; "
+                                    "ao prunes no worktree while it cannot be read") from exc
+    return _git_output(root, "worktree", *args)
+
+
 def prune_worktree(root, fact, apply=False, now=None):
     """Retire one worktree that may go: archive its coordination state and branch tip, then remove both (#42).
 
@@ -325,12 +368,12 @@ def prune_worktree(root, fact, apply=False, now=None):
             _git_output(root, "update-ref", f"refs/ao/archive/{fact['branch']}-{stamp}", fact["head"])
     steps.append(f"remove the worktree {fact['path']}")
     if apply and os.path.isdir(fact["path"]):
-        _git_output(root, "worktree", "remove", "--force", fact["path"])
+        _git_worktree_cleanup(root, "remove", "--force", fact["path"])
     # Before the branch: git will not delete a branch a worktree it lists holds, and a worktree whose
     # directory someone deleted stays listed until a prune, so its branch could never go (LANE-START).
     steps.append("git worktree prune")
     if apply:
-        _git_output(root, "worktree", "prune")
+        _git_worktree_cleanup(root, "prune")
     if fact["branch"]:
         steps.append(f"delete the branch {fact['branch']}")
         if apply:

@@ -1481,7 +1481,7 @@ PROVE_BOUNDARY = "ao prove: a throwaway candidate whose whole diff adds one line
 def _prove_throwaway(cfg):
     """A one-line slice through verify, review and commit-ok in a temporary worktree; nothing lands (#85).
 
-    Returns (ok, what failed or None, what would fix it or None). The worktree's
+    Returns (ok, what failed or None, what would fix it or None, worktree path or None). The worktree's
     coordination state and review go to ~/.ao/archive/<project>/prove-<stamp>/.
     """
     import io
@@ -1491,20 +1491,23 @@ def _prove_throwaway(cfg):
     scratch = tempfile.mkdtemp(prefix="ao-prove-")
     tree = os.path.join(scratch, "tree")
     links, unlinked, heard = [], [], io.StringIO()
+    made = False
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     try:
         added = subprocess.run([A.git_binary(), "worktree", "add", "--detach", "--quiet", tree, "HEAD"], cwd=root,
                                capture_output=True)
+        made = added.returncode == 0 or os.path.lexists(os.path.join(tree, ".git"))
         if added.returncode:
-            return False, "a temporary worktree could not be made: " + added.stderr.decode(UTF8, "replace").strip(), \
-                "a repository with at least one commit"
-        # A step that raises is a check that failed, said with what would fix it: it ended `ao prove` in a
-        # traceback (PROVE-2).
-        try:
-            return _prove_steps(cfg, root, tree, stamp, links, unlinked, heard)
-        except Exception as exc:
-            return False, f"the throwaway slice stopped: {type(exc).__name__}: {' '.join(str(exc).split())}", \
-                "run the step it names by hand in this checkout, or `ao doctor`"
+            result = (False, "a temporary worktree could not be made: "
+                      + added.stderr.decode(UTF8, "replace").strip(), "a repository with at least one commit")
+        else:
+            # A step that raises is a check that failed, said with what would fix it: it ended `ao prove` in a
+            # traceback (PROVE-2).
+            try:
+                result = _prove_steps(cfg, root, tree, stamp, links, unlinked, heard)
+            except Exception as exc:
+                result = (False, f"the throwaway slice stopped: {type(exc).__name__}: {' '.join(str(exc).split())}",
+                          "run the step it names by hand in this checkout, or `ao doctor`")
     finally:
         for link in links:
             try:
@@ -1516,9 +1519,23 @@ def _prove_throwaway(cfg):
             if os.path.isdir(os.path.join(tree, part)):
                 shutil.copytree(os.path.join(tree, part), os.path.join(archive, part), symlinks=True,
                                 dirs_exist_ok=True)
-        subprocess.run([A.git_binary(), "worktree", "remove", "--force", tree], cwd=root, capture_output=True)
-        shutil.rmtree(scratch, ignore_errors=True)
-        subprocess.run([A.git_binary(), "worktree", "prune"], cwd=root, capture_output=True)
+        try:
+            cleanup_steps = (("remove", "--force", tree), ("prune",)) if made else ()
+            if not made:
+                shutil.rmtree(scratch, ignore_errors=True)
+            for cleanup_args in cleanup_steps:
+                try:
+                    A._git_worktree_cleanup(root, *cleanup_args)
+                except A.WorktreeCleanupRefused:
+                    raise
+                except RuntimeError as exc:
+                    print(f"{C['yellow']}worktree cleanup incomplete{C['reset']}: "
+                          f"{' '.join(str(exc).split())}; inspect the worktree administration and retry cleanup")
+                if cleanup_args[0] == "remove":
+                    shutil.rmtree(scratch, ignore_errors=True)
+        except A.WorktreeCleanupRefused as exc:
+            result = (False, f"worktree cleanup failed: {exc}", "repair the worktree administration and retry")
+    return (*result, tree if made else None)
 
 
 def _prove_steps(cfg, root, tree, stamp, links, unlinked, heard):
@@ -1582,6 +1599,7 @@ def cmd_prove(cfg, args):
     """
     root = cfg["root"]
     results = []
+    worktree = None
     probe = _hook_execution_probe(_ao_hook_inventory(root))
     enrollment = _project_enrollment(root)
     # A hook whose /bin/sh finds no ao is not fixed by installing it again (SAFE-REMOVE), and a project no
@@ -1614,15 +1632,21 @@ def cmd_prove(cfg, args):
     elif not reviewer_ok:
         results.append(("a throwaway slice lands end to end", False, "not tried: no reviewer can review"))
     else:
-        ok, failed, fix = _prove_throwaway(cfg)
+        ok, failed, fix, worktree = _prove_throwaway(cfg)
         results.append(("a throwaway slice lands end to end", ok, None if ok else f"{failed} — {fix}"))
     for claim, ok, fix in results:
         print(f"  {C['green'] + 'proven' if ok else C['red'] + 'NOT PROVEN'}{C['reset']}  {claim}")
         if fix:
             print(f"      {fix}")
     proven = all(ok for _, ok, _ in results)
+    if worktree is None:
+        cleanup = "no throwaway worktree was made"
+    elif os.path.lexists(worktree):
+        cleanup = f"the throwaway worktree remains at {worktree}; inspect it before retrying cleanup"
+    else:
+        cleanup = "the throwaway worktree is gone"
     print(f"\n{C['b']}{'PROVEN' if proven else 'NOT PROVEN'}{C['reset']}  "
-          f"{C['dim']}nothing was committed; the throwaway worktree is gone{C['reset']}")
+          f"{C['dim']}nothing was committed; {cleanup}{C['reset']}")
     return 0 if proven else 1
 
 

@@ -16,7 +16,7 @@ def test_a_step_that_raises_is_a_check_that_failed_with_what_would_fix_it(projec
 
     monkeypatch.setattr(cli, "cmd_verify", broken)
 
-    ok, failed, fix = cli._prove_throwaway(project)
+    ok, failed, fix, _ = cli._prove_throwaway(project)
 
     assert not ok and failed == "the throwaway slice stopped: RuntimeError: the gates file is not JSON" and fix
 
@@ -32,6 +32,6 @@ def test_a_path_that_could_not_be_linked_is_named_when_the_gates_fail(project, m
     monkeypatch.setattr(cli.os, "symlink", refuse)
     monkeypatch.setattr(cli, "cmd_verify", lambda cfg, args: 1)
 
-    ok, failed, _ = cli._prove_throwaway(project)
+    ok, failed, _, _ = cli._prove_throwaway(project)
 
     assert not ok and failed.endswith("; merge.link_paths could not link shared (links are not allowed here)")

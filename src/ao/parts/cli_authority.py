@@ -377,9 +377,11 @@ def cmd_merge_check(cfg, args):
     scratch = tempfile.mkdtemp(prefix="ao-merge-check-")
     result_dir = os.path.join(scratch, "result")
     links, results, ok = [], [], True
+    made = False
     try:
         added = subprocess.run([A.git_binary(), "worktree", "add", "--detach", "--quiet", result_dir, into],
                                cwd=root, capture_output=True)
+        made = added.returncode == 0 or os.path.lexists(os.path.join(result_dir, ".git"))
         checked_out = added.returncode == 0 and subprocess.run(
             [A.git_binary(), "read-tree", "-u", "--reset", tree], cwd=result_dir, capture_output=True).returncode == 0
         if not checked_out:
@@ -416,10 +418,25 @@ def cmd_merge_check(cfg, args):
                 os.unlink(link)
             except OSError:
                 pass
-        subprocess.run([A.git_binary(), "worktree", "remove", "--force", result_dir], cwd=root, capture_output=True)
-        shutil.rmtree(scratch, ignore_errors=True)
-        subprocess.run([A.git_binary(), "worktree", "prune"], cwd=root, capture_output=True)
-        release()
+        try:
+            cleanup_steps = (("remove", "--force", result_dir), ("prune",)) if made else ()
+            if not made:
+                shutil.rmtree(scratch, ignore_errors=True)
+            for cleanup_args in cleanup_steps:
+                try:
+                    A._git_worktree_cleanup(root, *cleanup_args)
+                except A.WorktreeCleanupRefused:
+                    raise
+                except RuntimeError as exc:
+                    print(f"{C['yellow']}worktree cleanup incomplete{C['reset']}: "
+                          f"{' '.join(str(exc).split())}; inspect the worktree administration and retry cleanup")
+                if cleanup_args[0] == "remove":
+                    shutil.rmtree(scratch, ignore_errors=True)
+        except A.WorktreeCleanupRefused as exc:
+            ok = False
+            print(f"{C['red']}worktree cleanup failed{C['reset']}: {exc}")
+        finally:
+            release()
     row.update(passed=ok, gates=results, conflict=None)
     A.record_merge_check(root, row)
     print(f"\n{C['b']}{'PASS' if ok else 'FAIL'}{C['reset']}  recorded as {row['id']}; it vouches for a merge of "

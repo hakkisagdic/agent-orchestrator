@@ -292,7 +292,10 @@ def _drop_lane_branch(root, branch, base):
             if attempt:
                 return f"the branch {branch} stays ({exc}); `git branch -D {branch}` removes it"
         # A worktree git gave up on may still be listed, and git keeps a listed worktree's branch.
-        git_text(root, "worktree", "prune")
+        try:
+            _git_worktree_cleanup(root, "prune")
+        except RuntimeError as exc:
+            return f"the branch {branch} stays: {exc}"
 
 
 def lane_harness_hold(root):
