@@ -159,8 +159,11 @@ cycle. `ao doctor` names a store that is over its bound anyway. What a trim take
 window: each notice is folded first into `.ao/ledger/notice-times.json`, when each key was last
 recorded and sent, which keeps a week and at most 500 keys ([alarms](alarms.md)).
 
-Evidence is never trimmed. A chained ledger past its bound is **sealed**: `ao prune --evidence
---yes` moves all but its newest `retention.evidence_keep` rows whole into `.ao/ledger/sealed/`,
+Evidence is never trimmed. `ao doctor` names authority and verification ledgers whose live rows
+exceed `retention.evidence_keep`, with their row count and the command to seal them. Archived rows
+do not count against that bound. Plans are kept whole and never sealed.
+The authority and verification ledgers past their bound are **sealed**: `ao prune --evidence
+--yes` moves all but their newest `retention.evidence_keep` rows whole into `.ao/ledger/sealed/`,
 and a seal records how many rows it retired and the digest of the last of them. That digest is
 the genesis the first kept row links to, and the same seal is recorded outside the repository
 with the committed length, so a seal written by hand, or a sealed prefix removed, is refused

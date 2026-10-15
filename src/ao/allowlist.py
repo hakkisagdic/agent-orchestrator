@@ -37,6 +37,7 @@ FORBIDDEN = (
     ("records harness configuration as seen", "ao harness seen --by p --digest d"),
     ("records harness configuration as seen", "ao harness seen --by p --ask"),
     ("removes the hooks", "ao hooks uninstall"),
+    ("pages a person", "ao doctor --check --notify"),
     ("runs any command", "ao lock -- sh -c x"),
     ("runs arbitrary code", "python3 -c x"),
     ("runs arbitrary code", "python -c x"),
@@ -90,6 +91,7 @@ PERSON_ACTS = (
     ("switches the inventory review off", ("ao", "features", "off", "inventory_review"), ()),
     ("opens a push window", ("ao", "push", "allow"), ()),
     ("removes the hooks", ("ao", "hooks", "uninstall"), ()),
+    ("pages a person", ("ao", "doctor"), ("--check", "--notify")),
     ("records harness configuration as seen", ("ao", "harness", "seen"), ("--digest",)),
     ("records harness configuration as seen", ("ao", "harness", "seen"), ("--ask",)),
 )
@@ -346,6 +348,11 @@ def problems(argv, options=None, role=None):
         # (SETTINGS-2).
         for rule in granted:
             command = next((c for c in settings_commands() if admits(rule, c)), None) if rule not in named else None
+            # Exact values and unsets also change the loop's settings (TRIAGE-1-LOW).
+            if rule not in named and command is None:
+                command = next((" ".join(words) + " ..." for words in
+                                (("ao", "config", "set"), ("ao", "config", "unset"))
+                                if admits_act(rule, words)), None)
             if command:
                 found.append(("changes a setting that governs its own work", command, rule))
                 named.add(rule)

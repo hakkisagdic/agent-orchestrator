@@ -705,6 +705,7 @@ def cmd_prune(cfg, args):
                 sealed = seal_chained_jsonl(os.path.join(root, rel), A.VERIFICATION_CHAIN, keep, legacy_prefix=True)
             print(f"  {C['dim']}keep  {name:<14} evidence is never pruned; "
                   + (f"sealed through row {sealed['retired']} into .ao/ledger/sealed/" if sealed
+                     else "plans are kept whole; never sealed" if name == "plans"
                      else f"rows past the newest {keep} are sealed, not dropped") + f"{C['reset']}")
             continue
         if kind == "evidence" and not args.evidence:
@@ -1707,14 +1708,29 @@ def _doctor_consistency(cfg, repair=False):
 
 
 def _store_bound_lines(cfg):
-    """Observation stores past their bound (#50): the watchdog holds them each cycle, so one here means it is not."""
+    """Name row bounds separately from byte bounds, with the action that holds each (TRIAGE-1-LOW)."""
     from .watchdog import STATE_DIR
-    over = A.stores_over_bound(cfg["root"], cfg, STATE_DIR)
+    from .storage import LedgerCorruption
+    try:
+        over = A.stores_over_bound(cfg["root"], cfg, STATE_DIR)
+    except (OSError, LedgerCorruption) as exc:
+        return [f"{'stores':<16}{C['yellow']}cannot measure evidence retention{C['reset']}: "
+                f"{' '.join(str(exc).split())}; restore the ledger from a known-good backup and run `ao doctor` again"]
     if not over:
         return []
-    return [f"{'stores':<16}{C['yellow']}{len(over)} over their bound{C['reset']}  "
-            f"{C['dim']}{', '.join(f'{os.path.basename(p)} {size // 1024}KB/{limit // 1024}KB' for p, size, limit in over)}"
-            f" — the watchdog trims them each cycle; is it running?{C['reset']}"]
+    lines = []
+    for unit in ("bytes", "rows"):
+        stores = [(path, size, limit) for path, size, limit, kind in over if kind == unit]
+        if not stores:
+            continue
+        detail = ", ".join(f"{os.path.basename(path)} " +
+                           (f"{size}/{limit} rows" if unit == "rows" else f"{size // 1024}KB/{limit // 1024}KB")
+                           for path, size, limit in stores)
+        action = ("run `ao prune --evidence --yes` to seal older rows" if unit == "rows" else
+                  "the watchdog trims them each cycle; is it running?")
+        lines.append(f"{'stores':<16}{C['yellow']}{len(stores)} over their bound{C['reset']}  "
+                     f"{C['dim']}{detail} — {action}{C['reset']}")
+    return lines
 
 
 def cmd_backup(cfg, args):

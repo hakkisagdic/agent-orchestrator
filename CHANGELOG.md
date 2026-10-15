@@ -30,6 +30,9 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- Reviewer documentation distinguishes closed state metadata from valid stdout or stderr answers retained after credential scanning ([roles](docs/roles.md)) (TRIAGE-1-LOW)
+- `ao doctor` names authority and verification ledgers past their live-row bound, and `ao prune` accurately describes plans as kept whole and never sealed ([ledger](docs/ledger.md)) (TRIAGE-1-LOW)
+- Machine role names no longer appear as unknown settings, while unknown keys in those groups are still named ([configuration](docs/configuration.md)) (TRIAGE-1-LOW)
 - A stand-in's answer is recorded as the slice its request was made for, not the one running when a person collects it, and `ao remove` takes a project's review requests with it ([pipeline](docs/pipeline.md), [privacy](docs/privacy.md), REVIEW-PATH-HIGHS).
 - Reviewers are told in both languages that a missing candidate folder means unpacking failed, while an empty one means everything was withheld ([adapters](docs/adapters.md)) (TRIAGE-4-REST)
 - Content imports refuse case aliases with competing owners and preserve hand edits by checking the manifest's recorded digest before re-import ([upstream](docs/upstream.md)) (TRIAGE-4-REST)
@@ -53,6 +56,8 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Security
 
+- The grants audit names agent rules admitting `ao doctor --check --notify`, including broad doctor grants and reversed flag order ([alarms](docs/alarms.md)) (TRIAGE-1-LOW)
+- The implementer grants audit names exact-value and unset settings commands, including machine settings mutations ([configuration](docs/configuration.md)) (TRIAGE-1-LOW)
 - A borrowed Kiro agent whose `prompt` names a file outside the project loads none: the prompt is taken out and named, as an outside resource is ([upstream](docs/upstream.md), REVIEW-PATH-HIGHS).
 - An ACP reviewer only reads: `review.transport` is part of the reviewer a person accepts with `ao harness seen` and is judged as the review read it, only an ACP command measured to hold a reviewer to reads answers (qoder's reviewer is spawned with its read-only flags), a read or a search is let run only inside the folder the review runs in, and any write the agent reports voids its answer, whatever it ended as ([adapters](docs/adapters.md), [safety](docs/safety.md), REVIEW-PATH-HIGHS).
 - What a person approves is bound where the implementer cannot rewrite it: a stand-in review request - its binding and the text a person carries - is kept in `~/.ao/review-requests/<project>/` and its answer is recorded only for the bytes it was made for, where one in `.ao/review-requests/` could be turned to other bytes or written whole; and the digest `ao person-review` shows covers the slice, boundary and criteria with the diff ([standin](docs/standin.md), [roles](docs/roles.md), REVIEW-PATH-HIGHS).

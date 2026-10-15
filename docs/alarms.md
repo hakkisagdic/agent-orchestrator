@@ -250,7 +250,10 @@ holds it, `~/.ao/pings.json`.
 *In ao since slice LEADS-SECRETS: `ao pings` printed the whole ping URL. `tests/test_leads_secrets.py`.*
 
 The doctor job, `ao doctor --check --notify` every fifteen minutes, is the watchdog's
-backstop, and it pages nothing twice:
+backstop. `--notify` is for the person and the scheduler: it can page a person. The grants audit
+names agent rules that admit it with `--check`, including `Bash(ao doctor:*)`; a plain
+`ao doctor --check` remains quiet. This is a grant audit, not caller authentication.
+The job pages nothing twice:
 
 - **One alarm whoever sees it.** What the watchdog raises itself - credits that ran out, an
   architect wake that failed - the doctor raises under the watchdog's own alarm, at its

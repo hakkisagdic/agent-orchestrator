@@ -628,7 +628,7 @@ def bound_observation_logs(root, state_dir=None, busy=()):
 
 
 def stores_over_bound(root, cfg, state_dir=None):
-    """(path, bytes, bound) for each observation store over its bound, for `ao doctor` (#50)."""
+    """(path, amount, bound, unit) for observations and sealable evidence past their bounds (TRIAGE-1-LOW)."""
     limit = settings.get(cfg, "retention.observation_kb") * 1024
     out = []
     for path in observation_stores(root, state_dir):
@@ -637,7 +637,15 @@ def stores_over_bound(root, cfg, state_dir=None):
         except OSError:
             continue
         if size > limit * 1.25:
-            out.append((path, size, limit))
+            out.append((path, size, limit, "bytes"))
+    from .storage import read_chained_jsonl
+    keep = settings.get(cfg, "retention.evidence_keep")
+    for name, chain, legacy in (("authority", AUTHORITY_CHAIN, False),
+                                ("verifications", VERIFICATION_CHAIN, True)):
+        path = os.path.join(root, ".ao", "ledger", name + ".jsonl")
+        count = len(read_chained_jsonl(path, chain, legacy_prefix=legacy))
+        if count > keep:
+            out.append((path, count, keep, "rows"))
     return out
 
 

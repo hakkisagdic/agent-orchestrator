@@ -402,7 +402,10 @@ implementer's binding **or bound model family** is ineligible and is never
 spawned, but for the opted-in same-family tier. Family comes only from the bound model declaration, so inline family
 fields cannot spoof independence. Runtime-unavailable eligible reviewers still
 advance in order; malformed substantive output is `INVALID` and does not trigger
-approval shopping. A schema-valid reviewer response is the review artifact. Every
+approval shopping. A schema-valid reviewer response is kept in the review artifact after the
+[credential scan](safety.md#7b-what-ao-writes-is-scanned-before-it-is-written): stdout is the answer,
+or stderr when stdout is empty for a plain subprocess reviewer. The answer's prose is retained,
+with credential-shaped strings redacted; reviewer state carries only closed metadata, not that prose. Every
 unsuccessful response is terminal-only: repository review files, reviewer state,
 notices, and strict evidence persist only AO-generated closed metadata such as kind,
 exit code, binary, timeout, and attempt position. AO does not derive reset hints or

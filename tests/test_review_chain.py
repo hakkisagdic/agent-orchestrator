@@ -1,3 +1,4 @@
+"""Reviewer failures keep closed state; valid stderr answers are scanned (TRIAGE-1-LOW)."""
 import json
 import os
 import subprocess
@@ -702,6 +703,27 @@ def test_unsuccessful_reviewer_output_is_terminal_only_not_repository_state(
             if os.path.islink(path):
                 continue
             assert encoded not in open(path, "rb").read(), path
+
+
+def test_valid_stderr_answer_is_kept_after_credential_scan(project, tmp_path):
+    root = project["root"]
+    _repo_with_change(root)
+    secret = "s" + "k-ant-api03-" + "Q7" * 14
+    answer = "VERDICT: APPROVED\nBLOCKER: 0\nHIGH: 0\nMEDIUM: 0\nLOW: 0\nEchoed key: " + secret
+    reviewer = program(tmp_path / "bin", "stderr-reviewer",
+                       "import sys\nprint(" + repr(answer) + ", file=sys.stderr)\n")
+    cfg = dict(project, reviewer={"id": "r1", "family": "x", "argv": [reviewer, "{prompt}"]})
+
+    assert cli.cmd_review(cfg, _args()) == 0
+
+    [(name, verdict)] = A.reviews(root, "semantic-review")
+    assert verdict == "APPROVED"
+    with open(os.path.join(root, "semantic-review", name), encoding="utf-8") as fh:
+        body = fh.read()
+    assert "Echoed key: [redacted:anthropic-key]" in body
+    assert secret not in body
+    state = json.dumps(A.reviewer_state(root), sort_keys=True)
+    assert secret not in state and "Echoed key" not in state
 
 
 def test_timeout_drain_remains_bounded_after_reviewer_kill(project, monkeypatch):

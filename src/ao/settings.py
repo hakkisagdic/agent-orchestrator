@@ -461,9 +461,12 @@ def problems(cfg):
         if spec.scope == "machine" and lookup(cfg or {}, key) is not _MISSING:
             out.append((key, f"{key} is set in the project, but it governs the whole machine and is read "
                              f"only from {machine_path()}: `ao config set {key} … --machine`"))
-    groups = {key.split(".")[0] for key in SETTINGS if "." in key} - {"implementer", "architect"}
+    groups = {key.split(".")[0] for key in SETTINGS if "." in key}
     for source, document in (("project", cfg or {}), ("machine", machine)):
         for group in sorted(groups):
+            # Project roles also hold argv and adapter fields; machine roles are settings (TRIAGE-1-LOW).
+            if source == "project" and group in ("implementer", "architect"):
+                continue
             section = document.get(group)
             if not isinstance(section, dict):
                 continue

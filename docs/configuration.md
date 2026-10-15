@@ -185,7 +185,10 @@ files can do - or into the machine's settings is not, and `ao doctor` names it. 
 means is in [review tiers](roles.md#review-tiers); `ao init --review-tier same-family --by <name>`
 opts a new project in.
 
-An implementer whose tool grant admits `ao config set` could lengthen or shorten what
-governs its own review, and `ao doctor` names such a grant. Credentials - the e-mail relay
+An implementer whose tool grant admits `ao config set` or `ao config unset` could lengthen or shorten what
+governs its own review, and `ao doctor` names such a grant even when it fixes a value or includes
+`--machine`. The machine's `implementer` and `architect` objects are settings groups: their `name`
+keys are recognized, and unknown keys are named. Project role objects also hold adapter and command
+fields, which are not settings. Credentials - the e-mail relay
 token, the Telegram bot token - are not settings; they stay in their own files under
 `~/.ao`, outside any repository.
