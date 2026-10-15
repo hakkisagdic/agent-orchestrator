@@ -69,8 +69,10 @@ def test_a_git_query_past_its_timeout_is_stopped_with_what_it_started(tmp_path, 
     monkeypatch.setattr(A, "git_binary", lambda: git)
 
     started = time.time()
+    # Long enough for the stand-in to start its child on a busy machine: at 2 seconds the landing suite, run beside
+    # reviewers and other suites, timed it out before its child was born, and the test failed (TEST-TIMING).
     with pytest.raises(cli._HookResolutionError, match="git query failed"):
-        cli._hook_git(str(tmp_path), "hook", "run", "pre-commit", timeout=2)
+        cli._hook_git(str(tmp_path), "hook", "run", "pre-commit", timeout=10)
 
     assert not _still_runs(_child_of(pidfile))
     assert time.time() - started < 30

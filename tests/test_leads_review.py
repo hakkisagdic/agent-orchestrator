@@ -507,8 +507,9 @@ def test_a_version_probe_that_does_not_answer_is_stopped_with_what_it_started(pr
                     f"open({str(marker)!r}, 'w').write(str(child.pid))\n"
                     "time.sleep(60)\n")
     try:
-        # Long enough for the probe to start its child on a busy machine; it never answers.
-        assert cli._reviewer_binary_version(project["root"], probe, timeout=6) == ""
+        # Long enough for the probe to start its child on a busy machine; it never answers. Six seconds were not, with
+        # the landing suite run beside reviewers and other suites (TEST-TIMING).
+        assert cli._reviewer_binary_version(project["root"], probe, timeout=15) == ""
 
         assert marker.exists(), "the probe had not started its child when its timeout came"
         child = int(marker.read_text())
