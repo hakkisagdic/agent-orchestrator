@@ -184,7 +184,7 @@ Nothing is skipped silently, and nothing is lost when the run degrades:
   still out of quota stays open;
 - the credit burn rate is sampled every half hour; when it says the plan runs
   out before it resets, the alarm is red, days ahead;
-- `ao pings setup --url …` gives an external service (healthchecks.io) a
+- `ao pings setup` gives an external service (healthchecks.io) a
   heartbeat from the watchdog and the doctor job — when both die, that service
   e-mails you, which nothing on the dead machine can;
 - `.ao-project` is the tracked enrollment boundary: only exact

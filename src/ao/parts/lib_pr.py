@@ -229,21 +229,6 @@ def pr_mail_body(pr, fact, shown):
     return "\n".join(lines) + "\n"
 
 
-def _unwritten_mail_name(root, cfg, stem):
-    """`<stem>.md`, or `<stem>-2.md` and on when a message of that name was ever written.
-
-    A mail's name is its id, and the message store takes an id in once (#80): a fact that clears
-    and returns on the same head within one minute would otherwise be written under the name its
-    first mail had, and never reach the store.
-    """
-    box = os.path.join(root, cfg.get("mailbox", "agent-mail"))
-    written = {row.get("id") for row in mail_log(root, 5000) if row.get("event") == "written"}
-    name, n = f"{stem}.md", 2
-    while name in written or os.path.exists(os.path.join(box, name)):
-        name, n = f"{stem}-{n}.md", n + 1
-    return name
-
-
 def write_pr_mail(root, cfg, pr, fact, shown):
     """Mail one new fact to whoever holds the implementer role, through the writer every message ao writes takes.
 
@@ -253,7 +238,7 @@ def write_pr_mail(root, cfg, pr, fact, shown):
     implementer, _ = mail_names(cfg)
     to, head = safe_slug(implementer, "implementer"), pr["headRefOid"]
     stem = f"{time.strftime('%Y%m%d-%H%M')}-pr-watch-to-{to}-PR-{pr['number']}-{fact}-{head[:12]}"
-    return write_mail(root, cfg, _unwritten_mail_name(root, cfg, stem), pr_mail_body(pr, fact, shown),
+    return write_mail(root, cfg, f"{stem}.md", pr_mail_body(pr, fact, shown),
                       {"kind": "pr", "class": "needs-read", "from": "pr-watch", "to": to,
                        "pr": pr["number"], "condition": fact, "head": head})
 

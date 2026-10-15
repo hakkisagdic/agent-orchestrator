@@ -220,7 +220,9 @@ def test_a_file_ao_keeps_private_is_said_to_be_as_private_as_its_folder_on_windo
     saved = SimpleNamespace(action="setup", provider=None, token="t", to="me@example.com")
     assert _as_windows(monkeypatch, lambda: cli.cmd_email(project, saved)) == 0
     assert f"saved {email.CONF} ({SAVED_ON_WINDOWS}) → me@example.com" in _plain(capsys)
-    pinged = SimpleNamespace(action="setup", url="https://hc-ping.com/x", all=False)
+    # Named by its variable: a ping URL on the command line is refused (SECRETS-2).
+    monkeypatch.setenv("AO_TEST_PING_URL", "https://hc-ping.com/x")
+    pinged = SimpleNamespace(action="setup", url=None, url_env="AO_TEST_PING_URL", all=False)
     assert _as_windows(monkeypatch, lambda: cli.cmd_pings(project, pinged)) == 0
     assert f"saved {A.pings_path()} ({SAVED_ON_WINDOWS})" in _plain(capsys)
 

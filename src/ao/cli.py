@@ -564,8 +564,12 @@ def build_parser(root=None):
     cu.set_defaults(fn=cmd_catchup)
     pg = sub.add_parser("pings", help="dead man's switch: external pings that alarm when they stop")
     pg.add_argument("action", choices=["status", "setup", "test"], nargs="?", default="status")
-    pg.add_argument("--url")
-    pg.add_argument("--all", action="store_true")
+    # Kept so a script's `--url VALUE` is refused in ao's words: argparse's would quote the URL back (SECRETS-2).
+    pg.add_argument("--url", help=argparse.SUPPRESS)
+    pg.add_argument("--url-env", metavar="NAME",
+                    help="setup: the environment variable holding the ping URL, where no terminal is attached to ask "
+                         "for it at")
+    pg.add_argument("--all", action="store_true", help="setup: the URL of every project that has none of its own")
     pg.set_defaults(fn=cmd_pings)
     hk = sub.add_parser(
         "hooks",

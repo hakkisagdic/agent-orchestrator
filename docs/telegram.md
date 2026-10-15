@@ -38,6 +38,9 @@ private as `~/.ao`, and `ao telegram setup` says so ([windows.md](windows.md)).
 Where no terminal is attached to ask at, nothing is asked: a script names the variable that
 holds the token, and each chat, `ao telegram setup --token-env NAME --chat ID`.
 
+A token of another bot drops the poller's place in the messages, `~/.ao/telegram-offset`, which
+counts the old bot's updates; the same token keeps it.
+
 The chat allowlist is not optional. An inbound channel without one is an authority
 surface open to whoever finds the bot.
 
@@ -55,6 +58,11 @@ is not the shape @BotFather gives is refused before it is put into a request. `a
 `~/Library/LaunchAgents` that is not there and asked for launchctl, uninstall said it had removed the
 job, and status sent the person to install; they refuse wherever there is no launchd.
 `tests/test_leads_secrets.py`.*
+
+*In ao since slice SECRETS-2: a new token kept the old bot's offset, and the poller asked the new bot
+for its updates from the old bot's number on. Telegram takes every update below the number asked from
+as read, so a person's first messages to the new bot, numbered lower, were dropped unread.
+`tests/test_secrets_2.py`.*
 
 ## Inbound: everything you type is urgent
 

@@ -1164,9 +1164,8 @@ def cmd_handoff(cfg, args):
     text = "\n".join(lines)
     # Named in the project's language; a note named in either is listed and read the same (LANGUAGE-FILES).
     kind = language.marker(cfg, "handoff-kind")
-    # A name no mail had before: the minute and the roles were all of it, so a second handoff in the same minute was
-    # written over the first, and a message store, which takes an id in once, never took the second (LEADS-SECRETS).
-    name = A._unwritten_mail_name(root, cfg, f"{datetime.now():%Y%m%d-%H%M}-{A.mail_names(cfg)[1]}-to-anyone-{kind}")
+    # The writer allocates the final name, including when another handoff takes it meanwhile (SECRETS-2).
+    name = f"{datetime.now():%Y%m%d-%H%M}-{A.mail_names(cfg)[1]}-to-anyone-{kind}.md"
     # As every mail ao writes: an envelope with its roles, scanned for credentials, mirrored in the mail
     # ledger. The note was written past write_mail, and so were none of those (ROLE-TABLE-2).
     name = A.write_mail(root, cfg, name, text + "\n",

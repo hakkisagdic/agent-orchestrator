@@ -115,6 +115,18 @@ and records none of them as seen, under any AO_ROLE, as `ao_status` records none
 that document - a status bar, a scheduled job - and a message recorded as seen by a reader who never
 saw it would never climb the ladder.*
 
+Every message ao writes is created under a name no file or recorded message has: a second message of the same minute and
+subject is written beside the first, `-2` after its name and on, never over it, and the name it was
+written under is the one ao prints, records and puts in its envelope. A link left at a message's name
+is not written through. Acknowledging a message removes its view, but never frees its ID.
+
+*Before TRIAGE-2-MEDIUM, a message was written over whatever stood at its name, so a second
+`ao note`, `ao mail send`, `ao_report` or hold release of the same minute and subject replaced the
+first, two writers that each found a name free both wrote to it, and a link left at the name was
+written through. SECRETS-2 keeps that writer as the sole allocator, including for handoffs and
+pull-request mail, and checks sends after acknowledgement and races for a numbered name.
+`tests/test_secrets_2.py`.*
+
 With `mail.store` set to `append-only`, nothing is deleted to prove it was handled. Each message
 is taken into `.ao/mail/store/` and a chained `.ao/ledger/mail-store.jsonl` row the first time the
 watchdog or a mail command sees it; `ao mail ack` and `ao_ack` append a `handled` record naming who

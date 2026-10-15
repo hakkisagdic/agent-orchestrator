@@ -1723,13 +1723,7 @@ def cmd_pings(cfg, args):
     """Dead man's switch: an external service that alarms when the pings stop."""
     root = cfg["root"]
     if args.action == "setup":
-        if not args.url:
-            print("1. Create a check at https://healthchecks.io (free) with a 15-minute period and a 10-minute grace.\n"
-                  "2. Copy its ping URL, then:  ao pings setup --url https://hc-ping.com/<uuid>  [--all]\n"
-                  "The watchdog and the doctor job ping it every cycle; when both die, healthchecks e-mails you.")
-            return 0
-        A.set_ping_url(root, args.url, all_projects=args.all)
-        print(f"{C['green']}saved{C['reset']} {A.pings_path()} ({_private_mode()})"); return 0
+        return _pings_setup(root, args)
     url = A.ping_url(root)
     if args.action == "test":
         ok = A.ping(root)
@@ -1740,6 +1734,76 @@ def cmd_pings(cfg, args):
         return 0
     print(f"ping url: {_ping_url_shown(url)}  {C['dim']}(the rest is the secret, in {A.pings_path()}){C['reset']}")
     return 0
+
+
+def _pings_setup(root, args):
+    """`ao pings setup`: its steps, then the ping URL asked at the terminal and not shown, or read from the variable a
+    script names.
+
+    The steps had a person type the URL on a command line, `ao pings setup --url https://hc-ping.com/<uuid>`: the
+    shell's history and the process list kept it, and whoever reads the check's UUID can ping it, so a dead watchdog
+    looks alive. ao asks for it now as `ao telegram setup` asks for the bot token (LEADS-SECRETS) and `ao email setup`
+    for an account's password (EMAIL-SETUP-PROMPT); neither ever took its secret on a command line, and a URL given
+    with --url is refused unsaved (SECRETS-2).
+    """
+    url_env = getattr(args, "url_env", None)
+    if getattr(args, "url", None) is not None:
+        print(f"{C['red']}not saved{C['reset']}: a ping URL on a command line stays in the shell's history and the "
+              "process list, where whoever reads it can ping the check; run ao pings setup to paste it unseen, or "
+              "name the variable that holds it with --url-env NAME")
+        return 2
+    if url_env:
+        # Read once from the environment, for a script.
+        url = os.environ.get(url_env)
+        if not url:
+            print(f"{C['red']}not saved{C['reset']}: ${url_env} is {'empty' if url == '' else 'not set'}")
+            return 2
+    else:
+        print("1. Create a check at https://healthchecks.io (free) with a 15-minute period and a 10-minute grace.\n"
+              "2. Copy its ping URL and paste it when ao asks. It is not shown: whoever has the check's UUID can ping\n"
+              "   it, so no command line or shell history holds it. With --all it is the URL of every project that\n"
+              "   has none of its own.\n"
+              "The watchdog and the doctor job ping it every cycle; when both die, healthchecks e-mails you.\n")
+        if not sys.stdin.isatty():
+            print(f"{C['red']}not saved{C['reset']}: the ping URL is asked at a terminal, and none is attached; run "
+                  "ao pings setup in a terminal of yours, or name the variable that holds it with --url-env NAME")
+            return 2
+        url = _hidden_input("ping URL (not shown): ")
+        if url is None:
+            print(f"{C['red']}not saved{C['reset']}: this terminal cannot hide what is typed, and a ping URL typed "
+                  "here would stand in its scrollback; --url-env names a variable that holds it")
+            return 2
+    url = url.strip()
+    if not url:
+        print(f"{C['red']}not saved{C['reset']}: no ping URL was given"); return 2
+    if not _pingable(url):
+        # Said without the value: what was pasted unseen may be another secret.
+        print(f"{C['red']}not saved{C['reset']}: that is no ping URL; healthchecks gives one as "
+              "https://hc-ping.com/<uuid>")
+        return 2
+    every = bool(getattr(args, "all", False))
+    A.set_ping_url(root, url, all_projects=every)
+    print(f"{C['green']}saved{C['reset']} {A.pings_path()} ({_private_mode()}): "
+          f"{'every project with no URL of its own' if every else 'this project'} pings {_ping_url_shown(url)}")
+    print(f"now: {C['b']}ao pings test{C['reset']}")
+    return 0
+
+
+def _pingable(url):
+    """Whether a URL is one the watchdog's ping can request: http or https, a host, and no space or control character.
+
+    It is pasted where it is not shown, so a person cannot see they pasted something else, and the ping hands it to
+    urllib, which opens a file:// address as readily (SECRETS-2).
+    """
+    from urllib.parse import urlsplit
+    if any(ch.isspace() or not ch.isprintable() for ch in url):
+        return False
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname and parts.hostname + (f":{parts.port}" if parts.port else "")
+    except ValueError:                                   # a URL urllib cannot read, a port that is no number among them
+        return False
+    return parts.scheme in ("http", "https") and bool(host)
 
 
 def _ping_url_shown(url):

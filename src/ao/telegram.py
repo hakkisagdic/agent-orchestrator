@@ -69,10 +69,25 @@ def save(token, chats):
     token between the two, and the shell's history kept the line that held it. ao asks for the token now and
     writes the file itself, as ~/.ao/email.json is written: 0600 from its creation, in place of the old one whole
     (HUNT-LEADS-SEC, LEADS-SECRETS).
+
+    A token of another bot drops the poller's place in the messages, ~/.ao/telegram-offset, which counts the old
+    bot's updates: kept, it asked the new bot for its updates from that number on, and Telegram takes every update
+    below the number asked from as read, so the messages a person sent the new bot, numbered lower, were dropped
+    unread. The same token keeps its place, or what was read since its last confirmation is read again (SECRETS-2).
     """
     from ao.storage import replace_file_durably
+    try:
+        with open(CONF, encoding=UTF8) as fh:
+            saved = json.load(fh)
+    except (OSError, ValueError):
+        saved = None
     data = (json.dumps({"token": token, "chats": [str(chat) for chat in chats]}, indent=1) + "\n").encode(UTF8)
     replace_file_durably(CONF, data, mode=0o600)
+    if not isinstance(saved, dict) or saved.get("token") != token:
+        try:
+            os.remove(_offset_path())
+        except FileNotFoundError:
+            pass
     return config()
 
 

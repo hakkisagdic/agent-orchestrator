@@ -1320,7 +1320,8 @@ def _optional_features(cfg):
          "install keyflip for account budgets and quota rotation"),
         ("telegram", "configured" if telegram.config() else "absent", "ao telegram setup"),
         ("email", f"configured ({mail['provider']})" if mail else "absent", "ao email setup"),
-        ("ping", "configured" if A.ping_url(root) else "absent", "ao ping set <url>"),
+        # The command that sets the ping up: the hint named `ao ping set <url>`, which never existed (SECRETS-2).
+        ("ping", "configured" if A.ping_url(root) else "absent", "ao pings setup"),
     ]
     # A tool reviewer is an optional extra with its own provider account (#86).
     primary = cfg.get("reviewer") or {}

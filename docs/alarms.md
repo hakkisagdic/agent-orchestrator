@@ -240,8 +240,8 @@ in `.ao/config.json`. Optional.
 
 ## When the alarm itself can die
 
-Every channel above runs on the machine that is failing. `ao pings setup --url
-…` adds the one that does not: the watchdog and the doctor job ping an external
+Every channel above runs on the machine that is failing. `ao pings setup` adds
+the one that does not: the watchdog and the doctor job ping an external
 check (healthchecks.io) every cycle, and that service e-mails you when the pings
 stop. The credit burn rate (`ao doctor`) turns "the plan runs out before it
 resets" into a red alarm days ahead rather than a silent stop on the day. It projects only
@@ -250,12 +250,21 @@ ledger are not its account, and neither is a sample that names no adapter
 ([telemetry.md](telemetry.md), "Whose account").
 
 The check's address is a secret: whoever has its UUID can ping it, and keep a dead
-watchdog looking alive. The whole address is the secret - a check's UUID can stand in its
-path or in its host's labels, a host can be the check's own name, and four characters at its
-end can be all of the secret - so `ao pings` shows only its scheme, and names the file that
-holds it, `~/.ao/pings.json`.
+watchdog looking alive. `ao pings setup` asks for it at your terminal and does not show it, as
+`ao telegram setup` asks for the bot token, and refuses what is no http or https address with a
+host. Where no terminal is attached a script names the variable that holds it,
+`ao pings setup --url-env NAME`, and `--all` makes it the address of every project that has none
+of its own. An address given on the command line with `--url` is refused, and nothing is saved:
+the shell's history and the process list keep a command line. The whole address is the secret - a
+check's UUID can stand in its path or in its host's labels, a host can be the check's own name, and
+four characters at its end can be all of the secret - so `ao pings` shows only its scheme, and names
+the file that holds it, `~/.ao/pings.json`.
 
 *In ao since slice LEADS-SECRETS: `ao pings` printed the whole ping URL. `tests/test_leads_secrets.py`.*
+
+*In ao since slice SECRETS-2: the setup had you type the address into a command line,
+`ao pings setup --url https://hc-ping.com/<uuid>`, which your shell's history kept.
+`tests/test_secrets_2.py`.*
 
 The doctor job, `ao doctor --check --notify` every fifteen minutes, is the watchdog's
 backstop. `--notify` is for the person and the scheduler: it can page a person. The grants audit

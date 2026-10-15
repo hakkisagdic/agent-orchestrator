@@ -72,14 +72,16 @@ written as `[redacted:<rule>]` ([safety.md](safety.md#7b-what-ao-writes-is-scann
   and puts a new one in place of the old one whole, so a write cut short leaves the one that worked;
   the first and the last were written in place and given their mode after, readable by every user
   of the machine meanwhile (HUNT-LEADS-SEC), and the Telegram file was one a person wrote with
-  `echo` and `chmod`, the token left in their shell's history (LEADS-SECRETS). The bot token and an
-  SMTP account's password are asked at your terminal and not shown ([telegram.md](telegram.md)) -
-  and not asked at all where the terminal cannot hide what is typed, which Python's prompt only warned
-  of while it read the line echoed; there a variable holds it (`--token-env`, `--password-env`) - and
-  `ao pings` shows of the ping address only its scheme. Windows keeps
-  no file mode: there the three are as private as `~/.ao`, which takes its permissions from your user
-  profile, and ao says so when it saves one ([windows.md](windows.md)).
-  `~/.ao/telegram-offset` is the poller's place in the messages.
+  `echo` and `chmod`, the token left in their shell's history (LEADS-SECRETS). The bot token, an
+  SMTP account's password and the ping address are asked at your terminal and not shown
+  ([telegram.md](telegram.md), [alarms.md](alarms.md)) - and not asked at all where the terminal
+  cannot hide what is typed, which Python's prompt only warned of while it read the line echoed;
+  there a variable holds it (`--token-env`, `--password-env`, `--url-env`) - and `ao pings` shows of
+  the ping address only its scheme. Windows keeps no file mode: there the three are as private as
+  `~/.ao`, which takes its permissions from your user profile, and ao says so when it saves one
+  ([windows.md](windows.md)).
+  `~/.ao/telegram-offset` is the poller's place in the messages; a new bot token drops it, as it counts
+  the old bot's.
 - For each project, files named after it: the watchdog's state and log and its recorded cycles
   (`~/.ao/watchdog-<project>.json`, `~/.ao/cycles-<project>.jsonl`), its heartbeat, and the logs of the
   turns it started (`~/.ao/nudge-<project>.log`, `~/.ao/escalate-<project>.log`). Those logs hold what
@@ -116,7 +118,7 @@ Only these, each once someone has set it up; take the setup away and it stops.
 |---|---|---|---|
 | E-mail, the red alarm | `ao email setup` | formsubmit.co, or your own SMTP server | an alarm's title and text, and the project's name ([alarms.md](alarms.md)) |
 | Telegram | `ao telegram setup`, and `ao telegram install` for the poller on macOS | Telegram's bot API | which chats wrote to the bot, asked once by `ao telegram setup` with the token you gave it; alarms and notices, blocked reports, the questions `ao ask` poses, `ao handoff`'s summary, and the answers to `/status`, `/board`, `/credits`, `/notices`, `/fleet` and `/decisions` as those commands print them; the poller fetches the messages sent from the chats you allowed ([telegram.md](telegram.md)) |
-| Dead man's switch | `ao pings setup --url …` | the address you give it | one request a watchdog or doctor cycle, carrying nothing ([alarms.md](alarms.md)) |
+| Dead man's switch | `ao pings setup` | the address you give it | one request a watchdog or doctor cycle, carrying nothing ([alarms.md](alarms.md)) |
 | A backup or the mail store on a remote | `ao backup --to remote:<name>`, `mail.sync_repo` | GitHub, asked through your `gh` whether the repository is private, then that remote through git | the governance files, or the mail records, scanned for credentials first; nothing unless the host says the repository is private. With `mail.sync_repo` set, each `ao doctor` run also asks the remote how far its copy is, and GitHub whether it is still private ([recovery.md](recovery.md), [messaging.md](messaging.md)) |
 | The account lookup | an implementer whose adapter declares one; Kiro's does | that harness's provider | a request for the account's usage, with the token its CLI already holds, from `ao credits`, `ao cost`, `ao digest`, `ao handoff` and the watchdog every thirty minutes; `ao credits --offline` skips it ([telemetry.md](telemetry.md)) |
 | Borrowed harness content | `ao content add` | the source you name, through git | a fetch of the one commit it is pinned to; `ao content verify` reads only the files on disk |

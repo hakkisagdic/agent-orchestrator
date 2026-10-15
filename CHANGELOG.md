@@ -31,6 +31,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- No mail ao writes goes over another or through a link left at its name: each is created under a name no file has, `-2` after its own when that is taken, and `ao note`, `ao mail send`, `ao_report`, a hold's release, `ao handoff`, `ao hunt` and the Telegram poller say and record the name it went under, where a second mail of the same minute and subject replaced the first. A new Telegram bot token drops `~/.ao/telegram-offset`, whose old count had Telegram take the new bot's first messages as read; and `ao doctor` names `ao pings setup` for the dead man's switch, where it named `ao ping set <url>`, which never existed ([messaging](docs/messaging.md), [telegram](docs/telegram.md), SECRETS-2).
 - Email settings whose provider is a list or object disable the channel without raising, so malformed settings no longer interrupt notification callers ([alarms](docs/alarms.md)) (TRIAGE-2-LOW)
 - `ao status` names the most recently active secondary project while the primary session is slowing, stopped or idle ([watchdog](docs/watchdog.md)) (TRIAGE-2-LOW)
 - `ao doctor` names an executable `AO_GIT` script and lists unrecognised shell hooks as unverified instead of silently omitting them ([gates](docs/gates.md)) (TRIAGE-2-LOW)
@@ -76,6 +77,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Security
 
+- `ao pings setup` asks for the check's address at the terminal without showing it, takes it in a script from the variable `--url-env` names, and refuses an address given with `--url` - exit 2, nothing saved - as it refuses one that is no http or https address with a host: the setup had a person type it on the command line, where the shell's history and the process list keep it, and whoever reads the check's UUID can ping it and keep a dead watchdog looking alive ([alarms](docs/alarms.md), SECRETS-2).
 - Reviewer and hunter routes refuse known command wrappers that hide the harness being checked ([adapters](docs/adapters.md)) (TRIAGE-3-MEDIUM).
 - Grant checks recognize every word of multi-value tool lists, permission-bypass modes and shipped trust-all flags ([safety](docs/safety.md)) (TRIAGE-3-MEDIUM).
 - Harness digests distinguish special files and follow every declared directory view; `ao init` and `ao skill install` use held folders, opt-in records and locks stay in the held tree, known MCP formats are merged directly while unsafe vendor writes are refused, and source imports cannot inject board lines ([safety](docs/safety.md), [getting started](docs/getting-started.md), [sources](docs/sources.md)) (LEADS-ADAPTERS).
