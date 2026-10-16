@@ -199,8 +199,11 @@ def _machine_jobs():
     LaunchAgents or launchd holds it loaded with the plist gone, so the jobs of a project deleted since, or never
     in the registry, go with the rest. A user systemd (LINUX-SCHEDULER) likewise: every unit in ao's namespace,
     `ao-<job>-<project>` (`_systemd_unit`), with a file in the user unit directory - the link `enable` made
-    counts, as `_installed_jobs` reads a job. Task Scheduler offers no namespace to list, so there they are the
-    tasks of the projects the machine registry knows, named as `ao watchdog install` names them.
+    counts - and, for each project the registry knows, a job the manager still runs after its files went, as
+    `_installed_jobs` reads a job (LEADS-INSTALL). Task Scheduler offers no namespace to list, so there they are
+    the tasks of the projects the machine registry knows, named as `ao watchdog install` names them. A launchd
+    whose listing failed read as holding nothing loaded; its labels are then those of the projects the registry
+    knows, each tried and named, as Task Scheduler's are (LEADS-INSTALL).
     """
     if os.name == "nt":
         found = []
@@ -216,6 +219,8 @@ def _machine_jobs():
                 continue
             units |= {name.rpartition(".")[0] for name in names
                       if name.startswith(prefixes) and name.rpartition(".")[2] in ("service", "timer")}
+        for key in sorted(A.project_registry()):
+            units |= {name[:-len(".timer")] for _, name in _installed_jobs(key)}
         return [("systemd timer", unit + ".timer") for unit in sorted(units)]
     try:
         names = os.listdir(os.path.dirname(_launchd_plist(LAUNCHD_NAMESPACE)))
@@ -223,28 +228,37 @@ def _machine_jobs():
         names = []
     labels = {name[:-len(".plist")] for name in names
               if name.startswith(LAUNCHD_NAMESPACE) and name.endswith(".plist")}
-    labels |= {label for label in (line.rsplit("\t", 1)[-1].strip() for line in _launchctl("list")[0].split("\n"))
+    listed, status = _launchctl("list")
+    labels |= {label for label in (line.rsplit("\t", 1)[-1].strip() for line in listed.split("\n"))
                if label.startswith(LAUNCHD_NAMESPACE)}
+    for key in sorted(A.project_registry()) if status != 0 else []:
+        labels |= {label for _, label in _installed_jobs(key)}
     return [("launchd job", label) for label in sorted(labels)]
 
 
-def _serves_ao(entry):
-    """Whether an MCP server entry is the one `ao init` registered: it runs `ao … mcp serve` (UPDATE-UNINSTALL-2).
+def _serves_ao(entry, root):
+    """Whether an MCP server entry is the one `ao init` registered for the project at `root`: it runs
+    `ao … -C <root> mcp serve` (UPDATE-UNINSTALL-2).
 
     skillkit.register_mcp writes {command: the ao it found, args: [-C, <root>, mcp, serve]}, followed by
     `--role <role>` when the registration names one (MCP-ROLES); an agent's own CLI, asked to register the
     same, keeps the command, and an ao run as `python -m ao` keeps its interpreter. So an entry is ao's when
     its arguments end with `mcp serve` and nothing after it but ao's own options, `--role` and
     `--allow-verify`, whatever its command is called: a server named `ao` whose program is another one
-    called ao was taken for ao's on its name alone, and removed. One ao registered some other way is left,
-    since leaving it is the smaller harm.
+    called ao was taken for ao's on its name alone, and removed. And the `-C` right before `mcp serve` names
+    this project, as every registration ao wrote does: one that serves another project, or any program whose
+    arguments merely end in `mcp serve`, was taken with this project's and removed (LEADS-INSTALL). One ao
+    registered some other way is left, since leaving it is the smaller harm.
     """
     if not isinstance(entry, dict):
         return False
     args = entry.get("args")
     words = [str(word) for word in args] if isinstance(args, list) else []
-    served = [index for index in range(len(words) - 1) if words[index:index + 2] == ["mcp", "serve"]]
-    if not served:
+    served = [index for index in range(2, len(words) - 1) if words[index:index + 2] == ["mcp", "serve"]]
+    if not served or words[served[-1] - 2] not in ("-C", "--root"):
+        return False
+    named = os.path.join(root, os.path.expanduser(words[served[-1] - 1]))
+    if os.path.normcase(os.path.realpath(named)) != os.path.normcase(os.path.realpath(root)):
         return False
     rest, index = words[served[-1] + 2:], 0
     while index < len(rest):
@@ -284,31 +298,111 @@ def _mcp_entries(root):
             unread.append((path, " ".join(str(exc).split())))
             continue
         servers = document.get(key) if isinstance(document, dict) else None
-        if isinstance(servers, dict) and _serves_ao(servers.get("ao")):
+        if isinstance(servers, dict) and _serves_ao(servers.get("ao"), root):
             found.append((path, key, remove_when_empty))
     return found, unread
 
 
-def _drop_mcp_entry(path, key, remove_when_empty):
-    """Take ao's server out of one MCP file, every other entry and key kept; "entry" or "file", what went.
+# What an MCP file that changed while ao took its entry out is left with, and what the person does.
+MCP_CHANGED = "it changed while ao was taking its entry out, and is left as it now is; run the removal again"
 
-    Written whole through storage.replace_file_durably, at the resolved path so a symbolic link to the file stays
-    one. The file itself goes only when its adapter says so and nothing but the empty server table is left in it.
-    Raises OSError or ValueError when the file cannot be read or written, or no longer holds ao's entry.
+
+def _drop_mcp_entry(path, key, remove_when_empty, root):
+    """Take ao's server out of one MCP file of the project at `root`, every other entry and key kept; "entry" or
+    "file", what went.
+
+    Written whole and durably, through the project's own folders and file, never a symbolic link. The file itself goes
+    only when its adapter says so and nothing but the empty server table is left in it. Raises OSError or
+    ValueError when the file cannot be read or written, no longer holds ao's entry, resolves outside the project,
+    or changed meanwhile.
+
+    The file is found again here, without following links even to another file inside the project: `_mcp_entries`
+    found it before the jobs and hooks went, and a link swapped in since redirected the write (LEADS-INSTALL).
+    Storage holds the folders for the read, write and rename: relative descriptors on POSIX, native handles without
+    delete sharing
+    on Windows, and refusal where neither is available. A file that goes has its directory synced where the
+    platform supports it, as a replaced one has (storage.replace_file_durably).
+
+    A change another program made meanwhile was overwritten (LEADS-INSTALL). The new file is written and synced
+    first, and the bytes are read again as the last thing before the rename or the delete: a change made until
+    then is left as it is, and said. What files cannot close is the instant between that reading and the rename
+    or the delete, a few system calls long: a program that replaces the file in it loses its change. No lock
+    helps there, since nothing else that writes these files - a harness, an editor, `ao init` - takes one.
     """
-    from .storage import replace_file_durably
     real = os.path.realpath(path)
-    with open(real, encoding=UTF8) as fh:
-        document = json.load(fh)
+    if not _hook_contains(root, real):
+        raise ValueError(f"it resolves to {real}, outside the project, and is not written there; take ao's entry "
+                         "out of it by hand if it is there")
+    from . import storage
+    base = os.path.realpath(root)
+    # The containment check above is a diagnostic, not the path to open: resolving a link within the project
+    # would otherwise rewrite or unlink its target while leaving the link behind (LEADS-INSTALL).
+    steps = storage._tree_parts(os.path.relpath(path, root))
+    with storage._tree_folder(base, steps[:-1], make=False) as directory:
+        if directory is None:
+            raise FileNotFoundError(path)
+        return _drop_mcp_entry_in(directory, steps[-1], key, remove_when_empty, root)
+
+
+def _mcp_without_ao(data, key, root):
+    """The MCP document in `data` with ao's server taken out; ValueError when it holds none of this project's."""
+    document = json.loads(data.decode(UTF8))
     servers = document.get(key) if isinstance(document, dict) else None
-    if not isinstance(servers, dict) or not _serves_ao(servers.get("ao")):
+    if not isinstance(servers, dict) or not _serves_ao(servers.get("ao"), root):
         raise ValueError(f"no `ao` entry under {key} any more")
     del servers["ao"]
+    return document
+
+
+def _drop_mcp_entry_in(directory, name, key, remove_when_empty, root):
+    """`_drop_mcp_entry` on the file `name` in an open directory, every step through it (LEADS-INSTALL)."""
+    import secrets
+    from . import storage
+
+    def read():
+        with os.fdopen(storage._tree_open(directory, name, os.O_RDONLY), "rb") as fh:
+            return fh.read(), os.fstat(fh.fileno()).st_mode & 0o7777
+
+    data, mode = read()
+    document = _mcp_without_ao(data, key, root)
     if remove_when_empty and document == {key: {}}:
-        os.remove(real)
+        if read()[0] != data:                       # the last thing before the delete (see _drop_mcp_entry)
+            raise ValueError(MCP_CHANGED)
+        storage._tree_unlink(directory, name)
+        storage._tree_sync(directory, os.fsync)
         return "file"
-    replace_file_durably(real, json.dumps(document, indent=2).encode(UTF8))
+    payload = json.dumps(document, indent=2).encode(UTF8)
+    temporary = f".{name}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
+    fd = storage._tree_open(directory, temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    try:
+        _write_whole(fd, payload, temporary, mode=mode if isinstance(directory, int) else None)
+        if read()[0] != data:                       # the last thing before the rename (see _drop_mcp_entry)
+            raise ValueError(MCP_CHANGED)
+        storage._tree_rename(directory, temporary, name)
+    except BaseException:
+        try:
+            storage._tree_unlink(directory, temporary)
+        except OSError:
+            pass
+        raise
+    storage._tree_sync(directory, os.fsync)
     return "entry"
+
+
+def _write_whole(fd, payload, name, mode=None):
+    """Write `payload` whole to the new file open at `fd`, sync it and close it, whatever happens."""
+    try:
+        if mode is not None:
+            os.fchmod(fd, mode)
+        view = memoryview(payload)
+        while view:
+            written = os.write(fd, view)
+            if written <= 0:
+                raise OSError(f"writing {name} made no progress")
+            view = view[written:]
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def _registry_problem():
@@ -504,7 +598,7 @@ def cmd_uninstall(cfg, args):
         for path, key, remove_when_empty in project["mcp"]:
             shown = os.path.relpath(path, root)
             try:
-                gone = _drop_mcp_entry(path, key, remove_when_empty)
+                gone = _drop_mcp_entry(path, key, remove_when_empty, root)
             except (OSError, ValueError) as exc:
                 left.append(path)
                 print(f"{C['red']}left{C['reset']} the `ao` entry in {path}: {' '.join(str(exc).split())}")

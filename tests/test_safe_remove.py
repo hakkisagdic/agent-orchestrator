@@ -257,6 +257,8 @@ def test_windows_tasks_are_deleted_in_this_process_and_a_task_left_is_named(monk
 
     def schtasks(*args):
         asked.append(args)
+        if args == ("/Query",):                     # the listing that shows Task Scheduler answers (LEADS-INSTALL)
+            return "Folder: \\", 0
         name = args[args.index("/TN") + 1]
         if args[0] == "/Query":
             return ("Ready", 0) if name in tasks else ("ERROR: The system cannot find the file specified.", 1)

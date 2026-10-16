@@ -649,8 +649,9 @@ def cmd_init(cfg, args):
     # (README-QUICKSTART-7); one the repository already tracks is the repository's, and stays so.
     add += [l for l in ([] if args.no_mcp else _mcp_files_in_tree(root, args)) if l not in lines and l not in add]
     if add:
-        refused = _append_to_project_file(gi, "\n# agent-orchestrator: mail is transient; the ledger and reviews are "
-                                              "not\n" + "\n".join(add) + "\n")
+        # Under a comment that names these lines as init's, so that `ao remove` takes them and no line a person wrote
+        # (LEADS-INSTALL); written only into the project's own file (LEADS-ADAPTERS).
+        refused = _append_to_project_file(gi, "\n" + _gitignore_block(add) + "\n" + "\n".join(add) + "\n")
         if refused:
             unwritten.append((".gitignore", f"{refused}; add these lines to the project's own .gitignore yourself: "
                                             + " ".join(add)))

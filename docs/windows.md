@@ -10,7 +10,7 @@ What works, what does not, and how hosted runners exercise it.
 | MCP server, playbook, `ao init` registration | work (`.mcp.json`, `.kiro/settings/mcp.json`); a request is read as UTF-8 and every reply is seven-bit JSON, whatever the code page |
 | process introspection (`ao writers`, orphans, hung turns) | first cut: `Win32_Process` through PowerShell as JSON, tree kill via `taskkill /T`, every process of the tree named to it and asked afterwards; the working directory is read from the process environment block (a 64-bit process, by a 64-bit Python), proven on the Windows lane, and where it cannot be read a turn is matched by the repository path on its command line; a table PowerShell cannot read never reads as no process: what decides from it refuses or holds, and says why; what an ended turn left is not told apart from a turn, as Windows has no process groups, and `ao writers` and `ao doctor` say so (below) |
 | `ao hold` | proven on the Windows lane: a turn placed by its working directory is stopped; what a stop leaves running is named, and the hold exits 1 (below) |
-| scheduler (`ao watchdog install`) | first cut: Task Scheduler (`schtasks`, every 2 min; doctor every 15 min). Each task names a program that exists — the console script on PATH, a clone's script, or `python -m ao.watchdog` from an interpreter that imports an installed ao — or install refuses; install exits 1 when `schtasks` cannot create a task, saying why in the OEM code page schtasks writes in, and `ao remove --yes` deletes both tasks in its own process and checks they are gone; a silent watchdog is to be looked into with Task Scheduler (below) |
+| scheduler (`ao watchdog install`) | first cut: Task Scheduler (`schtasks`, every 2 min; doctor every 15 min). Each task names a program that exists — the console script on PATH, a clone's script, or `python -m ao.watchdog` from an interpreter that imports an installed ao — or install refuses; install exits 1 when `schtasks` cannot create a task, saying why in the OEM code page schtasks writes in, and `ao remove --yes` deletes both tasks in its own process and checks they are gone, as `ao watchdog uninstall` does; a task schtasks cannot say it lacks - access denied, a Task Scheduler that lists no task, a schtasks that cannot run - is named and keeps the project's state; a silent watchdog is to be looked into with Task Scheduler (below) |
 | desktop notifications | a toast through PowerShell behind the `toast` feature switch, off by default; Telegram and e-mail carry the orange and red levels |
 | `bin/ao.ps1`, the subset for a machine without Python | `status`, `board` and `doctor`; reads files as UTF-8 and takes paths literally; written and reviewed, not yet run on Windows (below) |
 | commit hook (`ao hooks install`) | installed inside the repository; a shared, external or globally configured hooks directory is refused (#71); since HOOK-V4 the hook reads a drive-letter index as absolute, and its execution proof passes on the lane (below) |
@@ -184,7 +184,8 @@ case. A prompt file is no channel for it, since its path is an argument too.
 `tests/test_windows_cmd_channel.py` holds it on every platform by deciding as Windows does; the
 lane has not yet started an agent CLI through a `.cmd`.*
 
-*In ao since slice LEADS-ADAPTERS: files init and skill install write stay in held folders on Windows.*
+*In ao since slices LEADS-ADAPTERS and LEADS-INSTALL: files init and skill install write, MCP
+entries remove and uninstall take out, and project state remove deletes stay in held folders on Windows.*
 Each folder, from the volume root through the project's destination folder, is opened with
 `CreateFileW`, `FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT`, and sharing that omits
 `FILE_SHARE_DELETE`. ao refuses a reparse point or anything but a directory, and keeps every handle
@@ -194,12 +195,24 @@ root are created, so a shared ancestor needs no create-directory permission. Wit
 a rule link to another drive or UNC share is named as unwritten and the command exits 1.
 Leaves are opened with `FILE_FLAG_OPEN_REPARSE_POINT` and checked before reading or writing; new files
 and replacement temporaries use `CREATE_NEW`. A replacement is renamed in the held folder.
+Removal holds each child folder while listing and emptying it, releases that child before removing its
+name in the still-held parent, and deletes links and junctions as links, without entering them.
 The opt-in ledger and its lock are held this way too. Known JSON MCP files are written by ao's own
 primitive; a vendor command whose writes ao cannot keep in the project is named for a person, never run.
 The choice depends on available APIs, not `os.name` alone, and a platform with neither these handles nor
 POSIX relative opens refuses the operation. `tests/test_leads_adapters_3.py` checks the choice and API
 contract on every platform, with native Windows tests for links, junctions and attempts to rename held
 folders. Windows still has no POSIX file modes or directory fsync guarantee.
+
+*In ao since slice LEADS-INSTALL: `ao adapters conform` runs on Windows; its fixture harness was a
+script started by its first line, which Windows does not run, so every capability failed. A schtasks
+query that failed read as no task whatever it failed for: access denied read as absent, and
+`ao remove` took a project's state while its task ran on. A task is absent now only when Task
+Scheduler lists its tasks (`schtasks /Query`) and schtasks fails for it as it fails for a name no
+task has, said in the machine's own language: a failure every query shares - access to Task
+Scheduler denied, its service not running - reads the same for both names, and is no absence. Where
+the listing itself fails, whatever for, ao cannot tell a task is gone, and `ao remove` keeps the
+project's state, naming what schtasks said, until it runs where Task Scheduler answers.*
 
 The hosted `tests` workflow runs Windows and macOS every week on Python 3.12, Windows twice -
 once without Python's UTF-8 mode - and any environment on demand (`gh workflow run tests -f

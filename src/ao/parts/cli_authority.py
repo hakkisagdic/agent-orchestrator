@@ -70,12 +70,18 @@ def _launchd_plist(label):
 
 
 def _launchd_loaded(label):
-    """Whether `launchctl list` names exactly this label.
+    """Whether `launchctl list` names exactly this label: True or False, else why launchd cannot be asked.
 
     `_launchd_listed` reads the listing as grep did, and the watchdog label of a project
-    called `proj` is inside the one of `proj-api`: a removal checks the label itself.
+    called `proj` is inside the one of `proj-api`: a removal checks the label itself. A
+    listing launchctl did not give - it could not be run, or it failed - named no label, and
+    `ao remove` read that as the job gone and took the state of a project it ran on against
+    (LEADS-INSTALL).
     """
-    return any(line.rsplit("\t", 1)[-1].strip() == label for line in _launchctl("list")[0].split("\n"))
+    said, status = _launchctl("list")
+    if status != 0:
+        return "launchctl could not be run" if status is None else f"launchctl list exited {status}"
+    return any(line.rsplit("\t", 1)[-1].strip() == label for line in said.split("\n"))
 
 PLIST_CMD = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

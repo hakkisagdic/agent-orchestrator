@@ -74,6 +74,10 @@ if verb == "restart":
     state["active"] = sorted(set(state["active"]) | set(units))
     done(0)
 if verb in ("disable", "stop"):
+    # A disable acts on unit files: without one it fails, and its --now stops nothing (LEADS-INSTALL).
+    missing = [unit for unit in units if verb == "disable" and not os.path.exists(os.path.join(UNITS, unit))]
+    if missing:
+        done(1, err=f"Failed to disable unit: Unit file {missing[0]} does not exist.")
     for unit in units:
         if verb == "disable" and os.path.lexists(os.path.join(wants, unit)):
             os.remove(os.path.join(wants, unit))
@@ -381,8 +385,8 @@ def test_uninstall_disables_and_stops_both_jobs_removes_their_files_and_the_hear
     assert fake()["active"] == fake()["enabled"] == []
     assert [" ".join(call[1:]) for call in fake()["calls"]] == [
         step for unit in (watchdog, doctor)
-        for step in ("show --property=Version", f"disable --now {unit}.timer", f"stop {unit}.service",
-                     "daemon-reload", f"is-active {unit}.timer")]
+        for step in ("show --property=Version", f"disable --now {unit}.timer", f"stop {unit}.timer {unit}.service",
+                     "daemon-reload", f"is-active {unit}.timer {unit}.service")]
     assert not os.path.exists(A.heartbeat_path(root))
     out = _plain(capsys)
     assert f"removed {watchdog}.timer" in out and f"removed {doctor}.timer" in out
@@ -415,7 +419,8 @@ def test_a_timer_that_stays_active_is_named_and_its_files_are_gone(project, tmp_
 
     left = cli._unschedule(f"{watchdog}.timer")
 
-    assert left == f"still active — systemctl --user disable --now {watchdog}.timer"
+    # Its files are gone, and a disable needs them: a stop is what takes it off now (LEADS-INSTALL).
+    assert left == f"still active — systemctl --user stop {watchdog}.timer"
     assert not (units / f"{watchdog}.timer").exists()
 
 

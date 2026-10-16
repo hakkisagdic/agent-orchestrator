@@ -489,6 +489,11 @@ with no `~`, `..`, backslash or drive, since `C:/outside` is absolute on Windows
 and a `review` block whose `environment` is no object, are named rather than raising or read as no
 rules; an environment of null still says there are none.
 
+*In ao since slice LEADS-INSTALL: `ao adapters conform` starts its fixture harness with the
+interpreter that runs ao, isolated (`-I`). It was a copy whose first line named the interpreter:
+Windows runs no such line, and an interpreter whose path holds a space made one POSIX cannot read,
+so there every capability failed as "the harness did not run".*
+
 ## What a harness says it supports, asked in ACP
 
 *In ao since slice ACP-PROBE: an adapter's `acp` block and `ao harness probe`. It is the first step of

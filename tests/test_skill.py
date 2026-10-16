@@ -86,8 +86,9 @@ def test_remove_undoes_init_and_only_removes_ao_owned_hooks(project, monkeypatch
     os.makedirs(os.path.join(root, ".claude"))
     monkeypatch.setattr(skillkit.shutil, "which", lambda n, *args, **kwargs: None)
     real_run = cli.subprocess.run
-    # Remove takes the jobs off in its own process (SAFE-REMOVE): a launchd holding none of this project's.
-    monkeypatch.setattr(cli.A, "_run_program", lambda argv, **kwargs: ("", 0))
+    # Remove takes the jobs off in its own process (SAFE-REMOVE): a machine holding none of this project's. Its
+    # schedulers are not asked: a user systemd that does not answer counts its jobs as there (LEADS-INSTALL).
+    monkeypatch.setattr(cli, "_installed_jobs", lambda key: [])
     _, agents = skillkit.detect_agents(root)
     skillkit.install_playbook(root, agents)
     skillkit.register_mcp(root, agents, exe="/x/ao")

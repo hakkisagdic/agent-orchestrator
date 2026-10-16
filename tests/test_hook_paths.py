@@ -411,8 +411,9 @@ def test_dead_protected_repository_source_warns_but_does_not_block_remove(
     _git(root, "add", ".githooks/pre-commit")
     _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "source-hook")
 
-    # Remove takes the jobs off in its own process (SAFE-REMOVE): a launchd holding none of this project's.
-    monkeypatch.setattr(A, "_run_program", lambda argv, **kwargs: ("", 0))
+    # Remove takes the jobs off in its own process (SAFE-REMOVE): a machine holding none of this project's. Its
+    # schedulers are not asked: a user systemd that does not answer counts its jobs as there (LEADS-INSTALL).
+    monkeypatch.setattr(cli, "_installed_jobs", lambda key: [])
     assert cli.cmd_remove(project, SimpleNamespace(yes=True, allow_shared_hooks=False)) == 0
     assert not os.path.exists(os.path.join(root, ".ao"))
     assert os.path.exists(hook)
@@ -1281,8 +1282,9 @@ def test_remove_is_two_phase_and_keeps_state_until_marker_commit(
 ):
     root = project["root"]
     marker = _enroll_project(root)
-    # Remove takes the jobs off in its own process (SAFE-REMOVE): a launchd holding none of this project's.
-    monkeypatch.setattr(A, "_run_program", lambda argv, **kwargs: ("", 0))
+    # Remove takes the jobs off in its own process (SAFE-REMOVE): a machine holding none of this project's. Its
+    # schedulers are not asked: a user systemd that does not answer counts its jobs as there (LEADS-INSTALL).
+    monkeypatch.setattr(cli, "_installed_jobs", lambda key: [])
     args = SimpleNamespace(yes=True, allow_shared_hooks=False)
 
     assert cli.cmd_remove(project, args) == 0

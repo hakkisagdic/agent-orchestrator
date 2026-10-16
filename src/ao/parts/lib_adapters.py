@@ -2419,7 +2419,9 @@ def validate_adapter(adapter):
 def conform_adapter(adapter, harness, workdir):
     """Run an adapter's send and resume through a fixture harness: does each prompt and session arrive whole? (#77)
 
-    Returns [(capability, "pass" | "fail" | "absent", detail)] for the five capabilities.
+    `harness` is the program that takes the place of the adapter's, or the words that start it: `ao adapters
+    conform` starts the fixture with this interpreter, since Windows runs no script by its first line
+    (LEADS-INSTALL). Returns [(capability, "pass" | "fail" | "absent", detail)] for the five capabilities.
     """
     results = []
     prompt = "conformance prompt: spaces, 'quotes', \"double\", = signs and a\nsecond line"
@@ -2428,8 +2430,8 @@ def conform_adapter(adapter, harness, workdir):
         if not argv:
             results.append((capability, "absent", "not declared"))
             continue
-        rendered = [harness] + [a.replace("{prompt}", prompt).replace("{session}", "sess-conformance")
-                                for a in argv[1:]]
+        rendered = (list(harness) if isinstance(harness, (list, tuple)) else [harness]) \
+            + [a.replace("{prompt}", prompt).replace("{session}", "sess-conformance") for a in argv[1:]]
         record = os.path.join(workdir, f"{capability}.json")
         try:
             subprocess.run(rendered, cwd=workdir, env=dict(os.environ, AO_HARNESS_RECORD=record), timeout=30,

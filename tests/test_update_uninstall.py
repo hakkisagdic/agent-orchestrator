@@ -426,8 +426,8 @@ def test_an_mcp_entry_that_names_a_role_is_aos_all_the_same():
     """`ao init` ends a registration only one role reads with `--role <role>` (MCP-ROLES); it is still ao's."""
     served = {"command": "/usr/bin/python3", "args": ["-m", "ao", "-C", "/p", "mcp", "serve", "--role", "implementer"]}
 
-    assert cli._serves_ao(served) and cli._serves_ao(dict(served, args=served["args"][:-2]))
-    assert not cli._serves_ao({"command": "/usr/local/bin/ops", "args": ["run", "--role", "implementer"]})
+    assert cli._serves_ao(served, "/p") and cli._serves_ao(dict(served, args=served["args"][:-2]), "/p")
+    assert not cli._serves_ao({"command": "/usr/local/bin/ops", "args": ["run", "--role", "implementer"]}, "/p")
 
 
 @pytest.mark.skipif(os.name == "nt", reason=LAUNCHD_ONLY)
@@ -516,7 +516,9 @@ def test_windows_jobs_are_the_tasks_of_the_projects_the_registry_knows(tmp_path,
     _home(tmp_path, monkeypatch)
     keys = [A.project_key(_project(tmp_path / "work", name)) for name in ("svc", "api")]
     tasks = {"ao-watchdog-svc", "ao-doctor-svc", "ao-doctor-api", "ao-watchdog-unknown"}
-    monkeypatch.setattr(cli, "_schtasks", lambda *args: ("Ready", 0) if args[args.index("/TN") + 1] in tasks
+    # A listing that answers, as Task Scheduler gives one, and a task or its absence by name (LEADS-INSTALL).
+    monkeypatch.setattr(cli, "_schtasks", lambda *args: ("Folder: \\", 0) if "/TN" not in args
+                        else ("Ready", 0) if args[args.index("/TN") + 1] in tasks
                         else ("ERROR: The system cannot find the file specified.", 1))
     monkeypatch.setattr(cli.os, "name", "nt")
 
@@ -577,7 +579,7 @@ def test_a_clone_is_removed_by_deleting_it_and_the_link_that_points_at_it(tmp_pa
 ])
 def test_an_mcp_entry_is_aos_when_it_runs_aos_server_not_when_its_name_is_ao(entry, ours):
     """UPDATE-UNINSTALL-2: an entry was taken for ao's on its command's name alone, and removed."""
-    assert cli._serves_ao(entry) is ours
+    assert cli._serves_ao(entry, "/p") is ours
 
 
 @pytest.mark.skipif(os.name == "nt", reason=LAUNCHD_ONLY)

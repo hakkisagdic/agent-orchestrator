@@ -123,6 +123,14 @@ Each check that fails says what would fix it. `ao init --prove` runs the same ch
 last step. The throwaway review spends one short review from the reviewer's quota;
 `--no-review` skips it and says that slice is not proven.
 
+*In ao since slice LEADS-INSTALL: each run keeps its review in an archive of its own,
+`prove-<time>`, then `-2` and on for another run in the same second, which was merged into the
+first; an archive that cannot be written is said, and the worktree is removed all the same, where
+it stayed registered in the checkout. The throwaway borrows the untracked dependency directories
+`merge.link_paths` names (`.venv` and `node_modules` unless set) from this checkout, as
+`ao merge-check` does, so that its gates can run: a gate that writes into one - an install, a
+cache - writes into this checkout's.*
+
 ## 4. The first slice
 
 Put it on the board with the boundary it will be judged against, then the loop the playbook
@@ -189,6 +197,20 @@ it but ao's own `--role` and `--allow-verify`, whatever its command is called. A
 program was another one called ao was taken for ao's on its name alone, and removed. `ao remove --yes` finds
 a project's entries as the uninstall does, under the key each adapter declares, and a file it cannot read
 stays, named, and the removal exits 1.*
+
+*In ao since slice LEADS-INSTALL: an entry is the project's only when the `-C` right before `mcp serve`
+names that project, as every registration `ao init` wrote does: one serving another project, or any
+program whose arguments end in `mcp serve`, was taken and removed with it. The file is found again as it
+is written, and must lie in the project: a link swapped in after the removal began sent the write
+outside. On macOS and Linux each directory from the project down is opened without following a link;
+Windows pins each folder with native handles that prevent its replacement. MCP edits and project state
+deletions use these held folders and refuse where neither backend is available. A change another program made to the file meanwhile
+is not written over: the new file is written and synced first, and the file is read again as the last
+thing before it is replaced or deleted. A file that changed stays as it now is, named, and the removal
+exits 1. What files cannot close is the instant between that reading and the rename, a few system calls
+long: a program that replaces the file in it loses its change, and no lock helps, since the harnesses
+and editors that write these files take none. A file emptied of ao's entry is deleted with its
+directory synced on macOS and Linux, as a file ao replaces is.*
 
 ## 6. Shell completion
 

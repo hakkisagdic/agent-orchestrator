@@ -37,13 +37,15 @@ def _lane_start(cfg, item):
         print(f"{C['red']}lane {item} not started{C['reset']}: {exc}")
         return 1
     except KeyboardInterrupt:
-        # Stopped by a signal: say what the record now says, if the terminal is still there to read it.
-        lane = A.lane_record(root, item) or {}
+        # Stopped by a signal: say what the record now says, if the terminal is still there to read it. Nothing
+        # done to say it may take the interrupt's place, nor its exit 130: the record was read outside the guard,
+        # and what reading it raised replaced the interrupt (LEADS-INSTALL).
         try:
+            lane = A.lane_record(root, item) or {}
             if lane.get("problem"):
                 print(f"{C['red']}lane {item} not ready{C['reset']}: {lane['problem']}; "
                       f"`ao lane remove {item}` retires it")
-        except OSError:
+        except Exception:
             pass
         raise
     where = f"{lane['path']} on {lane['branch']} from {lane['base'][:10]}"

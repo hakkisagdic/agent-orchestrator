@@ -108,6 +108,10 @@ and the lane is recorded as failed. An ao killed outright can stop nothing: `ao 
 shows the lane preparing while its command runs on, and `ao lane remove` stops that command
 before it retires the lane.
 
+*In ao since slice LEADS-INSTALL: a start stopped this way exits 130 whatever reading the lane's
+record to say what it holds raises; a record nested deeper than the parser reads replaced the
+interrupt, and its exit with it.*
+
 `ao lane remove` refuses a lane whose worktree holds changes nobody committed, other than the
 links and the file ao put there, or a review in flight, and names them. Otherwise it removes
 ao's links first, so nothing can reach through one into the main checkout, and retires the rest

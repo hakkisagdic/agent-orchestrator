@@ -113,18 +113,60 @@ def _registry_names(root):
 
 AO_GITIGNORE = ("agent-mail/*.md", "!agent-mail/README.md", ".ao/inbox/", ".ao/hold", ".ao/sessions.json",
                 ".ao/lanes/")
+# What the comment `ao init` writes above the lines it adds to .gitignore says (cmd_init), and the comment itself.
+AO_GITIGNORE_MARK = "agent-orchestrator: mail is transient"
+AO_GITIGNORE_COMMENT = "# agent-orchestrator: mail is transient; the ledger and reviews are not"
+# Why a comment in ao's words stays in .gitignore with the lines under it, and what the person does.
+GITIGNORE_UNCLAIMED = ("ao cannot tell it wrote them (an older ao named no lines, and a block changed since is not "
+                       "what it wrote); delete them by hand if ao added them")
+
+
+def _gitignore_block(lines):
+    """The comment `ao init` writes above the lines it adds to .gitignore, naming them its own: how many follow it,
+    and a digest of exactly those lines (LEADS-INSTALL).
+
+    A comment in ao's words was all that marked them, and a person's own block under such a comment - copied from
+    another project, or written before init - was taken with ao's. The count and the digest are what ao wrote and
+    nobody writes by chance: `ao remove` takes a block only when the lines under its comment are those.
+    """
+    import hashlib
+    digest = hashlib.sha256("\n".join(lines).encode(UTF8)).hexdigest()[:16]
+    return f"{AO_GITIGNORE_COMMENT} (ao: {len(lines)} line{'' if len(lines) == 1 else 's'} below, {digest})"
 
 
 def _gitignore_without_ao(root):
-    """(.gitignore's path, its lines without the ones ao added, how many of those it had)."""
+    """(.gitignore's path, its lines without the ones ao added, how many of those it had, and where a comment in
+    ao's words stands over lines ao cannot tell it wrote: [(its line now, its line once ao's lines are out)]).
+
+    ao's lines are the blocks `ao init` wrote: its comment, naming the lines under it by their count and digest
+    (_gitignore_block), and exactly those lines. Every line holding one of ao's patterns went, wherever it stood,
+    and then the run of ao's patterns under any comment in ao's words, so a person's own block under such a
+    comment went too (LEADS-INSTALL). A block an older ao wrote names no lines, and one changed since is not
+    what ao wrote: each stays, and is named, for the person to delete if it is ao's.
+    """
+    import re
+    from . import storage
     path = os.path.join(root, ".gitignore")
-    try:
-        lines = open(path, encoding=UTF8).read().split("\n")
-    except OSError:
-        return path, [], 0
-    keep = [line for line in lines if line.strip() not in AO_GITIGNORE
-            and "agent-orchestrator: mail is transient" not in line]
-    return path, keep, len(lines) - len(keep)
+    raw = storage.read_in_tree(root, ".gitignore")
+    if raw is None:
+        return path, [], 0, []
+    # Match init's text decoding, but never read through a link or wait on a FIFO. The caller names an
+    # unreadable file at both planning and removal, including a link swapped in between them (LEADS-INSTALL).
+    lines = raw.decode(UTF8, "replace").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    keep, unclaimed, index = [], [], 0
+    while index < len(lines):
+        line = lines[index]
+        if line.lstrip().startswith("#") and AO_GITIGNORE_MARK in line:
+            named = re.search(r" \(ao: (\d{1,6}) lines? below, [0-9a-f]{16}\)$", line)
+            count = int(named.group(1)) if named else 0
+            block = lines[index + 1:index + 1 + count]
+            if named and len(block) == count and line == _gitignore_block(block):
+                index += 1 + count
+                continue
+            unclaimed.append((index + 1, len(keep) + 1))
+        keep.append(line)
+        index += 1
+    return path, keep, len(lines) - len(keep), unclaimed
 
 
 # The jobs `ao watchdog install` and `ao telegram install` schedule for a project (SAFE-REMOVE). Windows
@@ -179,6 +221,11 @@ SYSTEMD_RUNTIME = "/run/systemd/system"
 SYSTEMD_NAME_MAX = 255
 # What `systemctl is-active` says of a unit that is running or about to be.
 SYSTEMD_UP = ("active", "activating", "reloading")
+# And of one whose process may still run: a service being stopped is `deactivating` until it has ended.
+SYSTEMD_NOT_GONE = SYSTEMD_UP + ("deactivating",)
+# And of one that does not run and will not start of itself, a unit it does not know included. Any other word, or
+# no word for a unit, is no answer, and a job it is said of counts as there (LEADS-INSTALL).
+SYSTEMD_DOWN = ("inactive", "failed")
 LINGER_ADVICE = ("the timers run while you are logged in; to keep them running after you log out: "
                  "loginctl enable-linger")
 
@@ -357,22 +404,27 @@ def _systemd_unschedule(timer):
     """Take one job's timer and service off the user systemd and out of its directory; what is left, or None.
 
     Without systemd as the init system nothing can hold them, and their files are all there is to
-    remove. With it, the manager is asked to disable and stop them and then whether the timer is
-    gone. A manager this shell cannot reach may still run them: they are then left as they are,
-    files included, so that a session that reaches it still finds them to take off.
+    remove. With it, the manager is asked to disable and stop them and then whether each is gone:
+    the timer, and the service, whose cycle may be running as it is asked. Only the timer was
+    asked after, so a service a stop did not end ran on against a project its removal said was
+    free of it (LEADS-INSTALL). A manager this shell cannot reach may still run them: they are
+    then left as they are, files included, so that a session that reaches it still finds them to
+    take off - and so they are when no file of theirs is left, since the manager keeps running a
+    unit whose files went; that was read as nothing to take off (LEADS-INSTALL). Each is stopped by
+    name as well as disabled: a disable finds no unit file to act on once the files went, and its
+    `--now` then stops nothing.
     """
     unit = timer[:-len(".timer")]
+    service = unit + ".service"
     files = _systemd_files(unit)
     booted = os.path.isdir(SYSTEMD_RUNTIME)
     if booted:
         problem = _systemd_user_problem()
         if problem:
-            if not any(os.path.lexists(path) for path in files):
-                return None                     # nothing of ao's is here, and a manager out of reach cannot be asked
             return f"{problem} — take it off from a login session of this user: ao watchdog uninstall"
-        # What these two answer is not read: the timer's state afterwards is what decides.
+        # What these answer is not read: each unit's state afterwards is what decides.
         _systemctl("disable", "--now", timer)
-        _systemctl("stop", unit + ".service")
+        _systemctl("stop", timer, service)
     left = []
     for path in files:
         try:
@@ -384,32 +436,101 @@ def _systemd_unschedule(timer):
         return "; ".join(left) or None
     _systemctl("daemon-reload")
     deadline = time.monotonic() + JOB_GONE_SECONDS
-    state = _systemd_states(timer)[timer]
-    while state in SYSTEMD_UP and time.monotonic() < deadline:
+    states = _systemd_states(timer, service)
+    while any(state in SYSTEMD_NOT_GONE for state in states.values()) and time.monotonic() < deadline:
         time.sleep(0.25)
-        state = _systemd_states(timer)[timer]
-    if state is None:
-        left.append(f"the user manager stopped answering — systemctl --user is-active {timer}")
-    elif state in SYSTEMD_UP:
-        left.append(f"still {state} — systemctl --user disable --now {timer}")
+        states = _systemd_states(timer, service)
+    running = _systemd_running(states)
+    if states[timer] in SYSTEMD_NOT_GONE:
+        left.append(f"still {states[timer]} — systemctl --user stop {timer}")
+    if states[service] in SYSTEMD_NOT_GONE:
+        left.append(f"its service still {states[service]} — systemctl --user stop {service}")
+    if running is not True and running is not False:
+        left.append(f"{running}, so whether it still runs is not known — take it off from a login session of this "
+                    "user: ao watchdog uninstall")
     return "; ".join(left) or None
+
+
+def _systemd_running(states):
+    """True when the user manager says one of these units runs or is about to, False when it says each is down;
+    else why what it said is neither (LEADS-INSTALL).
+
+    `_systemd_states` names no state when the manager cannot be asked, or does not answer a state for each unit,
+    and that read as no unit running: a job the manager could not be asked about counted as gone.
+    """
+    if any(state in SYSTEMD_NOT_GONE for state in states.values()):
+        return True
+    if all(state in SYSTEMD_DOWN for state in states.values()):
+        return False
+    if None in states.values():
+        return (_systemd_user_problem()
+                or f"the user manager did not answer systemctl --user is-active {' '.join(states)}")
+    unit, state = next((unit, state) for unit, state in states.items() if state not in SYSTEMD_DOWN)
+    return f"systemctl --user is-active answers {state!r} for {unit}, neither running nor stopped"
+
+
+def _task_held(name):
+    """True when Task Scheduler holds a task of this name, False when it says it holds none; else why it cannot say.
+
+    schtasks exits 1 for a task it does not have and for one it will not show alike - access is
+    denied, the service does not answer - and says which in the machine's own language. Every
+    failed query read as no task, so `ao remove` took a project's state while a task it could not
+    read went on running against it (LEADS-INSTALL). So it is also asked for a name no task has,
+    and a failed query is an absence only when it failed the same way, that name aside. And only
+    when Task Scheduler answered at all, by listing its tasks: a failure every query shares - access
+    to Task Scheduler denied, its service not running - read the same for both names, and was taken
+    for an absence (LEADS-INSTALL).
+    """
+    import secrets
+    said, status = _schtasks("/Query", "/TN", name)
+    if status == 0:
+        return True
+    if status is None:
+        return "schtasks could not be run"
+    listed, listed_status = _schtasks("/Query")
+    if listed_status != 0:
+        return f"it lists no task: {listed[:120] or 'schtasks /Query exit ' + str(listed_status)}"
+    nobody = f"ao-no-task-{secrets.token_hex(6)}"
+    absent, absent_status = _schtasks("/Query", "/TN", nobody)
+    if absent_status == status and absent.replace(nobody, "\0") == said.replace(name, "\0"):
+        return False
+    return said[:120] or f"schtasks exit {status}"
+
+
+def _systemd_loaded(unit):
+    """Whether the user manager runs one job's timer or service, or is about to: True, False when it says neither
+    does, else why it cannot be asked - a job with no file left.
+
+    The manager keeps a unit it has loaded after its files are gone, a timer running included, until it
+    stops; files deleted by hand left one running that `ao remove` never looked for (LEADS-INSTALL). A
+    manager this shell cannot reach, or an answer that is not a state for each unit, read as neither
+    running, and the removal took the state of a project whose timer ran on: it is no answer, and the
+    job counts as there (LEADS-INSTALL). False where systemd is not the init system: no manager holds
+    a unit there, and the files are all there is to find.
+    """
+    if not os.path.isdir(SYSTEMD_RUNTIME):
+        return False
+    return _systemd_running(_systemd_states(unit + ".timer", unit + ".service"))
 
 
 def _installed_jobs(key):
     """(kind, name) of each job ao scheduled for a project that is there to remove on this platform.
 
-    A user systemd loads ao's units from the files `ao watchdog install` writes and from nowhere
-    else, so on Linux a job is there while one of its files is.
+    A user systemd loads ao's units from the files `ao watchdog install` writes, and keeps one it
+    loaded running after they are gone: on Linux a job is there while one of its files is, or
+    while the manager runs it. A job its scheduler cannot say it lacks - Task Scheduler, a user
+    manager or launchd that does not answer - is there too, so that removing it is tried, and
+    what could not be asked is named (LEADS-INSTALL).
     """
     scheduler = _scheduler()
     if scheduler == "schtasks":
         return [("scheduled task", name) for name in (_windows_task(job, key) for job in WINDOWS_TASKS)
-                if _schtasks("/Query", "/TN", name)[1] == 0]
+                if _task_held(name) is not False]
     if scheduler == "systemd":
         return [("systemd timer", unit + ".timer") for unit in (_systemd_unit(job, key) for job in SYSTEMD_JOBS)
-                if any(os.path.lexists(path) for path in _systemd_files(unit))]
+                if any(os.path.lexists(path) for path in _systemd_files(unit)) or _systemd_loaded(unit) is not False]
     return [("launchd job", label) for label in (_launchd_label(job, key) for job in LAUNCHD_JOBS)
-            if _launchd_loaded(label) or os.path.lexists(_launchd_plist(label))]
+            if _launchd_loaded(label) is not False or os.path.lexists(_launchd_plist(label))]
 
 
 def _unschedule(name):
@@ -418,17 +539,23 @@ def _unschedule(name):
     `ao remove` ran `python -m ao watchdog uninstall` and did not read the result: from a clone
     that interpreter has no ao module, the jobs went on running against a removed project, and
     remove said they were gone. The telegram poller, which launchd keeps alive, was never removed.
+    A job its scheduler cannot say is gone is left, named, as one it still holds (LEADS-INSTALL).
     """
     scheduler = _scheduler()
     if scheduler == "schtasks":
         said, status = _schtasks("/Delete", "/TN", name, "/F")
-        if _schtasks("/Query", "/TN", name)[1] == 0:
+        held = _task_held(name)
+        if held is True:
             return f"Task Scheduler still holds it: {said[:120] or f'schtasks exit {status}'}"
+        if held is not False:
+            return (f"Task Scheduler cannot say whether it still holds it ({held}) — delete it from a prompt "
+                    f"that can: schtasks /Delete /TN {name} /F")
         return None
     if scheduler == "systemd":
         return _systemd_unschedule(name)
     plist, left = _launchd_plist(name), []
-    if _launchd_loaded(name) and _launchctl("bootout", _launchd_domain(name))[1] != 0 and os.path.exists(plist):
+    if _launchd_loaded(name) is not False and _launchctl("bootout", _launchd_domain(name))[1] != 0 \
+            and os.path.exists(plist):
         _launchctl("unload", plist)
     try:
         if os.path.lexists(plist):
@@ -436,12 +563,159 @@ def _unschedule(name):
     except OSError as exc:
         left.append(f"cannot remove {_home_relative(plist)}: {exc}")
     deadline = time.monotonic() + JOB_GONE_SECONDS
-    while _launchd_loaded(name):
-        if time.monotonic() >= deadline:
-            left.append(f"still loaded — launchctl bootout {_launchd_domain(name)}")
-            break
+    loaded = _launchd_loaded(name)
+    while loaded is True and time.monotonic() < deadline:
         time.sleep(0.25)
+        loaded = _launchd_loaded(name)
+    if loaded is True:
+        left.append(f"still loaded — launchctl bootout {_launchd_domain(name)}")
+    elif loaded is not False:
+        left.append(f"launchd cannot say whether it still holds it ({loaded}) — check from a login session of this "
+                    f"user with `launchctl list`, and take it off: launchctl bootout {_launchd_domain(name)}")
     return "; ".join(left) or None
+
+
+def _plan_words(rel):
+    """The names that lead from the project to one path of `ao remove`'s plan, or None when it names none inside it.
+
+    A path of the plan comes partly from words an agent can write - the reviews directory of .ao/config.json, a
+    project adapter's `ao_files` - and `..` there named the directory above the project, `.` the project itself:
+    a containment check of the directory the path is in passes for both, and the delete took that directory whole
+    (LEADS-INSTALL). An empty name and `.` are dropped as a path's reading drops them; `..`, and a drive on
+    Windows, name nothing inside.
+    """
+    words = [word for word in rel.replace(os.sep, "/").split("/") if word not in ("", ".")]
+    if not words or ".." in words or os.path.splitdrive(os.path.join(*words))[0]:
+        return None
+    return words
+
+
+def _remove_in_project(root, rel):
+    """Delete one path of `ao remove`'s plan where it lies in the project; None once it is gone, else why it is not.
+
+    A directory goes whole, a link in it as a link; a file or a link goes itself, never what a link
+    points at. Every error of the recursive delete was ignored, and a removal that left part of .ao/
+    behind said that AO state was gone (LEADS-INSTALL). A path whose directory resolves outside the
+    project is left as it is: a link put on its way would send the delete there.
+
+    Storage holds each folder while it is used: relative descriptors on POSIX and native handles
+    without delete sharing on Windows. A platform with neither refuses the operation (LEADS-INSTALL).
+    """
+    from . import storage
+    words = _plan_words(rel)
+    if words is None:
+        return "it names no path inside the project, and nothing is deleted for it"
+    path = os.path.join(root, *words)
+    if not os.path.lexists(path):
+        return None
+    parent = os.path.realpath(os.path.dirname(path))
+    if not _hook_contains(root, parent):
+        return f"its directory resolves outside the project, to {parent}, and nothing is deleted there"
+    base = os.path.realpath(root)
+    failed = []
+    # The resolved parent above is only a diagnostic. Walk the plan's original names so a link to another
+    # directory inside the project is refused too, rather than deleting from its target (LEADS-INSTALL).
+    steps = words[:-1]
+    try:
+        with storage._tree_folder(base, steps, make=False) as directory:
+            if directory is None:
+                return None
+            _delete_in_directory(directory, words[-1], failed)
+            try:
+                storage._tree_stat(directory, words[-1])
+            except FileNotFoundError:
+                return None
+    except OSError as exc:
+        failed.append(exc)
+    return " ".join(str(failed[0]).split()) if failed else "it is still there"
+
+
+def _delete_in_directory(directory, name, failed):
+    """Delete `name` from the open directory `directory` without following a link; each error goes into `failed`.
+
+    A file or a link goes itself. A directory is emptied first, each directory in it opened relative to the one it
+    is in, without following a link, and each name deleted relative to the directory it is in, so that a link
+    swapped in for one of them is deleted as a link or stops the walk where it stands (LEADS-INSTALL). It is a walk
+    of ao's own because shutil.rmtree starts from a held directory only from Python 3.11, and ao runs on 3.9; it
+    keeps a stack of its own, so that a tree nested deeper than the interpreter recurses ends no removal in a
+    RecursionError.
+    """
+    import stat
+    from contextlib import ExitStack
+    from . import storage
+    if isinstance(directory, int) and (os.rmdir not in os.supports_dir_fd or os.scandir not in os.supports_fd):
+        failed.append(storage.InTheWay(name, "cannot hold folders for removal; ao refuses this file operation"))
+        return
+    opened_context = ExitStack()
+    try:
+        info = storage._tree_stat(directory, name)
+        if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            storage._tree_remove_leaf(directory, name)
+            return
+        opened = opened_context.enter_context(storage._tree_child(directory, name))
+        if opened is None:
+            opened_context.close()
+            return
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        failed.append(exc)
+        return
+    stack = [(directory, name, opened, _directory_entries(opened, failed), opened_context)]
+    try:
+        while stack:
+            parent, here, held, entries, context = stack[-1]
+            entry = next(entries, None)
+            if entry is None:
+                stack.pop()
+                context.close()
+                try:
+                    storage._tree_rmdir(parent, here)
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    failed.append(exc)
+                continue
+            child, is_directory = entry
+            try:
+                if is_directory:
+                    context = ExitStack()
+                    try:
+                        inner = context.enter_context(storage._tree_child(held, child))
+                    except BaseException:
+                        context.close()
+                        raise
+                    if inner is None:
+                        context.close()
+                        continue
+                    stack.append((held, child, inner, _directory_entries(inner, failed), context))
+                else:
+                    storage._tree_remove_leaf(held, child)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                failed.append(exc)
+    finally:
+        for _, _, _, _, context in reversed(stack):
+            context.close()
+
+
+def _directory_entries(directory, failed):
+    """An iterator of (name, whether it is a directory itself, not through a link) over an open directory, read whole
+    before anything in it is deleted; an error goes into `failed`, and the entries read before it stay."""
+    found = []
+    try:
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                try:
+                    found.append((entry.name, entry.is_dir(follow_symlinks=False)
+                                  and (isinstance(directory, int) or not
+                                       getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0) & 0x400)))
+                except OSError:
+                    found.append((entry.name, False))          # deleted as a file, or named with why it is not
+    except OSError as exc:
+        failed.append(exc)
+    return iter(found)
 
 
 def cmd_remove(cfg, args):
@@ -461,14 +735,24 @@ def cmd_remove(cfg, args):
     plan = [PROJECT_MARKER, ".ao/", "agent-mail/", cfg.get("reviews", "semantic-review") + "/"] + harness_files
     print(f"{C['b']}ao remove{C['reset']} would delete from {root}:")
     for rel in plan:
-        if os.path.exists(os.path.join(root, rel)):
+        words = _plan_words(rel)
+        if words is None:
+            print(f"   {C['red']}not {rel}{C['reset']}: it names no path inside the project")
+        elif os.path.exists(os.path.join(root, *words)):
             print(f"   {rel}")
     for path, _, _ in mcp_entries:
         print(f"   {os.path.relpath(path, root)}: the `ao` server entry (other entries stay)")
     for path, why in mcp_unread:
         print(f"   {C['red']}cannot read {os.path.relpath(path, root)}{C['reset']}: {why}; any `ao` entry in it stays")
-    if _gitignore_without_ao(root)[2]:
+    try:
+        _, _, dropped, unclaimed = _gitignore_without_ao(root)
+    except OSError as exc:
+        dropped, unclaimed = 0, []
+        print(f"   {C['red']}cannot read .gitignore{C['reset']}: {exc}; the lines ao added stay")
+    if dropped:
         print("   .gitignore: the lines ao added")
+    for line, _ in unclaimed:
+        print(f"   {C['yellow']}stays{C['reset']} .gitignore line {line} and the lines under it: {GITIGNORE_UNCLAIMED}")
     # Outside the tree, each thing by name, found as the removal below finds it (SAFE-REMOVE).
     for kind, name in _installed_jobs(key) if owned else []:
         print(f"   {kind} {name}")
@@ -558,7 +842,8 @@ def cmd_remove(cfg, args):
         return 1
 
     # The jobs go first, in this process, and each is checked gone (SAFE-REMOVE). A job left
-    # behind runs against the project every few minutes, so its state stays until none is left.
+    # behind runs against the project every few minutes, so its state stays until none is left,
+    # and so it does while a scheduler cannot say whether it holds one (LEADS-INSTALL).
     left = []
     for kind, name in _installed_jobs(key) if owned else []:
         problem = _unschedule(name)
@@ -568,21 +853,19 @@ def cmd_remove(cfg, args):
         else:
             print(f"removed {kind} {name}")
     if left:
-        print(f"{C['red']}remove stopped; AO state kept intact{C['reset']}: {len(left)} scheduled job(s) would go on "
-              "running against a removed project — remove them, then run: ao remove --yes")
+        print(f"{C['red']}remove stopped; AO state kept intact{C['reset']}: {len(left)} scheduled job(s) may go on "
+              "running against a removed project — take each off as said above, then run: ao remove --yes")
         return 1
 
-    import shutil as _sh
     for rel in plan:
-        p = os.path.join(root, rel)
-        if os.path.isdir(p):
-            _sh.rmtree(p, ignore_errors=True)
-        elif os.path.exists(p):
-            os.remove(p)
+        problem = _remove_in_project(root, rel)
+        if problem:
+            left.append(os.path.join(root, rel))
+            print(f"{C['red']}left{C['reset']} {rel}: {problem}")
     for path, mcp_key, remove_when_empty in mcp_entries:
         shown = os.path.relpath(path, root)
         try:
-            gone = _drop_mcp_entry(path, mcp_key, remove_when_empty)
+            gone = _drop_mcp_entry(path, mcp_key, remove_when_empty, root)
         except (OSError, ValueError) as exc:
             left.append(path)
             print(f"{C['red']}left{C['reset']} the `ao` entry in {shown}: {' '.join(str(exc).split())}")
@@ -593,9 +876,20 @@ def cmd_remove(cfg, args):
         left.append(path)
         print(f"{C['red']}left{C['reset']} {os.path.relpath(path, root)}: it cannot be read ({why}), "
               "so any `ao` entry in it stays")
-    gi, keep, dropped = _gitignore_without_ao(root)
-    if dropped:
-        open(gi, "w", encoding=UTF8).write("\n".join(keep))
+    gi = os.path.join(root, ".gitignore")
+    try:
+        gi, keep, dropped, unclaimed = _gitignore_without_ao(root)
+        if dropped:
+            from .storage import replace_in_tree
+            replace_in_tree(root, ".gitignore", "\n".join(keep).encode(UTF8))
+    except OSError as exc:
+        left.append(gi)
+        print(f"{C['red']}left{C['reset']} the lines ao added to .gitignore: {exc}")
+    else:
+        # Named, and no failure of the removal: lines ao cannot tell it wrote are the person's until they say not.
+        for before, after in unclaimed:
+            print(f"{C['yellow']}kept{C['reset']} .gitignore line {after if dropped else before} and the lines under "
+                  f"it: {GITIGNORE_UNCLAIMED}")
     # Exactly this project's files in ~/.ao, named by the table their writers name them from, and
     # its row of the registry, which stays for every other project (SAFE-REMOVE).
     removed = 0
@@ -1086,13 +1380,18 @@ def _watchdog_windows(cfg, args):
                                             ["-C", root, "doctor", "--check", "--notify"])}
     if args.action == "status":
         for name in tasks:
-            print(f"{name}: {'scheduled' if _schtasks('/Query', '/TN', name)[1] == 0 else 'absent'}")
+            held = _task_held(name)
+            print(f"{name}: " + ("scheduled" if held is True else "absent" if held is False
+                                 else f"unknown — Task Scheduler cannot say ({held})"))
         return 0
     if args.action == "uninstall":
+        # Each checked gone, as `ao remove` checks it: "removed" was printed whatever schtasks did (LEADS-INSTALL).
+        left = 0
         for name in tasks:
-            _schtasks("/Delete", "/TN", name, "/F")
-            print(f"removed {name}")
-        return 0
+            problem = _unschedule(name)
+            left += bool(problem)
+            print(f"{C['red']}left{C['reset']} {name}: {problem}" if problem else f"removed {name}")
+        return 1 if left else 0
     # A task that names a missing program fails every run and says nothing (SAFE-REMOVE).
     argvs = {name: _scheduled_argv(*entry) for name, (_, entry, _) in tasks.items()}
     missing = [entry[0] for name, (_, entry, _) in tasks.items() if argvs[name] is None]
@@ -1268,12 +1567,12 @@ def cmd_adapters(cfg, args):
             return 1 if problems else 0
         import tempfile
         harness = os.path.join(os.path.dirname(A.__file__), "conformance_harness.py")
+        # The fixture harness is started by this interpreter, isolated (-I) so that nothing beside the script is
+        # imported. It was a copy whose first line named the interpreter, made executable: Windows runs no such
+        # line and refused to start it, and an interpreter whose path holds a space made a line POSIX cannot read,
+        # so every capability failed as "the harness did not run" (LEADS-INSTALL).
         with tempfile.TemporaryDirectory(prefix="ao-conform-") as workdir:
-            shim = os.path.join(workdir, "harness")
-            with open(shim, "w", encoding=UTF8) as fh:
-                fh.write(f"#!{sys.executable}\n" + open(harness, encoding=UTF8).read())
-            os.chmod(shim, 0o755)
-            results = A.conform_adapter(adapter, shim, workdir)
+            results = A.conform_adapter(adapter, [sys.executable, "-I", harness], workdir)
         for capability, state, detail in results:
             tone = C["green"] if state == "pass" else C["red"] if state == "fail" else C["dim"]
             print(f"  {capability:<11} {tone}{state}{C['reset']}  {C['dim']}{detail}{C['reset']}")
@@ -1536,28 +1835,56 @@ def _prove_throwaway(cfg):
                 os.unlink(link)
             except OSError:
                 pass
-        archive = os.path.join(A.HOME, ".ao", "archive", A.project_key(root), f"prove-{stamp}")
-        for part in (".ao", cfg.get("reviews", "semantic-review")):
-            if os.path.isdir(os.path.join(tree, part)):
-                shutil.copytree(os.path.join(tree, part), os.path.join(archive, part), symlinks=True,
-                                dirs_exist_ok=True)
+        # An archive that cannot be written is said, and the worktree goes all the same: a copy that raised here
+        # skipped the removal below and left the worktree registered in the checkout (LEADS-INSTALL).
         try:
-            cleanup_steps = (("remove", "--force", tree), ("prune",)) if made else ()
-            if not made:
-                shutil.rmtree(scratch, ignore_errors=True)
-            for cleanup_args in cleanup_steps:
-                try:
-                    A._git_worktree_cleanup(root, *cleanup_args)
-                except A.WorktreeCleanupRefused:
-                    raise
-                except RuntimeError as exc:
-                    print(f"{C['yellow']}worktree cleanup incomplete{C['reset']}: "
-                          f"{' '.join(str(exc).split())}; inspect the worktree administration and retry cleanup")
-                if cleanup_args[0] == "remove":
+            _archive_throwaway(cfg, root, tree, stamp)
+        except Exception as exc:
+            print(f"  {C['yellow']}the throwaway's coordination state and review were not archived{C['reset']}: "
+                  f"{type(exc).__name__}: {' '.join(str(exc).split())}")
+        finally:
+            try:
+                cleanup_steps = (("remove", "--force", tree), ("prune",)) if made else ()
+                if not made:
                     shutil.rmtree(scratch, ignore_errors=True)
-        except A.WorktreeCleanupRefused as exc:
-            result = (False, f"worktree cleanup failed: {exc}", "repair the worktree administration and retry")
+                for cleanup_args in cleanup_steps:
+                    try:
+                        A._git_worktree_cleanup(root, *cleanup_args)
+                    except A.WorktreeCleanupRefused:
+                        raise
+                    except RuntimeError as exc:
+                        print(f"{C['yellow']}worktree cleanup incomplete{C['reset']}: "
+                              f"{' '.join(str(exc).split())}; inspect the worktree administration and retry cleanup")
+                    if cleanup_args[0] == "remove":
+                        shutil.rmtree(scratch, ignore_errors=True)
+            except A.WorktreeCleanupRefused as exc:
+                result = (False, f"worktree cleanup failed: {exc}", "repair the worktree administration and retry")
     return (*result, tree if made else None)
+
+
+def _archive_throwaway(cfg, root, tree, stamp):
+    """Copy the throwaway's .ao/ and reviews to ~/.ao/archive/<project>/prove-<stamp>/, a directory of this run's own.
+
+    Named by the second, two runs in one second shared a directory and the second was merged into the
+    first (LEADS-INSTALL): one that is there already is followed by -2, -3 and on, each made by this run.
+    """
+    import shutil
+    parts = [part for part in (".ao", cfg.get("reviews", "semantic-review")) if os.path.isdir(os.path.join(tree, part))]
+    if not parts:
+        return None
+    parent = os.path.join(A.HOME, ".ao", "archive", A.project_key(root))
+    os.makedirs(parent, exist_ok=True)
+    count = 1
+    while True:
+        archive = os.path.join(parent, f"prove-{stamp}" + (f"-{count}" if count > 1 else ""))
+        try:
+            os.mkdir(archive)
+            break
+        except FileExistsError:
+            count += 1
+    for part in parts:
+        shutil.copytree(os.path.join(tree, part), os.path.join(archive, part), symlinks=True)
+    return archive
 
 
 def _prove_steps(cfg, root, tree, stamp, links, unlinked, heard):
@@ -1983,87 +2310,90 @@ def cmd_doctor(cfg, args):
     # items and half a day. Check the child's PATH, not this shell's.
     from .watchdog import child_path
     reachable = A.program_path("ao", path=child_path())
-    if reachable:
-        # The architect is woken through a binary the watchdog resolves by version,
-        # not by PATH order; say which one, and whether the last wake died on it.
-        arch = cfg.get("architect") or {}
-        if arch.get("argv"):
-            from .watchdog import wake_error, STATE_DIR, architect_command
-            # Use the wake's preparation and refusal values before any version probe (ARCH-PROBE-ORDER).
-            command, _, stopped = architect_command(root, cfg, arch.get("prompt", language.text(cfg, "prompt.refill")))
-            rb, rv = (None, "") if stopped else A.resolve_binary(command["argv"][0], path=command["path"])
-            others = [] if stopped else [c for c in A.binary_candidates(command["argv"][0], command["path"]) if c != rb]
-            if stopped:
-                print(f"architect bin   {C['red']}not asked{C['reset']} {C['dim']}{A.shown_text(stopped)}{C['reset']}")
-            else:
-                print(f"architect bin   {C['green'] if rb else C['red']}{rb or 'not found'}{C['reset']} {C['dim']}{rv}"
-                      f"{C['reset']}" + (f"  {C['dim']}({len(others)} older copy: {', '.join(others)}){C['reset']}"
-                                         if others else ""))
-            key = A.project_key(root)
-            we = wake_error(os.path.join(STATE_DIR, A.project_file_name("escalate-log", key)))
-            if we:
-                text, used, when = we["text"], we["binary"], we["when"]
-                print(f"last wake       {C['red']}failed{C['reset']} {when} [{used or '?'}]: {text[:90]}")
-                if stopped:
-                    print(f"                {C['dim']}no wake starts while the architect's command is held or refused"
-                          f"{C['reset']}")
-                elif not used:
-                    print(f"                {C['dim']}binary not recorded (older log); the next wake uses the one above{C['reset']}")
-                elif used != f"{rb} {rv}":
-                    print(f"                {C['dim']}a different binary resolves now; the next wake will use it{C['reset']}")
-                else:
-                    update = next((adapter["detect"]["update"] for adapter in A.package_adapters().values()
-                                   if (adapter.get("detect") or {}).get("update")
-                                   and os.path.basename(arch["argv"][0]) in A.adapter_binaries(adapter)), None)
-                    how = f" ({' '.join(update)})" if update else ""
-                    print(f"                {C['yellow']}same binary — update it{how} or remove the stale copy{C['reset']}")
-        # Liveness and channels. A watchdog nobody can prove is alive, and an orange
-        # alarm with no channel beyond the desktop, are both silent failures.
-        hb = A.heartbeat_age(root)
-        if hb is None:
-            print(f"last tick       {C['yellow']}never{C['reset']} {C['dim']}(no heartbeat file yet){C['reset']}")
+    # The architect is woken through a binary the watchdog resolves by version,
+    # not by PATH order; say which one, and whether the last wake died on it.
+    arch = cfg.get("architect") or {}
+    if arch.get("argv"):
+        from .watchdog import wake_error, STATE_DIR, architect_command
+        # Use the wake's preparation and refusal values before any version probe (ARCH-PROBE-ORDER).
+        command, _, stopped = architect_command(root, cfg, arch.get("prompt", language.text(cfg, "prompt.refill")))
+        rb, rv = (None, "") if stopped else A.resolve_binary(command["argv"][0], path=command["path"])
+        others = [] if stopped else [c for c in A.binary_candidates(command["argv"][0], command["path"]) if c != rb]
+        if stopped:
+            print(f"architect bin   {C['red']}not asked{C['reset']} {C['dim']}{A.shown_text(stopped)}{C['reset']}")
         else:
-            tone = C['green'] if hb < 360 else C['red']
-            print(f"last tick       {tone}{hb // 60}m {hb % 60}s ago{C['reset']}"
-                  + (f"  {C['red']}watchdog is not running its cycles{C['reset']}" if hb >= 360 else ""))
-        from . import telegram as _tg, email as _em
-        tg_ok, em_ok = bool(_tg.config()), bool(_em.config())
-        print(f"channels        desktop {C['green']}on{C['reset']} · telegram "
-              f"{C['green'] if tg_ok else C['yellow']}{'on' if tg_ok else 'off'}{C['reset']} · e-mail "
-              f"{C['green'] if em_ok else C['yellow']}{'on' if em_ok else 'off'}{C['reset']}"
-              + ("" if (tg_ok or em_ok) else f"  {C['yellow']}orange alarms reach nothing but the desktop — ao email setup{C['reset']}"))
-        try:
-            from .watchdog import load_state as _ls, reset_when as _reset_when
-            _st = _ls(root)
-            if _st.get("arch_quota_until", 0) > time.time():
-                # The date too when the end is a day or more away: a week's end is not tonight (ARCHITECT-WAKE-QUOTA).
-                print(f"architect       {C['yellow']}at quota{C['reset']} until {_reset_when(_st['arch_quota_until'])}")
-        except Exception:
-            pass
-        alive = A.active_alarms(A.project_key(root))
-        if alive:
-            worst = max(alive, key=lambda e: {"yellow": 0, "orange": 1, "red": 2}.get(e.get("ring"), 0))
-            print(f"alarms          {C['red'] if worst['ring'] == 'red' else C['yellow']}{len(alive)} live, worst {worst['ring']}{C['reset']}  {C['dim']}ao alarms{C['reset']}")
-        # Things that fail silently unless someone asks: the transcript format (a CLI
-        # update changes it and every status goes blind), the credits running out
-        # before the reset, the external ping, the push hook, the switches.
-        try:
-            msgs_p, _ = A.session_paths(cfg)
-            if msgs_p and os.path.exists(msgs_p):
-                n_recs = len(A.read_tail(msgs_p, 2_000_000))
-                age_m = int((time.time() - os.path.getmtime(msgs_p)) / 60)
-                bad = n_recs == 0 and age_m < 60
-                print(f"transcript      {C['red'] if bad else C['green']}{n_recs} records parsed{C['reset']}, last write {age_m}m ago"
-                      + (f"  {C['red']}fresh file, nothing parsed — the CLI's format changed; update the adapter{C['reset']}" if bad else ""))
-        except Exception:
-            pass
-        # The implementer's own account only, or that its adapter declares none (ACCOUNT-READERS).
-        for line in _doctor_credit_lines(cfg):
-            print(line)
-        print(f"ping            {C['green'] + 'configured' + C['reset'] if A.ping_url(root) else C['yellow'] + 'off' + C['reset'] + '  ao pings setup'}")
-        from . import features as _F
-        print(f"features        {sum(_F.switches(cfg).values())}/{len(_F.ORDER)} on  {C['dim']}ao cost --features for what "
-              f"each spent{C['reset']}")
+            print(f"architect bin   {C['green'] if rb else C['red']}{rb or 'not found'}{C['reset']} {C['dim']}{rv}"
+                  f"{C['reset']}" + (f"  {C['dim']}({len(others)} older copy: {', '.join(others)}){C['reset']}"
+                                     if others else ""))
+        key = A.project_key(root)
+        we = wake_error(os.path.join(STATE_DIR, A.project_file_name("escalate-log", key)))
+        if we:
+            text, used, when = we["text"], we["binary"], we["when"]
+            print(f"last wake       {C['red']}failed{C['reset']} {when} [{used or '?'}]: {text[:90]}")
+            if stopped:
+                print(f"                {C['dim']}no wake starts while the architect's command is held or refused"
+                      f"{C['reset']}")
+            elif not used:
+                print(f"                {C['dim']}binary not recorded (older log); the next wake uses the one above{C['reset']}")
+            elif used != f"{rb} {rv}":
+                print(f"                {C['dim']}a different binary resolves now; the next wake will use it{C['reset']}")
+            else:
+                update = next((adapter["detect"]["update"] for adapter in A.package_adapters().values()
+                               if (adapter.get("detect") or {}).get("update")
+                               and os.path.basename(arch["argv"][0]) in A.adapter_binaries(adapter)), None)
+                how = f" ({' '.join(update)})" if update else ""
+                print(f"                {C['yellow']}same binary — update it{how} or remove the stale copy{C['reset']}")
+    # Liveness and channels. A watchdog nobody can prove is alive, and an orange
+    # alarm with no channel beyond the desktop, are both silent failures.
+    hb = A.heartbeat_age(root)
+    if hb is None:
+        print(f"last tick       {C['yellow']}never{C['reset']} {C['dim']}(no heartbeat file yet){C['reset']}")
+    else:
+        tone = C['green'] if hb < 360 else C['red']
+        print(f"last tick       {tone}{hb // 60}m {hb % 60}s ago{C['reset']}"
+              + (f"  {C['red']}watchdog is not running its cycles{C['reset']}" if hb >= 360 else ""))
+    from . import telegram as _tg, email as _em
+    tg_ok, em_ok = bool(_tg.config()), bool(_em.config())
+    print(f"channels        desktop {C['green']}on{C['reset']} · telegram "
+          f"{C['green'] if tg_ok else C['yellow']}{'on' if tg_ok else 'off'}{C['reset']} · e-mail "
+          f"{C['green'] if em_ok else C['yellow']}{'on' if em_ok else 'off'}{C['reset']}"
+          + ("" if (tg_ok or em_ok) else f"  {C['yellow']}orange alarms reach nothing but the desktop — ao email setup{C['reset']}"))
+    try:
+        from .watchdog import load_state as _ls, reset_when as _reset_when
+        _st = _ls(root)
+        if _st.get("arch_quota_until", 0) > time.time():
+            # The date too when the end is a day or more away: a week's end is not tonight (ARCHITECT-WAKE-QUOTA).
+            print(f"architect       {C['yellow']}at quota{C['reset']} until {_reset_when(_st['arch_quota_until'])}")
+    except Exception:
+        pass
+    alive = A.active_alarms(A.project_key(root))
+    if alive:
+        worst = max(alive, key=lambda e: {"yellow": 0, "orange": 1, "red": 2}.get(e.get("ring"), 0))
+        print(f"alarms          {C['red'] if worst['ring'] == 'red' else C['yellow']}{len(alive)} live, worst {worst['ring']}{C['reset']}  {C['dim']}ao alarms{C['reset']}")
+    # Things that fail silently unless someone asks: the transcript format (a CLI
+    # update changes it and every status goes blind), the credits running out
+    # before the reset, the external ping, the push hook, the switches.
+    try:
+        msgs_p, _ = A.session_paths(cfg)
+        if msgs_p and os.path.exists(msgs_p):
+            n_recs = len(A.read_tail(msgs_p, 2_000_000))
+            age_m = int((time.time() - os.path.getmtime(msgs_p)) / 60)
+            bad = n_recs == 0 and age_m < 60
+            print(f"transcript      {C['red'] if bad else C['green']}{n_recs} records parsed{C['reset']}, last write {age_m}m ago"
+                  + (f"  {C['red']}fresh file, nothing parsed — the CLI's format changed; update the adapter{C['reset']}" if bad else ""))
+    except Exception:
+        pass
+    # The implementer's own account only, or that its adapter declares none (ACCOUNT-READERS).
+    for line in _doctor_credit_lines(cfg):
+        print(line)
+    print(f"ping            {C['green'] + 'configured' + C['reset'] if A.ping_url(root) else C['yellow'] + 'off' + C['reset'] + '  ao pings setup'}")
+    from . import features as _F
+    print(f"features        {sum(_F.switches(cfg).values())}/{len(_F.ORDER)} on  {C['dim']}ao cost --features for what "
+          f"each spent{C['reset']}")
+    # Only this line is about finding ao for the agents. Every line above was printed only when ao was found,
+    # and a machine where it was not lost the heartbeat, the alarms, the transcript, the credits, the ping and
+    # the channels with it (LEADS-INSTALL).
+    if reachable:
         print(f"ao for agents   {C['green']}{reachable}{C['reset']}")
     else:
         print(f"ao for agents   {C['red']}not on a spawned agent's PATH{C['reset']}")

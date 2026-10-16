@@ -365,6 +365,40 @@ the same way, and on Windows the tasks of the projects the registry knows. The
 heartbeats of those projects go with the jobs, since one left behind reads as a dead watchdog
 ([getting started](getting-started.md#5-update-and-uninstall)).
 
+*In ao since slice LEADS-INSTALL: a job counts as gone only when its scheduler says it is. On Linux
+the service a timer starts is asked after as well as the timer: a watchdog cycle that a stop did not
+end ran on while the removal said its jobs were gone, and it is now named with the
+`systemctl --user stop` that ends it. A timer the user manager still runs after its files were
+deleted by hand is found by asking the manager - by `ao remove --yes`, and by `ao uninstall --yes`
+for each project the registry knows - and stopped by name, since a disable finds no unit file to act
+on; only the files were looked at. On Windows every schtasks query that failed read as no task,
+whatever it failed for: a task is absent now only when Task Scheduler lists its tasks and schtasks
+fails for it as it fails for a name no task has, said in the machine's own language. `ao watchdog
+uninstall` there checks each task gone as remove does, where it said "removed" whatever schtasks did,
+and `ao watchdog status` says when Task Scheduler cannot say. Every scheduler question has three
+answers - the job is there, it is not, or the scheduler cannot be asked - and the last counts as
+there: a user manager this shell cannot reach, an answer that is not one state for each unit, a
+`launchctl list` that fails and a Task Scheduler that refuses every query alike (access denied, its
+service not running) each read as holding nothing, and the removal took the state of a project whose
+job ran on. `ao remove --yes` now names the job it could not ask about, keeps the project's state and
+exits 1, and `ao uninstall --yes` does the same for each project the registry knows: run either from
+a login session of the user the jobs belong to, where the scheduler answers.*
+
+*In ao since slice LEADS-INSTALL: what `ao remove --yes` deletes in the project is checked gone too.
+Every error of deleting `.ao/`, the mailbox and the reviews was ignored, and a removal that left part
+of `.ao/` behind said that AO state was gone, while a harness file that could not be deleted ended it
+in a traceback; each path still there is named with why, and the removal exits 1. A link among them
+goes as a link, never what it points at, and a path whose directory a link takes outside the project
+is left where it is, named. On macOS and Linux each path is deleted through directories held open
+from the project down, each opened without following a link; Windows pins the folders with native
+handles that prevent their replacement. A platform with neither refuses the operation. Checked by
+path and deleted by path, a link swapped in between the two took the delete outside the project. A reviews directory of `..` or `.` in `.ao/config.json` named the directory above the project
+or the project itself, and the removal deleted it whole; a path that names nothing inside the project
+is left, named. In `.gitignore` only the blocks `ao init` wrote go: its comment names how many lines it
+added and a digest of them, and a block goes only when the lines under the comment are those. A
+person's own lines under a comment in ao's words went with ao's; a block an older ao wrote, which
+names no lines, or one changed since stays, named, for the person to delete.*
+
 ## The instruments
 
 ```bash
@@ -378,6 +412,11 @@ ao mail log                  # every message written and when it was consumed
 ```
 
 Over MCP: `ao_watchdog {action: explain|trace}` returns the same, read-only.
+
+*In ao since slice LEADS-INSTALL: `ao doctor` shows the architect's binary, the last wake, the last
+tick, the channels, the live alarms, the transcript, the credits, the ping and the switches whether
+or not an agent's PATH finds ao. Each was left out when it did not, where only the line that says
+whether agents find ao is about that.*
 
 When the watchdog "did nothing", run `explain`. The last decision line is the
 verdict; the lines above it are the guards that let it through; the

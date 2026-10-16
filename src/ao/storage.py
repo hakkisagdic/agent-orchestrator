@@ -1104,6 +1104,41 @@ def _tree_folder(root, parts, make):
             yield folder
 
 
+@contextmanager
+def _tree_child(folder, name):
+    """Hold a child for reading or removal while its parent stays held, through no link (LEADS-INSTALL)."""
+    if isinstance(folder, int):
+        fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=folder)
+        try:
+            yield fd
+        finally:
+            os.close(fd)
+    else:
+        _require_windows_tree()
+        child = os.path.join(folder, name)
+        handle, close = _open_tree_nt(child)
+        try:
+            yield child
+        finally:
+            close(handle)
+
+
+def _tree_rmdir(folder, name):
+    if isinstance(folder, int):
+        os.rmdir(name, dir_fd=folder)
+    else:
+        os.rmdir(os.path.join(folder, name))
+
+
+def _tree_remove_leaf(folder, name):
+    """Unlink a leaf, including a Windows junction itself, never its target (LEADS-INSTALL)."""
+    info = _tree_stat(folder, name)
+    if not isinstance(folder, int) and getattr(info, "st_file_attributes", 0) & 0x10:
+        _tree_rmdir(folder, name)
+    else:
+        _tree_unlink(folder, name)
+
+
 def _tree_open(folder, name, flags, mode=0o666):
     if isinstance(folder, int):
         try:
