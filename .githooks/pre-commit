@@ -1,5 +1,5 @@
 #!/bin/sh
-# agent-orchestrator: ao-hook-v6 role=pre-commit binding=project-local
+# agent-orchestrator: ao-hook-v7 role=pre-commit binding=project-local
 initial_cwd=$(CDPATH= cd -- . && pwd -P)
 root="$initial_cwd"
 AO_COMMIT_TOP="$initial_cwd"; export AO_COMMIT_TOP
@@ -17,6 +17,14 @@ case $headed in
 esac
 if [ -z "$indexed$headed" ]; then
   headed=$(git --literal-pathspecs -C "$initial_cwd" log --all -1 --format=%H -- .ao-project 2>/dev/null) || headed=unread
+fi
+if [ -z "$indexed$headed" ]; then
+  enrollment_common=$(git --literal-pathspecs -C "$initial_cwd" rev-parse --git-common-dir 2>/dev/null) || headed=unread
+  [ -n "$enrollment_common" ] || headed=unread
+  case $enrollment_common in /*|[A-Za-z]:[\\/]*) ;; *) enrollment_common="$initial_cwd/$enrollment_common" ;; esac
+  if [ -e "$enrollment_common/ao-enrolled.json" ] || [ -L "$enrollment_common/ao-enrolled.json" ]; then
+    headed=recorded
+  fi
 fi
 [ -n "$indexed$headed" ] || exit 0
 ao=$(command -v ao) || { echo 'agent-orchestrator: ao not found' >&2; exit 1; }

@@ -1350,36 +1350,62 @@ def source_trees(root, minimum):
             for tree, chains in counts.items() if any(n >= minimum for n in chains.values())}
 
 
+# A word of a gate's command line that launches the program after it: `python -m pytest`, `npx vitest`, `uv run pytest`.
+_GATE_LAUNCHERS = {"python": "-m", "python3": "-m", "py": "-m", "npx": None, "pnpx": None, "bunx": None, "uv": "run",
+                   "poetry": "run", "pipenv": "run"}
+
+
+def _gate_programs(run):
+    """The programs a gate's command line starts: the first word of each command in it - after `&&`, `||`, `;`, `|`
+    or `&`, a `NAME=value` aside - and the one a launcher such as `python -m` or `npx` starts after it, each named as
+    a runner is (TRIAGE-HIGHS).
+
+    A runner was matched anywhere in the line, so `echo pytest` read as running pytest and covered every Python
+    tree."""
+    import shlex
+    # Tokenize before splitting commands: a quoted separator never starts a runner (TRIAGE-2-MEDIUM).
+    try:
+        lexer = shlex.shlex(str(run or ""), posix=False, punctuation_chars=";&|()\n")
+        lexer.whitespace = " \t\r"
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return set()
+    found = set()
+    commands, words = [], []
+    for token in tokens:
+        if token and all(char in ";&|()\n" for char in token):
+            commands.append(words)
+            words = []
+        else:
+            words.append(token)
+    commands.append(words)
+    for words in commands:
+        words = [word.strip("\"'") for word in words]
+        while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[0]):
+            words.pop(0)
+        names = [re.sub(r"\.(exe|cmd|bat)$", "", re.split(r"[\\/]", word)[-1].lower()) for word in words]
+        if not names:
+            continue
+        # A wrapper is itself a runner, including when flags precede its package (TRIAGE-2-MEDIUM).
+        found.add(names[0])
+        after = _GATE_LAUNCHERS.get(names[0], "")
+        if after is None and len(names) > 1:
+            found.add(names[1])
+        elif after and len(names) > 2 and names[1] == after:
+            found.add(names[2])
+    return found
+
+
 def _gate_covers(gate, tree, chain):
     """Whether one gate exercises a toolchain's files in one tree: it runs that toolchain's
-    runner and, when it declares inputs, one of them reaches into the tree."""
+    runner where a command starts and, when it declares inputs, one of them reaches into the tree."""
     import fnmatch
-    run = str((gate or {}).get("run") or "")
-    runners = TOOLCHAINS[chain]["runners"]
-    # A runner printed by echo is no check; quoted separators start no command (TRIAGE-2-MEDIUM).
-    import shlex
-    try:
-        lexer = shlex.shlex(run, posix=False, punctuation_chars=";&|()")
-        lexer.whitespace_split = True
-        words = list(lexer)
-    except ValueError:
+    if not isinstance(gate, dict):
+        return False                    # no gate ao reads; the doctor names the file (TRIAGE-HIGHS)
+    if not _gate_programs(gate.get("run")) & set(TOOLCHAINS[chain]["runners"]):
         return False
-    starts = [0] + [i + 1 for i, word in enumerate(words) if word in ("&&", ";", "|", "||", "(")]
-    commands = []
-    for start in starts:
-        command = words[start:]
-        # The wrapper is itself a runner, even with flags or an unfamiliar package (TRIAGE-2-MEDIUM).
-        if command:
-            commands.append(command[0].strip("\"'").replace("\\", "/").rsplit("/", 1)[-1])
-        if command[:2] == ["uv", "run"]:
-            command = command[2:]
-        elif command[:1] == ["npx"]:
-            command = command[1:]
-        if command:
-            commands.append(command[0].strip("\"'").replace("\\", "/").rsplit("/", 1)[-1])
-    if not any(command in runners for command in commands):
-        return False
-    inputs = (gate or {}).get("inputs")
+    inputs = gate.get("inputs")
     if not isinstance(inputs, list) or not inputs:
         return True
     probe = "x" + TOOLCHAINS[chain]["ext"][0] if tree == "." else f"{tree}/x{TOOLCHAINS[chain]['ext'][0]}"
@@ -1388,7 +1414,8 @@ def _gate_covers(gate, tree, chain):
 
 def gate_coverage_gaps(root, spec, minimum, names=None):
     """(tree, toolchain, files) for every tree's toolchain that no gate - or none of `names` - exercises."""
-    gates = (spec or {}).get("gates") or {}
+    gates = spec.get("gates") if isinstance(spec, dict) else None
+    gates = gates if isinstance(gates, dict) else {}
     chosen = [gate for name, gate in gates.items() if isinstance(gate, dict)
               and (names is None or name in names)]
     gaps = []
@@ -1411,6 +1438,15 @@ def gate_inputs(root):
             spec = json.load(fh)
     except (OSError, ValueError):
         return None
+    return gate_inputs_of(spec)
+
+
+def gate_inputs_of(spec):
+    """gate_inputs of one reading of `.ao/gates.json`, `spec`: the one `ao verify` runs its gates from (TRIAGE-HIGHS).
+
+    Verify judged isolation by the file read again after it had waited for the machine lock: inputs narrowed
+    in that wait, and put back once the run was recorded, left an untracked file a gate read out of the
+    check, and the recorded digest still matched the file."""
     gates = spec.get("gates") if isinstance(spec, dict) else None
     if not isinstance(gates, dict) or not gates:
         return None

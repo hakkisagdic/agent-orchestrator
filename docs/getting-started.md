@@ -102,6 +102,11 @@ hooks. It exits 0 only when Git was seen to run the commit hook. The options of 
 as `--profile`, are refused beside it; `ao doctor`, `ao doctor --check`, `ao prove`, the commit
 hook's refusal and `ao hooks install` name it wherever they meet such a project.*
 
+*In ao since slice TRIAGE-HIGHS: such a project whose `.ao/config.json` cannot be read is refused
+by `ao hooks install` too: its old hook refuses every commit, and the current one would have let
+each through. `ao hooks install`, `ao doctor` and `ao prove` name what cannot be read, to make
+readable first, and then `ao init --adopt`, which refuses the project until then.*
+
 ## 3. Prove it
 
 ```bash

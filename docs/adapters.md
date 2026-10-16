@@ -408,6 +408,7 @@ no MCP server it was not given (#24); `ao doctor` and the reviewer check read it
 | `quota` → `provider` | the keyflip provider an actor running this harness spends | window reserve, rotation (#32), `ao fanout` |
 | `quota` → `stops` | the words a turn of this harness ends on when a usage limit stops it: a list of `{words, hours}`, `words` a regular expression (a group named `epoch` holds a reset written in epoch seconds) and `hours` the longest the limit stands once hit | the watchdog's park ([watchdog.md](watchdog.md#a-slice-parked-on-quota)), `ao adapters validate` |
 | `quota` → `resets_at` | the path, in a reply the harness writes in the model's place, to the reset it records beside its words, in epoch seconds | the watchdog's park |
+| `telemetry.quota` | `{from: "command", argv, cache_seconds}`: the command that prints the machine's provider windows, keyflip's for Kiro, and how long a reading of it is kept | `ao status`, the watchdog's quota gates, the window reserve and rotation |
 | `detect.install_dirs` | where the harness installs itself outside the usual directories | the newest-binary search |
 | `detect.update` | the command that updates the harness | `ao doctor` on a stale binary |
 
@@ -418,6 +419,13 @@ a lookup runs the command its adapter names, so what a layer an agent can write 
 asked, and there is no first adapter to fall back on. An implementer whose adapter declares none has
 no account ao can read, no credit samples and no credits alarm; every sample names the adapter it
 was read through ([telemetry.md](telemetry.md), "Whose account").
+
+*In ao since slice TRIAGE-HIGHS: `telemetry.quota` is read from the package's adapters only, as a
+lookup is. `ao status` and the watchdog's quota gates ran the command the implementer's adapter
+declares as every layer loads it, and a project's `.ao/adapters/` - a file the implementer writes -
+named one that ran. The quota is the one the adapter ao ships under the implementer's `adapter`
+declares; a layer still says how the implementer's transcript reads. `ao init` composes the
+architect's command from the package's adapter alone too ([safety.md](safety.md)).*
 
 *In ao since slice QUOTA-PARK: a harness's usage limit is read in the words its own adapter
 declares. The watchdog read an implementer's stop by one pattern written in one harness's words,

@@ -126,6 +126,7 @@ def _allow_commit_prerequisites(monkeypatch, tree, candidate):
             "gates": [],
             "candidate": candidate,
             "candidate_ready": True,
+            "isolation_inputs": A.gate_inputs(root),
         },
     )
     monkeypatch.setattr(A, "plan_drift", lambda root: [])
@@ -483,6 +484,7 @@ def _persist_exact_candidate_grant(project):
         "schema": 2,
         "passed": True,
         "candidate_ready": True,
+        "isolation_inputs": A.gate_inputs(root),
         "candidate": candidate,
         "candidate_after": candidate,
         "gates": [],

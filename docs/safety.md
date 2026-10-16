@@ -299,6 +299,15 @@ still sends human alarms, including the redirect. Usage errors and
 unreadable ranges from `ao commit-check` still exit 2. A version 5 hook reads as legacy, and each enrolled
 repository reinstalls with `ao hooks install`.*
 
+*In ao since slice TRIAGE-HIGHS: `ao hooks install` refuses wherever the current hook would stand
+aside in a project with AO state - no `.ao-project` in the index or in HEAD, or Git could not be
+asked - and not only in a legacy project. A project set up before the marker whose `.ao/config.json`
+cannot be read reads as broken: its old hook refuses every commit, install went ahead there and put
+in its place a hook that let every commit through, and `ao doctor` and `ao prove` advised exactly
+that install. Install refuses it now, and the three name what ao cannot read there, to make readable
+first, and then `ao init --adopt`. A project whose marker is tracked is installed as before: its
+hook goes on to ao, which refuses every commit while its state cannot be read.*
+
 The chain is tamper-evidence, not writer authentication. It detects an edit, deletion,
 reorder, or append whose successor/predecessor links were not recomputed. It cannot
 cryptographically exclude a process with the same user's write access: that process can
@@ -650,6 +659,15 @@ that reads as a flag.
   records it as the one accepted from then on. A role reassigned with `ao role set` is such a change. The
   watchdog judges the command it composed, not the file read again, which an agent can put back in between.
   What is accepted is kept in `~/.ao/harness-turns-<project>.json`.
+
+*In ao since slice TRIAGE-HIGHS: the implementer's quota is read by the command the adapter the
+package ships declares, `telemetry.quota.argv`, for `ao status` and for each quota gate of the
+watchdog - a wake's, a refill's and a nudge's. Both read it from the adapter as every layer loads it,
+and a command the project's `.ao/adapters/` declared ran: from `ao status`, from a watchdog cycle,
+and from its dry run, which the implementer's own `ao_watchdog` tool asks for. A layer still says how
+the implementer's transcript reads. The architect's command `ao init` composes, writes and accepts,
+which every wake starts, is the package's adapter's too: a user's layer gave it a resume and a grant
+of its own.*
 
 ### A review's and a hunt's command is held as a turn's is
 

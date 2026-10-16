@@ -108,6 +108,10 @@ class Smtp:
 
     `tls` is "starttls" (the default, port 587), "implicit" (port 465) or "none". The
     password is read from the file, never from a repository.
+
+    Either TLS verifies the server's certificate and that it names the host. smtplib's own
+    context for both verifies neither, and implicit TLS took it: whoever answered for the
+    host in between was handed the account's password (TRIAGE-HIGHS).
     """
     name = "smtp"
     required = ("host", "to")
@@ -123,10 +127,14 @@ class Smtp:
         message.set_content(body)
         tls = c.get("tls") or "starttls"
         port = int(c.get("port") or (465 if tls == "implicit" else 587))
-        factory = opener or (smtplib.SMTP_SSL if tls == "implicit" else smtplib.SMTP)
-        with factory(c["host"], port, timeout=20) as server:
+        verified = ssl.create_default_context()
+        if tls == "implicit":
+            server = (opener or smtplib.SMTP_SSL)(c["host"], port, timeout=20, context=verified)
+        else:
+            server = (opener or smtplib.SMTP)(c["host"], port, timeout=20)
+        with server:
             if tls == "starttls":
-                server.starttls(context=ssl.create_default_context())
+                server.starttls(context=verified)
             if c.get("user"):
                 server.login(c["user"], c.get("password") or "")
             server.send_message(message)

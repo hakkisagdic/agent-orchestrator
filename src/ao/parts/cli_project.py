@@ -158,6 +158,11 @@ itself. Authority lives in `.ao/authority.md`, not in mail. `push` is never your
 """
 
 
+# Directories one level down whose manifests are a build's output or another project's dependencies, not a project
+# of this repository's: a package.json copied into dist/ is no workspace (TRIAGE-HIGHS).
+GATE_DETECTION_SKIPS = ("node_modules", "vendor", "dist", "build", "target", "venv")
+
+
 def _detect_gates(root, children=True):
     """Guess the project's gates from what is already there. A wrong guess costs a
     failed verify, which is visible; no guess costs an empty gate file nobody
@@ -165,61 +170,20 @@ def _detect_gates(root, children=True):
 
     Every toolchain found gets its gates (#5): a repository with a JavaScript
     workspace and a .NET backend got npm gates only, and nothing verified the
-    backend.
+    backend. A toolchain was found by its manifest at the top alone, so a backend
+    whose project file sat in backend/ still got none, and init went ahead: its
+    manifest one directory down gives gates that run there and declare it as their
+    inputs, and Maven, Gradle and Swift packages are found too (TRIAGE-HIGHS).
     """
     gates, quick = {}, []
-    pj = os.path.join(root, "package.json")
-    if os.path.exists(pj):
-        try:
-            scripts = (json.load(open(pj, encoding=UTF8)).get("scripts") or {})
-        except Exception:
-            scripts = {}
-        for name, key in (("typecheck", "typecheck"), ("lint", "lint"), ("test", "test")):
-            if key in scripts:
-                gates[name] = {"run": f"npm run {key}", "expect": "exit_zero",
-                               "timeout": 600 if name != "test" else 2400}
-                if name != "test":
-                    quick.append(name)
-        if "test" in gates:
-            gates["test"]["serialise"] = True
-    if any(os.path.exists(os.path.join(root, f)) for f in ("pyproject.toml", "setup.py")):
-        gates["pytest"] = {"run": "python -m pytest -q", "expect": "exit_zero",
-                           "timeout": 2400, "serialise": True}
-        # Collecting imports every test module: cheap, and it exercises the code.
-        gates["pytest-collect"] = {"run": "python -m pytest --collect-only -q", "expect": "exit_zero",
-                                   "timeout": 300}
-        quick.append("pytest-collect")
-        if A.program_path("ruff"):
-            gates["ruff"] = {"run": "ruff check .", "expect": "exit_zero", "timeout": 300}
-            quick.append("ruff")
-    if any(name.endswith((".sln", ".csproj", ".fsproj")) for name in os.listdir(root)):
-        gates["dotnet-build"] = {"run": "dotnet build --nologo -v q", "expect": "exit_zero", "timeout": 1200}
-        gates["dotnet-test"] = {"run": "dotnet test --nologo", "expect": "exit_zero", "timeout": 2400,
-                                "serialise": True}
-        quick.append("dotnet-build")
-    if os.path.exists(os.path.join(root, "go.mod")):
-        gates["go-vet"] = {"run": "go vet ./...", "expect": "exit_zero", "timeout": 600}
-        gates["go-test"] = {"run": "go test ./...", "expect": "exit_zero", "timeout": 2400, "serialise": True}
-        quick.append("go-vet")
-    if os.path.exists(os.path.join(root, "Cargo.toml")):
-        gates["cargo-check"] = {"run": "cargo check", "expect": "exit_zero", "timeout": 1200}
-        gates["cargo-test"] = {"run": "cargo test", "expect": "exit_zero", "timeout": 2400, "serialise": True}
-        quick.append("cargo-check")
-    for manifest, runner, check, test in (("pom.xml", "mvn", "compile", "test"),
-                                           ("build.gradle", "gradle", "classes", "test"),
-                                           ("Package.swift", "swift", "build", "test")):
-        if os.path.isfile(os.path.join(root, manifest)):
-            gates[f"{runner}-check"] = {"run": f"{runner} {check}", "expect": "exit_zero", "timeout": 1200}
-            gates[f"{runner}-test"] = {"run": f"{runner} {test}", "expect": "exit_zero", "timeout": 2400,
-                                      "serialise": True}
-            quick.append(f"{runner}-check")
+    _detect_toolchain_gates(root, ".", gates, quick)
     for gate in gates.values():
         gate["inputs"] = ["**"]
     # A backend one level down was left out beside a root package.json (TRIAGE-2-MEDIUM).
     if children:
         for child in sorted(os.listdir(root)):
             path = os.path.join(root, child)
-            if child.startswith(".") or child in ("node_modules", "vendor", "target", "venv") \
+            if child.startswith(".") or child in GATE_DETECTION_SKIPS \
                     or not os.path.isdir(path) or os.path.islink(path):
                 continue
             found = _detect_gates(path, children=False)
@@ -232,7 +196,7 @@ def _detect_gates(root, children=True):
             for name, gate in found["gates"].items():
                 if name == "diff-check":
                     continue
-                scoped = f"{child}/{name}"
+                scoped = f"{child}-{name}"
                 gates[scoped] = dict(gate, run=f"cd {quoted} && {gate['run']}",
                                      inputs=[f"{child}/**"])
                 if name in found["profiles"]["quick"]:
@@ -242,6 +206,72 @@ def _detect_gates(root, children=True):
     return {"gates": gates,
             "profiles": {"quick": quick, "full": list(gates)},
             "default_profile": "quick"}
+
+
+def _detect_toolchain_gates(root, where, gates, quick):
+    """Add to `gates` the gates of each toolchain whose manifest `where` holds - "." for the top of the repository,
+    else a directory one level down - and their quick ones to `quick` (#5, TRIAGE-HIGHS).
+
+    One directory down a gate is named after the directory, runs in it and declares it as its inputs, so the
+    coverage check reads it as reaching that tree and no other.
+    """
+    here = os.path.join(root, where)
+    down = where != "."
+
+    def gate(name, run, timeout, fast=False, serialise=False):
+        named = f"{where}-{name}" if down else name
+        gates[named] = {"run": f"cd {where} && {run}" if down else run, "expect": "exit_zero", "timeout": timeout}
+        if serialise:
+            gates[named]["serialise"] = True
+        if down:
+            gates[named]["inputs"] = [f"{where}/**"]
+        if fast:
+            quick.append(named)
+
+    def holds(*names):
+        return any(os.path.isfile(os.path.join(here, name)) for name in names)
+
+    if holds("package.json"):
+        try:
+            with open(os.path.join(here, "package.json"), encoding=UTF8) as fh:
+                scripts = json.load(fh).get("scripts") or {}
+        except Exception:
+            scripts = {}
+        for name in ("typecheck", "lint", "test"):
+            if name in scripts:
+                gate(name, f"npm run {name}", 600 if name != "test" else 2400, fast=name != "test",
+                     serialise=name == "test")
+    if holds("pyproject.toml", "setup.py"):
+        gate("pytest", "python -m pytest -q", 2400, serialise=True)
+        # Collecting imports every test module: cheap, and it exercises the code.
+        gate("pytest-collect", "python -m pytest --collect-only -q", 300, fast=True)
+        if A.program_path("ruff"):
+            gate("ruff", "ruff check .", 300, fast=True)
+    try:
+        dotnet = any(name.endswith((".sln", ".csproj", ".fsproj")) for name in os.listdir(here))
+    except OSError:
+        dotnet = False
+    if dotnet:
+        gate("dotnet-build", "dotnet build --nologo -v q", 1200, fast=True)
+        gate("dotnet-test", "dotnet test --nologo", 2400, serialise=True)
+    if holds("go.mod"):
+        gate("go-vet", "go vet ./...", 600, fast=True)
+        gate("go-test", "go test ./...", 2400, serialise=True)
+    if holds("Cargo.toml"):
+        gate("cargo-check", "cargo check", 1200, fast=True)
+        gate("cargo-test", "cargo test", 2400, serialise=True)
+    if holds("pom.xml"):
+        gate("maven-compile", "mvn -q -B compile", 1200, fast=True)
+        gate("maven-verify", "mvn -q -B verify", 2400, serialise=True)
+    if holds("build.gradle", "build.gradle.kts"):
+        # The project's own wrapper where it has one; cmd.exe runs gradlew.bat by that name.
+        gradle = ("gradlew" if os.name == "nt" else "./gradlew") if holds("gradlew", "gradlew.bat") else "gradle"
+        gate("gradle-assemble", f"{gradle} assemble --quiet", 1200, fast=True)
+        gate("gradle-check", f"{gradle} check --quiet", 2400, serialise=True)
+    if holds("Package.swift"):
+        gate("swift-build", "swift build", 1200, fast=True)
+        gate("swift-test", "swift test", 2400, serialise=True)
+
 
 def _models(adapter_id):
     try:
@@ -269,8 +299,14 @@ def _architect_argv(adapter_id):
     routine and the wake and refill prompts name, and writes to ao's coordination files only.
     An adapter that declares how to grant tools but no architect grant leaves the architect
     none: a wake then only reads, rather than holding the implementer's grant.
+
+    Composed from the adapter the package ships alone: init writes this command into
+    .ao/config.json and accepts it as seen, and a wake starts it, so a resume or a grant a
+    user's layer declared - ~/.ao/adapters, which an agent can write - was taken into every
+    wake with no person having read it. A command ao runs comes from the package, as a turn's
+    is composed at the wake (TURN-ARGV, TRIAGE-HIGHS).
     """
-    declared = A.load_adapter(adapter_id)
+    declared = A.turn_adapter(adapter_id) or {}
     argv = list((declared.get("resume") or {}).get("argv") or [])
     options = declared.get("options") or {}
     grant = options.get("allowed_tools") or []

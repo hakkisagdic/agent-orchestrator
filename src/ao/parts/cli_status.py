@@ -113,8 +113,9 @@ def status_facts(cfg, msg_count=8, window_hours=24.0, shown=False):
             "cost_total": tel.get("total"), "cost_average": tel["total"] / max(1, tel["turns"]) if last else None,
             "cost_delegated": tel.get("delegated"),
             "last_turn_cost": last[0] if last else None, "last_turn_tool_calls": last[1] if last else None,
-            # keyflip's provider windows are the machine's, never the implementer's own pool.
-            "machine_quota": A.quota(adapter)}
+            # keyflip's provider windows are the machine's, never the implementer's own pool. Read by the command
+            # the package's adapter declares, never one a layer the implementer writes declares (TRIAGE-HIGHS).
+            "machine_quota": A.quota(A.metered_adapter(cfg))}
         nudge_err = A.last_nudge_error(root)
         errs = A.recent_errors(recs, 2, adapter)
         spin = A.spinning(root)

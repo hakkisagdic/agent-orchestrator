@@ -36,7 +36,8 @@ def _verified(root):
     """A passing verification of exactly the staged candidate, recorded in the chained ledger."""
     candidate = A.index_candidate(root)
     A.record_verification(root, {"id": f"V-attack-{time.time_ns()}", "passed": True,
-                                 "candidate": candidate, "candidate_ready": True, "gates": []})
+                                 "candidate": candidate, "candidate_ready": True, "gates": [],
+                                 "isolation_inputs": A.gate_inputs(root)})
 
 
 def _commit_ok(cfg, capsys):

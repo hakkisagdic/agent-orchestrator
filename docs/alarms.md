@@ -230,6 +230,12 @@ resume would send and writes nothing. A silence under the threshold changes noth
   `ao doctor` warns when neither Telegram nor e-mail is configured: an orange
   alarm with no channel beyond the desktop is a silent alarm.
 
+*In ao since slice TRIAGE-HIGHS: e-mail through your own server (`ao email setup --provider smtp`)
+verifies the server's certificate, and that it names the host you gave, before the account's
+password is sent, over implicit TLS (`--tls implicit`, port 465) as over STARTTLS. Implicit TLS took
+smtplib's own context, which verifies neither, so whoever answered for the host on the way was
+handed the password ([privacy.md](privacy.md)).*
+
 ## Configuration
 
 ```json
@@ -292,3 +298,8 @@ doctor saw its heartbeat at its last run - each run records the one it saw. `ao 
 takes the heartbeat with the jobs, and the doctor that ran first after `ao watchdog install` paged
 what the first cycle was about to name, a credits reading two weeks old among it. A doctor that saw
 no heartbeat at its last run, or has no run of its own yet, gives no cycle, as before.*
+
+*In ao since slice TRIAGE-HIGHS: a `.ao/gates.json` in a shape the doctor's coverage check could not
+read raised, and the job ended on one line without sending any alarm, a dead watchdog's among them.
+That file is now a finding of its own, `gates-unusable`, an advisory for the architect
+([gates.md](gates.md)), and every other finding is sent as before.*

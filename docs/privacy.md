@@ -134,6 +134,14 @@ urllib followed one with every header, `Authorization` among them, to whatever h
 with the host that URL names: a redirect is asked at the place it names, with nothing of the path it
 left.
 
+*In ao since slice TRIAGE-HIGHS: e-mail through your own SMTP server verifies the server's
+certificate, and that it names the host you gave, before the account's password is sent - over
+implicit TLS (port 465) as over STARTTLS. Implicit TLS took smtplib's own context, which verifies
+neither, so whoever answered for the host on the way was handed the password. Every other connection
+ao makes over HTTPS is urllib's, whose default context verifies, and nothing in ao builds, installs or
+weakens another; `tests/test_triage_highs.py` holds both. With `--tls none` nothing is encrypted, the
+password included.*
+
 `gh` is asked only these reads - whether a repository is private, and with `pr.watch` on the open
 pull requests - the two refs above are all ao ever pushes, and ao never grants `push` to an agent
 ([safety.md](safety.md)). `ao watch --web` serves its pages on 127.0.0.1 alone and answers only a

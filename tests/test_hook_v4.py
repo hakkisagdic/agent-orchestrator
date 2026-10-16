@@ -148,7 +148,7 @@ def test_an_exact_v3_hook_reads_as_legacy_and_install_puts_the_current_hook_in_i
         target = _active(after, role)
         assert target["static_state"] == "current-local (behavior unverified)"
         assert (hooks / role).read_bytes() == target["body"]
-        assert b"# agent-orchestrator: ao-hook-v6 " in target["body"]
+        assert b"# agent-orchestrator: ao-hook-v7 " in target["body"]
 
 
 @pytest.mark.skipif(os.name == "nt", reason=SHARED_HOOKS_REFUSED)
@@ -172,4 +172,4 @@ def test_an_exact_v3_shared_hook_reads_as_legacy_and_install_puts_the_current_ho
         target = _active(after, role)
         assert target["static_state"] == "current-scoped (behavior unverified)"
         assert (hooks / role).read_bytes() == target["body"]
-        assert b"# agent-orchestrator: ao-hook-v6 " in target["body"]
+        assert b"# agent-orchestrator: ao-hook-v7 " in target["body"]

@@ -1208,7 +1208,7 @@ def test_exact_v2_hook_is_legacy_and_upgrades_to_the_current_hook(project):
     assert cli.cmd_hooks(project, _args("install")) == 0
     # In the git directory the body also names the ao that installed it (SAFE-REMOVE).
     assert path.read_bytes() == cli._render_local_hook("pre-commit", ".", cli._hook_fallback())
-    assert b"ao-hook-v6" in path.read_bytes()
+    assert b"ao-hook-v7" in path.read_bytes()
 
 
 def test_init_writes_exact_unstaged_marker_and_refuses_wrong_reinit(

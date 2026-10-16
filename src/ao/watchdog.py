@@ -801,6 +801,8 @@ def architect_hold_reason(root, cfg, adapter, st, found=None, now=None):
     accepted, resolving it asks candidates their version (ARCH-PROBE-ORDER).
     Blockers are checked before in-flight wakes, so a wake that has already
     failed is never counted as one that is coming.
+
+    `adapter` is the one the quota is read through, A.metered_adapter's (TRIAGE-HIGHS).
     """
     from . import features as F
     now = now or time.time()
@@ -876,6 +878,9 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
     # rather than making the detector guess.
     found = A.anomalies(root, cfg, adapter, age, args.idle_minutes * 60,
                         exclude_pids={st.get("arch_pid"), os.getpid()})
+    # A wake spends the quota the package's adapter reads by its own command; `adapter`, as every layer loads it,
+    # says only how the transcript reads (TRIAGE-HIGHS).
+    metered = A.metered_adapter(cfg)
 
     # A second turn is a hazard only if it persists. A real concurrent writer runs
     # for minutes; a gate helper, an `ao` call or a one-shot process blinks in and
@@ -942,7 +947,7 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
         # that overstates its own effect is how a gap stays invisible.
         # Hold for the architect only when a wake is actually coming; decided from the
         # wake's own predicates, not from whether an argv is configured.
-        hold = hold or architect_hold_reason(root, cfg, adapter, st, found)
+        hold = hold or architect_hold_reason(root, cfg, metered, st, found)
         if hold["holdable"]:
             notify(f"{project}: anomaly", f"{a['kind']} — {hold['reason']}", root,
                    key=key, window=window, audience="architect")
@@ -967,7 +972,7 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
         # requests it groups whether or not its window let it ring this cycle (CATCHUP-POLISH).
         # A dry cycle delivered no alarm: checking its coverage prepared and probed a wake before
         # building the implementer's nudge (ARCH-PROBE-ORDER-2).
-        hold = hold or architect_hold_reason(root, cfg, adapter, st, found)
+        hold = hold or architect_hold_reason(root, cfg, metered, st, found)
         if not hold["holdable"]:
             told.update(name for anomaly in standing.values() for name in anomaly.get("reports") or [])
     arch = cfg.get("architect") or {}
@@ -1031,7 +1036,7 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
 
     # Waking spends a turn on the same provider the implementer uses, so a report
     # that could have waited must not burn the window the implementer needs.
-    if woke and arch.get("argv") and not quota_ok(adapter):
+    if woke and arch.get("argv") and not quota_ok(metered):
         print("reports pending, but no quota headroom to wake the architect")
         # One handoff for what waits: the same note went to the phone again every hour the
         # architect could not be woken, with nothing new in it (NOTICE-NOISE).
@@ -1059,7 +1064,7 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
         # interactive, and telling it here as well mailed one request twice on every red repeat.
         # This alarm names the rest, as reports-no-wake does with wakes off, and rings again when
         # another report waits (NOISE-REPEATS).
-        hold = hold or architect_hold_reason(root, cfg, adapter, st, found)
+        hold = hold or architect_hold_reason(root, cfg, metered, st, found)
         named = set() if hold["holdable"] else anomaly_reports(standing.values(), stale)
         rest = [m for m in stale if m not in named]
         if told is not None:
@@ -1086,7 +1091,7 @@ def escalate(root, cfg, adapter, age, args, st, told=None):
         # nothing while no work is open, a lead, an anomaly's report whose condition has ended.
         # With wakes off no anomaly is held for the architect, so every standing one reached a
         # person (WAITING-ONE-ALARM).
-        hold = hold or architect_hold_reason(root, cfg, adapter, st, found)
+        hold = hold or architect_hold_reason(root, cfg, metered, st, found)
         named = set() if hold["holdable"] else anomaly_reports(standing.values(), stale)
         rest = [m for m in stale if m not in named]
         if told is not None:
@@ -1786,6 +1791,9 @@ def quota_ok(adapter):
     back to reading the raw window when no budget exists. A breached budget stops
     the turn, whatever the window says; a budget not breached is headroom. Which
     account's breach counts is quota_budget's to say.
+
+    `adapter` is the package's, A.metered_adapter's: reading the window runs the command it declares, and a
+    layer the implementer writes chose one that ran (TRIAGE-HIGHS).
     """
     budget = A.quota_budget(adapter)
     if budget["breached"]:
@@ -2624,9 +2632,7 @@ def announce_resume(root, owed, dry_run=False, now=None):
     named = [item["key"] for item in items if item["key"]]
     audience = "human" if any(item["audience"] == "human" for item in items) else "architect"
     if audience == "architect" and named:
-        impl = cfg.get("implementer") or {}
-        adapter = A.load_adapter(impl.get("adapter", ""), root) if impl else {}
-        if not architect_hold_reason(root, cfg, adapter, st, now=now)["holdable"]:
+        if not architect_hold_reason(root, cfg, A.metered_adapter(cfg), st, now=now)["holdable"]:
             audience = "human"
     project = A.project_key(root)
     silence = float(resume["at"]) - float(resume["since"])
@@ -2758,6 +2764,9 @@ def _cycle_impl(args, root):
         print("no implementer session; nothing to watch")
         return 0
     adapter = A.load_adapter(impl.get("adapter", ""), root)
+    # The quota gates read the quota by the command the package's adapter declares: reading it runs that command,
+    # and the project's layer is a file the implementer writes (TRIAGE-HIGHS).
+    metered = A.metered_adapter(cfg)
     msgs, _ = A.session_paths(cfg)
     if not msgs or not os.path.exists(msgs):
         # An `auto` ao could not resolve says why, where it read as a transcript gone missing (SESSION-IDENTITY).
@@ -3151,7 +3160,7 @@ def _cycle_impl(args, root):
                 return 0
             # A refill spends the same window a report wake does, and its failures
             # were never read (audit): check the quota and the last refill's log.
-            if not quota_ok(adapter):
+            if not quota_ok(metered):
                 print("queue low, but there is no quota headroom to wake the architect")
                 return 0
             failed = wake_error(log_path)
@@ -3238,7 +3247,7 @@ def _cycle_impl(args, root):
     # 4 — no quota. Delivery still works: reports are written above this gate and
     # the transport is HTTP, so a pending question reaches a phone even now. What
     # stops is deciding — so hand the state to whoever can.
-    if not quota_ok(adapter):
+    if not quota_ok(metered):
         if not args.dry_run:
             if not A.recently_deferred(root, "nudge"):
                 A.deferred_append(root, "nudge", reason="implementer quota")

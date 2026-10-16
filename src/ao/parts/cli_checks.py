@@ -77,11 +77,13 @@ def _architect_grant_gaps(cfg):
     """The rules the architect's configured grant lacks of the one its adapter declares now (GRANTS-PINNED).
 
     `ao init` writes the architect's argv into .ao/config.json, so a grant composed before the
-    adapter's changed stays as it was: a refill wake told to write .ao/inbox/ could not.
+    adapter's changed stays as it was: a refill wake told to write .ao/inbox/ could not. The grant
+    is the package's adapter's, as init composes it (TRIAGE-HIGHS).
     """
     from . import allowlist as AL
     architect = cfg.get("architect") or {}
-    declared = A.load_adapter(architect["adapter"]) if architect.get("adapter") and architect.get("argv") else {}
+    declared = (A.turn_adapter(architect["adapter"]) or {}) if architect.get("adapter") and architect.get("argv") \
+        else {}
     options = declared.get("options") or {}
     wanted = [rule for rule in str(options.get("architect_tools") or "").split(",") if rule]
     have = set(AL.rules(architect.get("argv") or []))
@@ -275,6 +277,47 @@ def _path_problems():
                               f"{'it' if len(named) == 1 else 'them'} out of PATH")]
 
 
+def _gates_file(root, cfg=None):
+    """(.ao/gates.json as read, or None; what keeps ao from running it, said after the file's name, or None)
+    (TRIAGE-HIGHS).
+
+    Read with the checks a run reads it with (_profile_gates): the profile `ao verify` runs when none is named,
+    every other profile `--profile` and `ao merge-check` may name, and each gate, since the coverage check reads
+    those no profile runs. The coverage check raised on a gate or a file of a shape it could not read, and the
+    doctor's scheduled check ended there without sending any alarm.
+    """
+    try:
+        with open(os.path.join(root, ".ao", "gates.json"), encoding=UTF8) as fh:
+            spec = json.load(fh)
+    except FileNotFoundError:
+        if not os.path.isdir(os.path.join(root, ".ao")):
+            return None, None                   # no ao project here, so nothing it would verify
+        return None, ("is missing, so `ao verify` has nothing to run and no candidate is granted - `ao init` "
+                      "writes one, or declare the gates as docs/gates.md shows")
+    except (OSError, ValueError) as exc:
+        return None, f"cannot be read ({' '.join(str(exc).split())}) - fix it as docs/gates.md shows"
+    refused = "`ao verify` refuses it - fix it as docs/gates.md shows"
+    declared = spec.get("profiles") if isinstance(spec, dict) else None
+    default = spec.get("default_profile", "quick") if isinstance(spec, dict) else "quick"
+    names, problem = _profile_gates(spec, default, cfg)
+    if problem:
+        return spec, f"cannot run: {problem}; {refused}"
+    if not names:
+        return spec, (f"runs no gate in profile {default}, the one `ao verify` runs when none is named - declare it "
+                      "as docs/gates.md shows")
+    for profile in sorted(name for name in declared if name != default):
+        names, problem = _profile_gates(spec, profile, cfg)
+        if not problem and not names:
+            problem = f"profile {profile} selects no gate"
+        if problem:
+            return spec, f"cannot run: {problem}; `ao verify --profile {profile}` and `ao merge-check` refuse it"
+    for name, gate in spec["gates"].items():
+        why = _gate_shape_problem(gate)
+        if why:
+            return spec, f"cannot be read: its gate {name} is in no profile, and {why} - fix it as docs/gates.md shows"
+    return spec, None
+
+
 def doctor_problems(cfg):
     """What `ao doctor --check` acts on: conditions a person must fix, as (key, text)."""
     from .watchdog import wake_error, STATE_DIR
@@ -368,33 +411,23 @@ def doctor_problems(cfg):
                 out.append((key, f"the {role}'s session is {state['how']}: {state['why']}"))
     except Exception:
         pass
-    # A source tree no gate exercises is a tree nothing verifies (#5).
-    try:
-        with open(os.path.join(root, ".ao", "gates.json"), encoding=UTF8) as fh:
-            gate_spec = json.load(fh)
-        names, gate_problem = _profile_gates(gate_spec, gate_spec.get("default_profile", "quick")
-                                             if isinstance(gate_spec, dict) else "quick", cfg)
-        # Verification refuses an absent or empty default even when other gates exist (TRIAGE-2-MEDIUM).
-        if not gate_problem and not names:
-            gate_problem = "the default profile selects no gates"
-        if not gate_problem:
-            for profile in gate_spec.get("profiles", {}):
-                _, gate_problem = _profile_gates(gate_spec, profile, cfg)
-                if gate_problem:
-                    break
-        if not gate_problem:
-            gate_problem = next((_gate_shape_problem(gate) for gate in gate_spec.get("gates", {}).values()
-                                 if _gate_shape_problem(gate)), None)
-        if not gate_problem and not gate_spec.get("gates"):
-            gate_problem = "no gates are declared"
-    except (OSError, ValueError) as exc:
-        gate_problem = str(exc)
-    if gate_problem:
-        out.append(("gates-unusable", f".ao/gates.json cannot be used: {gate_problem}; fix the gate definitions"))
-    else:
-        for tree, chain, files in A.gate_coverage_gaps(root, gate_spec, S.get(cfg, "gates.coverage_min_files")):
+    # A source tree no gate exercises is a tree nothing verifies (#5). The file is read with the checks `ao verify`
+    # reads it with, and one that cannot run is a finding of its own: a shape the coverage check could not read
+    # raised out of `ao doctor --check --notify` before it sent any alarm, and a missing or unreadable file said
+    # nothing (TRIAGE-HIGHS).
+    gate_spec, gates_problem = _gates_file(root, cfg)
+    if isinstance(gate_spec, dict):
+        try:
+            gaps = A.gate_coverage_gaps(root, gate_spec, S.get(cfg, "gates.coverage_min_files"))
+        except Exception as exc:
+            gaps = []
+            gates_problem = gates_problem or (f"cannot be read for coverage ({' '.join(str(exc).split())}) - fix it "
+                                              "as docs/gates.md shows")
+        for tree, chain, files in gaps:
             out.append((f"gate-uncovered:{tree}", f"{tree}/ holds {files} {chain} files that no gate in "
                                                   ".ao/gates.json exercises"))
+    if gates_problem:
+        out.append(("gates-unusable", f".ao/gates.json {gates_problem}"))
     # A setting that is written but not used says one thing and does another (#74).
     for name, text in S.problems(cfg):
         out.append((f"setting:{name}", text))
@@ -550,8 +583,9 @@ def doctor_problems(cfg):
             )
         if reasons:
             enrollment = _project_enrollment(root)
-            if enrollment["state"] == "redirected":
-                repair = None if proof["detail"] == enrollment["detail"] else enrollment["detail"]
+            install_problem = _hook_install_problem(enrollment)
+            if install_problem:
+                repair = _hook_install_problem(enrollment, said=proof["detail"])
             elif commit["repository_source"] and commit["track_state"] == "tracked" \
                     and commit["crlf_only"]:
                 repair = "git restore -- .githooks/pre-commit"
@@ -563,10 +597,6 @@ def doctor_problems(cfg):
                 )
                 flag = " --allow-shared-hooks" if needs_allow else ""
                 repair = f"ao hooks uninstall{flag}, then ao hooks install{flag}"
-            elif enrollment["state"] == "legacy":
-                # One command adopts the project whatever its hook is (INIT-ADOPTION). A current
-                # hook stands aside there, and its proof failed with this very text: said once.
-                repair = None if proof["detail"] == enrollment["detail"] else enrollment["detail"]
             elif _state_base(commit["static_state"]) not in (
                 "current-local", "current-scoped"
             ):

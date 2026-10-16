@@ -73,6 +73,25 @@ not a number of seconds up to a week - is said in one line and exits 2 before th
 raised in the middle of the run. A gate whose command line the system cannot start - one past `ARG_MAX` -
 fails with exit 127 and what the system said, where it raised once the lock was held.*
 
+*In ao since slice TRIAGE-HIGHS: `ao verify` judges whether the candidate is isolated by the inputs
+of the definitions it ran - the `.ao/gates.json` it read before it waited for the machine lock - and
+records them as `isolation_inputs` (null for the whole tree). It read the file again after the wait,
+so inputs narrowed while it waited, and put back once the run was recorded, left out an untracked
+file a gate read, and the recorded digest still matched the file.*
+
+*In ao since slice TRIAGE-HIGHS: `ao init` finds a toolchain by its manifest one directory down as
+well as at the top - `package.json`, `pyproject.toml` or `setup.py`, a `.sln`, `.csproj` or `.fsproj`,
+`go.mod`, `Cargo.toml`, `pom.xml`, `build.gradle` and `Package.swift` - and gives it gates named after
+its directory, which run there (`cd backend && dotnet build --nologo -v q`) and declare it as their
+`inputs`; Maven, Gradle and Swift get gates at the top too. A .NET backend in `backend/` beside a
+JavaScript workspace got none, and nothing verified it. `ao doctor` names a top-level tree of five
+or more files of one toolchain that no gate exercises (`gate-uncovered:<tree>`), and a gate exercises
+a toolchain only where a command in it starts with that toolchain's runner - after `&&`, `;` or `|`,
+or behind `python -m`, `npx` or `uv run` - where `echo pytest` counted. A `.ao/gates.json` that is
+missing, cannot be read, or holds a profile or a gate `ao verify` cannot run is a finding of its own,
+`gates-unusable`: in a shape the check could not read it raised, and `ao doctor --check --notify`
+ended without sending any alarm.*
+
 ## The artifact sweep earns its place
 
 That fifth gate looks like housekeeping and is not. In the source run, fault-injection

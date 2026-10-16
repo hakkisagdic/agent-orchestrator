@@ -49,6 +49,7 @@ def _allow_candidate_verification(monkeypatch, candidate):
             "gates": [],
             "candidate": candidate,
             "candidate_ready": True,
+            "isolation_inputs": A.gate_inputs(root),
         },
     )
     monkeypatch.setattr(A, "plan_drift", lambda root: [])

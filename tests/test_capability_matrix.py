@@ -125,6 +125,7 @@ def _persist_verification(cfg):
         "schema": 2,
         "passed": True,
         "candidate_ready": True,
+        "isolation_inputs": A.gate_inputs(cfg["root"]),
         "candidate": candidate,
         "candidate_after": candidate,
         "candidate_issues": [],

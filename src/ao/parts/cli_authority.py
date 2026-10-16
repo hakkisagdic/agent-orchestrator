@@ -500,13 +500,16 @@ def cmd_verify(cfg, args):
     # The record names what ran, so a later edit to gates.json cannot inherit
     # this result (#61).
     gates_digest = A.gate_definitions_digest_of(spec, profile)
+    # Isolation is judged by the paths these gates read, from this reading of the file: read again after the
+    # wait for the lock, inputs narrowed meanwhile and put back after the run hid a file a gate read (TRIAGE-HIGHS).
+    inputs = A.gate_inputs_of(spec)
     release = _take_gate_lock(cfg, args.wait)
     if release is None:
         return 2
 
     try:
         candidate_before = A.index_candidate(root)
-        candidate_issues_before = A.candidate_worktree_issues(root, cfg, candidate_before)
+        candidate_issues_before = A.candidate_worktree_issues(root, cfg, candidate_before, inputs=inputs)
     except RuntimeError as exc:
         release()
         print(f"{C['red']}{exc}{C['reset']}")
@@ -542,7 +545,7 @@ def cmd_verify(cfg, args):
 
     try:
         candidate_after = A.index_candidate(root)
-        candidate_issues_after = A.candidate_worktree_issues(root, cfg, candidate_after)
+        candidate_issues_after = A.candidate_worktree_issues(root, cfg, candidate_after, inputs=inputs)
         after_messages = A.candidate_issue_messages(candidate_issues_after)
     except RuntimeError as exc:
         candidate_after = None
@@ -596,6 +599,8 @@ def cmd_verify(cfg, args):
            "candidate_issues": candidate_messages + [
                message for message in after_messages if message not in candidate_messages
            ],
+           # The paths isolation was judged by, from the definitions that ran; null is the whole tree (TRIAGE-HIGHS).
+           "isolation_inputs": inputs,
            # Keep the worktree digest for telemetry and legacy readers. Commit
            # authority is bound to the immutable index candidate above.
            "tree": A.tree_digest(root, cfg),
@@ -710,6 +715,19 @@ def _boundary_review_refusals(root, evidence):
     return []
 
 
+def _verification_isolation_problem(root, record):
+    """Bind the all-gate isolation scope without changing the existing profile digest's meaning.
+
+    Another profile can narrow isolation without changing that digest. Older records with no scope remain
+    readable history, but cannot establish which inputs isolated their candidate: they need a fresh verify.
+    """
+    if "isolation_inputs" not in record:
+        return "verification does not record isolation inputs — re-run `ao verify`"
+    if record["isolation_inputs"] != A.gate_inputs(root):
+        return "verification isolation inputs changed — re-run `ao verify`"
+    return None
+
+
 def cmd_commit_ok(cfg, args):
     """Grant authority only for the exact, isolated tree in Git's index."""
     root = cfg["root"]
@@ -749,7 +767,8 @@ def cmd_commit_ok(cfg, args):
     def verification_matches(record):
         measured = (record or {}).get("candidate") or {}
         return bool(record and record.get("passed") and record.get("candidate_ready")
-                    and measured.get("digest") == candidate["digest"])
+                    and measured.get("digest") == candidate["digest"]
+                    and not _verification_isolation_problem(root, record))
 
     if getattr(args, "verify", False) and not verification_matches(ver):
         from types import SimpleNamespace
@@ -792,6 +811,9 @@ def cmd_commit_ok(cfg, args):
                            + (f": {detail}" if detail else ""))
         if A.gate_definitions_digest(root, ver.get("profile")) != ver.get("gates_digest"):
             reasons.append(f"gate definitions changed since {ver['id']} — re-run `ao verify`")
+        isolation_problem = _verification_isolation_problem(root, ver)
+        if isolation_problem:
+            reasons.append(isolation_problem)
 
     try:
         drift = A.plan_drift(root)
@@ -1165,7 +1187,18 @@ def _marker_blob(root, oid, extra_env):
 def _index_project_marker(root, index_file=None):
     extra_env, problem = _project_index_env(root, index_file)
     if problem:
-        return {"status": "invalid", "detail": problem}
+        return {"status": "unknown", "detail": problem}
+    if extra_env:
+        try:
+            with open(extra_env["GIT_INDEX_FILE"], "rb") as fh:
+                fh.read(1)
+        except FileNotFoundError as exc:
+            # Git defines a nonexistent index as empty. A dangling symlink is an
+            # existing override we cannot read, not a new empty index.
+            if os.path.lexists(extra_env["GIT_INDEX_FILE"]):
+                return {"status": "unknown", "detail": f"active index cannot be read: {exc}"}
+        except OSError as exc:
+            return {"status": "unknown", "detail": f"active index cannot be read: {exc}"}
     result = _hook_git(
         root, "ls-files", "--stage", "-z", "--", PROJECT_MARKER,
         extra_env=extra_env,
@@ -1173,7 +1206,7 @@ def _index_project_marker(root, index_file=None):
     if result.returncode:
         detail = result.stderr.decode(UTF8, "replace").strip()[:160]
         return {
-            "status": "invalid",
+            "status": "unknown",
             "detail": "active index marker query failed: "
                       + (detail or f"git exit {result.returncode}"),
         }
@@ -1194,7 +1227,7 @@ def _index_project_marker(root, index_file=None):
         return {"status": "invalid", "detail": f"active index marker has type/mode {mode}"}
     data, error = _marker_blob(root, oid, extra_env)
     if error:
-        return {"status": "invalid", "detail": "active index marker blob is unreadable: " + error}
+        return {"status": "unknown", "detail": "active index marker blob is unreadable: " + error}
     if data != PROJECT_MARKER_BYTES:
         return {"status": "invalid", "detail": "active index marker bytes are not ao-project-v1"}
     return {"status": "canonical", "mode": mode, "oid": oid}
@@ -1203,11 +1236,11 @@ def _index_project_marker(root, index_file=None):
 def _head_project_marker(root):
     head = _hook_git(root, "rev-parse", "--verify", "--quiet", "HEAD")
     if head.returncode:
-        if not head.stdout and not head.stderr:
+        if head.returncode == 1 and not head.stdout and not head.stderr:
             return {"status": "absent", "unborn": True}
         detail = head.stderr.decode(UTF8, "replace").strip()[:160]
         return {
-            "status": "invalid",
+            "status": "unknown",
             "detail": "HEAD marker query failed: "
                       + (detail or f"git exit {head.returncode}"),
         }
@@ -1215,7 +1248,7 @@ def _head_project_marker(root):
     if result.returncode:
         detail = result.stderr.decode(UTF8, "replace").strip()[:160]
         return {
-            "status": "invalid",
+            "status": "unknown",
             "detail": "HEAD marker query failed: "
                       + (detail or f"git exit {result.returncode}"),
         }
@@ -1238,7 +1271,7 @@ def _head_project_marker(root):
         return {"status": "invalid", "detail": f"HEAD marker has type/mode {kind}/{mode}"}
     data, error = _marker_blob(root, oid, None)
     if error:
-        return {"status": "invalid", "detail": "HEAD marker blob is unreadable: " + error}
+        return {"status": "unknown", "detail": "HEAD marker blob is unreadable: " + error}
     if data != PROJECT_MARKER_BYTES:
         return {"status": "invalid", "detail": "HEAD marker bytes are not ao-project-v1"}
     return {"status": "canonical", "mode": mode, "oid": oid}
@@ -1378,19 +1411,13 @@ def _legacy_enrollment(root):
         touched = _hook_git(root, "rev-list", "-n", "1", "HEAD", "--", PROJECT_MARKER)
         if touched.returncode:
             detail = touched.stderr.decode(UTF8, "replace").strip()[:160]
-            return {
-                "state": "broken",
-                "detail": f"cannot read {PROJECT_MARKER} history: "
-                          + (detail or f"git exit {touched.returncode}"),
-            }
+            return _unknown_project_enrollment(
+                f"cannot read {PROJECT_MARKER} history: " + (detail or f"git exit {touched.returncode}"))
         if touched.stdout.strip():
             return None
-    elif head.stdout or head.stderr:
+    elif head.returncode != 1 or head.stdout or head.stderr:
         detail = head.stderr.decode(UTF8, "replace").strip()[:160]
-        return {
-            "state": "broken",
-            "detail": "HEAD query failed: " + (detail or f"git exit {head.returncode}"),
-        }
+        return _unknown_project_enrollment("HEAD query failed: " + (detail or f"git exit {head.returncode}"))
     problem = _project_config_problem(root)
     if problem:
         return {
@@ -1408,6 +1435,12 @@ def _legacy_enrollment(root):
     }
 
 
+def _unknown_project_enrollment(problem, **evidence):
+    """An unanswered enrollment question permits no enrollment or hook writes."""
+    return dict(evidence, state="broken", unknown=True, recordable=False,
+                detail=f"enrollment is unknown: {problem}")
+
+
 def _project_enrollment(root, index_file=None):
     """Measure the tracked marker in the active index and HEAD, then local state.
 
@@ -1415,7 +1448,10 @@ def _project_enrollment(root, index_file=None):
     cannot disable a canonical HEAD marker.  An absent index entry still consults
     HEAD, which keeps enforcement active while an authorized marker deletion is
     staged.  A canonical staged marker permits first adoption before the first
-    marker-bearing commit.
+    marker-bearing commit, including on an unborn branch. With neither marker,
+    consult history across all refs and this machine's record before deciding.
+    Failed queries are unknown and permit no writes; a missing index or unborn
+    HEAD is known absent. Recording pre-marker state would wedge its adoption.
     """
     root = os.path.abspath(root)
     redirected = _commit_repository_binding(root)
@@ -1428,56 +1464,68 @@ def _project_enrollment(root, index_file=None):
         indexed = _index_project_marker(root, index_file=index_file)
         headed = _head_project_marker(root)
     except _HookResolutionError as exc:
-        return {"state": "broken", "detail": _project_refusal(str(exc))}
+        return _unknown_project_enrollment(str(exc))
 
+    for measured in (indexed, headed):
+        if measured["status"] == "unknown":
+            return _unknown_project_enrollment(measured["detail"], index=indexed, head=headed)
+
+    # A marker that is there but not the marker still names the project, and the current hook goes on to ao
+    # there, which refuses: the index and HEAD are kept so `ao hooks install` can tell that from a project where
+    # no marker is tracked, which the hook stands aside in (TRIAGE-HIGHS).
     if indexed["status"] == "invalid":
-        return {"state": "broken", "detail": _project_refusal(indexed["detail"])}
+        return {"state": "broken", "detail": _project_refusal(indexed["detail"]),
+                "index": indexed, "head": headed, "recordable": True}
     if indexed["status"] == "canonical":
         source, marker = "index", indexed
     elif headed["status"] == "invalid":
-        return {"state": "broken", "detail": _project_refusal(headed["detail"])}
+        return {"state": "broken", "detail": _project_refusal(headed["detail"]),
+                "index": indexed, "head": headed, "recordable": True}
     elif headed["status"] == "canonical":
         source, marker = "head", headed
     else:
-        # A branch not born yet, with no marker staged: a repository whose history tracks the marker on any ref was
-        # enrolled, and an orphan branch with the marker unstaged is no way out of it; nor is deleting every ref
-        # that tracked it, where this machine recorded the project as enrolled (LEADS-GATE). Only a repository
-        # with neither is before its marker's first commit (docs/threat-model.md).
-        if headed.get("unborn"):
+        # Absence in this index and HEAD is not absence from the repository.
+        # Only a completed removal in this branch's history retires enrollment;
+        # an orphan or a branch made before enrollment must consult every ref and
+        # then the machine record, which survives deletion of those refs.
+        try:
             tracked = _hook_git(root, "log", "--all", "-1", "--format=%H", "--", PROJECT_MARKER)
-            recorded = A.enrollment_record(root)
-            why = None
             if tracked.returncode:
-                why = "the repository's history cannot be read for its marker"
-            elif tracked.stdout.strip():
-                why = ("this branch is not born yet and stages no marker, but the repository's history tracks "
-                       f"{PROJECT_MARKER} on another branch; commit the marker on this branch, or switch back")
-            elif recorded is not None:
-                when = recorded.get("at")
-                why = ("this branch is not born yet and stages no marker, and no ref's history tracks one, but this "
-                       "machine recorded the project as enrolled"
-                       + (f" on {time.strftime('%Y-%m-%d', time.localtime(when))}"
-                          if isinstance(when, int) and not isinstance(when, bool) and when > 0 else "")
-                       + (f" (the record cannot be read: {recorded['unreadable']})" if recorded.get("unreadable")
-                          else "")
-                       + f": the refs that tracked {PROJECT_MARKER} were deleted - restore the branch that tracked it "
-                       "(git reflog names its last commit), or commit the marker on this branch")
-            if why:
-                return {"state": "broken", "detail": _project_refusal(why), "index": indexed, "head": headed}
-        else:
-            # Born, and tracking no marker: a branch whose history never tracked one - made from a commit before the
-            # marker's - in a repository this machine recorded as enrolled is no new repository either; one whose
-            # history did is a removal committed, and passes (LEADS-GATE-HOOK).
-            touched = _hook_git(root, "rev-list", "-n", "1", "HEAD", "--", PROJECT_MARKER)
-            recorded = A.enrollment_record(root) if touched.returncode == 0 and not touched.stdout.strip() else None
-            if recorded is not None:
-                return {"state": "broken", "detail": _project_refusal(
-                    f"this branch tracks no {PROJECT_MARKER} and descends from no commit that did, but this machine "
-                    "recorded the project as enrolled: a branch made from before the marker's commit - commit the "
-                    "marker on it, or switch back"
-                    + (f" (the record cannot be read: {recorded['unreadable']})" if recorded.get("unreadable")
-                       else "")), "index": indexed, "head": headed}
-        legacy = _legacy_enrollment(root)
+                detail = tracked.stderr.decode(UTF8, "replace").strip()[:160]
+                return _unknown_project_enrollment(
+                    f"cannot read {PROJECT_MARKER} history across all refs: "
+                    + (detail or f"git exit {tracked.returncode}"), index=indexed, head=headed)
+            removed = False
+            if not headed.get("unborn"):
+                touched = _hook_git(root, "rev-list", "-n", "1", "HEAD", "--", PROJECT_MARKER)
+                if touched.returncode:
+                    detail = touched.stderr.decode(UTF8, "replace").strip()[:160]
+                    return _unknown_project_enrollment(
+                        f"cannot read {PROJECT_MARKER} history: " + (detail or f"git exit {touched.returncode}"),
+                        index=indexed, head=headed)
+                removed = bool(touched.stdout.strip())
+        except _HookResolutionError as exc:
+            return _unknown_project_enrollment(f"cannot read {PROJECT_MARKER} history: {exc}",
+                                               index=indexed, head=headed)
+        recorded = A.enrollment_record(root)
+        if recorded is not None and recorded.get("unreadable"):
+            return _unknown_project_enrollment(
+                f"machine enrollment record cannot be read: {recorded['unreadable']}", index=indexed, head=headed)
+        if not removed and (tracked.stdout.strip() or recorded is not None):
+            branch = ("this branch is not born yet and stages no marker" if headed.get("unborn") else
+                      f"this branch tracks no {PROJECT_MARKER} and descends from no commit that did")
+            if tracked.stdout.strip():
+                why = f"{branch}, but the repository's history tracks {PROJECT_MARKER} on another branch"
+            else:
+                why = f"{branch}, but this machine recorded the project as enrolled"
+            why += (": commit the marker on this branch, or switch back" if headed.get("unborn") else
+                    ": a branch made from before the marker's commit - commit the marker on it, or switch back")
+            return {"state": "broken", "detail": _project_refusal(why),
+                    "index": indexed, "head": headed, "recordable": True}
+        try:
+            legacy = _legacy_enrollment(root)
+        except _HookResolutionError as exc:
+            return _unknown_project_enrollment(str(exc), index=indexed, head=headed)
         if legacy is not None:
             legacy.update({"index": indexed, "head": headed})
             return legacy
@@ -1492,12 +1540,12 @@ def _project_enrollment(root, index_file=None):
     if problem:
         return {
             "state": "broken", "detail": _project_refusal(problem),
-            "source": source, "marker": marker,
+            "source": source, "marker": marker, "recordable": True,
             "index": indexed, "head": headed,
         }
     return {
         "state": "enrolled", "detail": f"canonical {PROJECT_MARKER} via {source}",
-        "source": source, "marker": marker,
+        "source": source, "marker": marker, "recordable": True,
         "index": indexed, "head": headed,
     }
 
@@ -1833,8 +1881,8 @@ def cmd_commit_check(cfg, args):
             print(f"{C['red']}cannot check {spec}{C['reset']}: cannot bind the repository: {exc}; "
                   "repair its .git and try again")
             return 2
-        print(f"{C['red']}{C['b']}COMMIT REFUSED{C['reset']}: cannot bind the repository: {exc}; "
-              "repair its .git and try again")
+        print(f"{C['red']}{C['b']}COMMIT REFUSED{C['reset']}: enrollment is unknown: "
+              f"cannot bind the repository: {exc}; repair the query failure and try again")
         return 1
 
 
@@ -1855,10 +1903,10 @@ def _bound_commit_check(cfg, args):
         print(f"  {C['red']}·{C['reset']} {enrollment['detail']}")
         return 1
     if enrollment["state"] == "broken":
-        # Refused, and recorded as enrolled all the same: an orphan branch of an enrolled repository is read as
-        # broken while a ref still tells of the marker, and an agent can delete the ref next. A record that cannot be
-        # written is said with the refusal (LEADS-GATE-HOOK).
-        unkept = A.record_enrollment(_project_repository_top(root) or root)
+        # Malformed but positively read enrollment remains recordable. An unanswered
+        # query supplies no such evidence and must leave the repository untouched.
+        unkept = (A.record_enrollment(_project_repository_top(root) or root)
+                  if enrollment.get("recordable") else None)
         print(f"{C['red']}{C['b']}COMMIT REFUSED{C['reset']}")
         print(f"  {C['red']}·{C['reset']} {enrollment['detail']}")
         if unkept:
@@ -1872,7 +1920,8 @@ def _bound_commit_check(cfg, args):
     # not redirect the enrollment record into another repository (NESTED-GIT).
     # Kept outside the tree, for a branch not born yet to ask where no ref tracks the marker any more; a proof that
     # the hook runs records nothing (LEADS-GATE).
-    unkept = A.record_enrollment(_project_repository_top(root) or root)
+    unkept = (A.record_enrollment(_project_repository_top(root) or root)
+              if enrollment.get("recordable") else None)
     if unkept:
         print(f"{C['red']}{C['b']}COMMIT REFUSED{C['reset']}")
         print(f"  {C['red']}·{C['reset']} this machine cannot record that the project is enrolled, and a branch not "
@@ -1968,6 +2017,9 @@ def _bound_commit_check(cfg, args):
                 != verification.get("gates_digest"):
             reasons.append("gate definitions changed since the grant's verification — "
                            "re-run `ao verify`")
+        isolation_problem = _verification_isolation_problem(root, verification)
+        if isolation_problem:
+            reasons.append(isolation_problem)
 
     if grant and grant.get("granted") is True:
         review_name = grant.get("review")

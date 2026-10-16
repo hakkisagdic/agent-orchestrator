@@ -1957,10 +1957,11 @@ def cmd_prove(cfg, args):
     # A hook whose /bin/sh finds no ao is not fixed by installing it again (SAFE-REMOVE), and a project no
     # tracked marker covers refuses `ao hooks install` until it is adopted; a current hook there failed its
     # proof with the adoption's own text, which is said once (INIT-ADOPTION).
-    if HOOK_AO_NOT_FOUND in probe["detail"]:
+    install_problem = _hook_install_problem(enrollment)
+    if install_problem:
+        hook_fix = _hook_install_problem(enrollment, said=probe["detail"])
+    elif HOOK_AO_NOT_FOUND in probe["detail"]:
         hook_fix = _ao_link_fix()
-    elif enrollment["state"] == "legacy":
-        hook_fix = None if probe["detail"] == enrollment["detail"] else enrollment["detail"]
     else:
         hook_fix = "ao hooks install"
     results.append(("hook refuses an unauthorised commit", probe["installed"],
@@ -2251,22 +2252,18 @@ def cmd_doctor(cfg, args):
     else:
         active = _active_hook_targets(hook_inventory)
         enrollment = _project_enrollment(root)
-        legacy_project = enrollment["state"] == "legacy"
+        install_problem = _hook_install_problem(enrollment)
         for role, label in (("pre-commit", "commit hook"), ("pre-push", "push hook")):
             target = active[role]
             base = _state_base(target["static_state"])
             current = base in ("current-local", "current-scoped")
             tone = C["green"] if current else C["yellow"]
             notes = []
-            if enrollment["state"] == "redirected":
+            if install_problem:
                 tone = C["yellow"]
-                notes.append(enrollment["detail"])
+                notes.append(install_problem)
             elif role == "pre-commit" and not current:
-                # `ao hooks install` refuses a project no tracked marker covers; one command adopts it (INIT-ADOPTION).
-                notes.append(
-                    f"no {PROJECT_MARKER} tracked yet — {PROJECT_ADOPT_COMMAND}"
-                    if legacy_project else "ao hooks install"
-                )
+                notes.append("ao hooks install")
             if role == "pre-push" and not current:
                 notes.append("AO push-window hook unavailable")
             suffix = "  " + "; ".join(notes) if notes else ""

@@ -2052,6 +2052,19 @@ def _kept_reading(argv, window, take):
     return _quota_keep(command, reading) if keep else reading
 
 
+def metered_adapter(cfg):
+    """The adapter the implementer's quota is read through: the one the package ships under the adapter id its block
+    names, else {} (TRIAGE-HIGHS).
+
+    Reading the quota runs the command its adapter declares (`telemetry.quota.argv`), and `ao status` and the
+    watchdog's quota gate read it from the adapter as every layer loads it - the project's .ao/adapters/ among them,
+    a file the implementer writes, where a planted `touch` ran. A command ao runs comes from the package alone, as a
+    turn's, a route's, an MCP registration's and a probe's do (TURN-ARGV, ROUTE-ARGV, HARNESS-SETUP-2, PROBE-SHIPPED);
+    a layer still says how a transcript reads.
+    """
+    return turn_adapter(((cfg or {}).get("implementer") or {}).get("adapter")) or {}
+
+
 def quota(adapter, ttl=300):
     """Provider quota via the adapter's command, kept for its window across ao's processes. Silent if absent.
 
@@ -2061,6 +2074,9 @@ def quota(adapter, ttl=300):
     ~/.ao/quota.json and read back while it is younger than that. Only a command that
     exited 0 is kept: a failure is asked again next time, not served as no lines for the
     whole window.
+
+    `adapter` is one the package ships - metered_adapter's, or the window's - since the command it names runs
+    (TRIAGE-HIGHS).
     """
     spec = (adapter.get("telemetry") or {}).get("quota") or {}
     argv = spec.get("argv")

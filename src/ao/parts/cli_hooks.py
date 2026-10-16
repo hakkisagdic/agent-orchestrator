@@ -396,7 +396,7 @@ def _hook_project_marker_guard():
     )
 
 
-def _hook_enrollment_guard(top, root_rel):
+def _hook_enrollment_guard(top, root_rel, *, check_record=True):
     """The lines that let a hook stand aside: only where Git, asked at `top`, the shell variable naming the top of the
     working tree, answers that the project's .ao-project is neither in the index nor in HEAD (LEADS-GATE).
 
@@ -411,11 +411,23 @@ def _hook_enrollment_guard(top, root_rel):
     is one only ao can say, from its history and from this machine's record that the project was enrolled,
     since an agent can delete every ref whose history tracked the marker. A born branch that tracks no
     marker - one made from a commit before the marker's - goes on to ao too while any ref's history tracks
-    one (LEADS-GATE-HOOK). Any other answer goes on to ao, which refuses what it cannot read; a hook that
-    finds no ao refuses.
+    one or this machine holds an enrollment record (LEADS-GATE-HOOK). Any other answer goes on to ao,
+    which refuses what it cannot read; a hook that finds no ao refuses. Older renderers keep their exact
+    guard without the record check so installed hooks can be recognized and upgraded.
     """
     import shlex
     marker = shlex.quote(PROJECT_MARKER if root_rel in ("", ".") else f"{root_rel}/{PROJECT_MARKER}")
+    record_guard = (
+        "if [ -z \"$indexed$headed\" ]; then\n"
+        f"  enrollment_common=$(git --literal-pathspecs -C \"{top}\" rev-parse --git-common-dir 2>/dev/null)"
+        " || headed=unread\n"
+        "  [ -n \"$enrollment_common\" ] || headed=unread\n"
+        f"  case $enrollment_common in /*|[A-Za-z]:[\\\\/]*) ;; *) enrollment_common=\"{top}/$enrollment_common\" ;; esac\n"
+        "  if [ -e \"$enrollment_common/ao-enrolled.json\" ] || [ -L \"$enrollment_common/ao-enrolled.json\" ]; then\n"
+        "    headed=recorded\n"
+        "  fi\n"
+        "fi\n"
+    ) if check_record else ""
     return (
         f"indexed=$(git --literal-pathspecs -C \"{top}\" ls-files -- {marker} 2>/dev/null) || indexed=unread\n"
         "headed=\n"
@@ -434,7 +446,8 @@ def _hook_enrollment_guard(top, root_rel):
         f"  headed=$(git --literal-pathspecs -C \"{top}\" log --all -1 --format=%H -- {marker} 2>/dev/null)"
         " || headed=unread\n"
         "fi\n"
-        "[ -n \"$indexed$headed\" ] || exit 0\n"
+        + record_guard
+        + "[ -n \"$indexed$headed\" ] || exit 0\n"
     )
 
 
@@ -648,7 +661,7 @@ def _render_v5_local_hook(role, root_rel):
         f"root=\"$initial_cwd\"{suffix}\n"
         + _hook_index_case()
         + _hook_repository_unset()
-        + _hook_enrollment_guard("$initial_cwd", root_rel)
+        + _hook_enrollment_guard("$initial_cwd", root_rel, check_record=False)
         + _AO_LOOKUP
         + f"exec \"$ao\" -C \"$root\" {command}\n"
     ).encode(UTF8)
@@ -674,13 +687,13 @@ def _render_v5_scoped_hook(role, root_rel, family, directory_class):
         + "case $top in /*) ;; *) top=\"$initial_cwd/$top\" ;; esac\n"
         + "top=$(CDPATH= cd \"$top\" 2>/dev/null && pwd -P) || exit 0\n"
         + f"root=\"$top\"{suffix}\n"
-        + _hook_enrollment_guard("$top", root_rel)
+        + _hook_enrollment_guard("$top", root_rel, check_record=False)
         + _AO_LOOKUP
         + f"exec \"$ao\" -C \"$root\" {command}\n"
     ).encode(UTF8)
 
 
-def _render_local_hook(role, root_rel, fallback=None):
+def _render_local_hook(role, root_rel, fallback=None, *, version=7):
     """Portable bytes for one project-local hook; no machine/family binding unless a fallback ao is named.
 
     The hook names, in AO_COMMIT_TOP, the top of the working tree Git set as its current directory to run it - the
@@ -693,19 +706,19 @@ def _render_local_hook(role, root_rel, fallback=None):
     command = _role_command(role)
     return (
         "#!/bin/sh\n"
-        f"# agent-orchestrator: ao-hook-v6 role={role} binding=project-local\n"
+        f"# agent-orchestrator: ao-hook-v{version} role={role} binding=project-local\n"
         "initial_cwd=$(CDPATH= cd -- . && pwd -P)\n"
         f"root=\"$initial_cwd\"{suffix}\n"
         "AO_COMMIT_TOP=\"$initial_cwd\"; export AO_COMMIT_TOP\n"
         + _hook_index_case()
         + _hook_repository_unset()
-        + _hook_enrollment_guard("$initial_cwd", root_rel)
+        + _hook_enrollment_guard("$initial_cwd", root_rel, check_record=version >= 7)
         + _ao_lookup(fallback)
         + f"exec \"$ao\" -C \"$root\" {command}\n"
     ).encode(UTF8)
 
 
-def _render_scoped_hook(role, root_rel, family, directory_class, fallback=None):
+def _render_scoped_hook(role, root_rel, family, directory_class, fallback=None, *, version=7):
     """Family-bound bytes for a shared/external target; unknown routing is fail-open.
 
     AO_COMMIT_TOP names the top of the working tree the committed repository resolved to from inside the family it is
@@ -716,7 +729,7 @@ def _render_scoped_hook(role, root_rel, family, directory_class, fallback=None):
     command = _role_command(role)
     return (
         "#!/bin/sh\n"
-        f"# agent-orchestrator: ao-hook-v6 role={role} binding={directory_class}\n"
+        f"# agent-orchestrator: ao-hook-v{version} role={role} binding={directory_class}\n"
         "initial_cwd=$(CDPATH= cd -- . && pwd -P)\n"
         + _hook_index_case()
         + _hook_repository_unset()
@@ -730,7 +743,7 @@ def _render_scoped_hook(role, root_rel, family, directory_class, fallback=None):
         + "top=$(CDPATH= cd \"$top\" 2>/dev/null && pwd -P) || exit 0\n"
         + f"root=\"$top\"{suffix}\n"
         + "AO_COMMIT_TOP=\"$top\"; export AO_COMMIT_TOP\n"
-        + _hook_enrollment_guard("$top", root_rel)
+        + _hook_enrollment_guard("$top", root_rel, check_record=version >= 7)
         + _ao_lookup(fallback)
         + f"exec \"$ao\" -C \"$root\" {command}\n"
     ).encode(UTF8)
@@ -780,12 +793,15 @@ def _legacy_hook_role(data):
     # `ao hooks install` replaces it: a v3 hook took a drive-letter index for a relative one (HOOK-V4),
     # a v4 hook stood aside when its marker queries failed (LEADS-GATE), and a v5 hook did not name the
     # repository it guards, so a planted `.git` could move ao's authority to another (NESTED-GIT).
+    # A v6 hook skipped the machine enrollment record once every marker-bearing ref was deleted.
     renderers = {
         "2": (_render_v2_local_hook, _render_v2_scoped_hook),
         "3": (_render_v3_local_hook, _render_v3_scoped_hook),
         "4": (_render_v4_local_hook, _render_v4_scoped_hook),
         "5": (_render_v5_local_hook, _render_v5_scoped_hook),
-        "6": (_render_local_hook, _render_scoped_hook),
+        "6": (lambda role, rel: _render_local_hook(role, rel, version=6),
+              lambda role, rel, family, kind: _render_scoped_hook(role, rel, family, kind, version=6)),
+        "7": (_render_local_hook, _render_scoped_hook),
     }
     if version not in renderers:
         return None
@@ -1435,6 +1451,42 @@ def _hooks_uninstall(inv, allow):
     return 1 if blockers else 0
 
 
+def _hook_stands_aside(enrollment):
+    """Whether the hook has no marker, history or record that makes it ask ao.
+
+    Unknown enrollment cannot authorize installing a hook, regardless of its guard.
+    """
+    return (not enrollment.get("unknown") and not enrollment.get("recordable")
+            and enrollment["state"] in ("legacy", "broken"))
+
+
+def _stand_aside_repair(enrollment, said=None):
+    """What a person does in a project the current hook would stand aside in, where `ao hooks install` is refused: the
+    adoption, after what ao cannot read there is made readable; `said`, a text already shown, is not repeated
+    (TRIAGE-HIGHS).
+
+    A project set up before .ao-project whose config could not be read read as broken, not legacy: install went
+    ahead there, and `ao doctor` and `ao prove` advised it."""
+    if enrollment["state"] == "legacy" or enrollment.get("recordable"):
+        return None if said == enrollment["detail"] else enrollment["detail"]
+    step = f"make it readable, then {PROJECT_ADOPT_HINT}"
+    return step if said == enrollment["detail"] else f"{enrollment['detail']} - {step}"
+
+
+def _hook_install_problem(enrollment, said=None):
+    """One decision for installation and its advice, from the complete enrollment reading.
+
+    Failed queries permit neither installation nor adoption. Positive marker/history/record evidence
+    permits an enforcing hook; known pre-marker state needs adoption, even on an unborn or orphan HEAD.
+    Omit detail already printed by an execution probe when composing its repair advice.
+    """
+    if enrollment.get("unknown") or enrollment["state"] == "redirected":
+        return None if said == enrollment["detail"] else enrollment["detail"]
+    if _hook_stands_aside(enrollment):
+        return _stand_aside_repair(enrollment, said=said)
+    return None
+
+
 def cmd_hooks(cfg, args):
     """Manage AO hook intent at Git's effective path without replacing user hooks."""
     root = cfg["root"]
@@ -1445,6 +1497,10 @@ def cmd_hooks(cfg, args):
                   else _commit_repository_binding(root))
     if redirected:
         print(f"{C['red']}hooks {args.action} refused{C['reset']}: {redirected}")
+        return 1
+    install_problem = _hook_install_problem(enrollment)
+    if enrollment.get("unknown"):
+        print(f"{C['red']}hooks {args.action} refused{C['reset']}: {install_problem}")
         return 1
     inv = _ao_hook_inventory(root)
     if inv["error"]:
@@ -1458,21 +1514,22 @@ def cmd_hooks(cfg, args):
     if action == "uninstall":
         return _hooks_uninstall(inv, allow)
 
-    if enrollment["state"] == "legacy":
+    if install_problem:
         # The current hooks exit in their shell guard when no marker is tracked, so
         # installing them over a legacy project's enforcing hook would turn commit
         # authority off at exactly the moment someone meant to repair it. Adoption
-        # stages the marker first and installs them after it (INIT-ADOPTION).
-        print(f"{C['red']}hooks install refused{C['reset']}: {enrollment['detail']}")
+        # stages the marker first and installs them after it (INIT-ADOPTION). A project
+        # from before the marker whose state cannot be read is that project too: its
+        # old hook refuses every commit, and the current one would let each through
+        # (TRIAGE-HIGHS).
+        print(f"{C['red']}hooks install refused{C['reset']}: {install_problem}")
         print(f"  {C['dim']}the current hooks stand aside while no {PROJECT_MARKER} is tracked, so installing "
               f"them before it would switch commit authority off{C['reset']}")
         return 1
-    if enrollment["state"] != "uninitialized":
-        # The hook asks ao on a branch not born yet, and ao reads this machine's record that the project is
-        # enrolled: kept from the install on, not from the first commit after it, and an install that cannot keep
-        # it puts in no hook that would read its absence as a new repository (LEADS-GATE). A repository read as
-        # broken is enrolled all the same - an orphan branch of it most of all, where the install passed the record
-        # over and the refs that still told of the marker could then be deleted (LEADS-GATE-HOOK).
+
+    if enrollment.get("recordable"):
+        # Only positively established enrollment reaches this write. Legacy state
+        # and unanswered queries must remain adoptable without an enrollment record.
         unkept = A.record_enrollment(_project_repository_top(root) or root)
         if unkept:
             print(f"{C['red']}hooks install refused{C['reset']}: this machine cannot record that the project is "

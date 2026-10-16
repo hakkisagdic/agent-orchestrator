@@ -87,7 +87,9 @@ def test_the_hook_asks_ao_while_any_ref_tracks_the_marker_and_on_a_branch_not_bo
     # A branch not born yet goes on to ao, since only ao can say whether the repository was enrolled (LEADS-GATE):
     # with no ao it is refused, and an ao that finds nothing tracked and nothing recorded lets the first commit in.
     assert "ao not found" in _run(unborn, "commit", "-q", "--allow-empty", "-m", "first").stderr
-    standin.program(tmp_path / "bin", "ao", "import sys\nfrom ao import cli\nsys.exit(cli.main(sys.argv[1:]))\n")
+    standin.program(tmp_path / "bin", "ao", "import sys\n"
+                    f"sys.path.insert(0, {str(Path(__file__).resolve().parents[1] / 'src')!r})\n"
+                    "from ao import cli\nsys.exit(cli.main(sys.argv[1:]))\n")
     home = tmp_path / "home"
     env = dict(os.environ, HOME=str(home), USERPROFILE=str(home),
                PATH=f"{tmp_path / 'bin'}{os.pathsep}{os.environ.get('PATH', '')}")
@@ -111,7 +113,7 @@ def test_the_v4_hook_reads_as_legacy_and_install_puts_the_current_one_in_its_pla
     for target in cli._ao_hook_inventory(root)["targets"]:
         if target["active"]:
             assert target["static_state"] == "current-local (behavior unverified)"
-            assert b"# agent-orchestrator: ao-hook-v6 " in (hooks / target["role"]).read_bytes()
+            assert b"# agent-orchestrator: ao-hook-v7 " in (hooks / target["role"]).read_bytes()
 
 
 # ---- 39aaf2997fe78820: ao's exact hook without its execute bit is replaced ------------------------

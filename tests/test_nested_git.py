@@ -446,13 +446,15 @@ def test_a_genuine_nested_repository_committed_through_its_own_top_is_governed_a
     assert cli._commit_repository_binding(str(inner)) is None
 
 
-# ---- a v5 hook reads as legacy and `ao hooks install` upgrades it to v6 ---------------------------
+# ---- older hooks read as legacy and `ao hooks install` upgrades them ---------------------------
 
-def test_a_v5_hook_reads_as_legacy_and_install_puts_v6_in_its_place(project):
+@pytest.mark.parametrize("version", (5, 6))
+def test_an_older_hook_reads_as_legacy_and_install_puts_the_current_one_in_its_place(project, version):
     root = project["root"]
     hooks = Path(cli._ao_hook_inventory(root)["active_dir"])
     for role in ("pre-commit", "pre-push"):
-        (hooks / role).write_bytes(cli._render_v5_local_hook(role, "."))
+        (hooks / role).write_bytes(cli._render_v5_local_hook(role, ".") if version == 5
+                                  else cli._render_local_hook(role, ".", version=6))
         (hooks / role).chmod(0o755)
 
     before = cli._ao_hook_inventory(root)
@@ -462,7 +464,7 @@ def test_a_v5_hook_reads_as_legacy_and_install_puts_v6_in_its_place(project):
     for target in cli._ao_hook_inventory(root)["targets"]:
         if target["active"]:
             assert target["static_state"] == "current-local (behavior unverified)"
-            assert b"# agent-orchestrator: ao-hook-v6 " in (hooks / target["role"]).read_bytes()
+            assert b"# agent-orchestrator: ao-hook-v7 " in (hooks / target["role"]).read_bytes()
 
 
 @pytest.mark.parametrize("command", ("commit-check", "broken-commit-check", "hooks"))

@@ -221,7 +221,7 @@ def test_where_git_shares_the_hooks_adoption_asks_for_the_authorization_and_fini
 
     assert cli.cmd_init(cfg, _init("--adopt", "--allow-shared-hooks")) == 0
     assert "commit hook installed (execution proved)" in _plain(capsys)
-    assert b"ao-hook-v6" in hook.read_bytes()
+    assert b"ao-hook-v7" in hook.read_bytes()
 
 
 def test_doctor_names_the_adoption_on_the_commit_hook_row(tmp_path, monkeypatch, capsys):
@@ -233,8 +233,9 @@ def test_doctor_names_the_adoption_on_the_commit_hook_row(tmp_path, monkeypatch,
     cli.cmd_doctor(cfg, cli.build_parser().parse_args(["doctor"]))
 
     # Whatever the old hook is read as, the row that shows it names the one step.
-    assert re.search(r"^commit hook\s+\S.* / untracked  no \.ao-project tracked yet — ao init --adopt$",
-                     _plain(capsys), re.M)
+    (row,) = [line for line in _plain(capsys).splitlines() if line.startswith("commit hook")]
+    assert cli._project_enrollment(str(root))["detail"] in row
+    assert row.count(cli.PROJECT_ADOPT_COMMAND) == 1 and "ao hooks install" not in row
 
 
 def test_doctor_names_the_adoption_once_where_a_current_hook_stands_aside(tmp_path, monkeypatch):
