@@ -291,8 +291,9 @@ NOBODY = "\n".join([
     "   <dim>/work/acme-api</>",
     "",
     "   Run it from a project, or point at one:",
-    "     <b>ao -C /work/acme-web</>  <dim>5m ago</>",
-    "     <b>ao -C /work/acme-docs</>  <dim>3h ago</>",
+    # Copyable commands use the platform's quoting, as review ids above do (WINDOWS-TESTS-8).
+    f"     <b>ao -C {A.copyable_word('/work/acme-web')}</>  <dim>5m ago</>",
+    f"     <b>ao -C {A.copyable_word('/work/acme-docs')}</>  <dim>3h ago</>",
     "",
     "<b><mag>── REPOSITORY ─────────────────────────────────────────────</>",
     "   <dim>0 files uncommitted · </><yellow>no remote default branch to compare against</>",

@@ -93,7 +93,8 @@ def test_the_lines_init_wrote_go_and_the_same_lines_a_person_wrote_before_stay(t
 
 
 def _gitignore(root, text):
-    (Path(root) / ".gitignore").write_text(text, encoding="utf-8")
+    # Preserve the fixture's CRLF: text mode on Windows adds a second CR (WINDOWS-TESTS-8).
+    (Path(root) / ".gitignore").write_bytes(text.encode("utf-8"))
     return Path(root) / ".gitignore"
 
 
@@ -131,7 +132,9 @@ def test_a_block_ao_wrote_and_changed_since_or_an_older_aos_stays_named(tmp_path
 def test_only_the_lines_init_named_go_and_a_line_written_right_under_them_stays(tmp_path, monkeypatch):
     root, cfg = _removable(tmp_path, monkeypatch)
     added = list(cli.AO_GITIGNORE) + [".mcp.json"]                     # init adds the MCP file it writes too
-    gitignore = _gitignore(root, "a/\r\n" + cli._gitignore_block(added) + "\r\n" + "\r\n".join(added) + "\r\nb/\r\n")
+    text = "a/\r\n" + cli._gitignore_block(added) + "\r\n" + "\r\n".join(added) + "\r\nb/\r\n"
+    gitignore = _gitignore(root, text)
+    assert gitignore.read_bytes() == text.encode("utf-8")
 
     assert cli.cmd_remove(cfg, REMOVE) == 0
 

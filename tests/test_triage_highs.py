@@ -466,8 +466,10 @@ def test_a_toolchain_one_directory_down_gets_gates_that_run_there_and_cover_its_
     detected = cli._detect_gates(str(root))
 
     gates, quick = detected["gates"], detected["profiles"]["quick"]
-    assert gates["backend-dotnet-build"] == {"run": "cd backend && dotnet build --nologo -v q", "expect": "exit_zero",
-                                             "timeout": 1200, "inputs": ["backend/**"]}
+    # Windows quotes even a bare directory name in a shell command (WINDOWS-TESTS-8).
+    assert gates["backend-dotnet-build"] == {
+        "run": f"cd {A.copyable_word('backend')} && dotnet build --nologo -v q",
+        "expect": "exit_zero", "timeout": 1200, "inputs": ["backend/**"]}
     assert {"lint", "backend-dotnet-build", "service-maven-compile", "swift-build", "diff-check"} <= set(quick)
     assert {"backend-dotnet-test", "service-maven-verify", "swift-test"} <= set(gates)
     assert A.gate_coverage_gaps(str(root), detected, 5, names=quick) == []

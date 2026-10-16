@@ -3,6 +3,10 @@
 Its state was written over in place, and a torn file read as a fresh state: the markers that a park
 was resumed, a report handed to a wake, a nudge counted were gone, and the next cycle could resume or
 wake a second time. These kill the writer outright, as a power cut or kill -9 does, mid-work.
+
+The Windows 3.9 lane killed the first writer before its first save: readiness preceded the write,
+and 300 ms did not ensure it finished. Kill at storage checkpoints after a completed initial save,
+so every platform must preserve the exact old or new state (WINDOWS-TESTS-8).
 """
 import json
 import os
@@ -18,28 +22,42 @@ from tests.scenarios import World
 
 SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
 WRITER = """
-import sys
+import sys, time
 sys.path.insert(0, {src!r})
-from ao import watchdog as W
+from ao import storage, watchdog as W
 W.STATE_DIR = {state_dir!r}
-pad = "x" * 400000
-n = 0
-open({ready!r}, "w").close()
-while True:
-    n += 1
-    W.save_state({root!r}, {{"n": n, "pad": pad}})
+W.save_state({root!r}, {{"n": 1, "pad": "x" * 400000}})
+replace = storage.replace_file_durably
+
+def checkpoint(step):
+    if step == sys.argv[1]:
+        open({ready!r}, "wb").close()
+        while True:
+            time.sleep(1)
+
+def interrupted(path, data, **kwargs):
+    return replace(path, data, _checkpoint=checkpoint, **kwargs)
+
+storage.replace_file_durably = interrupted
+W.save_state({root!r}, {{"n": 2, "pad": "y" * 400000}})
 """
 
 
-def _killed_mid_writing(script, ready):
-    process = subprocess.Popen([sys.executable, str(script)], env=os.environ.copy())
-    deadline = time.time() + 30
-    while not ready.exists() and time.time() < deadline:
-        time.sleep(0.05)
-    time.sleep(0.3)
-    process.kill()
-    process.wait()
-    ready.unlink()
+def _killed_mid_writing(script, ready, checkpoint):
+    process = subprocess.Popen([sys.executable, str(script), checkpoint], env=os.environ.copy())
+    try:
+        deadline = time.monotonic() + 30
+        while not ready.exists() and time.monotonic() < deadline:
+            assert process.poll() is None, f"writer exited before {checkpoint}: {process.returncode}"
+            time.sleep(0.05)
+        assert ready.exists(), f"writer did not reach {checkpoint}"
+        assert process.poll() is None, f"writer exited at {checkpoint}: {process.returncode}"
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=30)
+        if ready.exists():
+            ready.unlink()
 
 
 def test_a_state_written_while_its_writer_is_killed_reads_whole(project, tmp_path):
@@ -48,13 +66,14 @@ def test_a_state_written_while_its_writer_is_killed_reads_whole(project, tmp_pat
     script = tmp_path / "writer.py"
     script.write_text(WRITER.format(src=SRC, state_dir=W.STATE_DIR, ready=str(ready), root=root), encoding="utf-8")
 
-    for _ in range(4):
-        _killed_mid_writing(script, ready)
+    for checkpoint in ("temporary-opened", "temporary-written", "temporary-fsynced", "replaced"):
+        _killed_mid_writing(script, ready, checkpoint)
 
         with open(W.state_path(root), encoding="utf-8") as fh:
             state = json.load(fh)
-        assert state["n"] >= 1 and len(state["pad"]) == 400000
-        assert W.load_state(root)["n"] == state["n"]
+        expected = {"n": 2, "pad": "y" * 400000} if checkpoint == "replaced" else {"n": 1, "pad": "x" * 400000}
+        assert state == expected
+        assert W.load_state(root) == expected
 
 
 # ---- a log a started process writes is trimmed in the file it holds (JOURNAL-3) ----------------------------------

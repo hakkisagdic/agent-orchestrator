@@ -540,12 +540,18 @@ def _fake_head_repository(tmp_path, outer, proj, monkeypatch):
     inner = tmp_path / "fake-head"
     inner.mkdir()
     assert _run(inner, "init", "-q").returncode == 0
-    (inner / ".git" / "objects" / "info" / "alternates").write_text(
-        (outer / ".git" / "objects").as_posix() + "\n", encoding="utf-8")
+    # gitrepository-layout: one object directory per line, absolute or relative to objects/.
+    # Keep the drive and forward slashes, and write LF bytes: Windows text mode adds a CR
+    # that Git reads as part of the alternate's path (WINDOWS-TESTS-8).
+    alternate = (outer / ".git" / "objects").resolve().as_posix()
+    (inner / ".git" / "objects" / "info" / "alternates").write_bytes((alternate + "\n").encode("utf-8"))
     tree = _run(outer, "write-tree").stdout.strip()
+    borrowed = _run(inner, "cat-file", "-e", tree + "^{tree}")
+    assert borrowed.returncode == 0, borrowed.stderr
     with monkeypatch.context() as env:
         env.setenv("GIT_INDEX_FILE", str(tmp_path / "fake-index"))
-        assert _run(inner, "read-tree", tree).returncode == 0
+        loaded = _run(inner, "read-tree", tree)
+        assert loaded.returncode == 0, loaded.stderr
         harmless = tmp_path / "harmless"
         harmless.write_text("almost two\n", encoding="utf-8")
         blob = _run(inner, "hash-object", "-w", str(harmless)).stdout.strip()
