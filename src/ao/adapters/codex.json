@@ -25,7 +25,7 @@
     "output_json": ["--json"],
     "trust_all": ["--dangerously-bypass-approvals-and-sandbox"],
     "sandbox": ["--sandbox", "{mode}"],
-    "sandbox_note": "codex exec takes --sandbox and codex exec resume does not (openai/codex issue 40149); a resume takes -c sandbox_mode=\"<mode>\", which every exec subcommand accepts.",
+    "sandbox_note": "codex exec takes --sandbox and codex exec resume does not (openai/codex issue 40149; rechecked on codex-cli 0.160.0, 2026-10-16: `codex exec resume --sandbox read-only` errors 'unexpected argument --sandbox found' and suggests passing it as a value, while `codex exec resume -c sandbox_mode=\"read-only\"` is accepted); a resume takes -c sandbox_mode=\"<mode>\", which every exec subcommand accepts.",
     "bypass": {
       "--dangerously-bypass-approvals-and-sandbox": { "roles": ["implementer"], "sandbox": true,
         "why": "No documented combination runs an unattended implementer's loop without it. codex exec asks nobody - it answers every approval with never - and runs in a read-only sandbox unless told otherwise. Its workspace-write sandbox (-c sandbox_mode=\"workspace-write\" after exec resume; --full-auto is gone since 0.147.0) keeps <writable_root>/.git read-only and the network off, so an implementer could edit and test but never stage, commit or run its reviewer. The watchdog starts no turn with it until a person names codex in watchdog.bypass_adapters on this machine, and ao doctor names what that allows. Read on 2026-09-17 from learn.chatgpt.com/docs/sandboxing, /docs/non-interactive-mode, /docs/developer-commands and /docs/config-file/config-reference, and github.com/openai/codex (codex-rs/exec/src/cli.rs; issues 40149 and 7071)." }

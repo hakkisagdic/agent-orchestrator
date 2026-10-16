@@ -26,7 +26,8 @@
     "pr_field": "number",
     "diff": ["gh", "pr", "diff", "{pr}"],
     "checks": ["gh", "pr", "checks", "{pr}"],
-    "fetch": ["git", "fetch", "origin", "{branch}"]
+    "fetch": ["git", "fetch", "origin", "refs/pull/{pr}/head"],
+    "fetch_note": "Measured against real GitHub, 2026-10-16: a fork PR's branch does not exist in the base repository - `git ls-remote refs/heads/<branch>` is empty for The-PR-Agent/pr-agent#4143, whose commits live only at refs/pull/4143/head - so fetching `{branch}` from origin fails ('couldn't find remote ref') for exactly the fork case this adapter exists for. The pull namespace fetches for fork and same-repo PRs alike (`pull/{pr}/head` and its full refs/ form both work); a same-repo PR's branch is additionally present under refs/heads."
   },
 
   "busy": {

@@ -73,7 +73,13 @@ def _transaction(path, work):
 
 
 def claim(path, key, kind, lease, now=None):
-    """Whether this caller now holds `key`: it is new, or the step that held it is done or its lease has passed."""
+    """Whether this caller now holds `key`: it is new, or the step that held it is done or its lease has passed.
+
+    The clock is the wall clock, deliberately: a lease must outlive this process and a reboot, which a
+    monotonic reading cannot. A clock step only moves when a lease ends, and the reader of a passed lease
+    re-verifies the recorded pid and start against the process table (`running`), so a jump back can delay a
+    wake and a jump forward can end a lease early, but neither starts a second turn into the same session.
+    """
     now = time.time() if now is None else now
 
     def work(connection):
