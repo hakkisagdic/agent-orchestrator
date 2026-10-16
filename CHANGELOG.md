@@ -148,6 +148,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Under the hood
 
+- The weekly and on-demand test lanes have an hour and a half: on 2026-10-16 the Windows suite took 54 minutes on Python 3.12 and ran past its hour on 3.9, cancelled before it said a result (CI-WINDOWS-TIME-2).
 - Documentation checks reject unused path strings as evidence and require JSON file examples to contain exactly one value, while retaining multiple-value JSONL examples ([release](docs/release.md)) (TRIAGE-2-LOW)
 - The F11 fuzz oracle accepts an answering message alongside a blocked report, with a forced scenario proving the resulting nudge ([watchdog](docs/watchdog.md)) (TRIAGE-3-LOW)
 - The weekly and on-demand test lanes have an hour: the Windows suite took 37 minutes on Python 3.9 and ran past the 40 it had on 2026-10-12, cancelled before it said a result (CI-WINDOWS-TIME).
