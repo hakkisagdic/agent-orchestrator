@@ -111,7 +111,11 @@ def test_a_person_s_act_written_out_in_full_is_named_by_its_first_words(rule, re
 
 
 @pytest.mark.parametrize("rule", ["Bash(ao catchup --limit 5)", "Bash(ao init --profile claude-kiro)",
-                                  "Bash(ao features on review)", "Bash(ao waiver-list)", "Bash(ao status:*)",
+                                  "Bash(ao features on review)", "Bash(ao status:*)",
                                   "Bash(ao harness seen --by Alice)"])
 def test_a_rule_that_starts_no_person_s_act_is_not_named(rule):
     assert AL.problems(["claude", "-p", "{prompt}", "--allowedTools", f"Read,{rule}"], {}) == []
+
+
+def test_an_unknown_ao_subcommand_is_not_assumed_harmless():
+    assert AL.problems(["claude", "--allowedTools", "Bash(ao waiver-list)"])

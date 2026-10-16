@@ -566,8 +566,8 @@ def reading_problems(argv, prompt=None):
                 found.append(f"it gives {flag} more than one value ({given or '(empty)'} {args[after]}), and "
                              f"{adapter.get('id')} may read them all")
                 continue
-            if given == value or (given is not None and "," in value
-                                  and set(filter(None, given.split(","))) <= set(value.split(","))):
+            if given == value or (given is not None and (flag in GRANT_FLAGS + ("--tools", "--trust-tools") or "," in value)
+                                  and set(split_tool_list(given)) <= set(split_tool_list(value))):
                 continue
             found.append(f"it runs with {flag} {given if given is not None else '(no value)'}, where "
                          f"{adapter.get('id')} declares {flag} {value or '(empty)'} leaves it only reading")
@@ -576,7 +576,36 @@ def reading_problems(argv, prompt=None):
 
 # ---- a turn holds the grant ao composes, never a person's default or an unnamed bypass (GRANTS-PINNED) ----
 
-# The flags a harness takes its allowlist after, as comma-separated rules in its own syntax (#58).
+def split_tool_list(value):
+    """Read Name or Name(body) rules separated by commas/whitespace.
+
+    Harnesses disagree about commas and nested rules inside a body. Reject those,
+    adjacent rules without a separator, and unbalanced parentheses as every Bash
+    command. Auditing, rewriting and pin comparisons use this same strict grammar.
+    """
+    outside, tool, in_body, closed = [], [], False, False
+    for char in value + ",":
+        if in_body:
+            if char in ",(":  # Also rejects any embedded Bash( text, even in another tool's body.
+                return ["Bash(*)"]
+            if char == ")":
+                in_body, closed = False, True
+        elif char == "," or char.isspace():
+            if tool:
+                outside.append("".join(tool))
+            tool, closed = [], False
+            continue
+        elif closed or char == ")":
+            return ["Bash(*)"]
+        elif char == "(":
+            if not tool:
+                return ["Bash(*)"]
+            in_body = True
+        tool.append(char)
+    return ["Bash(*)"] if in_body else list(dict.fromkeys(outside))
+
+
+# Flags whose values are tool lists in the shared grammar (#58).
 GRANT_FLAGS = ("--allowedTools", "--allowed-tools")
 # An argv that carries one of these carries a tool scope of its own, and ao appends no grant to it (#58, #69).
 SCOPE_FLAGS = GRANT_FLAGS + ("--trust-tools", "--trust-all-tools")
@@ -1522,7 +1551,7 @@ def pinned_argv(argv, role, adapter=None):
 def pin_conflicts(argv, role, adapter=None):
     """What an argv sets otherwise than its adapter pins for `role`, as phrases; empty when it holds the pin (GRANTS-PINNED).
 
-    A comma-separated list that names no more than the pinned list is narrower, and no conflict.
+    A tool list that names no more than the pinned list is narrower, and no conflict.
     """
     out = []
     args = [str(arg) for arg in argv or []]
@@ -1539,7 +1568,8 @@ def pin_conflicts(argv, role, adapter=None):
                 continue
             if given == value:
                 continue
-            if given is not None and "," in value and set(filter(None, given.split(","))) <= set(value.split(",")):
+            if (given is not None and (flag in GRANT_FLAGS + ("--tools", "--trust-tools") or "," in value)
+                    and set(split_tool_list(given)) <= set(split_tool_list(value))):
                 continue
             out.append(f"it runs with {flag} {given if given is not None else '(no value)'}, where ao pins {value}")
     return out
@@ -2174,7 +2204,7 @@ def rewritten_rules(rule, rewriters=None):
     return found
 
 
-def admit_rewrites(argv, rewriters=None):
+def admit_rewrites(argv, rewriters=None, prompt=None):
     """(argv, added): `argv` with each rule of its tool grant followed by those of its `rewritten_rules` the
     grant does not hold yet, and the rules added (GRANTS-RTK).
 
@@ -2187,25 +2217,30 @@ def admit_rewrites(argv, rewriters=None):
     rewriters = command_rewriters() if rewriters is None else rewriters
     args, added = list(argv or []), []
 
-    def admitted(value):
-        parts = value.split(",")
-        held = {part.strip() for part in parts}
-        out = []
-        for part in parts:
+    values, active = [], False
+    for at, arg in enumerate(args):
+        flag, equals, value = str(arg).partition("=")
+        if str(arg).startswith("-"):
+            active = flag in GRANT_FLAGS
+            if active and equals:
+                values.append((at, flag + "=", value))
+        elif active:
+            values.append((at, "", str(arg)))
+    values = [(at, prefix, value) for at, prefix, value in values
+              if value != prompt and not re.fullmatch(r"\{[a-z_]+\}", value)]
+    held = {rule for _, _, value in values for rule in split_tool_list(value)}
+    for at, prefix, value in values:
+        out, changed = [], False
+        for part in split_tool_list(value):
             out.append(part)
             for rule in rewritten_rules(part, rewriters):
                 if rule not in held:
                     held.add(rule)
                     out.append(rule)
                     added.append(rule)
-        return ",".join(out)
-
-    for at, arg in enumerate(args):
-        flag, equals, value = str(arg).partition("=")
-        if at and str(args[at - 1]) in GRANT_FLAGS:
-            args[at] = admitted(str(arg))
-        elif equals and flag in GRANT_FLAGS:
-            args[at] = f"{flag}={admitted(value)}"
+                    changed = True
+        if changed:
+            args[at] = prefix + ",".join(out)
     return args, added
 
 

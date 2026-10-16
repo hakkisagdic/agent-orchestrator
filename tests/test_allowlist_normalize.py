@@ -16,13 +16,15 @@ from ao import allowlist as AL
     ("timeout 60 pytest", "pytest"),
     ("timeout -k 5 60 pytest -q", "pytest -q"),
     ("nice -n 10", ""),
-    ("env FOO=1 -u BAR git status", "git status"),
+    # env reads its options before its NAME=VALUE operands, and a variable it does not know reads as any command
+    # (ALLOWLIST-DEPTH).
+    ("env -u BAR LC_ALL=C git status", "git status"),
     ("rtk proxy git commit", "git commit"),
     ("rtk git -C . commit", "git commit"),
-    ("git -C /repo -c a=b --no-pager commit -n", "git commit -n"),
-    ("git --git-dir=.git status", "git status"),
+    ("git -C /repo -c color.ui=never --no-pager commit -n", "*"),
+    ("git --git-dir=.git status", "*"),
     ("sudo -u root timeout 5 sh", "sh"),
-    ("xargs -n 1 git add", "git add"),
+    ("xargs -n 1 git add", "git add *"),          # and what it reads after them (ALLOWLIST-DEPTH)
     ("ls -la", "ls -la"),
     ("git status", "git status"),
 ])
@@ -33,11 +35,14 @@ def test_each_wrapper_and_git_global_option_is_taken_off(words, runs):
 @pytest.mark.parametrize("rule, plain", [
     ("Bash(timeout 60 pytest:*)", "Bash(pytest:*)"),
     ("Bash(nice:*)", "Bash(*)"),
-    ("Bash(git -C:*)", "Bash(git:*)"),
-    ("Bash(rtk git -C /repo commit *)", "Bash(git commit:*)"),
+    # A wildcard where git's own options may still stand can be `-c alias.x=!sh x` (ALLOWLIST-DEPTH).
+    ("Bash(git -C:*)", "Bash(*)"),
+    ("Bash(rtk git -C /repo commit *)", "Bash(*)"),
     ("Bash(git status:*)", None),                  # already the command it runs
-    ("Bash(timeout 60 pytest -q)", None),          # an exact command admits nothing after it
-    ("Bash(timeout * pytest:*)", None),            # a wildcard inside fixes no words to read
+    # An exact command is read as the exact command it runs, and a wildcard where a word is read stands for any
+    # command: `timeout 1 sh -c x pytest` (ALLOWLIST-DEPTH).
+    ("Bash(timeout 60 pytest -q)", "Bash(pytest -q)"),
+    ("Bash(timeout * pytest:*)", "Bash(*)"),
     ("Read", None),
 ])
 def test_a_rule_is_read_as_the_command_it_runs(rule, plain):

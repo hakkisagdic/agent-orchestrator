@@ -282,16 +282,19 @@ def test_a_file_system_that_numbers_no_file_is_read_as_changed(monkeypatch, tmp_
 
 
 
-@pytest.mark.parametrize("rule", ["Bash(python3 -O -c:*)", "Bash(\"powershell.exe\" -c:*)", "Bash(py.exe:*)",
-                                  "Bash(node --eval:*)", "Bash(/usr/bin/python3:*)",
-                                  "Bash(\"C:\\Program Files\\Python312\\python.exe\":*)"])
-def test_a_grant_of_an_interpreter_is_named_whatever_its_rule_fixes(rule):
-    """From the second review of WINDOWS-SAY-WHY: each spelling was a sample, and a rule fixing other arguments, or
-    naming its program quoted or without a space before `:*`, passed. An interpreter is read as a closed world now."""
+@pytest.mark.parametrize("rule, reason", [
+    ("Bash(python3 -O -c:*)", "runs arbitrary code"),
+    ('Bash("powershell.exe" -c:*)', "runs arbitrary code"),
+    ("Bash(py.exe:*)", "runs arbitrary code"),
+    ("Bash(node --eval:*)", "runs arbitrary code"),
+    ("Bash(/usr/bin/python3:*)", "runs code the project may hold"),
+    ('Bash("C:\\Program Files\\Python312\\python.exe":*)', "skips the commit hook, as the command it runs"),
+])
+def test_a_grant_of_an_interpreter_is_named_whatever_its_rule_fixes(rule, reason):
+    """Bare interpreters run code; paths name files and quoted paths are outside the closed grammar."""
     from ao import allowlist as AL
     found = AL.problems(["claude", "-p", "{prompt}", "--allowedTools", f"Read,{rule}"], {})
-
-    assert any(reason == "runs arbitrary code" and granted == rule for reason, _, granted in found), found
+    assert any(why == reason and granted == rule for why, _, granted in found), found
 
 
 def test_an_interpreter_asked_only_its_version_is_no_grant_of_code():

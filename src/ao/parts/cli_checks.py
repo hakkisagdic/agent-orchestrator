@@ -85,7 +85,7 @@ def _architect_grant_gaps(cfg):
     declared = (A.turn_adapter(architect["adapter"]) or {}) if architect.get("adapter") and architect.get("argv") \
         else {}
     options = declared.get("options") or {}
-    wanted = [rule for rule in str(options.get("architect_tools") or "").split(",") if rule]
+    wanted = A.split_tool_list(str(options.get("architect_tools") or ""))
     have = set(AL.rules(architect.get("argv") or []))
     missing = [rule for rule in wanted if rule not in have]
     if not wanted or not missing:

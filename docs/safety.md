@@ -410,6 +410,117 @@ names such a rule once, for the first forbidden command it admits that way, "as 
 A rule already named for a form it admits as it stands is not named again, and an everyday rule behind
 the same words - `Bash(git -C . status:*)`, `Bash(timeout 60 git status:*)` - is not named at all.*
 
+*In ao since slice ALLOWLIST-DEPTH: the reading of a rule fails closed wherever it runs out. It took off
+eight programs that run the command after them and stopped, so nine `nice`s before a person's act read as
+a `nice` command nothing forbids, and it took `rtk` off only before `git` and rtk's own wrappers, so
+`Bash(rtk ruby:*)` passed, though rtk runs a program it has no filter for as it is. Its review found three
+more places it assumed: an option of a wrapper it did not list was taken to take no value, and macOS's
+`env -P /usr/bin git` takes `/usr/bin` as the folder to find git in; a wildcard in a program's folder was
+dropped with the folder, so `Bash(/usr/*/git status:*)` read as `Bash(git status:*)` though it admits
+`/usr/bin/python3 -c x /tmp/git status`; and an exact rule was compared with ao's sample commands as
+strings, so `Bash(git commit --no-verify -m y)` skipped the hook unnamed beside the sample's `-m x`.*
+
+The audit reads only plain words separated by spaces, optionally followed by one terminal
+wildcard after complete words: ` *` or `:*`. An attached wildcard, such as `git status*`,
+leaves its word unknown and makes the entire rule read as `Bash(*)`. No partial word or other wildcard is read. Quotes, backslashes, shell
+metacharacters and expansions anywhere in a rule make the whole rule read as `Bash(*)`, which
+the audit names. No redirection is parsed: `>`, `<`, `2&>`, descriptor duplication and every
+other spelling all fail closed. The shipped grants need no quoting or redirection.
+
+Tool lists accept only `Name` or `Name(body)` rules separated by commas or whitespace.
+A comma inside a body, a nested parenthesis (including embedded `Bash(`), unbalanced
+parentheses, or any non-separator after `)` makes the entire list read as `Bash(*)`.
+Harnesses split these forms differently, so no safe fragment of an ambiguous list is retained.
+A space-separated list of two Bash rules is two rules, and `Read Grep` is two reviewer tools.
+Auditing, rewriting grants and comparing role pins use the same splitter, including variadic
+grant values; prompts remain separate data.
+
+A program must be a bare name to be read as a known tool. A path separator, drive prefix or
+stream suffix names a file that may hold project code. The audit does not strip that part or
+trust an absolute path: `scripts/git status`, `./pytest -q` and `git:sh status` all name code.
+
+Every wrapper is removed however deeply it is nested. GNU and BSD option declarations say which
+short and long options take values; the same parser reads short-option clusters for wrappers and
+file-writing tools. A value-taking option ends its cluster and consumes its attached value or the
+next word, even one beginning with `-`. Thus `sudo -h host` consumes the host, `cp -ftsrc` names
+`src` as the target, and `git format-patch -qo src` names an output directory. `env` consumes every
+operand containing `=` before its program as an assignment, and only known inert variables leave
+the command reading intact. Every `xargs`/`gxargs` replacement mode (`-I`, `-i`, `--replace`,
+or BSD `-J`) fails closed. Without replacement, xargs appends arbitrary arguments, so the remaining
+command is judged as a prefix rule ending in ` *`. Validation uses only the words left after
+unwrapping, never a saved command from before a wrapper changed it. Rewriters are removed before
+any program; unknown programs, subcommands and tool options fail closed too. A value attached
+to a flag-only option is unknown, as is a partially specified option before a prefix wildcard.
+ao's subcommands and options are derived from its actual parser, including the options consumed
+when recognizing an operation. The slice lifecycle's `abandon` action is the architect's decision, and an implementer
+grant is named even with options before the action or a prefix admitting that action. The
+package's shipped grants remain unnamed.
+
+Each command is then judged by its operation: bypassing or redirecting the commit hook, performing
+a person's act, running arbitrary code, changing an implementer's settings, or writing an architect's
+product files. `git format-patch` writes files by default unless `--stdout` is given; a prefix
+grant can still add an output option. Option values and positionals are never mistaken for options.
+A `git config` rule is read-only only when its complete, parsed command is a known read form with no write option or write
+subcommand and no wildcard. Other forms are writes. Writes that can reach `core.hooksPath`, any key
+under `include` or `includeIf`, a wildcard key or another configuration file are named as rewriting
+the hook configuration; edits and section renames/removals are included. A `-l` that is a comment
+value or a positional cannot turn a write into a read.
+Normalized commands and unwrapped argv retain git's `-c` and `--config-env` configuration.
+Script operations use parsed operands: the `run` in `npm --prefix run test` is a directory,
+not a subcommand. Only declared command paths are understood; `uv tool run` runs code, while
+undeclared `uv tool` operations fail closed.
+
+Rules already named for a forbidden command are not named again. A run of wildcards is matched as
+one, preventing exponential matching work. Shell reading and operation recognition remain one
+slice because they share the same fail-closed contract: an operation may trust only a completely
+validated reading, and neither layer may turn an unknown result into a harmless grant. The audit
+still complements the commit hook, `ao commit`, and the check of what landed; it is not a sandbox
+for code a granted tool executes or configuration that a granted command reads.
+
+The landing review also requires an effect classification independent of option syntax. Adding a
+wrapper or tool option to a parser table does not classify it: an option absent from the reviewed
+inventory fails closed. Option tables contain each short letter and long name only once;
+Git log inherits `--reverse` from diff without redeclaring it. Every admitted Git subcommand has an operation policy. Commands and options
+outside those inventories, including undeclared Git write commands, still admit any command.
+
+Directory and project selectors fail closed, including env/genv `-C`/`--chdir`, sudo
+`-D`/`--chdir`, `-R`/`--chroot`, `-i`/`--login`, Git's `-C`, `--git-dir`, `--work-tree`,
+`--namespace`, `--super-prefix`, `--bare`, npm's `--prefix`, `--workspace`, `--workspaces`,
+uv's `--directory`/`--project`, and ao's `-C`/`--root`, `backup --to`, and `content --from`.
+The only proven no-op is the literal `.` for env/genv chdir, sudo chdir, or Git `-C`.
+Ao accepts only the separate word pair `-C .`; attached roots, long-option aliases,
+and every other directory option fail closed. In particular, argparse reads `-Csrc=.` as
+the directory `src=.`; the audit never splits that attached value to recover a final `.`.
+Prefix grants for `ao backup` or `ao content` also fail closed because they can append a directory option. Repeated and nested selectors are
+checked separately; a preceding `.` does not excuse a later directory change. Undeclared spellings,
+such as npm `-C` or tar options, already fail closed. Make and gmake already run arbitrary code.
+
+Git archive program/transport selection, custom archive formats/compressors, pagers, non-inert
+configuration and config writes that can name a program are code. Commit hooks, non-shipped diff
+and show commands' external diff/text conversion, and stash operations that can run filters are
+code too. Stash modifications and index writes are forbidden to the architect; so are config
+writes, format-patch's default output, and explicit output files. Plain tar/zip archive output
+remains an implementer operation. Exact config reads do not run the program named by a returned value.
+Pytest runs test and conftest code even without `-p`; npm test runs package scripts and uv sync
+can run build backends. They are named, as their explicit code-selection forms are.
+Env/genv `-a`/`--argv0` and exec `-a` also fail closed: changing a program's invocation name
+can select another operation, such as sudo's edit mode, rather than the program the audit read.
+
+Wrapper writes survive unwrapping: time/gtime `-o`/`--output` is checked against the coordination
+paths, and nohup/gnohup may write `nohup.out` in the current directory or home. An architect may
+not receive those product writes. Cp/mv target directories are checked too; backup/suffix options
+are conservatively writes outside coordination: a suffixed backup is a separate path from the
+single coordination file the architect may edit.
+Buffer-size options such as stdbuf `-oL`, sudo's descriptor-count `-C`, and Git diff's copy-detection
+`-C` are not mistaken for output paths or directory changes.
+
+The requirement to keep all shipped grants unnamed retains a specific limitation: Git status,
+diff, log and add may execute programs from existing configuration (fsmonitor, external diff,
+text converters or filters), and their shipped prefix grants remain allowed for the implementer.
+The audit does not claim to close that implicit-execution boundary. Explicit program/configuration
+selection still fails closed, and Git add's index write is forbidden to the architect. Closing
+implicit execution as well would require changing those shipped grants and their execution environment.
+
 *In ao since slice GATE-LOCK-SAME-ROOT: `ao verify` and `ao merge-check` wait for a holder of the
 machine lock that runs for their own project. They used to wait only for another project's, and ran
 their suite beside an `ao lock -- <command>` in the same checkout.*
