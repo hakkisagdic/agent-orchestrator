@@ -136,6 +136,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Windows
 
+- Mail on Windows preserves a dangling link at its chosen name, including one planted during creation, and takes the next numbered name; platforms without a safe creation API refuse the write ([Windows](docs/windows.md), [messaging](docs/messaging.md)) (WINDOWS-TESTS-7)
 - Setup writes hold native directory handles without delete sharing, refuse reparse points and open leaves without following links, while platforms offering neither native handles nor safe relative opens refuse the operation ([windows](docs/windows.md)) (LEADS-ADAPTERS).
 - Processes appending to a new ledger at once no longer fail on Windows: the one that found the lock file empty wrote its byte after another had locked it, and Windows' mandatory lock refused the write with PermissionError ([ledger](docs/ledger.md), WINDOWS-LOCK-WRITE).
 - A reviewer ao starts - a route of `ao review`, the bug hunter - is asked for UTF-8 standard streams, as ao writes its prompt and reads its answer: one written in Python wrote Windows' ANSI code page without UTF-8 mode, so its leads and findings lost the em dash they are read by, and a Turkish letter ended it before it answered ([windows](docs/windows.md), REVIEWER-UTF8).

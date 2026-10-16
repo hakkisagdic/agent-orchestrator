@@ -1,3 +1,4 @@
+"""Storage barriers survive interrupted writers; mail creation refuses links on Windows (WINDOWS-TESTS-7)."""
 import errno
 import json
 import os
@@ -280,24 +281,31 @@ def test_a_new_lock_file_whose_byte_another_process_holds_is_locked_without_writ
     """
     import io
     path = str(tmp_path / "authority.jsonl.lock")
-    real_open = open
+    real_open = storage._open_lock
+    refused = []
 
-    class Held(io.FileIO):
+    class Held:
+        def __init__(self, handle):
+            self.handle = handle
+
+        def __getattr__(self, name):
+            return getattr(self.handle, name)
+
         def write(self, data):
+            refused.append(data)
             raise PermissionError(13, "Permission denied")
 
-    def opened(name, mode="r", buffering=-1, *args, **kwargs):
-        if name != path:
-            return real_open(name, mode, buffering, *args, **kwargs)
-        assert (mode, buffering) == ("a+b", 0), (mode, buffering)       # nothing buffered to flush on close
-        return Held(name, "a+")
+    def opened(name):
+        handle = real_open(name)
+        assert isinstance(handle, io.FileIO)             # nothing buffered to flush on close
+        return Held(handle) if name == path else handle
 
-    monkeypatch.setattr(storage, "open", opened, raising=False)
+    monkeypatch.setattr(storage, "_open_lock", opened)
     entered = []
     with storage._exclusive_lock(path, timeout=1):
         entered.append(True)
 
-    assert entered == [True] and os.path.getsize(path) == 0
+    assert entered == [True] and refused == [b"\0"] and os.path.getsize(path) == 0
 
 
 def test_concurrent_chained_appends_form_one_linear_history(tmp_path):
@@ -322,3 +330,89 @@ for i in range(12): append_chained_jsonl(path, {"worker":worker,"i":i}, chain)
     for row in rows:
         assert row["previous"] == expected
         expected = storage.chained_row_digest(row, CHAIN)
+
+
+@pytest.mark.parametrize("backend", ["nofollow", "native", "unavailable"])
+def test_new_text_chooses_available_apis_not_the_platform_name(tmp_path, monkeypatch, backend):
+    from types import SimpleNamespace
+    path = str(tmp_path / "mail.md")
+    calls = []
+    original_open = os.open
+    modeled = SimpleNamespace(name="nt" if backend == "nofollow" else "posix")
+    if backend == "nofollow":
+        modeled.O_NOFOLLOW = 0x40000000
+
+    def opened(name, flags, mode=0o666):
+        calls.append((name, flags))
+        assert flags & os.O_EXCL and flags & os.O_CREAT
+        if backend == "nofollow":
+            assert flags & modeled.O_NOFOLLOW
+            flags &= ~modeled.O_NOFOLLOW
+        return original_open(name, flags, mode)
+
+    modeled.open = opened
+    monkeypatch.setattr(storage, "os", modeled)
+    monkeypatch.setattr(storage, "_windows_tree_available", lambda: backend == "native")
+    monkeypatch.setattr(storage, "_open_tree_nt", opened)
+    if backend == "unavailable":
+        with pytest.raises(OSError, match="cannot create a file through no link.*refuses"):
+            storage.open_new_text(path)
+        assert not calls and not os.path.exists(path)
+    else:
+        with storage.open_new_text(path) as handle:
+            handle.write("Ayşe")
+        assert len(calls) == 1 and open(path, "rb").read() == "Ayşe".encode("utf-8")
+
+
+@pytest.mark.parametrize("occupied", [False, True])
+def test_new_text_native_open_uses_create_new_and_opens_the_reparse_point(tmp_path, monkeypatch, occupied):
+    """Model CREATE_NEW refusing a link at the instant of creation, without needing Windows (WINDOWS-TESTS-7)."""
+    import ctypes
+    from ctypes import wintypes
+    from types import SimpleNamespace
+    path = str(tmp_path / "mail.md")
+    calls, converted, closed = [], [], []
+
+    class Function:
+        def __init__(self, call):
+            self.call = call
+
+        def __call__(self, *args):
+            return self.call(*args)
+
+    def create(name, access, share, security, disposition, flags, template):
+        calls.append(name)
+        assert access == 0x40000000 and disposition == 1  # GENERIC_WRITE, CREATE_NEW
+        assert flags & 0x00200000                       # FILE_FLAG_OPEN_REPARSE_POINT
+        if occupied:
+            return wintypes.HANDLE(-1).value
+        return os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+
+    def info(raw, output):
+        output._obj.attributes = 0
+        return True
+
+    def convert(raw, flags):
+        converted.append(raw)
+        assert flags & os.O_WRONLY
+        return raw
+
+    kernel = SimpleNamespace(CreateFileW=Function(create), CloseHandle=Function(closed.append),
+                             GetFileInformationByHandle=Function(info))
+    monkeypatch.delattr(os, "O_NOFOLLOW", raising=False)
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *a, **kw: kernel, raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 80, raising=False)
+    monkeypatch.setattr(ctypes, "WinError", lambda code: FileExistsError(errno.EEXIST, "name is taken", path),
+                        raising=False)
+    monkeypatch.setitem(sys.modules, "msvcrt", SimpleNamespace(open_osfhandle=convert))
+    if occupied:
+        with pytest.raises(FileExistsError):
+            storage.open_new_text(path)
+        assert not converted and not os.path.exists(path)
+    else:
+        with storage.open_new_text(path) as handle:
+            handle.write("new mail")
+        assert len(converted) == 1 and open(path, encoding="utf-8").read() == "new mail"
+        with pytest.raises(OSError):
+            os.fstat(converted[0])                      # Python owns and closes the converted handle
+    assert calls == [path] and not closed

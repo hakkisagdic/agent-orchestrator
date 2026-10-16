@@ -119,6 +119,8 @@ Every message ao writes is created under a name no file or recorded message has:
 subject is written beside the first, `-2` after its name and on, never over it, and the name it was
 written under is the one ao prints, records and puts in its envelope. A link left at a message's name
 is not written through. Acknowledging a message removes its view, but never frees its ID.
+On Windows, a native exclusive open refuses even a dangling link at that name; where ao has
+no API to create without following a link, it refuses the write and says why (WINDOWS-TESTS-7).
 
 *Before TRIAGE-2-MEDIUM, a message was written over whatever stood at its name, so a second
 `ao note`, `ao mail send`, `ao_report` or hold release of the same minute and subject replaced the

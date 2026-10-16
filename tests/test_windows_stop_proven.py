@@ -163,7 +163,8 @@ def _hold_as_windows(project, monkeypatch, running, refused=()):
     monkeypatch.setattr(A, "_pid_alive", lambda pid: pid in running)
     with monkeypatch.context() as patch:
         # Windows locks a byte with msvcrt, which no other platform has; a lock no other process takes here.
-        patch.setitem(sys.modules, "msvcrt", SimpleNamespace(LK_NBLCK=2, LK_UNLCK=0, locking=lambda *args: None))
+        if os.name != "nt":
+            patch.setitem(sys.modules, "msvcrt", SimpleNamespace(LK_NBLCK=2, LK_UNLCK=0, locking=lambda *args: None))
         patch.setattr(os, "name", "nt")
         return cli.cmd_hold(project, HOLD)
 

@@ -2,6 +2,14 @@
 
 What works, what does not, and how hosted runners exercise it.
 
+*In ao since slice WINDOWS-TESTS-7: a link at a new mail's name stays untouched, including a link
+to a file that does not exist. Python's exclusive open on Windows followed that link and created
+its target. Mail now uses native `CREATE_NEW` with `FILE_FLAG_OPEN_REPARSE_POINT`, so a link put
+there before or during creation takes the name and the mail receives the next numbered name.
+The way is chosen by available APIs; a platform with neither this native open nor `O_NOFOLLOW`
+refuses the write and says why. `tests/test_secrets_2.py` checks occupied names and races, and
+`tests/test_storage_durability.py` checks the API choice and native flags on every platform.*
+
 | layer | status |
 |---|---|
 | files: `.ao/`, mailbox, board, backlog, ledgers | works — plain files and Python |

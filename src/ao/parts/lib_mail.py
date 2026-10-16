@@ -877,7 +877,7 @@ def write_mail(root, cfg, name, body, meta=None):
     body = scan_evidence(body)[0]                     # scanned before it is written (#48)
     # A handled message leaves its view but still owns its ID. Serialize allocation through
     # recording so a concurrent writer cannot reuse an ID after the view vanishes (TRIAGE-2-MEDIUM).
-    from .storage import _exclusive_lock
+    from .storage import _exclusive_lock, open_new_text
     with _exclusive_lock(os.path.join(root, ".ao", "mail", "write.lock")):
         reserved = {row.get("id") for row in mail_log(root, limit=None) if isinstance(row, dict)}
         reserved.update(row.get("id") for row in mail_store_rows(root))
@@ -892,7 +892,7 @@ def write_mail(root, cfg, name, body, meta=None):
                 name = f"{stem}-{attempt}{extension}"
                 continue
             try:
-                fh = open(os.path.join(box, name), "x", encoding=UTF8)
+                fh = open_new_text(os.path.join(box, name))
                 break
             except FileExistsError:
                 attempt += 1

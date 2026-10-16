@@ -237,18 +237,37 @@ def test_two_mails_of_one_name_in_one_minute_are_two_mails(project, mode):
         assert b"# the second" in A.message_body(root, SECOND) and b"# the first" in A.message_body(root, NAME)
 
 
-def test_a_link_left_at_a_mails_name_is_not_written_through(project, tmp_path):
+@pytest.mark.parametrize("exists", [False, True])
+@pytest.mark.parametrize("raced", [False, True])
+def test_a_link_left_at_a_mails_name_is_not_written_through(project, tmp_path, monkeypatch, exists, raced):
+    """A final link, even planted at the open, never creates or changes its target (WINDOWS-TESTS-7)."""
     root = project["root"]
     target = tmp_path / "outside" / "authorized_keys"
     target.parent.mkdir()
+    if exists:
+        target.write_bytes(b"person's file\n")
+    path = os.path.join(root, "agent-mail", NAME)
     try:
-        os.symlink(str(target), os.path.join(root, "agent-mail", NAME))
+        os.symlink(str(target), path)
     except (OSError, NotImplementedError):
-        pytest.skip("this machine cannot make a symbolic link")
+        pytest.skip("a symbolic link needs a privilege on Windows which this machine does not grant")
+    planted = []
+    if raced:
+        os.unlink(path)
+        original_open = builtins.open
+
+        def racing(name, mode="r", *args, **kwargs):
+            if name == path and mode == "x" and not planted:
+                os.symlink(str(target), path)
+                planted.append(path)
+            return original_open(name, mode, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", racing)
 
     assert A.write_mail(root, project, NAME, "# the note\n", {"kind": "note"}) == SECOND
 
-    assert not target.exists() and os.path.islink(os.path.join(root, "agent-mail", NAME))
+    assert (target.read_bytes() == b"person's file\n") if exists else not target.exists()
+    assert os.path.islink(path) and bool(planted) == raced
     assert "# the note" in _read(project, SECOND)
 
 
@@ -283,7 +302,7 @@ def test_a_taken_suffix_advances_the_original_stem(project, monkeypatch, capsys,
     original_open, raced = builtins.open, []
 
     def racing(path, mode="r", *args, **kwargs):
-        if os.fspath(path) == os.path.join(box, second) and mode == "x" and not raced:
+        if mode == "x" and not isinstance(path, int) and os.fspath(path) == os.path.join(box, second) and not raced:
             raced.append(second)
             with original_open(path, "x", encoding="utf-8") as fh:
                 fh.write("# racing mail\n")

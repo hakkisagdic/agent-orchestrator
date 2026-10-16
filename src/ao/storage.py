@@ -1004,6 +1004,24 @@ def _require_windows_tree():
         raise InTheWay("this platform", "cannot hold folders through no link; ao refuses this file operation")
 
 
+def open_new_text(path):
+    """Create a UTF-8 file through no final link, or report that its name is taken (WINDOWS-TESTS-7).
+
+    Windows' CRT exclusive open follows a dangling link before creating its target. CREATE_NEW with
+    OPEN_REPARSE_POINT instead refuses the occupied name, including a link planted during the open.
+    Choose by the available APIs: tests can name a POSIX host Windows without giving it WinDLL.
+    """
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is not None:
+        opener = lambda name, flags: os.open(name, flags | nofollow, 0o666)
+    elif _windows_tree_available():
+        opener = _open_tree_nt
+    else:
+        raise OSError(f"{path}: this platform cannot create a file through no link; "
+                      "ao refuses the write; use a supported platform")
+    return open(path, "x", encoding=UTF8, opener=opener)
+
+
 def _open_tree_nt(path, flags=None, mode=0o666):
     """Open the directory or leaf itself, with no delete sharing; reject every reparse point (LEADS-ADAPTERS)."""
     import ctypes

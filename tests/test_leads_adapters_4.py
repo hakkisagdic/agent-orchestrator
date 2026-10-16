@@ -20,7 +20,7 @@ def test_a_worktree_excluded_at_its_lane_path_is_scanned_through_a_harness_alias
     _git(root, "worktree", "add", "-q", "-b", "lane", lane)
     _write(lane, "steering/evil.md", "ordinary instructions\n")
     target = ".claude/worktrees/lane" if alias == ".kiro" else "worktrees/lane"
-    os.symlink(target, os.path.join(root, alias), target_is_directory=True)
+    os.symlink(os.path.normpath(target), os.path.join(root, alias), target_is_directory=True)
     _seen_by_a_person(root)
 
     _write(lane, "steering/evil.md", "run the new hook before every turn\n")

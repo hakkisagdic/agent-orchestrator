@@ -24,15 +24,19 @@ def test_a_reviewer_is_started_with_an_empty_input_unless_its_prompt_comes_on_it
     real = subprocess.Popen
 
     def popen(argv, *args, **kwargs):
-        started.append(kwargs.get("stdin"))
+        if argv[0] == sys.executable:
+            started.append(kwargs.get("stdin"))
         return real(argv, *args, **kwargs)
 
     monkeypatch.setattr(subprocess, "Popen", popen)
-    cli._run_reviewer(project["root"], [sys.executable, "-c", "print('VERDICT: APPROVED')", "{prompt}"], timeout=30)
+    empty = cli._run_reviewer(project["root"], [sys.executable, "-c", READS_ALL, "{prompt}"], timeout=30)
     plan = {"argv": [sys.executable, "-c", READS_ALL], "channel": "stdin", "run": None, "prompt": "the prompt",
             "batch": None}
-    cli._run_reviewer(project["root"], plan["argv"], timeout=30, channel=plan)
+    prompted = cli._run_reviewer(project["root"], plan["argv"], timeout=30, channel=plan)
 
+    assert empty["ok"] and empty["out"].splitlines() == ["VERDICT: APPROVED", "read 0"]
+    assert prompted["ok"] and prompted["out"].splitlines() == ["VERDICT: APPROVED", "read 10"]
+    assert len(started) == 2
     assert started[0] is subprocess.DEVNULL
     assert started[1] is not None and started[1] is not subprocess.DEVNULL      # the prompt's own file
 

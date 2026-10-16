@@ -55,7 +55,7 @@ def test_a_link_at_a_declared_prefix_reads_the_declared_children(project, tmp_pa
         _write(root, alias + "/hooks/evil.json", "ordinary instructions\n")
         _write(root, alias + "/unrelated.txt", "not harness configuration\n")
     else:
-        os.symlink("../payload" if kind == "nested" else "payload", os.path.join(root, alias),
+        os.symlink(os.path.normpath("../payload" if kind == "nested" else "payload"), os.path.join(root, alias),
                    target_is_directory=True)
     if kind in ("tracked", "hidden"):
         _git(root, "add", "--", alias)

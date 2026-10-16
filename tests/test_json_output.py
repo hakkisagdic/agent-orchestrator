@@ -237,10 +237,10 @@ STATUS = "\n".join([
     "        <dim>│</>  AssertionError: 1 != 2",
     "",
     "   <yellow><b>REVIEW RETURNED</> for S3: R-17 NEEDS_CHANGES — handle it before new work (<b>ao "
-    "review collect R-17</>)",
+    f"review collect {A.copyable_word('R-17')}</>)",
     "",
     "   <yellow><b>REVIEW ENDED</> for a slice: R-18 failed, no verdict — collect it, then submit again (<b>ao "
-    "review collect R-18</>)",
+    f"review collect {A.copyable_word('R-18')}</>)",
     "",
     "<b><mag>── REVIEWS ────────────────────────────────────────────────</>",
     "   <red>⚠ round 6/5 — over budget: re-specify, split, or change actor</>",

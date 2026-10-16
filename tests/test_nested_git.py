@@ -539,7 +539,7 @@ def _fake_head_repository(tmp_path, outer, proj, monkeypatch):
     inner.mkdir()
     assert _run(inner, "init", "-q").returncode == 0
     (inner / ".git" / "objects" / "info" / "alternates").write_text(
-        str(outer / ".git" / "objects") + "\n", encoding="utf-8")
+        (outer / ".git" / "objects").as_posix() + "\n", encoding="utf-8")
     tree = _run(outer, "write-tree").stdout.strip()
     with monkeypatch.context() as env:
         env.setenv("GIT_INDEX_FILE", str(tmp_path / "fake-index"))

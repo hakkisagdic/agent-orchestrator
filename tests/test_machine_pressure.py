@@ -404,8 +404,9 @@ def test_a_calm_machine_is_read_once_and_a_run_under_its_holders_lock_reads_none
 def test_windows_says_once_that_it_reads_nothing_and_refuses_nothing(project, lock, clock, monkeypatch, capsys):
     root = project["root"]
     _gates(root)
-    asked = _programs(monkeypatch, {})
-    reading = P.measure("win32")
+    with monkeypatch.context() as patch:
+        asked = _programs(patch, {})
+        reading = P.measure("win32")
     assert reading == P.Reading(None, None, (), None,
                                 (("machine", "ao reads memory, paging and disk on macOS and Linux"),))
     assert asked == [] and clock.slept == 0                          # nothing was run or sampled
