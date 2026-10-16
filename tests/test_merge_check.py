@@ -1,3 +1,4 @@
+"""Merge gates come from the result tree, including branch changes (TRIAGE-1-MEDIUM)."""
 import json
 import os
 import shlex
@@ -37,6 +38,7 @@ def test_two_green_branches_whose_merge_is_red_are_caught_and_every_merge_is_acc
         json.dump(spec, fh)
     monkeypatch.setattr(A, "GATE_LOCK", str(tmp_path / "gate.lock"))
     base = _git(root, "rev-parse", "--abbrev-ref", "HEAD")
+    _git(root, "add", ".ao/gates.json")
     _commit_files(root, "one argument", **{"lib.py": "def f(x):\n    return x\n", "use_a.py": "import lib\nlib.f(1)\n"})
     for name, files in (("caller", {"use_b.py": "import lib\nlib.f(3)\n"}), ("docs", {"notes.txt": "notes\n"}),
                         ("other", {"other.txt": "other\n"})):

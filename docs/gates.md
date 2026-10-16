@@ -208,7 +208,10 @@ temporary worktree, borrows the untracked dependency directories named in
 `.ao/ledger/merges.jsonl`, chained. The record names both parents and the tree the merge
 makes, so it vouches for exactly that merge: after either side moves, it vouches for
 nothing. `ao doctor` reports a merge on the current branch within `merge.check_days` that
-no passing run vouches for, and one whose recorded run failed.
+no passing run vouches for, and one whose recorded run failed. The profile and gate commands
+come from `.ao/gates.json` in the merge result, including gates added by either branch.
+A passing record with a different definitions digest does not verify that merge; run
+`ao merge-check` again against those parents (TRIAGE-1-MEDIUM).
 
 ## Commit authority is bound to a verification
 

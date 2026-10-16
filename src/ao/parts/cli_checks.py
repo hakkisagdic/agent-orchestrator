@@ -836,7 +836,10 @@ def _doctor_check(cfg, page=False):
         elif key == "credits-exhaust":
             notify(f"{project}: {key}", text, root, key=shared["key"], window=shared["window"],
                    audience="human", level=shared["level"], quiet_until=credit_reset(last.get("reset_at")),
-                   what=credits_told("exhausted", last.get("account")))
+                   what=credits_told("exhausted", last.get("account")),
+                   evidence=A.notice_evidence("credit_reading", [
+                       {"value": f"{last['used']:.0f}/{last['limit']:.0f}", "at": last.get("at"),
+                        "source": f"GetUsageLimits, account {last.get('account')}"}] if last else []))
         elif shared:
             # A failed wake says what the watchdog's own raise of it says, so the same failure rings once
             # whoever sees it (NOISE-REPEATS); so does harness configuration nobody has seen (HARNESS-CONFIG),
@@ -861,7 +864,7 @@ SHARED_POOL_NOTE = ("the account's figure counts every session on it - another p
                     "another orchestrator - and ao's transcript holds only ao's own turns")
 
 
-def _account_beside_share(cfg, since=None):
+def _account_beside_share(cfg, acct=None):
     """Lines setting the implementer's own account beside ao's own transcript share, labelled as such.
 
     The account is the one the implementer's adapter declares a lookup for. The first shipped
@@ -872,21 +875,28 @@ def _account_beside_share(cfg, since=None):
     ident = A.implementer_adapter_id(cfg)
     if not A.usage_api(ident):
         return [f"{C['dim']}the account: {_no_account(ident)}; what follows is ao's transcript only{C['reset']}"]
-    try:
-        acct = A.account_usage(adapter_id=ident)
-    except Exception:
-        acct = None
+    if acct is None:
+        try:
+            acct = A.account_usage(adapter_id=ident)
+        except Exception:
+            acct = None
     if not acct or acct.get("error") or acct.get("expired") or not acct.get("limit"):
         return [f"{C['dim']}the account's figure could not be read; what follows is ao's transcript "
                 f"only{C['reset']}"]
     lines = [f"the account: {float(acct['used']):,.0f} of {float(acct['limit']):,.0f} used"]
-    try:
-        mine = A.turn_costs(cfg, since=since)
-    except Exception:
-        mine = None
-    if mine and mine.get("turns") and float(acct["used"] or 0) > 0:
-        lines.append(f"ao's own share, from its transcript: {mine['total']:,.0f} {mine['unit']} "
-                     f"({100 * mine['total'] / float(acct['used']):.0f}% of the account's used)")
+    start = acct.get("cycle_start")
+    known = isinstance(start, (int, float)) and not isinstance(start, bool) and 0 < start <= time.time()
+    if known:
+        try:
+            mine = A.turn_costs(cfg, since=start)
+        except Exception:
+            mine = None
+        if mine and mine.get("turns") and float(acct["used"] or 0) > 0:
+            lines.append(f"ao's own share, from its transcript: {mine['total']:,.0f} {mine['unit']} "
+                         f"({100 * mine['total'] / float(acct['used']):.0f}% of the account's used); "
+                         f"cycle since {time.strftime('%Y-%m-%d %H:%M', time.localtime(start))}")
+    else:
+        lines.append("the account's cycle start is unknown; no transcript share percentage can be compared")
     lines.append(f"{C['dim']}{SHARED_POOL_NOTE}{C['reset']}")
     return lines
 
@@ -1018,7 +1028,7 @@ def cmd_cost(cfg, args):
     if delegated:
         print(f"  {C['dim']}delegated: what the subagents a turn started spent, inside that turn's spend{C['reset']}")
     overhead = sum(c["by_class"].get(k, {}).get("usage", 0) for k in ("ceremony", "coordination"))
-    for line in _account_beside_share(cfg, since):
+    for line in _account_beside_share(cfg):
         print(f"  {line}")
     told = f"{C['b']}{100 * overhead / tot:.0f}%{C['reset']} of spend" if tot else "no share: nothing was spent"
     print(f"\n  coordination + ceremony: {told}"

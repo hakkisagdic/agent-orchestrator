@@ -348,10 +348,26 @@ def cmd_merge_check(cfg, args):
     import shutil
     import tempfile
     root = cfg["root"]
+    into = A.git_text(root, "rev-parse", "--verify", "--quiet", f"{args.into}^{{commit}}")
+    branch = A.git_text(root, "rev-parse", "--verify", "--quiet", f"{args.branch}^{{commit}}")
+    if not into or not branch:
+        print(f"{C['red']}cannot resolve {args.branch if into else args.into} to a commit{C['reset']}")
+        return 2
     try:
-        with open(os.path.join(root, ".ao", "gates.json"), encoding=UTF8) as fh:
-            spec = json.load(fh)
-    except (OSError, ValueError) as exc:
+        tree, conflict = A.merge_result_tree(root, into, branch)
+    except RuntimeError as exc:
+        print(f"{C['red']}{exc}{C['reset']}")
+        return 2
+    row = {"id": f"MC-{A.unique_ms()}", "at": int(time.time()), "into": into, "branch": branch,
+           "tree": tree, "profile": args.profile, "gates_digest": None, "measured_by": A.measured_by()}
+    if conflict:
+        row.update(passed=False, gates=[], conflict=conflict)
+        A.record_merge_check(root, row)
+        print(f"{C['red']}{C['b']}CONFLICT{C['reset']}  {conflict}  {C['dim']}recorded as {row['id']}{C['reset']}")
+        return 1
+    try:
+        spec = json.loads(A._git_output(root, "show", f"{tree}:.ao/gates.json"))
+    except (OSError, ValueError, RuntimeError) as exc:
         print(f"{C['red']}no usable .ao/gates.json{C['reset']}: {exc}")
         return 2
     declared = spec if isinstance(spec, dict) else {}
@@ -364,24 +380,7 @@ def cmd_merge_check(cfg, args):
     if not names:
         print(f"unknown profile {profile}; have: {', '.join(profiles)}")
         return 2
-    into = A.git_text(root, "rev-parse", "--verify", "--quiet", f"{args.into}^{{commit}}")
-    branch = A.git_text(root, "rev-parse", "--verify", "--quiet", f"{args.branch}^{{commit}}")
-    if not into or not branch:
-        print(f"{C['red']}cannot resolve {args.branch if into else args.into} to a commit{C['reset']}")
-        return 2
-    try:
-        tree, conflict = A.merge_result_tree(root, into, branch)
-    except RuntimeError as exc:
-        print(f"{C['red']}{exc}{C['reset']}")
-        return 2
-    row = {"id": f"MC-{A.unique_ms()}", "at": int(time.time()), "into": into, "branch": branch,
-           "tree": tree, "profile": profile, "gates_digest": A.gate_definitions_digest_of(spec, profile),
-           "measured_by": A.measured_by()}
-    if conflict:
-        row.update(passed=False, gates=[], conflict=conflict)
-        A.record_merge_check(root, row)
-        print(f"{C['red']}{C['b']}CONFLICT{C['reset']}  {conflict}  {C['dim']}recorded as {row['id']}{C['reset']}")
-        return 1
+    row.update(profile=profile, gates_digest=A.gate_definitions_digest_of(spec, profile))
     release = _take_gate_lock(cfg, args.wait)
     if release is None:
         return 2
@@ -683,6 +682,28 @@ def _latest_verification_or_problem(root):
         return None, str(exc)
 
 
+def _boundary_review_refusals(root, evidence):
+    """Hold an approval to the running slice's pinned boundary both when granting and when committing.
+
+    The implementer can restore a board pointer after obtaining a grant without it. Matching names alone
+    also prove nothing when the review could not read the file or compare it with its pinned commit.
+    """
+    pointer = A.boundary_pointer(A.running_slice(root))
+    if not pointer:
+        return []
+    if not pointer[1]:
+        return ["the running slice's boundary file names no commit; pin it with boundary: path@commit "
+                "and run `ao review` again"]
+    reviewed = evidence.get("boundary_file") if isinstance(evidence, dict) else None
+    if not isinstance(reviewed, dict) or (reviewed.get("file"), reviewed.get("commit")) != pointer:
+        return ["the review does not name the running slice's boundary file and commit; run `ao review` again"]
+    digest = reviewed.get("sha256")
+    if not (isinstance(digest, str) and A.re.fullmatch(r"sha256:[0-9a-f]{64}", digest)) \
+            or not isinstance(reviewed.get("changed"), bool):
+        return ["the review did not read the boundary file and compare it with its commit; run `ao review` again"]
+    return []
+
+
 def cmd_commit_ok(cfg, args):
     """Grant authority only for the exact, isolated tree in Git's index."""
     root = cfg["root"]
@@ -818,6 +839,7 @@ def cmd_commit_ok(cfg, args):
         why = []
         reviewed_scope, integrity_reasons = A.candidate_review_integrity(root, candidate, ev)
         why.extend(f"{name}: {reason}" for reason in integrity_reasons)
+        why.extend(f"{name}: {reason}" for reason in _boundary_review_refusals(root, ev))
         # A boundary that lists criteria lands only when the review found every one met (CRITERIA-VERDICTS).
         why.extend(f"{name}: {reason}" for reason in A.criteria_refusals(ev))
         fields["scope"] = reviewed_scope
@@ -1962,6 +1984,7 @@ def _bound_commit_check(cfg, args):
                     root, candidate, match[3]
                 )
                 reasons.extend(f"{match[0]}: {reason}" for reason in integrity_reasons)
+                reasons.extend(f"{match[0]}: {reason}" for reason in _boundary_review_refusals(root, match[3]))
                 reasons.extend(f"{match[0]}: {reason}" for reason in A.criteria_refusals(match[3]))
                 if match[3].get("scope") != grant.get("scope"):
                     reasons.append(

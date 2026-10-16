@@ -2990,6 +2990,8 @@ def _collect_review(cfg, args, root, by, model, read_chained_jsonl):
                          "diff": request.get("diff_digest")},
                "evidence": {"transport": "human-carried", "collected_by": by, "nonce": request["nonce"],
                             "request": request["text"], "limits": list(A.STANDIN_LIMITS)}}
+    if isinstance(request.get("boundary_file"), dict):
+        carried["evidence"]["boundary_file"] = request["boundary_file"]
     if isinstance(request.get("threat_model"), dict):
         carried["evidence"]["threat_model"] = request["threat_model"]   # the one its prompt carried
     asked = SimpleNamespace(boundary=request.get("boundary"), paths=request.get("paths"), commits=None,
@@ -3642,6 +3644,10 @@ def cmd_review_submit(cfg, args):
                   f"{limit}; collect first: {', '.join(state['id'] for state in flying)}")
             return 2
         running = A.running_slice(root)
+        if getattr(args, "boundary", None) and A.boundary_pointer(running):
+            print(f"{C['red']}--boundary cannot replace the running slice's boundary file{C['reset']}; "
+                  "review without --boundary so the file and its diff reach the reviewer")
+            return 2
         slice_id = (running or {}).get("id")
         elsewhere = [state for state in flying if state.get("slice") != slice_id]
         if elsewhere:
@@ -4192,6 +4198,11 @@ def cmd_review(cfg, args):
         running = next((item for items in A.board(root).values() for item in items if item.get("id") == owner),
                        {"id": owner, "title": "", "notes": {}}) if owner else None
     # A boundary file is read at the commit its row names; a later change travels as a diff (#73).
+    if not args.commits and args.boundary and A.boundary_pointer(running) and not carried \
+            and not hasattr(args, "pinned_boundary_source"):
+        print(f"{C['red']}--boundary cannot replace the running slice's boundary file{C['reset']}; "
+              "review without --boundary so the file and its diff reach the reviewer")
+        return 2
     source = (args.pinned_boundary_source if hasattr(args, "pinned_boundary_source")
               else None if args.boundary else A.read_boundary(root, running))
     boundary = args.boundary or (source or {}).get("label") or A.slice_boundary(running)
@@ -4456,7 +4467,7 @@ def cmd_review(cfg, args):
                 request = A.write_review_request(
                     root, cfg, candidate, scope, evidence.get("diff_digest"), boundary,
                     evidence.get("slice"), args.paths, treeless, criteria=criteria,
-                    threat_model=evidence.get("threat_model"))
+                    threat_model=evidence.get("threat_model"), boundary_file=evidence.get("boundary_file"))
             except OSError as exc:
                 request = None
                 print(f"{C['dim']}no stand-in request was written: {exc}{C['reset']}")

@@ -33,6 +33,15 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- Credits reuses its account reading, and transcript shares are shown only for a known billing cycle ([telemetry](docs/telemetry.md)) (TRIAGE-1-MEDIUM)
+- Throughput counts successful verifications and attributes waiting decisions only to their recorded slice ([surfaces](docs/surfaces.md)) (TRIAGE-1-MEDIUM)
+- Hold and fleet recognize project adapters, and adapter validation rejects placeholders turns cannot fill ([adapters](docs/adapters.md)) (TRIAGE-1-MEDIUM)
+- Test-only review context resolves dotted imports, relative imports and static parts while keeping headers and definitions within its budget ([pipeline](docs/pipeline.md)) (TRIAGE-1-MEDIUM)
+- Scheduled credit alerts and mailed notice rows retain the readings behind them ([telemetry](docs/telemetry.md)) (TRIAGE-1-MEDIUM)
+- Merge-check runs the merged tree's gates, and only matching definition digests verify a merge ([gates](docs/gates.md)) (TRIAGE-1-MEDIUM)
+- Review rounds follow ledger order, unrecorded approvals reset nothing, and unavailable attempts cannot hide recorded findings ([slices](docs/slices.md)) (TRIAGE-1-MEDIUM)
+- Consistency checks validate archived review bytes, and repairs record intent before acting while preserving retaken locks ([ledger](docs/ledger.md)) (TRIAGE-1-MEDIUM)
+- Candidate reviews retain the running slice's pinned boundary through stand-in collection and commit authority ([slices](docs/slices.md)) (TRIAGE-1-MEDIUM)
 - The record of each ledger's length outside the repository is written as ao's other whole files are, its folder synced after the rename, so a power cut can no longer take back the record of an append that had returned ([ledger](docs/ledger.md#authority-chain), LEDGER-HISTORY).
 - A new board item goes under the heading it names - a line that is exactly `## <state>`, never text inside an item or another heading - and is refused, said, where the board has none; starting a slice clears its `waiting:` note from whichever state it starts from; and `ao slice` and `ao slices` escape what agents wrote, as the board's own listing does ([slices](docs/slices.md)) (SLICE-LIFECYCLE-3).
 - No mail ao writes goes over another or through a link left at its name: each is created under a name no file has, `-2` after its own when that is taken, and `ao note`, `ao mail send`, `ao_report`, a hold's release, `ao handoff`, `ao hunt` and the Telegram poller say and record the name it went under, where a second mail of the same minute and subject replaced the first. A new Telegram bot token drops `~/.ao/telegram-offset`, whose old count had Telegram take the new bot's first messages as read; and `ao doctor` names `ao pings setup` for the dead man's switch, where it named `ao ping set <url>`, which never existed ([messaging](docs/messaging.md), [telegram](docs/telegram.md), SECRETS-2).

@@ -19,7 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, watchdog as W
+from ao import cli, lib as A, storage, watchdog as W
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -78,6 +78,8 @@ def _places(project, tmp_path):
         _write(os.path.join(place, ".ao", "ledger", "progress.jsonl"), "")
         review = os.path.join(place, "semantic-review", "r-001.md")
         _write(review, "# review\n\nVERDICT: NEEDS_CHANGES\n")
+        storage.append_chained_jsonl(A.review_ledger_path(place),
+                                     {"at": 4102444800, "verdict": "NEEDS_CHANGES"}, A.REVIEW_CHAIN)
         os.utime(review, (4102444800, 4102444800))           # newer than any commit here
     return places
 
@@ -204,7 +206,7 @@ def test_no_git_query_goes_through_a_shell():
 PROBE = r"""
 import json, os, subprocess, sys
 sys.path.insert(0, os.path.join(sys.argv[1], "src"))
-from ao import lib as A
+from ao import storage, lib as A
 started = []
 real_run = subprocess.run
 def spy(*args, **kwargs):

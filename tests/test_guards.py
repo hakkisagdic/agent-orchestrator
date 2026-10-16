@@ -1,3 +1,4 @@
+"""Coordination guards preserve slice identity and require recorded approvals."""
 import os
 import time
 
@@ -128,6 +129,14 @@ def test_rounds_are_scoped_to_running_slice_at_the_same_head(project):
     assert A.rounds(root, "semantic-review") == 1
 
     _round_review(root, "r-05.md", "B2", "APPROVED", base + 5, head)
+    # TRIAGE-1-MEDIUM: an editable legacy approval cannot erase rounds.
+    # Keep the same-HEAD isolation check, then require a recorded approval
+    # of this slice (not its neighbour) before the budget resets.
+    assert A.rounds(root, "semantic-review") == 1
+    from tests.test_round_ledger import _review
+    _review(root, "APPROVED", slice_id="B1")
+    assert A.rounds(root, "semantic-review") == 1
+    _review(root, "APPROVED", slice_id="B2")
     assert A.rounds(root, "semantic-review") == 0
 
 

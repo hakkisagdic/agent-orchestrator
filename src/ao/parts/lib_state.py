@@ -80,9 +80,10 @@ def consistency_findings(root, cfg):
     for row in grants:
         token = row.get("token") or "a grant"
         review = row.get("review")
-        if review and not os.path.exists(os.path.join(root, reviews_dir, review)) and review not in archived:
+        if review and not os.path.isfile(os.path.join(root, reviews_dir, review)) and not (
+                archived.get(review) and os.path.isfile(os.path.join(archived[review], review))):
             found("grant-review", f"grant {token} rests on review {review}, which is neither in {reviews_dir}/ "
-                                  "nor recorded as archived")
+                                  "nor present at its recorded archive")
         if verifications is not None and row.get("verification") and row["verification"] not in verifications:
             found("grant-verification", f"grant {token} names verification {row['verification']}, which the "
                                         "verification ledger does not hold")
@@ -98,17 +99,23 @@ def consistency_findings(root, cfg):
         if not name:
             continue
         path = os.path.join(root, reviews_dir, name)
-        if os.path.exists(path):
-            with open(path, "rb") as fh:
-                if "sha256:" + hashlib.sha256(fh.read()).hexdigest() != row.get("sha256"):
-                    found("review-bytes", f"{reviews_dir}/{name} is not the bytes its review row recorded")
-        elif name not in archived:
-            where = _in_archive(root, reviews_dir, name)
+        where = None
+        if not os.path.isfile(path):
+            where = archived.get(name) or _in_archive(root, reviews_dir, name)
             if where:
-                found("archive-pointer", f"{name} was moved to {where} and nothing records where",
-                      repair=("archive-pointer", name, where))
-            else:
-                found("review-missing", f"{reviews_dir}/{name} has a review row and no file, here or archived")
+                path = os.path.join(where, name)
+        try:
+            with open(path, "rb") as fh:
+                digest = "sha256:" + hashlib.sha256(fh.read()).hexdigest()
+        except OSError:
+            found("review-missing", f"{reviews_dir}/{name} has a review row but its file cannot be read at {path}; "
+                                    "restore the recorded bytes")
+            continue
+        if digest != row.get("sha256"):
+            found("review-bytes", f"{path} is not the bytes its review row recorded; restore the recorded bytes")
+        elif where and name not in archived:
+            found("archive-pointer", f"{name} was moved to {where} and nothing records where",
+                  repair=("archive-pointer", name, where))
     for state, items in board(root).items():
         for item in items:
             for key in ("landed", "commit"):
@@ -129,7 +136,7 @@ def consistency_findings(root, cfg):
         holder = None
     if isinstance(holder, dict) and holder.get("pid") and not _pid_alive(holder["pid"]):
         found("architect-lock", f"the architect lock names pid {holder['pid']}, which is not running",
-              repair=("architect-lock", lock))
+              repair=("architect-lock", lock, holder))
     return out
 
 
@@ -140,14 +147,23 @@ def repair_consistency(root, findings):
     review or waiver ledgers.
     """
     from .storage import (_exclusive_lock, _load_committed_lengths, _write_committed_lengths, append_chained_jsonl,
-                          checkpoint_path)
+                          checkpoint_path, read_chained_jsonl)
+    ledger = os.path.join(root, ".ao", "ledger", "repairs.jsonl")
+    read_chained_jsonl(ledger, REPAIR_CHAIN)
     done = []
+
+    def intent(finding, repair):
+        # An interrupted repair must leave its reason before it changes state (TRIAGE-1-MEDIUM).
+        append_chained_jsonl(ledger, {"at": int(time.time()), "event": "intent", "kind": repair[0],
+                                     "target": list(repair[1:]), "finding": finding["text"]}, REPAIR_CHAIN)
+
     for finding in findings:
         repair = finding.get("repair")
         if not repair:
             continue
         kind = repair[0]
         if kind == "checkpoint":
+            intent(finding, repair)
             store = checkpoint_path()
             with _exclusive_lock(store + ".lock"):
                 data = _load_committed_lengths()
@@ -157,17 +173,21 @@ def repair_consistency(root, findings):
                 # The same replace every ledger append makes, retried where Windows holds the store (#71).
                 _write_committed_lengths(data)
         elif kind == "architect-lock":
-            try:
+            with _exclusive_lock(project_file(root, "architect-lock-guard")):
+                try:
+                    with open(repair[1], encoding=UTF8) as fh:
+                        holder = json.load(fh)
+                except (OSError, ValueError):
+                    continue
+                if len(repair) < 3 or holder != repair[2] or _pid_alive(holder["pid"]):
+                    continue
+                intent(finding, repair)
                 os.remove(repair[1])
-            except FileNotFoundError:
-                continue
         elif kind == "archive-pointer":
+            intent(finding, repair)
             record_archived(root, repair[1], repair[2])
         else:
             continue
-        append_chained_jsonl(os.path.join(root, ".ao", "ledger", "repairs.jsonl"),
-                             {"at": int(time.time()), "kind": kind, "target": list(repair[1:]),
-                              "finding": finding["text"]}, REPAIR_CHAIN)
         done.append(finding)
     return done
 
@@ -486,6 +506,7 @@ def record_verification(root, record):
         mine = re.fullmatch(r"V-([0-9]+)", str(record.get("id") or ""))
         return {"id": f"V-{max(taken) + 1}"} if mine and taken and int(mine.group(1)) <= max(taken) else {}
 
+    record.setdefault("slice", (running_slice(root) or {}).get("id"))
     row = append_chained_jsonl(path, scan_record(record), VERIFICATION_CHAIN, legacy_prefix=True,
                                prepare=above_every_recorded)
     record["id"] = row.get("id")                        # the id it went under, which its caller reports

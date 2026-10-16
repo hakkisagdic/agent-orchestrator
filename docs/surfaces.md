@@ -112,7 +112,7 @@ shape both, and the exit status is the panel's. `ao fleet --json` ([parallel.md]
 | `problems` | `nothing_to_do_since` (epoch seconds), `spinning_minutes`, `nudge_error` (`at`, `code`, `tail`, `log`) and `agent_errors` (`time`, `text`) |
 | `returned_reviews` | reviews that ended and nobody collected: `id`, `slice`, `verdict`, `state` |
 | `reviews`, `rounds` | the newest review artefacts (`file`, `verdict`); the rounds the running slice spent and its budget (`spent`, `budget`), null with no artefact |
-| `throughput` | what the window produced: `hours`, `staged`, `landed`, `decisions_asked`, `decisions_open`, `oldest_open_minutes`, `state`, and `stall` (`minutes`, `candidate`, `paths`, `reason`) |
+| `throughput` | only passed, ready verifications count as staged; a waiting decision explains a stall only for the slice recorded by that verification (TRIAGE-1-MEDIUM). What the window produced: `hours`, `staged`, `landed`, `decisions_asked`, `decisions_open`, `oldest_open_minutes`, `state`, and `stall` (`minutes`, `candidate`, `paths`, `reason`) |
 | `repository` | the newest three commits (`log`), `dirty_files`, and where the checkout stands: `ahead`, `behind`, `base`, `merged`; `ahead`, `behind` and `base` are null with no remote default branch to compare against |
 | `mail` | the mailbox directory (`dir`), the messages in it (`waiting`), the marked ones for the role asking (`urgent`: `id`, `to`, `title`; null when the mailbox could not be read), and those nobody was shown, oldest first (`unseen`: `id`, `class`, `age_seconds`) |
 | `board` | `counts` by state, and the `blocked` items: `id`, `title`, and `why`, null when the board gives no reason |

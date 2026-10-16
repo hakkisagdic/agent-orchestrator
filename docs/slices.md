@@ -46,7 +46,11 @@ A claim is journalled before it is admitted, and never after.
 `ao review` reads the file at the commit the pointer names and hands it to the reviewer.
 If the file has changed since, the change goes with it as a diff, so a boundary that moved
 mid-slice is visible instead of silently becoming a different contract. Such a slice is
-reviewed without `--boundary`.
+reviewed without `--boundary`: a candidate review refuses that override when the row names
+a file. A pointer without a commit is a problem; an unreadable boundary or a failed
+comparison is reported to the reviewer with `changed: null`. Commit authority requires the
+review to name the row's same file and commit, so changing the pointer requires another review. Stand-in requests keep
+that binding when their answers are collected too (TRIAGE-1-MEDIUM).
 
 The declared paths - the file's Paths section, or `paths:` on a row - are checked against
 the repository whenever `ao board` or `ao doctor` reads a running or queued item: a path
@@ -178,7 +182,13 @@ accounting key: a review attributed to another slice can neither consume nor res
 current slice's budget, even when both slices review the same HEAD. Unscoped legacy
 artifacts are not charged to a slice because their owner cannot be established. Retrospective
 reviews are outside the prospective fix/re-review budget, and `UNAVAILABLE` or `INVALID`
-attempts are not rounds.
+attempts are not rounds. Recorded verdicts follow ledger order even when the clock moves
+back, including across the re-specification timestamp: a recorded approval ends older
+rounds before that timestamp filters rejections. Unrecorded files count only rejections
+older than the first ledger row; an unrecorded approval never resets the count. The watchdog
+also reads the newest verdict from the ledger, so newer unavailable attempts cannot hide
+open findings. Corrupt review history contributes no verdict to that work signal; other
+work signals remain available and consistency checks report the corruption (TRIAGE-1-MEDIUM).
 
 This exists because of a measured failure. One slice in the source run went through **nine
 review rounds** — nine cycles of finding, fix, re-review — and nothing in the system

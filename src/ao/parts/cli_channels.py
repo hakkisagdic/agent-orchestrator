@@ -197,8 +197,7 @@ def cmd_credits(cfg, args):
               f"   {C['b']}{used:,.2f}{C['reset']} of {limit:,.0f}")
         print(f"   {C['b']}{limit - used:,.2f}{C['reset']} remaining")
         # Whose spend this is: the whole account's, with ao's transcript share beside it (#95).
-        for line in _account_beside_share(cfg, since=datetime.now().replace(day=1, hour=0, minute=0,
-                                                                             second=0, microsecond=0).timestamp())[1:]:
+        for line in _account_beside_share(cfg, acct=acct)[1:]:
             print(f"   {line}")
         if acct.get("overage_status") == "DISABLED":
             print(f"\n   {C['dim']}overage disabled — work stops at the limit, it does not "
@@ -209,11 +208,10 @@ def cmd_credits(cfg, args):
 
         if args.local:
             u = A.credit_usage(adapter_id=ident)
-            here = sum(v for d, v in u["days"].items()
-                       if d >= date.today().replace(day=1).isoformat())
-            share = here / used * 100 if used else 0
-            print(f"\n   {C['dim']}transcripts on this machine account for {here:,.0f} "
-                  f"({share:.0f}%) of it{C['reset']}")
+            month = date.today().replace(day=1).isoformat()
+            here = sum(v for d, v in u["days"].items() if d >= month)
+            print(f"\n   {C['dim']}local transcript estimate, calendar month {month[:7]}: "
+                  f"{here:,.0f}{C['reset']}")
         return 0
 
     if not api:

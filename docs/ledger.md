@@ -193,14 +193,19 @@ ao ledger render                                   # regenerate INDEX.md
 
 The board, the ledgers, the review artefacts and git refs are four stores that must agree.
 `ao doctor --consistency` cross-checks them and names every disagreement with both sides: a
-grant resting on a review that is neither on disk nor recorded as archived, a grant naming a
+grant resting on a review that is neither on disk nor present at its archive pointer, a grant naming a
 verification or a waiver its ledger does not hold, a review file that is not the bytes its row
 recorded, a review row with no file anywhere, a board item citing a commit that is not in the
 repository, a committed-length checkpoint for a checkout that is gone, an architect lock whose
 holder is dead, and a review ao archived with nothing recording where.
 
-`--repair` fixes only the last three kinds - mechanical state - and appends what it did to
-`.ao/ledger/repairs.jsonl`, chained, so a repair is itself evidence. Anything that says what
+Archived copies are opened and checked against the review row's digest: a pointer alone
+vouches for no bytes. `--repair` fixes only the last three kinds - mechanical state - after
+reading the chained `.ao/ledger/repairs.jsonl` and appending an `event: intent` row before each
+action. An intent records an attempted repair, not proof that an interrupted action finished.
+Unreadable repair history prevents all repairs. Lock repair compares the scanned holder
+again under the same sidecar lock that acquisition and release use; a retaken or live lock
+is left alone (TRIAGE-1-MEDIUM). Anything that says what
 was authorised, reviewed or verified is reported and never changed; no repair rewrites an
 authority row.
 

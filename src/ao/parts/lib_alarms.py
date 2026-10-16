@@ -403,6 +403,7 @@ PROJECT_FILES = {
     "helpers-lock": "helpers-{key}.json.lock",
     "reviewer": "reviewer-{key}.json",
     "architect-lock": "architect-{key}.lock",
+    "architect-lock-guard": "architect-{key}.lock.guard",
     # What the watchdog starts, claimed before its process does (JOURNAL-2), and the files SQLite keeps beside it.
     "journal": "journal-{key}.db",
     "journal-wal": "journal-{key}.db-wal",
@@ -1790,25 +1791,30 @@ def architect_lock_holder(root):
 def acquire_architect(root, pid, who):
     """Take the lock unless a live holder has it. Two architect copies deciding at
     once — a desktop resume beside a watchdog wake — contradict each other."""
-    holder = architect_lock_holder(root)
-    if holder and holder.get("pid") != pid:
-        return None
-    d = {"pid": pid, "who": who, "at": int(time.time())}
-    try:
-        os.makedirs(os.path.dirname(architect_lock_path(root)), exist_ok=True)
-        json.dump(d, open(architect_lock_path(root), "w", encoding=UTF8))
-    except OSError:
-        pass
-    return d
+    from .storage import _exclusive_lock
+    with _exclusive_lock(project_file(root, "architect-lock-guard")):
+        holder = architect_lock_holder(root)
+        if holder and holder.get("pid") != pid:
+            return None
+        d = {"pid": pid, "who": who, "at": int(time.time())}
+        try:
+            with open(architect_lock_path(root), "w", encoding=UTF8) as fh:
+                json.dump(d, fh)
+        except OSError:
+            return None
+        return d
 
 
 def release_architect(root, pid=None):
-    try:
-        d = json.load(open(architect_lock_path(root), encoding=UTF8))
-        if pid is None or d.get("pid") == pid:
-            os.remove(architect_lock_path(root))
-    except (OSError, ValueError):
-        pass
+    from .storage import _exclusive_lock
+    with _exclusive_lock(project_file(root, "architect-lock-guard")):
+        try:
+            with open(architect_lock_path(root), encoding=UTF8) as fh:
+                d = json.load(fh)
+            if pid is None or d.get("pid") == pid:
+                os.remove(architect_lock_path(root))
+        except (OSError, ValueError):
+            pass
 
 
 # ---- foreign edits: a person in the same files -------------------------------------

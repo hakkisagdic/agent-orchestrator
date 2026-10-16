@@ -18,6 +18,15 @@ def _git(root, *args):
                           capture_output=True, text=True).stdout.strip()
 
 
+def _commit_merge_gates(root):
+    # Merge-check reads the resulting tree's definitions (C6), so cleanup tests need
+    # gates in their fixture's commit to reach the worktree and lock lifecycle.
+    (Path(root) / ".ao" / "gates.json").write_text(json.dumps({
+        "gates": {"check": {"run": "unused"}}, "profiles": {"full": ["check"]}}), encoding="utf-8")
+    _git(root, "add", ".ao/gates.json")
+    _git(root, "commit", "-qm", "declare merge gates")
+
+
 def _link(path, target, kind):
     if kind == "junction":
         if os.name != "nt":
@@ -231,8 +240,7 @@ def test_prove_reports_cleanup_refusal_as_a_failed_check(project, tmp_path, monk
 
 def test_merge_check_reports_cleanup_refusal_and_releases_its_lock(project, tmp_path, monkeypatch, capsys):
     root = project["root"]
-    (Path(root) / ".ao" / "gates.json").write_text(json.dumps({
-        "gates": {"check": {"run": "unused"}}, "profiles": {"full": ["check"]}}), encoding="utf-8")
+    _commit_merge_gates(root)
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     released, paths = [], []
     monkeypatch.setattr(cli, "_take_gate_lock", lambda cfg, wait: lambda: released.append(True))
@@ -275,8 +283,7 @@ def _fail_git_cleanup(monkeypatch, tmp_path, operation):
 @pytest.mark.parametrize("operation", ["remove", "prune"])
 def test_merge_check_keeps_a_pass_when_git_cleanup_fails(project, tmp_path, monkeypatch, capsys, operation):
     root = project["root"]
-    (Path(root) / ".ao" / "gates.json").write_text(json.dumps({
-        "gates": {"check": {"run": "unused"}}, "profiles": {"full": ["check"]}}), encoding="utf-8")
+    _commit_merge_gates(root)
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     released = []
     monkeypatch.setattr(cli, "_take_gate_lock", lambda cfg, wait: lambda: released.append(True))
@@ -383,8 +390,7 @@ def test_a_failed_add_that_made_nothing_does_not_run_cleanup(project, tmp_path, 
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     calls = _fail_worktree_add(monkeypatch)
     if caller == "merge-check":
-        (Path(root) / ".ao" / "gates.json").write_text(json.dumps({
-            "gates": {"check": {"run": "unused"}}, "profiles": {"full": ["check"]}}), encoding="utf-8")
+        _commit_merge_gates(root)
         released = []
         monkeypatch.setattr(cli, "_take_gate_lock", lambda cfg, wait: lambda: released.append(True))
         assert cli.cmd_merge_check(project, SimpleNamespace(

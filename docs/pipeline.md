@@ -227,6 +227,12 @@ resumable like any other, and the verdict is per lens in the artefact: a clean c
 pass no longer implies a clean concurrency pass. A lens the row names is asked even when it is
 the only one; a default of `correctness` alone is the whole review.
 
+A test-only Python candidate's read-only context resolves plain dotted imports and relative
+imports against the test's package, as well as aliases and statically named module parts.
+Context headers and names share the
+same byte budget as definitions; when no context fits, no context section is attached
+(TRIAGE-1-MEDIUM).
+
 ## 2c — Criteria: a verdict for each one the boundary lists
 
 A boundary often names several conditions, and one verdict for the whole of it cannot say which

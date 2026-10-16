@@ -1791,7 +1791,7 @@ def cmd_hold(cfg, args):
     """
     root = cfg["root"]
     impl = cfg.get("implementer") or {}
-    adapter = A.load_adapter(impl.get("adapter", "")) if impl else {}
+    adapter = A.load_adapter(impl.get("adapter", ""), root) if impl else {}
     path = os.path.join(root, A.HOLD_FILE)
 
     if args.action == "status":

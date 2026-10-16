@@ -457,7 +457,9 @@ appears in a core module's code. Docstrings may name one; code reads an adapter 
 
 Adapters load from three places, each overriding the one before by `id`: the package, then
 `~/.ao/adapters/`, then the project's `.ao/adapters/`. Supporting a new harness is a JSON file,
-not a change to ao and a wait for a release.
+not a change to ao and a wait for a release. `ao hold` and `ao fleet` read the project's
+adapter too, so a harness a person started through that layer remains visible
+(TRIAGE-1-MEDIUM).
 
 ```bash
 ao adapters                          # each adapter, its source, contract and verification
@@ -469,7 +471,9 @@ An adapter declares `"contract": 1`, the adapter contract this ao implements. On
 another contract is listed as refused, with both versions named, and never loaded half-way.
 `validate` checks the fields every adapter needs - `id`, `name`, `verified`, `contract`, and a
 `send.argv` carrying `{prompt}` in exactly one argument - and that `resume.argv` carries
-`{session}` and uses only placeholders ao fills. `conform` runs `send` and `resume` with the
+`{session}` and uses only placeholders ao fills: `{prompt}` and `{session}` for turns;
+a tool reviewer's `send.argv` may also use the tool-review placeholders. A turn cannot
+carry an unfilled `{model}` (TRIAGE-1-MEDIUM). `conform` runs `send` and `resume` with the
 harness binary replaced by a fixture that records what it was given, and passes only when the
 prompt, with spaces, quotes, `=` signs and a line break, arrives whole in one argument and,
 where `resume` takes a session id, the session arrives too. `transcript`, `busy` and `directives`

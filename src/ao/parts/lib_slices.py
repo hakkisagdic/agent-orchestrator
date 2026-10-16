@@ -1774,7 +1774,7 @@ def read_boundary(root, item):
     if not pointer:
         return None
     path, commit = pointer
-    out = {"file": path, "commit": commit, "changed": False, "sha256": None, "sections": {}, "problem": None}
+    out = {"file": path, "commit": commit, "changed": None, "sha256": None, "sections": {}, "problem": None}
     real_root = os.path.realpath(root)
     target = os.path.realpath(os.path.join(root, path))
     if os.path.isabs(path) or not target.startswith(real_root + os.sep):
@@ -1794,20 +1794,26 @@ def read_boundary(root, item):
         out.update(label=f"{path} (unreadable)",
                    text=f"the boundary file {path} cannot be read: {out['problem']} - say so as a finding")
         return out
+    # Keep readable contents for a deferred review, even when no commit makes them authoritative.
+    if not commit:
+        out["problem"] = "it names no commit; use boundary: path@commit"
     content = data.decode(UTF8, "replace")
     diff = ""
     if commit:
         try:
             diff = _git_output(root, "diff", commit, "--", path).decode(UTF8, "replace")
-        except RuntimeError:
-            diff = ""
+        except RuntimeError as exc:
+            out["problem"] = f"cannot compare the boundary with its commit: {exc}"
     label = f"{path} at {commit[:12]}" if commit else f"{path} as it stands in the worktree"
     text = f"the boundary file {label}:\n\n{content}"
     if diff.strip():
         label += ", changed since"
         text += (f"\n\nThe file has changed since {commit[:12]}. The change is part of what you judge: "
                  f"a boundary that moved mid-slice is a finding unless a decision records it.\n{diff}")
-    out.update(changed=bool(diff.strip()), sha256="sha256:" + hashlib.sha256(data).hexdigest(), label=label,
+    if out["problem"]:
+        text += f"\n\n{out['problem']} - say so as a finding"
+    out.update(changed=None if out["problem"] else bool(diff.strip()),
+               sha256="sha256:" + hashlib.sha256(data).hexdigest() if commit else None, label=label,
                text=text, sections=boundary_sections(content))
     return out
 
@@ -2016,9 +2022,9 @@ def rounds(root, reviews_dir, item=None):
     ends nothing: the rejection still counts. UNAVAILABLE and INVALID are not
     rounds; nobody completed a review.
 
-    Review files from before the ledger have no row and are read as they always
-    were, so a slice that began before it keeps its count. `ao slice status` counts
-    the same way for any slice it is asked about (SLICE-LIFECYCLE).
+    Unrecorded files count only rejections older than the ledger's first row;
+    an unrecorded approval ends no round count (TRIAGE-1-MEDIUM). `ao slice status`
+    counts the same way for any slice it is asked about (SLICE-LIFECYCLE).
     """
     current = item if item is not None else running_slice(root)
     slice_id = ((current or {}).get("id") or (current or {}).get("key") or "").strip()
@@ -2049,13 +2055,13 @@ def rounds(root, reviews_dir, item=None):
             if candidate:
                 rejected.add(candidate)
             if mine:
-                events.append((at, 1, order, "round"))
+                events.append((1, order, at, "round"))
         elif mine and row.get("authorizable") is True \
                 and not (row.get("fallback") and candidate in rejected):
-            events.append((at, 1, order, "approved"))
+            events.append((1, order, at, "approved"))
 
     for order, (f, v) in enumerate(reviews(root, reviews_dir, limit=None)):
-        if f in recorded or v not in ("APPROVED", "NEEDS_CHANGES"):
+        if f in recorded or v != "NEEDS_CHANGES":
             continue
         path = os.path.join(root, reviews_dir, f)
         try:
@@ -2068,12 +2074,16 @@ def rounds(root, reviews_dir, item=None):
                 or (evidence.get("slice") or "").strip() != slice_id \
                 or evidence.get("review_status") in ("unavailable", "invalid"):
             continue
-        events.append((at, 0, -order, "approved" if v == "APPROVED" else "round"))
+        if rows and at >= int(rows[0].get("at") or 0):
+            continue
+        events.append((0, -order, at, "round"))
 
     n = 0
-    for at, _, _, what in sorted(events, reverse=True):
-        if at < respec or what == "approved":
+    for _, _, at, what in sorted(events, reverse=True):
+        if what == "approved":
             break
+        if at < respec:
+            continue
         n += 1
     return n
 

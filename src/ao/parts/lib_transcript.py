@@ -3745,7 +3745,7 @@ def _ledger_time(value):
         return 0.0
 
 
-def _stall_reason(root, cfg, candidate, waiting):
+def _stall_reason(root, cfg, candidate, waiting, slice_id=None):
     """Why the newest staged candidate has not landed, from what was recorded."""
     try:
         for row in reversed(authority_rows(root)):
@@ -3765,6 +3765,7 @@ def _stall_reason(root, cfg, candidate, waiting):
             if "APPROVED" in (verdict or "").upper():
                 return f"review approved ({name}) but nothing committed"
             return f"review {verdict} ({name})"
+    waiting = [d for d in waiting if slice_id and d.get("slice") == slice_id]
     if waiting:
         oldest = min(waiting, key=lambda d: d.get("asked_at") or 0)
         return f"waiting on decision {oldest.get('id')}: {str(oldest.get('question') or '')[:80]}"
@@ -3798,8 +3799,9 @@ def throughput(root, cfg, hours=24.0, now=None):
     ready = []
     for row in rows:
         candidate = row.get("candidate") if isinstance(row, dict) else None
-        if isinstance(candidate, dict) and row.get("candidate_ready") and candidate.get("index_tree"):
-            ready.append((_ledger_time(row.get("at")), candidate))
+        if isinstance(candidate, dict) and row.get("passed") is True and row.get("candidate_ready") \
+                and candidate.get("index_tree"):
+            ready.append((_ledger_time(row.get("at")), candidate, row.get("slice")))
     trees = {}
     try:
         log = _git_output(root, "log", "-n", "400", "--format=%T %ct").decode(UTF8, "replace")
@@ -3809,8 +3811,8 @@ def throughput(root, cfg, hours=24.0, now=None):
         parts = line.split()
         if len(parts) == 2 and parts[1].isdigit():
             trees.setdefault(parts[0], int(parts[1]))
-    staged = {candidate["digest"] for at, candidate in ready if at >= cut}
-    landed = {candidate["index_tree"] for _, candidate in ready
+    staged = {candidate["digest"] for at, candidate, _ in ready if at >= cut}
+    landed = {candidate["index_tree"] for _, candidate, _ in ready
               if trees.get(candidate["index_tree"], 0) >= cut}
     every = decisions(root)
     asked = [d for d in every if (d.get("asked_at") or 0) >= cut]
@@ -3818,12 +3820,12 @@ def throughput(root, cfg, hours=24.0, now=None):
     oldest = min((d.get("asked_at") or now for d in waiting), default=None)
     stall = None
     if ready:
-        at, newest = max(ready, key=lambda item: item[0])
+        at, newest, slice_id = max(ready, key=lambda item: item[0])
         minutes = (now - at) / 60
         if newest["index_tree"] not in trees and minutes >= settings.get(cfg, "stall_minutes"):
             stall = {"minutes": int(minutes), "candidate": newest.get("digest"),
                      "paths": list(newest.get("changed_paths") or []),
-                     "reason": _stall_reason(root, cfg, newest, waiting)}
+                     "reason": _stall_reason(root, cfg, newest, waiting, slice_id)}
     msgs, _ = session_paths(cfg)
     try:
         moved = bool(msgs) and os.path.getmtime(msgs) >= cut

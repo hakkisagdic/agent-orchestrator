@@ -2404,7 +2404,10 @@ def validate_adapter(adapter):
             problems.append(f"`{capability}.argv` must carry {{prompt}} in exactly one argument")
         if capability == "resume" and not any("{session}" in a for a in argv):
             problems.append("`resume.argv` must carry {session}")
-        unknown = sorted({p for a in argv for p in re.findall(r"\{([a-z_]+)\}", a)} - set(ADAPTER_PLACEHOLDERS))
+        filled = {"prompt", "session"}
+        if capability == "send" and isinstance(adapter.get("review"), dict):
+            filled.update(TOOL_REVIEW_PLACEHOLDERS)
+        unknown = sorted({p for a in argv for p in re.findall(r"\{([a-z_]+)\}", a)} - filled)
         if unknown:
             problems.append(f"`{capability}.argv` uses placeholders ao does not fill: {', '.join(unknown)}")
     return (problems + prompt_channel_problems(adapter) + tool_review_problems(adapter) + subagent_problems(adapter)

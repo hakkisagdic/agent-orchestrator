@@ -309,7 +309,8 @@ def test_a_stand_in_answer_is_read_against_the_criteria_its_request_asked_about(
     os.makedirs(os.path.join(root, "docs", "slices"))
     Path(root, "docs", "slices", "S1.md").write_text(BOUNDARY_FILE, encoding="utf-8")
     _repo_with_change(root)                                     # commits the boundary file with the base
-    _running(root, "- [S1] the claim journal · boundary: docs/slices/S1.md")
+    sha = A.git_text(root, "rev-parse", "HEAD")
+    _running(root, f"- [S1] the claim journal · boundary: docs/slices/S1.md@{sha}")
     cfg = dict(project, reviewer={"id": "r1", "family": "x", "argv": _fake("down", exit_code=17)})
 
     assert cli.cmd_review(cfg, _args(boundary=None)) == 3

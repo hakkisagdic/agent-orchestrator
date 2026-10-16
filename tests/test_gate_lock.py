@@ -142,7 +142,7 @@ def test_merge_check_waits_for_a_run_in_its_own_project_and_refuses_when_it_does
     _git(root, "checkout", "-q", "-b", "feature")
     with open(os.path.join(root, "feature.txt"), "w", encoding="utf-8") as fh:
         fh.write("feature\n")
-    _git(root, "add", "feature.txt")
+    _git(root, "add", "feature.txt", ".ao/gates.json")
     _git(root, "commit", "-q", "-m", "feature")
     _git(root, "checkout", "-q", base)
     _held(lock, root, other_process)

@@ -103,6 +103,14 @@ messages into the record. The watchdog records the attempt, waits half an hour b
 retrying, and doctor reports `credits-check` while that implementer is being driven
 (TRIAGE-3-MEDIUM).
 
+`ao cost` and `ao credits` compare transcript spend with the account only when its lookup
+supplies `cycle_start` as epoch seconds. That share uses and names the account's cycle,
+regardless of the cost report's selected window. A reset date alone does not establish its
+start: the shipped lookup currently supplies no start, so no share percentage is printed.
+`ao credits` reuses the account it already read. With `--local`, its additional estimate
+names the calendar month and reports a subtotal without an account-share percentage;
+daily local totals do not establish a matching account cycle (TRIAGE-1-MEDIUM).
+
 ## In US dollars: an estimate
 
 `ao cost` counts spend in the unit the implementer's harness bills - credits, or tokens - and a
@@ -242,7 +250,9 @@ loop, and the tool-call list in `usage_summary` shows you which one.
 A desktop notification reaches the human and vanishes. The architect reading the
 panel — the participant who could act on a *pattern* of alerts — is then the only
 one who never sees what the human was told. `ao notices` closes that: every alert
-is written to `.ao/ledger/notices.jsonl` as it is raised.
+is written to `.ao/ledger/notices.jsonl` as it is raised. A scheduled doctor's exhausted-credit
+notice carries the newest account sample, and a red alert's `mail:` row keeps the same
+evidence; `ao notices <id>` shows the reading behind either row (TRIAGE-1-MEDIUM).
 
 Alerts are rate-limited per key, default thirty minutes. The watchdog runs every
 two minutes, so a guard that notified on each run would turn one ongoing condition

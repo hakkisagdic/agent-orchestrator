@@ -105,7 +105,10 @@ def test_the_account_beside_the_share_is_the_implementers_own_or_it_says_there_i
         "by_class": {"product": {"turns": 10, "usage": 1250.0, "wasted": 0, "wasted_usage": 0}}})
     assert cli.cmd_cost(project, SimpleNamespace(since=None)) == 0
     out = capsys.readouterr().out
-    assert "the account: 5,000 of 10,000 used" in out and "(25% of the account's used)" in out
+    # TRIAGE-1-MEDIUM: identity still selects the implementer's account, but
+    # without its cycle start the transcript cannot supply a comparable share.
+    assert "the account: 5,000 of 10,000 used" in out
+    assert "the account's cycle start is unknown" in out and "% of the account's used" not in out
     assert asked == [project["implementer"]["adapter"]]
 
 

@@ -344,7 +344,7 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
                 if email.send(f"{title}", body, root):
                     A.alarm_mailed(project, key, what=what)
                     if root:
-                        A.record_notice(root, title, msg, sent=True, key="mail:" + key)
+                        A.record_notice(root, title, msg, sent=True, key="mail:" + key, evidence=evidence)
             except Exception:
                 pass
     # Told once, with a known end and nothing new to say before it: record, do not ring.
@@ -1508,12 +1508,17 @@ def open_work(cfg, root):
         reasons.append("uncommitted changes")
     # Findings are the newest review that produced a verdict; an UNAVAILABLE or
     # INVALID file is not a finding anyone can act on (audit).
-    revs = [(f, v) for f, v in A.reviews(root, cfg["reviews"], limit=8)
-            if v in ("APPROVED", "NEEDS_CHANGES")]
-    if revs and revs[0][1] == "NEEDS_CHANGES":
+    from .storage import LedgerCorruption, read_chained_jsonl
+    try:
+        rows = read_chained_jsonl(A.review_ledger_path(root), A.REVIEW_CHAIN)
+    except (OSError, ValueError, LedgerCorruption):
+        rows = []
+    latest = next((row for row in reversed(rows) if isinstance(row, dict)
+                   and row.get("verdict") in ("APPROVED", "NEEDS_CHANGES")), None)
+    if latest and latest["verdict"] == "NEEDS_CHANGES":
         try:
-            rev_at = os.path.getmtime(os.path.join(root, cfg["reviews"], revs[0][0]))
             head_at = int(A._git_text(root, "log", "-1", "--format=%ct") or 0)
+            rev_at = int(latest.get("at") or 0)
         except (OSError, ValueError):
             rev_at, head_at = 1, 0
         if rev_at > head_at:

@@ -355,7 +355,7 @@ def test_ao_lock_and_merge_check_wait_for_the_machine_and_refuse_as_verify_does(
     base = _git(root, "rev-parse", "--abbrev-ref", "HEAD")
     _git(root, "checkout", "-q", "-b", "feature")
     Path(root, "feature.txt").write_text("feature\n", encoding="utf-8")
-    _git(root, "add", "feature.txt")
+    _git(root, "add", "feature.txt", ".ao/gates.json")
     _git(root, "commit", "-q", "-m", "feature")
     _git(root, "checkout", "-q", base)
     clock.start, clock.slept = clock.now, 0

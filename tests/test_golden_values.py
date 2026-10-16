@@ -252,15 +252,46 @@ ROUNDS = [
     # `ao slice status` asks about any slice: its own reviews count, whichever runs (SLICE-LIFECYCLE)
     ("a slice asked about that is not running", "R1", [("NEEDS_CHANGES", "R2")] * 2 + [("NEEDS_CHANGES", "R1")],
      2, "R2"),
+    # TRIAGE-1-MEDIUM: only a recorded approval can reset rounds; legacy
+    # rejections count only before the ledger began, never as fresh events.
+    ("a legacy approval ends nothing", "R2",
+     [("NEEDS_CHANGES", "R2"), ("APPROVED", "R2", {"legacy": True, "at": NOW + 10})], 1, None),
+    ("a rejection before the ledger still counts", "R2",
+     [("NEEDS_CHANGES", "R2", {"legacy": True, "at": NOW - 10}), ("NEEDS_CHANGES", "R2")], 2, None),
+    ("a rejection at the ledger start is not legacy", "R2",
+     [("NEEDS_CHANGES", "R2"), ("NEEDS_CHANGES", "R2", {"legacy": True})], 1, None),
+    ("a rejection after the ledger start is not legacy", "R2",
+     [("NEEDS_CHANGES", "R2"), ("NEEDS_CHANGES", "R2", {"legacy": True, "at": NOW + 10})], 1, None),
+    # Ledger order remains authoritative when the wall clock moves backwards.
+    ("a later approval with an earlier clock ends the count", "R2",
+     [("NEEDS_CHANGES", "R2"), ("APPROVED", "R2", {"at": NOW - 10})], 0, None),
+    ("a later rejection with an earlier clock starts a round", "R2",
+     [("APPROVED", "R2"), ("NEEDS_CHANGES", "R2", {"at": NOW - 10})], 1, None),
+    # A clock step across re-specification cannot hide a later recorded approval (TRIAGE-1-MEDIUM).
+    ("a later approval predating re-specification still ends the count", "R2",
+     [("NEEDS_CHANGES", "R2", {"at": NOW + 10, "respec": NOW}),
+      ("APPROVED", "R2", {"at": NOW - 10})], 0, None),
 ]
 
 
 @pytest.mark.parametrize("case,running,reviews,expected,asked", ROUNDS)
-def test_rounds_golden_values(case, running, reviews, expected, asked, project):
+def test_rounds_golden_values(case, running, reviews, expected, asked, project, monkeypatch):
     if running:
         _running(project["root"], running)
-    for verdict, slice_id in reviews:
-        _review(project["root"], verdict, slice_id=slice_id)
+    for index, (verdict, slice_id, *options) in enumerate(reviews):
+        options = options[0] if options else {}
+        if "respec" in options:
+            monkeypatch.setattr(A, "respecified_at", lambda *args, at=options["respec"]: at)
+        at = options.get("at", NOW)
+        monkeypatch.setattr(time, "time", lambda: at)
+        if options.get("legacy"):
+            evidence = {"schema": 2, "kind": "index-candidate", "authorizable": True, "slice": slice_id}
+            path = os.path.join(project["root"], "semantic-review", f"legacy-{index}.md")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(f"# review\n\nVERDICT: {verdict}\n\n{A.review_evidence_line(evidence)}\n")
+            os.utime(path, (at, at))
+        else:
+            _review(project["root"], verdict, slice_id=slice_id)
     item = {"id": asked, "title": "", "notes": {}} if asked else None
     assert A.rounds(project["root"], "semantic-review", item) == expected, case
 
@@ -274,7 +305,7 @@ GOLDEN = {
     W.architect_quota_until: (ARCHITECT_QUOTA, 7),
     A.burn_rate: (BURN_RATE, 11),
     cli._credits_problem: (CREDITS_PROBLEM, 12),
-    A.rounds: (ROUNDS, 36),
+    A.rounds: (ROUNDS, 38),
 }
 
 

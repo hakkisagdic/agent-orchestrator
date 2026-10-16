@@ -1024,7 +1024,7 @@ def _is_test_path(path):
 
 
 def _review_definitions(root, rev, path, cache):
-    """Top-level definitions of one committed Python file: (lines, name -> (start, end))."""
+    """Committed definitions and static part loads: (lines, name -> (start, end), parts)."""
     import ast
     if path not in cache:
         cache[path] = None
@@ -1042,7 +1042,7 @@ def _review_definitions(root, rev, path, cache):
                 for target in (node.targets if isinstance(node, ast.Assign) else [node.target]):
                     if isinstance(target, ast.Name):
                         spans[target.id] = (node.lineno, node.end_lineno)
-        cache[path] = (source.splitlines(), spans)
+        cache[path] = (source.splitlines(), spans, top_level_statements(source)[2])
     return cache[path]
 
 
@@ -1060,9 +1060,11 @@ def review_context(root, paths, read_rev, context_rev, budget=REVIEW_CONTEXT_BUD
     an attribute of an imported module, an imported name, or a name handed to
     ``setattr`` as a string - is copied whole, in the order the tests first name
     it, while the budget lasts. What does not fit is named, never cut, and the
-    whole text stays within the budget unless the names alone exceed it. Python only.
+    whole text, including its header and names, stays within the budget. Python only.
     """
     import ast
+    if budget <= 0:
+        return None
     py = [path for path in paths or [] if path.endswith(".py")]
     if not py or not all(_is_test_path(path) for path in py):
         return None
@@ -1081,18 +1083,33 @@ def review_context(root, paths, read_rev, context_rev, budget=REVIEW_CONTEXT_BUD
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    if alias.asname:
-                        modules[alias.asname] = alias.name
-            elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                    modules[alias.asname or alias.name] = alias.name
+            elif isinstance(node, ast.ImportFrom):
+                package = path.split("/")[:-1]
+                if package and package[0] == "src":
+                    package = package[1:]
+                if node.level > len(package):
+                    continue
+                relative = package[:len(package) - node.level + 1] if node.level else []
+                module = ".".join(relative + ([node.module] if node.module else []))
                 for alias in node.names:
                     bound = alias.asname or alias.name
-                    modules[bound] = f"{node.module}.{alias.name}"
-                    names[bound] = (node.module, alias.name)
+                    modules[bound] = f"{module}.{alias.name}"
+                    names[bound] = (module, alias.name)
         for node in ast.walk(tree):
             at = (path, getattr(node, "lineno", 0), getattr(node, "col_offset", 0))
-            if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
-                    and node.value.id in modules):
-                refs.append((at, modules[node.value.id], node.attr))
+            if isinstance(node, ast.Attribute):
+                parts, base = [], node
+                while isinstance(base, ast.Attribute):
+                    parts.insert(0, base.attr)
+                    base = base.value
+                if isinstance(base, ast.Name):
+                    parts.insert(0, base.id)
+                    for end in range(len(parts) - 1, 0, -1):
+                        prefix = ".".join(parts[:end])
+                        if prefix in modules:
+                            refs.append((at, modules[prefix], parts[end]))
+                            break
             elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in names:
                 refs.append((at, *names[node.id]))
             elif (isinstance(node, ast.Call) and len(node.args) >= 2
@@ -1109,8 +1126,20 @@ def review_context(root, paths, read_rev, context_rev, budget=REVIEW_CONTEXT_BUD
         path = next((candidate for candidate in (f"src/{base}.py", f"{base}.py",
                                                  f"src/{base}/__init__.py", f"{base}/__init__.py")
                      if candidate in committed), None)
-        found = _review_definitions(root, context_rev, path, cache) if path else None
-        if not found or name not in found[1]:
+        waiting, visited = [path] if path else [], set()
+        while waiting:
+            path = waiting.pop(0)
+            if path in visited or path not in committed:
+                continue
+            visited.add(path)
+            found = _review_definitions(root, context_rev, path, cache)
+            if not found:
+                continue
+            if name in found[1]:
+                break
+            # ao's own public definitions live in statically named parts (TRIAGE-1-MEDIUM).
+            waiting += [_part_file(path, part) for part in found[2]]
+        else:
             continue
         start, end = found[1][name]
         order.append(qualified)
@@ -1144,6 +1173,11 @@ def review_context(root, paths, read_rev, context_rev, budget=REVIEW_CONTEXT_BUD
     while kept and len(result["text"].encode(UTF8)) > budget:
         kept.pop()
         result = render(kept)
+    if len(result["text"].encode(UTF8)) > budget:
+        # Even the names can exceed a small remaining argument budget (TRIAGE-1-MEDIUM).
+        result["text"] = f"committed at {context_rev[:12]}; read-only; not under review"
+        if len(result["text"].encode(UTF8)) > budget:
+            return None
     return result
 
 
@@ -1653,7 +1687,7 @@ STANDIN_LIMITS = (
 
 
 def write_review_request(root, cfg, candidate, scope, diff_digest, boundary, slice_id, paths, prompt,
-                         criteria=None, threat_model=None):
+                         criteria=None, threat_model=None, boundary_file=None):
     """A review request a person can carry to a session ao cannot reach (#75).
 
     Written when no reviewer could be reached for a staged candidate: the prompt the
@@ -1684,6 +1718,8 @@ def write_review_request(root, cfg, candidate, scope, diff_digest, boundary, sli
             "index_tree": candidate["index_tree"], "scope": scope, "diff_digest": diff_digest,
             "boundary": boundary, "slice": slice_id, "paths": paths, "collected": None,
             "text": "sha256:" + hashlib.sha256(text).hexdigest()}
+    if boundary_file:
+        meta["boundary_file"] = boundary_file
     if criteria:
         meta["criteria"] = criteria
     if threat_model:
@@ -1859,6 +1895,15 @@ def unverified_merges(root, cfg):
             out.append((sha, "no run of its merge result was recorded"))
         elif run.get("passed") is not True:
             out.append((sha, f"the recorded run of its merge result, {run.get('id')}, failed"))
+        else:
+            try:
+                spec = json.loads(_git_output(root, "show", f"{tree}:.ao/gates.json"))
+                digest = gate_definitions_digest_of(spec, run.get("profile"))
+            except (OSError, ValueError, RuntimeError, TypeError, AttributeError) as exc:
+                out.append((sha, f"the merge's gate definitions cannot be read: {exc}; run merge-check again"))
+                continue
+            if not digest or run.get("gates_digest") != digest:
+                out.append((sha, "the recorded run used different gate definitions; run merge-check again"))
     return out
 
 
