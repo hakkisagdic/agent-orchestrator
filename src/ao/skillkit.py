@@ -89,12 +89,13 @@ def resolve_agent(name, root=None):
 
 
 def agent_choices(root=None):
-    """The names `--agent` accepts: every harness ao sets up, by adapter id and by vendor name.
+    """The names `--agent` accepts: every valid adapter, by adapter id and by vendor name.
 
     A project's own adapters are among them where `root` names the project: `ao -C <repo> init --agent <id>`
     was refused for an adapter the project declared, though init and skill set it up (HARNESS-SETUP-3).
     """
-    ids = {ident for ident, _ in setup_adapters(root)}
+    # A harness with no measured MCP setup still gets the files-only playbook (WARP-ADAPTER).
+    ids = {ident for ident, entry in A.adapter_catalog(root).items() if not entry["problem"]}
     names = ids | {vendor["id"] for vendor in A.vendor_list() if vendor.get("adapter") in ids}
     return sorted(names) + ["auto", "all"]
 
@@ -485,9 +486,13 @@ def rules_wired(root):
         place = _local(root, steering)
         if place and os.path.isdir(place):
             candidates += [os.path.join(place, f) for f in os.listdir(place)]
-    for _, adapter in setup_adapters(root):
-        skills = (adapter.get("directives") or {}).get("skills_dir")
-        if skills and _local(root, skills) and os.path.isdir(os.path.join(_local(root, skills), "ao")):
+    # A harness can discover skills without declaring how ao sets up MCP or rules (WARP-ADAPTER).
+    for entry in A.adapter_catalog(root).values():
+        if entry["problem"]:
+            continue
+        skills = (entry["adapter"].get("directives") or {}).get("skills_dir")
+        place = _local(root, skills)
+        if place and os.path.isdir(os.path.join(place, "ao")):
             return True                  # a skill is discovered by the agent on its own
     for p in candidates:
         try:

@@ -2199,13 +2199,14 @@ _SURFACES = {"at": 0.0, "rows": {}}
 def tool_availability(ttl=600):
     """Which agent tools are actually usable on this machine.
 
-    Two independent facts, and both matter: is the CLI installed (which), and is
+    Two independent facts, and both matter: can ao find a runnable CLI, and is
     there an authenticated account for it. keyflip already answers the second for
     a range of tools and never reads the secret itself, so ask it rather than
     reinventing credential detection — align, do not depend: if keyflip is absent
     the CLI check still works on its own. Which tools and which binaries come from
     the vendor list and the adapters, never from a table here (#89). A CLI is installed where
-    ao would start it from, never the current directory (WINDOWS-NO-CWD-EXEC).
+    ao would start it from, including declared install directories past PATH
+    (WARP-ADAPTER), never the current directory (WINDOWS-NO-CWD-EXEC).
     """
     if time.time() - _SURFACES["at"] < ttl and _SURFACES["rows"]:
         return _SURFACES["rows"]
@@ -2228,7 +2229,7 @@ def tool_availability(ttl=600):
         binaries = adapter_binaries((catalog.get(vendor["adapter"]) or {}).get("adapter"))
         if not binaries:
             continue
-        found = next((binary for binary in binaries if program_path(binary)), None)
+        found = next((binary for binary in binaries if runnable_binary(binary)), None)
         entry = named.setdefault(vendor["adapter"], {})
         entry["installed"] = bool(found)
         entry["binary"] = found or binaries[0]

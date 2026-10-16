@@ -139,9 +139,15 @@ söyler.
 | doğrulama | adaptörler |
 |---|---|
 | **full** — her yetenek gerçek koşumda sınandı | kiro, claude-code, antigravity |
-| **partial** — durumu okur, bazı yetenekler sınanmadı | opencode, command-code, codex, qoder, openai-api |
+| **partial** — durumu okur, bazı yetenekler sınanmadı | opencode, command-code, codex, qoder, openai-api, warp |
 | **documented** — yayımlanmış dokümandan yazıldı, henüz koşulmadı | cursor-agent |
 | **untested** — şema hazır, ilk koşumu bekliyor | gemini, aider, amp, copilot, amazon-q, deepseek, ollama, droid, grok, hermes, kilocode, kimi, omp, pi, pr-agent, qwen, reasonix, trae |
+
+Warp, `oz` kullanır; ao, PATH üzerinde olmasa da programı `/Applications` veya
+`~/Applications` altındaki Warp uygulama paketinde bulur. `ao init --agent warp`
+yalnızca dosyalarla çalışan kurulumu yapar; Warp için MCP kaydı oluşturmaz.
+Yanıtlar ve oturumlar henüz ölçülmedi; Warp inceleyici olarak uygun değildir.
+[Ölçüm notu](docs/audit/2026-10-15-warp-store.md).
 
 `ao adapters` bu tabloyu makinende gerçekte kurulu olanla yan yana gösterir; ve
 [keyflip](https://github.com/hakkisagdic/keyflip) varsa, CLI kurulu olmasa bile hesap

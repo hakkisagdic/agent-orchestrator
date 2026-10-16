@@ -108,6 +108,35 @@ def test_a_project_adapter_is_one_agent_init_and_skill_accept_by_name(project):
     assert os.path.isfile(os.path.join(root, ".newcomer", "rules", "ao-playbook.md"))
 
 
+def test_an_agent_without_setup_declarations_can_be_named_for_files_only_setup(project, capsys):
+    """A measured absence of MCP setup must not make an adapter unnameable (WARP-ADAPTER)."""
+    from ao import cli
+    adapter = {key: value for key, value in NEWCOMER.items() if key not in ("directives", "mcp")}
+    _declare(project["root"], adapter)
+    assert "newcomer" in skillkit.agent_choices(project["root"])
+    assert cli.main(["-C", project["root"], "init", "--agent", "newcomer"]) == 0
+    assert "No MCP-capable agent detected" in capsys.readouterr().out
+    assert os.path.isfile(os.path.join(project["root"], ".ao", "PLAYBOOK.md"))
+
+
+@pytest.mark.parametrize("ident", ["warp", "newcomer"])
+def test_a_discovered_ao_skill_wires_rules_without_mcp_or_playbook_declarations(project, ident):
+    """Skill discovery also applies to adapters with no setup target (WARP-ADAPTER)."""
+    root = project["root"]
+    if ident == "newcomer":
+        adapter = {key: value for key, value in NEWCOMER.items() if key not in ("directives", "mcp")}
+        _declare(root, dict(adapter, directives={"skills_dir": ".newcomer/skills"}))
+    assert ident not in dict(skillkit.setup_adapters(root))
+    assert skillkit.rules_wired(root) is None
+    skillkit.install_playbook(root, {"generic"})
+    assert skillkit.rules_wired(root) is False
+    directory = os.path.join(root, "." + ident, "skills", "ao")
+    os.makedirs(directory)
+    with open(os.path.join(directory, "SKILL.md"), "w", encoding="utf-8") as fh:
+        fh.write("# ao\n")
+    assert skillkit.rules_wired(root) is True
+
+
 def test_a_root_option_missing_its_directory_is_told_by_the_parser_proper(capsys):
     """HARNESS-SETUP-3: the project is read before the parser is built, and a -C with no directory is still told
     as `ao` tells it, not by that first reading."""

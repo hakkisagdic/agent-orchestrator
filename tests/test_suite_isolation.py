@@ -4,9 +4,9 @@ ao binds what it keeps on a machine when a module is imported - telegram.CONF, e
 watchdog's STATE_DIR - and those were the person's own files: a test that did not point them away
 could reach their phone and their mail. A program a test started by name was looked for on their
 PATH, where their agent CLIs are, ao read the files their AO_ variables name, and ao's own search
-looks in /usr/local/bin and /opt/homebrew/bin whatever PATH says. tests/conftest.py gives the suite a
+looks in shared package-manager and adapter-declared directories whatever PATH says. tests/conftest.py gives the suite a
 home, a PATH and an environment of its own before ao is imported, and keeps every search of ao's in
-this process out of those two directories. These hold it to that.
+this process out of those directories. These hold it to that.
 """
 import ast
 import os
@@ -192,3 +192,21 @@ def test_the_directories_kept_out_of_reach_are_the_ones_ao_names_past_path_outsi
               if d and not conftest._within(d, conftest.SESSION_HOME)} - POSIX_SYSTEM
 
     assert searched == handed == set(conftest.SHARED_INSTALL_DIRS)
+
+
+def test_a_new_package_install_directory_reaches_children_and_is_kept_off_tests(tmp_path, monkeypatch):
+    """A bundle path must work for any adapter, without a harness-specific exception (WARP-ADAPTER)."""
+    directory = str(tmp_path / "new-install" / "bin")
+    adapters = dict(A.package_adapters(), newcomer={"detect": {"install_dirs": [directory]}})
+    monkeypatch.setattr(A, "package_adapters", lambda: adapters)
+    monkeypatch.setenv("PATH", "")
+    _executable(Path(directory) / "newcomer")  # discovered, never started
+
+    assert directory in A._SearchDirs()
+    assert A.binary_candidates("newcomer") == [os.path.join(directory, "newcomer")]
+    assert directory in conftest._AO_CHILD_PATH().split(os.pathsep)
+    monkeypatch.setattr(conftest, "SHARED_INSTALL_DIRS", conftest._shared_install_dirs())
+    assert directory in conftest.SHARED_INSTALL_DIRS
+    assert A.binary_candidates("newcomer") == []
+    assert cli._reviewer_candidate_paths("newcomer") == []
+    assert directory not in W.child_path().split(os.pathsep)

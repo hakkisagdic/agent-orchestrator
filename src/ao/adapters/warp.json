@@ -1,0 +1,69 @@
+{
+  "id": "warp",
+  "name": "Warp (the Oz agent CLI)",
+  "project_config": [".warp", ".agents"],
+  "contract": 1,
+  "verified": "partial",
+  "verified_version": "Oz v0.2026.10.07.08.29.stable_00, macOS, read 2026-10-15",
+  "observation_mode": "call-return",
+  "disclaimer": "The command surface is measured; the answer is not. Every flag below came from this build's own `--help` on 2026-10-15, and one real turn was started: `oz agent run -p ... -C <a throwaway directory> --model <a custom endpoint's model id> --no-snapshot --output-format json` authenticated as the person's Warp account, wrote two system events on standard output, sent the request to the endpoint that person configured, and ended at that provider's daily token cap with exit 1 and the cap's own JSON on stderr. No run has answered yet, so this adapter declares no path to a result record, no usage and no tool calls: those would be the shape of a reply nobody has seen. ao can start a Warp turn and tell whether it died. It cannot yet read what it said.",
+  "notes": "The desktop app and the CLI are one bundle: /Applications/Warp.app/Contents/Resources/bin/oz is a two-line script that execs Contents/MacOS/stable, the app's own binary, under a different argv[0]. `warp` on PATH is Cloudflare's VPN (`warp-cli`), a different product that shares the first letter, and nothing here keys on that name. The app keeps its state in ~/Library/Group Containers/2BBY89MBSN.dev.warp/Library/Application Support/dev.warp.Warp-Stable/warp.sqlite, mapped on this machine 2026-10-15: 52 tables, 250 turns in `ai_queries` across 24 conversations in `agent_conversations`, one working directory and one title each. This adapter declares no store over it, for a measured reason: the CLI run above changed none of those counts and its conversation id is in no table, so the store holds the app's conversations and not the ones ao starts, and a store that names another agent's sessions to a panel reading them as an implementer's is the misreading this project refuses. Watching the app's own sessions is a second adapter's work; its queries, its timestamps and the three readings it supports are written up in docs/audit/2026-10-15-warp-store.md, which this branch adds. CLI logs live in ~/Library/Logs/oz; neither that log directory nor the app's state container is a program installation directory. `oz mcp` manages servers, and `--mcp <path|json>` attaches some to one run, with `--strict-mcp-startup` and `--mcp-startup-timeout <duration>` beside it (this build's help). Where the app keeps its own list was not read: `active_mcp_servers` and `mcp_server_installations` hold 0 rows here, so no file and no key is declared, and `ao init` writes no Warp configuration.",
+  "detect": {
+    "dirs": [".warp"],
+    "binaries": ["oz"],
+    "headless": ["-p", "--prompt", "--saved-prompt"],
+    "config": ["~/.warp"],
+    "install_dirs": ["/Applications/Warp.app/Contents/Resources/bin", "~/Applications/Warp.app/Contents/Resources/bin"],
+    "note": "Nothing named `oz` was on PATH on the machine measured: the app had made no link for it, and `command -v oz` answered nothing. ao finds the bundle's oz where Warp installs it, in /Applications/Warp.app/Contents/Resources/bin or ~/Applications/Warp.app/Contents/Resources/bin, even when it is not on PATH. A headless turn is `agent run` with its prompt flag; `run` is deliberately not declared headless, because `oz run list` and `oz run get` are reads ao must not mistake for a turn it owns and may stop."
+  },
+  "send": {
+    "argv": ["oz", "agent", "run", "-p", "{prompt}"],
+    "cwd_matters": true,
+    "note": "The measured run took the directory it was given, ran with `--no-snapshot` so it uploaded no copy of it, and left the throwaway directory it worked in empty - a prompt that asked for no tool changes. Whether a turn that edits writes in place or in a cloud workspace was not answered by it, and ao has no reading of that until one does."
+  },
+  "resume": {
+    "argv": ["oz", "agent", "run", "--conversation", "{session}", "-p", "{prompt}"],
+    "note": "`--conversation <ID>` reads, in the same help, as 'Continue an existing cloud conversation by ID'. Never exercised: the one conversation id measured from a real run is in the app's store nowhere, since the CLI keeps its conversations on the server. So ao treats a resumed Warp turn as unproven, which is to say it has not run."
+  },
+  "options": {
+    "trust_none": null,
+    "trust_none_why": "no flag denies tools: `oz agent run --help` (this build, 2026-10-15) names no permission, tool, read-only or sandbox argument, and what the agent may do is decided in the person's app or in an agent profile. Ineligible for the reviewer role until a way to deny tools exists.",
+    "trust_all": null,
+    "trust_all_why": "no flag approves every tool either. Auto-execution is a setting a run inherits rather than an argument: `autoexecute_override` read 'RespectUserSettings' in all 24 of the app's stored conversations, and the CLI names no override for it. ao can neither widen a Warp turn nor narrow one, which means a Warp wake runs with whatever the person's app already allows - and ao cannot claim that grant is scoped.",
+    "model": ["--model", "{model}"],
+    "model_format": "an id `oz model list` prints: named models (auto, auto-genius, claude-4-5-haiku, ...) beside one UUID per model of every custom endpoint the person configured",
+    "agent_profile": ["--profile", "{agent}"],
+    "output_json": ["--output-format", "json"],
+    "output_stream": ["--output-format", "ndjson"],
+    "cwd": ["-C", "{cwd}"],
+    "effort": null,
+    "note": "`--model` was measured to route: the run named the UUID of a model of the person's own custom endpoint and the request went to that endpoint's /v1/chat/completions, which answered with its daily cap - so a BYOK endpoint configured in the app is a model a headless turn can take. `--profile` takes an id from `oz agent profile list`, which holds one here (Unsynced, named Default). No effort, mode, step-limit or timeout argument exists in this help, so none is declared, and no flag pins the permission mode: see trust_all_why."
+  },
+  "transcript": {
+    "kind": "call-return",
+    "note": "What the measured run wrote on stdout, one JSON object to a line: {\"type\":\"system\",\"event_type\":\"run_started\",\"run_id\":\"<run id>\",\"run_url\":\"https://oz.warp.dev/runs/<run id>\"}, then {\"type\":\"system\",\"event_type\":\"conversation_started\",\"conversation_id\":\"<conversation id>\"}. That was all of it. The turn died at the provider before any reply and put its error on stderr with exit 1, naming the endpoint URL and the HTTP status, and ao read a started run and a failed one and nothing between. No final record was ever seen, so `answer_record` and `result_record` are undeclared and every reader of a Warp turn's words, cost and tool calls finds nothing by design, not by omission. What the server knows is reached by other commands - `oz run get <task id>`, and `oz run conversation get <conversation id>` - and neither was given an id that answered."
+  },
+  "busy": {
+    "kind": "orchestrator-owned",
+    "note": "ao starts the run and waits on it, so it knows a turn is in flight without asking a file. The app's database is not that clock: its -wal moves whenever the desktop agent writes anything, whatever the CLI is doing."
+  },
+  "telemetry": {
+    "cost": {
+      "from": "call-return",
+      "todo": "the usage fields of a completed run's record are unmeasured; the two events a real run wrote carry none"
+    },
+    "context": {
+      "from": "none",
+      "note": "The app keeps a context percentage per conversation - `context_window_usage` inside a JSON column of `agent_conversations`, 0.166 on the newest one measured - but that is a conversation of the desktop app, not one ao starts, and the CLI's own reply is unmeasured. Nothing is declared over either."
+    },
+    "failure": {
+      "from": "none",
+      "note": "One measured failure of a run reaches ao as exit status and stderr text, not as a record: the provider's own answer came through inside the harness's error line, with its reset time in it, which is the reading `ao wake` would need and does not have a path to yet."
+    },
+    "balance": { "from": "none" }
+  },
+  "directives": {
+    "skills_dir": ".warp/skills",
+    "note": "`--skill <SKILL>` reads, in this build's help: skills are searched in `.agents/skills/`, `.warp/skills/`, `.claude/skills/` and `.codex/skills/`, so `.warp/skills` is the one declared. Whether a Warp turn honours AGENTS.md was not measured; the app keeps a `project_rules` table and it holds 0 rows on this machine, so nothing is claimed about rules."
+  }
+}

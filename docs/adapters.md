@@ -644,9 +644,28 @@ the adapter says so in its `disclaimer`. **Reviewer** is whether the adapter can
 | `ollama` | `ollama` | untested | ineligible | Ollama (local models) |
 | `qoder` | `qoder` | partial | eligible | Qoder CLI |
 | `trae` | `trae` | untested | ineligible | Trae Agent (ByteDance) |
+| `warp` | `warp` | partial | ineligible | Warp (the Oz agent CLI) |
 | `cloud` | `cloud-generic` | partial | ineligible | Generic cloud agent (pull-request delivered) |
 | `pr-agent` | `pr-agent` | untested | eligible | PR-Agent, a tool reviewer ao runs over the candidate (#86) |
 | `openai-api` | `openai-api` | partial | eligible | an OpenAI-compatible chat API, through ao's own client, a tool reviewer (API-REVIEWER) |
+
+Warp runs `oz`, which ao finds on PATH or where Warp installs it:
+`/Applications/Warp.app/Contents/Resources/bin` and
+`~/Applications/Warp.app/Contents/Resources/bin`. The same declared directories
+reach child PATHs; the test suite excludes every shared install directory derived
+from package adapters. The app's SQLite container and CLI logs are state, not
+program locations. `ao init --agent warp` installs the generic playbook and
+reports the files-only protocol, without claiming an MCP registration. Auto
+setup also falls back to generic when only Oz is installed. No answer record,
+sessions or store are declared, neither trust mode is claimed, and Warp remains
+ineligible as a reviewer. The [measurement note](audit/2026-10-15-warp-store.md)
+records why those capabilities remain undeclared.
+
+Warp owns `.warp`, so pinned skills can be vendored into `.warp/skills` and those
+files are classified as harness configuration. With ao's playbook installed,
+`.warp/skills/ao` also satisfies the rules-wired check without an MCP setup
+declaration. `ao adapters` reports a harness as installed when ao finds a runnable
+program on PATH or in its additional search directories, including the Warp bundle.
 
 The first twenty-one rows are Traycer's canonical enum, the coverage this list is measured
 against; then the harnesses ao shipped before it, and last a tool reviewer. Moving a row to `full` is the most valuable

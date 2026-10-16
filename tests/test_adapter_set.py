@@ -5,6 +5,7 @@ import shutil
 from types import SimpleNamespace
 
 from ao import cli, lib as A
+from tests.standin import program
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TRAYCER = {"claude", "codex", "opencode", "traycer", "cursor", "grok", "qwen", "kiro", "droid", "kimi", "copilot",
@@ -71,12 +72,13 @@ def test_the_doctor_names_a_configured_adapter_whose_command_this_machine_lacks(
     assert "adapter-binary:dev" not in dict(cli.doctor_problems(cfg))
 
 
-def test_availability_and_the_listing_derive_from_the_vendor_list(project, monkeypatch, capsys):
+def test_availability_and_the_listing_derive_from_the_vendor_list(project, tmp_path, monkeypatch, capsys):
     asked = []
     monkeypatch.setattr(A, "_run_program", lambda argv, cwd=None, **kwargs: asked.append((list(argv), cwd)) or
                         ("●  Gemini CLI  signed in\n○  cursor  none", 0))
     monkeypatch.setattr(A, "_SURFACES", {"at": 0.0, "rows": {}})
-    monkeypatch.setattr(shutil, "which", lambda name, *args, **kwargs: "/opt/bin/kilocode" if name == "kilocode" else None)
+    executable = program(tmp_path / "bin", "kilocode", "raise AssertionError('only discovered, never run')\n")
+    monkeypatch.setattr(A, "binary_candidates", lambda name, path=None: [executable] if name == "kilocode" else [])
 
     rows = A.tool_availability()
 

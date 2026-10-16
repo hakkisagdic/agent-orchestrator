@@ -34,6 +34,7 @@
     { "id": "ollama",       "adapter": "ollama" },
     { "id": "qoder",        "adapter": "qoder" },
     { "id": "trae",         "adapter": "trae" },
+    { "id": "warp",         "adapter": "warp" },
     { "id": "cloud",        "adapter": "cloud-generic" },
     { "id": "pr-agent",     "adapter": "pr-agent" },
     { "id": "openai-api",   "adapter": "openai-api" }

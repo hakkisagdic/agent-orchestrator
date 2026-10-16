@@ -154,8 +154,9 @@ def child_path():
     version-manager shim directory the current interpreter can see.
     """
     parts = [os.environ.get("PATH", "")]
-    for d in list(S.get(None, "binaries.extra_dirs")) + [
-            "~/.local/bin", "~/bin", "/usr/local/bin", "/opt/homebrew/bin",
+    # A bundle's CLI may be off PATH: hand children the same declared install directories
+    # binary_candidates searches, including those outside the home (WARP-ADAPTER).
+    for d in list(S.get(None, "binaries.extra_dirs")) + list(A._BIN_DIRS) + [
             "/usr/bin", "/bin", "/usr/sbin", "/sbin"]:
         parts.append(os.path.expanduser(d))
     # Version-manager installs keep node beside the agent binary; a wake that

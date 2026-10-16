@@ -36,9 +36,6 @@ SESSION_BIN = os.path.join(SESSION, "bin")
 # Who commits in a test that names nobody. git read the person's identity from their home, and a
 # guess from the host name fails on a host with no domain, so the suite's home holds one.
 GIT_IDENTITY = ("ao tests", "ao-tests@example.invalid")
-# Where ao looks for a program whatever PATH says, outside every home (see "ao's own search past
-# PATH" below): package managers install agent CLIs there for every user of a machine.
-SHARED_INSTALL_DIRS = ("/usr/local/bin", "/opt/homebrew/bin")
 # Variables that point git or ao back into the person's home.
 HOME_POINTERS = ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "GIT_CONFIG_GLOBAL")
 # The suite's own switches (tests/test_scenario_fuzz.py): a person sets them to run it differently.
@@ -85,6 +82,14 @@ _own_home()
 from ao import lib as A  # noqa: E402
 from ao import pressure as P  # noqa: E402
 from ao import watchdog as W  # noqa: E402
+
+
+def _shared_install_dirs():
+    """Every search directory outside a home, including package-declared bundles (WARP-ADAPTER)."""
+    return tuple(sorted({directory for directory in A._SearchDirs() if not directory.startswith("~")}))
+
+
+SHARED_INSTALL_DIRS = _shared_install_dirs()
 
 
 def _within(path, root):
@@ -191,15 +196,15 @@ from ao import cli  # noqa: E402
 
 # ---- ao's own search past PATH -------------------------------------------------------------------
 #
-# ao also looks for a program in SHARED_INSTALL_DIRS, /usr/local/bin and /opt/homebrew/bin, whatever
+# ao also looks for a program in SHARED_INSTALL_DIRS, including package-declared bundles, whatever
 # PATH says - lib._BIN_DIRS when it resolves a binary or discovers a reviewer, watchdog.child_path
-# for the PATH it hands an agent it starts - because a launchd job's PATH names neither. Package
-# managers install agent CLIs there for every user of a machine, and `ao doctor`, a review and an
-# architect wake ask each copy they find for its --version. So in this process a program in those
+# for the PATH it hands an agent it starts - because a launchd job's PATH omits them. Package
+# managers and app bundles install agent CLIs there for every user of a machine. `ao doctor`, a review
+# and an architect wake ask each copy they find for its --version. So in this process a program in those
 # directories is out of reach like one on the person's PATH: each function of ao's that looks there
 # is run with what it finds there left out. tests/test_suite_isolation.py finds every such function
 # in ao's source and fails on one KEPT_OFF_SHARED does not name. A process a test starts inherits
-# HOME, PATH and the environment but not this: an ao started as a child still looks in both.
+# HOME, PATH and the environment but not this: an ao started as a child still looks in them.
 
 
 def _found_outside(found):
