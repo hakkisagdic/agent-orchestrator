@@ -1,17 +1,19 @@
 # Warp's own store, measured — what a second adapter would read
 
 A measurement note, not an audit of ao. It records what was read off this machine on
-2026-10-15 so that the harness adapter shipped in the same branch ([`warp.json`](../../src/ao/adapters/warp.json))
-did not have to carry it, and so the work of watching Warp's desktop agent — which that
-adapter deliberately declines to declare — is not started from zero by whoever takes it.
+2026-10-15, and the readings of 2026-10-16 once the provider's token cap reset, so that the
+harness adapter ([`warp.json`](../../src/ao/adapters/warp.json)) did not have to carry it, and
+so the work of watching Warp's desktop agent — which that adapter deliberately declines to
+declare — is not started from zero by whoever takes it.
 
 Everything below is a reading of one machine's files and of one build of one CLI. Counts
 age. Nothing here was read from Warp's documentation, and no claim below is inferred from
 what a terminal app is usually like.
 
-This note provides evidence for the adapter's measured refusals to declare an
-answer record, sessions or a store: no completed CLI reply was captured, and the
-observed desktop conversations were not the conversations created by the CLI.
+This note provides evidence for the adapter's measured refusals to declare sessions
+or a store, and for the reads it does declare — a completed turn's answer, cost and
+conversation, taken from the CLI's own records (the last section) — while the observed
+desktop conversations were not the conversations created by the CLI.
 
 ## Two harnesses live in one bundle
 
@@ -140,5 +142,47 @@ conversation id the app's store names mean anything to `oz agent run --conversat
 does, the store and the CLI are one id space, the app's sessions become resumable, and the
 declaration above becomes the right one to ship. If it does not, the app is a harness ao can
 watch and never drive, and it wants its own adapter id rather than a second block on this one.
-Neither has been answered: every attempt this machine made to complete a turn died at the
-provider's daily token cap before an answer.
+Neither has been answered: the turns that completed once the cap reset the next day were
+started fresh, and no id from the app's store was ever offered to `--conversation`.
+
+## What answered, once the cap reset
+
+The 2026-10-16 readings, all on the same build as above. With `--output-format ndjson`, a
+completed turn's stdout is exactly three JSON lines and nothing after:
+
+```json
+{"type":"system","event_type":"run_started","run_id":"<run id>","run_url":"https://oz.warp.dev/runs/<run id>"}
+{"type":"system","event_type":"conversation_started","conversation_id":"<conversation id>"}
+{"type":"agent","text":"<the agent's words>"}
+```
+
+The ids in the first two lines are the handles the two reads take. `oz run get <the run id>
+--output-format json` prints one object; the keys measured include `state`, `run_time`,
+`conversation_id`, `request_usage`, `status_message`, `started_at`, `updated_at` and
+`finished_at`. The answer is not among them — `status_message.message` is the harness's own
+summary of the turn — and `finished_at` read null on a `SUCCEEDED` run. `oz run conversation
+get <the conversation id> --output-format json` prints `{conversation_id, steps}`; each message
+carries `role`, `timestamp`, `request_id` and `content[]` blocks of `{type, text, message_id}`,
+and the assistant's `text` is the answer. Both get commands print a TUI box without
+`--output-format json`, even when no terminal is attached.
+
+Usage is the conversation's, not the run's, and it moves under the reader: the same run's
+record answered 40898 tokens (input 40693, output 205) and later 87739 (input 87479, output
+260), after the conversation's second turn, with `updated_at` unmoved — and both runs of the
+conversation report the later total. A reader that bills one turn by
+`request_usage.total_tokens` bills the whole conversation.
+
+`--conversation` took the id the CLI itself had printed: the resumed stream's
+`conversation_started` named the id it was given, and the conversation record then held both
+turns — four messages under one step. A step is not a turn, and a message's `timestamp` is the
+step's write time rather than when the words were said: the first turn's messages carried the
+moment the first run completed, the second turn's the moment the second did.
+
+`oz run list --output-format json` answered `{as_of, page_info, runs: [], team_uid}` — no runs
+at all, although two runs of that day exist and both are readable by id — so the list is no
+session index.
+
+What stayed unread, and stays undeclared: a tool call's event (none of the turns asked for
+work), the stdout of a completed `--output-format json` run (the streams measured were ndjson),
+what a failed run's record holds (`SUCCEEDED` is the only `state` seen), and whether a turn that
+edits writes in place or in a cloud workspace.
