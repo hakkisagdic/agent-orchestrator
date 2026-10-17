@@ -187,7 +187,9 @@ def test_init_with_only_oz_uses_the_files_only_setup(project, tmp_path, monkeypa
     assert not (Path(project["root"]) / ".mcp.json").exists()
     assert "warp" not in dict(skillkit.setup_adapters(project["root"]))
     assert skillkit.detect_agents(project["root"])[1] == {"generic"}
-    assert A.program_path("oz") == executable
+    # Windows finds the stand-in through PATHEXT, whose suffix is written in capitals: `oz.EXE` is the same file
+    # as the `oz.exe` the helper wrote, and a path comparison there is one Windows makes without case.
+    assert os.path.normcase(A.program_path("oz")) == os.path.normcase(executable)
 
 
 def test_the_measurement_describes_evidence_without_internal_landing_process():
