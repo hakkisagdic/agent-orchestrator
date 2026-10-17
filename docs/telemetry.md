@@ -233,6 +233,26 @@ panel degrades, it does not break.
 4. **Give it a threshold.** A number without a threshold is decoration. Context gets a bar
    that turns yellow at 70% and red at 85%; burn rate gets compared against the budget.
 
+## One surface: `ao gain`
+
+`ao stats` reads outcomes, `ao cost` reads spend and `ao credits` reads one account.
+`ao gain` reads them together, with the board, the review ledger, the watchdog's own
+logs and the platform runs recorded in `.ao/ledger/platform-runs.jsonl`, and prints a
+daily spend and landing trend:
+
+```bash
+ao gain                     # everything recorded here
+ao gain --since 7d --slices --sources
+ao gain --all --json        # every registered project, one JSON document
+ao gain --quota             # also ask the implementer's account, one request
+```
+
+Nothing in it is estimated: a count that has no store is left out, and a store that
+cannot be read is named as unreadable rather than shown as zero. `--json` is the same
+numbers for another program; `--sources` names the files they came from. A platform
+run appears once one is recorded there, with how many commits HEAD has added since the
+commit it ran at.
+
 ## Thresholds that earned their place
 
 | Signal | Warn | Act |

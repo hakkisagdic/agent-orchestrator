@@ -275,6 +275,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao adapters [list|validate|conform]` | every adapter and its source; check a candidate before relying on it |
 | `ao role [set|swap]` | the role table; a reassignment takes effect on the next slice. `set reviewer <adapter> --model M` composes the reviewer from its adapter; a tool reviewer, which ao runs over the staged candidate on its own provider, also needs `--family F` |
 | `ao stats [--all] [--since D] [--until D]` | slice outcomes from the ledgers: rounds, first-pass rate, time, size, defects found later |
+| `ao gain [--since D] [--all] [--days N] [--slices] [--json] [--sources] [--quota]` | one surface for what ao measured: slices, reviews, board, spend, activity, lane evidence and a daily trend, read from the ledgers; `--quota` asks the implementer's account |
 | `ao doctor --consistency [--repair]` | board, ledgers, review artefacts and git checked against each other |
 | `ao prove [--no-review]` | run the guarantees: the hook refuses, the reviewer answers, a throwaway slice lands |
 | `ao demo [--keep]` | a person's command: the guarantee played in a scratch folder with a stand-in reviewer, a change with a bug refused and its fix landed; it touches nothing outside that folder |

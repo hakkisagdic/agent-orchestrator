@@ -37,6 +37,7 @@ A._part("cli_authority", globals())
 
 
 A._part("cli_channels", globals())
+A._part("cli_gain", globals())
 
 
 A._part("cli_review", globals())
@@ -202,6 +203,19 @@ def build_parser(root=None):
     st_.add_argument("--until", type=A.time_arg(), help="landed before: a date (2026-09-17), 2h, today")
     st_.add_argument("--slices", action="store_true", help="one line per slice")
     st_.set_defaults(fn=cmd_stats)
+    gn = sub.add_parser("gain", help="what ao measured: slices, spend, reviews, activity, lane evidence and "
+                                     "their daily trend, read from the ledgers and never estimated")
+    gn.add_argument("--all", action="store_true", help="every project registered on this machine")
+    gn.add_argument("--since", type=A.time_arg(),
+                    help="window: 30m, 2h, 7d, yesterday or a date (default: everything recorded)")
+    gn.add_argument("--days", type=int, default=14, help="days the daily trend shows (default 14)")
+    gn.add_argument("--slices", action="store_true", help="one line per landed slice")
+    gn.add_argument("--json", action="store_true", help="print one JSON document")
+    gn.add_argument("--sources", action="store_true", help="name the files the numbers were read from")
+    gn.add_argument("--quota", action="store_true",
+                    help="also read the implementer's account (one request; nothing is guessed for an adapter "
+                         "that declares no lookup)")
+    gn.set_defaults(fn=cmd_gain)
     rc = sub.add_parser("recall", help="what was decided, found or learned before, across projects")
     rc.add_argument("text", nargs="+")
     rc.add_argument("-n", "--limit", type=int, default=10)
