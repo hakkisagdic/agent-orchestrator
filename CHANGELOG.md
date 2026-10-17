@@ -144,6 +144,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Windows
 
+- `bin/ao.ps1` sets its console output encoding to UTF-8 before reading git, so a commit subject holding a letter outside the console's code page — a Turkish name, an arrow — reads as itself in `status`; tests/test_windows_powershell.py holds it on the Windows lane (WINDOWS-GIT-UTF8).
 - Mail on Windows preserves a dangling link at its chosen name, including one planted during creation, and takes the next numbered name; platforms without a safe creation API refuse the write ([Windows](docs/windows.md), [messaging](docs/messaging.md)) (WINDOWS-TESTS-7)
 - Setup writes hold native directory handles without delete sharing, refuse reparse points and open leaves without following links, while platforms offering neither native handles nor safe relative opens refuse the operation ([windows](docs/windows.md)) (LEADS-ADAPTERS).
 - Processes appending to a new ledger at once no longer fail on Windows: the one that found the lock file empty wrote its byte after another had locked it, and Windows' mandatory lock refused the write with PermissionError ([ledger](docs/ledger.md), WINDOWS-LOCK-WRITE).

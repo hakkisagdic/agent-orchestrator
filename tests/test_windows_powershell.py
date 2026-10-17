@@ -81,3 +81,39 @@ def test_the_windows_subset_reads_a_board_in_utf8_under_a_path_holding_wildcards
 
     assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
     assert json.loads(out.read_text(encoding="utf-8-sig")) == ["İşçi → ılık çay", "a plain title"]
+
+
+# Dot-sourced, bin/ao.ps1 leaves its functions defined; the repository block is asked alone, its
+# Write-Host lines taken from the information stream and written as UTF-8, so the bytes the script
+# decoded are the bytes this test reads.
+READ_REPOSITORY = (". $env:AO_TEST_PS1 board -Root $env:AO_TEST_ROOT 6>$null >$null; "
+                   "$out = @(Show-Repository $env:AO_TEST_ROOT 6>&1 | ForEach-Object { \"$_\" }); "
+                   "[System.IO.File]::WriteAllText($env:AO_TEST_OUT, ($out -join \"`n\"), "
+                   "(New-Object System.Text.UTF8Encoding $false))")
+
+
+def _git(root, *args):
+    done = subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", *args], cwd=str(root),
+                          capture_output=True, timeout=120)
+    assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="a native program's output is decoded in the console's code "
+                                                    "page, which only Windows has; the Windows lane runs this")
+@pytest.mark.parametrize("shell", SHELLS)
+def test_the_windows_subset_reads_git_output_in_utf8(shell, tmp_path):
+    # Git writes UTF-8; read in the console's code page, a commit subject outside that page came
+    # back as other letters (#71).
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git(root, "init", "-q")
+    (root / "a.txt").write_text("x\n", encoding="utf-8")
+    _git(root, "add", "a.txt")
+    _git(root, "commit", "-q", "-m", "İşçi → ılık çay")
+    out = tmp_path / "repository.txt"
+
+    done = _run(_powershell(shell), READ_REPOSITORY, AO_TEST_PS1=str(PS1), AO_TEST_ROOT=str(root),
+                AO_TEST_OUT=str(out))
+
+    assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
+    assert "İşçi → ılık çay" in out.read_text(encoding="utf-8-sig")

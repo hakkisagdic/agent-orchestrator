@@ -20,7 +20,7 @@ refuses the write and says why. `tests/test_secrets_2.py` checks occupied names 
 | `ao hold` | proven on the Windows lane: a turn placed by its working directory is stopped; what a stop leaves running is named, and the hold exits 1 (below) |
 | scheduler (`ao watchdog install`) | first cut: Task Scheduler (`schtasks`, every 2 min; doctor every 15 min). Each task names a program that exists — the console script on PATH, a clone's script, or `python -m ao.watchdog` from an interpreter that imports an installed ao — or install refuses; install exits 1 when `schtasks` cannot create a task, saying why in the OEM code page schtasks writes in, and `ao remove --yes` deletes both tasks in its own process and checks they are gone, as `ao watchdog uninstall` does; a task schtasks cannot say it lacks - access denied, a Task Scheduler that lists no task, a schtasks that cannot run - is named and keeps the project's state; a silent watchdog is to be looked into with Task Scheduler (below) |
 | desktop notifications | a toast through PowerShell behind the `toast` feature switch, off by default; Telegram and e-mail carry the orange and red levels |
-| `bin/ao.ps1`, the subset for a machine without Python | `status`, `board` and `doctor`; reads files as UTF-8 and takes paths literally; written and reviewed, not yet run on Windows (below) |
+| `bin/ao.ps1`, the subset for a machine without Python | `status`, `board` and `doctor`; reads files as UTF-8, takes paths literally and reads git's UTF-8 output as itself; the board was read through it on the lane, `status` and `doctor` have not been run on Windows (below) |
 | commit hook (`ao hooks install`) | installed inside the repository; a shared, external or globally configured hooks directory is refused (#71); since HOOK-V4 the hook reads a drive-letter index as absolute, and its execution proof passes on the lane (below) |
 | pre-push hook | works under Git's own shell |
 | the programs ao starts | Windows' own tools from its system directory, every other program from PATH's absolute entries, never the current directory (below) |
@@ -287,6 +287,13 @@ command line outside the code page back from the table and places its turn, and
 script ao hands it - the table's query, the toast, `bin/ao.ps1`. The lane ran them green on
 2026-10-01, on Python 3.9 and 3.12.
 
+*In ao since slice WINDOWS-GIT-UTF8:* `bin/ao.ps1` sets the console's output encoding to UTF-8
+before it runs `git`. PowerShell decodes a native program's output in the console's code page,
+and git writes UTF-8, so a commit subject holding a letter outside that page - a Turkish name,
+an arrow - came back as other letters in `status`. `tests/test_windows_powershell.py` holds it
+where a PowerShell runs on Windows: a repository's subject with Turkish letters and an arrow is
+read back through the script's repository block.
+
 ## Still open
 
 - **A prompt handed to a batch file.** Found by reading, not seen on a Windows machine.
@@ -301,9 +308,6 @@ script ao hands it - the table's query, the toast, `bin/ao.ps1`. The lane ran th
   Windows and cmd.exe (WINDOWS-CMD-CHANNEL, above). A channel, not a quoting rule: no
   quoting carries a line break through cmd.exe. What stays open is the proof: it changes
   how every turn starts, and no agent CLI has yet been started through a `.cmd` on the lane.
-- **Git's output in `bin/ao.ps1`.** PowerShell reads what a program prints in the
-  console's code page, so where a commit subject holds a letter outside that page,
-  `status` shows other letters in its place.
 - **The toast has never been shown.** A test has PowerShell parse its script, which
   the lane has not yet run, and no test shows a toast on a person's desktop.
 - **What a reviewer leaves running when it ends.** On macOS and Linux ao stops whatever of

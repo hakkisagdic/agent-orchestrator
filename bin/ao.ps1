@@ -14,11 +14,11 @@
   implementations drift; the way to make drift harmless is to keep the second one
   small enough that it cannot hide a disagreement.
 
-  STATUS: written from the PowerShell language reference and reviewed, but not yet
-  run on Windows - no Windows machine was available. Treat it as `documented`, the
-  same bar the adapter registry uses, until someone runs it and says otherwise.
-  tests/test_windows_powershell.py has PowerShell parse it wherever one runs, and
-  reads a board through it on Windows; the Windows lane has not yet run those.
+  STATUS: written from the PowerShell language reference and reviewed. PowerShell
+  parses it wherever one runs, and the Windows lane read a board through it green on
+  2026-10-01. `status` and `doctor`, which read the process table and the user
+  profile's agent sessions, have not been run there; treat them as `documented`, the
+  same bar the adapter registry uses, until someone runs them and says otherwise.
 
   Text and paths: ao writes UTF-8 without a byte-order mark, and Windows PowerShell
   reads such a file in the ANSI code page, so every file here is read as UTF-8. A
@@ -40,6 +40,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# A native program's output is decoded in the console's code page; git writes UTF-8. Left to the
+# code page, a commit subject outside it came back as other letters (#71).
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
 
 function Find-Root([string]$Start) {
   # An explicit path is taken at face value; the user knows where their project is.
@@ -112,6 +116,20 @@ function Get-Session([string]$Root) {
   return $best
 }
 
+function Show-Repository([string]$Root) {
+  # Git's bytes are UTF-8 and are decoded as such: the console's code page is set at the top of this
+  # script, since a commit subject may hold a letter outside it (#71).
+  Push-Location -LiteralPath $Root
+  try {
+    $dirty = @(git status --porcelain 2>$null).Count
+    $log = @(git log --oneline -3 2>$null)
+    Write-Host "`n-- REPOSITORY " -ForegroundColor Magenta -NoNewline
+    Write-Host ([string][char]0x2500 * 64) -ForegroundColor Magenta
+    $log | ForEach-Object { Write-Host "   $_" }
+    Write-Host "   $dirty files uncommitted" -ForegroundColor DarkGray
+  } finally { Pop-Location }
+}
+
 function Show-Status([string]$Root) {
   $name = Split-Path $Root -Leaf
   Write-Host ([string][char]0x2550 * 78) -ForegroundColor Cyan
@@ -147,15 +165,7 @@ function Show-Status([string]$Root) {
   Write-Host "`n$state" -ForegroundColor $col -NoNewline
   Write-Host "  last write $([int]($age / 60))m $($age % 60)s ago" -ForegroundColor DarkGray
 
-  Push-Location -LiteralPath $Root
-  try {
-    $dirty = @(git status --porcelain 2>$null).Count
-    $log = @(git log --oneline -3 2>$null)
-    Write-Host "`n-- REPOSITORY " -ForegroundColor Magenta -NoNewline
-    Write-Host ([string][char]0x2500 * 64) -ForegroundColor Magenta
-    $log | ForEach-Object { Write-Host "   $_" }
-    Write-Host "   $dirty files uncommitted" -ForegroundColor DarkGray
-  } finally { Pop-Location }
+  Show-Repository $Root
 
   $board = Get-Board $Root
   if ($board.Keys.Count) {
