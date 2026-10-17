@@ -310,8 +310,8 @@ read back through the script's repository block.
   is started, and it reads a prompt holding a line break, `%NAME%`, quotes, `&`, `|` and `<`
   whole on standard input (WINDOWS-CMD-PROOF). What is not yet seen is a vendor's
   npm-installed agent CLI started through its own `.cmd` there.
-- **The toast has never been shown.** A test has PowerShell parse its script, which
-  the lane has not yet run, and no test shows a toast on a person's desktop.
+- **The toast has never been shown.** A test has PowerShell parse its script, and the
+  lane ran it green on 2026-10-01 (above); no test shows a toast on a person's desktop.
 - **What a reviewer leaves running when it ends.** On macOS and Linux ao stops whatever of
   a reviewer's process group still runs once the reviewer has ended (LEADS-REVIEW). Windows
   has no process groups: a reviewer stopped on its timeout has its tree stopped with
