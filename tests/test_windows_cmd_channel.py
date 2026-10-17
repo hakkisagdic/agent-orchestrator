@@ -7,9 +7,12 @@ prompts as an argument, and the architect's wake runs to several paragraphs: thr
 read the first. A batch program is now handed its prompt on standard input whatever its size, where its
 adapter declares standard input; where the adapter declares none nothing starts, and the reason names
 Windows and cmd.exe. Windows is what `os.name` says, faked here while a prompt is handed over and only
-then, so every platform runs these.
+then, so every platform runs these - but one, which starts a real `.cmd` through cmd.exe on the Windows
+lane, since a faked `os.name` starts no process.
 """
 import os
+import subprocess
+import sys
 
 import pytest
 
@@ -171,3 +174,30 @@ def test_a_nudge_through_a_batch_file_whose_adapter_declares_no_standard_input_s
     assert "Windows" in refused and "cmd.exe" in refused
     assert refused.endswith("adapter kiro declares no standard input for `resume`; not nudging")
     assert _batch(started, "kiro-cli.cmd") == []
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="only Windows runs a .cmd through cmd.exe; the Windows lane "
+                                                    "starts this one as a turn is started")
+def test_a_real_batch_program_is_handed_its_whole_prompt_on_standard_input(tmp_path):
+    # The reading above says cmd.exe would cut a prompt in an argument at its first line, replace %NAME%
+    # and read quotes, `&`, `|` and `<` as its own; this starts a real one and reads what it got.
+    out = tmp_path / "prompt.bin"
+    reader = tmp_path / "read_stdin.py"
+    reader.write_text("import os, sys\n"
+                      "open(os.environ['AO_TEST_OUT'], 'wb').write(sys.stdin.buffer.read())\n", encoding="utf-8")
+    program = tmp_path / "claude.cmd"
+    program.write_text(f'@echo off\r\n"%AO_TEST_PY%" "%AO_TEST_SCRIPT%"\r\n', encoding="ascii")
+    plan, argv = _rendered("claude-code", SHORT, str(program))
+
+    given, why = A.prompt_input(plan, str(tmp_path / "repository"), argv)
+    assert why is None
+    assert all(SHORT not in part for part in given["argv"])
+    try:
+        done = subprocess.run(given["argv"], stdin=given["stdin"], capture_output=True, timeout=120,
+                              env=dict(os.environ, AO_TEST_PY=sys.executable, AO_TEST_SCRIPT=str(reader),
+                                       AO_TEST_OUT=str(out)))
+    finally:
+        A.release_prompt(given)
+
+    assert done.returncode == 0, done.stderr
+    assert out.read_bytes() == SHORT.encode("utf-8")

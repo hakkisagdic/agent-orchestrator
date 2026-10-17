@@ -306,8 +306,10 @@ read back through the script's repository block.
   architect's wake reach a batch program there, whatever the prompt's size; a batch
   program whose adapter declares none is not started, and the watchdog says why, naming
   Windows and cmd.exe (WINDOWS-CMD-CHANNEL, above). A channel, not a quoting rule: no
-  quoting carries a line break through cmd.exe. What stays open is the proof: it changes
-  how every turn starts, and no agent CLI has yet been started through a `.cmd` on the lane.
+  quoting carries a line break through cmd.exe. The lane now starts a real `.cmd` as a turn
+  is started, and it reads a prompt holding a line break, `%NAME%`, quotes, `&`, `|` and `<`
+  whole on standard input (WINDOWS-CMD-PROOF). What is not yet seen is a vendor's
+  npm-installed agent CLI started through its own `.cmd` there.
 - **The toast has never been shown.** A test has PowerShell parse its script, which
   the lane has not yet run, and no test shows a toast on a person's desktop.
 - **What a reviewer leaves running when it ends.** On macOS and Linux ao stops whatever of
@@ -391,8 +393,9 @@ and the lane's log lists each one with it:
   processes, a directory fsync, launchd, and the `ps` and `lsof` a process table falls
   back to.
 
-The other way round, `tests/test_windows_processes.py` and the board read through
-`bin/ao.ps1` need Windows itself and run only there. PowerShell's parser reads ao's scripts
+The other way round, `tests/test_windows_processes.py`, the board read through
+`bin/ao.ps1` and the real `.cmd` WINDOWS-CMD-PROOF starts need Windows itself and run only
+there. PowerShell's parser reads ao's scripts
 wherever a PowerShell is installed, and `pwsh` runs on Linux and macOS too. Where none is,
 each test says so as it is skipped. No test runs `bin/ao.ps1 status` or `doctor`: a `.ps1` runs
 only in a PowerShell, and both read what only Windows has - the user profile's Kiro sessions,
