@@ -89,7 +89,8 @@ def test_gain_reads_slices_spend_reviews_and_evidence_from_their_stores(project,
     assert "6 credit in 2 turns" in out and "2 tool calls" in out
     assert "windows green" in out and "1 commit(s) behind HEAD" in out
     assert "queued 1" in out and "done 1" in out
-    assert ".ao/ledger/platform-runs.jsonl" in out and "transcript:" in out
+    # The file is named as the platform writes its paths: os.path.join, as cli_gain builds it (WINDOWS-TESTS-10).
+    assert os.path.join(".ao", "ledger", "platform-runs.jsonl") in out and "transcript:" in out
     assert datetime.now().strftime("%m-%d") in out
 
 
