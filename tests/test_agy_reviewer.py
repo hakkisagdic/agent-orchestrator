@@ -1,9 +1,11 @@
 """An agy reviewer runs as an agent of ao's whose tools only read (AGY-REVIEWER).
 
-Measured on agy 1.3.0 on 2026-10-06. No flag leaves agy reading: `--dangerously-skip-permissions` only widens what a
+Measured on agy 1.3.0 on 2026-10-06 and again on agy 1.4.0 and 1.4.2 on 2026-10-18. No flag leaves agy reading:
+`--dangerously-skip-permissions` only widens what a
 run may do, and a print run denies a write or a command only because nobody is there to ask. Run as an agent whose
 tools are view_file, grep_search, find_by_name and list_dir, it read the file it was asked to and had no tool to write
-a file or run a command. The person's MCP servers stay attached to every agent, Linear's writing tools among them, and
+a file or run a command; the same agent on 1.4.0 answered the marker word it had read, said a write and a `touch` were
+not permitted, and left no file behind. The person's MCP servers stay attached to every agent, Linear's writing tools among them, and
 a call to one was denied only because no rule in the person's settings allowed it: ao refuses the reviewer while those
 settings allow more than reading. Its answer is the `response` of the one JSON record it prints.
 """
@@ -132,17 +134,29 @@ def test_a_review_its_harness_denied_a_tool_says_so_and_is_asked_again(project, 
     assert "its harness denied it mcp" in attempt["reason"]
 
 
-@pytest.mark.parametrize("version, refused", [("1.3.0", False), ("1.3.1", False), ("1.1.19", True), ("1.4.0", True),
+@pytest.mark.parametrize("version, refused", [("1.4.0", False), ("1.4.2", False), ("1.3.0", True), ("1.1.19", True),
                                               ("", True)])
 def test_an_agy_reviewer_runs_only_on_the_release_its_agent_was_measured_on(version, refused):
     """AGY-REVIEWER-2: agy 1.1.19 wrote files in a print run, and the agent that holds agy to reading was measured on
-    1.3.0 alone; a release nobody measured may hold it to nothing."""
-    attempt = cli._measured_release_problem(A.load_adapter("antigravity"), "/opt/agy", version)
+    1.4 alone; a release nobody measured may hold it to nothing, and one release is all the gate can carry, so the 1.3
+    that was measured on 2026-10-06 is refused now that the adapter names 1.4."""
+    adapter = A.load_adapter("antigravity")
+    release = adapter["options"]["reviewer_agent"]["release"]
+    attempt = cli._measured_release_problem(adapter, "/opt/agy", version)
 
     assert (attempt is not None) == refused
     if refused:
-        assert attempt["kind"] == "missing-binary" and "the 1.3 release its reviewer agent was measured on" in \
-            attempt["reason"]
+        assert attempt["kind"] == "missing-binary" and f"not the {release} release its reviewer agent was measured on" \
+            in attempt["reason"]
+
+
+def test_the_agy_release_the_reviewer_agent_was_measured_on_is_named():
+    """The gate above only holds while the adapter names the release the agent was measured on: the agent held agy
+    1.4.0 and 1.4.2 to reading on 2026-10-18 (docs/audit/2026-10-18-agy-1-4-reviewer.md), and no other release was
+    measured with it on this machine."""
+    agent = A.load_adapter("antigravity")["options"]["reviewer_agent"]
+
+    assert agent["release"] == "1.4"
 
 
 def test_a_route_through_an_agy_nobody_measured_is_not_started(project, monkeypatch):

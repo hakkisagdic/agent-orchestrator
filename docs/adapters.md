@@ -51,11 +51,15 @@ No flag leaves agy reading either, so it reviews the same way: as an agent of ao
 `view_file`, `grep_search`, `find_by_name` and `list_dir`, written as `.agents/agents/<name>.md` and
 named with `--agent=<name>`. Measured on agy 1.3.0: a print run denies a write or a command it cannot
 ask about and ends on an empty response; run as that agent, agy read the file it was asked to and
-had no tool to write a file or run a command. The person's MCP servers stay attached to every agent,
+had no tool to write a file or run a command. Measured again on agy 1.4.0 and on 1.4.2 on
+2026-10-18, where the same prompt asked for a read, a write and a `touch`: it answered the marker
+word it had read, said both other actions were not permitted, and left no file behind - and its
+record still carries `conversation_id`, `status`, `response`, `duration_seconds`, `num_turns` and
+`usage` (the audit note `docs/audit/2026-10-18-agy-1-4-reviewer.md`). The person's MCP servers stay attached to every agent,
 Linear's writing tools among them, and a call to one was denied only because no rule in the
 person's settings allowed it - so ao refuses an agy reviewer while
 `~/.gemini/antigravity-cli/settings.json` allows anything beyond `read_file(...)`, or cannot be read.
-It reviews only on the release the agent was measured on, 1.3 and its patches: agy 1.1.19 wrote
+It reviews only on the release the agent was measured on, 1.4 and its patches: agy 1.1.19 wrote
 files in a print run, and a release nobody measured may hold the agent to nothing (AGY-REVIEWER-2).
 A run agy ends on a network failure - its record's `error`, or its stderr, says so - is asked again
 once, as a Kiro review whose provider failed to answer is (AGY-TRANSIENT).

@@ -12,6 +12,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ## [Unreleased]
 
+### Adapters
+
+- `antigravity`'s reviewer agent is measured on the agy that is installed: the read-only agent was handed a prompt asking for a read, a write and a `touch` on agy 1.4.0 and again on 1.4.2, where it answered the marker word it had read, refused the other two and left no file behind, so `reviewer_agent.release` moves 1.3 to 1.4 and a self-updated install can review again; the gate carries one release, so a machine pinned to agy 1.3.0 is refused until someone measures it ([adapters](docs/adapters.md), [the reading](docs/audit/2026-10-18-agy-1-4-reviewer.md)) (AGY-14).
+
 ## [0.6.0] - 2026-10-19
 
 ### New commands

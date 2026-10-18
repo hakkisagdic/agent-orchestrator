@@ -3,9 +3,9 @@
   "name": "Antigravity CLI (agy)",
   "project_config": [".agents", ".gemini", "AGENTS.md", "GEMINI.md"],
   "verified": "full",
-  "verified_version": "agy 1.3.0",
+  "verified_version": "agy 1.3.0 for print, its result record and a resume; agy 1.4.0 and 1.4.2 for the reviewer agent and the record it returns",
   "observation_mode": "call-return",
-  "notes": "Verified against a running install, agy 1.1.19; print, the result record and a resume by conversation id measured again on agy 1.3.0 on 2026-10-06. Keeps no local transcript we could find; instead every print-mode call returns a complete JSON record including the conversation id and full token accounting. The orchestrator persists that record itself, so observation and telemetry are better here than with a passive store — at the cost of only seeing turns it started.",
+  "notes": "Verified against a running install, agy 1.1.19; print, the result record and a resume by conversation id measured again on agy 1.3.0 on 2026-10-06; print and its result record measured again on agy 1.4.0 and 1.4.2 on 2026-10-18, where a resume was not asked. Keeps no local transcript we could find; instead every print-mode call returns a complete JSON record including the conversation id and full token accounting. The orchestrator persists that record itself, so observation and telemetry are better here than with a passive store — at the cost of only seeing turns it started.",
 
   "syntax_warning": "Go-style flags: the prompt must be ATTACHED to the flag. `agy --print='...'` works; `agy -p '...'` silently takes the next argument as the flag value and drops the prompt. A space-separated form fails without writing anything, which looks exactly like the agent doing nothing.",
 
@@ -25,7 +25,7 @@
     "trust_none_why": "no flag denies tools - --dangerously-skip-permissions only widens them - so a reviewer runs as an agent of ao's own that only reads, options.reviewer_agent",
     "reviewer_agent": {
       "argv": ["--agent={agent}"],
-      "release": "1.3",
+      "release": "1.4",
       "path": ".agents/agents/{agent}.md",
       "format": "frontmatter",
       "config": {
@@ -44,7 +44,7 @@
         "reads": ["read_file("],
         "why": "an agent's tools leave out the servers the person's own MCP settings attach, and a print run denies a call to one only because no rule allows it"
       },
-      "note": "Measured on agy 1.3.0, 2026-10-06. A print run denies every write and command it cannot ask about, and ends with an empty response and the action in denied_actions. Run as this agent it read the file it was asked to and had no tool to write a file or run a command, and wrote nothing. The person's MCP servers stay attached, Linear's writing tools among them, and a call to one was denied only by that headless rule; excludeDefaultComponents took them away but denied every read too, and --mode=plan changed neither. So ao refuses the reviewer while the person's settings allow more than reading."
+      "note": "Measured on agy 1.3.0, 2026-10-06. A print run denies every write and command it cannot ask about, and ends with an empty response and the action in denied_actions. Run as this agent it read the file it was asked to and had no tool to write a file or run a command, and wrote nothing. The person's MCP servers stay attached, Linear's writing tools among them, and a call to one was denied only by that headless rule; excludeDefaultComponents took them away but denied every read too, and --mode=plan changed neither. So ao refuses the reviewer while the person's settings allow more than reading. Measured again on agy 1.4.0 and again on 1.4.2 the same day: the same agent, handed a prompt asking for a read, a write and a `touch`, answered the marker word it had read, said the other two were not permitted, and left no file behind, and its record carried the same fields; the release this agent was measured on is therefore 1.4 (docs/audit/2026-10-18-agy-1-4-reviewer.md)."
     },
     "model": ["--model={model}"],
     "effort": ["--effort={effort}"],
