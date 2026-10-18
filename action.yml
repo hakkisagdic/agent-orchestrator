@@ -49,7 +49,7 @@ inputs:
   ao-version:
     description: The ao-orchestrator release installed from PyPI.
     required: false
-    default: "0.5.2"
+    default: "0.6.0"
   python-version:
     description: The Python that runs ao.
     required: false

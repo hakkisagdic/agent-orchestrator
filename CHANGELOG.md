@@ -12,6 +12,8 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-19
+
 ### New commands
 
 - `ao gain [--since 7d]` reads ao's own ledgers and says what it measured - slices landed, what reviews said, where the board stands, what a turn cost and did, each platform's last run and how far HEAD has moved since - with a daily trend; an absent store is named rather than shown as zero, and `--json`, `--slices`, `--sources`, `--quota` and `--all` narrow or widen the reading ([telemetry](docs/telemetry.md#one-surface-ao-gain)) (GAIN).
@@ -601,7 +603,8 @@ backlog row it closed.
 
 - The first release: attach to a coding agent already running, watch it, restart it when it stalls, run its gates independently, and decide from that evidence what may be committed (7fb15cf).
 
-[Unreleased]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/hakkisagdic/agent-orchestrator/compare/v0.4.0...v0.5.0
