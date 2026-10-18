@@ -407,7 +407,7 @@ no MCP server it was not given (#24); `ao doctor` and the reviewer check read it
 
 | Field | What it declares | Used by |
 |---|---|---|
-| `billing.api.driver` | a protocol in `src/ao/drivers.py` (`usage-limits`) with its `token`, `profile`, `body`, `resource` and `login` | `ao credits`, `ao cost`, the credit sampler and the samples `ao doctor` reads, `ao digest`, handoff: each for the implementer's own adapter |
+| `billing.api.driver` | a protocol in `src/ao/drivers.py` (`usage-limits`) with its `token`, `profile`, `body`, `resource` and `login` | `ao credits`, `ao cost`, the credit sampler and the samples `ao doctor` reads, `ao digest`, handoff: each for the implementer's own adapter; `ao credits --all` asks every shipped adapter that declares one |
 | `billing.fallback.transcripts` | a glob of transcripts whose usage records are read when the account cannot be | `ao credits --offline`, `ao digest`, for the implementer's own adapter |
 | `quota` → `provider` | the keyflip provider an actor running this harness spends | window reserve, rotation (#32), `ao fanout` |
 | `quota` → `stops` | the words a turn of this harness ends on when a usage limit stops it: a list of `{words, hours}`, `words` a regular expression (a group named `epoch` holds a reset written in epoch seconds) and `hours` the longest the limit stands once hit | the watchdog's park ([watchdog.md](watchdog.md#a-slice-parked-on-quota)), `ao adapters validate` |

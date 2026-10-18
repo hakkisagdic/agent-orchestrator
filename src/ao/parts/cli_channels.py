@@ -163,6 +163,90 @@ def cmd_lock(cfg, args):
         A.release_gate_lock()
 
 
+def _credits_account_line(api, acct):
+    """One adapter's account reading, in a line: its plan, what it used and its reset (CREDITS-ALL).
+
+    A response that omits usage or the limit is no balance: coercing a missing field to zero prints
+    `0.00 of 0 (0.0%)` for a figure ao never read (CREDITS-ALL).
+    """
+    from datetime import datetime
+    if acct is None:
+        return f"{C['dim']}the account: no token available{C['reset']}"
+    if acct.get("expired"):
+        login = " ".join(api.get("login") or []) or "the CLI's login"
+        return f"{C['yellow']}the account: the CLI's token has expired; run {login}{C['reset']}"
+    if acct.get("error"):
+        return f"{C['yellow']}the account: lookup failed — {acct['error']}{C['reset']}"
+    used, limit = acct.get("used"), acct.get("limit")
+    has_used = (isinstance(used, (int, float)) and not isinstance(used, bool)
+                and used == used and 0 <= used < float("inf"))
+    has_limit = (isinstance(limit, (int, float)) and not isinstance(limit, bool)
+                 and limit == limit and 0 < limit < float("inf"))
+    missing = [name for name, ok in (("usage", has_used), ("limit", has_limit)) if not ok]
+    if missing:
+        return f"{C['yellow']}the account: reading unavailable — no {' or '.join(missing)} in response{C['reset']}"
+    reset = "no reset date in response"
+    reset_at = acct.get("reset_at")
+    if isinstance(reset_at, (int, float)) and not isinstance(reset_at, bool) and 0 < reset_at < float("inf"):
+        try:
+            reset = f"resets {C['b']}{datetime.fromtimestamp(reset_at).strftime('%d %b')}{C['reset']}"
+        except (OSError, OverflowError, ValueError):
+            pass
+    return (f"{C['b']}{acct.get('plan') or 'account'}{C['reset']} · {used:,.2f} of {limit:,.0f} "
+            f"({used / limit * 100:.1f}%) · {reset}")
+
+
+def _credits_all(cfg, args):
+    """Every shipped adapter's account and local estimate, one block each (CREDITS-ALL).
+
+    A lookup is asked only where the adapter declares one ao has a driver for, one request each;
+    an adapter that declares none is named with the rest, never shown another harness's figure or
+    a zero. The local estimate is read where the adapter declares its transcripts, and `--offline`
+    asks nothing. The adapters are the package's: a lookup runs the command its adapter names, and
+    a layer an agent can write must not name that command.
+    """
+    from datetime import date, timedelta
+    today = date.today()
+    first = today.replace(day=1).isoformat()
+    last = ((today.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)).isoformat()
+    readable, silent = [], []
+    for ident, adapter in sorted(A.package_adapters().items()):
+        api = A.usage_api(ident)
+        fallback = (adapter.get("billing") or {}).get("fallback") or {}
+        if api or fallback.get("transcripts"):
+            readable.append((ident, api, fallback))
+        else:
+            silent.append(ident)
+    print(f"{C['b']}ao credits --all{C['reset']} {C['dim']}— every account ao can read, and this machine's "
+          f"estimate{C['reset']}")
+    for ident, api, fallback in readable:
+        print(f"\n{C['b']}{ident}{C['reset']}")
+        if not api:
+            print(f"   {C['dim']}the account: {_no_account(ident)}{C['reset']}")
+        elif args.offline:
+            print(f"   {C['dim']}the account: not asked (--offline){C['reset']}")
+        else:
+            print("   " + _credits_account_line(api, A.account_usage(adapter_id=ident)))
+        if not fallback.get("transcripts"):
+            print(f"   {C['dim']}this machine: no transcript estimate declared{C['reset']}")
+            continue
+        u = A.credit_usage(adapter_id=ident)
+        # Only records inside the current calendar month, bounded on both ends: a record dated after
+        # the month is named with the earlier ones as left out, never added into this month (CREDITS-ALL).
+        here = [v for d, v in u["days"].items() if first <= d <= last]
+        outside = sorted(d for d in u["days"] if not (first <= d <= last))
+        named = ", ".join(outside) if len(outside) <= 5 else f"{outside[0]}..{outside[-1]}"
+        left = f"; {len(outside)} day(s) outside {first[:7]} left out ({named})" if outside else ""
+        if here:
+            print(f"   {C['dim']}this machine, {first[:7]}: {sum(here):,.2f} on {len(here)} day(s){left}{C['reset']}")
+        else:
+            print(f"   {C['dim']}this machine: no usage records this month{left}{C['reset']}")
+    if silent:
+        print(f"\n{C['dim']}no account ao can read, and no local estimate declared: {', '.join(silent)}"
+              f"{C['reset']}")
+    return 0
+
+
 def cmd_credits(cfg, args):
     """Credit usage: the provider's own figure, with a local estimate behind it.
 
@@ -178,8 +262,12 @@ def cmd_credits(cfg, args):
     The account and the estimate are the implementer's own: the ones its adapter declares
     (ACCOUNT-READERS). The first shipped adapter's were read whatever the implementer ran,
     so an implementer on a harness that bills no account ao can read was shown one it never
-    spends. It is told it has none, and shown no other harness's figure.
+    spends. It is told it has none, and shown no other harness's figure. With `--all`,
+    every shipped adapter that declares a lookup or its transcripts is read, one block each,
+    and the rest are named: what another harness bills is readable only where it says so.
     """
+    if getattr(args, "all", False):
+        return _credits_all(cfg, args)
     from datetime import date, datetime
 
     ident = A.implementer_adapter_id(cfg)

@@ -12,6 +12,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ## [Unreleased]
 
+### New commands
+
+- `ao credits --all` reads every shipped adapter that declares an account ao can reach, one request each, and the local estimate where it declares its transcripts; an adapter that declares neither is named rather than shown another harness's figure or a zero ([telemetry.md](docs/telemetry.md)) (CREDITS-ALL).
+
 ## [0.6.0] - 2026-10-19
 
 ### New commands

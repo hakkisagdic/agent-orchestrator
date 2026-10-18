@@ -111,6 +111,10 @@ start: the shipped lookup currently supplies no start, so no share percentage is
 names the calendar month and reports a subtotal without an account-share percentage;
 daily local totals do not establish a matching account cycle (TRIAGE-1-MEDIUM).
 
+`ao credits --all` reads every shipped adapter that declares a lookup, one request each, and
+the local estimate where an adapter declares its transcripts; an adapter that declares neither
+is named rather than shown another harness's figure or a zero (CREDITS-ALL).
+
 ## In US dollars: an estimate
 
 `ao cost` counts spend in the unit the implementer's harness bills - credits, or tokens - and a

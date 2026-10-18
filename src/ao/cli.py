@@ -443,6 +443,8 @@ def build_parser(root=None):
     cr = sub.add_parser("credits", help="credit spend measured from local transcripts")
     cr.add_argument("--offline", action="store_true", help="skip the account lookup")
     cr.add_argument("--local", action="store_true", help="also show this machine's share")
+    cr.add_argument("--all", action="store_true",
+                    help="every shipped adapter's account and local estimate, one block each")
     cr.add_argument("--reset-day", type=int, help="fallback: override the renewal day")
     cr.set_defaults(fn=cmd_credits)
     cm = sub.add_parser("commit", help="commit the staged candidate after ao commit-ok, naming its grant in Ao- "
