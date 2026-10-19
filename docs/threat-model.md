@@ -74,14 +74,22 @@ A finding that needs one of these assumptions is a hardening note, not a blocker
 
 ## The severity rule reviewers apply
 
-- **BLOCKER or HIGH** only when "How it breaks" names an actor in scope, the capability they use, and a
-  concrete outcome: an unreviewed commit lands, a reviewer or hunter writes, a secret leaks, ao runs
-  code an attacker chose, or a guarantee fails open.
+The owner decided on 2026-10-19 that a review's severity follows what is at stake: a feature far from
+the gate - an export, a notification, an onboarding step - took four to seven rounds, each refused for
+a HIGH that needed the implementer to forge a record or plant a file and reached no outcome of the
+gate (REVIEW-SCOPE).
+
+- **BLOCKER or HIGH** only when "How it breaks" names an actor in scope, the capability they use and the outcome:
+  an unreviewed or unverified commit lands; a guarantee a person records (review on, a person's opt-in, a waiver)
+  turns off with no person; a reviewer or hunter writes; a secret leaks; ao runs code an attacker chose.
+- A finding in a feature outside that core - reporting, exports, notifications, onboarding and setup,
+  documentation pages, dashboards - that needs the implementer to forge a record or plant a file, and
+  reaches none of those outcomes, is MEDIUM at most, and says so in its text.
 - A finding that needs an assumption out of scope is written under "## Notes" as
   `hardening: <the assumption>`. It has no severity and is not counted; hardening notes are collected
   into the backlog, not lost.
 - A correctness finding - a wrong result, a missed case - is judged as before; this model decides
-  security findings only.
+  security findings only, and the verdict rule (NEEDS_CHANGES only for a BLOCKER or HIGH) stays.
 - A reviewer that cannot tell writes the finding, and names the assumption it needs.
 
 A candidate that changes this page is judged against the version from before it: a change cannot

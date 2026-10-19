@@ -20,6 +20,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Behaviour changes
 
+- The threat model's severity rule and the review prompt's threat-model preamble in both languages now bound `BLOCKER` and `HIGH` security findings to the five concrete gate outcomes — an unreviewed or unverified commit lands, a guarantee a person records (review on, a person's opt-in, a waiver) turns off with no person, a reviewer or hunter writes, a secret leaks, or ao runs code an attacker chose — and cap a finding in a non-core feature (reporting, exports, notifications, onboarding and setup, documentation pages, dashboards) that needs the implementer to forge a record or plant a file and reaches none of those outcomes at `MEDIUM` at most, while keeping correctness findings, hardening notes and the verdict rule unchanged ([threat model](docs/threat-model.md#the-severity-rule-reviewers-apply)) (REVIEW-SCOPE).
 - `ao mcp serve` now serves read-only `ao://<project>/board`, `roles`, `ledger` and `decisions` resources, URI templates, and `status`, `land-slice` and `stuck` prompts across MCP `2025-06-18` and `2026-07-28`, and `--project all` serves every project in `ao`'s project registry from a single server while keeping human authority in the CLI (MCP-RES).
 
 ### Fixes

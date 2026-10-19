@@ -43,7 +43,8 @@ TURKISH = {
     "prompt.review-range-tree": "cdc95470e65d6d1a081b5c81a3f92c58e9bd0f915cd929d4b52f4458562258c4",
     # Added by CRITERIA-VERDICTS, after the tree's note: a boundary that lists criteria is asked about each.
     "prompt.review-criteria": "6c45e0b98838460856ce9c6054e9686cb6f8c4427e454486d15610b2149beb8a",
-    "prompt.review-threat-model": "dafd320aebf4702a38a9ad5a670ae7eebec4d0bf3cbcdcb275b84edc4fa7891a",
+    # Narrowed BLOCKER/HIGH to the five gate outcomes and capped non-core forged-input findings at MEDIUM (REVIEW-SCOPE).
+    "prompt.review-threat-model": "3abc0e5ed2f70716cf14bf991129e953fda0e1fef941ddba5bd7f868133259ca",
     # Added by REVIEW-REASK: the note a reviewer is asked again with when ao could not read its answer.
     "prompt.review-reask": "efe205b3487739b4e973da8223710cc762a1daa0db032c14c4fe0d00bb3d331d",
     "prompt.review-section": "8063a940247fdbf8be4db5d8445f9945c817b3a0970c601e8bfb39155dc6ce60",

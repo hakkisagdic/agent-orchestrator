@@ -390,18 +390,29 @@ LOW: <n>
                "(dosya:satır ya da bir test), ya da `CRITERION <n>: NOT MET` ve ardından eksik olan. Kanıtsız bir "
                "MET satırı hüküm değildir. ---\n{criteria}"),
     },
-    # the project's threat model, ahead of the candidate (REVIEW-THREAT-MODEL); {path}: where it is kept, {model}: its text
+    # the project's threat model, ahead of the candidate (REVIEW-THREAT-MODEL, REVIEW-SCOPE); {path}: where it is kept,
+    # {model}: its text
     "prompt.review-threat-model": {
         "en": ("--- THREAT MODEL: the project's, from `{path}` as it stood before this change. Judge a security finding "
-               "against it: BLOCKER or HIGH only when \"How it breaks\" names an actor it puts in scope, the capability "
-               "they use and a concrete outcome. A finding that needs an assumption it puts out of scope goes under "
+               "against it: BLOCKER or HIGH only when \"How it breaks\" names an actor in scope, the capability "
+               "they use and the outcome: an unreviewed or unverified commit lands; a guarantee a person records "
+               "(review on, a person's opt-in, a waiver) turns off with no person; a reviewer or hunter writes; a "
+               "secret leaks; ao runs code an attacker chose. A finding in a feature outside that core - reporting, "
+               "exports, notifications, onboarding and setup, documentation pages, dashboards - that needs the "
+               "implementer to forge a record or plant a file, and reaches none of those outcomes, is MEDIUM at most, "
+               "and says so in its text. A finding that needs an assumption it puts out of scope goes under "
                "\"## Notes\" as `hardening: <the assumption>`, with no severity, and is not counted. A correctness "
                "finding is judged as before. ---\n{model}\n--- END OF THREAT MODEL ---"),
         "tr": ("--- TEHDİT MODELİ: projenin, bu değişiklikten önce `{path}` dosyasında olduğu gibi. Bir güvenlik bulgusunu "
-               "ona göre yargıla: BLOCKER ya da HIGH yalnızca \"Nasıl bozulur\" onun kapsama aldığı bir aktörü, "
-               "kullandığı yeteneği ve somut bir sonucu adlandırdığında. Kapsam dışı saydığı bir varsayım gerektiren "
-               "bulgu, o varsayımla birlikte \"## Notlar\" altına `hardening: <...>` olarak yazılır, önem derecesi "
-               "olmadan, ve sayılmaz. "
+               "ona göre yargıla: BLOCKER ya da HIGH yalnızca \"Nasıl bozulur\" kapsamdaki bir aktörü, kullandığı "
+               "yeteneği ve sonucu adlandırdığında: gözden geçirilmemiş ya da doğrulanmamış bir commit iner; bir "
+               "insanın kayda geçirdiği bir güvence (gözden geçirmenin açık olması, bir insanın açık tercihi, bir "
+               "feragat) insan olmadan kapanır; bir gözden geçiren ya da avcı yazar; bir sır sızar; ao saldırganın "
+               "seçtiği kodu çalıştırır. Bu çekirdeğin dışındaki bir özellikte - raporlama, dışa aktarma, bildirimler, "
+               "ilk kurulum ve ayar, dokümantasyon sayfaları, paneller - uygulayıcının sahte bir kayıt üretmesini ya "
+               "da bir dosya yerleştirmesini gerektiren ve bu sonuçların hiçbirine varmayan bir bulgu en çok MEDIUM "
+               "olur ve metninde bunu söyler. Kapsam dışı saydığı bir varsayım gerektiren bulgu, o varsayımla birlikte "
+               "\"## Notlar\" altına `hardening: <...>` olarak yazılır, önem derecesi olmadan, ve sayılmaz. "
                "Bir doğruluk bulgusu eskisi gibi yargılanır. ---\n{model}\n--- TEHDİT MODELİ SONU ---"),
     },
     # the note ao writes above a candidate whose diff is not UTF-8, which it shows escaped whole (LEADS-REVIEW)

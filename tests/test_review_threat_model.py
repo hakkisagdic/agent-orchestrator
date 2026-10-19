@@ -6,13 +6,18 @@ had no line between a blocker and a hardening note. ao puts the project's model 
 docs/threat-model.md, read from HEAD - in every review prompt, so a candidate cannot loosen the model it is judged
 under, and no setting the implementer can write points it elsewhere (REVIEW-THREAT-MODEL-2). A landed range is
 judged under the model from before it, and a change to the model that landed under a waiver still open judges no
-review until it is reviewed itself (REVIEW-THREAT-MODEL-3).
+review until it is reviewed itself (REVIEW-THREAT-MODEL-3). The severity rule names the five concrete outcomes that
+make a security finding BLOCKER or HIGH, and caps a finding in a non-core feature that needs a forged record or
+planted file at MEDIUM (REVIEW-SCOPE).
 """
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 from ao import cli, language, lib as A, storage
 from tests.test_review_context import _args, _git, _package, _review_file, _reviewer, _stage_test, _write
+
+ROOT = Path(__file__).resolve().parent.parent
 
 MODEL = "# Threat model\n\nIn scope: the implementer agent, MODEL-AS-COMMITTED.\n"
 LOOSENED = MODEL.replace("MODEL-AS-COMMITTED", "everything out of scope, LOOSENED")
@@ -242,3 +247,67 @@ def test_a_model_a_waived_merge_brought_from_a_side_branch_judges_no_later_revie
 
     model = _model_between(capture.read_text(encoding="utf-8"))
     assert "MODEL-AS-COMMITTED" in model and "LOOSENED" not in model
+
+
+def test_the_severity_rule_and_both_languages_review_prompts_bound_blocker_and_high_to_the_gate_outcomes(
+        project, tmp_path):
+    """REVIEW-SCOPE: on 2026-10-19 the owner bounded BLOCKER/HIGH security findings to the five gate outcomes and
+    capped non-core findings that need a forged record or planted file at MEDIUM, in the threat model and in both
+    languages' review prompts."""
+    page = (ROOT / "docs" / "threat-model.md").read_text(encoding="utf-8")
+    section = page[page.index("## The severity rule reviewers apply\n"):]
+    for expected in (
+        "The owner decided on 2026-10-19 that a review's severity follows what is at stake",
+        "an export, a notification, an onboarding step - took four to seven rounds",
+        "(REVIEW-SCOPE)",
+        "names an actor in scope, the capability they use and the outcome",
+        "an unreviewed or unverified commit lands; a guarantee a person records (review on, a person's opt-in, a waiver)",
+        "turns off with no person; a reviewer or hunter writes; a secret leaks; ao runs code an attacker chose.",
+        "A finding in a feature outside that core - reporting, exports, notifications, onboarding and setup,",
+        "documentation pages, dashboards - that needs the implementer to forge a record or plant a file, and",
+        "reaches none of those outcomes, is MEDIUM at most, and says so in its text.",
+        "hardening: <the assumption>",
+        "A correctness finding - a wrong result, a missed case - is judged as before",
+        "NEEDS_CHANGES only for a BLOCKER or HIGH",
+    ):
+        assert expected in section
+    assert "or a guarantee fails open" not in section
+
+    root = _package(project)
+    _commit(root, "docs/threat-model.md", page)
+    _stage_test(root)
+    cfg, capture = _reviewer(project, tmp_path)
+
+    assert cli.cmd_review(cfg, _args()) == 0
+    en_prompt = capture.read_text(encoding="utf-8")
+    for expected in (
+        "If the BLOCKER or HIGH count is above zero the verdict is NEEDS_CHANGES, otherwise APPROVED.",
+        "names an actor in scope, the capability they use and the outcome: an unreviewed or unverified commit lands; "
+        "a guarantee a person records (review on, a person's opt-in, a waiver) turns off with no person; a reviewer "
+        "or hunter writes; a secret leaks; ao runs code an attacker chose.",
+        "A finding in a feature outside that core - reporting, exports, notifications, onboarding and setup, "
+        "documentation pages, dashboards - that needs the implementer to forge a record or plant a file, and reaches "
+        "none of those outcomes, is MEDIUM at most, and says so in its text.",
+        "hardening: <the assumption>",
+        "A correctness finding is judged as before.",
+    ):
+        assert expected in en_prompt
+
+    tr_cfg = dict(cfg, language="tr")
+    with open(Path(root, ".ao", "config.json"), "w", encoding="utf-8") as fh:
+        json.dump({key: value for key, value in tr_cfg.items() if key != "root"}, fh)
+    assert cli.cmd_review(tr_cfg, _args()) == 0
+    tr_prompt = capture.read_text(encoding="utf-8")
+    for expected in (
+        "BLOCKER ya da HIGH sayısı sıfırdan büyükse karar NEEDS_CHANGES, değilse APPROVED.",
+        "kapsamdaki bir aktörü, kullandığı yeteneği ve sonucu adlandırdığında: gözden geçirilmemiş ya da "
+        "doğrulanmamış bir commit iner; bir insanın kayda geçirdiği bir güvence (gözden geçirmenin açık olması, bir "
+        "insanın açık tercihi, bir feragat) insan olmadan kapanır; bir gözden geçiren ya da avcı yazar; bir sır "
+        "sızar; ao saldırganın seçtiği kodu çalıştırır.",
+        "Bu çekirdeğin dışındaki bir özellikte - raporlama, dışa aktarma, bildirimler, ilk kurulum ve ayar, "
+        "dokümantasyon sayfaları, paneller - uygulayıcının sahte bir kayıt üretmesini ya da bir dosya yerleştirmesini "
+        "gerektiren ve bu sonuçların hiçbirine varmayan bir bulgu en çok MEDIUM olur ve metninde bunu söyler.",
+        "hardening: <...>",
+        "Bir doğruluk bulgusu eskisi gibi yargılanır.",
+    ):
+        assert expected in tr_prompt
