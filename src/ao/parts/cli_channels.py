@@ -36,17 +36,18 @@ NO_AO_PROGRAM = ("no ao program to name in the config: none is on PATH, and this
 
 def cmd_mcp(cfg, args):
     """Serve this project's state to any MCP client, over stdio."""
-    # The role is the server's own argument, so the config printed for a client carries it too (MCP-ROLES).
+    # The role and project scope are the server's own arguments, so the config printed for a client carries them too (MCP-ROLES, MCP-RES).
     role = ["--role", args.role] if args.role is not None else []
+    project = ["--project", args.project] if getattr(args, "project", None) is not None else []
     if args.action != "serve":
         command = A.ao_program()                   # never one the current directory holds (WINDOWS-NO-CWD-EXEC)
         if command is None:
             print(NO_AO_PROGRAM); return 1
         print(f"{C['b']}Add to an MCP client's config:{C['reset']}")
         print(json.dumps({"mcpServers": {"agent-orchestrator": {
-            "command": command, "args": ["-C", cfg["root"], "mcp", "serve"] + role}}}, indent=2))
+            "command": command, "args": ["-C", cfg["root"], "mcp", "serve"] + project + role}}}, indent=2))
         return 0
-    return _serve("mcp", cfg, (["--allow-verify"] if args.allow_verify else []) + role)
+    return _serve("mcp", cfg, (["--allow-verify"] if args.allow_verify else []) + project + role)
 
 
 def cmd_a2a_mcp(cfg, args):

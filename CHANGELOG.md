@@ -17,6 +17,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 - `ao ntfy setup|test|status` sets up, tests and checks an outbound `ntfy` phone channel (`ntfy.sh` or self-hosted) in `~/.ao/ntfy.json` (mode `0600`, access token read only from `--token-env NAME`), sending the watchdog's phone alerts over HTTPS POST with `Priority` mapped from the alarm level (`urgent` for red, `high` for orange, `default` otherwise) and recording failed sends without raising into the cycle (NOTIFY-NTFY).
 - `ao credits --all` reads every shipped adapter that declares an account ao can reach, one request each, and the local estimate where it declares its transcripts; an adapter that declares neither is named rather than shown another harness's figure or a zero ([telemetry.md](docs/telemetry.md)) (CREDITS-ALL).
 
+### Behaviour changes
+
+- `ao mcp serve` now serves read-only `ao://<project>/board`, `roles`, `ledger` and `decisions` resources, URI templates, and `status`, `land-slice` and `stuck` prompts across MCP `2025-06-18` and `2026-07-28`, and `--project all` serves every project in `ao`'s project registry from a single server while keeping human authority in the CLI (MCP-RES).
+
 ### Fixes
 
 - The landing page's agent support introduction now covers `cloud-generic`'s observation through pull-request polling and Git results alongside the five non-cloud groups and qualifies the `full`/`partial` install-measurement statement for `openai-api`, whose client is tested against a stand-in endpoint while a provider's own answer is proven by an owner's local run, checked in both languages against `src/ao/adapters/*.json` (LANDING-REFRESH-3).

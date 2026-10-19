@@ -9,6 +9,9 @@ One rule shapes the surface: **authority never goes on it.** `commit-ok` decides
 whether work may land, and exposing it here would let the implementer grant
 itself the authority the separation exists to withhold. Reading is free; the one
 expensive action, `verify`, is opt-in because it runs the project's real gates.
+No resource, prompt or tool records an approval, a `commit-ok`, a waiver, an
+answer or a `harness-seen`; a step that is a person's comes back as the CLI
+command text only (MCP-RES).
 
 A second rule narrows it per session (MCP-ROLES): a server started for a role,
 `--role architect|implementer|reviewer`, lists and runs that role's tools alone. A
@@ -16,6 +19,13 @@ reviewer reads and sends nothing; an implementer works its mailbox; the architec
 keeps every tool. `ao init` writes the role into a registration only one role reads. A
 role it does not know stops the server, naming the roles: served every tool, a mistyped
 reviewer could act as the architect (HUNT-LEADS-SEC).
+
+A third rule scopes which projects the server speaks for (MCP-RES): started for one
+project, it serves that project's tools, read-only resources (`ao://<project>/board`,
+`roles`, `ledger`, `decisions`) and prompts (`status`, `land-slice`, `stuck`); started
+with `--project all`, one server serves every project in ao's project registry
+(`project_registry_path`), each tool, resource and prompt naming its project, and
+refuses any project outside the registry.
 
 JSON-RPC 2.0 over stdio, standard library only.
 """
@@ -32,7 +42,12 @@ PROTOCOL = "2025-06-18"
 PROTOCOL_2026 = "2026-07-28"
 PROTOCOLS = (PROTOCOL_2026, PROTOCOL)
 INVALID_PARAMS = -32602
+RESOURCE_NOT_FOUND = -32002
 UNSUPPORTED_PROTOCOL_VERSION = -32022
+RESOURCE_SCHEME = "ao"
+RESOURCE_MIME_TYPE = "application/json"
+PROJECT_SCOPES = ("all",)
+CAPABILITIES = {"tools": {}, "resources": {}, "prompts": {}}
 
 TOOLS = [
     {"name": "ao_status",
@@ -196,6 +211,25 @@ def served_role(argv):
     return role
 
 
+def served_project(argv):
+    """The project scope the server's arguments name (`all`), or None for one project (MCP-RES).
+
+    ValueError when `--project` is given anything other than `all`: one project is chosen with `-C <dir>`,
+    and `--project all` serves every project in ao's project registry (`project_registry_path`).
+    """
+    named = [index for index, word in enumerate(argv) if word == "--project" or word.startswith("--project=")]
+    if not named:
+        return None
+    index = named[-1]
+    given = argv[index].partition("=")[2] if argv[index] != "--project" else \
+        (argv[index + 1] if index + 1 < len(argv) else "")
+    scope = given.strip().lower()
+    if scope not in PROJECT_SCOPES:
+        raise ValueError(f"ao mcp: --project {given!r} is not 'all', so the server does not start; use --project all "
+                         "for every registered project, or -C <dir> without --project for one project")
+    return scope
+
+
 def role_notice(role):
     """The line a server started with no role prints on stderr, or None.
 
@@ -207,6 +241,83 @@ def role_notice(role):
     known = ", ".join(sorted(ROLE_TOOLS))
     return (f"ao mcp: started with no --role, so every tool is served; the roles are {known}, "
             "and `ao init` writes one into each registration a single role reads")
+
+
+def _project_name(cfg):
+    """The served project's stable name, read without writing `.ao/project-key` or the registry."""
+    root = (cfg or {}).get("root") or ""
+    return (A.registered_key(root) if root else None) \
+        or str((cfg or {}).get("project") or "").strip() \
+        or os.path.basename(os.path.abspath(root).rstrip("/\\")) \
+        or "project"
+
+
+def registered_projects():
+    """{project: root} for every existing project in ao's project registry (`A.project_registry_path()`)."""
+    found = {}
+    for name, row in sorted(A.project_registry().items()):
+        path = row.get("root")
+        if A._usable_key(name) and isinstance(path, str) and os.path.isdir(path):
+            found[name] = os.path.abspath(path)
+    return found
+
+
+def _served_projects(cfg, project_scope=None):
+    """[(project, root, project_cfg)] for the projects this server serves, in stable order."""
+    if project_scope == "all":
+        return [(name, root, dict(A.load_config(root), root=root))
+                for name, root in sorted(registered_projects().items())]
+    root = os.path.abspath(cfg["root"])
+    return [(_project_name(cfg), root, dict(cfg, root=root))]
+
+
+def _resolve_project(cfg, project_scope, requested):
+    """((project, root, project_cfg), None) for `requested`, or (None, error_message)."""
+    given = str(requested or "").strip() if isinstance(requested, str) else ""
+    if project_scope == "all":
+        projects = registered_projects()
+        if not given:
+            known = ", ".join(sorted(projects)) or "none registered"
+            return None, f"project is required with --project all (registered: {known})"
+        if given not in projects:
+            known = ", ".join(sorted(projects)) or "none registered"
+            return None, (f"project {given!r} is not in ao's project registry "
+                          f"({A.project_registry_path()}; registered: {known})")
+        root = projects[given]
+        return (given, root, dict(A.load_config(root), root=root)), None
+    current = _project_name(cfg)
+    root = os.path.abspath(cfg["root"])
+    if requested is not None and (not isinstance(requested, str) or given != current):
+        return None, (f"project {requested!r} is not served by this server "
+                      f"(serving {current!r}); start with --project all for every registered project")
+    return (current, root, dict(cfg, root=root)), None
+
+
+def tools_for_role(role, project_scope=None):
+    """The tool definitions a server started for `role` and `project_scope` lists (MCP-ROLES, MCP-RES).
+
+    With `--project all`, every tool's inputSchema names `project` as a required string so each call
+    identifies the registered project it acts on.
+    """
+    served = role_tools(role)
+    listed = []
+    for tool in TOOLS:
+        if tool["name"] not in served:
+            continue
+        if project_scope != "all":
+            listed.append(tool)
+            continue
+        schema = dict(tool["inputSchema"])
+        props = dict({"project": {"type": "string",
+                                  "description": "project name in ao's project registry"}},
+                     **dict(schema.get("properties") or {}))
+        required = list(schema.get("required") or [])
+        if "project" not in required:
+            required = ["project"] + required
+        schema["properties"] = props
+        schema["required"] = required
+        listed.append(dict(tool, inputSchema=schema))
+    return listed
 
 
 def status_payload(cfg):
@@ -283,25 +394,374 @@ def candidate_payload(cfg):
     return out
 
 
-def call(name, args, cfg, allow_verify, role=None):
-    """Run one tool for a server started for `role`, and return what it answers.
+def roles_payload(cfg):
+    """The project's actors, held roles and any pending role assignment, read-only (MCP-RES)."""
+    root = cfg["root"]
+    try:
+        with open(os.path.join(root, ".ao", "config.json"), encoding=UTF8) as fh:
+            stored = json.load(fh)
+    except (OSError, ValueError):
+        stored = {}
+    source = stored if isinstance(stored, dict) and stored else cfg
+    actors, roles, _ = A.role_table(source)
+    held = A.effective_roles(root, dict(source, roles=roles))
+    waiting, after = A.pending_roles(root, source)
+    return {
+        "roles": {role: held.get(role) for role in A.ROLE_BLOCKS},
+        "actors": {
+            name: {key: block[key] for key in ("adapter", "model", "effort", "family") if block.get(key)}
+            for name, block in sorted(actors.items())
+        },
+        "pending": {"roles": waiting, "after": after} if waiting else None,
+    }
+
+
+def ledger_payload(root):
+    """Read-only summary of the project's ledgers, carrying no authority token (MCP-RES)."""
+    from .storage import read_chained_history
+    slice_rows = [row for row in A.slice_moves(root) if isinstance(row, dict)]
+    verifications = [row for row in A.verification_history(root) if isinstance(row, dict)]
+    reviews = [row for row in read_chained_history(A.review_ledger_path(root), A.REVIEW_CHAIN) if isinstance(row, dict)]
+    decisions = [row for row in A.decision_rows(root) if isinstance(row, dict)]
+    waivers = [row for row in A.waiver_rows(root) if isinstance(row, dict)]
+    latest_v = A.latest_verification(root)
+    return {
+        "counts": {
+            "slices": len(slice_rows),
+            "verifications": len(verifications),
+            "reviews": len(reviews),
+            "decisions": len(decisions),
+            "waivers": len(waivers),
+        },
+        "latest_slice": (
+            {key: slice_rows[-1].get(key) for key in ("slice", "from", "to", "at", "by", "why")
+             if key in slice_rows[-1]}
+            if slice_rows else None
+        ),
+        "latest_verification": (
+            {key: latest_v.get(key) for key in ("id", "passed", "ok", "profile", "at")
+             if key in latest_v}
+            if isinstance(latest_v, dict) else None
+        ),
+        "latest_review": (
+            {"id": reviews[-1].get("artefact") or reviews[-1].get("id"),
+             "slice": reviews[-1].get("slice"),
+             "verdict": reviews[-1].get("verdict"),
+             "at": reviews[-1].get("at")}
+            if reviews else None
+        ),
+    }
+
+
+def decisions_payload(root, limit=10):
+    """The project's latest architect decisions and asked questions, read-only (MCP-RES)."""
+    recorded = [row for row in A.decision_rows(root)
+                if isinstance(row, dict) and row.get("kind") != "proposal"][-limit:]
+    asked = A.decisions(root)
+    return {
+        "decisions": recorded,
+        "questions": asked[:limit],
+        "open_count": sum(1 for item in asked if item.get("state") in ("open", "proposed")),
+    }
+
+
+RESOURCE_SPECS = (
+    {"kind": "board",
+     "title": "Board",
+     "description": "Where each pre-authorised work item stands on the project's board, read-only and carrying no authority."},
+    {"kind": "roles",
+     "title": "Role table",
+     "description": "The project's actors, role assignments and any pending reassignment, read-only and carrying no authority."},
+    {"kind": "ledger",
+     "title": "Ledger summary",
+     "description": "Summary of the project's slice, verification, review, decision and waiver ledgers, read-only and carrying no authority."},
+    {"kind": "decisions",
+     "title": "Latest decisions",
+     "description": "The project's latest architect decisions and asked questions, read-only and carrying no authority."},
+)
+RESOURCE_SPEC_BY_KIND = {spec["kind"]: spec for spec in RESOURCE_SPECS}
+
+
+def resource_uri(project, kind):
+    """The stable `ao://<project>/<kind>` URI of one read-only resource (MCP-RES)."""
+    return f"{RESOURCE_SCHEME}://{project}/{kind}"
+
+
+def _parse_resource_uri(uri):
+    """(project, kind) for a valid `ao://<project>/<kind>` URI, or (None, None)."""
+    prefix = f"{RESOURCE_SCHEME}://"
+    if not isinstance(uri, str) or not uri.startswith(prefix):
+        return None, None
+    rest = uri[len(prefix):]
+    project, sep, kind = rest.partition("/")
+    if not sep or not project or not kind or "/" in kind or not A._usable_key(project):
+        return None, None
+    if kind not in RESOURCE_SPEC_BY_KIND:
+        return None, None
+    return project, kind
+
+
+def _cursor_error(params):
+    if params is None:
+        return None
+    if not isinstance(params, dict):
+        return {"code": INVALID_PARAMS, "message": "Invalid params"}
+    if params.get("cursor") is not None:
+        return {"code": INVALID_PARAMS, "message": "Invalid params: unknown cursor"}
+    return None
+
+
+def resources_list(cfg, project_scope=None, params=None):
+    """Answer `resources/list`: (result, error) for the served project or every registered project (MCP-RES)."""
+    err = _cursor_error(params)
+    if err is not None:
+        return None, err
+    resources = []
+    for project, _, _ in _served_projects(cfg, project_scope):
+        for spec in RESOURCE_SPECS:
+            kind = spec["kind"]
+            resources.append({
+                "uri": resource_uri(project, kind),
+                "name": f"{project}/{kind}",
+                "title": f"{project} {spec['title'].lower()}",
+                "description": spec["description"],
+                "mimeType": RESOURCE_MIME_TYPE,
+            })
+    return {"resources": resources}, None
+
+
+def resource_templates_list(params=None):
+    """Answer `resources/templates/list`: (result, error) for per-project `ao://{project}/<kind>` URIs (MCP-RES)."""
+    err = _cursor_error(params)
+    if err is not None:
+        return None, err
+    templates = [{
+        "uriTemplate": f"{RESOURCE_SCHEME}://{{project}}/{spec['kind']}",
+        "name": spec["kind"],
+        "title": spec["title"],
+        "description": spec["description"],
+        "mimeType": RESOURCE_MIME_TYPE,
+    } for spec in RESOURCE_SPECS]
+    return {"resourceTemplates": templates}, None
+
+
+def resource_read(cfg, project_scope=None, params=None, negotiated=None):
+    """Answer `resources/read`: (result, error), read-only and refusing any project outside the registry (MCP-RES).
+
+    In MCP `2025-06-18` an unknown or unserved resource URI answers with `-32002` (`Resource not found`);
+    in `2026-07-28` (SEP-2164) it answers with `-32602` (`Invalid params`).
+    """
+    if not isinstance(params, dict) or not isinstance(params.get("uri"), str) or not params.get("uri"):
+        return None, {"code": INVALID_PARAMS, "message": "Invalid params: uri is required"}
+    uri = params["uri"]
+    not_found_code = INVALID_PARAMS if negotiated == PROTOCOL_2026 else RESOURCE_NOT_FOUND
+    project, kind = _parse_resource_uri(uri)
+    if project is None:
+        return None, {"code": not_found_code, "message": f"Resource not found: {uri}", "data": {"uri": uri}}
+    resolved, problem = _resolve_project(cfg, project_scope, project)
+    if problem is not None:
+        return None, {"code": not_found_code, "message": problem, "data": {"uri": uri}}
+    project_name, root, project_cfg = resolved
+    canonical_uri = resource_uri(project_name, kind)
+    if kind == "board":
+        body = board_payload(root)
+    elif kind == "roles":
+        body = roles_payload(project_cfg)
+    elif kind == "ledger":
+        body = ledger_payload(root)
+    else:
+        body = decisions_payload(root)
+    payload = dict({"project": project_name, "uri": canonical_uri, "authority": "none"}, **body)
+    return {
+        "contents": [{
+            "uri": canonical_uri,
+            "mimeType": RESOURCE_MIME_TYPE,
+            "text": json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+        }]
+    }, None
+
+
+PROMPT_SPECS = (
+    {"name": "status",
+     "title": "Day's status",
+     "description": "Summarise the day's status for the project by calling its read-only ao tools in order.",
+     "tools": ("ao_status", "ao_board", "ao_decisions", "ao_notices"),
+     "arguments": ()},
+    {"name": "land-slice",
+     "title": "Land a named slice",
+     "description": "Prepare a named slice to land by calling ao's inspection and gate tools in order; "
+                    "every authority step stays a CLI command for a person.",
+     "tools": ("ao_board", "ao_status", "ao_inbox", "ao_decisions", "ao_verify", "ao_candidate"),
+     "arguments": ({"name": "slice",
+                    "description": "Slice id on the project's board to land",
+                    "required": True},)},
+    {"name": "stuck",
+     "title": "Explain what is stuck",
+     "description": "Explain what is stuck in the project by calling ao's inspection tools in order; "
+                    "any authority step comes back as a CLI command for a person.",
+     "tools": ("ao_status", "ao_board", "ao_decisions", "ao_notices", "ao_watchdog", "ao_inbox"),
+     "arguments": ()},
+)
+PROMPT_SPEC_BY_NAME = {spec["name"]: spec for spec in PROMPT_SPECS}
+
+
+def _prompt_arguments(spec, project_scope=None):
+    project_arg = {
+        "name": "project",
+        "description": "Project name in ao's project registry",
+        "required": project_scope == "all",
+    }
+    return [project_arg] + [dict(arg) for arg in spec["arguments"]]
+
+
+def prompts_list(project_scope=None, params=None):
+    """Answer `prompts/list`: (result, error) for the menu prompts a person picks from (MCP-RES)."""
+    err = _cursor_error(params)
+    if err is not None:
+        return None, err
+    prompts = [{
+        "name": spec["name"],
+        "title": spec["title"],
+        "description": spec["description"],
+        "arguments": _prompt_arguments(spec, project_scope),
+    } for spec in PROMPT_SPECS]
+    return {"prompts": prompts}, None
+
+
+def _prompt_text(name, project_name, root, slice_id=None):
+    call_arg = f'{{"project": "{project_name}"}}'
+    cli_prefix = f"ao -C {root}"
+    if name == "status":
+        return (
+            f"Project: {project_name}\n"
+            f"Inspect the day's status for project `{project_name}` by calling these ao MCP tools in order:\n"
+            f"1. `ao_status` with arguments `{call_arg}` — read implementer state, telemetry, git state and open reviews.\n"
+            f"2. `ao_board` with arguments `{call_arg}` — read running, blocked, ready, verified and done slices.\n"
+            f"3. `ao_decisions` with arguments `{call_arg}` — read open, proposed and answered questions.\n"
+            f"4. `ao_notices` with arguments `{call_arg}` — read recent alerts and notices.\n\n"
+            "Authority stays in the CLI — no MCP resource, prompt or tool records an approval, a commit-ok, "
+            "a waiver, an answer or a harness-seen. If a person must act, return the exact CLI command text "
+            "for them to run in their terminal:\n"
+            f"- Answer an open question: `{cli_prefix} answer ID KEY`\n"
+            f"- Record harness configuration changes as seen: `{cli_prefix} harness seen --by NAME`\n"
+            f"- Record a person review verdict: `{cli_prefix} person-review --by NAME --verdict APPROVED --digest DIGEST`\n"
+            f"- Grant commit authority: `{cli_prefix} commit-ok --verify`"
+        )
+    if name == "land-slice":
+        verify_arg = f'{{"project": "{project_name}", "profile": "quick"}}'
+        return (
+            f"Project: {project_name}\n"
+            f"Slice: {slice_id}\n"
+            f"Prepare slice `{slice_id}` in project `{project_name}` to land by calling these ao MCP tools in order:\n"
+            f"1. `ao_board` with arguments `{call_arg}` — confirm `{slice_id}` is on the board and check its state.\n"
+            f"2. `ao_status` with arguments `{call_arg}` — check dirty files, head, open reviews and unacknowledged mail.\n"
+            f"3. `ao_inbox` with arguments `{call_arg}` — read any unacknowledged coordination messages (and acknowledge handled ones with `ao_ack`).\n"
+            f"4. `ao_decisions` with arguments `{call_arg}` — confirm no open question blocks `{slice_id}`.\n"
+            f"5. `ao_verify` with arguments `{verify_arg}` — run the declared gates when the server was started with `--allow-verify`.\n"
+            f"6. `ao_candidate` with arguments `{call_arg}` — read the staged candidate's digest, paths and boundary for `{slice_id}`.\n\n"
+            "Authority stays in the CLI — no MCP resource, prompt or tool records an approval, a commit-ok, "
+            "a waiver, an answer or a harness-seen. Return any person step as CLI command text only:\n"
+            f"- Independent or person review: `{cli_prefix} review` or `{cli_prefix} person-review --by NAME --verdict APPROVED --digest DIGEST` "
+            f"(or `{cli_prefix} collect-review NONCE --response FILE --model MODEL --by NAME`)\n"
+            f"- Grant commit authority for the staged candidate: `{cli_prefix} commit-ok --verify`\n"
+            f"- Commit the granted candidate: `{cli_prefix} commit -m \"{slice_id}: SUMMARY\"`\n"
+            f"- Waive a gate on the record (person only): `{cli_prefix} waive review --slice {slice_id} --by NAME --why \"REASON\"`\n"
+            f"- Answer an open question (person only): `{cli_prefix} answer ID KEY`\n"
+            f"- Record harness configuration changes as seen (person only): `{cli_prefix} harness seen --by NAME`"
+        )
+    return (
+        f"Project: {project_name}\n"
+        f"Explain what is stuck in project `{project_name}` by calling these ao MCP tools in order:\n"
+        f"1. `ao_status` with arguments `{call_arg}` — check implementer state, spinning minutes, held state and unread processes.\n"
+        f"2. `ao_board` with arguments `{call_arg}` — find blocked slices, what each waits on, and any board graph problems.\n"
+        f"3. `ao_decisions` with arguments `{call_arg}` — list open questions and rule proposals waiting on a person.\n"
+        f"4. `ao_notices` with arguments `{call_arg}` — inspect recent anomaly notices.\n"
+        f"5. `ao_watchdog` with arguments `{call_arg}` — run one dry explain cycle to see why the watchdog did or did not act.\n"
+        f"6. `ao_inbox` with arguments `{call_arg}` — check unacknowledged coordination messages.\n\n"
+        "Authority stays in the CLI — no MCP resource, prompt or tool records an approval, a commit-ok, "
+        "a waiver, an answer or a harness-seen. When a person's action is needed to unblock the project, "
+        "return the command text only:\n"
+        f"- Answer an open decision or proposal: `{cli_prefix} answer ID KEY`\n"
+        f"- Mark harness changes seen: `{cli_prefix} harness seen --by NAME`\n"
+        f"- Record a person review: `{cli_prefix} person-review --by NAME --verdict APPROVED --digest DIGEST`\n"
+        f"- Waive a gate on the record: `{cli_prefix} waive GATE --slice SLICE --by NAME --why \"REASON\"`\n"
+        f"- Grant commit authority: `{cli_prefix} commit-ok --verify`"
+    )
+
+
+def prompt_get(cfg, project_scope=None, params=None):
+    """Answer `prompts/get`: (result, error) naming the project and ordered ao tools to call (MCP-RES)."""
+    if not isinstance(params, dict) or not isinstance(params.get("name"), str):
+        return None, {"code": INVALID_PARAMS, "message": "Invalid params: prompt name is required"}
+    name = params["name"]
+    spec = PROMPT_SPEC_BY_NAME.get(name)
+    if spec is None:
+        return None, {"code": INVALID_PARAMS, "message": f"Invalid params: unknown prompt {name!r}"}
+    raw_args = params.get("arguments")
+    if raw_args is None:
+        raw_args = {}
+    if not isinstance(raw_args, dict) or any(not isinstance(k, str) or not isinstance(v, str)
+                                             for k, v in raw_args.items()):
+        return None, {"code": INVALID_PARAMS, "message": "Invalid params: arguments must be a map of strings"}
+    resolved, problem = _resolve_project(cfg, project_scope, raw_args.get("project"))
+    if problem is not None:
+        return None, {"code": INVALID_PARAMS, "message": f"Invalid params: {problem}"}
+    project_name, root, _ = resolved
+    slice_id = None
+    if name == "land-slice":
+        slice_id = raw_args.get("slice", "").strip()
+        if not slice_id or any(ch in slice_id for ch in "\r\n\0"):
+            return None, {"code": INVALID_PARAMS, "message": "Invalid params: argument 'slice' is required"}
+    text = _prompt_text(name, project_name, root, slice_id=slice_id)
+    return {
+        "description": f"{spec['description']} (project: {project_name})",
+        "messages": [{
+            "role": "user",
+            "content": {"type": "text", "text": text},
+        }],
+    }, None
+
+
+def _attach_project(payload, project_name, project_scope):
+    if project_scope == "all" and isinstance(payload, dict) and "error" not in payload:
+        return dict({"project": project_name}, **payload)
+    return payload
+
+
+def call(name, args, cfg, allow_verify, role=None, project_scope=None):
+    """Run one tool for a server started for `role` and `project_scope`, and return what it answers.
 
     A tool outside the role's set is refused here, not only left off the listing: a client can
     call a name it was never shown, and the refusal is the same whichever way the call arrives.
+    With `--project all`, every call must name a project in ao's project registry (`project_registry_path`),
+    and any project outside the registry is refused before the tool runs (MCP-RES).
     """
-    root = cfg["root"]
-    if name in EVERY_TOOL and name not in role_tools(role):
+    args = args if isinstance(args, dict) else {}
+    if name not in EVERY_TOOL:
+        return {"error": f"unknown tool {name}"}
+    if name not in role_tools(role):
         return {"error": f"{name} is not one of the {role}'s tools; this server was started with --role {role}"}
+    resolved, problem = _resolve_project(cfg, project_scope, args.get("project"))
+    if problem is not None:
+        return {"error": problem}
+    project_name, root, cfg = resolved
     if name == "ao_status":
-        return status_payload(cfg)
+        out = status_payload(cfg)
+        if project_scope == "all":
+            out = dict(out, project=project_name)
+        return out
     if name == "ao_board":
-        return board_payload(root)
+        return _attach_project(board_payload(root), project_name, project_scope)
     if name == "ao_candidate":
-        return candidate_payload(cfg)
+        return _attach_project(candidate_payload(cfg), project_name, project_scope)
     if name == "ao_notices":
-        return {"notices": A.notices(root, args.get("limit", 10),
-                                     args.get("include_suppressed", False))}
+        return _attach_project({"notices": A.notices(root, args.get("limit", 10),
+                                                     args.get("include_suppressed", False))},
+                               project_name, project_scope)
     if name == "ao_fleet":
+        if project_scope == "all":
+            projects = [{"name": proj, "root": path} for proj, path in sorted(registered_projects().items())]
+            return {"project": project_name, "projects": projects}
         return {"projects": [{"name": os.path.basename(w["path"]), "root": w["path"]}
                              for w in A.all_workspaces()]}
     if name == "ao_inbox":
@@ -320,8 +780,9 @@ def call(name, args, cfg, allow_verify, role=None):
                 continue
             out.append({"id": m, "body": body})
         A.mail_seen(root, [message["id"] for message in out], "implementer")   # shown, not handled (#30)
-        return {"messages": out, "count": len(out),
-                "note": "acknowledge each with ao_ack after applying or rejecting it"}
+        return _attach_project({"messages": out, "count": len(out),
+                                "note": "acknowledge each with ao_ack after applying or rejecting it"},
+                               project_name, project_scope)
 
     if name == "ao_ack":
         box = cfg.get("mailbox", "agent-mail")
@@ -346,7 +807,8 @@ def call(name, args, cfg, allow_verify, role=None):
                         sent=False, key="ack")
         A.mail_ledger_append(root, {"event": "consumed", "id": mid,
                                     "outcome": args.get("outcome", "applied")})
-        return {"acknowledged": mid, "outcome": args.get("outcome", "applied")}
+        return _attach_project({"acknowledged": mid, "outcome": args.get("outcome", "applied")},
+                               project_name, project_scope)
 
     if name == "ao_report":
         box = cfg.get("mailbox", "agent-mail")
@@ -373,10 +835,12 @@ def call(name, args, cfg, allow_verify, role=None):
                 dup = m
         if dup:
             n = A.bump_repeat(os.path.join(root, box, dup), cfg)
-            return {"written": dup, "repeated": n, "escalates": kind == "blocked",
-                    "delivered_to_phone": 0,
-                    "note": (f"the same {kind} report is already standing ({n}× now); the architect "
-                             f"sees one file with its original time. Do not report it again; end the turn.")}
+            return _attach_project(
+                {"written": dup, "repeated": n, "escalates": kind == "blocked",
+                 "delivered_to_phone": 0,
+                 "note": (f"the same {kind} report is already standing ({n}× now); the architect "
+                          f"sees one file with its original time. Do not report it again; end the turn.")},
+                project_name, project_scope)
         name_ = f"{time.strftime('%Y%m%d-%H%M')}-{impl}-to-{arch}-{kind.upper()}-{slug}.md"
         text = f"# {args['summary']}\n\n{header}\n\n"
         # Counts are quoted from the ledger, not typed; a green claim over a red
@@ -404,24 +868,32 @@ def call(name, args, cfg, allow_verify, role=None):
                     root)
             except Exception:
                 pass
-        return {"written": name_, "escalates": kind == "blocked",
-                "delivered_to_phone": delivered, "inconsistent": inconsistent,
-                "note": ("the architect is woken on the next watchdog cycle"
-                         if kind == "blocked" else "queued for the architect")}
+        return _attach_project(
+            {"written": name_, "escalates": kind == "blocked",
+             "delivered_to_phone": delivered, "inconsistent": inconsistent,
+             "note": ("the architect is woken on the next watchdog cycle"
+                      if kind == "blocked" else "queued for the architect")},
+            project_name, project_scope)
 
     if name == "ao_watchdog":
         from types import SimpleNamespace
         from . import watchdog as W
         if args.get("action", "explain") == "trace":
-            return {"cycles": W.cycles(root, int(args.get("last") or 20))}
+            return _attach_project({"cycles": W.cycles(root, int(args.get("last") or 20))},
+                                   project_name, project_scope)
         W.run(SimpleNamespace(root=root, idle_minutes=None, dry_run=True))
-        return {"facts": dict(W._FACTS), "trace": list(W._TRACE),
-                "verdict": W._TRACE[-1] if W._TRACE else ""}
+        return _attach_project({"facts": dict(W._FACTS), "trace": list(W._TRACE),
+                                "verdict": W._TRACE[-1] if W._TRACE else ""},
+                               project_name, project_scope)
     if name == "ao_fanout":
         if args.get("action") == "record":
-            return A.record_fanout(root, args["agents"], args.get("done"), args.get("errors"),
-                                   args.get("tokens"), args.get("note"))
-        return A.fanout_verdict(root, cfg, int(args["agents"]), args.get("per_agent_tokens"))
+            return _attach_project(
+                A.record_fanout(root, args["agents"], args.get("done"), args.get("errors"),
+                                args.get("tokens"), args.get("note")),
+                project_name, project_scope)
+        return _attach_project(
+            A.fanout_verdict(root, cfg, int(args["agents"]), args.get("per_agent_tokens")),
+            project_name, project_scope)
     if name == "ao_ask":
         rec = A.ask(root, args["question"], args.get("options") or [],
                     context=args.get("context"), slice_id=args.get("slice"), cfg=cfg)
@@ -434,13 +906,15 @@ def call(name, args, cfg, allow_verify, role=None):
             delivered = _phone_decision(rec, cfg)
         except Exception:
             pass
-        return {"id": rec["id"], "options": rec["options"],
-                "delivered_to_phone": delivered,
-                "note": "park the slice and take the next queued item; check "
-                        "ao_decisions next turn"}
+        return _attach_project({"id": rec["id"], "options": rec["options"],
+                                "delivered_to_phone": delivered,
+                                "note": "park the slice and take the next queued item; check "
+                                        "ao_decisions next turn"},
+                               project_name, project_scope)
 
     if name == "ao_decisions":
-        return {"decisions": A.decisions(root, args.get("state"))}
+        return _attach_project({"decisions": A.decisions(root, args.get("state"))},
+                               project_name, project_scope)
 
     if name == "ao_propose":
         # A proposal, never an edit: it records the change and asks a person, and writes no rule file. It is
@@ -451,17 +925,21 @@ def call(name, args, cfg, allow_verify, role=None):
         except A.ProposalRefused as exc:
             return {"error": str(exc)}
         if not created:
-            return {"id": proposal["id"], "question": proposal["question"], "standing": True,
-                    "note": "this change is proposed already and waits for a person; do not propose it again"}
+            return _attach_project(
+                {"id": proposal["id"], "question": proposal["question"], "standing": True,
+                 "note": "this change is proposed already and waits for a person; do not propose it again"},
+                project_name, project_scope)
         delivered = 0
         try:
             from .cli import _phone_decision
             delivered = _phone_decision(question, cfg)
         except Exception:
             pass
-        return {"id": proposal["id"], "question": proposal["question"], "delivered_to_phone": delivered,
-                "note": "a person accepts or rejects it; keep working under the rule as it stands, and read "
-                        "the answer with ao_decisions"}
+        return _attach_project(
+            {"id": proposal["id"], "question": proposal["question"], "delivered_to_phone": delivered,
+             "note": "a person accepts or rejects it; keep working under the rule as it stands, and read "
+                     "the answer with ao_decisions"},
+            project_name, project_scope)
 
     if name == "ao_verify":
         if not allow_verify:
@@ -471,8 +949,9 @@ def call(name, args, cfg, allow_verify, role=None):
                            + (["-p", args["profile"]] if args.get("profile") else []),
                            capture_output=True, text=True, encoding=UTF8, errors="replace", timeout=3600,
                            cwd=A.self_child_cwd(), env=A.self_child_env())
-        return {"exit": r.returncode, "output": (r.stdout or r.stderr)[-4000:],
-                "record": A.latest_verification(root)}
+        return _attach_project({"exit": r.returncode, "output": (r.stdout or r.stderr)[-4000:],
+                                "record": A.latest_verification(root)},
+                               project_name, project_scope)
     return {"error": f"unknown tool {name}"}
 
 
@@ -480,10 +959,14 @@ def _server_info():
     return {"name": "agent-orchestrator", "version": __version__}
 
 
+def _capabilities():
+    return {key: dict(value) for key, value in CAPABILITIES.items()}
+
+
 def _discover_result():
     return {"resultType": "complete",
             "supportedVersions": list(PROTOCOLS),
-            "capabilities": {"tools": {}},
+            "capabilities": _capabilities(),
             "_meta": {"io.modelcontextprotocol/serverInfo": _server_info()}}
 
 
@@ -498,7 +981,7 @@ def _negotiate_initialize(params):
         return None, {"code": INVALID_PARAMS, "message": "Invalid params"}
     version = requested if requested in PROTOCOLS else PROTOCOL
     return {"protocolVersion": version,
-            "capabilities": {"tools": {}},
+            "capabilities": _capabilities(),
             "serverInfo": _server_info()}, None
 
 
@@ -549,12 +1032,13 @@ def main():
     allow_verify = "--allow-verify" in sys.argv
     if "-C" in sys.argv:
         root = sys.argv[sys.argv.index("-C") + 1]
-    # The role the registration names (MCP-ROLES): fixed for the session, since a harness starts
-    # its servers once, when its session starts. Read as AO_ROLE is, without case or surrounding
-    # space, so a hand-written `Reviewer` is the reviewer; a role it does not know stops the
-    # server before it answers anything, where it was served every tool (HUNT-LEADS-SEC).
+    # The role and project scope the registration names (MCP-ROLES, MCP-RES): fixed for the session,
+    # since a harness starts its servers once, when its session starts. Read without case or
+    # surrounding space, so a hand-written `Reviewer` is the reviewer; a role or `--project` value
+    # the server does not know stops the server before it answers anything (HUNT-LEADS-SEC).
     try:
         role = served_role(sys.argv[1:])
+        project_scope = served_project(sys.argv[1:])
     except ValueError as refused:
         print(refused, file=sys.stderr, flush=True)
         return 2
@@ -562,7 +1046,7 @@ def main():
     notice = role_notice(role)
     if notice:
         print(notice, file=sys.stderr, flush=True)
-    cfg = A.load_config(A.find_root(root))
+    cfg = {"root": A.find_root(root)} if project_scope == "all" else A.load_config(A.find_root(root))
 
     for line in sys.stdin:
         line = line.strip()
@@ -597,37 +1081,53 @@ def main():
             elif method == "initialize":
                 result, error = _negotiate_initialize(req.get("params"))
             else:
-                negotiated, error = _negotiate_meta(req.get("params"), require_meta=(method == "server/discover"))
+                params = req.get("params")
+                negotiated, error = _negotiate_meta(params, require_meta=(method == "server/discover"))
                 if error is None:
                     if method == "server/discover":
                         result = _discover_result()
                     elif method == "tools/list":
-                        result = {"tools": [tool for tool in TOOLS if tool["name"] in served]}
+                        result = {"tools": tools_for_role(role, project_scope)}
                     elif method == "tools/call":
-                        p = req.get("params") or {}
-                        payload = call(p.get("name"), p.get("arguments") or {}, cfg, allow_verify, role)
+                        p = params if isinstance(params, dict) else {}
+                        args = p.get("arguments") if isinstance(p.get("arguments"), dict) else {}
+                        payload = call(p.get("name"), args, cfg, allow_verify, role, project_scope)
                         # Ride along on whatever the agent called. MCP has no way to push,
                         # so the next best thing is to attach the message to the next
                         # response it asks for — which costs nothing and arrives sooner
                         # than the agent's own next inbox check. Only where ao_inbox is served:
                         # the note sends the agent there, and a role without it - a reviewer -
                         # can neither read the message nor acknowledge it.
-                        if isinstance(payload, dict) and p.get("name") != "ao_inbox" and "ao_inbox" in served:
-                            urgent = A.urgent_messages(cfg["root"], cfg)
-                            if urgent:
-                                payload["URGENT_UNACKNOWLEDGED"] = [
-                                    {"id": u["id"], "title": u["title"]} for u in urgent]
-                                payload["URGENT_NOTE"] = (
-                                    "Read these with ao_inbox and acknowledge them before "
-                                    "continuing. ao commit-ok will refuse while any remain.")
+                        if (isinstance(payload, dict) and "error" not in payload
+                                and p.get("name") != "ao_inbox" and "ao_inbox" in served):
+                            resolved, problem = _resolve_project(cfg, project_scope, args.get("project"))
+                            if problem is None:
+                                _, target_root, target_cfg = resolved
+                                urgent = A.urgent_messages(target_root, target_cfg)
+                                if urgent:
+                                    payload["URGENT_UNACKNOWLEDGED"] = [
+                                        {"id": u["id"], "title": u["title"]} for u in urgent]
+                                    payload["URGENT_NOTE"] = (
+                                        "Read these with ao_inbox and acknowledge them before "
+                                        "continuing. ao commit-ok will refuse while any remain.")
                         result = {"content": [{"type": "text",
                                                "text": json.dumps(payload, ensure_ascii=False,
                                                                   indent=2, default=str)}]}
+                    elif method == "resources/list":
+                        result, error = resources_list(cfg, project_scope, params)
+                    elif method == "resources/templates/list":
+                        result, error = resource_templates_list(params)
+                    elif method == "resources/read":
+                        result, error = resource_read(cfg, project_scope, params, negotiated=negotiated)
+                    elif method == "prompts/list":
+                        result, error = prompts_list(project_scope, params)
+                    elif method == "prompts/get":
+                        result, error = prompt_get(cfg, project_scope, params)
                     elif method == "ping":
                         result = {}
                     else:
                         raise ValueError(f"method not found: {method}")
-                    if method != "server/discover" and negotiated == PROTOCOL_2026:
+                    if error is None and method != "server/discover" and negotiated == PROTOCOL_2026:
                         result = dict({"resultType": "complete"}, **result,
                                       _meta={"io.modelcontextprotocol/serverInfo": _server_info()})
         except Exception as e:                            # never take the transport down

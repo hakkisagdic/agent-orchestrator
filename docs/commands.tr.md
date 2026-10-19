@@ -38,7 +38,7 @@ Her `ao` komutu ve ne yaptığı. [README](../README.tr.md) her değişiklikte k
 | `ao source import` | takip sistemindeki işleri panoya kabul et |
 | `ao mail` · `ao notices` | koordinasyon mesajları; projenin ürettiği uyarılar |
 | `ao watchdog install` | takılan ajanı yeniden başlatan launchd işi, Linux'ta systemd kullanıcı zamanlayıcısı ([watchdog.md](watchdog.md)) |
-| `ao mcp serve` · `ao a2a serve` | durumu MCP istemcilerine / A2A görevi olarak sun |
+| `ao mcp serve [--project all]` · `ao a2a serve` | durumu, salt okunur kaynakları ve prompt'ları MCP istemcilerine (`--project all` kayıtlı her projeyi sunar) / A2A görevi olarak sun |
 | `ao telegram setup` | telefona uyarı, telefondan karar; ao bot token'ını sorar ve ekrana basmaz, bota yazan sohbetleri bulur, `~/.ao/telegram.json` dosyasını kendisi yazar ([telegram.md](telegram.md)) |
 | `ao ntfy setup --topic-url <url> [--token-env AD]` / `ao ntfy test` / `ao ntfy status` | ntfy.sh ya da kendi ntfy sunucun üzerinden telefona giden uyarılar; `~/.ao/ntfy.json` dosyasını 0600 kipiyle yazar, erişim token'ını yalnız `$AD` değişkeninden okur (asla argüman olmaz, ekrana basılmaz, loglanmaz) ve her uyarıyı alarm seviyesine göre öncelikle gönderir ([alarms.md](alarms.md)) |
 | `ao digest [--days N]` | ne oldu, defterlerden okunur — "neden ilerlemiyor"un da cevabı |

@@ -493,6 +493,8 @@ def build_parser(root=None):
     mc.add_argument("--role", type=lambda given: given.strip().lower(), choices=sorted(A.ROLE_BLOCKS),
                     help="the role this server serves: architect, implementer or reviewer, each only its own tools "
                          "(default: every tool)")
+    mc.add_argument("--project", type=lambda given: given.strip().lower(), choices=["all"],
+                    help="all: serve every project in ao's project registry on one server, refusing any outside it")
     mc.set_defaults(fn=cmd_mcp)
     am = sub.add_parser("a2a-mcp", help="reach A2A agents from an MCP client (stdio)")
     am.add_argument("action", choices=["serve", "config"], nargs="?", default="config")

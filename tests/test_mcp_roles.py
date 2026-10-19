@@ -335,7 +335,7 @@ def test_server_discover_answers_with_supported_versions_capabilities_and_server
         "result": {
             "resultType": "complete",
             "supportedVersions": ["2026-07-28", "2025-06-18"],
-            "capabilities": {"tools": {}},
+            "capabilities": {"tools": {}, "resources": {}, "prompts": {}},
             "_meta": {"io.modelcontextprotocol/serverInfo": {"name": "agent-orchestrator", "version": mcp.__version__}},
         },
     }
@@ -369,7 +369,8 @@ def test_each_kept_protocol_version_works_on_requests_and_older_clients_keep_wor
     assert answers[3]["result"] == {"resultType": "complete", "_meta": server_meta}
     assert answers[4]["result"] == {"tools": [tool for tool in mcp.TOOLS if tool["name"] in REVIEWER]}
     assert answers[5]["result"] == {}
-    assert answers[6]["result"] == {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
+    assert answers[6]["result"] == {"protocolVersion": "2025-06-18",
+                                    "capabilities": {"tools": {}, "resources": {}, "prompts": {}},
                                     "serverInfo": {"name": "agent-orchestrator", "version": mcp.__version__}}
     assert [tool["name"] for tool in answers[7]["result"]["tools"]] == sorted(REVIEWER, key=mcp.EVERY_TOOL.index)
     assert answers[8]["result"] == {}

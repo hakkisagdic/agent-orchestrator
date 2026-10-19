@@ -38,7 +38,7 @@ Every `ao` command and what it does. The [README](../README.md) starts with the 
 | `ao source import` | admit tracker items onto the board |
 | `ao mail` · `ao notices` | coordination messages; alerts this project raised |
 | `ao watchdog install` | launchd job, or systemd user timer on Linux, that restarts a stalled agent ([watchdog.md](watchdog.md)) |
-| `ao mcp serve` · `ao a2a serve` | expose state to MCP clients / as A2A tasks |
+| `ao mcp serve [--project all]` · `ao a2a serve` | expose state, read-only resources and prompts to MCP clients (`--project all` serves every registered project) / as A2A tasks |
 | `ao telegram setup` | alerts to your phone, decisions back from it; ao asks for the bot token and does not show it, finds the chats that wrote to the bot, and writes `~/.ao/telegram.json` itself ([telegram.md](telegram.md)) |
 | `ao ntfy setup --topic-url <url> [--token-env NAME]` / `ao ntfy test` / `ao ntfy status` | outbound phone alerts via ntfy.sh or your own ntfy server; writes `~/.ao/ntfy.json` mode 0600, reads an access token only from `$NAME` (never an argument, never printed, never logged), and sends each alert with a priority from its alarm level ([alarms.md](alarms.md)) |
 | `ao digest [--days N]` | what happened, read from the ledgers — also answers "why is nothing moving" |

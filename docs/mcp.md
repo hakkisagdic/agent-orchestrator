@@ -12,6 +12,7 @@ So `ao` also ships as an MCP server. Same protocol, same state, two doors.
 ```bash
 ao mcp serve                 # stdio MCP server
 ao mcp serve --role reviewer # the same, serving the reviewer's tools alone (see Roles)
+ao mcp serve --project all   # one server for every project in ao's project registry
 ```
 
 Register it the way your agent registers any stdio server:
@@ -50,7 +51,8 @@ every tool for the rest of the session.*
 and `io.modelcontextprotocol/logLevel`) and may probe `server/discover` for `supportedVersions`
 (`["2026-07-28", "2025-06-18"]`), `capabilities`, `resultType: "complete"` and
 `_meta["io.modelcontextprotocol/serverInfo"]`, which `2026-07-28` replies on `tools/list`,
-`tools/call` and `ping` also carry; an unknown version in `_meta` is refused with JSON-RPC error
+`tools/call`, `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list`,
+`prompts/get` and `ping` also carry; an unknown version in `_meta` is refused with JSON-RPC error
 `-32022` (`Unsupported protocol version`) and
 `data: {"supported": ["2026-07-28", "2025-06-18"], "requested": ...}`, and missing or malformed
 `_meta` with `-32602` (`Invalid params`). An older client that opens the session with `initialize`
@@ -82,10 +84,59 @@ changes nothing, **write** records something in its mailbox, decisions or ledger
 | `ao_watchdog` | read | Why the watchdog acted or did not: one dry cycle, or the cycles it recorded. |
 | `ao_verify` | run | Runs the project's gates as `ao verify` does, and records the verification. |
 
+## Resources
+
+*In ao since slice MCP-RES: `ao mcp serve` advertises the `resources` capability and serves four
+read-only JSON resources per project through `resources/list`, `resources/templates/list` and
+`resources/read`. None carries or records authority.*
+
+| URI | Template | MIME type | What it holds |
+|---|---|---|---|
+| `ao://<project>/board` | `ao://{project}/board` | `application/json` | Where each pre-authorised work item stands on the board, what is ready, and any graph problems. |
+| `ao://<project>/roles` | `ao://{project}/roles` | `application/json` | The project's actors, held roles and any pending reassignment waiting for a running slice to finish. |
+| `ao://<project>/ledger` | `ao://{project}/ledger` | `application/json` | Read-only summary counts and latest entries of the slice, verification, review, decision and waiver ledgers (never a grant token). |
+| `ao://<project>/decisions` | `ao://{project}/decisions` | `application/json` | The project's latest architect decisions and asked questions, with the count still open or proposed. |
+
+An unknown URI or a project the server does not serve is refused on `resources/read` with `-32002`
+(`Resource not found`) in `2025-06-18` and `-32602` (`Invalid params`) in `2026-07-28`, as each
+revision of the specification defines.
+
+## Prompts
+
+*In ao since slice MCP-RES: `ao mcp serve` advertises the `prompts` capability and offers three menu
+prompts through `prompts/list` and `prompts/get`.*
+
+| Prompt | Arguments | Ordered tools named |
+|---|---|---|
+| `status` | `project` (required with `--project all`) | `ao_status` → `ao_board` → `ao_decisions` → `ao_notices` |
+| `land-slice` | `slice` (required), `project` (required with `--project all`) | `ao_board` → `ao_status` → `ao_inbox` → `ao_decisions` → `ao_verify` → `ao_candidate` |
+| `stuck` | `project` (required with `--project all`) | `ao_status` → `ao_board` → `ao_decisions` → `ao_notices` → `ao_watchdog` → `ao_inbox` |
+
+Each prompt returns a user message naming the project, the `ao` tools to call in order, and the CLI
+commands for any step that belongs to a person (`ao commit-ok`, `ao commit`, `ao review`,
+`ao person-review`, `ao collect-review`, `ao waive`, `ao answer`, `ao harness seen`). No resource,
+prompt or tool records an approval, a `commit-ok`, a waiver, an answer or a `harness-seen`: a
+person's step comes back as the CLI command text only.
+
+## Serving every registered project (`--project all`)
+
+```bash
+ao mcp serve --project all
+ao mcp config --project all
+```
+
+Started with `--project all`, one server serves every project recorded in ao's machine project
+registry (`~/.ao/projects.json`, or `AO_PROJECT_REGISTRY`). Every tool schema requires `project`,
+every tool response names `project`, `resources/list` lists the four `ao://<project>/...` resources
+for each registered project, and `prompts/list` marks `project` as a required prompt argument. Any
+tool call, resource read or prompt get naming a project outside the registry is refused before
+anything runs.
+
 ## Capability gating
 
-The server has two switches: `--allow-verify`, for the one tool that runs something, and
-`--role`, for which tools a session is served at all ([Roles](#roles), below).
+The server has three switches: `--allow-verify`, for the one tool that runs something, `--role`, for
+which tools a session is served at all ([Roles](#roles), below), and `--project all`, for serving
+every project in ao's project registry on one server.
 
 ```bash
 ao mcp serve                  # every tool but ao_verify
