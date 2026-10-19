@@ -249,7 +249,7 @@ adapters declare; the models are the ones the configuration names, as `model` or
 adapter's model option in the reviewer's argv. The reviewer is admitted only when both declare
 one family, both name a model and the two models differ. A person opts a project in with
 `ao config set review.same_family labeled --by <name>`, or at init with
-`ao init --profile claude-claude --review-tier same-family --by <name>`: the name, the login
+`ao init --implementer claude-code --review-tier same-family --by <name>`: the name, the login
 and whether a terminal was attached go to `.ao/ledger/opt-ins.jsonl`. A value written into
 `.ao/config.json` by hand is not in force, because an agent that edits files can write it, and
 `ao doctor` names it. Withdrawn (`ao config set review.same_family refused --by <name>`), the

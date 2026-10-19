@@ -13,10 +13,19 @@ def _bare(root):
 
 def test_the_reviewer_ao_writes_starts_no_mcp_server_on_either_path(project):
     root = project["root"]
+    for reviewer_model in (None, "gpt-6-luna"):
+        _bare(root)
+        args = SimpleNamespace(profile="agy-codex", implementer=None, model=None, effort=None,
+                               reviewer_model=reviewer_model)
+        cli._apply_profile(root, args)
+        argv = json.load(open(os.path.join(root, ".ao", "config.json"), encoding="utf-8"))["reviewer"]["argv"]
+
+        assert "--ignore-user-config" in argv
+        assert AL.reviewer_problems(argv) == []
     for reviewer_model in (None, "claude-sonnet-5"):
         _bare(root)
-        args = SimpleNamespace(profile="claude-kiro", implementer=None, model=None, effort=None,
-                               reviewer_model=reviewer_model)
+        args = SimpleNamespace(profile=None, implementer="claude-code", model=None, effort=None,
+                               reviewer_model=reviewer_model, review_tier="same-family", by="Alice")
         cli._apply_profile(root, args)
         argv = json.load(open(os.path.join(root, ".ao", "config.json"), encoding="utf-8"))["reviewer"]["argv"]
 

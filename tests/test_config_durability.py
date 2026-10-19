@@ -12,7 +12,7 @@ from ao import cli, lib as A, storage
 from tests.test_capability_matrix import _strict_config
 
 SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
-PROFILE = dict(profile="claude-kiro", implementer=None, model=None, effort=None, reviewer_model=None)
+PROFILE = dict(profile="agy-codex", implementer=None, model=None, effort=None, reviewer_model=None)
 
 CHILD = r'''
 import os, sys, time

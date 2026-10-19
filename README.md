@@ -32,7 +32,7 @@ To see it first, `ao demo` plays one change through ao on a scratch project ([de
 ```bash
 pip install ao-orchestrator          # or: uv tool install ao-orchestrator
 cd your-repository
-ao init --profile claude-kiro        # Kiro implements, Claude reviews; or claude-claude
+ao init --profile agy-codex          # agy (Gemini 4 Argon) implements, Codex (gpt-6-luna) reviews; or codex-agy, claude-codex
 git add .ao-project .gitignore && git commit -m "adopt ao"
 ao hooks install                     # from here on, only a granted candidate commits
 ```
@@ -48,9 +48,15 @@ ao commit -m "feat: what changed"    # commit it, bound to that evidence by its 
 ```
 
 [Getting started](docs/getting-started.md) goes through it step by step, and `ao prove` runs the
-guarantees on a throwaway candidate instead of describing them. With one harness for every role,
-`claude-claude` asks for a [review tier](docs/roles.md#review-tiers): another model of the same
-family, labelled as weaker independence, or a person.
+guarantees on a throwaway candidate instead of describing them. [Profiles](docs/profiles.md)
+offers three cross-family presets — `agy-codex` (`antigravity` `verified: full`, Gemini 4 Argon
+implementer with `codex` `verified: partial`, `gpt-6-luna` reviewer), `codex-agy` (`codex`
+`verified: partial`, `gpt-6-astra` implementer with `antigravity` `verified: full` read-only
+reviewer agent on Gemini 4 Argon) and `claude-codex` (`claude-code` `verified: full` implementer
+with `codex` `verified: partial`, `gpt-6-luna` reviewer), each with a `claude-code` (`verified:
+full`) architect. With one harness for every role (`--implementer claude-code`), `ao init` asks
+for a [review tier](docs/roles.md#review-tiers): another model of the same family, labelled as
+weaker independence, or a person.
 
 `ao status` names the most recently active secondary project while the primary session
 is slowing, stopped or idle. `ao doctor` reports a script selected by `AO_GIT` and

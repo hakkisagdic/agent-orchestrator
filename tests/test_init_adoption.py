@@ -175,7 +175,7 @@ def test_adoption_leaves_a_completed_removal_removed(tmp_path, monkeypatch, caps
     assert cli._project_enrollment(str(root))["state"] == "uninitialized"
 
 
-@pytest.mark.parametrize("argv", (("--adopt", "--profile", "claude-kiro"), ("--allow-shared-hooks",)))
+@pytest.mark.parametrize("argv", (("--adopt", "--profile", "agy-codex"), ("--allow-shared-hooks",)))
 def test_options_that_do_not_belong_together_are_refused_before_anything_is_written(
         tmp_path, monkeypatch, capsys, argv):
     root, cfg, hook = _legacy(tmp_path, monkeypatch)

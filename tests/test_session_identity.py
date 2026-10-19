@@ -95,7 +95,7 @@ def _wakes(world):
     return [argv for argv in world.spawned if isinstance(argv, list) and wake in argv]
 
 
-def _init(tmp_path, monkeypatch, name, profile):
+def _init(tmp_path, monkeypatch, name, profile, implementer=None):
     """`ao init --profile` in a fresh repository, its reviewer probe answering."""
     root = tmp_path / name
     root.mkdir()
@@ -103,7 +103,7 @@ def _init(tmp_path, monkeypatch, name, profile):
     monkeypatch.setattr(cli, "_reviewer_probe", lambda cfg, timeout=cli.REVIEW_PROBE_TIMEOUT: {
         "configured": True, "ok": True, "route": "fixture-reviewer", "binary": sys.executable,
         "version": "fixture", "reason": "exact nonce echoed", "kind": "success"})
-    args = SimpleNamespace(name=None, profile=profile, implementer=None, model=None, effort=None,
+    args = SimpleNamespace(name=None, profile=profile, implementer=implementer, model=None, effort=None,
                            reviewer_model=None, agent=None, no_mcp=True, rules=False, watchdog=False)
     assert cli.cmd_init({"root": str(root)}, args) == 0
     return str(root)
@@ -121,7 +121,7 @@ def _panel(cfg, monkeypatch, capsys):
 
 def test_a_kiro_profile_resolves_auto_to_the_workspaces_newest_session_and_status_reads_it(
         project, monkeypatch, tmp_path, capsys):
-    root = _init(tmp_path, monkeypatch, "kiro-project", "claude-kiro")
+    root = _init(tmp_path, monkeypatch, "kiro-project", None, implementer="kiro")
     stored = json.load(open(os.path.join(root, ".ao", "config.json"), encoding="utf-8"))
     assert stored["implementer"]["session"] == "auto"
     assert ".ao/sessions.json" in open(os.path.join(root, ".gitignore"), encoding="utf-8").read().split("\n")
@@ -142,8 +142,8 @@ def test_a_claude_profile_reads_the_claude_code_session_and_the_architect_does_n
         project, monkeypatch, capsys):
     root = project["root"]
     _config(root, {"project": "proj", "round_budget": 5})
-    # The blocks `ao init --profile claude-claude` writes; whether its reviewer may review is another question.
-    args = SimpleNamespace(profile="claude-claude", implementer=None, model=None, effort=None, reviewer_model=None)
+    # The blocks `ao init --profile claude-codex` writes: implementer and architect both run Claude Code.
+    args = SimpleNamespace(profile="claude-codex", implementer=None, model=None, effort=None, reviewer_model=None)
     assert cli._apply_profile(root, args) == ["implementer", "reviewer", "architect"]
     only = _claude_session(root, "s-only", 1800)
 

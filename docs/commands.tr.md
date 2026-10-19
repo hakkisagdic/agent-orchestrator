@@ -28,7 +28,7 @@ Her `ao` komutu ve ne yaptığı. [README](../README.tr.md) her değişiklikte k
 | `ao remove --yes [--allow-shared-hooks]` | iki aşamalı kaldırma: dayatma etkinken `.ao-project` dosyasını silip commit et, HEAD ve index artık taşımayınca AO durumunu kaldır; yabancı/korunan hook'lara dokunma. İkinci aşama projenin zamanlanmış işlerini ve `~/.ao` içindeki yalnız kendi dosyalarını kaldırır, kuru koşuda her birini adıyla listeler ve kaldıramadığını adıyla söyleyip 1 ile çıkar ([watchdog.md](watchdog.md)) |
 | `ao update [--dry-run\|--yes]` | ao'yu kurulduğu yoldan güncelle: git klonu ileri sarılır, commit edilmemiş değişikliği varken reddedilir; Homebrew, pipx ya da uv kurulumu kendi aracıyla, pip kurulumu ao'yu çalıştıran yorumlayıcının pip'iyle yükseltilir. Komut önce gösterilir, `--yes` ya da terminaldeki bir evet ile çalışır ([başlarken](getting-started.md#5-update-and-uninstall)) |
 | `ao uninstall [--yes] [--purge] [--allow-shared-hooks]` | ao'nun bu makineye kurduklarını kaldır: ao'nun her zamanlanmış işi, kayıt defterinin bildiği her projedeki ao'nun kendi hook'ları ve MCP dosyalarındaki `ao` girdisi; `--yes` olmadan kuru koşudur ve bıraktıklarını adıyla söyler - her projenin `.ao/` dizini, `--purge` yoksa `~/.ao` ve programın kendisi, onu kaldıran komutla birlikte |
-| `ao init --profile claude-kiro|claude-claude [--review-tier same-family|person] [--language en|tr]` | rol bloklarını ve exact `.ao-project` kayıt işaretini yaz, ama stage etme; tek harness'lı profil bir review katmanı seçer ([profiles.md](profiles.md)); `--language tr` ile ao'nun projeye yazdıkları ve insanlara söyledikleri Türkçe olur ([configuration.md](configuration.md)) |
+| `ao init --profile agy-codex|codex-agy|claude-codex [--review-tier same-family|person] [--language en|tr]` | rol bloklarını ve exact `.ao-project` kayıt işaretini yaz, ama stage etme; tek harness'lı kurulum bir review katmanı seçer ([profiles.md](profiles.md)); `--language tr` ile ao'nun projeye yazdıkları ve insanlara söyledikleri Türkçe olur ([configuration.md](configuration.md)) |
 | `ao demo [--keep]` | güvence, ao daha deponda yokken yaklaşık bir dakikada: kendi home'u ve vekil bir reviewer'ı olan geçici bir projede hatalı bir değişikliği review, `ao commit-ok` ve commit hook'u reddeder, düzeltmesi Ao- trailer'larıyla iner; geçici klasörün dışında hiçbir şeye dokunulmaz, `--keep` o klasörü bırakır ([demo.md](demo.md)) |
 | `ao doctor --check` | zamanlayıcı için sessiz doctor: problem başına bir satır, exit 1, alarm — `ao watchdog install` 15 dakikalık launchd işi, Linux'ta systemd kullanıcı zamanlayıcısı olarak kurar |
 | `ao email setup` / `ao email test` | kırmızı alarm kanalı: formsubmit.co ile e-posta, sunucu yok ([alarms.md](alarms.md)) |
@@ -66,7 +66,7 @@ dayatmayı korur. Kayıtlı projede `.ao/config.json` geçerli, boş olmayan üs
 JSON nesnesi olmalıdır. AO en fazla 1.048.576 bayt okur ve 64'ten derin container
 yapısını recursive JSON ayrıştırmasından önce reddeder; komut yönlendirmesi
 öncesindeki yükleme ile commit dayatması aynı bounded sonucu kullanır. Eksik ya da
-okunamayan durum tek satırlık `ao init --profile claude-kiro` düzeltmesiyle
+okunamayan durum tek satırlık `ao init --profile agy-codex` düzeltmesiyle
 birlikte reddedilir.
 
 `current-local (behavior unverified)` ve `current-scoped (behavior unverified)`

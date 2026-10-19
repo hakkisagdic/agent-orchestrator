@@ -4,23 +4,29 @@ from ao import cli, lib as A
 
 
 def _args(**overrides):
-    return SimpleNamespace(**dict(dict(profile="claude-kiro", implementer=None, model=None, effort=None,
+    return SimpleNamespace(**dict(dict(profile="agy-codex", implementer=None, model=None, effort=None,
                                        reviewer_model=None), **overrides))
 
 
 def test_a_profile_composes_its_blocks_from_the_adapters_it_names(project):
-    roles = A.profiles()["claude-kiro"]
+    shipped = A.package_adapters()
+    assert A.default_profile() == "agy-codex"
+    for name, roles in A.profiles().items():
+        for role in ("implementer", "reviewer", "architect"):
+            assert roles[role] in shipped
+        cfg, added = cli._profile_config(project["root"], _args(profile=name), {})
 
-    cfg, added = cli._profile_config(project["root"], _args(), {})
-
-    assert added == ["implementer", "reviewer", "architect"]
-    assert cfg["implementer"]["name"] == A.load_adapter(roles["implementer"])["actor_name"]
-    review_model = A.load_adapter(roles["reviewer"])["models"]["review"]
-    assert cfg["reviewer"]["argv"] == A.compose_reviewer(roles["reviewer"], model=review_model)["argv"]
-    assert cfg["reviewer"]["id"].endswith(f"-reviewer-{review_model}") and cfg["reviewer"]["family"]
-    options = A.load_adapter(roles["architect"])["options"]
-    tools = options["allowed_tools"][0]
-    assert cfg["architect"]["argv"].count(tools) == 1 and cfg["architect"]["argv"][-1] == options["architect_tools"]
+        assert added == ["implementer", "reviewer", "architect"]
+        assert cfg["implementer"]["name"] == A.load_adapter(roles["implementer"])["actor_name"]
+        assert cfg["implementer"]["model"] == A.load_adapter(roles["implementer"])["models"]["default"]
+        review_model = A.load_adapter(roles["reviewer"])["models"]["review"]
+        assert cfg["reviewer"]["argv"] == A.compose_reviewer(roles["reviewer"], model=review_model)["argv"]
+        assert cfg["reviewer"]["id"].endswith(f"-reviewer-{review_model}") and cfg["reviewer"]["family"]
+        assert cli._reviewer_ineligible(cfg, cfg["reviewer"]) is None
+        assert cli._review_tier(cfg, cfg["reviewer"]) == ("independent", None)
+        options = A.load_adapter(roles["architect"])["options"]
+        tools = options["allowed_tools"][0]
+        assert cfg["architect"]["argv"].count(tools) == 1 and cfg["architect"]["argv"][-1] == options["architect_tools"]
     assert cli.PROJECT_INIT_COMMAND == f"ao init --profile {A.default_profile()}"
 
 

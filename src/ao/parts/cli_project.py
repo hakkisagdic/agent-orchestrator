@@ -353,7 +353,7 @@ def _profile_config(root, args, base):
         added.append("implementer")
     if "reviewer" not in cfg and tier != "person":
         # With --review-tier person no model reviews: a person reviews each candidate.
-        reviewer = roles.get("reviewer")
+        reviewer = impl_adapter if tier == "same-family" and not prof else roles.get("reviewer")
         rmodel = getattr(args, "reviewer_model", None) or _models(reviewer).get("review")
         cfg["reviewer"] = dict(_reviewer_block(reviewer, rmodel),
                                _why="must not be the implementer; a different model where one is available")

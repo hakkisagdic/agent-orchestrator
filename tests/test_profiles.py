@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
-from ao import cli
+from ao import cli, lib as A, tiers as T
 from tests.standin import program
 
 
@@ -15,11 +15,11 @@ def _bare(root):
 def test_profile_writes_role_blocks_and_keeps_existing(project):
     root = project["root"]
     _bare(root)
-    args = SimpleNamespace(profile="claude-claude", implementer=None, model=None, effort=None, reviewer_model=None)
+    args = SimpleNamespace(profile="claude-codex", implementer=None, model=None, effort=None, reviewer_model=None)
     assert cli._apply_profile(root, args) == ["implementer", "reviewer", "architect"]
     cfg = json.load(open(os.path.join(root, ".ao", "config.json"), encoding="utf-8"))
     assert cfg["implementer"]["adapter"] == "claude-code" and cfg["implementer"]["model"] == "claude-sonnet-5"
-    assert "--model" in cfg["reviewer"]["argv"] and "claude-opus-5" in cfg["reviewer"]["argv"]
+    assert "--model" in cfg["reviewer"]["argv"] and "gpt-6-luna" in cfg["reviewer"]["argv"]
     grant = cfg["architect"]["argv"][-1]
     assert cfg["architect"]["session"] == "auto" and "Bash(ao status:*)" in grant and "Bash(ao:*)" not in grant
     # second run: nothing overwritten
@@ -29,20 +29,94 @@ def test_profile_writes_role_blocks_and_keeps_existing(project):
     assert json.load(open(os.path.join(root, ".ao", "config.json"), encoding="utf-8"))["implementer"]["model"] == "custom"
 
 
-def test_kiro_profile_with_effort(project):
+def test_agy_profile_with_effort(project):
     root = project["root"]
     _bare(root)
-    args = SimpleNamespace(profile="claude-kiro", implementer=None, model=None, effort="high", reviewer_model=None)
+    args = SimpleNamespace(profile="agy-codex", implementer=None, model=None, effort="high", reviewer_model=None)
     cli._apply_profile(root, args)
     cfg = json.load(open(os.path.join(root, ".ao", "config.json"), encoding="utf-8"))
-    assert cfg["implementer"] == {"adapter": "kiro", "session": "auto", "name": "kiro", "effort": "high"}
+    assert cfg["implementer"] == {
+        "adapter": "antigravity",
+        "session": "auto",
+        "name": "agy",
+        "model": "gemini-4-argon-high",
+        "effort": "high",
+    }
 
+
+def test_every_profile_pairs_shipped_adapters_of_different_families_and_engines_and_passes_review_independence(
+    project, tmp_path, monkeypatch
+):
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    shipped = A.package_adapters()
+    assert A.default_profile() == "agy-codex"
+    assert set(A.profiles()) == {"agy-codex", "codex-agy", "claude-codex"}
+    assert "claude-kiro" not in A.profiles() and "claude-claude" not in A.profiles()
+
+    expected = {
+        "agy-codex": (
+            ("antigravity", "agy", "gemini-4-argon-high", "google", "full"),
+            ("codex", "gpt-6-luna", "openai", "partial"),
+            ("claude-code", "full"),
+        ),
+        "codex-agy": (
+            ("codex", "codex", "gpt-6-astra", "openai", "partial"),
+            ("antigravity", "gemini-4-argon-high", "google", "full"),
+            ("claude-code", "full"),
+        ),
+        "claude-codex": (
+            ("claude-code", "claude", "claude-sonnet-5", "anthropic", "full"),
+            ("codex", "gpt-6-luna", "openai", "partial"),
+            ("claude-code", "full"),
+        ),
+    }
+
+    for name, roles in A.profiles().items():
+        for role in ("implementer", "reviewer", "architect"):
+            assert roles[role] in shipped and roles[role] in A.shipped_adapter_ids()
+            assert shipped[roles[role]]["verified"] in A.ADAPTER_VERIFIED
+
+        impl_exp, rev_exp, arch_exp = expected[name]
+        assert (roles["implementer"], roles["reviewer"], roles["architect"]) == (
+            impl_exp[0], rev_exp[0], arch_exp[0]
+        )
+        assert shipped[roles["implementer"]]["verified"] == impl_exp[4]
+        assert shipped[roles["reviewer"]]["verified"] == rev_exp[3]
+        assert shipped[roles["architect"]]["verified"] == arch_exp[1]
+
+        cfg, added = cli._profile_config(project["root"], _init_args(profile=name), {"project": "proj"})
+        assert added == ["implementer", "reviewer", "architect"]
+        assert cfg["implementer"] == {
+            "adapter": impl_exp[0],
+            "session": "auto",
+            "name": impl_exp[1],
+            "model": impl_exp[2],
+        }
+        assert shipped[impl_exp[0]]["family"] == impl_exp[3]
+        assert cfg["reviewer"]["family"] == rev_exp[2]
+        assert cfg["reviewer"]["id"] == f"{shipped[rev_exp[0]]['actor_name']}-reviewer-{rev_exp[1]}"
+        assert any(rev_exp[1] in token for token in cfg["reviewer"]["argv"])
+        if rev_exp[0] == "antigravity":
+            fresh = tmp_path / f"fresh-{name}"
+            fresh.mkdir()
+            agent_argv, why = cli._reviewer_agent(str(fresh), cfg["reviewer"]["argv"])
+            assert why is None and agent_argv[-1].startswith("--agent=ao-reviewer-")
+
+        # Review-time independence check: different families and different engines, independent tier with no opt-in.
+        assert roles["implementer"] != roles["reviewer"]
+        assert shipped[roles["implementer"]]["family"] != cfg["reviewer"]["family"]
+        assert cli._reviewer_ineligible(cfg, cfg["reviewer"]) is None
+        assert cli._review_tier(cfg, cfg["reviewer"]) == (T.INDEPENDENT, None)
+        assert cli._review_decision(cfg, cfg["reviewer"]) == (T.INDEPENDENT, None, None)
 
 
 def _init_args(**overrides):
     values = {
         "name": None,
-        "profile": "claude-kiro",
+        "profile": "agy-codex",
         "implementer": None,
         "model": None,
         "effort": None,
@@ -100,8 +174,8 @@ def test_init_plans_profile_and_failed_reviewer_probe_has_no_side_effects(
         return {
             "configured": True,
             "ok": False,
-            "route": "claude-reviewer",
-            "binary": "/usr/local/bin/claude",
+            "route": "codex-reviewer",
+            "binary": "/usr/local/bin/codex",
             "version": "1.0",
             "reason": "exited 17",
             "kind": "nonzero-exit",
@@ -117,8 +191,8 @@ def test_init_plans_profile_and_failed_reviewer_probe_has_no_side_effects(
 
     assert len(seen) == 1
     assert seen[0]["root"] == str(root)
-    assert seen[0]["reviewer"]["argv"][0] == "claude"
-    assert "/usr/local/bin/claude" in output
+    assert seen[0]["reviewer"]["argv"][0] == "codex"
+    assert "/usr/local/bin/codex" in output
     assert "exited 17" in output
     assert _tree_state(root) == before
     assert (root / ".gitignore").read_text(encoding="utf-8") == "owner-rule\n"

@@ -248,17 +248,22 @@ def test_a_registration_read_by_two_roles_or_none_names_no_role(project, monkeyp
 
 
 def test_the_default_profile_registers_its_implementer_and_leaves_the_two_role_harness_unnamed(project, monkeypatch):
-    """What docs/mcp.md says of the default profile, from the role blocks `ao init --profile` composes."""
+    """What docs/mcp.md says of the profiles, from the role blocks `ao init --profile` composes."""
     root = project["root"]
     monkeypatch.setattr(skillkit.shutil, "which", lambda name, *args, **kwargs: None)
-    assert A.default_profile() == "claude-kiro"
+    assert A.default_profile() == "agy-codex"
     planned, _ = cli._profile_config(root, SimpleNamespace(profile=A.default_profile()), {"project": "proj"})
     Path(root, ".ao", "config.json").write_text(json.dumps(planned), encoding="utf-8")
 
-    skillkit.register_mcp(root, {"claude-code", "kiro"}, exe="/x/ao")
+    skillkit.register_mcp(root, {"claude-code"}, exe="/x/ao")
 
-    assert _registered(root, ".mcp.json") == ["-C", root, "mcp", "serve"]           # architect and reviewer
-    assert _registered(root, ".kiro/settings/mcp.json") == ["-C", root, "mcp", "serve", "--role", "implementer"]
+    assert _registered(root, ".mcp.json") == ["-C", root, "mcp", "serve", "--role", "architect"]
+
+    planned, _ = cli._profile_config(root, SimpleNamespace(profile="claude-codex"), {"project": "proj"})
+    Path(root, ".ao", "config.json").write_text(json.dumps(planned), encoding="utf-8")
+    skillkit.register_mcp(root, {"claude-code"}, exe="/x/ao")
+
+    assert _registered(root, ".mcp.json") == ["-C", root, "mcp", "serve"]           # implementer and architect
 
 
 def test_a_role_reassigned_reaches_the_registration_when_init_registers_again(project, monkeypatch):

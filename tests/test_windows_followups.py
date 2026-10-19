@@ -111,7 +111,7 @@ def test_init_keeps_the_marker_a_windows_clone_holds_and_refuses_it_elsewhere(tm
     monkeypatch.setattr(cli, "_reviewer_probe", lambda cfg, timeout=cli.REVIEW_PROBE_TIMEOUT: {
         "configured": True, "ok": True, "route": "fixture-reviewer", "binary": "/fixture/reviewer",
         "version": "fixture", "reason": "exact nonce echoed", "kind": "success"})
-    args = SimpleNamespace(name=None, profile="claude-kiro", implementer=None, model=None, effort=None,
+    args = SimpleNamespace(name=None, profile="agy-codex", implementer=None, model=None, effort=None,
                            reviewer_model=None, agent=None, no_mcp=True, rules=False, watchdog=False)
     elsewhere, on_windows = _marker_read_on("posix", monkeypatch), _marker_read_on("nt", monkeypatch)
 

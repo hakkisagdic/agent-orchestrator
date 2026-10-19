@@ -1233,7 +1233,7 @@ def test_init_writes_exact_unstaged_marker_and_refuses_wrong_reinit(
         },
     )
 
-    assert cli.cmd_init(cfg, _init_args(profile="claude-kiro")) == 0
+    assert cli.cmd_init(cfg, _init_args(profile="agy-codex")) == 0
     marker = root / cli.PROJECT_MARKER
     assert marker.read_bytes() == cli.PROJECT_MARKER_BYTES
     assert _git(
@@ -1245,7 +1245,7 @@ def test_init_writes_exact_unstaged_marker_and_refuses_wrong_reinit(
 
     marker.write_text("wrong-version\n", encoding="utf-8")
     capsys.readouterr()
-    assert cli.cmd_init(cfg, _init_args(profile="claude-kiro")) == 1
+    assert cli.cmd_init(cfg, _init_args(profile="agy-codex")) == 1
     output = _strip_colour(capsys.readouterr().out)
     assert cli.PROJECT_MARKER in output
     assert "AO project state is missing/unreadable" in output
@@ -1264,7 +1264,7 @@ def test_init_refuses_broken_symlink_state_without_replacing_it(
     missing = root / "missing-target"
     os.symlink(str(missing), str(link))
 
-    assert cli.cmd_init(_cfg(root), _init_args(profile="claude-kiro")) == 1
+    assert cli.cmd_init(_cfg(root), _init_args(profile="agy-codex")) == 1
     output = _strip_colour(capsys.readouterr().out)
 
     assert link.is_symlink()

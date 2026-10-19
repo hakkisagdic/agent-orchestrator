@@ -16,7 +16,7 @@ ao demo --keep     # it stays, and the last lines say where
    project - `calc.py` with `add(a, b)`, its test and a `.gitignore`, in one commit - and the
    stand-in reviewer.
 2. **ao on it.** The reviewer and one gate, the project's tests run with `python -m unittest`, are
-   written into `.ao/config.json` and `.ao/gates.json` first. `ao init --profile claude-kiro`
+   written into `.ao/config.json` and `.ao/gates.json` first. `ao init --profile agy-codex`
    keeps both, composes the implementer and the architect from the profile, and its reviewer probe
    runs the stand-in. The marker and the `.gitignore` init added to are committed, and
    `ao hooks install` puts the commit hook in place.
@@ -81,7 +81,7 @@ is spent: the reviewer is a stand-in script.
 2. ao on it, the reviewer a stand-in of another family
    .ao/config.json  the reviewer: stand-in-reviewer, family stand-in, runs <scratch>/reviewer.py
    .ao/gates.json   one gate, the project's tests: python -m unittest
-   $ ao init --profile claude-kiro --agent kiro --no-mcp
+   $ ao init --profile agy-codex --agent antigravity --no-mcp
      reviewer: python
      reviewer stand-in-reviewer exited 0 after 0.0s
        wrote  .ao/config.json (+implementer, architect)
@@ -192,7 +192,7 @@ is spent: the reviewer is a stand-in script.
    removed /tmp/ao-demo-to9zzux1
 
 DEMO PASSED  every step behaved as it says. To put ao on a repository of your own:
-docs/getting-started.md, or `ao init --profile claude-kiro` in it.
+docs/getting-started.md, or `ao init --profile agy-codex` in it.
 ```
 
 AUTHORIZED is `ao commit`'s check, the one the commit hook runs. `ao commit` then writes the commit

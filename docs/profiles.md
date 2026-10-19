@@ -7,24 +7,32 @@ Existing blocks are never overwritten — a project's cast is its own decision.
 
 | profile | implementer | reviewer | architect |
 |---|---|---|---|
-| `claude-kiro` | Kiro (`kiro-cli`, headless, resumable session; model/effort optional) | Claude, `claude-opus-5`, read-only tools | a resumable Claude Code session, woken into absence |
-| `claude-claude` | Claude Code headless (`claude -p`), `claude-sonnet-5` by default, one per worktree | Claude, `claude-opus-5`: another model, but of the implementer's own family, so `ao init` refuses it until you choose a review tier (below) | a resumable Claude Code session |
+| `agy-codex` *(default)* | `agy` (`antigravity`, verified: `full`; Gemini 4 Argon, `gemini-4-argon-high` by default; effort optional) | Codex (`codex`, verified: `partial`; `gpt-6-luna`, read-only sandbox) | a resumable Claude Code (`claude-code`, verified: `full`) session, woken into absence |
+| `codex-agy` | Codex (`codex`, verified: `partial`; `gpt-6-astra` by default; effort optional) | `agy`'s read-only reviewer agent (`antigravity`, verified: `full`; Gemini 4 Argon, `gemini-4-argon-high`, `.agents/agents/{agent}.md` with read-only tools) | a resumable Claude Code (`claude-code`, verified: `full`) session, woken into absence |
+| `claude-codex` | Claude Code headless (`claude -p`, `claude-code`, verified: `full`; `claude-sonnet-5` by default, one per worktree) | Codex (`codex`, verified: `partial`; `gpt-6-luna`, read-only sandbox) | a resumable Claude Code (`claude-code`, verified: `full`) session, woken into absence |
 | custom | any adapter in `ao adapters` (`--implementer codex` …) | `--reviewer-model` | the same architect block |
 
+Every preset in `profiles.json` pairs an implementer and a reviewer of different model families and
+engines that work today and pass ao's review-time independence check (`antigravity` is `verified: full`,
+`codex` is `verified: partial`, `claude-code` is `verified: full`). Setups whose reviewer cannot be used
+today (such as `claude-kiro`, where Kiro no longer works on this machine's accounts) or that pair one
+family with itself (`claude-claude`) are kept out of `profiles.json`.
+
 ```bash
-ao init --profile claude-kiro --effort high        # a Kiro implementer at high effort
-ao init --profile claude-claude --model claude-sonnet-5 --reviewer-model claude-opus-5 --review-tier same-family --by <name>
-ao init --implementer codex --reviewer-model claude-opus-5
+ao init --profile agy-codex --effort high          # an agy (Gemini 4 Argon) implementer at high effort, reviewed by Codex (gpt-6-luna)
+ao init --profile codex-agy                        # a Codex (gpt-6-astra) implementer, reviewed by agy's read-only reviewer agent (Gemini 4 Argon)
+ao init --profile claude-codex                     # a Claude Code (claude-sonnet-5) implementer, reviewed by Codex (gpt-6-luna)
+ao init --implementer claude-code --model claude-sonnet-5 --reviewer-model claude-opus-5 --review-tier same-family --by <name>
 ```
 
 ## One harness: choose a review tier
 
 A review counts only when someone other than the author's model family reads the work, so a
 project whose implementer and reviewer run on one harness chooses what stands in. `ao init`
-refuses `claude-claude` until it is told, and the refusal names the three choices:
+refuses a same-family reviewer until it is told, and the refusal names the three choices:
 
-- **another model family** (the default, and the strongest): a reviewer from another harness or
-  provider, as `claude-kiro` has. Nothing is labeled.
+- **another model family** (the default, and the strongest): a reviewer from another harness and
+  provider, as `agy-codex`, `codex-agy` and `claude-codex` have. Nothing is labeled.
 - **same family, labeled** (`--review-tier same-family --by <name>`): another model of the
   implementer's family reviews. It shares more of the author's blind spots than another family
   would, so every review, grant and statistic it produces says `same family: weaker
@@ -35,8 +43,8 @@ refuses `claude-claude` until it is told, and the refusal names the three choice
   is labeled `person review`.
 
 ```bash
-ao init --profile claude-claude --review-tier same-family --by <name>   # another model of the same family, labeled
-ao init --profile claude-claude --review-tier person                    # a person reviews each candidate
+ao init --implementer claude-code --review-tier same-family --by <name>   # another model of the same family, labeled
+ao init --implementer claude-code --review-tier person                    # a person reviews each candidate
 ```
 
 [Review tiers](roles.md#review-tiers) has the rule each tier is held to.
@@ -65,16 +73,17 @@ written in place of `auto` is pinned and always wins.
    metadata names each session's workspace, and Claude Code keeps a directory's sessions
    under the escaped directory name. An adapter that declares no store cannot resolve
    `auto`; pin its session.
-2. **A role alone in its store** takes the newest session there. With `claude-kiro` both
-   roles are alone: every Kiro session for the workspace is the implementer's, every
-   Claude Code session in the architect's directory the architect's. A newer session is a
-   conversation someone opened, and `auto` follows it.
-3. **Two roles in one store.** With `claude-claude` both roles run Claude Code in the
-   project directory, and the newest transcript is whichever wrote last: a wake once
-   resumed the implementer's own session as the architect. There ao takes a session only
-   when it can tell: a pinned id, a session it recorded, or the one session the other role
-   does not hold. The implementer is resolved first and takes a lone session; the
-   architect never takes the implementer's. Two sessions ao cannot tell apart are
+2. **A role alone in its store** takes the newest session there. With `agy-codex` or
+   `codex-agy` the Claude Code store in the architect's directory holds only the
+   architect's session, and with a single-store implementer its workspace store holds
+   only the implementer's. A newer session is a conversation someone opened, and `auto`
+   follows it.
+3. **Two roles in one store.** With `claude-codex` both the implementer and the architect
+   run Claude Code in the project directory, and the newest transcript is whichever wrote
+   last: a wake once resumed the implementer's own session as the architect. There ao takes
+   a session only when it can tell: a pinned id, a session it recorded, or the one session
+   the other role does not hold. The implementer is resolved first and takes a lone session;
+   the architect never takes the implementer's. Two sessions ao cannot tell apart are
    **ambiguous**: ao names them and refuses to guess.
 4. **What is resumed.** A session found beside a role that is neither pinned nor recorded
    is read for `ao status` and `ao tail`, but neither nudged nor woken until one of the two
@@ -95,4 +104,4 @@ Whatever the cast, the playbook (`ao skill install`) is the same: one writer per
 tree, pre-authorised slices with invariant boundaries, independent review,
 commit authority granted by `ao commit-ok`, push by a person. Sub-agents in
 worktrees — several Claude implementers under one Claude architect — are the
-`claude-claude` profile, with a review tier chosen, plus `ao fanout ok` before every fan-out.
+`claude-codex` profile (or `--implementer claude-code` with a review tier chosen), plus `ao fanout ok` before every fan-out.

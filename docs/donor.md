@@ -21,7 +21,7 @@ whether it lands*.
 
 ## What ao would need: a donor profile
 
-<!-- not built: the donor profile is a design; ao init offers claude-kiro and claude-claude -->
+<!-- not built: the donor profile is a design; ao init offers agy-codex, codex-agy and claude-codex -->
 - `ao init --profile donor`: implementer, reviewer and gates; `architect_wake`, `refill` and
   `reports` off. Nobody plays architect on a donor machine: the work order carries the
   boundary, and the coordinator answers the questions.

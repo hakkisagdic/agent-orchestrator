@@ -235,9 +235,9 @@ def test_a_reviewer_of_the_implementers_family_is_refused_in_one_sentence_by_rol
     fresh = tmp_path / "single-harness"
     fresh.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=fresh, check=True)
-    assert cli.cmd_init({"root": str(fresh)}, _init_args(profile="claude-claude", agent="kiro")) == 1
+    assert cli.cmd_init({"root": str(fresh)}, _init_args(profile=None, implementer="codex", agent="kiro")) == 1
     out = _plain(capsys)
-    assert sentence in out and "unresolved binary" not in out
+    assert cli._tier_refusal("it runs the implementer's own engine (codex)") in out and "unresolved binary" not in out
     assert "--review-tier same-family --by <name>" in out and "--review-tier person" in out
     assert not (fresh / ".ao").exists()
 
@@ -406,7 +406,7 @@ def test_the_single_harness_profile_initialises_once_a_tier_is_chosen(project, t
     same = tmp_path / "same-family"
     same.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=same, check=True)
-    args = vars(_init_args(profile="claude-claude", agent="kiro", review_tier="same-family"))
+    args = vars(_init_args(profile=None, implementer="claude-code", agent="kiro", review_tier="same-family"))
     assert cli.cmd_init({"root": str(same)}, _init_args(**args)) == 1 and "--by is required" in _plain(capsys)
     assert cli.cmd_init({"root": str(same)}, _init_args(**dict(args, by="claude"))) == 1
     assert "names an agent or a role" in _plain(capsys) and not (same / ".ao").exists()
@@ -420,7 +420,7 @@ def test_the_single_harness_profile_initialises_once_a_tier_is_chosen(project, t
     person = tmp_path / "person"
     person.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=person, check=True)
-    assert cli.cmd_init({"root": str(person)}, _init_args(profile="claude-claude", agent="kiro",
+    assert cli.cmd_init({"root": str(person)}, _init_args(profile=None, implementer="claude-code", agent="kiro",
                                                           review_tier="person")) == 0
     cfg = A.load_config(str(person))
     assert "reviewer" not in cfg and cfg["implementer"]["adapter"] == "claude-code"

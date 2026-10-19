@@ -34,7 +34,7 @@ her karar, kurcalandığını belli eden bir deftere yazılır.
 ```bash
 pip install ao-orchestrator          # ya da: uv tool install ao-orchestrator
 cd deponun-yolu
-ao init --profile claude-kiro        # Kiro yazar, Claude gözden geçirir; ya da claude-claude
+ao init --profile agy-codex          # agy (Gemini 4 Argon) yazar, Codex (gpt-6-luna) gözden geçirir; ya da codex-agy, claude-codex
 git add .ao-project .gitignore && git commit -m "adopt ao"
 ao hooks install                     # bundan sonra yalnızca yetki verilmiş aday commit edilir
 ```
@@ -50,7 +50,13 @@ ao commit -m "feat: ne değişti"      # commit et; trailer'larıyla o kanıta b
 ```
 
 [Başlarken](docs/getting-started.md) bunu adım adım anlatır; `ao prove` güvenceleri anlatmak
-yerine atılacak bir adayda koşturur. Her rol için tek harness kullanıyorsan `claude-claude` bir
+yerine atılacak bir adayda koşturur. [Profiller](docs/profiles.md) farklı ailelerden üç hazır
+kurulum sunar — `agy-codex` (`antigravity` `verified: full`, Gemini 4 Argon uygulayıcı ve `codex`
+`verified: partial`, `gpt-6-luna` gözden geçiren), `codex-agy` (`codex` `verified: partial`,
+`gpt-6-astra` uygulayıcı ve `antigravity` `verified: full`, Gemini 4 Argon salt okunur gözden
+geçiren ajanı) ve `claude-codex` (`claude-code` `verified: full` uygulayıcı ve `codex` `verified:
+partial`, `gpt-6-luna` gözden geçiren); her birinde mimar `claude-code` (`verified: full`). Her rol
+için tek harness kullanıyorsan (`--implementer claude-code`) `ao init` bir
 [gözden geçirme katmanı](docs/roles.md#review-tiers) ister: aynı aileden başka bir model ("daha
 zayıf bağımsızlık" etiketiyle) ya da bir kişi.
 

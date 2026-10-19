@@ -28,7 +28,7 @@ Every `ao` command and what it does. The [README](../README.md) starts with the 
 | `ao remove --yes [--allow-shared-hooks]` | two-phase removal: delete and commit `.ao-project` while enforcement remains active, then remove AO state after HEAD and index no longer contain it; foreign/protected hooks stay untouched. The second phase takes off the project's scheduled jobs and exactly its own files in `~/.ao`, lists each by name in the dry run, and exits 1 naming what it could not remove ([watchdog.md](watchdog.md)) |
 | `ao update [--dry-run\|--yes]` | update ao the way it was installed: a git clone fast-forwards, and is refused while it has uncommitted changes; a Homebrew, pipx or uv install upgrades through its own tool, a pip install through the pip of the interpreter running ao. The command is shown first and runs on `--yes` or a yes at the terminal ([getting started](getting-started.md#5-update-and-uninstall)) |
 | `ao uninstall [--yes] [--purge] [--allow-shared-hooks]` | take what ao installed off this machine: every scheduled job of ao's, ao's own hooks in each project the registry knows, and the `ao` entry in their MCP files; a dry run unless `--yes`, naming what it leaves - each project's `.ao/`, `~/.ao` unless `--purge`, and the program, with the command that removes it |
-| `ao init --profile claude-kiro|claude-claude [--review-tier same-family|person] [--language en|tr]` | write role blocks and exact `.ao-project` enrollment marker without staging it; a single-harness profile chooses a review tier ([profiles.md](profiles.md)); `--language tr` has what ao writes into the project and for its people in Turkish ([configuration.md](configuration.md)) |
+| `ao init --profile agy-codex|codex-agy|claude-codex [--review-tier same-family|person] [--language en|tr]` | write role blocks and exact `.ao-project` enrollment marker without staging it; a single-harness setup chooses a review tier ([profiles.md](profiles.md)); `--language tr` has what ao writes into the project and for its people in Turkish ([configuration.md](configuration.md)) |
 | `ao demo [--keep]` | the guarantee in about a minute, before ao is on a repository of yours: on a scratch project with a home of its own and a stand-in reviewer, a change with a bug is refused by review, `ao commit-ok` and the commit hook, and its fix lands with its Ao- trailers; nothing outside the scratch folder is touched, and `--keep` keeps that folder ([demo.md](demo.md)) |
 | `ao doctor --check` | quiet doctor for a scheduler: one line per problem, exit 1, alarms raised — installed as a 15-minute launchd job, or systemd user timer on Linux, by `ao watchdog install` |
 | `ao email setup` / `ao email test` | the red alarm channel: e-mail via formsubmit.co, no server ([alarms.md](alarms.md)) |
@@ -66,7 +66,7 @@ that deletion is committed. An enrolled project requires `.ao/config.json` to be
 valid, non-empty top-level JSON object. AO reads at most 1,048,576 bytes and
 rejects container nesting deeper than 64 before recursive JSON decoding;
 pre-dispatch loading and commit enforcement use the same bounded result. Missing
-or unreadable state refuses with the one-line `ao init --profile claude-kiro`
+or unreadable state refuses with the one-line `ao init --profile agy-codex`
 repair.
 
 The `current-local (behavior unverified)` and `current-scoped (behavior unverified)`

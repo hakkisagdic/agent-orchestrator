@@ -321,7 +321,7 @@ def test_a_reinit_probes_no_reviewer_a_person_has_not_accepted(project, tmp_path
     assert A.unseen_harness_config(root) == []
     source, marker = _marking(tmp_path)
     _store(root, reviewer=_reviewer(script=source))
-    args = SimpleNamespace(name=None, profile="claude-kiro", implementer=None, model=None, effort=None,
+    args = SimpleNamespace(name=None, profile="agy-codex", implementer=None, model=None, effort=None,
                            reviewer_model=None, agent=None, no_mcp=True, rules=False, watchdog=False)
 
     assert cli.cmd_init({"root": root}, args) == 1

@@ -211,7 +211,7 @@ window). After: `ao fanout record --agents N --done D --errors E --tokens T`.
 
 ## 9. Setup, once per repository
 
-`ao init --profile claude-kiro|claude-claude` writes `.ao/` (config with the role
+`ao init --profile agy-codex|codex-agy|claude-codex` writes `.ao/` (config with the role
 blocks: who implements, reviews, judges; board, backlog, authority, gates), the exact
 root `.ao-project` marker, the mailbox, this playbook, and the MCP registration. It
 never stages `.ao-project`: a person includes that marker in the first authorized
@@ -221,7 +221,7 @@ the active index. A project an older ao set up has AO state and no tracked marke
 hooks, and names the commit left to land.
 Removal is two-phase: commit the marker deletion while state still
 enforces, then run `ao remove --yes` again to remove the remaining state. A single-harness
-profile reviews with another model of the implementer's family only when a person chooses it
+setup reviews with another model of the implementer's family only when a person chooses it
 (`--review-tier same-family --by NAME`), or with no model reviewer at all (`--review-tier
 person`); `ao doctor` names the tier in force.
 

@@ -192,7 +192,7 @@ Nothing is skipped silently, and nothing is lost when the run degrades:
   incidental `.ao/` directory stays inert. A staged marker supports first
   adoption; a staged deletion remains enrolled through HEAD. Once enrolled,
   `.ao/config.json` must be a valid, non-empty top-level JSON object or every
-  commit is refused with an `ao init --profile claude-kiro` repair. Its shared
+  commit is refused with an `ao init --profile agy-codex` repair. Its shared
   pre-dispatch/enforcement reader consumes at most 1,048,576 bytes and rejects
   container nesting deeper than 64 before recursive JSON decoding.
 - `ao hooks status` asks Git for the effective hook path and reports its class,

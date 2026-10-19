@@ -143,9 +143,10 @@ block - or a reviewer's fallback - runs a harness that reads the registration. A
 `ao` entry and two harnesses can read one file (Claude Code and Qoder both read `.mcp.json`), so
 every harness whose adapter declares that file counts; a snippet a person adds by hand is read by
 its own harness alone. One role names the registration. Two or more, or none, name nothing, and
-its server serves every tool: in the default profile Claude Code is both the architect and the
-reviewer, so `.mcp.json` names no role, while Kiro, the implementer alone, is registered as the
-implementer. A project on a capability matrix binds its roles to declared tools rather than to
+its server serves every tool: in `claude-codex` Claude Code is both the implementer and the
+architect, so `.mcp.json` names no role, while in `agy-codex` each role runs on its own harness
+and Claude Code, the architect alone, is registered as the architect. A project on a capability
+matrix binds its roles to declared tools rather than to
 harnesses, and its registrations name none. A role reassigned later, with `ao role set` or
 `ao role swap`, reaches the registrations when `ao init` runs again.
 

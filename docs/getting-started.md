@@ -9,7 +9,7 @@ in a temporary repository, so this page cannot drift from what ao does.
 ```bash
 pip install ao-orchestrator
 cd your-repository
-ao init --profile claude-kiro        # or claude-claude
+ao init --profile agy-codex          # or codex-agy, claude-codex
 ```
 
 `ao init` writes `.ao/` (config, gates, board), the mailbox, the playbook and the MCP
@@ -46,14 +46,14 @@ Init appends only to a `.gitignore` that is a regular file with one name, opened
 otherwise it names the lines for you to add. `ao skill install` writes the playbook as init does,
 and exits 1 when it did not write one.
 
-With one harness for both roles, `claude-claude` is refused until you choose a
+With one harness for both roles, a same-family reviewer is refused until you choose a
 [review tier](roles.md#review-tiers): another model of the same family, labeled as weaker
 independence wherever its reviews show, or no model reviewer at all and a person reviewing each
 candidate.
 
 ```bash
-ao init --profile claude-claude --review-tier same-family --by <name>
-ao init --profile claude-claude --review-tier person
+ao init --implementer claude-code --review-tier same-family --by <name>
+ao init --implementer claude-code --review-tier person
 ```
 
 ## 2. Wire what makes the guarantees hold

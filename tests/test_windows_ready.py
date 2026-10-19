@@ -33,7 +33,7 @@ def test_init_writes_the_marker_it_checks_even_where_text_mode_writes_crlf(tmp_p
     monkeypatch.setattr(cli, "_reviewer_probe", lambda cfg, timeout=cli.REVIEW_PROBE_TIMEOUT: {
         "configured": True, "ok": True, "route": "fixture-reviewer", "binary": sys.executable,
         "version": "fixture", "reason": "exact nonce echoed", "kind": "success"})
-    args = SimpleNamespace(name=None, profile="claude-kiro", implementer=None, model=None, effort=None,
+    args = SimpleNamespace(name=None, profile="agy-codex", implementer=None, model=None, effort=None,
                            reviewer_model=None, agent=None, no_mcp=True, rules=False, watchdog=False)
 
     assert cli.cmd_init({"root": str(root)}, args) == 0, capsys.readouterr().out

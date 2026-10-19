@@ -101,7 +101,7 @@ def test_init_keeps_the_marker_it_writes_where_a_path_and_a_handle_read_two_cloc
     monkeypatch.setattr(cli, "_reviewer_probe", lambda cfg, timeout=cli.REVIEW_PROBE_TIMEOUT: {
         "configured": True, "ok": True, "route": "fixture-reviewer", "binary": "/fixture/reviewer",
         "version": "fixture", "reason": "exact nonce echoed", "kind": "success"})
-    args = SimpleNamespace(name=None, profile="claude-kiro", implementer=None, model=None, effort=None,
+    args = SimpleNamespace(name=None, profile="agy-codex", implementer=None, model=None, effort=None,
                            reviewer_model=None, agent=None, no_mcp=True, rules=False, watchdog=False)
 
     assert cli.cmd_init({"root": str(root)}, args) == 0, capsys.readouterr().out
