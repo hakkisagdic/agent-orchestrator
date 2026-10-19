@@ -361,8 +361,8 @@ def doctor_problems(cfg):
             when = time.time()
         if time.time() - when < 24 * 3600:
             out.append(("wake-failed", f"last architect wake failed ({we['kind']}): {we['text'][:90]}"))
-    from . import telegram as _tg, email as _em
-    if not (_tg.config() or _em.config()):
+    from . import telegram as _tg, email as _em, ntfy as _nt
+    if not (_tg.config() or _em.config() or _nt.config()):
         out.append(("no-channel", "no human channel beyond desktop notifications — ao email setup"))
     for sib, age in A.stale_siblings(root).items():
         out.append((f"sibling-dead:{sib}", f"{sib}: watchdog silent for {age // 60}m"))

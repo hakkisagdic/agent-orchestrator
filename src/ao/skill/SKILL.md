@@ -174,12 +174,12 @@ rewrites): take a size, a path list or a count from ao's records, not from the t
 | level | who | channel |
 |---|---|---|
 | yellow | the architect | mailbox anomaly + architect wake |
-| orange | a person | desktop + Telegram |
+| orange | a person | desktop + Telegram / ntfy |
 | red | a person, now | e-mail (an orange standing an hour; exhausted quota; failed wakes; a hold standing four hours) |
 
 Set the channels up during setup, not after the first stall: `ao email setup`
-(formsubmit.co, no server), `ao telegram setup`. `ao alarms` lists live
-episodes; `ao alarms test --level red` rings every channel for real.
+(formsubmit.co, no server), `ao telegram setup` or `ao ntfy setup --topic-url <url>`.
+`ao alarms` lists live episodes; `ao alarms test --level red` rings every channel for real.
 
 ## 7. The architect's routine
 
@@ -315,6 +315,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao alarms [test]` | live alarm episodes; ring the channels |
 | `ao email setup|test|status` | the red channel |
 | `ao telegram setup|test|install` | the orange channel and phone decisions |
+| `ao ntfy setup|test|status` | outbound phone channel via ntfy.sh or your own ntfy server |
 | `ao fanout ok|record|history` | budget gate for sub-agent fan-outs; `--roots R --per-root K` for pipelines |
 | `ao credits` | the implementer's own credit account and offline estimate, or that its adapter declares none ao can read; `--all` reads every shipped adapter that declares a lookup or its transcripts |
 | `ao features [on|off <key>]` | the switches and what each costs; all off = deterministic ao |

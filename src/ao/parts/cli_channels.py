@@ -546,6 +546,60 @@ def cmd_telegram(cfg, args):
     return 0
 
 
+def cmd_ntfy(cfg, args):
+    """Outbound phone channel via ntfy (ntfy.sh or a self-hosted ntfy server)."""
+    from . import ntfy
+    if args.action == "setup":
+        if getattr(args, "token", None) is not None:
+            print(f"{C['red']}not saved{C['reset']}: an access token on a command line stays in the shell's history "
+                  "and the process list; name the variable that holds it with --token-env NAME")
+            return 2
+        topic_url = getattr(args, "topic_url", None)
+        token_env = getattr(args, "token_env", None)
+        if not topic_url:
+            if token_env:
+                print(f"{C['red']}not saved{C['reset']}: setup needs --topic-url URL")
+                return 2
+            print(language.text(None, "ntfy.setup", conf=ntfy.CONF,
+                                kept=language.text(None, "private-file.kept-windows" if os.name == "nt"
+                                                   else "private-file.kept")))
+            return 0
+        token = None
+        if token_env:
+            # Read once from the environment: an access token is never passed on a command line or printed.
+            raw = os.environ.get(token_env)
+            if not raw or not raw.strip():
+                print(f"{C['red']}not saved{C['reset']}: ${token_env} is "
+                      f"{'empty' if raw is not None else 'not set'}")
+                return 2
+            token = raw.strip()
+        try:
+            c = ntfy.save(topic_url, token=token)
+        except ValueError as exc:
+            print(f"{C['red']}not saved{C['reset']}: {exc}")
+            return 2
+        print(f"{C['green']}saved{C['reset']} {ntfy.CONF} ({_private_mode()}) host={ntfy.host(c)}"
+              + (" (token set)" if c.get("token") else ""))
+        print(f"now: {C['b']}ao ntfy test{C['reset']}")
+        return 0
+    c = ntfy.config()
+    if args.action == "test":
+        if not c:
+            print(f"{C['red']}not configured{C['reset']} — ao ntfy setup")
+            return 1
+        name = cfg.get("project") or os.path.basename(cfg["root"])
+        ok = ntfy.send(language.text(cfg, "ntfy.test", name=name), cfg["root"])
+        print(f"{C['green']}sent{C['reset']}" if ok else
+              f"{C['red']}send failed{C['reset']} — check the topic URL and token")
+        return 0 if ok else 1
+    if not c:
+        print(f"{C['yellow']}not configured{C['reset']} — ao ntfy setup")
+        return 1
+    auth = "token=set" if c.get("token") else "token=none"
+    print(f"{C['green']}configured{C['reset']} host={ntfy.host(c)} {auth} file={ntfy.CONF}")
+    return 0
+
+
 def _decision_text(rec, cfg=None):
     """A decision as the phone shows it, worded in the project's language (LANGUAGE-OUTPUT).
 

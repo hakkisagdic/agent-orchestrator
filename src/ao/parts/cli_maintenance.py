@@ -1611,13 +1611,14 @@ def cmd_adapters(cfg, args):
 
 def _optional_features(cfg):
     """(name, state, what would enable it) for each optional capability, core excluded (#82)."""
-    from . import email, telegram
+    from . import email, ntfy, telegram
     root = cfg["root"]
     mail = email.config()
     features = [
         ("keyflip", "installed" if A.program_path("keyflip") else "absent",
          "install keyflip for account budgets and quota rotation"),
         ("telegram", "configured" if telegram.config() else "absent", "ao telegram setup"),
+        ("ntfy", "configured" if ntfy.config() else "absent", "ao ntfy setup"),
         ("email", f"configured ({mail['provider']})" if mail else "absent", "ao email setup"),
         # The command that sets the ping up: the hint named `ao ping set <url>`, which never existed (SECRETS-2).
         ("ping", "configured" if A.ping_url(root) else "absent", "ao pings setup"),
@@ -2349,12 +2350,13 @@ def cmd_doctor(cfg, args):
         tone = C['green'] if hb < 360 else C['red']
         print(f"last tick       {tone}{hb // 60}m {hb % 60}s ago{C['reset']}"
               + (f"  {C['red']}watchdog is not running its cycles{C['reset']}" if hb >= 360 else ""))
-    from . import telegram as _tg, email as _em
-    tg_ok, em_ok = bool(_tg.config()), bool(_em.config())
+    from . import telegram as _tg, email as _em, ntfy as _nt
+    tg_ok, nt_ok, em_ok = bool(_tg.config()), bool(_nt.config()), bool(_em.config())
     print(f"channels        desktop {C['green']}on{C['reset']} · telegram "
-          f"{C['green'] if tg_ok else C['yellow']}{'on' if tg_ok else 'off'}{C['reset']} · e-mail "
-          f"{C['green'] if em_ok else C['yellow']}{'on' if em_ok else 'off'}{C['reset']}"
-          + ("" if (tg_ok or em_ok) else f"  {C['yellow']}orange alarms reach nothing but the desktop — ao email setup{C['reset']}"))
+          f"{C['green'] if tg_ok else C['yellow']}{'on' if tg_ok else 'off'}{C['reset']}"
+          + (f" · ntfy {C['green']}on{C['reset']}" if nt_ok else "")
+          + f" · e-mail {C['green'] if em_ok else C['yellow']}{'on' if em_ok else 'off'}{C['reset']}"
+          + ("" if (tg_ok or nt_ok or em_ok) else f"  {C['yellow']}orange alarms reach nothing but the desktop — ao email setup{C['reset']}"))
     try:
         from .watchdog import load_state as _ls, reset_when as _reset_when
         _st = _ls(root)

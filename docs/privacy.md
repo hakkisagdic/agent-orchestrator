@@ -40,9 +40,10 @@ systemd units on Linux and the web view on 127.0.0.1.*
   (`keyflip usage --providers`, `keyflip budget status --json`, `keyflip surfaces`). keyflip never hands
   ao a secret ([keyflip.md](keyflip.md)).
 - **A variable you name for a secret.** `ao telegram setup --token-env NAME` reads the bot token from
-  `NAME`, and the A2A bridge reads a header's value from the variable `${NAME}` names in
-  `.ao/a2a-agents.json`; each goes only where it was named for, `~/.ao/telegram.json` and that
-  agent's requests ([mcp.md](mcp.md)).
+  `NAME`, `ao ntfy setup --topic-url <url> --token-env NAME` reads the ntfy access token from `NAME`,
+  and the A2A bridge reads a header's value from the variable `${NAME}` names in
+  `.ao/a2a-agents.json`; each goes only where it was named for, `~/.ao/telegram.json`,
+  `~/.ao/ntfy.json` and that agent's requests ([mcp.md](mcp.md)).
 
 ## What ao writes
 
@@ -67,17 +68,18 @@ written as `[redacted:<rule>]` ([safety.md](safety.md#7b-what-ao-writes-is-scann
 
 - `~/.ao/settings.json` and `~/.ao/projects.json` - the machine's settings, and the projects on it by
   name and path.
-- `~/.ao/email.json`, `~/.ao/telegram.json` and `~/.ao/pings.json` - the channels' credentials and
-  addresses. ao writes all three readable by you alone (mode 0600) from the moment each is created,
-  and puts a new one in place of the old one whole, so a write cut short leaves the one that worked;
-  the first and the last were written in place and given their mode after, readable by every user
-  of the machine meanwhile (HUNT-LEADS-SEC), and the Telegram file was one a person wrote with
-  `echo` and `chmod`, the token left in their shell's history (LEADS-SECRETS). The bot token, an
+- `~/.ao/email.json`, `~/.ao/telegram.json`, `~/.ao/ntfy.json` and `~/.ao/pings.json` - the channels'
+  credentials and addresses. ao writes all four readable by you alone (mode 0600) from the moment each
+  is created, and puts a new one in place of the old one whole, so a write cut short leaves the one
+  that worked; the first and the last were written in place and given their mode after, readable by
+  every user of the machine meanwhile (HUNT-LEADS-SEC), and the Telegram file was one a person wrote
+  with `echo` and `chmod`, the token left in their shell's history (LEADS-SECRETS). The bot token, an
   SMTP account's password and the ping address are asked at your terminal and not shown
   ([telegram.md](telegram.md), [alarms.md](alarms.md)) - and not asked at all where the terminal
   cannot hide what is typed, which Python's prompt only warned of while it read the line echoed;
-  there a variable holds it (`--token-env`, `--password-env`, `--url-env`) - and `ao pings` shows of
-  the ping address only its scheme. Windows keeps no file mode: there the three are as private as
+  there a variable holds it (`--token-env`, `--password-env`, `--url-env`), as `--token-env` holds
+  an ntfy access token - and `ao pings` shows of the ping address only its scheme while `ao ntfy status`
+  shows only the server's host. Windows keeps no file mode: there the four are as private as
   `~/.ao`, which takes its permissions from your user profile, and ao says so when it saves one
   ([windows.md](windows.md)).
   `~/.ao/telegram-offset` is the poller's place in the messages; a new bot token drops it, as it counts
@@ -118,6 +120,7 @@ Only these, each once someone has set it up; take the setup away and it stops.
 |---|---|---|---|
 | E-mail, the red alarm | `ao email setup` | formsubmit.co, or your own SMTP server | an alarm's title and text, and the project's name ([alarms.md](alarms.md)) |
 | Telegram | `ao telegram setup`, and `ao telegram install` for the poller on macOS | Telegram's bot API | which chats wrote to the bot, asked once by `ao telegram setup` with the token you gave it; alarms and notices, blocked reports, the questions `ao ask` poses, `ao handoff`'s summary, and the answers to `/status`, `/board`, `/credits`, `/notices`, `/fleet` and `/decisions` as those commands print them; the poller fetches the messages sent from the chats you allowed ([telegram.md](telegram.md)) |
+| ntfy | `ao ntfy setup --topic-url <url> [--token-env NAME]` | the topic URL you give it (ntfy.sh or your own ntfy server) | one HTTP POST per watchdog alert or courtesy line to the phone (and `ao ntfy test`), carrying the same text Telegram gets, a `Priority` header from the alarm level (`urgent` for red, `high` for orange, `default` for the rest), and `Authorization: Bearer <token>` when an access token was set; nothing comes back in ([alarms.md](alarms.md)) |
 | Dead man's switch | `ao pings setup` | the address you give it | one request a watchdog or doctor cycle, carrying nothing ([alarms.md](alarms.md)) |
 | A backup or the mail store on a remote | `ao backup --to remote:<name>`, `mail.sync_repo` | GitHub, asked through your `gh` whether the repository is private, then that remote through git | the governance files, or the mail records, scanned for credentials first; nothing unless the host says the repository is private. With `mail.sync_repo` set, each `ao doctor` run also asks the remote how far its copy is, and GitHub whether it is still private ([recovery.md](recovery.md), [messaging.md](messaging.md)) |
 | The account lookup | an implementer whose adapter declares one; Kiro's does | that harness's provider | a request for the account's usage, with the token its CLI already holds, from `ao credits`, `ao cost`, `ao digest`, `ao handoff` and the watchdog every thirty minutes; `ao credits --all` takes one per shipped adapter that declares one, and `ao credits --offline` skips it ([telemetry.md](telemetry.md)) |
@@ -127,7 +130,7 @@ Only these, each once someone has set it up; take the setup away and it stops.
 | A2A | `ao a2a serve`, `ao a2a-mcp serve` | 127.0.0.1 only, answering a request named for that address alone; the agents in `.ao/a2a-agents.json` or `~/.ao/a2a-agents.json` | the board, to anything on this machine; the messages you send, to the agents you registered, with the headers registered for them - a credential among them read from the variable it names ([mcp.md](mcp.md)) |
 
 A request that carries a credential in a header - the account lookup's token, an A2A agent's headers,
-the key of the API reviewer ([adapters.md](adapters.md)) - follows no redirect: it goes to the URL
+ntfy's access token, the key of the API reviewer ([adapters.md](adapters.md)) - follows no redirect: it goes to the URL
 that is named and no other, and an answer that sends it elsewhere is an error naming its HTTP status.
 urllib followed one with every header, `Authorization` among them, to whatever host it named
 (HUNT-LEADS-SEC). A token written in a URL's path - Telegram's bot token, formsubmit's alias - stays

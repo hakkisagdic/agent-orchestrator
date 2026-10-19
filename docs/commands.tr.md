@@ -40,6 +40,7 @@ Her `ao` komutu ve ne yaptığı. [README](../README.tr.md) her değişiklikte k
 | `ao watchdog install` | takılan ajanı yeniden başlatan launchd işi, Linux'ta systemd kullanıcı zamanlayıcısı ([watchdog.md](watchdog.md)) |
 | `ao mcp serve` · `ao a2a serve` | durumu MCP istemcilerine / A2A görevi olarak sun |
 | `ao telegram setup` | telefona uyarı, telefondan karar; ao bot token'ını sorar ve ekrana basmaz, bota yazan sohbetleri bulur, `~/.ao/telegram.json` dosyasını kendisi yazar ([telegram.md](telegram.md)) |
+| `ao ntfy setup --topic-url <url> [--token-env AD]` / `ao ntfy test` / `ao ntfy status` | ntfy.sh ya da kendi ntfy sunucun üzerinden telefona giden uyarılar; `~/.ao/ntfy.json` dosyasını 0600 kipiyle yazar, erişim token'ını yalnız `$AD` değişkeninden okur (asla argüman olmaz, ekrana basılmaz, loglanmaz) ve her uyarıyı alarm seviyesine göre öncelikle gönderir ([alarms.md](alarms.md)) |
 | `ao digest [--days N]` | ne oldu, defterlerden okunur — "neden ilerlemiyor"un da cevabı |
 | `ao ask` · `ao answer` · `ao decisions` | tek dokunuşla cevaplanan sorular; serbest metin hep sonda; cevap sorunun sunduğu bir harf olmalı, `ao answer <D-id> <harf> --change` bir cevabı değiştirir ve ilki kayıtta kalır |
 | `ao propose "…" --why "…" [--rule-file <yol>]` · `ao proposals` | ajan, altında çalıştığı bir kuralı düzenlemek yerine değişikliği önerir: kanıtıyla karar defterine yazılır, bir insan `ao answer` ile kabul ya da ret eder; kural dosyasına hiçbir şey yazılmaz ([protocol.md](protocol.md#changing-the-rules-an-agent-proposes-a-person-decides)) |

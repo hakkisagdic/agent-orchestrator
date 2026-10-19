@@ -40,6 +40,7 @@ Every `ao` command and what it does. The [README](../README.md) starts with the 
 | `ao watchdog install` | launchd job, or systemd user timer on Linux, that restarts a stalled agent ([watchdog.md](watchdog.md)) |
 | `ao mcp serve` · `ao a2a serve` | expose state to MCP clients / as A2A tasks |
 | `ao telegram setup` | alerts to your phone, decisions back from it; ao asks for the bot token and does not show it, finds the chats that wrote to the bot, and writes `~/.ao/telegram.json` itself ([telegram.md](telegram.md)) |
+| `ao ntfy setup --topic-url <url> [--token-env NAME]` / `ao ntfy test` / `ao ntfy status` | outbound phone alerts via ntfy.sh or your own ntfy server; writes `~/.ao/ntfy.json` mode 0600, reads an access token only from `$NAME` (never an argument, never printed, never logged), and sends each alert with a priority from its alarm level ([alarms.md](alarms.md)) |
 | `ao digest [--days N]` | what happened, read from the ledgers — also answers "why is nothing moving" |
 | `ao ask` · `ao answer` · `ao decisions` | questions answerable in one tap; free text always last; an answer must be an offered key, and `ao answer <D-id> <key> --change` replaces one while the first stays on the record |
 | `ao propose "…" --why "…" [--rule-file <path>]` · `ao proposals` | an agent proposes a change to a rule it works under instead of editing it: recorded in the decision ledger with its evidence, and a person accepts or rejects it with `ao answer`; nothing writes the rule file ([protocol.md](protocol.md#changing-the-rules-an-agent-proposes-a-person-decides)) |

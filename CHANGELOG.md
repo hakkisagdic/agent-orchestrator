@@ -14,6 +14,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### New commands
 
+- `ao ntfy setup|test|status` sets up, tests and checks an outbound `ntfy` phone channel (`ntfy.sh` or self-hosted) in `~/.ao/ntfy.json` (mode `0600`, access token read only from `--token-env NAME`), sending the watchdog's phone alerts over HTTPS POST with `Priority` mapped from the alarm level (`urgent` for red, `high` for orange, `default` otherwise) and recording failed sends without raising into the cycle (NOTIFY-NTFY).
 - `ao credits --all` reads every shipped adapter that declares an account ao can reach, one request each, and the local estimate where it declares its transcripts; an adapter that declares neither is named rather than shown another harness's figure or a zero ([telemetry.md](docs/telemetry.md)) (CREDITS-ALL).
 
 ### Adapters

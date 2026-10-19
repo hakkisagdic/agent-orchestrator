@@ -440,6 +440,14 @@ def build_parser(root=None):
                     help="setup: the environment variable holding the bot token, where no terminal is attached to "
                          "ask for it at")
     tg.set_defaults(fn=cmd_telegram)
+    nt = sub.add_parser("ntfy", help="phone channel: alerts out via ntfy.sh or a self-hosted ntfy server")
+    nt.add_argument("action", nargs="?", default="status", choices=["status", "setup", "test"])
+    nt.add_argument("--topic-url", metavar="URL", help="setup: the topic's https URL (ntfy.sh or your own server)")
+    nt.add_argument("--token-env", metavar="NAME",
+                    help="setup: the environment variable holding the access token, when the server needs one")
+    # Kept so `--token VALUE` is refused in ao's words without argparse quoting the token back.
+    nt.add_argument("--token", help=argparse.SUPPRESS)
+    nt.set_defaults(fn=cmd_ntfy)
     cr = sub.add_parser("credits", help="credit spend measured from local transcripts")
     cr.add_argument("--offline", action="store_true", help="skip the account lookup")
     cr.add_argument("--local", action="store_true", help="also show this machine's share")

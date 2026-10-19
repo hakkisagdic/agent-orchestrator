@@ -647,6 +647,27 @@ bu adrese gider; `ao alarms` merdiveni gösterir.
         "tr": "*{name}* — bağlantı testi.\n\nBu sohbete yazdığın her mesaj acil karar olarak kutuya düşer ve "
               "uygulayıcı onaylamadan commit edemez.\n\nKomutlar: /status /board /credits /notices /fleet",
     },
+    # `ao ntfy setup` and `ao ntfy test`; {conf}: the file ao writes, {kept}: how it is kept private, {name}: project
+    "ntfy.setup": {
+        "en": "The ntfy phone channel (outbound alerts via ntfy.sh or your own ntfy server):\n\n"
+              "1. Subscribe to a topic in the ntfy phone app.\n"
+              "2. Save:    ao ntfy setup --topic-url https://ntfy.sh/<topic>\n"
+              "   When your server uses an access token, name the variable that holds it:\n"
+              "            ao ntfy setup --topic-url https://ntfy.example.com/<topic> --token-env NTFY_TOKEN\n"
+              "3. Test:    ao ntfy test\n\n"
+              "Settings stay in {conf}, {kept}, and are never written to a repository.",
+        "tr": "ntfy telefon kanalı (ntfy.sh ya da kendi ntfy sunucun üzerinden giden uyarılar):\n\n"
+              "1. ntfy telefon uygulamasında bir konuya abone ol.\n"
+              "2. Kaydet:  ao ntfy setup --topic-url https://ntfy.sh/<konu>\n"
+              "   Sunucun erişim token'ı istiyorsa onu tutan değişkeni adlandır:\n"
+              "            ao ntfy setup --topic-url https://ntfy.ornek.com/<konu> --token-env NTFY_TOKEN\n"
+              "3. Dene:    ao ntfy test\n\n"
+              "Ayarlar {conf} dosyasında {kept} durur; hiçbir depoya yazılmaz.",
+    },
+    "ntfy.test": {
+        "en": "*{name}* — ntfy connection test. Outbound watchdog alerts arrive here.",
+        "tr": "*{name}* — ntfy bağlantı testi. Watchdog uyarıları buraya gelir.",
+    },
     # what the poller answers on the phone: a button tapped in a chat off the allowlist, an answer recorded
     # ({option}: its key), a button of a decision that is gone, an answer typed to a decision there is not
     # ({id}), a message written to the mailbox ({name}: its file), and a command it does not know

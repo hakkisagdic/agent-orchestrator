@@ -394,13 +394,19 @@ def notify(title, msg, root=None, key=None, window=1800, audience=None, level=No
     except Exception:
         channel_cfg = None
     desktop_notify(title, safe, channel_cfg)
+    phone_text = f"*{title}*\n{_markdown_plain(msg)}"
     try:
         from . import telegram
         # The message as written, as the resume notice is sent: it can name a report, and one stray
         # underscore in a name makes the phone refuse the whole message as markup (WAITING-ONE-ALARM).
-        telegram.send(f"*{title}*\n{_markdown_plain(msg)}", root)
+        telegram.send(phone_text, root)
     except Exception:
         pass                                # a phone being unreachable is not a failure
+    try:
+        from . import ntfy
+        ntfy.send(phone_text, root, level=ring)
+    except Exception:
+        pass
     A.alarm_rang(project, key, what=what)
     if root:
         A.record_notice(root, title, msg, sent=True, key=key, evidence=evidence)
@@ -2449,6 +2455,11 @@ def _tell_phone(root, text):
         telegram.send(text, root)
     except Exception:
         pass                                # a phone being unreachable is not a failure
+    try:
+        from . import ntfy
+        ntfy.send(text, root)
+    except Exception:
+        pass
 
 
 def _handoff_quiet():
@@ -2654,9 +2665,15 @@ def announce_resume(root, owed, dry_run=False, now=None):
         A.record_notice(root, title, msg, sent=False, key="resume")
     elif audience == "human":
         desktop_notify(title, lines[0].replace('"', "'")[:200], cfg)
+        phone_text = f"*{_markdown_plain(title)}*\n{_markdown_plain(msg)}"
         try:
             from . import telegram
-            telegram.send(f"*{_markdown_plain(title)}*\n{_markdown_plain(msg)}", root)
+            telegram.send(phone_text, root)
+        except Exception:
+            pass
+        try:
+            from . import ntfy
+            ntfy.send(phone_text, root)
         except Exception:
             pass
         A.record_notice(root, title, msg, sent=True, key="resume", named=named)

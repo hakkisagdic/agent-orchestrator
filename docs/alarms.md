@@ -5,7 +5,7 @@ Three levels, named by who has to act.
 | level | who acts | channel | raised by |
 |---|---|---|---|
 | **yellow** | the architect | mailbox anomaly + architect wake | an implementer report, a stall, a round budget — anything the architect can judge |
-| **orange** | the human | desktop notification + Telegram | a decision only a person can make, a quota, a hold, a failed wake, a stuck agent |
+| **orange** | the human | desktop notification + Telegram / ntfy | a decision only a person can make, a quota, a hold, a failed wake, a stuck agent |
 | **red** | the human, now | **e-mail** (plus the orange channels) | an orange condition standing for an hour, or one that will not clear on its own |
 
 The distinction that matters is orange → red. Alert call sites declare who
@@ -222,12 +222,20 @@ resume would send and writes nothing. A silence under the threshold changes noth
 - Telegram: `ao telegram setup` — see [telegram.md](telegram.md). An alarm's text is sent
   as written, so an underscore in a report's name cannot make the phone refuse the message
   as broken markup.
+- ntfy: `ao ntfy setup --topic-url <url> [--token-env NAME]` — an outbound-only phone
+  channel beside Telegram, for ntfy.sh or your own ntfy server. Writes `~/.ao/ntfy.json`
+  (0600; on Windows, as private as `~/.ao`), reads an access token only from the environment
+  variable `--token-env` names (never an argument, never printed, never logged), and sends
+  what the watchdog sends to Telegram as one HTTP POST per alert with the same text and a
+  `Priority` header from its alarm level (`urgent` for red, `high` for orange, `default` for
+  the rest). `ao ntfy test` sends one test message and reports whether it arrived;
+  `ao ntfy status` shows whether ntfy is set up and the server's host, never the token.
 - E-mail: `ao email setup --token … --to …` — formsubmit.co relays a JSON POST,
   no server; the token lives in `~/.ao/email.json` (0600; on Windows, which keeps no file mode,
   as private as `~/.ao`), never in a repo.
   An unknown provider, or a `provider` value that is not a string, disables the channel
   without raising; run `ao email setup` to replace the unusable settings.
-  `ao doctor` warns when neither Telegram nor e-mail is configured: an orange
+  `ao doctor` warns when neither Telegram, ntfy nor e-mail is configured: an orange
   alarm with no channel beyond the desktop is a silent alarm.
 
 *In ao since slice TRIAGE-HIGHS: e-mail through your own server (`ao email setup --provider smtp`)
