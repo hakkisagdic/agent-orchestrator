@@ -165,7 +165,8 @@ the exact bytes it showed them, judged against the slice, boundary and criteria 
 bound to the candidate as a model's review is.
 `ao config set review.same_family labeled --by <name>` lets another model of the implementer's family
 review, labeled as weaker independence wherever its reviews show, and it is in force only while a
-person's record in `.ao/ledger/opt-ins.jsonl` says so. Each records the name, the login and whether a
+person's record in `.ao/ledger/opt-ins.jsonl` says so - a row ao appended on this machine, as its
+checkpoint store shows, never one written into the file by hand. Each records the name, the login and whether a
 terminal was attached, refuses a name that belongs to an agent or a role, and is on the list of commands
 no actor's grant may admit; ao still cannot prove that no agent typed it.
 

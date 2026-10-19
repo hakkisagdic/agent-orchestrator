@@ -11,6 +11,7 @@ import errno
 import hashlib
 import json
 import os
+import re
 import stat
 import time
 
@@ -246,25 +247,37 @@ def _read_jsonl_unlocked(path, allow_partial_tail=True):
     return _jsonl_rows(data, path, allow_partial_tail)
 
 
-def _jsonl_rows(data, path, allow_partial_tail=True):
-    """Parse bytes already read through a held file (LEADS-ADAPTERS)."""
-    rows = []
-    lines = data.splitlines(keepends=True)
-    for index, raw in enumerate(lines):
-        complete = raw.endswith((b"\n", b"\r"))
+def _jsonl_records(data):
+    """([(line number, record bytes)] of each complete, non-empty line, the line number of an unfinished last one or
+    None) - the one way ao splits JSONL bytes into records, which a read, a count and an append all use (OPTIN-ATTESTED).
+
+    A line ends at `\n`, `\r` or `\r\n`; an empty one is no record, and one of blanks is a record a parse refuses.
+    Counted any other way, a row put after `\r` on ao's own line was one line to a count and two records to a read.
+    """
+    records = []
+    for index, raw in enumerate(data.splitlines(keepends=True)):
         body = raw.rstrip(b"\r\n")
         if not body:
             continue
-        if not complete:
-            if allow_partial_tail:
-                break
-            raise LedgerCorruption(f"uncommitted final record {index + 1} in {path}")
-        try:
-            rows.append(json.loads(body.decode(UTF8)))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise LedgerCorruption(
-                f"malformed JSONL record {index + 1} in {path}: {exc}"
-            ) from exc
+        if not raw.endswith((b"\n", b"\r")):
+            return records, index
+        records.append((index, body))
+    return records, None
+
+
+def _jsonl_row(body, index, path):
+    try:
+        return json.loads(body.decode(UTF8))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise LedgerCorruption(f"malformed JSONL record {index + 1} in {path}: {exc}") from exc
+
+
+def _jsonl_rows(data, path, allow_partial_tail=True):
+    """Parse bytes already read through a held file (LEADS-ADAPTERS)."""
+    records, unfinished = _jsonl_records(data)
+    rows = [_jsonl_row(body, index, path) for index, body in records]
+    if unfinished is not None and not allow_partial_tail:
+        raise LedgerCorruption(f"uncommitted final record {unfinished + 1} in {path}")
     return rows
 
 
@@ -1379,21 +1392,29 @@ def _tree_replace_bytes(folder, name, data):
     _tree_sync(folder, os.fsync)
 
 
-def _chained_in_tree(root, rel, chain, record=None):
+def _chained_in_tree(root, rel, chain, record=None, every=False):
     """The opt-in ledger's read or append, including recovery, under its usual sidecar lock (LEADS-ADAPTERS).
 
     Keep the JSONL, chain, seals and machine checkpoint unchanged. Only this ledger's filesystem operations
     change: the lock, ledger and seal are opened in the held folder; truncation and rollback use the same
     descriptor, never a name an agent can redirect. Other ledger callers keep their existing API.
     """
+    nothing = 0 if every else []                    # what an empty ledger is to the caller
     parts = _tree_parts(rel)
     name = parts[-1]
     identity = os.path.join(os.path.realpath(root), *parts)
+    # Before the store is read at all: a store inside the tree attests nothing and is never acted on (OPTIN-ATTESTED).
+    if _store_in_tree(root):
+        if record is None:
+            return nothing
+        raise LedgerCorruption(
+            f"the checkpoint store {checkpoint_path()} lies inside the project, where an agent writes: ao records "
+            "no opt-in beside it - point AO_LEDGER_CHECKPOINTS outside the tree, or unset it")
     recovering = "intent" in _checkpoint_entry(identity, identity=identity)
     with _tree_folder(root, parts[:-1], make=record is not None or recovering) as folder:
         if folder is None:
             _check_missing_chained_ledger(identity, chain, identity=identity)
-            return []
+            return nothing
         if record is None and not recovering:
             # Reading a setting before any opt-in must not create a lock in an otherwise clean project, even
             # when init refuses during planning. A checkpoint intent needs locked recovery; an in-tree intent
@@ -1406,7 +1427,7 @@ def _chained_in_tree(root, rel, chain, record=None):
                 break
             else:
                 _check_missing_chained_ledger(identity, chain, seal=_tree_seal(folder, name, identity), identity=identity)
-                return []
+                return nothing
         with _exclusive_lock(identity + ".lock", _folder=folder):
             _settle_seal(identity, chain, CHAIN_PREVIOUS_FIELD, _folder=folder, identity=identity)
             data = _tree_bytes(folder, name)
@@ -1414,11 +1435,25 @@ def _chained_in_tree(root, rel, chain, record=None):
             if data is None:
                 _check_missing_chained_ledger(identity, chain, seal=seal, identity=identity)
                 data = b""
+            attested = _attested_length(identity, seal)
+            if record is None:
+                records, _ = _jsonl_records(data)
+                if every:
+                    return len(records)
+                # Only the rows ao recorded are read and checked: a tail past them - well formed or not - is nobody's
+                # record, and never makes ao's own unreadable (OPTIN-ATTESTED).
+                rows = [_jsonl_row(body, index, identity) for index, body in records[:attested]]
+                _validate_chained_rows(identity, rows, chain, CHAIN_PREVIOUS_FIELD, seal=seal)
+                _check_committed_length(identity, rows, chain, seal=seal, identity=identity)
+                return rows
+            past = len(_jsonl_records(data)[0]) - attested
+            if past > 0:
+                # Appended after them, ao's record would vouch for rows it never wrote (OPTIN-ATTESTED). Counted as a
+                # read counts them, before anything parses them.
+                raise LedgerCorruption(f"{rel}: {_unattested_repair(past, attested)}")
             rows = _jsonl_rows(data, identity)
             _validate_chained_rows(identity, rows, chain, CHAIN_PREVIOUS_FIELD, seal=seal)
             _check_committed_length(identity, rows, chain, seal=seal, identity=identity)
-            if record is None:
-                return rows
             retired = seal["retired"] if seal else 0
             previous = chained_row_digest(rows[-1], chain) if rows else (seal["digest"] if seal else None)
             chained = {CHAIN_PREVIOUS_FIELD: previous, "ordinal": retired + len(rows) + 1}
@@ -1476,8 +1511,84 @@ def append_chained_in_tree(root, rel, record, chain):
 
 
 def read_chained_in_tree(root, rel, chain):
-    """Read opt-ins under the same held-folder lock as their append (LEADS-ADAPTERS)."""
+    """Read opt-ins under the same held-folder lock as their append (LEADS-ADAPTERS): the rows this machine's checkpoint
+    store records ao appending, and no others (OPTIN-ATTESTED).
+
+    The chain proves no committed row was changed and the recorded length that none was cut off; neither says who
+    wrote a row past that length. A person's opt-in weakens a guarantee, and the implementer can write any file in
+    the tree: the first row of a chain needs no digest at all, and one past ao's last append needs only the digest of
+    the row before it. A row there - in a ledger this machine never recorded, or added after ao's last append - is
+    nobody's record.
+    """
     return _chained_in_tree(root, rel, chain)
+
+
+def unattested_in_tree(root, rel, chain):
+    """(rows this machine's checkpoint store does not record ao appending, rows it does) of an in-tree ledger
+    (OPTIN-ATTESTED)."""
+    attested = len(_chained_in_tree(root, rel, chain))
+    return max(0, _chained_in_tree(root, rel, chain, every=True) - attested), attested
+
+
+def _store_in_tree(root):
+    """Whether this machine's checkpoint store lies inside the project's tree (OPTIN-ATTESTED).
+
+    AO_LEDGER_CHECKPOINTS moves the store, and the implementer can name it on any command it runs: a store inside the
+    tree is a file it writes, so a row it wrote and a count it wrote beside it would vouch for each other. Such a store
+    attests nothing, and ao appends no opt-in beside it, as `ao doctor` already names the variable (PYTHON-ENV).
+
+    Compared by what the folders are, not how their names are spelled: a case-insensitive file system answers the
+    same folder to `/A/Proj` and `/a/proj`, and the real path keeps whichever spelling it was given. Each folder on
+    the store's path, as named and as resolved, is held to the root's device and inode, so neither case nor a link
+    moves it out.
+    """
+    try:
+        top = os.stat(root)
+    except OSError:
+        return False
+    named = checkpoint_path()
+    if os.pardir in re.split(r"[\\/]+", named):
+        # `a/link/..` is the link target's parent to the file system and `a` to a path read as text: either reading
+        # can hide the other, so a store named with `..` is taken as the tree's.
+        return True
+    given = named if os.path.isabs(named) else os.path.join(os.getcwd(), named)
+    # The path as named and as resolved, both: one through a link the implementer keeps in the tree is the tree's,
+    # wherever the link points as ao looks, since the link can point elsewhere by the time the store is read.
+    for path in (given, os.path.realpath(named)):
+        if not top.st_ino:
+            # A file system that numbers no file: the paths, case folded where the platform folds case.
+            store, folder = os.path.normcase(path), os.path.normcase(os.path.realpath(root))
+            if store == folder or store.startswith(folder.rstrip(os.sep) + os.sep):
+                return True
+            continue
+        here = os.path.dirname(path)
+        while True:
+            try:
+                held = os.stat(here)
+            except OSError:
+                held = None
+            if held is not None and (held.st_dev, held.st_ino) == (top.st_dev, top.st_ino):
+                return True
+            parent = os.path.dirname(here)
+            if parent == here:
+                break
+            here = parent
+    return False
+
+
+def _unattested_repair(foreign, attested):
+    """What a person does about rows past ao's record, keeping the ones ao did record (OPTIN-ATTESTED)."""
+    keep = (f"the first {attested} row(s) are ao's own and stay; a person removes exactly the last {foreign} line(s) "
+            "of the file") if attested else "no row of it is ao's own; a person moves the file aside"
+    return (f"{foreign} row(s) the checkpoint store of this machine ({checkpoint_path()}) does not record ao "
+            f"appending - something other than ao wrote them, or an append did not finish. They turn nothing off and "
+            f"ao appends nothing after them: {keep}, and records again what is missing")
+
+
+def _attested_length(identity, seal):
+    """How many of a ledger's live rows this machine's checkpoint store records ao committing (OPTIN-ATTESTED)."""
+    count = _checkpoint_entry(identity, identity=identity).get("count")
+    return max(0, (count if isinstance(count, int) else 0) - (seal["retired"] if seal else 0))
 
 
 def _repair_partial_tail(path, fsync, checkpoint):

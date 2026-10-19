@@ -58,6 +58,12 @@ they are switched off by a person, on the record, as a waiver is: `ao features o
 tree, so neither `ao doctor` nor the watchdog flagged the commit. A switch the config turns off
 with no person's record behind it now stays on: `ao features`, `ao commit-ok` and `ao doctor`
 say so.*
+
+*In ao since slice OPTIN-ATTESTED: a record counts only where this machine's checkpoint store records
+ao appending it. The first row of a chain needs no digest, so an implementer that wrote
+`"features": {"review": false}` and one row into `.ao/ledger/opt-ins.jsonl` by hand had review off;
+so did a row written after ao's own. Such a row - or one recorded on another machine - turns nothing
+off here, ao appends nothing after it, and `ao doctor` names it.*
 - `nudge` off — the watchdog measures, alarms and records, but never starts an
   implementer turn; a person starts the implementer.
 - `architect_wake` off — anomaly files and alarms only; a person reads them.

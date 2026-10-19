@@ -188,7 +188,9 @@ needs `--by` naming a person, never an agent or a role, refuses `--machine`, and
 name, the login and whether a terminal was attached to `.ao/ledger/opt-ins.jsonl`. The
 setting is in force only while the project's own `.ao/config.json` reads `labeled` and the
 newest record says the same: a value written into the file by hand - which an agent that edits
-files can do - or into the machine's settings is not, and `ao doctor` names it. What each value
+files can do - or into the machine's settings is not, and `ao doctor` names it. A record is one
+ao appended on this machine, as its checkpoint store shows: a row written into the ledger by hand
+is nobody's, and ao appends nothing after one. What each value
 means is in [review tiers](roles.md#review-tiers); `ao init --review-tier same-family --by <name>`
 opts a new project in.
 

@@ -345,6 +345,17 @@ def doctor_problems(cfg):
         out.append((f"unrecorded-switch:{switch}",
                     f"{switch} is off in .ao/config.json with no person's record, so it stays on - "
                     f"ao features off {switch} --by <name>, or remove it"))
+    # A row of the opt-in ledger this machine never recorded ao appending is nobody's record (OPTIN-ATTESTED).
+    from .storage import _unattested_repair, unattested_in_tree
+    try:
+        foreign, attested = unattested_in_tree(root, ".ao/ledger/opt-ins.jsonl", A.OPT_IN_CHAIN)
+    except Exception as exc:
+        # Said, never swallowed: a ledger ao cannot read turns no switch off, and the person learns why.
+        foreign, attested = 0, 0
+        out.append(("opt-ins-unreadable", f".ao/ledger/opt-ins.jsonl cannot be read, so no opt-in counts: {exc}"))
+    if foreign:
+        out.append(("opt-ins-unattested",
+                    f".ao/ledger/opt-ins.jsonl holds {_unattested_repair(foreign, attested)}"))
     out.extend(_harness_config_problem(root))
     out.extend(_environment_problem(root))
 

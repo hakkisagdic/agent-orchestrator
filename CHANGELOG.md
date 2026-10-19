@@ -29,6 +29,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 - `ao ntfy` cuts outgoing alert bodies at a UTF-8 character boundary within ntfy's 4,096-byte message limit so multibyte Turkish or emoji alerts under 4,000 characters are never turned into attachments ([alarms](docs/alarms.md)) (NOTIFY-NTFY-2).
 - The landing page's agent support introduction now states how each group of packaged adapters is observed (resolved session store read, `call-return` data kept by `ao`, declared transcript shape without a resolved store, `unknown` transcript, or stateless tool reviewer/model backend) and which levels are measured (`full`, `partial`), documented only (`documented`), or `untested`, checked in both languages against `src/ao/adapters/*.json` (LANDING-REFRESH-2).
 
+### Security
+
+- A switch or a review tier that weakens a guarantee is off only on a row ao appended to `.ao/ledger/opt-ins.jsonl` on this machine, as its checkpoint store records: the first row of the chain needs no digest, so an implementer that wrote the config and one row by hand had review off and was granted on verification alone. A row written by hand, or on another machine, now turns nothing off, ao appends nothing after one, and `ao doctor` names it; a checkpoint store `AO_LEDGER_CHECKPOINTS` puts inside the project attests nothing ([features](docs/features.md), OPTIN-ATTESTED).
+
 ### Adapters
 
 - `ao init --profile` now offers the three working cross-family, cross-engine presets — `agy-codex` (default: `agy` Gemini 4 Argon implementer with Codex `gpt-6-luna` reviewer), `codex-agy` (Codex `gpt-6-astra` implementer with `agy`'s read-only reviewer agent on Gemini 4 Argon) and `claude-codex` (Claude Code implementer with Codex `gpt-6-luna` reviewer) — and drops `claude-kiro` and `claude-claude`, with every preset's actors verified against the shipped adapters and review-time independence rule (PROFILES).

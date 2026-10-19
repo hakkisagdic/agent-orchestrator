@@ -19,7 +19,8 @@ The ledger is the fix: an append-only record that outlives the messages.
 ├── authority.jsonl      # hash-chained commit grants and refusals
 ├── reviews.jsonl        # hash-chained: each review artefact, its bytes and verdict
 ├── waivers.jsonl        # hash-chained: a person's waiver of a gate for a slice, and its closing
-├── opt-ins.jsonl        # hash-chained: a person's opt-in into a weaker review tier, with login and terminal
+├── opt-ins.jsonl        # hash-chained: a person's opt-in into a weaker review tier, with login and terminal;
+│                        #   only rows this machine's checkpoint store records ao appending count
 ├── merges.jsonl         # hash-chained: each merge-check run and the merge it vouches for
 └── slices.jsonl         # hash-chained: each move of a slice between the board's sections
 ```
