@@ -26,6 +26,7 @@ class _NtfyRecorder:
                     "method": self.command,
                     "path": self.path,
                     "headers": {k.lower(): v for k, v in self.headers.items()},
+                    "raw_body": raw,
                     "body": raw.decode("utf-8", errors="replace"),
                 })
                 self.send_response(recorder.status)
@@ -189,3 +190,28 @@ def test_failed_send_records_notice_without_leaking_secrets_and_never_raises(pro
     ntfy_server.status = 302
     ntfy_server.headers = {"Location": ntfy_server.url("other")}
     assert ntfy.send("redirect test", root=project["root"]) is False
+
+
+def test_send_truncates_at_utf8_character_boundary_within_4096_bytes(project, ntfy_server):
+    """A multibyte alert under 4,000 characters can still exceed ntfy's 4,096-byte message limit (NOTIFY-NTFY-2)."""
+    ntfy.save(ntfy_server.url("utf8-topic"))
+
+    cases = [
+        # 2,500 Turkish characters (2 bytes each = 5,000 bytes) with a 1-byte prefix so byte 4,096 splits a character.
+        ("a" + ("ş" * 2500), "a" + ("ş" * 2047), 4095),
+        # 3-byte characters ('—' is 3 bytes) where byte 4,096 splits after 2 continuation bytes.
+        ("ab" + ("—" * 1500), "ab" + ("—" * 1364), 4094),
+        # 4-byte emoji ('🚨' is 4 bytes) split at 1, 2 and 3 bytes into the character at the 4,096-byte boundary.
+        ("a" + ("🚨" * 1100), "a" + ("🚨" * 1023), 4093),
+        ("ab" + ("🚨" * 1100), "ab" + ("🚨" * 1023), 4094),
+        ("abc" + ("🚨" * 1100), "abc" + ("🚨" * 1023), 4095),
+        # Exact 4,096-byte multibyte payload is sent whole without dropping the last character.
+        ("ş" * 2048, "ş" * 2048, 4096),
+    ]
+    for message, expected_text, expected_bytes in cases:
+        ntfy_server.requests.clear()
+        assert ntfy.send(message, root=project["root"]) is True
+        assert len(ntfy_server.requests) == 1
+        raw = ntfy_server.requests[0]["raw_body"]
+        assert len(raw) == expected_bytes <= 4096
+        assert raw.decode("utf-8") == expected_text

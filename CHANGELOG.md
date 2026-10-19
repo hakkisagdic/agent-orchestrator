@@ -19,6 +19,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- `ao ntfy` cuts outgoing alert bodies at a UTF-8 character boundary within ntfy's 4,096-byte message limit so multibyte Turkish or emoji alerts under 4,000 characters are never turned into attachments ([alarms](docs/alarms.md)) (NOTIFY-NTFY-2).
 - The landing page's agent support introduction now states how each group of packaged adapters is observed (resolved session store read, `call-return` data kept by `ao`, declared transcript shape without a resolved store, `unknown` transcript, or stateless tool reviewer/model backend) and which levels are measured (`full`, `partial`), documented only (`documented`), or `untested`, checked in both languages against `src/ao/adapters/*.json` (LANDING-REFRESH-2).
 
 ### Adapters

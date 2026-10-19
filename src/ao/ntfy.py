@@ -22,6 +22,8 @@ CONF = os.path.join(A.HOME, ".ao", "ntfy.json")
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
 # ntfy priority names (docs.ntfy.sh/publish/#message-priority): 5 is urgent/max, 4 is high, 3 is default.
 PRIORITIES = {"red": "urgent", "orange": "high"}
+# ntfy treats a body past 4,096 bytes as an attachment (docs.ntfy.sh/publish/#limitations) (NOTIFY-NTFY-2).
+MAX_MESSAGE_BYTES = 4096
 
 
 def priority(level=None):
@@ -121,6 +123,14 @@ def _scrub(text, c):
     return out
 
 
+def _encode_message(text):
+    """Encode `text` as UTF-8 within ntfy's 4,096-byte message limit, cut at a character boundary (NOTIFY-NTFY-2)."""
+    raw = str(text).encode(UTF8)
+    if len(raw) <= MAX_MESSAGE_BYTES:
+        return raw
+    return raw[:MAX_MESSAGE_BYTES].decode(UTF8, errors="ignore").encode(UTF8)
+
+
 def send(text, root=None, level=None):
     """Publish one alert to the configured ntfy topic. Returns True on HTTP 2xx, False otherwise; never raises."""
     c = config()
@@ -131,7 +141,7 @@ def send(text, root=None, level=None):
         headers["Authorization"] = f"Bearer {c['token']}"
     req = urllib.request.Request(
         c["topic_url"],
-        data=str(text)[:4000].encode(UTF8),
+        data=_encode_message(text),
         headers=headers,
         method="POST",
     )
