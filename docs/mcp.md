@@ -56,9 +56,11 @@ and `io.modelcontextprotocol/logLevel`) and may probe `server/discover` for `sup
 `-32022` (`Unsupported protocol version`) and
 `data: {"supported": ["2026-07-28", "2025-06-18"], "requested": ...}`, and missing or malformed
 `_meta` with `-32602` (`Invalid params`). An older client that opens the session with `initialize`
-and sends no `_meta` on later calls keeps working: `initialize` echoes a requested version the
-server keeps (`2026-07-28` or `2025-06-18`), answers an unknown or omitted one with `2025-06-18` as
-that revision's lifecycle specifies, and refuses a non-string or empty `protocolVersion` with
+and sends no `_meta` on later calls keeps working: `initialize` answers `2025-06-18` for
+`2025-06-18` or an unknown or omitted legacy version as that revision's lifecycle specifies,
+refuses `2026-07-28` in `protocolVersion` or `params._meta` with `-32602` (`Invalid params`)
+pointing at `server/discover` and per-request `params._meta` because `2026-07-28` is stateless and
+has no `initialize` handshake (MCP-2026-2), and refuses a non-string or empty `protocolVersion` with
 `-32602`.*
 
 ## Tools
@@ -97,7 +99,9 @@ read-only JSON resources per project through `resources/list`, `resources/templa
 | `ao://<project>/ledger` | `ao://{project}/ledger` | `application/json` | Read-only summary counts and latest entries of the slice, verification, review, decision and waiver ledgers (never a grant token). |
 | `ao://<project>/decisions` | `ao://{project}/decisions` | `application/json` | The project's latest architect decisions and asked questions, with the count still open or proposed. |
 
-An unknown URI or a project the server does not serve is refused on `resources/read` with `-32002`
+`<project>` is percent-encoded in each `ao://<project>/<kind>` URI so a registered project whose
+name contains spaces or reserved URI characters is listed and read as a valid URI (MCP-2026-2). An
+unknown URI or a project the server does not serve is refused on `resources/read` with `-32002`
 (`Resource not found`) in `2025-06-18` and `-32602` (`Invalid params`) in `2026-07-28`, as each
 revision of the specification defines.
 
@@ -114,9 +118,14 @@ prompts through `prompts/list` and `prompts/get`.*
 
 Each prompt returns a user message naming the project, the `ao` tools to call in order, and the CLI
 commands for any step that belongs to a person (`ao commit-ok`, `ao commit`, `ao review`,
-`ao person-review`, `ao collect-review`, `ao waive`, `ao answer`, `ao harness seen`). No resource,
-prompt or tool records an approval, a `commit-ok`, a waiver, an answer or a `harness-seen`: a
-person's step comes back as the CLI command text only.
+`ao person-review`, `ao collect-review`, `ao waive`, `ao answer`, `ao harness seen`), built from
+words with every word passed through `shlex.quote` after checking any caller-supplied project
+against the project registry's keys by exact match and holding any slice or question id to ao's id
+pattern (MCP-2026-2). When the server is
+started with `--role`, `prompts/list` and `prompts/get` serve only the prompts whose ordered tools
+are all in that role's tool set (MCP-2026-2). No resource, prompt or tool records an approval, a
+`commit-ok`, a waiver, an answer or a `harness-seen`: a person's step comes back as the CLI command
+text only.
 
 ## Serving every registered project (`--project all`)
 

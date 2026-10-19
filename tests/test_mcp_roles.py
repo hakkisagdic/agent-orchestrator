@@ -382,7 +382,7 @@ def test_unknown_requested_version_is_answered_as_each_specification_says(projec
         {"id": 2, "method": "tools/list", "params": {"_meta": _meta("2024-11-05")}},
         {"id": 3, "method": "ping", "params": {"_meta": _meta("bad-\ud800")}},
         {"id": 4, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}},
-        {"id": 5, "method": "initialize", "params": {"protocolVersion": "2026-07-28"}},
+        {"id": 5, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}},
         {"id": 6, "method": "initialize", "params": {}},
     ]
 
@@ -399,8 +399,31 @@ def test_unknown_requested_version_is_answered_as_each_specification_says(projec
             },
         }
     assert answers[4]["result"]["protocolVersion"] == "2025-06-18"
-    assert answers[5]["result"]["protocolVersion"] == "2026-07-28"
+    assert answers[5]["result"]["protocolVersion"] == "2025-06-18"
     assert answers[6]["result"]["protocolVersion"] == "2025-06-18"
+
+
+def test_initialize_refuses_modern_2026_revision_and_points_at_server_discover_while_legacy_clients_keep_working(
+        project, monkeypatch, capsys):
+    """MCP 2026-07-28 removed initialize in favour of server/discover and per-request _meta (MCP-2026-2)."""
+    requests = [
+        {"id": 1, "method": "initialize", "params": {"protocolVersion": "2026-07-28"}},
+        {"id": 2, "method": "initialize", "params": {"_meta": _meta("2026-07-28")}},
+        {"id": 3, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}},
+        {"id": 4, "method": "tools/list"},
+    ]
+
+    answers, _ = _serve(monkeypatch, capsys, project["root"], requests, "--role", "reviewer")
+
+    for rid in (1, 2):
+        assert "result" not in answers[rid]
+        err = answers[rid]["error"]
+        assert err["code"] == -32602
+        assert "server/discover" in err["message"] and "2026-07-28" in err["message"]
+        assert err["data"] == {"supported": ["2026-07-28", "2025-06-18"], "requested": "2026-07-28"}
+    assert answers[3]["result"]["protocolVersion"] == "2025-06-18"
+    assert "resultType" not in answers[4]["result"]
+    assert [tool["name"] for tool in answers[4]["result"]["tools"]] == sorted(REVIEWER, key=mcp.EVERY_TOOL.index)
 
 
 def test_missing_or_malformed_negotiation_params_are_refused_with_invalid_params(project, monkeypatch, capsys):

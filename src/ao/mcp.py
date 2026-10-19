@@ -32,8 +32,11 @@ JSON-RPC 2.0 over stdio, standard library only.
 import json
 import math
 import os
+import re
+import shlex
 import sys
 import time
+import urllib.parse
 
 from . import __version__, language, lib as A, settings as S
 UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
@@ -41,6 +44,7 @@ UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise 
 PROTOCOL = "2025-06-18"
 PROTOCOL_2026 = "2026-07-28"
 PROTOCOLS = (PROTOCOL_2026, PROTOCOL)
+LEGACY_PROTOCOLS = (PROTOCOL,)
 INVALID_PARAMS = -32602
 RESOURCE_NOT_FOUND = -32002
 UNSUPPORTED_PROTOCOL_VERSION = -32022
@@ -48,6 +52,102 @@ RESOURCE_SCHEME = "ao"
 RESOURCE_MIME_TYPE = "application/json"
 PROJECT_SCOPES = ("all",)
 CAPABILITIES = {"tools": {}, "resources": {}, "prompts": {}}
+SLICE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)?\Z")
+QUESTION_ID_RE = re.compile(r"D-\d+\Z")
+ID_PATTERNS = {
+    "slice": SLICE_ID_RE,
+    "question": QUESTION_ID_RE,
+}
+SUGGESTED_COMMAND_TEMPLATES = (
+    "answer",
+    "harness-seen",
+    "person-review",
+    "commit-ok",
+    "review",
+    "collect-review",
+    "commit",
+    "waive-review",
+    "waive-gate",
+    "mail-ack",
+    "init",
+)
+
+
+def valid_caller_id(kind, value):
+    """True when caller-supplied `value` matches the pattern ao's own `kind` ids follow (MCP-2026-2)."""
+    pattern = ID_PATTERNS.get(kind)
+    return pattern is not None and isinstance(value, str) and 0 < len(value) <= 200 and bool(pattern.match(value))
+
+
+def _require_caller_id(kind, value):
+    if not valid_caller_id(kind, value):
+        raise ValueError(f"invalid {kind} id {value!r}")
+    return value
+
+
+def _require_project_key(value):
+    if not A._usable_key(value):
+        raise ValueError(f"invalid project key {value!r}")
+    return value
+
+
+def suggested_command(*words):
+    """Build a suggested CLI command from `words`, passing every word through `shlex.quote` (MCP-2026-2)."""
+    if not words:
+        raise ValueError("suggested_command requires at least one word")
+    quoted = []
+    for word in words:
+        text = str(word)
+        if "\0" in text:
+            raise ValueError("command word cannot contain NUL")
+        quoted.append(shlex.quote(text))
+    return " ".join(quoted)
+
+
+def suggested_command_words(template, root=None, *, slice_id=None, question_id=None, project=None):
+    """The unquoted word tuple for one suggested CLI command template, validating caller ids first (MCP-2026-2)."""
+    if project is not None:
+        _require_project_key(project)
+    if slice_id is not None:
+        _require_caller_id("slice", slice_id)
+    if question_id is not None:
+        _require_caller_id("question", question_id)
+    if template == "mail-ack":
+        return ("ao", "mail", "ack")
+    if template == "init":
+        return ("ao", "init")
+    if not isinstance(root, str) or not root or "\0" in root:
+        raise ValueError(f"invalid project root {root!r}")
+    prefix = ("ao", "-C", root)
+    if template == "answer":
+        return prefix + ("answer", question_id or "ID", "KEY")
+    if template == "harness-seen":
+        return prefix + ("harness", "seen", "--by", "NAME")
+    if template == "person-review":
+        return prefix + ("person-review", "--by", "NAME", "--verdict", "APPROVED", "--digest", "DIGEST")
+    if template == "commit-ok":
+        return prefix + ("commit-ok", "--verify")
+    if template == "review":
+        return prefix + ("review",)
+    if template == "collect-review":
+        return prefix + ("collect-review", "NONCE", "--response", "FILE", "--model", "MODEL", "--by", "NAME")
+    if template == "commit":
+        target = _require_caller_id("slice", slice_id)
+        return prefix + ("commit", "-m", f"{target}: SUMMARY")
+    if template == "waive-review":
+        target = _require_caller_id("slice", slice_id)
+        return prefix + ("waive", "review", "--slice", target, "--by", "NAME", "--why", "REASON")
+    if template == "waive-gate":
+        return prefix + ("waive", "GATE", "--slice", slice_id or "SLICE", "--by", "NAME", "--why", "REASON")
+    raise ValueError(f"unknown suggested command template {template!r}")
+
+
+def render_suggested_command(template, root=None, *, slice_id=None, question_id=None, project=None):
+    """Render one suggested CLI command template with every word passed through `shlex.quote` (MCP-2026-2)."""
+    return suggested_command(
+        *suggested_command_words(template, root, slice_id=slice_id, question_id=question_id, project=project)
+    )
+
 
 TOOLS = [
     {"name": "ao_status",
@@ -206,8 +306,9 @@ def served_role(argv):
     role = given.strip().lower()
     if role not in ROLE_TOOLS:
         known = ", ".join(sorted(ROLE_TOOLS))
+        init_cmd = render_suggested_command("init")
         raise ValueError(f"ao mcp: --role {given!r} is none of {known}, so the server does not start; name one of "
-                         "them in the registration - `ao init` writes it - or leave --role out for every tool")
+                         f"them in the registration - `{init_cmd}` writes it - or leave --role out for every tool")
     return role
 
 
@@ -239,17 +340,25 @@ def role_notice(role):
     if role is not None:
         return None
     known = ", ".join(sorted(ROLE_TOOLS))
+    init_cmd = render_suggested_command("init")
     return (f"ao mcp: started with no --role, so every tool is served; the roles are {known}, "
-            "and `ao init` writes one into each registration a single role reads")
+            f"and `{init_cmd}` writes one into each registration a single role reads")
 
 
 def _project_name(cfg):
     """The served project's stable name, read without writing `.ao/project-key` or the registry."""
     root = (cfg or {}).get("root") or ""
-    return (A.registered_key(root) if root else None) \
-        or str((cfg or {}).get("project") or "").strip() \
-        or os.path.basename(os.path.abspath(root).rstrip("/\\")) \
-        or "project"
+    abs_root = os.path.abspath(root) if root else ""
+    reg_key = (A.registered_key(root)
+               or next((name for name, path in registered_projects().items() if path == abs_root), None)) if root else None
+    for candidate in (
+        reg_key,
+        str((cfg or {}).get("project") or "").strip(),
+        os.path.basename(abs_root.rstrip("/\\")) if abs_root else "",
+    ):
+        if A._usable_key(candidate):
+            return candidate
+    return "project"
 
 
 def registered_projects():
@@ -273,23 +382,23 @@ def _served_projects(cfg, project_scope=None):
 
 def _resolve_project(cfg, project_scope, requested):
     """((project, root, project_cfg), None) for `requested`, or (None, error_message)."""
-    given = str(requested or "").strip() if isinstance(requested, str) else ""
     if project_scope == "all":
         projects = registered_projects()
-        if not given:
+        if not isinstance(requested, str) or not requested.strip():
             known = ", ".join(sorted(projects)) or "none registered"
             return None, f"project is required with --project all (registered: {known})"
-        if given not in projects:
+        if requested not in projects:
             known = ", ".join(sorted(projects)) or "none registered"
-            return None, (f"project {given!r} is not in ao's project registry "
+            return None, (f"project {requested!r} is not in ao's project registry "
                           f"({A.project_registry_path()}; registered: {known})")
-        root = projects[given]
-        return (given, root, dict(A.load_config(root), root=root)), None
+        root = projects[requested]
+        return (requested, root, dict(A.load_config(root), root=root)), None
     current = _project_name(cfg)
     root = os.path.abspath(cfg["root"])
-    if requested is not None and (not isinstance(requested, str) or given != current):
-        return None, (f"project {requested!r} is not served by this server "
-                      f"(serving {current!r}); start with --project all for every registered project")
+    if requested is not None:
+        if not isinstance(requested, str) or requested != current:
+            return None, (f"project {requested!r} is not served by this server "
+                          f"(serving {current!r}); start with --project all for every registered project")
     return (current, root, dict(cfg, root=root)), None
 
 
@@ -483,18 +592,21 @@ RESOURCE_SPEC_BY_KIND = {spec["kind"]: spec for spec in RESOURCE_SPECS}
 
 
 def resource_uri(project, kind):
-    """The stable `ao://<project>/<kind>` URI of one read-only resource (MCP-RES)."""
-    return f"{RESOURCE_SCHEME}://{project}/{kind}"
+    """The stable `ao://<project>/<kind>` URI of one read-only resource, with `<project>` percent-encoded (MCP-RES, MCP-2026-2)."""
+    return f"{RESOURCE_SCHEME}://{urllib.parse.quote(str(project), safe='')}/{kind}"
 
 
 def _parse_resource_uri(uri):
     """(project, kind) for a valid `ao://<project>/<kind>` URI, or (None, None)."""
     prefix = f"{RESOURCE_SCHEME}://"
-    if not isinstance(uri, str) or not uri.startswith(prefix):
+    if not isinstance(uri, str) or not uri.startswith(prefix) or any(ch.isspace() for ch in uri):
         return None, None
     rest = uri[len(prefix):]
-    project, sep, kind = rest.partition("/")
-    if not sep or not project or not kind or "/" in kind or not A._usable_key(project):
+    raw_project, sep, kind = rest.partition("/")
+    if not sep or not raw_project or not kind or "/" in kind or any(ch in raw_project for ch in "#?\\"):
+        return None, None
+    project = urllib.parse.unquote(raw_project)
+    if not A._usable_key(project):
         return None, None
     if kind not in RESOURCE_SPEC_BY_KIND:
         return None, None
@@ -605,6 +717,12 @@ PROMPT_SPECS = (
 PROMPT_SPEC_BY_NAME = {spec["name"]: spec for spec in PROMPT_SPECS}
 
 
+def prompts_for_role(role):
+    """The prompt specs whose ordered tools are all served for `role` (MCP-2026-2)."""
+    served = set(role_tools(role))
+    return tuple(spec for spec in PROMPT_SPECS if set(spec["tools"]).issubset(served))
+
+
 def _prompt_arguments(spec, project_scope=None):
     project_arg = {
         "name": "project",
@@ -614,8 +732,8 @@ def _prompt_arguments(spec, project_scope=None):
     return [project_arg] + [dict(arg) for arg in spec["arguments"]]
 
 
-def prompts_list(project_scope=None, params=None):
-    """Answer `prompts/list`: (result, error) for the menu prompts a person picks from (MCP-RES)."""
+def prompts_list(project_scope=None, params=None, role=None):
+    """Answer `prompts/list`: (result, error) for the menu prompts a person picks from (MCP-RES, MCP-2026-2)."""
     err = _cursor_error(params)
     if err is not None:
         return None, err
@@ -624,13 +742,21 @@ def prompts_list(project_scope=None, params=None):
         "title": spec["title"],
         "description": spec["description"],
         "arguments": _prompt_arguments(spec, project_scope),
-    } for spec in PROMPT_SPECS]
+    } for spec in prompts_for_role(role)]
     return {"prompts": prompts}, None
 
 
-def _prompt_text(name, project_name, root, slice_id=None):
-    call_arg = f'{{"project": "{project_name}"}}'
-    cli_prefix = f"ao -C {root}"
+def _prompt_text(name, project_name, root, slice_id=None, question_id=None):
+    _require_project_key(project_name)
+    if slice_id is not None:
+        _require_caller_id("slice", slice_id)
+    if question_id is not None:
+        _require_caller_id("question", question_id)
+    call_arg = json.dumps({"project": project_name}, ensure_ascii=False)
+    answer_cmd = render_suggested_command("answer", root, question_id=question_id, project=project_name)
+    seen_cmd = render_suggested_command("harness-seen", root, project=project_name)
+    person_review_cmd = render_suggested_command("person-review", root, project=project_name)
+    commit_ok_cmd = render_suggested_command("commit-ok", root, project=project_name)
     if name == "status":
         return (
             f"Project: {project_name}\n"
@@ -642,13 +768,18 @@ def _prompt_text(name, project_name, root, slice_id=None):
             "Authority stays in the CLI — no MCP resource, prompt or tool records an approval, a commit-ok, "
             "a waiver, an answer or a harness-seen. If a person must act, return the exact CLI command text "
             "for them to run in their terminal:\n"
-            f"- Answer an open question: `{cli_prefix} answer ID KEY`\n"
-            f"- Record harness configuration changes as seen: `{cli_prefix} harness seen --by NAME`\n"
-            f"- Record a person review verdict: `{cli_prefix} person-review --by NAME --verdict APPROVED --digest DIGEST`\n"
-            f"- Grant commit authority: `{cli_prefix} commit-ok --verify`"
+            f"- Answer an open question: `{answer_cmd}`\n"
+            f"- Record harness configuration changes as seen: `{seen_cmd}`\n"
+            f"- Record a person review verdict: `{person_review_cmd}`\n"
+            f"- Grant commit authority: `{commit_ok_cmd}`"
         )
     if name == "land-slice":
-        verify_arg = f'{{"project": "{project_name}", "profile": "quick"}}'
+        _require_caller_id("slice", slice_id)
+        verify_arg = json.dumps({"project": project_name, "profile": "quick"}, ensure_ascii=False)
+        review_cmd = render_suggested_command("review", root, project=project_name)
+        collect_cmd = render_suggested_command("collect-review", root, project=project_name)
+        commit_cmd = render_suggested_command("commit", root, slice_id=slice_id, project=project_name)
+        waive_review_cmd = render_suggested_command("waive-review", root, slice_id=slice_id, project=project_name)
         return (
             f"Project: {project_name}\n"
             f"Slice: {slice_id}\n"
@@ -661,14 +792,15 @@ def _prompt_text(name, project_name, root, slice_id=None):
             f"6. `ao_candidate` with arguments `{call_arg}` — read the staged candidate's digest, paths and boundary for `{slice_id}`.\n\n"
             "Authority stays in the CLI — no MCP resource, prompt or tool records an approval, a commit-ok, "
             "a waiver, an answer or a harness-seen. Return any person step as CLI command text only:\n"
-            f"- Independent or person review: `{cli_prefix} review` or `{cli_prefix} person-review --by NAME --verdict APPROVED --digest DIGEST` "
-            f"(or `{cli_prefix} collect-review NONCE --response FILE --model MODEL --by NAME`)\n"
-            f"- Grant commit authority for the staged candidate: `{cli_prefix} commit-ok --verify`\n"
-            f"- Commit the granted candidate: `{cli_prefix} commit -m \"{slice_id}: SUMMARY\"`\n"
-            f"- Waive a gate on the record (person only): `{cli_prefix} waive review --slice {slice_id} --by NAME --why \"REASON\"`\n"
-            f"- Answer an open question (person only): `{cli_prefix} answer ID KEY`\n"
-            f"- Record harness configuration changes as seen (person only): `{cli_prefix} harness seen --by NAME`"
+            f"- Independent or person review: `{review_cmd}` or `{person_review_cmd}` "
+            f"(or `{collect_cmd}`)\n"
+            f"- Grant commit authority for the staged candidate: `{commit_ok_cmd}`\n"
+            f"- Commit the granted candidate: `{commit_cmd}`\n"
+            f"- Waive a gate on the record (person only): `{waive_review_cmd}`\n"
+            f"- Answer an open question (person only): `{answer_cmd}`\n"
+            f"- Record harness configuration changes as seen (person only): `{seen_cmd}`"
         )
+    waive_gate_cmd = render_suggested_command("waive-gate", root, slice_id=slice_id, project=project_name)
     return (
         f"Project: {project_name}\n"
         f"Explain what is stuck in project `{project_name}` by calling these ao MCP tools in order:\n"
@@ -681,22 +813,30 @@ def _prompt_text(name, project_name, root, slice_id=None):
         "Authority stays in the CLI — no MCP resource, prompt or tool records an approval, a commit-ok, "
         "a waiver, an answer or a harness-seen. When a person's action is needed to unblock the project, "
         "return the command text only:\n"
-        f"- Answer an open decision or proposal: `{cli_prefix} answer ID KEY`\n"
-        f"- Mark harness changes seen: `{cli_prefix} harness seen --by NAME`\n"
-        f"- Record a person review: `{cli_prefix} person-review --by NAME --verdict APPROVED --digest DIGEST`\n"
-        f"- Waive a gate on the record: `{cli_prefix} waive GATE --slice SLICE --by NAME --why \"REASON\"`\n"
-        f"- Grant commit authority: `{cli_prefix} commit-ok --verify`"
+        f"- Answer an open decision or proposal: `{answer_cmd}`\n"
+        f"- Mark harness changes seen: `{seen_cmd}`\n"
+        f"- Record a person review: `{person_review_cmd}`\n"
+        f"- Waive a gate on the record: `{waive_gate_cmd}`\n"
+        f"- Grant commit authority: `{commit_ok_cmd}`"
     )
 
 
-def prompt_get(cfg, project_scope=None, params=None):
-    """Answer `prompts/get`: (result, error) naming the project and ordered ao tools to call (MCP-RES)."""
+def prompt_get(cfg, project_scope=None, params=None, role=None):
+    """Answer `prompts/get`: (result, error) naming the project and ordered ao tools to call (MCP-RES, MCP-2026-2)."""
     if not isinstance(params, dict) or not isinstance(params.get("name"), str):
         return None, {"code": INVALID_PARAMS, "message": "Invalid params: prompt name is required"}
     name = params["name"]
     spec = PROMPT_SPEC_BY_NAME.get(name)
     if spec is None:
         return None, {"code": INVALID_PARAMS, "message": f"Invalid params: unknown prompt {name!r}"}
+    served = set(role_tools(role))
+    unserved = [tool for tool in spec["tools"] if tool not in served]
+    if unserved:
+        return None, {
+            "code": INVALID_PARAMS,
+            "message": (f"Invalid params: prompt {name!r} calls {', '.join(unserved)}, which is not served "
+                        f"with --role {role}"),
+        }
     raw_args = params.get("arguments")
     if raw_args is None:
         raw_args = {}
@@ -708,11 +848,20 @@ def prompt_get(cfg, project_scope=None, params=None):
         return None, {"code": INVALID_PARAMS, "message": f"Invalid params: {problem}"}
     project_name, root, _ = resolved
     slice_id = None
-    if name == "land-slice":
-        slice_id = raw_args.get("slice", "").strip()
-        if not slice_id or any(ch in slice_id for ch in "\r\n\0"):
+    if name == "land-slice" or "slice" in raw_args:
+        raw_slice = raw_args.get("slice", "")
+        slice_id = raw_slice.strip() if isinstance(raw_slice, str) else ""
+        if not slice_id:
             return None, {"code": INVALID_PARAMS, "message": "Invalid params: argument 'slice' is required"}
-    text = _prompt_text(name, project_name, root, slice_id=slice_id)
+        if not valid_caller_id("slice", slice_id):
+            return None, {"code": INVALID_PARAMS, "message": f"Invalid params: invalid slice id {raw_slice!r}"}
+    question_id = None
+    if "question" in raw_args:
+        raw_question = raw_args.get("question", "")
+        question_id = raw_question.strip() if isinstance(raw_question, str) else ""
+        if not valid_caller_id("question", question_id):
+            return None, {"code": INVALID_PARAMS, "message": f"Invalid params: invalid question id {raw_question!r}"}
+    text = _prompt_text(name, project_name, root, slice_id=slice_id, question_id=question_id)
     return {
         "description": f"{spec['description']} (project: {project_name})",
         "messages": [{
@@ -795,9 +944,10 @@ def call(name, args, cfg, allow_verify, role=None, project_scope=None):
         # or with mail.store append-only recorded handled, which the store keeps from the actor deciding what was
         # handled precisely so that it cannot erase the question (LEADS-MCP).
         if not A.addressed_to(mid, cfg, "implementer"):
+            mail_ack_cmd = render_suggested_command("mail-ack")
             return {"error": f"{mid} is not addressed to the implementer, so ao_ack does not take it: it acknowledges "
                              "only what ao_inbox lists. Mail to the architect, and the watchdog's, is acknowledged by "
-                             "the one it is for, with `ao mail ack`; leave it where it is."}
+                             f"the one it is for, with `{mail_ack_cmd}`; leave it where it is."}
         if A.mail_store_mode(root) == "append-only":
             A.ingest_mail(root, cfg)
             A.handle_message(root, cfg, mid, "implementer", args.get("outcome", "applied"))   # a record (#80)
@@ -811,6 +961,8 @@ def call(name, args, cfg, allow_verify, role=None, project_scope=None):
                                project_name, project_scope)
 
     if name == "ao_report":
+        if args.get("slice") is not None and not valid_caller_id("slice", args.get("slice")):
+            return {"error": f"invalid slice id {args.get('slice')!r}"}
         box = cfg.get("mailbox", "agent-mail")
         os.makedirs(os.path.join(root, box), exist_ok=True)
         kind = args.get("kind", "status")
@@ -895,6 +1047,8 @@ def call(name, args, cfg, allow_verify, role=None, project_scope=None):
             A.fanout_verdict(root, cfg, int(args["agents"]), args.get("per_agent_tokens")),
             project_name, project_scope)
     if name == "ao_ask":
+        if args.get("slice") is not None and not valid_caller_id("slice", args.get("slice")):
+            return {"error": f"invalid slice id {args.get('slice')!r}"}
         rec = A.ask(root, args["question"], args.get("options") or [],
                     context=args.get("context"), slice_id=args.get("slice"), cfg=cfg)
         # Delivery is decided here, not by the caller. An implementer with its own
@@ -971,7 +1125,15 @@ def _discover_result():
 
 
 def _negotiate_initialize(params):
-    """Answer `initialize` (2025-06-18 lifecycle): (result, error)."""
+    """Answer `initialize` (2025-06-18 lifecycle): (result, error).
+
+    MCP `2026-07-28` is stateless and removed the `initialize` handshake in favour of
+    `server/discover` and per-request `params._meta` (`basic/versioning`, `basic/index`
+    #Statelessness). Naming `2026-07-28` on `initialize` previously answered with a
+    `2026-07-28` handshake result while subsequent no-`_meta` calls were served as
+    `2025-06-18`; refuse `2026-07-28` on `initialize` and point at `server/discover`,
+    while legacy clients keep working on `2025-06-18` (MCP-2026-2).
+    """
     if params is None:
         params = {}
     if not isinstance(params, dict):
@@ -979,7 +1141,18 @@ def _negotiate_initialize(params):
     requested = params.get("protocolVersion")
     if requested is not None and (not isinstance(requested, str) or not requested):
         return None, {"code": INVALID_PARAMS, "message": "Invalid params"}
-    version = requested if requested in PROTOCOLS else PROTOCOL
+    meta = params.get("_meta")
+    meta_version = meta.get("io.modelcontextprotocol/protocolVersion") if isinstance(meta, dict) else None
+    if requested == PROTOCOL_2026 or meta_version == PROTOCOL_2026:
+        return None, {
+            "code": INVALID_PARAMS,
+            "message": (f"Invalid params: protocolVersion {PROTOCOL_2026!r} is stateless and does not use "
+                        "initialize; probe with server/discover and send "
+                        "io.modelcontextprotocol/protocolVersion in params._meta on each request, "
+                        f"or initialize with {PROTOCOL!r}"),
+            "data": {"supported": list(PROTOCOLS), "requested": PROTOCOL_2026},
+        }
+    version = requested if requested in LEGACY_PROTOCOLS else PROTOCOL
     return {"protocolVersion": version,
             "capabilities": _capabilities(),
             "serverInfo": _server_info()}, None
@@ -1120,9 +1293,9 @@ def main():
                     elif method == "resources/read":
                         result, error = resource_read(cfg, project_scope, params, negotiated=negotiated)
                     elif method == "prompts/list":
-                        result, error = prompts_list(project_scope, params)
+                        result, error = prompts_list(project_scope, params, role=role)
                     elif method == "prompts/get":
-                        result, error = prompt_get(cfg, project_scope, params)
+                        result, error = prompt_get(cfg, project_scope, params, role=role)
                     elif method == "ping":
                         result = {}
                     else:
