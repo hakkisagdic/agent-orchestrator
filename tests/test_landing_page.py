@@ -48,6 +48,20 @@ OVERSTATED_HOOK = re.compile(
     r"|yalnız o değişikliğin inmesine izin verir",
     re.I,
 )
+OVERSTATED_SUPPORT = re.compile(
+    r"reads each agent's own session store"
+    r"|every adapter below is written from a measurement"
+    r"|not from documentation prose"
+    r"|her ajanın kendi oturum deposunu okur"
+    r"|her adaptör doküman cümlesinden değil, ölçümden yazılmıştır",
+    re.I,
+)
+SUPPORT_INTRO = re.compile(
+    r"<h2><span lang-en>Agent support</span><span lang-tr>Ajan desteği</span></h2>\s*"
+    r'<p class="note"[^>]*>\s*<span lang-en>(.*?)</span>\s*<span lang-tr>(.*?)</span>\s*</p>',
+    re.S,
+)
+INLINE_CODE = re.compile(r"<code>([^<]+)</code>")
 FORMULA_VERSION = re.compile(r"/refs/tags/v(\d+\.\d+\.\d+)\.tar\.gz")
 IDENTITY = {                      # the other places the package says what it is
     "pyproject.toml": ROOT / "pyproject.toml",
@@ -76,6 +90,35 @@ def _typed_commands(text):
                 yield words
 
 
+def _declared_support():
+    """Group non-cloud packaged adapters by how ao observes them and by verification status, directly
+    from `src/ao/adapters/*.json`."""
+    observed = {
+        "session_store": set(),
+        "call_return": set(),
+        "transcript_only": set(),
+        "unknown": set(),
+        "stateless": set(),
+    }
+    verified = {}
+    for name, adapter in A.package_adapters().items():
+        if adapter.get("kind") == "cloud":
+            continue
+        verified.setdefault(adapter.get("verified"), set()).add(name)
+        transcript_kind = (adapter.get("transcript") or {}).get("kind")
+        if A.session_store_reachable(adapter):
+            observed["session_store"].add(name)
+        elif adapter.get("observation_mode") == "call-return" or transcript_kind == "call-return":
+            observed["call_return"].add(name)
+        elif transcript_kind in ("jsonl", "sqlite", "json", "markdown"):
+            observed["transcript_only"].add(name)
+        elif transcript_kind == "unknown":
+            observed["unknown"].add(name)
+        else:
+            observed["stateless"].add(name)
+    return observed, verified
+
+
 def test_the_landing_page_loads_nothing_from_another_host():
     """LANDING-REFRESH-1: the workflow refuses an external script, stylesheet or image, because a page that
     breaks when a CDN moves is a page nobody notices is broken. That check runs on the pushed tree; this
@@ -93,15 +136,54 @@ def test_the_landing_page_groups_each_adapter_as_its_adapter_declares_it():
     """LANDING-REFRESH-3: the table is the README's table in another shape - each level naming the adapters
     whose adapter declares that level, and no level missing. A cloud agent's adapter is left out as
     `ao adapters` leaves it out: it names no harness this page can review with."""
-    declared = {}
-    for name, adapter in A.package_adapters().items():
-        if adapter.get("kind") != "cloud":
-            declared.setdefault(adapter.get("verified"), set()).add(name)
+    _, declared = _declared_support()
     shown = {level: {name.strip() for name in TAG.sub("", cell).split("·") if name.strip()}
              for level, cell in PILL.findall(_page())}
 
     assert shown == declared, {level: (sorted(shown.get(level, set())), sorted(declared.get(level, set())))
                                for level in set(shown) | set(declared) if shown.get(level) != declared.get(level)}
+
+
+def test_the_landing_page_support_intro_states_how_each_adapter_is_observed_and_measured():
+    """LANDING-REFRESH-2: the support section's opening paragraph must state how each group of packaged
+    adapters is observed (a reachable session store read, call-return data that ao keeps itself, a
+    declared transcript shape without a resolved session store, an unknown transcript, or a stateless
+    reviewer/model backend) and which levels are measured (`full`, `partial`), written from published
+    docs only (`documented`), or `untested` - never claiming every adapter reads a session store or is
+    written from a measurement."""
+    page = _page()
+    assert OVERSTATED_SUPPORT.search(page) is None
+
+    match = SUPPORT_INTRO.search(page)
+    assert match, "the Agent support section carries no bilingual intro paragraph"
+    observed, verified = _declared_support()
+
+    for lang, intro in zip(("en", "tr"), match.groups()):
+        sentences = [part.strip() for part in intro.strip().split(".") if part.strip()]
+        assert len(sentences) == 3, (lang, sentences)
+        obs_clauses = [clause.strip() for clause in sentences[1].split(";")]
+        assert len(obs_clauses) == 5, (lang, obs_clauses)
+
+        assert set(INLINE_CODE.findall(obs_clauses[0])) == observed["session_store"], lang
+        assert set(INLINE_CODE.findall(obs_clauses[1])) == observed["call_return"] | {"call-return"}, lang
+        assert set(INLINE_CODE.findall(obs_clauses[2])) == observed["transcript_only"], lang
+        assert set(INLINE_CODE.findall(obs_clauses[3])) == observed["unknown"] | {"unknown"}, lang
+        assert set(INLINE_CODE.findall(obs_clauses[4])) == observed["stateless"], lang
+
+        meas_clauses = [clause.strip() for clause in sentences[2].split(";")]
+        assert len(meas_clauses) == 2, (lang, meas_clauses)
+        assert set(INLINE_CODE.findall(meas_clauses[0])) == {"full", "partial"}, lang
+        assert set(INLINE_CODE.findall(meas_clauses[1])) == verified["documented"] | {"documented", "untested"}, lang
+
+    en_intro, tr_intro = match.groups()
+    assert "session store" in en_intro and "keeps itself" in en_intro
+    assert "measured against an install" in en_intro and "published docs only" in en_intro and "have not been run" in regex_collapse(en_intro)
+    assert "oturum deposunu çözüp okur" in regex_collapse(tr_intro) and "kendisi tutar" in regex_collapse(tr_intro)
+    assert "ölçülmüştür" in tr_intro and "yayımlanmış dokümandan" in regex_collapse(tr_intro) and "henüz koşulmamıştır" in regex_collapse(tr_intro)
+
+
+def regex_collapse(text):
+    return " ".join(TAG.sub("", text).split())
 
 
 def test_every_command_name_on_the_landing_page_is_one_ao_has():

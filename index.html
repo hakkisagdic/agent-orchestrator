@@ -402,10 +402,40 @@ ao hooks install                <span class="c" lang-en># the hook refuses an un
 <section><div class="wrap">
   <h2><span lang-en>Agent support</span><span lang-tr>Ajan desteği</span></h2>
   <p class="note" style="margin-top:-12px">
-    <span lang-en>ao reads each agent's own session store; the adapter says where and in
-    what shape, and is written from a measurement, not from documentation prose.</span>
-    <span lang-tr>ao her ajanın kendi oturum deposunu okur; adaptör nerede ve hangi
-    biçimde okuduğunu söyler — doküman cümlesinden değil, ölçümden yazılmıştır.</span></p>
+    <span lang-en>Each adapter declares how ao observes its harness and how much of that
+    declaration has been measured. ao resolves and reads the agent's own session store for
+    <code>kiro</code>, <code>claude-code</code>, <code>opencode</code> and
+    <code>qoder</code>; for <code>antigravity</code>, <code>warp</code> and
+    <code>cursor-agent</code> (<code>call-return</code>), the call returns a structured
+    record that ao keeps itself; <code>codex</code>, <code>command-code</code>,
+    <code>aider</code>, <code>droid</code>, <code>grok</code>, <code>hermes</code>,
+    <code>kilocode</code>, <code>kimi</code>, <code>omp</code>, <code>pi</code>,
+    <code>qwen</code> and <code>trae</code> declare a transcript shape with no session store
+    ao resolves yet; <code>amazon-q</code>, <code>amp</code>, <code>copilot</code>,
+    <code>deepseek</code>, <code>gemini</code> and <code>reasonix</code> leave the
+    transcript <code>unknown</code>; and <code>openai-api</code>, <code>pr-agent</code> and
+    <code>ollama</code> are tool reviewers or a model backend with no session store. Only
+    the <code>full</code> and <code>partial</code> rows are measured against an install;
+    <code>cursor-agent</code> (<code>documented</code>) is written from published docs only,
+    and the <code>untested</code> rows are written from documented interfaces and have not
+    been run.</span>
+    <span lang-tr>Her adaptör, ao'nun o harness'ı nasıl gözlemlediğini ve bu bildirimin ne
+    kadarının ölçüldüğünü söyler. ao, <code>kiro</code>, <code>claude-code</code>,
+    <code>opencode</code> ve <code>qoder</code> için ajanın kendi oturum deposunu çözüp
+    okur; <code>antigravity</code>, <code>warp</code> ve <code>cursor-agent</code>
+    (<code>call-return</code>) için çağrının döndürdüğü yapılandırılmış kaydı kendisi
+    tutar; <code>codex</code>, <code>command-code</code>, <code>aider</code>,
+    <code>droid</code>, <code>grok</code>, <code>hermes</code>, <code>kilocode</code>,
+    <code>kimi</code>, <code>omp</code>, <code>pi</code>, <code>qwen</code> ve
+    <code>trae</code>, ao'nun henüz çözmediği bir oturum deposuyla yalnız transcript
+    biçimini bildirir; <code>amazon-q</code>, <code>amp</code>, <code>copilot</code>,
+    <code>deepseek</code>, <code>gemini</code> ve <code>reasonix</code> transcript'i
+    <code>unknown</code> bırakır; <code>openai-api</code>, <code>pr-agent</code> ve
+    <code>ollama</code> ise oturum deposu olmayan araç gözden geçirenleri ya da model
+    arka uçlarıdır. Yalnız <code>full</code> ve <code>partial</code> satırları kurulu bir
+    araç üzerinde ölçülmüştür; <code>cursor-agent</code> (<code>documented</code>) yalnız
+    yayımlanmış dokümandan yazılmıştır, <code>untested</code> satırları ise dokümante
+    arayüzlerden yazılmış ve henüz koşulmamıştır.</span></p>
   <table>
     <tr><th lang-en>verified</th><th lang-tr>doğrulama</th><th lang-en>adapters</th><th lang-tr>adaptörler</th></tr>
     <tr><td><span class="pill">full</span></td><td>kiro · claude-code · antigravity<br>
