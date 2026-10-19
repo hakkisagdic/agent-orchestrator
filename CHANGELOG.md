@@ -16,6 +16,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 - `ao credits --all` reads every shipped adapter that declares an account ao can reach, one request each, and the local estimate where it declares its transcripts; an adapter that declares neither is named rather than shown another harness's figure or a zero ([telemetry.md](docs/telemetry.md)) (CREDITS-ALL).
 
+### Adapters
+
+- `ao mcp serve` speaks the Model Context Protocol revision dated `2026-07-28` beside `2025-06-18`: it answers `server/discover` with `supportedVersions` (`["2026-07-28", "2025-06-18"]`), `capabilities`, `resultType: "complete"` and `_meta["io.modelcontextprotocol/serverInfo"]`, negotiates on each request in `params._meta`, refuses an unknown version in `_meta` with JSON-RPC error `-32022` (`Unsupported protocol version`) naming `supported` and `requested` and malformed `_meta` with `-32602`, and keeps `initialize`-based clients working while answering an unknown version on `initialize` with `2025-06-18` (MCP-2026).
+
 ## [0.6.0] - 2026-10-19
 
 ### New commands

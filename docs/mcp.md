@@ -43,6 +43,22 @@ A2A-HARDEN; one the parser will not hold, a number of more than 4300 digits or n
 recurses, is passed over as a line that is no JSON is. Each ended the server, and its client lost
 every tool for the rest of the session.*
 
+*In ao since slice MCP-2026: `ao mcp serve` speaks the Model Context Protocol revision dated
+`2026-07-28` beside `2025-06-18`. A `2026-07-28` client negotiates on each request in
+`params._meta` (`io.modelcontextprotocol/protocolVersion` and
+`io.modelcontextprotocol/clientCapabilities`, with optional `io.modelcontextprotocol/clientInfo`
+and `io.modelcontextprotocol/logLevel`) and may probe `server/discover` for `supportedVersions`
+(`["2026-07-28", "2025-06-18"]`), `capabilities`, `resultType: "complete"` and
+`_meta["io.modelcontextprotocol/serverInfo"]`, which `2026-07-28` replies on `tools/list`,
+`tools/call` and `ping` also carry; an unknown version in `_meta` is refused with JSON-RPC error
+`-32022` (`Unsupported protocol version`) and
+`data: {"supported": ["2026-07-28", "2025-06-18"], "requested": ...}`, and missing or malformed
+`_meta` with `-32602` (`Invalid params`). An older client that opens the session with `initialize`
+and sends no `_meta` on later calls keeps working: `initialize` echoes a requested version the
+server keeps (`2026-07-28` or `2025-06-18`), answers an unknown or omitted one with `2025-06-18` as
+that revision's lifecycle specifies, and refuses a non-string or empty `protocolVersion` with
+`-32602`.*
+
 ## Tools
 
 Each tool has an access class, which says what calling it does to the project: **read**

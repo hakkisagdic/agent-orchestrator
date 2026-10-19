@@ -308,3 +308,124 @@ def test_docs_mcp_lists_each_role_with_the_tools_it_is_served():
     for role, cell in rows.items():
         named = set(re.findall(r"`(ao_[a-z_]+)`", cell)) or set(mcp.EVERY_TOOL)   # "every tool"
         assert named == set(mcp.ROLE_TOOLS[role]), role
+
+
+# ---- protocol negotiation (MCP-2026) ---------------------------------------------------------
+
+def _meta(version=mcp.PROTOCOL_2026, **extra):
+    return dict({"io.modelcontextprotocol/protocolVersion": version,
+                 "io.modelcontextprotocol/clientCapabilities": {},
+                 "io.modelcontextprotocol/clientInfo": {"name": "probe", "version": "1.0.0"}}, **extra)
+
+
+@pytest.mark.parametrize("version", mcp.PROTOCOLS)
+def test_server_discover_answers_with_supported_versions_capabilities_and_server_info(
+        project, monkeypatch, capsys, version):
+    answers, _ = _serve(monkeypatch, capsys, project["root"], [
+        {"id": 1, "method": "server/discover", "params": {"_meta": _meta(version)}}], "--role", "reviewer")
+
+    assert answers[1] == {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+            "resultType": "complete",
+            "supportedVersions": ["2026-07-28", "2025-06-18"],
+            "capabilities": {"tools": {}},
+            "_meta": {"io.modelcontextprotocol/serverInfo": {"name": "agent-orchestrator", "version": mcp.__version__}},
+        },
+    }
+
+
+def test_each_kept_protocol_version_works_on_requests_and_older_clients_keep_working(
+        project, monkeypatch, capsys):
+    server_meta = {"io.modelcontextprotocol/serverInfo": {"name": "agent-orchestrator", "version": mcp.__version__}}
+    requests = [
+        {"id": 1, "method": "tools/list", "params": {"_meta": _meta("2026-07-28")}},
+        {"id": 2, "method": "tools/call",
+         "params": {"name": "ao_board", "arguments": {}, "_meta": _meta("2026-07-28",
+                                                                        **{"io.modelcontextprotocol/logLevel": "info"})}},
+        {"id": 3, "method": "ping", "params": {"_meta": _meta("2026-07-28")}},
+        {"id": 4, "method": "tools/list", "params": {"_meta": _meta("2025-06-18")}},
+        {"id": 5, "method": "ping", "params": {"_meta": _meta("2025-06-18")}},
+        {"id": 6, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                                                     "clientInfo": {"name": "old", "version": "1.0"}}},
+        {"method": "notifications/initialized"},
+        {"id": 7, "method": "tools/list", "params": {"_meta": {"progressToken": "t-1"}}},
+        {"id": 8, "method": "ping"},
+    ]
+
+    answers, _ = _serve(monkeypatch, capsys, project["root"], requests, "--role", "reviewer")
+
+    assert answers[1]["result"] == {"resultType": "complete",
+                                    "tools": [tool for tool in mcp.TOOLS if tool["name"] in REVIEWER],
+                                    "_meta": server_meta}
+    assert answers[2]["result"]["resultType"] == "complete" and answers[2]["result"]["_meta"] == server_meta
+    assert "counts" in json.loads(answers[2]["result"]["content"][0]["text"])
+    assert answers[3]["result"] == {"resultType": "complete", "_meta": server_meta}
+    assert answers[4]["result"] == {"tools": [tool for tool in mcp.TOOLS if tool["name"] in REVIEWER]}
+    assert answers[5]["result"] == {}
+    assert answers[6]["result"] == {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
+                                    "serverInfo": {"name": "agent-orchestrator", "version": mcp.__version__}}
+    assert [tool["name"] for tool in answers[7]["result"]["tools"]] == sorted(REVIEWER, key=mcp.EVERY_TOOL.index)
+    assert answers[8]["result"] == {}
+
+
+def test_unknown_requested_version_is_answered_as_each_specification_says(project, monkeypatch, capsys):
+    requests = [
+        {"id": 1, "method": "server/discover", "params": {"_meta": _meta("1999-01-01")}},
+        {"id": 2, "method": "tools/list", "params": {"_meta": _meta("2024-11-05")}},
+        {"id": 3, "method": "ping", "params": {"_meta": _meta("bad-\ud800")}},
+        {"id": 4, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}},
+        {"id": 5, "method": "initialize", "params": {"protocolVersion": "2026-07-28"}},
+        {"id": 6, "method": "initialize", "params": {}},
+    ]
+
+    answers, _ = _serve(monkeypatch, capsys, project["root"], requests, "--role", "reviewer")
+
+    for rid, requested in ((1, "1999-01-01"), (2, "2024-11-05"), (3, "bad-\ud800")):
+        assert answers[rid] == {
+            "jsonrpc": "2.0",
+            "id": rid,
+            "error": {
+                "code": -32022,
+                "message": "Unsupported protocol version",
+                "data": {"supported": ["2026-07-28", "2025-06-18"], "requested": requested},
+            },
+        }
+    assert answers[4]["result"]["protocolVersion"] == "2025-06-18"
+    assert answers[5]["result"]["protocolVersion"] == "2026-07-28"
+    assert answers[6]["result"]["protocolVersion"] == "2025-06-18"
+
+
+def test_missing_or_malformed_negotiation_params_are_refused_with_invalid_params(project, monkeypatch, capsys):
+    bad = [
+        {"id": 1, "method": "server/discover"},
+        {"id": 2, "method": "server/discover", "params": {}},
+        {"id": 3, "method": "server/discover", "params": []},
+        {"id": 4, "method": "server/discover", "params": {"_meta": "not-an-object"}},
+        {"id": 5, "method": "server/discover", "params": {"_meta": {}}},
+        {"id": 6, "method": "server/discover",
+         "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": "",
+                              "io.modelcontextprotocol/clientCapabilities": {}}}},
+        {"id": 7, "method": "server/discover",
+         "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": 20260728,
+                              "io.modelcontextprotocol/clientCapabilities": {}}}},
+        {"id": 8, "method": "server/discover",
+         "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                              "io.modelcontextprotocol/clientCapabilities": []}}},
+        {"id": 9, "method": "server/discover",
+         "params": {"_meta": _meta("2026-07-28", **{"io.modelcontextprotocol/clientInfo": {"name": "only-name"}})}},
+        {"id": 10, "method": "server/discover",
+         "params": {"_meta": _meta("2026-07-28", **{"io.modelcontextprotocol/logLevel": 3})}},
+        {"id": 11, "method": "tools/list", "params": {"_meta": {}}},
+        {"id": 12, "method": "initialize", "params": []},
+        {"id": 13, "method": "initialize", "params": {"protocolVersion": ""}},
+        {"id": 14, "method": "initialize", "params": {"protocolVersion": 1}},
+    ]
+
+    answers, _ = _serve(monkeypatch, capsys, project["root"], bad + [{"id": 15, "method": "ping"}],
+                        "--role", "reviewer")
+
+    for rid in range(1, 15):
+        assert answers[rid] == {"jsonrpc": "2.0", "id": rid, "error": {"code": -32602, "message": "Invalid params"}}
+    assert answers[15] == {"jsonrpc": "2.0", "id": 15, "result": {}}

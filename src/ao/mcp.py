@@ -29,6 +29,10 @@ from . import __version__, language, lib as A, settings as S
 UTF8 = "utf-8"    # every text file ao writes or reads; Windows would otherwise use cp1252
 
 PROTOCOL = "2025-06-18"
+PROTOCOL_2026 = "2026-07-28"
+PROTOCOLS = (PROTOCOL_2026, PROTOCOL)
+INVALID_PARAMS = -32602
+UNSUPPORTED_PROTOCOL_VERSION = -32022
 
 TOOLS = [
     {"name": "ao_status",
@@ -472,6 +476,71 @@ def call(name, args, cfg, allow_verify, role=None):
     return {"error": f"unknown tool {name}"}
 
 
+def _server_info():
+    return {"name": "agent-orchestrator", "version": __version__}
+
+
+def _discover_result():
+    return {"resultType": "complete",
+            "supportedVersions": list(PROTOCOLS),
+            "capabilities": {"tools": {}},
+            "_meta": {"io.modelcontextprotocol/serverInfo": _server_info()}}
+
+
+def _negotiate_initialize(params):
+    """Answer `initialize` (2025-06-18 lifecycle): (result, error)."""
+    if params is None:
+        params = {}
+    if not isinstance(params, dict):
+        return None, {"code": INVALID_PARAMS, "message": "Invalid params"}
+    requested = params.get("protocolVersion")
+    if requested is not None and (not isinstance(requested, str) or not requested):
+        return None, {"code": INVALID_PARAMS, "message": "Invalid params"}
+    version = requested if requested in PROTOCOLS else PROTOCOL
+    return {"protocolVersion": version,
+            "capabilities": {"tools": {}},
+            "serverInfo": _server_info()}, None
+
+
+def _negotiate_meta(params, require_meta=False):
+    """Validate 2026-07-28 `params._meta` when present or required (MCP-2026): (version, error)."""
+    if params is None:
+        if require_meta:
+            return None, {"code": INVALID_PARAMS, "message": "Invalid params"}
+        return None, None
+    if not isinstance(params, dict):
+        return None, {"code": INVALID_PARAMS, "message": "Invalid params"}
+    if "_meta" not in params:
+        if require_meta:
+            return None, {"code": INVALID_PARAMS, "message": "Invalid params"}
+        return None, None
+    meta = params.get("_meta")
+    if not isinstance(meta, dict):
+        return None, {"code": INVALID_PARAMS, "message": "Invalid params"}
+    if not require_meta and set(meta) == {"progressToken"} and type(meta.get("progressToken")) in (str, int):
+        return None, None
+    requested = meta.get("io.modelcontextprotocol/protocolVersion")
+    if not isinstance(requested, str) or not requested:
+        return None, {"code": INVALID_PARAMS, "message": "Invalid params"}
+    if requested not in PROTOCOLS:
+        return None, {"code": UNSUPPORTED_PROTOCOL_VERSION,
+                      "message": "Unsupported protocol version",
+                      "data": {"supported": list(PROTOCOLS), "requested": requested}}
+    capabilities = meta.get("io.modelcontextprotocol/clientCapabilities", {})
+    if not isinstance(capabilities, dict):
+        return None, {"code": INVALID_PARAMS, "message": "Invalid params"}
+    client_info = meta.get("io.modelcontextprotocol/clientInfo")
+    if client_info is not None and (
+            not isinstance(client_info, dict)
+            or not isinstance(client_info.get("name"), str)
+            or not isinstance(client_info.get("version"), str)):
+        return None, {"code": INVALID_PARAMS, "message": "Invalid params"}
+    log_level = meta.get("io.modelcontextprotocol/logLevel")
+    if log_level is not None and not isinstance(log_level, str):
+        return None, {"code": INVALID_PARAMS, "message": "Invalid params"}
+    return requested, None
+
+
 def main():
     # MCP's stdio transport is UTF-8. A client writes a request in it whatever the platform's code
     # page, and each reply below is seven-bit JSON, which reads the same in any (#71).
@@ -521,42 +590,55 @@ def main():
             sys.stdout.flush()
             continue
         try:
-            if method == "initialize":
-                result = {"protocolVersion": PROTOCOL,
-                          "capabilities": {"tools": {}},
-                          "serverInfo": {"name": "agent-orchestrator", "version": __version__}}
-            elif method in ("notifications/initialized", "initialized"):
+            error = None
+            negotiated = None
+            if method in ("notifications/initialized", "initialized"):
                 continue                                  # notification: no reply
-            elif method == "tools/list":
-                result = {"tools": [tool for tool in TOOLS if tool["name"] in served]}
-            elif method == "tools/call":
-                p = req.get("params") or {}
-                payload = call(p.get("name"), p.get("arguments") or {}, cfg, allow_verify, role)
-                # Ride along on whatever the agent called. MCP has no way to push,
-                # so the next best thing is to attach the message to the next
-                # response it asks for — which costs nothing and arrives sooner
-                # than the agent's own next inbox check. Only where ao_inbox is served:
-                # the note sends the agent there, and a role without it - a reviewer -
-                # can neither read the message nor acknowledge it.
-                if isinstance(payload, dict) and p.get("name") != "ao_inbox" and "ao_inbox" in served:
-                    urgent = A.urgent_messages(cfg["root"], cfg)
-                    if urgent:
-                        payload["URGENT_UNACKNOWLEDGED"] = [
-                            {"id": u["id"], "title": u["title"]} for u in urgent]
-                        payload["URGENT_NOTE"] = (
-                            "Read these with ao_inbox and acknowledge them before "
-                            "continuing. ao commit-ok will refuse while any remain.")
-                result = {"content": [{"type": "text",
-                                       "text": json.dumps(payload, ensure_ascii=False,
-                                                          indent=2, default=str)}]}
-            elif method == "ping":
-                result = {}
+            elif method == "initialize":
+                result, error = _negotiate_initialize(req.get("params"))
             else:
-                raise ValueError(f"method not found: {method}")
+                negotiated, error = _negotiate_meta(req.get("params"), require_meta=(method == "server/discover"))
+                if error is None:
+                    if method == "server/discover":
+                        result = _discover_result()
+                    elif method == "tools/list":
+                        result = {"tools": [tool for tool in TOOLS if tool["name"] in served]}
+                    elif method == "tools/call":
+                        p = req.get("params") or {}
+                        payload = call(p.get("name"), p.get("arguments") or {}, cfg, allow_verify, role)
+                        # Ride along on whatever the agent called. MCP has no way to push,
+                        # so the next best thing is to attach the message to the next
+                        # response it asks for — which costs nothing and arrives sooner
+                        # than the agent's own next inbox check. Only where ao_inbox is served:
+                        # the note sends the agent there, and a role without it - a reviewer -
+                        # can neither read the message nor acknowledge it.
+                        if isinstance(payload, dict) and p.get("name") != "ao_inbox" and "ao_inbox" in served:
+                            urgent = A.urgent_messages(cfg["root"], cfg)
+                            if urgent:
+                                payload["URGENT_UNACKNOWLEDGED"] = [
+                                    {"id": u["id"], "title": u["title"]} for u in urgent]
+                                payload["URGENT_NOTE"] = (
+                                    "Read these with ao_inbox and acknowledge them before "
+                                    "continuing. ao commit-ok will refuse while any remain.")
+                        result = {"content": [{"type": "text",
+                                               "text": json.dumps(payload, ensure_ascii=False,
+                                                                  indent=2, default=str)}]}
+                    elif method == "ping":
+                        result = {}
+                    else:
+                        raise ValueError(f"method not found: {method}")
+                    if method != "server/discover" and negotiated == PROTOCOL_2026:
+                        result = dict({"resultType": "complete"}, **result,
+                                      _meta={"io.modelcontextprotocol/serverInfo": _server_info()})
         except Exception as e:                            # never take the transport down
             sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": rid,
                                          "error": {"code": -32603, "message": str(e)}}) + "\n")
             sys.stdout.flush()
+            continue
+        if error is not None:
+            if rid is not None:
+                sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": rid, "error": error}, default=str) + "\n")
+                sys.stdout.flush()
             continue
         if rid is not None:
             # Escaped to ASCII, as the error reply above always was: this write is outside the handler, and
