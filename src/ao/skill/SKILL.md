@@ -211,6 +211,12 @@ window). After: `ao fanout record --agents N --done D --errors E --tokens T`.
 
 ## 9. Setup, once per repository
 
+`ao start [--yes]` is a person's first-run wizard from nothing to a working, governed
+project: it detects the installed agent CLIs and their model families, proposes a
+cross-family implementer/reviewer pair (preferring measured `verified` levels), writes
+the choice as a profile, asks before running `ao demo`, `ao init`, `ao hooks install`
+and `ao prove` (`--yes` runs only the steps that need no person), and ends by listing
+the steps only a person can take (`ao harness seen --ask`).
 `ao init --profile agy-codex|codex-agy|claude-codex` writes `.ao/` (config with the role
 blocks: who implements, reviews, judges; board, backlog, authority, gates), the exact
 root `.ao-project` marker, the mailbox, this playbook, and the MCP registration. It
@@ -258,6 +264,7 @@ start. Run anything in a repository whose owner has not approved it.
 
 | command | one line |
 |---|---|
+| `ao start [--yes]` | a person's first-run wizard: detect installed agent CLIs and model families, propose a cross-family implementer/reviewer pair (measured `verified` levels first), write the profile, ask before `ao demo`, `ao init`, `ao hooks install` and `ao prove` (`--yes` runs only the steps that need no person), and list the steps only a person can take; never records a person's approval or installs software |
 | `ao init` | write AO state plus an exact unstaged `.ao-project` enrollment marker; idempotent |
 | `ao init --adopt` | adopt AO state no tracked `.ao-project` covers: keep it all, stage the marker, install the current hooks; idempotent |
 | `ao skill install` | (re)write this playbook for the detected agents (ao-owned files only; `--rules` for the owner's rule files) |

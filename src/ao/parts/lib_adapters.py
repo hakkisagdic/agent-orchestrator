@@ -232,7 +232,9 @@ def adapter_catalog(root=None):
 
 def load_adapter(adapter_id, root=None):
     entry = adapter_catalog(root).get(adapter_id)
-    return {} if not entry or entry["problem"] else entry["adapter"]
+    if entry is not None:
+        return {} if entry["problem"] else entry["adapter"]
+    return dict(package_adapters().get(adapter_id) or {})
 
 
 # ---- the adapter set derives from one canonical vendor list (#89) ------------------------
@@ -247,34 +249,156 @@ DATA_FILES = (VENDORS_FILE, PROFILES_FILE)      # beside the adapters, and not a
 _PROFILE_DOCUMENT = {}
 
 
-def _profile_document():
-    """adapters/profiles.json, read once per state of the file: mail names consult it for every message."""
-    path = os.path.join(adapters_dir(), PROFILES_FILE)
+def _layer_profile_document(path):
+    """One profiles.json layer, read once per state of the file: mail names consult it for every message."""
+    import stat
     try:
-        key = (path, os.stat(path).st_mtime_ns)
+        st = os.lstat(path)
     except OSError:
+        _PROFILE_DOCUMENT.pop(path, None)
         return {}
-    if key not in _PROFILE_DOCUMENT:
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode) or getattr(st, "st_file_attributes", 0) & 0x400:
+        _PROFILE_DOCUMENT.pop(path, None)
+        return {}
+    mtime = st.st_mtime_ns
+    cached = _PROFILE_DOCUMENT.get(path)
+    if not cached or cached[0] != mtime:
         try:
             with open(path, encoding=UTF8) as fh:
                 document = json.load(fh)
         except (OSError, ValueError):
             document = {}
-        _PROFILE_DOCUMENT.clear()
-        _PROFILE_DOCUMENT[key] = document if isinstance(document, dict) else {}
-    return _PROFILE_DOCUMENT[key]
+        cached = (mtime, document if isinstance(document, dict) else {})
+        _PROFILE_DOCUMENT[path] = cached
+    return cached[1]
 
 
-def profiles():
+def _profile_document(root=None):
+    """Merged adapters/profiles.json across package, user and project layers."""
+    merged = {"profiles": {}}
+    for _, folder in adapter_layers(root):
+        doc = _layer_profile_document(os.path.join(folder, PROFILES_FILE))
+        if doc.get("init"):
+            merged["init"] = doc["init"]
+        found = doc.get("profiles")
+        if isinstance(found, dict):
+            for name, roles in found.items():
+                if isinstance(roles, dict):
+                    merged["profiles"][name] = {k: v for k, v in roles.items()
+                                                 if k in ("implementer", "reviewer", "architect")}
+    return merged
+
+
+def user_profiles_path():
+    """Where `ao start` records a chosen profile so `ao init --profile` and `A.profiles()` know it."""
+    return os.path.join(os.environ.get("AO_USER_ADAPTERS") or os.path.join(HOME, ".ao", "adapters"), PROFILES_FILE)
+
+
+def write_profile(name, roles, default=True, path=None):
+    """Record a profile `{implementer, reviewer, architect}` in profiles.json without touching shipped files.
+
+    Opened and replaced in its folder held through no link, and refused when a link, a non-regular file or a hard link
+    stands at its name or on its way: `AO_USER_ADAPTERS` can name a folder in the tree an agent writes (ONBOARD).
+    """
+    import stat
+    import tempfile
+    from . import storage
+    target = path or user_profiles_path()
+    absolute = os.path.abspath(target)
+    parent, leaf = os.path.dirname(absolute), os.path.basename(absolute)
+    if not leaf or leaf in (".", ".."):
+        raise storage.InTheWay(target, "names no profile file")
+    trusted = set()
+    for root_dir in (HOME, tempfile.gettempdir()):
+        cur = os.path.dirname(os.path.abspath(root_dir))
+        while True:
+            trusted.add(cur)
+            up = os.path.dirname(cur)
+            if up == cur:
+                break
+            cur = up
+    if os.sep == "/":
+        trusted.add("/tmp")
+    anchors = (os.path.abspath(os.getcwd()), os.path.abspath(HOME))
+
+    def _under_anchor(folder):
+        for anchor in anchors:
+            try:
+                if folder != anchor and os.path.commonpath([folder, anchor]) == anchor:
+                    return True
+            except ValueError:
+                continue
+        return False
+
+    def _untrusted_link_on_way(folder):
+        cur = folder
+        while True:
+            if cur not in trusted and storage.not_a_folder_of_its_own(cur):
+                return True
+            up = os.path.dirname(cur)
+            if up == cur:
+                return False
+            cur = up
+
+    base, folder_parts = parent, []
+    while os.path.dirname(base) != base and (
+        not folder_parts
+        or not os.path.exists(base)
+        or storage.not_a_folder_of_its_own(base)
+        or _under_anchor(base)
+        or _untrusted_link_on_way(base)
+    ):
+        folder_parts.insert(0, os.path.basename(base))
+        base = os.path.dirname(base)
+    if storage.not_a_folder_of_its_own(base):
+        raise storage.InTheWay(base, "is a link or a file where a folder goes")
+    with storage._tree_folder(base, folder_parts, make=True) as folder:
+        try:
+            info = storage._tree_stat(folder, leaf)
+        except FileNotFoundError:
+            raw = None
+        else:
+            if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                raise storage.InTheWay(target, "is a link, and ao reads and writes through none")
+            if not stat.S_ISREG(info.st_mode):
+                raise storage.InTheWay(target, "is no regular file")
+            if info.st_nlink != 1:
+                raise storage.InTheWay(target, "is a file with another name")
+            raw = storage._tree_bytes(folder, leaf)
+        try:
+            loaded = json.loads(raw.decode(UTF8)) if raw is not None else {}
+        except (UnicodeDecodeError, ValueError):
+            loaded = {}
+        doc = dict(loaded) if isinstance(loaded, dict) else {}
+        existing = doc.get("profiles")
+        table = {k: dict(v) for k, v in existing.items() if isinstance(v, dict)} if isinstance(existing, dict) else {}
+        clean = {k: roles[k] for k in ("implementer", "reviewer", "architect") if roles.get(k)}
+        table[name] = dict(clean)
+        pair_name = f"{clean.get('implementer', '')}-{clean.get('reviewer', '')}".strip("-")
+        if pair_name and pair_name not in table:
+            table[pair_name] = dict(clean)
+        doc["profiles"] = table
+        if default:
+            doc["init"] = name
+        data = (json.dumps(doc, indent=2) + "\n").encode(UTF8)
+        storage._tree_replace_bytes(folder, leaf, data)
+    _PROFILE_DOCUMENT.pop(target, None)
+    return target
+
+
+def profiles(root=None):
     """{name: {role: adapter id}}: the presets `ao init --profile` offers, from adapters/profiles.json (#76)."""
-    found = _profile_document().get("profiles")
+    found = _profile_document(root).get("profiles")
     return {name: dict(roles) for name, roles in found.items() if isinstance(roles, dict)} \
         if isinstance(found, dict) else {}
 
 
-def default_profile():
+def default_profile(root=None):
     """The profile a new project is pointed at."""
-    return str(_profile_document().get("init") or next(iter(sorted(profiles())), ""))
+    doc = _profile_document(root)
+    found = doc.get("profiles") if isinstance(doc.get("profiles"), dict) else {}
+    init = str(doc.get("init") or "")
+    return init if init in found else next(iter(sorted(found)), init)
 
 
 def implementer_actor_name(cfg):

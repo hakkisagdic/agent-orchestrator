@@ -319,6 +319,30 @@ def _architect_argv(adapter_id):
     return argv
 
 
+def _can_architect(adapter_id, adapter=None):
+    """Whether `adapter_id` has a restricted architect wake command scoped to coordination-only tools."""
+    from . import allowlist as AL
+    declared = adapter if isinstance(adapter, dict) else (A.turn_adapter(adapter_id) or {})
+    if not declared or declared.get("kind") in ("cloud", "model-backend", "tool-reviewer"):
+        return False
+    if A.tool_review_contract(declared) is not None:
+        return False
+    roles_decl = declared.get("roles") if isinstance(declared.get("roles"), dict) else {}
+    if str(roles_decl.get("architect") or "").startswith(("ineligible", "untested")):
+        return False
+    options = declared.get("options") if isinstance(declared.get("options"), dict) else {}
+    if not options.get("allowed_tools") or not options.get("architect_tools"):
+        return False
+    argv = _architect_argv(adapter_id)
+    if not argv or not any("{session}" in str(part) for part in argv) or not any("{prompt}" in str(part) for part in argv):
+        return False
+    if not A.carries_scope(argv) or not AL.rules(argv):
+        return False
+    if AL.problems(argv, options, role="architect"):
+        return False
+    return A.turn_refusal("architect", adapter_id, argv) is None
+
+
 def _profile_config(root, args, base):
     """Return the profile's intended config and added block names without writing.
 
@@ -327,7 +351,7 @@ def _profile_config(root, args, base):
     person's opt-in once it writes.
     """
     cfg = dict(base) if isinstance(base, dict) else {}
-    presets = A.profiles()
+    presets = A.profiles(root)
     prof = presets.get(getattr(args, "profile", None) or "")
     impl_adapter = getattr(args, "implementer", None) or (prof or {}).get("implementer")
     tier = getattr(args, "review_tier", None)
@@ -338,7 +362,7 @@ def _profile_config(root, args, base):
         opted.append("review.same_family labeled")
     if not impl_adapter and not prof:
         return cfg, opted
-    roles = prof or presets.get(A.default_profile()) or {}
+    roles = prof or presets.get(A.default_profile(root)) or {}
     added = []
     if "implementer" not in cfg:
         impl_adapter = impl_adapter or roles.get("implementer")
@@ -358,8 +382,8 @@ def _profile_config(root, args, base):
         cfg["reviewer"] = dict(_reviewer_block(reviewer, rmodel),
                                _why="must not be the implementer; a different model where one is available")
         added.append("reviewer")
-    if "architect" not in cfg:
-        architect = roles.get("architect")
+    architect = roles.get("architect")
+    if "architect" not in cfg and architect and _can_architect(architect):
         cfg["architect"] = {"adapter": architect, "session": "auto", "cwd": root, "name": "architect",
                             "argv": _architect_argv(architect),
                             "_why": "resumable and woken only into absence; read-only tools plus ao"}
@@ -2331,4 +2355,325 @@ def cmd_skill(cfg, args):
         print(f"{C['yellow']}{len(refused)} file(s) were not written, each named above with why: make each a file or "
               f"folder of the project's own, then run ao skill install again{C['reset']}")
         return 1
+    return 0
+
+
+# ---- first-run onboarding wizard (`ao start`, ONBOARD) -------------------------------------
+
+def _start_detect_adapters():
+    """Installed and absent agent CLIs from the adapters ao ships, read the way `ao adapters` reads them."""
+    installed, absent = [], []
+    for adapter_id, adapter in sorted(A.package_adapters().items()):
+        if adapter.get("contract", A.ADAPTER_CONTRACT) != A.ADAPTER_CONTRACT:
+            continue
+        binaries = A.adapter_binaries(adapter)
+        present = ([b for b in binaries if A.binary_candidates(b) or _tool_beside_interpreter(b)]
+                   if A.tool_review_contract(adapter) is not None
+                   else [b for b in binaries if A.binary_candidates(b)])
+        family = A.declared_family(adapter)[0]
+        verified = str(adapter.get("verified") or "untested")
+        eligible_rev, rev_why = A.reviewer_eligibility(adapter)
+        kind = adapter.get("kind")
+        roles_decl = adapter.get("roles") if isinstance(adapter.get("roles"), dict) else {}
+        impl_role = str(roles_decl.get("implementer") or "")
+        can_impl = (bool(present) and kind not in ("cloud", "model-backend", "tool-reviewer")
+                    and A.tool_review_contract(adapter) is None
+                    and not impl_role.startswith("ineligible")
+                    and bool((adapter.get("send") or {}).get("argv") or (adapter.get("resume") or {}).get("argv")))
+        can_rev = bool(present) and eligible_rev and A.tool_review_contract(adapter) is None
+        can_arch = bool(present) and _can_architect(adapter_id, adapter)
+        row = {
+            "id": adapter_id,
+            "name": str(adapter.get("name") or adapter_id),
+            "adapter": adapter,
+            "binaries": binaries,
+            "present": present,
+            "family": family,
+            "verified": verified,
+            "can_implement": can_impl,
+            "can_review": can_rev,
+            "can_architect": can_arch,
+            "review_why": rev_why,
+        }
+        (installed if present else absent).append(row)
+    return installed, absent
+
+
+def _start_pairs(root, installed):
+    """Cross-family implementer/reviewer pairs accepted by ao's independence rule, ranked by measured `verified` level."""
+    from . import tiers as T
+    order = {level: idx for idx, level in enumerate(A.ADAPTER_VERIFIED)}
+    shipped = A._layer_profile_document(os.path.join(A.adapters_dir(), A.PROFILES_FILE))
+    shipped_profiles = shipped.get("profiles") if isinstance(shipped.get("profiles"), dict) else {}
+    shipped_init = str(shipped.get("init") or "")
+    implementers = [row for row in installed if row["can_implement"]]
+    reviewers = [row for row in installed if row["can_review"]]
+    by_id = {row["id"]: row for row in installed}
+    fallback_arch = next(
+        (row["id"] for row in sorted(installed, key=lambda r: (order.get(r["verified"], len(order)), r["id"]))
+         if row.get("can_architect")),
+        None,
+    )
+    pairs = []
+    for impl in implementers:
+        impl_model = _models(impl["id"]).get("default")
+        impl_block = {"adapter": impl["id"], "session": "auto",
+                      "name": impl["adapter"].get("actor_name") or impl["id"]}
+        if impl_model:
+            impl_block["model"] = impl_model
+        for rev in reviewers:
+            rev_model = _models(rev["id"]).get("review")
+            rev_block = _reviewer_block(rev["id"], rev_model)
+            probe_cfg = {"root": root, "implementer": impl_block, "reviewer": rev_block}
+            tier, _, code = _review_decision(probe_cfg, rev_block, sessions=set())
+            if tier != T.INDEPENDENT or code is not None:
+                continue
+            iv = order.get(impl["verified"], len(order))
+            rv = order.get(rev["verified"], len(order))
+            both_measured = iv <= 1 and rv <= 1
+            either_measured = iv <= 1 or rv <= 1
+            measured_rank = 0 if both_measured else (1 if either_measured else 2)
+            fam_rank = (0 if (impl["family"] and rev["family"] and impl["family"] != rev["family"])
+                        else (1 if (impl["family"] or rev["family"]) else 2))
+            preset_name = f"{impl['id']}-{rev['id']}"
+            shipped_arch = None
+            for name, roles in sorted(shipped_profiles.items()):
+                if isinstance(roles, dict) and roles.get("implementer") == impl["id"] \
+                        and roles.get("reviewer") == rev["id"]:
+                    preset_name = name
+                    shipped_arch = roles.get("architect")
+                    break
+            preset_rank = 0 if preset_name == shipped_init else (1 if preset_name in shipped_profiles else 2)
+            if impl["family"] and rev["family"]:
+                fam_why = (f"{impl['id']} ({impl['family']} family) and {rev['id']} ({rev['family']} family) "
+                           "are different model families")
+            elif impl["family"] or rev["family"]:
+                declared = f"{impl['id']} ({impl['family']})" if impl["family"] else f"{rev['id']} ({rev['family']})"
+                other = rev["id"] if impl["family"] else impl["id"]
+                fam_why = f"{declared} and {other} run separate harnesses outside the same model family"
+            else:
+                fam_why = f"{impl['id']} and {rev['id']} are separate harnesses ({T.label(tier)})"
+            if both_measured:
+                ver_why = (f"both adapters have measured verified levels "
+                           f"(implementer verified={impl['verified']}, reviewer verified={rev['verified']})")
+            else:
+                ver_why = f"implementer verified={impl['verified']}, reviewer verified={rev['verified']}"
+            trust = " ".join(str(x) for x in ((rev["adapter"].get("options") or {}).get("trust_none") or []))
+            why = f"{fam_why}; {ver_why}; {rev['id']} reviews read-only ({trust})"
+            if shipped_arch and by_id.get(shipped_arch, {}).get("can_architect"):
+                arch_id = shipped_arch
+            elif impl.get("can_architect"):
+                arch_id = impl["id"]
+            elif rev.get("can_architect"):
+                arch_id = rev["id"]
+            else:
+                arch_id = fallback_arch
+            roles = {"implementer": impl["id"], "reviewer": rev["id"]}
+            if arch_id:
+                roles["architect"] = arch_id
+            pairs.append({
+                "key": (measured_rank, max(iv, rv), iv + rv, rv, fam_rank, preset_rank, impl["id"], rev["id"]),
+                "implementer": impl,
+                "reviewer": rev,
+                "profile": preset_name,
+                "roles": roles,
+                "why": why,
+            })
+    pairs.sort(key=lambda item: item["key"])
+    return pairs
+
+
+def _start_init_args(profile_name):
+    return argparse.Namespace(
+        name=None,
+        agent="auto",
+        mcp=True,
+        no_mcp=False,
+        rules=False,
+        profile=profile_name,
+        implementer=None,
+        model=None,
+        effort=None,
+        reviewer_model=None,
+        watchdog=False,
+        allow_uncovered_gates=False,
+        prove=False,
+        no_review=False,
+        review_tier=None,
+        by=None,
+        language=None,
+        adopt=False,
+        allow_shared_hooks=False,
+    )
+
+
+def _start_prompt_choice(pairs, yes):
+    if yes or len(pairs) == 1 or not sys.stdin.isatty():
+        return pairs[0]
+    try:
+        ans = input(f"\nChoose pair [1-{len(pairs)}, default 1]: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return None
+    if not ans:
+        return pairs[0]
+    if ans.isdigit() and 1 <= int(ans) <= len(pairs):
+        return pairs[int(ans) - 1]
+    for pair in pairs:
+        if ans in (pair["profile"], f"{pair['implementer']['id']}-{pair['reviewer']['id']}"):
+            return pair
+    print(f"{C['yellow']}unknown choice {A.shown_text(ans)}; using #1 ({pairs[0]['profile']}){C['reset']}")
+    return pairs[0]
+
+
+def _start_person_steps(root):
+    """Steps only a person can take; `ao start` never records a person's approval itself."""
+    from . import skillkit
+    rule_files = " / ".join(skillkit.rule_file_names(root))
+    lines = [
+        f"{C['b']}ao harness seen --ask{C['reset']} — inspect and record your approval of any harness or rule file "
+        "changes in the tree (ao never records a person's approval itself)",
+        f"paste the ao rule pointer into {rule_files} if you want agents to load the playbook from your rule file, "
+        "then run `ao harness seen --ask`",
+        "land the initial .ao-project and .ao/ setup through the governed loop (`ao verify`, `ao review`, "
+        "`ao commit-ok`, `ao commit -m \"…\"`), and open a push window (`ao push allow`) before `git push`",
+        "`ao watchdog install` if you want the background watchdog and doctor timers on this machine",
+    ]
+    try:
+        unseen = A.unseen_harness_config(root) if os.path.isdir(os.path.join(root, ".ao")) else []
+    except Exception:
+        unseen = []
+    if unseen:
+        shown = ", ".join(A.shown_text(path) for path, _, _ in unseen[:5])
+        lines.insert(1, f"unseen harness config now ({len(unseen)}): {shown}")
+    return lines
+
+
+def cmd_start(cfg, args):
+    """First-run wizard from nothing to a working, governed project (ONBOARD).
+
+    Detects the agent CLIs installed from the adapters ao ships and their model families; proposes
+    cross-family implementer/reviewer pairs that ao's independence rule accepts (preferring adapters
+    with a measured `verified` level, and saying why each pair is offered); writes the choice as a
+    profile in profiles.json; then, asking before each step (or running the steps that need no person
+    when `--yes` is given), runs `ao demo`, `ao init`, `ao hooks install` and `ao prove`; and ends by
+    listing the steps only a person can take. It never records a person's approval itself and never
+    installs software.
+    """
+    root = cfg["root"]
+    yes = bool(getattr(args, "yes", False))
+    print(f"{C['b']}ao start{C['reset']}  {C['dim']}{root}{C['reset']}")
+
+    installed, absent = _start_detect_adapters()
+    print(f"\n{C['b']}1. Detected agent CLIs{C['reset']} (from the adapters ao ships):")
+    if installed:
+        for row in installed:
+            fam = row["family"] or "undeclared"
+            bins = ", ".join(row["present"])
+            roles = "/".join(r for r, ok in (("implementer", row["can_implement"]),
+                                             ("reviewer", row["can_review"]),
+                                             ("architect", row.get("can_architect"))) if ok) or "observation only"
+            print(f"  {C['green']}{row['id']:<14}{C['reset']} binary: {bins:<12} family: {fam:<12} "
+                  f"verified: {row['verified']:<10} roles: {roles}")
+    else:
+        print(f"  {C['yellow']}none of the agent CLIs ao ships adapters for were found on PATH{C['reset']}")
+    if absent:
+        print(f"  {C['dim']}not installed ({len(absent)}): "
+              f"{', '.join(r['id'] for r in absent[:8])}"
+              f"{', …' if len(absent) > 8 else ''}{C['reset']}")
+
+    pairs = _start_pairs(root, installed)
+    print(f"\n{C['b']}2. Cross-family implementer / reviewer pairs{C['reset']} "
+          "(accepted by ao's independence rule, measured `verified` levels first):")
+    if not pairs:
+        families = sorted({row["family"] or row["id"] for row in installed
+                           if row["can_implement"] or row["can_review"]})
+        print(f"  {C['red']}no cross-family implementer/reviewer pair is available from the installed CLIs{C['reset']}")
+        if not installed:
+            print("  ao never installs software itself. Install two agent CLIs from different model families "
+                  "(see `ao adapters`), then run `ao start` again.")
+        else:
+            print(f"  installed eligible CLI(s) cover only {', '.join(families) or 'no eligible role'}; "
+                  "ao's independence rule requires a reviewer from a different model family than the implementer.")
+            print("  ao never installs software and never records a person's opt-in into weaker independence itself.")
+            impl_id = next((row["id"] for row in installed if row["can_implement"]), installed[0]["id"])
+            print("  What only a person can do if you want to proceed with one harness or install another:")
+            print("    · install a second CLI from another model family (`ao adapters`), then re-run `ao start`")
+            print(f"    · or opt into same-family review yourself: "
+                  f"ao init --implementer {impl_id} --review-tier same-family --by <name>")
+            print(f"    · or review each candidate yourself: "
+                  f"ao init --implementer {impl_id} --review-tier person")
+            print("    · or see the guarantee in a scratch folder with no model CLI: ao demo")
+        return 1
+
+    for idx, pair in enumerate(pairs, 1):
+        impl, rev = pair["implementer"], pair["reviewer"]
+        mark = f"{C['green']}*{C['reset']}" if idx == 1 else " "
+        print(f"  {mark} [{idx}] {C['b']}{pair['profile']}{C['reset']}: "
+              f"implementer {impl['id']} ({impl['family'] or 'undeclared'}) + "
+              f"reviewer {rev['id']} ({rev['family'] or 'undeclared'})")
+        print(f"        why: {pair['why']}")
+
+    chosen = _start_prompt_choice(pairs, yes)
+    if chosen is None:
+        print(f"{C['yellow']}cancelled{C['reset']}")
+        return 1
+
+    try:
+        profile_path = A.write_profile(chosen["profile"], chosen["roles"], default=True)
+    except OSError as exc:
+        print(f"\n  {C['red']}start refused{C['reset']}: could not write profile to "
+              f"{A.shown_text(_home_relative(A.user_profiles_path()))} ({exc}); "
+              "make the adapter folder and profiles.json regular files of your own, then run `ao start` again")
+        return 1
+    print(f"\n  {C['green']}wrote profile{C['reset']} {chosen['profile']} "
+          f"(implementer={chosen['roles']['implementer']}, reviewer={chosen['roles']['reviewer']}, "
+          f"architect={chosen['roles'].get('architect') or 'none'}) → {_home_relative(profile_path)}")
+
+    def ask_step(title, command_text):
+        print(f"\n{C['b']}{title}{C['reset']} — `{command_text}`")
+        if yes:
+            return True
+        if not _confirm(f"Run `{command_text}` now? [y/N] "):
+            print(f"  {C['dim']}skipped `{command_text}`{C['reset']}")
+            return False
+        return True
+
+    if ask_step("Step 1/4: ao demo", "ao demo"):
+        code = cmd_demo(cfg, argparse.Namespace(keep=False))
+        if code:
+            return code
+
+    init_cmd = f"ao init --profile {chosen['profile']}"
+    if ask_step("Step 2/4: ao init", init_cmd):
+        code = cmd_init(cfg, _start_init_args(chosen["profile"]))
+        if code:
+            return code
+
+    if ask_step("Step 3/4: ao hooks install", "ao hooks install"):
+        if not os.path.lexists(os.path.join(root, ".ao", "config.json")):
+            print(f"  {C['yellow']}skipped: `ao hooks install` needs `.ao/config.json` from `ao init` first{C['reset']}")
+        else:
+            enrollment = _project_enrollment(root)
+            if enrollment["state"] == "legacy" and os.path.lexists(os.path.join(root, PROJECT_MARKER)):
+                # Stage .ao-project so the hook and its execution probe see the project enrolled before the first commit.
+                staged = _git_on_active_index(root, "add", "--", PROJECT_MARKER)
+                if staged:
+                    print(f"  {C['red']}could not stage {PROJECT_MARKER}{C['reset']}: {staged}")
+                    return 1
+            code = cmd_hooks(A.load_config(root), argparse.Namespace(action="install", allow_shared_hooks=False))
+            if code:
+                return code
+
+    if ask_step("Step 4/4: ao prove", "ao prove"):
+        if not os.path.lexists(os.path.join(root, ".ao", "config.json")):
+            print(f"  {C['yellow']}skipped: `ao prove` needs `.ao/config.json` from `ao init` first{C['reset']}")
+        else:
+            code = cmd_prove(A.load_config(root), argparse.Namespace(no_review=False))
+            if code:
+                return code
+
+    print(f"\n{C['b']}Steps only a person can take:{C['reset']}")
+    for line in _start_person_steps(root):
+        print(f"  · {line}")
     return 0

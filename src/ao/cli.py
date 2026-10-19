@@ -305,7 +305,8 @@ def build_parser(root=None):
     ini.add_argument("--mcp", action="store_true", help="(default) register the MCP server for detected agents")
     ini.add_argument("--no-mcp", action="store_true", help="skip the MCP registration")
     ini.add_argument("--rules", action="store_true", help="also write the pointer into the owner's rule files")
-    ini.add_argument("--profile", choices=sorted(A.profiles()), help="write the role blocks: who implements, reviews, judges")
+    ini.add_argument("--profile", choices=sorted(A.profiles(root)),
+                     help="write the role blocks: who implements, reviews, judges")
     ini.add_argument("--implementer", help="implementer adapter id (`ao adapters` lists them); overrides the profile")
     ini.add_argument("--model", help="implementer model, passed through the adapter's --model option")
     ini.add_argument("--effort", help="implementer effort, where its adapter takes one (options.effort_values)")
@@ -339,6 +340,10 @@ def build_parser(root=None):
                                      "on a scratch project with a stand-in reviewer")
     dm.add_argument("--keep", action="store_true", help="keep the scratch folder and say where it is")
     dm.set_defaults(fn=cmd_demo)
+    st = sub.add_parser("start", help="first-run wizard from nothing to a working, governed project")
+    st.add_argument("--yes", action="store_true",
+                    help="run only the steps that need no person without asking before each")
+    st.set_defaults(fn=cmd_start)
     de = sub.add_parser("decide", help="record an architect decision durably")
     de.add_argument("decision", nargs="?")
     de.add_argument("--why")

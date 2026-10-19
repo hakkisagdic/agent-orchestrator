@@ -1,14 +1,41 @@
 # Getting started
 
-From an empty checkout to a first reviewed commit. Every step is a command you type, and the
-last setup step proves the guarantees instead of describing them. A test runs this sequence
-in a temporary repository, so this page cannot drift from what ao does.
+From an empty checkout to a working, governed project. Start with `ao start`, the first-run
+wizard, or run each step it walks you through (`ao demo`, `ao init`, `ao hooks install`,
+`ao prove`) by hand. A test runs this sequence in a temporary repository, so this page cannot
+drift from what ao does.
+
+```bash
+pip install ao-orchestrator
+cd your-repository
+ao start                             # asks before each step; --yes runs the steps that need no person
+```
+
+`ao start` walks from nothing to a proven project:
+
+1. **Detects the agent CLIs installed** on this machine (from the adapters ao ships, as
+   `ao adapters` reads them) and their model families.
+2. **Proposes a cross-family implementer/reviewer pair** that ao's independence rule accepts,
+   preferring adapters with a measured `verified` level (`full`, then `partial`, ahead of
+   `documented` or `untested`) and saying why each pair is offered (their model families,
+   their `verified` levels, and the reviewer's read-only flag).
+3. **Writes the choice as a profile** in `~/.ao/adapters/profiles.json`, as `profiles.json`
+   and `ao init --profile` already know.
+4. **Runs `ao demo`, `ao init`, `ao hooks install` and `ao prove`**, asking before each step
+   (or, with `ao start --yes`, running the steps that need no person without prompting).
+5. **Ends by listing the steps only a person can take** — such as `ao harness seen --ask`,
+   wiring your own rule file, and landing the initial `.ao-project` and `.ao/` setup through
+   the governed loop. `ao start` never records a person's approval itself and never installs
+   software.
+
+The sections below show what each step does when you run it directly.
 
 ## 1. Install and put ao on the repository
 
 ```bash
 pip install ao-orchestrator
 cd your-repository
+ao start                             # or run ao init directly:
 ao init --profile agy-codex          # or codex-agy, claude-codex
 ```
 
