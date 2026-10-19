@@ -321,13 +321,46 @@ def _stop_reviewer_leftovers(proc, label):
     return still
 
 
-def _reviewer_kill_and_drain(proc):
+def _reviewer_job(pid, root, enabled=None):
+    """Hold a suspended reviewer and what it starts in a Windows job, then resume it, where windows_job is on
+    (WIN-JOB).
+
+    Windows has no process group for `_stop_reviewer_leftovers` to stop, so a reviewer that answered
+    and exited left whatever it had started running. Under `procs.creating_in_job`, the process is
+    placed in a job with `KILL_ON_JOB_CLOSE` at `CreateProcessW` via `PROC_THREAD_ATTRIBUTE_JOB_LIST`
+    with a locked thread DACL, then resumed here once verified; the job closes in the same `finally`
+    that stops a group elsewhere. `(None, None)` where this is not Windows or the switch is recorded off;
+    `(None, why)` where the platform refused, so the caller stops the process and refuses the run.
+    """
+    if enabled is None:
+        from . import features as F
+        enabled = sys.platform == "win32" and F.enabled(dict(A.load_config(root), root=root), "windows_job")
+    if not enabled:
+        return None, None
+    from . import procs
+    try:
+        job, why = procs.hold_in_job(pid)
+    except Exception as exc:
+        job, why = None, f"{type(exc).__name__}: {exc}"
+    if why:
+        reason = (f"reviewer pid {pid} could not be held in a Windows job ({why}); "
+                  "run from a prompt that may assign processes to a job, "
+                  "or `ao features off windows_job --by <name>`")
+        print(f"{C['red']}refused{C['reset']}: {reason}", flush=True)
+        return None, reason
+    return job, None
+
+
+def _reviewer_kill_and_drain(proc, tree=True):
     """Kill a reviewer with everything it started, and bound pipe draining after (#65).
 
     What of it still runs after the stop is said where the review is read: a reviewer's tree a stop
-    missed reviewed on for nobody, and was taken for stopped (WINDOWS-STOP-PROVEN).
+    missed reviewed on for nobody, and was taken for stopped (WINDOWS-STOP-PROVEN). `tree` is False
+    only for a process started with CREATE_SUSPENDED whose job was refused while it still had one
+    suspended thread and had never run (WIN-JOB).
     """
-    _say_reviewer_left(proc.pid, _stop_reviewer(proc.pid))
+    if tree:
+        _say_reviewer_left(proc.pid, _stop_reviewer(proc.pid))
     try:
         proc.kill()
     except OSError:
@@ -1072,34 +1105,67 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
         # A review in the foreground stopped by a signal stops its reviewer too, as a detached run does: the
         # reviewer leads a session of its own and hears nothing sent to this process (REVIEWER-ORPHAN-3). A
         # signal that comes while it starts waits until ao holds its pid, and stops it then (REVIEWER-ORPHAN-4).
+        from . import features as F, procs
+        hold_job = sys.platform == "win32" and F.enabled(dict(A.load_config(root), root=root), "windows_job")
         handlers_back = _stop_on_signals(held=True)
-        try:
-            proc = subprocess.Popen(
-                argv, cwd=fresh, env=env,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, encoding=UTF8, errors="replace",
-                **stdin, **_reviewer_group(),
-            )
-        except OSError as exc:
-            handlers_back()
-            handlers_back.release()
-            return _reviewer_os_failure(exc, "could not start")
-        except Exception as exc:
-            handlers_back()
-            handlers_back.release()
-            return {
-                "ok": False, "out": "",
-                "reason": f"could not start ({type(exc).__name__})",
-                "returncode": None, "kind": "spawn-unknown",
-                "retryable": False,
-            }
-        except BaseException:
-            # Whatever ends the start puts the handlers back: left holding, they would let every later stop go
-            # (REVIEWER-ORPHAN-5).
-            handlers_back()
-            handlers_back.release()
-            raise
+        with procs.creating_in_job(hold_job) as pre_job:
+            try:
+                proc = subprocess.Popen(
+                    argv, cwd=fresh, env=env,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    text=True, encoding=UTF8, errors="replace",
+                    **stdin, **_reviewer_group(suspended=hold_job),
+                )
+            except OSError as exc:
+                handlers_back()
+                handlers_back.release()
+                if pre_job is not None and pre_job.why:
+                    _, job_refused = _reviewer_job("start", root, enabled=True)
+                    return {
+                        "ok": False, "out": "",
+                        "reason": job_refused,
+                        "returncode": None, "kind": "isolation-error",
+                        "retryable": False,
+                    }
+                return _reviewer_os_failure(exc, "could not start")
+            except Exception as exc:
+                handlers_back()
+                handlers_back.release()
+                return {
+                    "ok": False, "out": "",
+                    "reason": f"could not start ({type(exc).__name__})",
+                    "returncode": None, "kind": "spawn-unknown",
+                    "retryable": False,
+                }
+            except BaseException:
+                # Whatever ends the start puts the handlers back: left holding, they would let every later stop go
+                # (REVIEWER-ORPHAN-5).
+                handlers_back()
+                handlers_back.release()
+                raise
 
+            try:
+                job, job_refused = _reviewer_job(proc.pid, root, enabled=hold_job)
+            except BaseException:
+                try:
+                    _reviewer_kill_and_drain(proc, tree=False)
+                finally:
+                    handlers_back()
+                    handlers_back.release()
+                raise
+            if job_refused:
+                ran_early = "suspend count" in job_refused or "threads before resume" in job_refused
+                try:
+                    _reviewer_kill_and_drain(proc, tree=ran_early)
+                finally:
+                    handlers_back()
+                    handlers_back.release()
+                return {
+                    "ok": False, "out": "",
+                    "reason": job_refused,
+                    "returncode": None, "kind": "isolation-error",
+                    "retryable": False,
+                }
         try:
             handlers_back.release()
             A.helper_register(root, proc.pid, "reviewer")
@@ -1155,6 +1221,8 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
                 A.helper_release(root, proc.pid)
                 _review_reviewer(None)
                 _stop_reviewer_leftovers(proc, label)
+                if job is not None:
+                    job.close()                     # what the reviewer started ends with it (WIN-JOB)
             finally:
                 handlers_back()
                 handlers_back.release()
@@ -1225,22 +1293,44 @@ def _reviewer_binary_version(root, path, timeout=REVIEW_VERSION_TIMEOUT):
         fresh = os.path.realpath(fresh)
         if _reviewer_temp_is_inside(root, fresh):
             return ""
+        from . import features as F, procs
+        hold_job = sys.platform == "win32" and F.enabled(dict(A.load_config(root), root=root), "windows_job")
         handlers_back = _stop_on_signals(held=True)
-        try:
-            proc = subprocess.Popen(
-                [path, "--version"], cwd=fresh,
-                env=_reviewer_environment(fresh),
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, encoding=UTF8, errors="replace", **_reviewer_group(),
-            )
-        except OSError:
-            handlers_back()
-            handlers_back.release()
-            return ""
-        except BaseException:
-            handlers_back()
-            handlers_back.release()
-            raise
+        with procs.creating_in_job(hold_job) as pre_job:
+            try:
+                proc = subprocess.Popen(
+                    [path, "--version"], cwd=fresh,
+                    env=_reviewer_environment(fresh),
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    text=True, encoding=UTF8, errors="replace", **_reviewer_group(suspended=hold_job),
+                )
+            except OSError:
+                handlers_back()
+                handlers_back.release()
+                if pre_job is not None and pre_job.why:
+                    _reviewer_job("start", root, enabled=True)
+                return ""
+            except BaseException:
+                handlers_back()
+                handlers_back.release()
+                raise
+            try:
+                job, job_refused = _reviewer_job(proc.pid, root, enabled=hold_job)
+            except BaseException:
+                try:
+                    _reviewer_kill_and_drain(proc, tree=False)
+                finally:
+                    handlers_back()
+                    handlers_back.release()
+                raise
+            if job_refused:
+                ran_early = "suspend count" in job_refused or "threads before resume" in job_refused
+                try:
+                    _reviewer_kill_and_drain(proc, tree=ran_early)
+                finally:
+                    handlers_back()
+                    handlers_back.release()
+                return ""
         try:
             handlers_back.release()
             A.helper_register(root, proc.pid, "reviewer-version")
@@ -1258,6 +1348,8 @@ def _reviewer_binary_version(root, path, timeout=REVIEW_VERSION_TIMEOUT):
             try:
                 A.helper_release(root, proc.pid)
                 _stop_reviewer_leftovers(proc, f"{os.path.basename(path)} --version")
+                if job is not None:
+                    job.close()                     # what the probe started ends with it (WIN-JOB)
             finally:
                 handlers_back()
                 handlers_back.release()
@@ -1878,7 +1970,7 @@ def _run_acp_reviewer(root, argv, adapter_id, prompt, timeout, label, fallback=F
     """
     import tempfile
     import threading
-    from . import acp, allowlist
+    from . import acp, allowlist, procs
     print(f"{C['dim']}reviewer: {os.path.basename(argv[0])} through ACP{' (fallback)' if fallback else ''}"
           f"{C['reset']}")
 
@@ -1915,29 +2007,57 @@ def _run_acp_reviewer(root, argv, adapter_id, prompt, timeout, label, fallback=F
 
         started = time.monotonic()
         deadline = started + float(timeout)
+        from . import features as F
+        hold_job = sys.platform == "win32" and F.enabled(dict(A.load_config(root), root=root), "windows_job")
         handlers_back = _stop_on_signals(held=True)         # as a spawned reviewer is (REVIEWER-ORPHAN-3, -4)
-        try:
-            session = acp.Session(argv, fresh, env=_reviewer_environment(fresh), permission=permission)
-        except acp.ProbeError as exc:
-            handlers_back()
-            handlers_back.release()
-            if isinstance(exc.__cause__, OSError):
-                return _reviewer_os_failure(exc.__cause__, "could not start")
-            return failed("spawn-unknown", "could not start (ProbeError)")
-        except Exception as exc:
-            # The session stopped its agent before this reached here (REVIEWER-ORPHAN-5).
-            handlers_back()
-            handlers_back.release()
-            return failed("spawn-unknown", f"could not start ({type(exc).__name__})")
-        except BaseException:
-            handlers_back()
-            handlers_back.release()
-            raise
+        with procs.creating_in_job(hold_job) as pre_job:
+            try:
+                session = acp.Session(argv, fresh, env=_reviewer_environment(fresh), permission=permission)
+            except acp.ProbeError as exc:
+                handlers_back()
+                handlers_back.release()
+                if pre_job is not None and pre_job.why:
+                    _, job_refused = _reviewer_job("start", root, enabled=True)
+                    return failed("isolation-error", job_refused)
+                if isinstance(exc.__cause__, OSError):
+                    return _reviewer_os_failure(exc.__cause__, "could not start")
+                return failed("spawn-unknown", "could not start (ProbeError)")
+            except Exception as exc:
+                # The session stopped its agent before this reached here (REVIEWER-ORPHAN-5).
+                handlers_back()
+                handlers_back.release()
+                return failed("spawn-unknown", f"could not start ({type(exc).__name__})")
+            except BaseException:
+                handlers_back()
+                handlers_back.release()
+                raise
+            # An ACP reviewer is created suspended inside the job and resumed only after assignment, as a spawned
+            # reviewer is; if Windows refused the job when windows_job is on, the reviewer never ran a child
+            # and is stopped directly unless another process already resumed it or started a thread (WIN-JOB).
+            try:
+                job, job_refused = _reviewer_job(session.proc.pid, root, enabled=hold_job)
+            except BaseException:
+                try:
+                    session.close(tree=False)
+                finally:
+                    handlers_back()
+                    handlers_back.release()
+                raise
+            if job_refused:
+                ran_early = "suspend count" in job_refused or "threads before resume" in job_refused
+                try:
+                    session.close(tree=ran_early)
+                finally:
+                    handlers_back()
+                    handlers_back.release()
+                return failed("isolation-error", job_refused)
         pid, agent, turn, allowed, outcome, expired = session.proc.pid, {}, None, 0.0, None, []
 
         def expire():
             expired.append(True)
             session.close()
+            if job is not None:
+                job.close()
 
         # A write to an agent that reads nothing more blocks without a bound; stopping it ends the write.
         guard = threading.Timer(float(timeout) + REVIEW_KILL_DRAIN_SECONDS, expire)
@@ -1964,11 +2084,15 @@ def _run_acp_reviewer(root, argv, adapter_id, prompt, timeout, label, fallback=F
             # the moment it is started (REVIEWER-ORPHAN); pass it on.
             guard.cancel()
             session.close()
+            if job is not None:
+                job.close()
             _DETACHED_RUN["stopped_reviewer"] = pid
             raise
         finally:
             guard.cancel()
             _say_reviewer_left(pid, session.close())     # what of it still runs is said (WINDOWS-STOP-PROVEN)
+            if job is not None:
+                job.close()
             A.helper_release(root, pid)
             _review_reviewer(None)
             handlers_back()
@@ -2852,13 +2976,19 @@ def _recorded_review_tier(cfg, evidence, reviewer_id):
     return (tier if tier is not None else recorded), None
 
 
-def _reviewer_group():
+def _reviewer_group(suspended=False):
     """Start a reviewer as the leader of its own process group (#65).
 
-    A timeout killed the wrapper alone; the runtime and engine it had started ran on.
+    A timeout killed the wrapper alone; the runtime and engine it had started ran on. Where
+    `windows_job` holds the tree on Windows, the process starts suspended (`CREATE_SUSPENDED`),
+    so it runs its first instruction only once it is in the job (WIN-JOB).
     """
-    if os.name == "nt":
-        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+    if os.name == "nt" or suspended:
+        from . import procs
+        flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        if suspended:
+            flags |= procs.CREATE_SUSPENDED
+        return {"creationflags": flags}
     return {"start_new_session": True}
 
 

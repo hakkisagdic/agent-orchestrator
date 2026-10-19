@@ -317,7 +317,16 @@ read back through the script's repository block.
   has no process groups: a reviewer stopped on its timeout has its tree stopped with
   `taskkill /T`, but what a reviewer that answered and exited started, and left running apart
   from it, is not looked for, as what an ended turn left is not told apart from a turn
-  (above). A Job Object would hold the tree whole; ao makes none yet.
+  (above). A Job Object holds the tree whole now: with `windows_job` on (the default, turned
+  off only on a person's record with `ao features off windows_job --by <name>`;
+  [features.md](features.md)), a spawned or ACP reviewer and the version probe are placed in
+  a job with `KILL_ON_JOB_CLOSE` at `CreateProcessW` via `PROC_THREAD_ATTRIBUTE_JOB_LIST`
+  with `CREATE_SUSPENDED`, a case-insensitively sorted Unicode environment block, and an
+  `OWNER_RIGHTS` `READ_CONTROL`-only thread DACL, then resumed only once inside the job so no
+  concurrent same-user process can resume them outside it, and the `KILL_ON_JOB_CLOSE` limit
+  ends what they started when the run's handle closes; a job Windows refuses stops the process
+  and refuses the run, and `tests/test_win_job.py` closes the job on a real reviewer process
+  tree (WIN-JOB).
 
 ## Found before the lane first ran
 

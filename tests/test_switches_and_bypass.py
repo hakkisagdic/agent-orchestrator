@@ -19,6 +19,7 @@ def test_features_default_on_and_switch(project):
     for k in F.ORDER:
         F.set_switch(root, k, False)
     A.record_opt_in(root, "features.inventory_review", False, "Ada")
+    A.record_opt_in(root, "features.windows_job", False, "Ada")
     assert not any(F.switches(A.load_config(root)).values())
 
 

@@ -18,6 +18,7 @@ does not answer in time, or answers nothing a table can be made of - the readers
 TableUnreadable rather than answer an empty one: an empty table reads as no process at
 all, and a guard that asks whether anything runs passed when it could not look.
 """
+import contextlib
 import ctypes
 import ctypes.util
 import os
@@ -558,6 +559,437 @@ class _Windows:
         return None if started is None else max(0, int(time.time() - started))
 
 
+# ---------------------------------------------------------------- Windows job objects (WIN-JOB)
+JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+CREATE_SUSPENDED = 0x00000004
+EXTENDED_STARTUPINFO_PRESENT = 0x00080000
+CREATE_UNICODE_ENVIRONMENT = 0x00000400
+PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x00020002
+PROC_THREAD_ATTRIBUTE_JOB_LIST = 0x0002000D
+_JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
+_PROCESS_SET_QUOTA, _PROCESS_TERMINATE = 0x0100, 0x0001
+_TH32CS_SNAPTHREAD = 0x00000004
+_THREAD_SUSPEND_RESUME = 0x0002
+_READ_CONTROL = 0x00020000
+_SE_DACL_PRESENT = 0x0004
+_ACL_REVISION = 2
+_SPAWN_OS_ERRORS = (2, 3, 193, 267)
+_ACTIVE_JOB = None
+
+
+class _JobBasicLimitInformation(ctypes.Structure):
+    """JOBOBJECT_BASIC_LIMIT_INFORMATION, as the Windows headers lay it out."""
+    _fields_ = [
+        ("PerProcessUserTimeLimit", ctypes.c_int64),
+        ("PerJobUserTimeLimit", ctypes.c_int64),
+        ("LimitFlags", ctypes.c_uint32),
+        ("MinimumWorkingSetSize", ctypes.c_size_t),
+        ("MaximumWorkingSetSize", ctypes.c_size_t),
+        ("ActiveProcessLimit", ctypes.c_uint32),
+        ("Affinity", ctypes.c_size_t),
+        ("PriorityClass", ctypes.c_uint32),
+        ("SchedulingClass", ctypes.c_uint32),
+    ]
+
+
+class _IoCounters(ctypes.Structure):
+    """IO_COUNTERS, six unsigned 64-bit counts."""
+    _fields_ = [(name, ctypes.c_uint64) for name in
+                ("ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                 "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
+
+
+class _JobExtendedLimitInformation(ctypes.Structure):
+    """JOBOBJECT_EXTENDED_LIMIT_INFORMATION: 144 bytes on 64-bit Windows, 112 on 32-bit."""
+    _fields_ = [
+        ("BasicLimitInformation", _JobBasicLimitInformation),
+        ("IoInfo", _IoCounters),
+        ("ProcessMemoryLimit", ctypes.c_size_t),
+        ("JobMemoryLimit", ctypes.c_size_t),
+        ("PeakProcessMemoryUsed", ctypes.c_size_t),
+        ("PeakJobMemoryUsed", ctypes.c_size_t),
+    ]
+
+
+class _ThreadEntry32(ctypes.Structure):
+    """THREADENTRY32, as Windows' tlhelp32.h lays it out."""
+    _fields_ = [
+        ("dwSize", ctypes.c_uint32),
+        ("cntUsage", ctypes.c_uint32),
+        ("th32ThreadID", ctypes.c_uint32),
+        ("th32OwnerProcessID", ctypes.c_uint32),
+        ("tpBasePri", ctypes.c_int32),
+        ("tpDeltaPri", ctypes.c_int32),
+        ("dwFlags", ctypes.c_uint32),
+    ]
+
+
+class _OwnerRightsReadControlAcl(ctypes.Structure):
+    """An ACL with one ACCESS_ALLOWED_ACE granting OWNER_RIGHTS (S-1-3-4) READ_CONTROL only.
+
+    A thread started with NULL lpThreadAttributes receives the creator token's default DACL, which
+    grants THREAD_SUSPEND_RESUME to any same-user process. With an explicit OWNER_RIGHTS ACE for
+    READ_CONTROL alone, OpenThread for THREAD_SUSPEND_RESUME or WRITE_DAC is denied while the direct
+    hThread handle from CreateProcessW keeps THREAD_ALL_ACCESS (WIN-JOB).
+    """
+    _fields_ = [
+        ("AclRevision", ctypes.c_uint8),
+        ("Sbz1", ctypes.c_uint8),
+        ("AclSize", ctypes.c_uint16),
+        ("AceCount", ctypes.c_uint16),
+        ("Sbz2", ctypes.c_uint16),
+        ("AceType", ctypes.c_uint8),
+        ("AceFlags", ctypes.c_uint8),
+        ("AceSize", ctypes.c_uint16),
+        ("Mask", ctypes.c_uint32),
+        ("SidRevision", ctypes.c_uint8),
+        ("SubAuthorityCount", ctypes.c_uint8),
+        ("IdentifierAuthority", ctypes.c_uint8 * 6),
+        ("SubAuthority", ctypes.c_uint32),
+    ]
+
+
+class _SecurityDescriptor(ctypes.Structure):
+    """Absolute SECURITY_DESCRIPTOR (winnt.h) with an explicit DACL."""
+    _fields_ = [
+        ("Revision", ctypes.c_uint8),
+        ("Sbz1", ctypes.c_uint8),
+        ("Control", ctypes.c_uint16),
+        ("Owner", ctypes.c_void_p),
+        ("Group", ctypes.c_void_p),
+        ("Sacl", ctypes.c_void_p),
+        ("Dacl", ctypes.c_void_p),
+    ]
+
+
+class _SecurityAttributes(ctypes.Structure):
+    """SECURITY_ATTRIBUTES (wtypesbase.h)."""
+    _fields_ = [
+        ("nLength", ctypes.c_uint32),
+        ("lpSecurityDescriptor", ctypes.c_void_p),
+        ("bInheritHandle", ctypes.c_int32),
+    ]
+
+
+class _StartupInfoW(ctypes.Structure):
+    """STARTUPINFOW (processthreadsapi.h): 104 bytes on 64-bit Windows, 68 on 32-bit."""
+    _fields_ = [
+        ("cb", ctypes.c_uint32),
+        ("lpReserved", ctypes.c_void_p),
+        ("lpDesktop", ctypes.c_void_p),
+        ("lpTitle", ctypes.c_void_p),
+        ("dwX", ctypes.c_uint32),
+        ("dwY", ctypes.c_uint32),
+        ("dwXSize", ctypes.c_uint32),
+        ("dwYSize", ctypes.c_uint32),
+        ("dwXCountChars", ctypes.c_uint32),
+        ("dwYCountChars", ctypes.c_uint32),
+        ("dwFillAttribute", ctypes.c_uint32),
+        ("dwFlags", ctypes.c_uint32),
+        ("wShowWindow", ctypes.c_uint16),
+        ("cbReserved2", ctypes.c_uint16),
+        ("lpReserved2", ctypes.c_void_p),
+        ("hStdInput", ctypes.c_void_p),
+        ("hStdOutput", ctypes.c_void_p),
+        ("hStdError", ctypes.c_void_p),
+    ]
+
+
+class _StartupInfoExW(ctypes.Structure):
+    """STARTUPINFOEXW (winbase.h): STARTUPINFOW followed by LPPROC_THREAD_ATTRIBUTE_LIST."""
+    _fields_ = [
+        ("StartupInfo", _StartupInfoW),
+        ("lpAttributeList", ctypes.c_void_p),
+    ]
+
+
+class _ProcessInformation(ctypes.Structure):
+    """PROCESS_INFORMATION (processthreadsapi.h)."""
+    _fields_ = [
+        ("hProcess", ctypes.c_void_p),
+        ("hThread", ctypes.c_void_p),
+        ("dwProcessId", ctypes.c_uint32),
+        ("dwThreadId", ctypes.c_uint32),
+    ]
+
+
+def _locked_thread_acl():
+    return _OwnerRightsReadControlAcl(
+        AclRevision=_ACL_REVISION, AclSize=ctypes.sizeof(_OwnerRightsReadControlAcl), AceCount=1,
+        AceType=0, AceSize=20, Mask=_READ_CONTROL,
+        SidRevision=1, SubAuthorityCount=1, IdentifierAuthority=(0, 0, 0, 0, 0, 3), SubAuthority=4,
+    )
+
+
+def _windows_error(call, code):
+    """What a Windows call refused with, in a message a person reads: the call, the code, a common name."""
+    known = {5: "access denied", 6: "invalid handle", 8: "not enough memory", 87: "invalid parameter"}
+    return f"{call} failed (error {code}{', ' + known[code] if code in known else ''})"
+
+
+def _job_kernel32():
+    """kernel32 with the job, creation and thread-resume calls' restype and argtypes set."""
+    from ctypes import wintypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    kernel32.SetInformationJobObject.restype = wintypes.BOOL
+    kernel32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+    kernel32.InitializeProcThreadAttributeList.restype = wintypes.BOOL
+    kernel32.InitializeProcThreadAttributeList.argtypes = [
+        ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(ctypes.c_size_t)]
+    kernel32.UpdateProcThreadAttribute.restype = wintypes.BOOL
+    kernel32.UpdateProcThreadAttribute.argtypes = [
+        ctypes.c_void_p, wintypes.DWORD, ctypes.c_size_t, ctypes.c_void_p,
+        ctypes.c_size_t, ctypes.c_void_p, ctypes.c_void_p]
+    kernel32.DeleteProcThreadAttributeList.restype = None
+    kernel32.DeleteProcThreadAttributeList.argtypes = [ctypes.c_void_p]
+    kernel32.CreateProcessW.restype = wintypes.BOOL
+    kernel32.CreateProcessW.argtypes = [
+        wintypes.LPCWSTR, wintypes.LPWSTR, ctypes.c_void_p, ctypes.c_void_p,
+        wintypes.BOOL, wintypes.DWORD, ctypes.c_void_p, wintypes.LPCWSTR,
+        ctypes.c_void_p, ctypes.POINTER(_ProcessInformation)]
+    kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+    kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    for name in ("Thread32First", "Thread32Next"):
+        getattr(kernel32, name).restype = wintypes.BOOL
+        getattr(kernel32, name).argtypes = [wintypes.HANDLE, ctypes.POINTER(_ThreadEntry32)]
+    kernel32.OpenThread.restype = wintypes.HANDLE
+    kernel32.OpenThread.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.ResumeThread.restype = wintypes.DWORD
+    kernel32.ResumeThread.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    return kernel32
+
+
+class JobObject:
+    """A Windows job holding one reviewer's process tree, ended when its handle closes (WIN-JOB).
+
+    Windows has no process group for `_stop_reviewer_leftovers` to stop, so what a reviewer started
+    and left behind ran on. A job with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE ends every process assigned
+    to it - and every process they start - when the last handle closes. When `_winapi.CreateProcess`
+    is hooked through `creating`, the child is placed in the job at `CreateProcessW` via
+    `PROC_THREAD_ATTRIBUTE_JOB_LIST` and its suspended primary thread is given an `OWNER_RIGHTS`
+    `READ_CONTROL`-only DACL so no concurrent same-user process can resume it; `resume` checks that
+    `ResumeThread` found a suspend count of 1; `close` may be called more than once.
+    """
+
+    def __init__(self, kernel32=None, last_error=None):
+        self._kernel32 = kernel32 if kernel32 is not None else _job_kernel32()
+        self._last_error = last_error if last_error is not None else getattr(ctypes, "get_last_error", lambda: 0)
+        self._held = set()
+        self._threads = {}
+        self._deferred_threads = set()
+        self.why = None
+        self.handle = self._kernel32.CreateJobObjectW(None, None)
+        if not self.handle:
+            self.why = _windows_error("CreateJobObjectW", self._last_error())
+            self.handle = None
+            return
+        limits = _JobExtendedLimitInformation()
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not self._kernel32.SetInformationJobObject(self.handle, _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+                                                     ctypes.byref(limits), ctypes.sizeof(limits)):
+            self.why = _windows_error("SetInformationJobObject", self._last_error())
+            self.close()
+
+    def _create_process(self, executable, args, proc_attrs, thread_attrs,
+                        inherit_handles, creationflags, env, cwd, startupinfo):
+        """Start `args` via `CreateProcessW` already in this job and with a locked thread DACL (WIN-JOB)."""
+        if self.why:
+            raise OSError(self.why)
+        if self.handle is None:
+            self.why = "the job is closed"
+            raise OSError(self.why)
+        attr_dict = getattr(startupinfo, "lpAttributeList", None) or {}
+        handle_list = [int(h) for h in (attr_dict.get("handle_list") or [])]
+        attr_count = 2 if handle_list else 1
+        attr_size = ctypes.c_size_t(0)
+        self._kernel32.InitializeProcThreadAttributeList(None, attr_count, 0, ctypes.byref(attr_size))
+        if not attr_size.value:
+            self.why = _windows_error("InitializeProcThreadAttributeList", self._last_error())
+            raise OSError(self.why)
+        attr_buf = ctypes.create_string_buffer(attr_size.value)
+        if not self._kernel32.InitializeProcThreadAttributeList(attr_buf, attr_count, 0, ctypes.byref(attr_size)):
+            self.why = _windows_error("InitializeProcThreadAttributeList", self._last_error())
+            raise OSError(self.why)
+        try:
+            job_list = (ctypes.c_void_p * 1)(self.handle)
+            if not self._kernel32.UpdateProcThreadAttribute(
+                attr_buf, 0, PROC_THREAD_ATTRIBUTE_JOB_LIST,
+                ctypes.byref(job_list), ctypes.sizeof(job_list), None, None,
+            ):
+                self.why = _windows_error("UpdateProcThreadAttribute", self._last_error())
+                raise OSError(self.why)
+            handles = None
+            if handle_list:
+                handles = (ctypes.c_void_p * len(handle_list))(*handle_list)
+                if not self._kernel32.UpdateProcThreadAttribute(
+                    attr_buf, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                    ctypes.byref(handles), ctypes.sizeof(handles), None, None,
+                ):
+                    self.why = _windows_error("UpdateProcThreadAttribute", self._last_error())
+                    raise OSError(self.why)
+            si_ex = _StartupInfoExW()
+            si_ex.StartupInfo.cb = ctypes.sizeof(_StartupInfoExW)
+            if startupinfo is not None:
+                si_ex.StartupInfo.dwFlags = int(getattr(startupinfo, "dwFlags", 0) or 0)
+                si_ex.StartupInfo.wShowWindow = int(getattr(startupinfo, "wShowWindow", 0) or 0)
+                si_ex.StartupInfo.hStdInput = int(getattr(startupinfo, "hStdInput", 0) or 0)
+                si_ex.StartupInfo.hStdOutput = int(getattr(startupinfo, "hStdOutput", 0) or 0)
+                si_ex.StartupInfo.hStdError = int(getattr(startupinfo, "hStdError", 0) or 0)
+            si_ex.lpAttributeList = ctypes.cast(attr_buf, ctypes.c_void_p).value
+            acl = _locked_thread_acl()
+            sd = _SecurityDescriptor(Revision=1, Control=_SE_DACL_PRESENT, Dacl=ctypes.addressof(acl))
+            thread_sa = _SecurityAttributes(
+                nLength=ctypes.sizeof(_SecurityAttributes),
+                lpSecurityDescriptor=ctypes.addressof(sd),
+                bInheritHandle=0,
+            )
+            flags = int(creationflags) | CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT
+            env_buf = None
+            if env is not None:
+                items = sorted(((os.fsdecode(k), os.fsdecode(v)) for k, v in env.items()),
+                               key=lambda item: item[0].upper())
+                env_text = "".join(f"{k}={v}\0" for k, v in items) + "\0"
+                env_buf = ctypes.create_unicode_buffer(env_text)
+                flags |= CREATE_UNICODE_ENVIRONMENT
+            cmd_buf = ctypes.create_unicode_buffer(args) if args is not None else None
+            pi = _ProcessInformation()
+            if not self._kernel32.CreateProcessW(
+                executable, cmd_buf, None, ctypes.byref(thread_sa),
+                bool(inherit_handles), flags,
+                ctypes.cast(env_buf, ctypes.c_void_p) if env_buf is not None else None,
+                cwd, ctypes.byref(si_ex), ctypes.byref(pi),
+            ):
+                code = self._last_error()
+                msg = _windows_error("CreateProcessW", code)
+                if code in (2, 3):
+                    raise FileNotFoundError(2, msg)
+                if code in _SPAWN_OS_ERRORS:
+                    raise OSError(code, msg)
+                self.why = msg
+                raise OSError(self.why)
+            pid, ht = int(pi.dwProcessId), int(pi.hThread)
+            self._held.add(pid)
+            self._threads[pid] = ht
+            self._deferred_threads.add(ht)
+            return int(pi.hProcess), ht, pid, int(pi.dwThreadId)
+        finally:
+            self._kernel32.DeleteProcThreadAttributeList(attr_buf)
+
+    @contextlib.contextmanager
+    def creating(self, winapi=None):
+        """Hook `_winapi.CreateProcess` so `Popen` puts the child in this job at creation (WIN-JOB)."""
+        if winapi is None:
+            winapi = getattr(subprocess, "_winapi", None)
+        if winapi is None or self.why or self.handle is None:
+            yield self
+            return
+        orig_create = winapi.CreateProcess
+        orig_close = getattr(winapi, "CloseHandle", None)
+
+        def close_handle(handle):
+            if int(handle) in self._deferred_threads:
+                self._deferred_threads.discard(int(handle))
+                return None
+            return orig_close(handle)
+
+        winapi.CreateProcess = self._create_process
+        if orig_close is not None:
+            winapi.CloseHandle = close_handle
+        try:
+            yield self
+        finally:
+            winapi.CreateProcess = orig_create
+            if orig_close is not None:
+                winapi.CloseHandle = orig_close
+
+    def hold(self, pid):
+        """Assign `pid` to the job; None when it is held, or the platform's reason."""
+        if self.why:
+            return self.why
+        if self.handle is None:
+            return "the job is closed"
+        if int(pid) in self._held:
+            return None
+        process = self._kernel32.OpenProcess(_PROCESS_SET_QUOTA | _PROCESS_TERMINATE, False, int(pid))
+        if not process:
+            return _windows_error(f"OpenProcess for {pid}", self._last_error())
+        try:
+            if not self._kernel32.AssignProcessToJobObject(self.handle, process):
+                return _windows_error(f"AssignProcessToJobObject for {pid}", self._last_error())
+        finally:
+            self._kernel32.CloseHandle(process)
+        self._held.add(int(pid))
+        return None
+
+    def _thread_id(self, pid):
+        """The one primary thread id of `pid` from a Toolhelp thread snapshot, or (None, why)."""
+        snapshot = self._kernel32.CreateToolhelp32Snapshot(_TH32CS_SNAPTHREAD, 0)
+        if not snapshot or snapshot == ctypes.c_void_p(-1).value:
+            return None, _windows_error(f"CreateToolhelp32Snapshot for {pid}", self._last_error())
+        try:
+            entry = _ThreadEntry32()
+            entry.dwSize = ctypes.sizeof(_ThreadEntry32)
+            tids = []
+            found = self._kernel32.Thread32First(snapshot, ctypes.byref(entry))
+            while found:
+                if entry.th32OwnerProcessID == int(pid):
+                    tids.append(int(entry.th32ThreadID))
+                found = self._kernel32.Thread32Next(snapshot, ctypes.byref(entry))
+            if not tids:
+                return None, f"no thread found for {pid}"
+            if len(tids) > 1:
+                return None, f"process {pid} already has {len(tids)} threads before resume"
+            return tids[0], None
+        finally:
+            self._kernel32.CloseHandle(snapshot)
+
+    def resume(self, pid):
+        """Resume `pid`'s primary thread after `CREATE_SUSPENDED`, once `hold` put it in the job (WIN-JOB)."""
+        if self.why:
+            return self.why
+        if self.handle is None:
+            return "the job is closed"
+        pid = int(pid)
+        if pid not in self._held:
+            return f"process {pid} is not in the job"
+        thread = self._threads.pop(pid, None)
+        if thread is not None:
+            self._deferred_threads.discard(thread)
+        else:
+            tid, why = self._thread_id(pid)
+            if why:
+                return why
+            thread = self._kernel32.OpenThread(_THREAD_SUSPEND_RESUME, False, tid)
+            if not thread:
+                return _windows_error(f"OpenThread for {pid}", self._last_error())
+        try:
+            previous = self._kernel32.ResumeThread(thread)
+            if previous == 0xFFFFFFFF:
+                return _windows_error(f"ResumeThread for {pid}", self._last_error())
+            if previous != 1:
+                return f"ResumeThread for {pid} found suspend count {previous}, expected 1"
+        finally:
+            self._kernel32.CloseHandle(thread)
+        return None
+
+    def close(self):
+        """Close the job's handle: whatever of its tree still runs ends (KILL_ON_JOB_CLOSE)."""
+        while self._threads:
+            _, thread = self._threads.popitem()
+            self._deferred_threads.discard(thread)
+            self._kernel32.CloseHandle(thread)
+        if self.handle is not None:
+            self._kernel32.CloseHandle(self.handle)
+            self.handle = None
+
+
 # ---------------------------------------------------------------- tool fallbacks (ps, lsof)
 class _Shell:
     def all_pids(self):
@@ -682,6 +1114,45 @@ def alive(pid):
         return _Windows.alive(pid) if pid > 0 else False
     except Exception:
         return None
+
+
+@contextlib.contextmanager
+def creating_in_job(enabled=True, kernel32=None, last_error=None, winapi=None):
+    """Create the Windows job before `Popen` and hook `_winapi.CreateProcess` so the child starts inside it (WIN-JOB)."""
+    global _ACTIVE_JOB
+    if not enabled or sys.platform != "win32":
+        yield None
+        return
+    job = JobObject(kernel32, last_error)
+    previous = _ACTIVE_JOB
+    _ACTIVE_JOB = job
+    try:
+        with job.creating(winapi=winapi):
+            yield job
+    finally:
+        _ACTIVE_JOB = previous
+        if _ACTIVE_JOB is None and job.handle is not None and not job._held and not job._threads:
+            job.close()
+
+
+def hold_in_job(pid, kernel32=None, last_error=None):
+    """A job holding `pid` and what it starts, resumed after assignment and killed when it closes (WIN-JOB), or (None, why).
+
+    None and None where this is not Windows: there a process group is stopped instead, by
+    `_stop_reviewer_leftovers`. When started under `creating_in_job`, the process is placed in the job at
+    `CreateProcessW` with `PROC_THREAD_ATTRIBUTE_JOB_LIST` and a locked thread DACL, then resumed here from
+    its direct thread handle. A job the platform refused - or whose process was already resumed or could not
+    be resumed - is closed, ending the process and leaking no handle, and the reason is the caller's to say.
+    """
+    if sys.platform != "win32":
+        return None, None
+    job = (_ACTIVE_JOB if (_ACTIVE_JOB is not None and kernel32 is None and last_error is None)
+           else JobObject(kernel32, last_error))
+    why = job.hold(pid) or job.resume(pid)
+    if why:
+        job.close()
+        return None, why
+    return job, None
 
 
 def ppid(pid):

@@ -37,6 +37,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 - A switch or a review tier that weakens a guarantee is off only on a row ao appended to `.ao/ledger/opt-ins.jsonl` on this machine, as its checkpoint store records: the first row of the chain needs no digest, so an implementer that wrote the config and one row by hand had review off and was granted on verification alone. A row written by hand, or on another machine, now turns nothing off, ao appends nothing after one, and `ao doctor` names it; a checkpoint store `AO_LEDGER_CHECKPOINTS` puts inside the project attests nothing ([features](docs/features.md), OPTIN-ATTESTED).
 
+### Windows
+
+- A spawned or ACP reviewer and version probe on Windows now start inside a kernel Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, `CREATE_SUSPENDED`, and an `OWNER_RIGHTS` `READ_CONTROL`-only thread DACL, so everything the reviewer starts ends when its review handle closes and a job Windows refuses stops the process and refuses the run; `windows_job` is on by default and switched off only on a person's record with `ao features off windows_job --by <name>` ([docs/windows.md](docs/windows.md), [docs/features.md](docs/features.md)) (WIN-JOB).
+
 ### Adapters
 
 - `ao init --profile` now offers the three working cross-family, cross-engine presets — `agy-codex` (default: `agy` Gemini 4 Argon implementer with Codex `gpt-6-luna` reviewer), `codex-agy` (Codex `gpt-6-astra` implementer with `agy`'s read-only reviewer agent on Gemini 4 Argon) and `claude-codex` (Claude Code implementer with Codex `gpt-6-luna` reviewer) — and drops `claude-kiro` and `claude-claude`, with every preset's actors verified against the shipped adapters and review-time independence rule (PROFILES).

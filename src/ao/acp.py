@@ -19,7 +19,7 @@ import subprocess
 import threading
 import time
 
-from . import __version__
+from . import __version__, procs
 
 PROTOCOL_VERSION = 1
 PROBE_TIMEOUT = 20.0
@@ -63,27 +63,43 @@ def answer_text(updates):
     return "".join(parts)
 
 
-def _group():
-    """Start the agent as the leader of its own process group, so stopping it stops what it started."""
-    if os.name == "nt":
-        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+def _group(suspended=False):
+    """Start the agent as the leader of its own process group, so stopping it stops what it started.
+
+    With `suspended`, the process is also started with CREATE_SUSPENDED so ao can verify and resume it
+    inside a Windows job before its main thread runs (WIN-JOB).
+    """
+    if os.name == "nt" or suspended:
+        from . import procs
+        flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        if suspended:
+            flags |= procs.CREATE_SUSPENDED
+        return {"creationflags": flags}
     return {"start_new_session": True}
 
 
-def _stop(proc):
+def _stop(proc, tree=True):
     """Stop the agent and everything it started, wait for it, and return what of it still runs after the stop.
 
     The stop is ao's own: its group on POSIX, Windows' own taskkill on Windows (WINDOWS-NO-CWD-EXEC),
     and each process of the agent's tree is asked afterwards whether it runs, where the stop was
-    taken for done (WINDOWS-STOP-PROVEN).
+    taken for done (WINDOWS-STOP-PROVEN). `tree` is False only for a process started with
+    CREATE_SUSPENDED whose job was refused while it still had one suspended thread and had never run
+    (WIN-JOB).
     """
     left = []
     if proc.poll() is None:
-        try:
-            from . import lib as A
-            left = A.kill_turn(proc.pid, getattr(signal, "SIGKILL", signal.SIGTERM)) or []
-        except OSError:
-            pass
+        if tree:
+            try:
+                from . import lib as A
+                left = A.kill_turn(proc.pid, getattr(signal, "SIGKILL", signal.SIGTERM)) or []
+            except OSError:
+                pass
+        else:
+            try:
+                proc.kill()
+            except OSError:
+                pass
     for stream in (proc.stdin, proc.stdout):
         try:
             if stream:
@@ -224,17 +240,18 @@ class Session:
     no such capability. Use as a context manager, so the agent is stopped with everything it started.
     """
 
-    def __init__(self, argv, cwd, env=None, permission=None):
+    def __init__(self, argv, cwd, env=None, permission=None, suspended=False):
         self.cwd = cwd
         self.permission = permission or reject_everything
         self.decisions, self.session_id, self._next = [], None, 0
+        suspended = bool(suspended or procs._ACTIVE_JOB is not None)
         # What the session holds is made before its agent starts, so nothing but the reader stands between the start
         # and the guard below (REVIEWER-ORPHAN-6).
         self.lines, self._turn, self.still_running = queue.Queue(), None, None
         try:
             self.proc = subprocess.Popen(list(argv), cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                          stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
-                                         **_group())
+                                         **_group(suspended=suspended))
         except OSError as exc:
             raise ProbeError(f"could not start {argv[0]}: {exc}") from exc
         # A session that fails to start after its agent did - no thread left for the reader - stops the agent: nobody
@@ -242,7 +259,7 @@ class Session:
         try:
             threading.Thread(target=_read, args=(self.proc.stdout, self.lines), daemon=True).start()
         except BaseException:
-            _stop(self.proc)
+            _stop(self.proc, tree=not suspended)
             raise
 
     def __enter__(self):
@@ -251,9 +268,9 @@ class Session:
     def __exit__(self, *exc):
         self.close()
 
-    def close(self):
+    def close(self, tree=True):
         """Stop the agent; what of it still runs after the first stop, every later one keeps (WINDOWS-STOP-PROVEN)."""
-        left = _stop(self.proc)
+        left = _stop(self.proc) if tree else _stop(self.proc, tree=False)
         if self.still_running is None:
             self.still_running = left
         return self.still_running

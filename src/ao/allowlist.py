@@ -31,6 +31,7 @@ FORBIDDEN = (
     # A person's act on the record since FEATURE-RECORDED; a grant that admits it hands an agent the record too.
     ("switches review off", "ao features off review --by p"),
     ("switches the inventory review off", "ao features off inventory_review --by p"),
+    ("switches the Windows reviewer job off", "ao features off windows_job --by p"),
     ("names the family that wrote a waived range", "ao catchup --author-family f --by b"),
     ("states which waived slices only moved code", "ao catchup --move-only s --by b"),
     ("replaces a waived range's commit claims", "ao catchup --boundary text --by b"),
@@ -1602,6 +1603,8 @@ OPERATIONS = (
     ("switches review off", "ao features off review", _ao_act("features", (("off",), ("review",)))),
     ("switches the inventory review off", "ao features off inventory_review",
      _ao_act("features", (("off",), ("inventory_review",)))),
+    ("switches the Windows reviewer job off", "ao features off windows_job",
+     _ao_act("features", (("off",), ("windows_job",)))),
     ("names the family that wrote a waived range", "ao catchup --author-family",
      _ao_act("catchup", (), ("--author-family",))),
     ("states which waived slices only moved code", "ao catchup --move-only", _ao_act("catchup", (), ("--move-only",))),

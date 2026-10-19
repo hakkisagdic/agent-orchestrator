@@ -30,14 +30,17 @@ FEATURES = {
                          "one hunter call per run over a bounded slice of the tree"),
     "toast":            ("a Windows toast for what reaches a person's desktop", False,
                          "nothing: a notification on this machine"),
+    "windows_job":      ("a Windows job holds each reviewer and probe so what they start ends with them", True,
+                         "nothing: a kernel job on this machine"),
 }
 ORDER = list(FEATURES)
 
 
 # A switch that weakens a guarantee is off only on a person's record, as a recorded setting is (REVIEW-TIERS):
 # `.ao/config.json` is a file the implementer can write, and review turned off there let `ao commit-ok` grant on
-# verification alone, so an unreviewed commit landed (FEATURE-RECORDED).
-RECORDED = ("review", "inventory_review")
+# verification alone, so an unreviewed commit landed (FEATURE-RECORDED); `windows_job` turned off there let a
+# reviewer leave a process tree running after the review ended (WIN-JOB).
+RECORDED = ("review", "inventory_review", "windows_job")
 
 
 def recorded_off(cfg, key):

@@ -48,12 +48,14 @@ What each switch changes when off:
   and `ao review` still works when asked.
 - `inventory_review` off — the playbook and backlog rule stop asking for an
   inventory review; the surface inventory itself is still good practice.
+- `windows_job` off — on Windows, a reviewer or version probe is not held in a
+  kernel Job Object with `KILL_ON_JOB_CLOSE` ([windows.md](windows.md)).
 
-*In ao since slice FEATURE-RECORDED: `review` and `inventory_review` weaken a guarantee, so
-they are switched off by a person, on the record, as a waiver is: `ao features off review --by
-<name>` writes the switch and appends the name, the login and whether a terminal was attached to
-`.ao/ledger/opt-ins.jsonl`, and switching one on is recorded too. The switch was read from
-`.ao/config.json` alone - a file the implementer can write - so an implementer that wrote
+*In ao since slice FEATURE-RECORDED: `review`, `inventory_review` and `windows_job` weaken a
+guarantee, so they are switched off by a person, on the record, as a waiver is: `ao features off
+review --by <name>` writes the switch and appends the name, the login and whether a terminal was
+attached to `.ao/ledger/opt-ins.jsonl`, and switching one on is recorded too. The switch was read
+from `.ao/config.json` alone - a file the implementer can write - so an implementer that wrote
 `"features": {"review": false}` was granted on verification alone, and the grant bound its
 tree, so neither `ao doctor` nor the watchdog flagged the commit. A switch the config turns off
 with no person's record behind it now stays on: `ao features`, `ao commit-ok` and `ao doctor`
