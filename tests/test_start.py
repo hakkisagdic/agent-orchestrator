@@ -1,4 +1,4 @@
-"""Tests for `ao start`: first-run onboarding wizard (ONBOARD).
+"""Tests for `ao start`: first-run onboarding wizard (ONBOARD, ONBOARD-2).
 
 All tests use stand-in adapters and binaries (`tests/standin.py`), never real agent runs.
 """
@@ -387,7 +387,7 @@ def test_start_refuses_profiles_json_symlink_without_truncating_target(tmp_path,
     assert "start refused" in out
     assert authorized_keys.read_text(encoding="utf-8") == key_material
     assert os.path.islink(link_path)
-    assert ran == []
+    assert ran == ["demo"]
 
     with pytest.raises(OSError):
         A.write_profile("beta-alpha", {"implementer": "beta", "reviewer": "alpha"})
@@ -410,3 +410,103 @@ def test_start_refuses_profiles_json_symlink_without_truncating_target(tmp_path,
     os.symlink(str(outside_dir), in_tree_adapters, target_is_directory=True)
     assert cli.cmd_start(cfg, SimpleNamespace(yes=True)) == 1
     assert outside_profiles.read_text(encoding="utf-8") == '{"init": "keep"}\n'
+
+
+def test_start_ignores_project_local_profiles_json_and_uses_selected_pair(tmp_path, monkeypatch, capsys):
+    root = _repo(tmp_path)
+    bin_dir = tmp_path / "bin"
+    for name in ("alpha-cli", "beta-cli", "gamma-cli"):
+        standin.program(bin_dir, name, REVIEW_STANDIN)
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+    monkeypatch.setenv("AO_USER_ADAPTERS", str(tmp_path / "user-adapters"))
+
+    adapters = {
+        "alpha": _adapter("alpha", "alpha-cli", "fam-alpha", verified="full", trust_flag="--read-only"),
+        "beta": _adapter("beta", "beta-cli", "fam-beta", verified="full", trust_flag="--no-tools"),
+        "gamma": _adapter("gamma", "gamma-cli", "fam-gamma", verified="documented", trust_flag="--sandbox"),
+    }
+    monkeypatch.setattr(A, "package_adapters", lambda: adapters)
+    monkeypatch.setattr(A, "turn_adapter", lambda aid: adapters.get(aid))
+    monkeypatch.setattr(A, "adapter_catalog", lambda r=None: {
+        k: {"id": k, "source": "package", "path": k, "adapter": v, "problem": None}
+        for k, v in adapters.items()
+    })
+    monkeypatch.setattr(cli, "cmd_demo", lambda cfg, a: 0)
+    monkeypatch.setattr(cli, "cmd_hooks", lambda cfg, a: 0)
+    monkeypatch.setattr(cli, "cmd_prove", lambda cfg, a: 0)
+
+    # A project-local .ao/adapters/profiles.json maps alpha-beta to gamma/beta instead of alpha/beta.
+    project_adapters = os.path.join(root, ".ao", "adapters")
+    os.makedirs(project_adapters, exist_ok=True)
+    with open(os.path.join(project_adapters, "profiles.json"), "w", encoding="utf-8") as fh:
+        json.dump(
+            {
+                "init": "gamma-beta",
+                "profiles": {
+                    "alpha-beta": {"implementer": "gamma", "reviewer": "beta", "architect": "gamma"},
+                    "gamma-beta": {"implementer": "gamma", "reviewer": "beta", "architect": "gamma"},
+                },
+            },
+            fh,
+        )
+
+    cfg = A.load_config(root)
+    assert cli.cmd_start(cfg, SimpleNamespace(yes=True)) == 0
+
+    saved = A.load_config(root)
+    assert saved["implementer"]["adapter"] == "alpha"
+    assert A.block_adapter(saved["reviewer"]) == "beta"
+    assert saved["architect"]["adapter"] == "alpha"
+    assert A.profiles(root)["alpha-beta"] == {"implementer": "alpha", "reviewer": "beta", "architect": "alpha"}
+    assert A.default_profile(root) == "alpha-beta"
+
+
+def test_start_writes_nothing_before_init_step_is_confirmed(tmp_path, monkeypatch, capsys):
+    root = _repo(tmp_path)
+    bin_dir = tmp_path / "bin"
+    standin.program(bin_dir, "alpha-cli", REVIEW_STANDIN)
+    standin.program(bin_dir, "beta-cli", REVIEW_STANDIN)
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+    monkeypatch.setenv("AO_USER_ADAPTERS", str(tmp_path / "user-adapters"))
+
+    adapters = {
+        "alpha": _adapter("alpha", "alpha-cli", "fam-alpha", verified="full", trust_flag="--read-only"),
+        "beta": _adapter("beta", "beta-cli", "fam-beta", verified="full", trust_flag="--no-tools"),
+    }
+    monkeypatch.setattr(A, "package_adapters", lambda: adapters)
+    monkeypatch.setattr(A, "adapter_catalog", lambda r=None: {
+        k: {"id": k, "source": "package", "path": k, "adapter": v, "problem": None}
+        for k, v in adapters.items()
+    })
+
+    ran = []
+
+    def check_demo(cfg, a):
+        assert not os.path.exists(A.user_profiles_path())
+        ran.append("demo")
+        return 0
+
+    monkeypatch.setattr(cli, "cmd_demo", check_demo)
+    monkeypatch.setattr(cli, "cmd_init", lambda cfg, a: ran.append("init") or 0)
+    monkeypatch.setattr(cli, "cmd_hooks", lambda cfg, a: ran.append("hooks") or 0)
+    monkeypatch.setattr(cli, "cmd_prove", lambda cfg, a: ran.append("prove") or 0)
+
+    # With no terminal and no --yes, no person can confirm any step: profiles.json is untouched.
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    cfg = A.load_config(root)
+    assert cli.cmd_start(cfg, SimpleNamespace(yes=False)) == 0
+    out = _plain(capsys)
+    assert "skipped `ao demo`" in out
+    assert "skipped `ao init --profile alpha-beta`" in out
+    assert ran == []
+    assert not os.path.exists(A.user_profiles_path())
+    assert not os.path.exists(os.path.join(root, ".ao", "config.json"))
+
+    # At a terminal, saying yes to demo and no to init still writes no profile.
+    answers = iter(["1", "y", "n", "n", "n"])
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    assert cli.cmd_start(cfg, SimpleNamespace(yes=False)) == 0
+    assert ran == ["demo"]
+    assert not os.path.exists(A.user_profiles_path())
+    assert not os.path.exists(os.path.join(root, ".ao", "config.json"))

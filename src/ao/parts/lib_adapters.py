@@ -274,9 +274,9 @@ def _layer_profile_document(path):
 
 
 def _profile_document(root=None):
-    """Merged adapters/profiles.json across package, user and project layers."""
+    """Merged adapters/profiles.json across package and user layers."""
     merged = {"profiles": {}}
-    for _, folder in adapter_layers(root):
+    for _, folder in adapter_layers():
         doc = _layer_profile_document(os.path.join(folder, PROFILES_FILE))
         if doc.get("init"):
             merged["init"] = doc["init"]

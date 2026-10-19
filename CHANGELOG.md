@@ -24,6 +24,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Fixes
 
+- `ao start` now writes the chosen profile to `~/.ao/adapters/profiles.json` only after `ao init` is confirmed, and `ao init` uses the exact implementer/reviewer/architect pair `ao start` selected without letting a project-local `.ao/adapters/profiles.json` override it (ONBOARD-2).
 - The landing page's agent support introduction now covers `cloud-generic`'s observation through pull-request polling and Git results alongside the five non-cloud groups and qualifies the `full`/`partial` install-measurement statement for `openai-api`, whose client is tested against a stand-in endpoint while a provider's own answer is proven by an owner's local run, checked in both languages against `src/ao/adapters/*.json` (LANDING-REFRESH-3).
 - `ao ntfy` cuts outgoing alert bodies at a UTF-8 character boundary within ntfy's 4,096-byte message limit so multibyte Turkish or emoji alerts under 4,000 characters are never turned into attachments ([alarms](docs/alarms.md)) (NOTIFY-NTFY-2).
 - The landing page's agent support introduction now states how each group of packaged adapters is observed (resolved session store read, `call-return` data kept by `ao`, declared transcript shape without a resolved store, `unknown` transcript, or stateless tool reviewer/model backend) and which levels are measured (`full`, `partial`), documented only (`documented`), or `untested`, checked in both languages against `src/ao/adapters/*.json` (LANDING-REFRESH-2).
