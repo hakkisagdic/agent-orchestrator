@@ -381,3 +381,15 @@ def _gain_source_of(project):
     except Exception:
         path = None
     return f"transcript: {path}" if path else "no transcript resolved"
+
+
+def cmd_export(cfg, args):
+    """Export the project's ledger as OpenTelemetry traces in the OTLP/JSON encoding (EXPORT-OTLP)."""
+    payload = A.export_otlp(cfg["root"], cfg, attested=bool(getattr(args, "attested", False)))
+    text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    if args.out:
+        from .storage import replace_file_durably
+        replace_file_durably(os.path.expanduser(args.out), text.encode(UTF8))
+        return 0
+    sys.stdout.write(text)
+    return 0

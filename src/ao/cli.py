@@ -216,6 +216,12 @@ def build_parser(root=None):
                     help="also read the implementer's account (one request; nothing is guessed for an adapter "
                          "that declares no lookup)")
     gn.set_defaults(fn=cmd_gain)
+    ex = sub.add_parser("export", help="the project's ledger as OpenTelemetry traces in the OTLP/JSON encoding")
+    ex.add_argument("format", choices=["otlp"], help="the export encoding: otlp (one ExportTraceServiceRequest)")
+    ex.add_argument("--attested", action="store_true",
+                    help="export only the rows this machine's checkpoint store attests and mark the output accordingly")
+    ex.add_argument("--out", metavar="FILE", help="write to FILE instead of standard output")
+    ex.set_defaults(fn=cmd_export)
     rc = sub.add_parser("recall", help="what was decided, found or learned before, across projects")
     rc.add_argument("text", nargs="+")
     rc.add_argument("-n", "--limit", type=int, default=10)
@@ -740,7 +746,7 @@ def main(argv=None):
             return 0
         command = f"ao {args.cmd}"
         root = A.find_root(args.root)
-        return args.fn(A.load_config(root), args) or 0
+        return args.fn(A.load_config(root, record=args.cmd != "export"), args) or 0
     except KeyboardInterrupt:
         return 130
     except LedgerLockTimeout as exc:

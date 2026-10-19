@@ -574,7 +574,7 @@ def resolve_session(root, cfg, role, avoid=()):
                            f"in .ao/config.json")
 
 
-def resolve_sessions(root, cfg):
+def resolve_sessions(root, cfg, record=True):
     """Resolve each role's `auto` into the block the role is read from, and record what settles it; the config.
 
     The implementer is resolved before the architect. A block ao resolved keeps `_session`:
@@ -592,7 +592,7 @@ def resolve_sessions(root, cfg):
             block["session"] = found["session"]
             if found["workspace_hash"]:
                 block["workspace_hash"] = found["workspace_hash"]
-        if found["record"]:
+        if record and found["record"]:
             record_session(root, role, found)
     return cfg
 

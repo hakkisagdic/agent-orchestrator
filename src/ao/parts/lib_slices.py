@@ -2243,3 +2243,992 @@ def git_state(root):
         "base": ref[len("refs/remotes/"):] if known else None,
         "merged": merged,
     }
+
+
+# ---- OTLP/JSON trace export of the project's ledger (EXPORT-OTLP) -----------------------
+
+_OTLP_COMMIT_CHAIN = "ao-commit-row-v1"
+_OTLP_STEP_RANK = {"verification": 0, "review": 1, "grant": 2, "commit": 3}
+_OTLP_TRAILER_ACTOR = re.compile(r"^([A-Za-z0-9_.-]+)(?:\s*\(([A-Za-z0-9_.-]+)\))?$")
+_OTLP_BOOL_KEYS = frozenset({
+    "ao.authorizable",
+    "ao.granted",
+    "ao.export.attested_only",
+    "ao.export.partial",
+})
+_OTLP_INT_KEYS = frozenset({
+    "ao.gates.count",
+    "ao.gates.passed_count",
+    "ao.gates.failed_count",
+    "ao.tests.pass_count",
+    "ao.tests.fail_count",
+    "ao.reviewers.count",
+    "ao.candidate.changed_count",
+    "ao.reasons.count",
+})
+_OTLP_LEDGER_NAMES = frozenset({
+    "verifications.jsonl",
+    "reviews.jsonl",
+    "authority.jsonl",
+    "waivers.jsonl",
+    "slices.jsonl",
+})
+_OTLP_VOCAB_ALLOWLIST = {
+    "service.name": frozenset({"ao"}),
+    "ao.step": frozenset({"verification", "review", "grant", "commit"}),
+    "ao.verification.profile": frozenset({"quick", "fast", "full", "ci", "default"}),
+    "ao.review.kind": frozenset({"index-candidate", "commit-range"}),
+    "ao.review.tier": frozenset({
+        "independent", "same-family", "person", "full", "single", "strict", "lite",
+    }),
+    "ao.outcome": frozenset({
+        "PASS", "FAIL", "APPROVED", "NEEDS_CHANGES", "UNAVAILABLE", "INVALID",
+        "GRANTED", "REFUSED", "LANDED",
+    }),
+}
+_OTLP_PATTERN_ALLOWLIST = {
+    "service.version": re.compile(r"^\d+\.\d+\.\d+(?:[-+._][0-9A-Za-z._-]+)?$"),
+    "ao.candidate": re.compile(r"^sha256:[0-9a-f]{64}$"),
+    "ao.commit.sha": re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$"),
+    "ao.commit.tree": re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$"),
+    "ao.verification.id": re.compile(r"^V-(?:\d+|\d{8}-\d{6}-[0-9a-f]{8})$"),
+    "ao.waiver.id": re.compile(r"^W-\d+(?:-\d+)?$"),
+    "ao.review.id": re.compile(r"^\d{4}-?\d{2}-?\d{2}-\d{6}-(?:[0-9a-f]{7,40}|R-\d+)(?:-\d+)?\.md$"),
+    "ao.implementer.actor": re.compile(r"^sha256:[0-9a-f]{16}$"),
+    "ao.reviewer.actor": re.compile(r"^sha256:[0-9a-f]{16}$"),
+}
+_OTLP_SLICE_ID = re.compile(r"^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*$")
+_OTLP_PURE_HEX = re.compile(r"^[0-9A-F]{16,}$")
+_OTLP_PROFILE_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+_OTLP_HEX_LOWER = re.compile(r"^[0-9a-f]{16,}$")
+_OTLP_SHORT_SHA = re.compile(r"^[0-9a-f]{7,64}$")
+
+
+def _otlp_hex_id(seed, chars):
+    """Lowercase hex id of `chars` nybbles derived from `seed`, never all zeros."""
+    digest = hashlib.sha256(seed.encode(UTF8)).hexdigest()[:chars]
+    return digest if any(ch != "0" for ch in digest) else ("0" * (chars - 1) + "1")
+
+
+def _otlp_unix_nano(value):
+    """A ledger timestamp as integer unix nanoseconds, or 0 when absent."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return max(0, value) * 1_000_000_000
+    seconds = _epoch(value)
+    if seconds is None or seconds < 0:
+        return 0
+    return int(round(seconds * 1_000_000_000))
+
+
+def _otlp_declared_profiles(root):
+    """Profile names declared in `.ao/gates.json` plus the standard built-in profile names."""
+    allowed = set(_OTLP_VOCAB_ALLOWLIST["ao.verification.profile"])
+    if not root:
+        return frozenset(allowed)
+    try:
+        with open(os.path.join(root, ".ao", "gates.json"), encoding=UTF8) as fh:
+            spec = json.load(fh)
+    except (OSError, ValueError):
+        return frozenset(allowed)
+    profiles = spec.get("profiles") if isinstance(spec, dict) else None
+    if isinstance(profiles, dict):
+        for name in profiles:
+            if isinstance(name, str) and _OTLP_PROFILE_NAME.fullmatch(name) and not _OTLP_HEX_LOWER.fullmatch(name):
+                allowed.add(name)
+    return frozenset(allowed)
+
+
+def _otlp_changed_count(cand):
+    """Count of changed paths on a candidate record (`changed_paths`, `changed_count`, or `changed`)."""
+    if not isinstance(cand, dict):
+        return 0
+    if isinstance(cand.get("changed_paths"), list):
+        return len(cand["changed_paths"])
+    if isinstance(cand.get("changed_count"), int) and not isinstance(cand.get("changed_count"), bool):
+        return max(0, int(cand["changed_count"]))
+    if isinstance(cand.get("changed"), list):
+        return len(cand["changed"])
+    return 0
+
+
+def _otlp_adapter_catalog(cfg=None):
+    """`(declared_families, adapter_name_to_family)` from shipped adapter declarations."""
+    adapters = package_adapters()
+    declared = set()
+    by_name = {}
+    for aid, spec in adapters.items():
+        if not isinstance(spec, dict):
+            continue
+        fam = str(spec.get("family") or "").strip().lower()
+        if not fam:
+            continue
+        declared.add(fam)
+        by_name[str(aid).strip().lower()] = fam
+        actor_name = str(spec.get("actor_name") or "").strip().lower()
+        if actor_name:
+            by_name[actor_name] = fam
+        for binary in adapter_binaries(spec):
+            if isinstance(binary, str) and binary.strip():
+                by_name[binary.strip().lower()] = fam
+    if isinstance(cfg, dict):
+        blocks = [cfg.get("implementer"), cfg.get("reviewer")]
+        reviewers = cfg.get("reviewers")
+        if isinstance(reviewers, list):
+            blocks.extend(reviewers)
+        elif isinstance(reviewers, dict):
+            blocks.extend(reviewers.values())
+        actors = cfg.get("actors")
+        if isinstance(actors, dict):
+            for actor_key, actor_block in actors.items():
+                if isinstance(actor_block, dict):
+                    blocks.append(dict(actor_block, actor=actor_block.get("actor") or actor_key))
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            ident = block_adapter(block)
+            spec = adapters.get(ident) if ident else None
+            fam = str((spec or {}).get("family") or "").strip().lower()
+            if not fam:
+                continue
+            for key in ("id", "name", "actor", "binding"):
+                val = block.get(key)
+                if isinstance(val, str) and val.strip():
+                    by_name[val.strip().lower()] = fam
+    return frozenset(declared), by_name
+
+
+def _otlp_allow_string(key, value, declared_families=None, declared_profiles=None):
+    """Return `value` if and only if `(key, value)` belongs to the OTLP attribute allowlist."""
+    if value is None or isinstance(value, bool):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if key == "ao.verification.profile":
+        profiles = declared_profiles if declared_profiles is not None else _OTLP_VOCAB_ALLOWLIST[key]
+        return text if text in profiles else None
+    if key == "ao.export.unattested_ledgers":
+        parts = [part.strip() for part in text.split(",") if part.strip()]
+        if parts and all(part in _OTLP_LEDGER_NAMES for part in parts):
+            return ",".join(parts)
+        return None
+    if key in _OTLP_VOCAB_ALLOWLIST:
+        return text if text in _OTLP_VOCAB_ALLOWLIST[key] else None
+    if key in ("ao.implementer.family", "ao.reviewer.family"):
+        families = declared_families if declared_families is not None else _otlp_adapter_catalog()[0]
+        low = text.lower()
+        return low if (low in families or low == "unknown") else None
+    if key == "ao.slice":
+        if len(text) <= 32 and _OTLP_SLICE_ID.fullmatch(text) and not _OTLP_PURE_HEX.fullmatch(text):
+            return text
+        return None
+    pattern = _OTLP_PATTERN_ALLOWLIST.get(key)
+    if pattern is not None:
+        return text if pattern.fullmatch(text) else None
+    return None
+
+
+def _otlp_attributes(pairs, declared_families=None, declared_profiles=None):
+    """OTLP/JSON KeyValue list from allowlisted `(key, value)` pairs."""
+    out, seen = [], set()
+    for key, value in pairs:
+        if not key or key in seen or value is None:
+            continue
+        if key in _OTLP_BOOL_KEYS:
+            if not isinstance(value, bool):
+                continue
+            encoded = {"boolValue": value}
+        elif key in _OTLP_INT_KEYS:
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                continue
+            encoded = {"intValue": str(value)}
+        else:
+            allowed = _otlp_allow_string(
+                key, value, declared_families=declared_families, declared_profiles=declared_profiles
+            )
+            if allowed is None:
+                continue
+            encoded = {"stringValue": allowed}
+        seen.add(key)
+        out.append({"key": key, "value": encoded})
+    return out
+
+
+def _otlp_actor_pairs(prefix, value, identity=None, catalog=None):
+    """`[(prefix.actor, sha256_id), (prefix.family, family)]` from an actor dict, route id or trailer."""
+    declared_families, by_name = catalog if catalog is not None else _otlp_adapter_catalog()
+    raw_actor = None
+    stated_family = None
+    candidates = []
+
+    if isinstance(value, dict):
+        for field in ("actor", "binding", "id", "name"):
+            cand = value.get(field)
+            if isinstance(cand, str) and cand.strip():
+                raw_actor = cand.strip()
+                break
+        if isinstance(value.get("family"), str) and value["family"].strip():
+            stated_family = value["family"].strip()
+        for field in ("adapter", "tool", "actor", "binding", "id", "name"):
+            cand = value.get(field)
+            if isinstance(cand, str) and cand.strip():
+                candidates.append(cand.strip())
+    elif isinstance(value, str) and value.strip():
+        text = value.strip()
+        match = _OTLP_TRAILER_ACTOR.match(text)
+        if match:
+            raw_actor = match.group(1)
+            stated_family = match.group(2)
+        else:
+            raw_actor = text
+        if raw_actor:
+            candidates.append(raw_actor)
+
+    if isinstance(identity, dict):
+        if not raw_actor:
+            for field in ("actor", "binding", "id", "name"):
+                cand = identity.get(field)
+                if isinstance(cand, str) and cand.strip():
+                    raw_actor = cand.strip()
+                    break
+        if not stated_family and isinstance(identity.get("family"), str) and identity["family"].strip():
+            stated_family = identity["family"].strip()
+        for field in ("adapter", "tool", "actor", "binding", "id", "name"):
+            cand = identity.get(field)
+            if isinstance(cand, str) and cand.strip():
+                candidates.append(cand.strip())
+
+    if not raw_actor and not stated_family and not candidates:
+        return []
+
+    resolved_family = None
+    for cand in candidates:
+        if "/" in cand or "\\" in cand:
+            continue
+        low = cand.lower()
+        if low in by_name:
+            resolved_family = by_name[low]
+            break
+        stem = low.split("-reviewer", 1)[0]
+        if stem and stem in by_name:
+            resolved_family = by_name[stem]
+            break
+    if resolved_family is None and isinstance(stated_family, str):
+        low_fam = stated_family.strip().lower()
+        if low_fam in declared_families:
+            resolved_family = low_fam
+    family = resolved_family if resolved_family in declared_families else "unknown"
+
+    pairs = []
+    if raw_actor:
+        actor_hash = "sha256:" + _otlp_hex_id(f"ao-otlp-actor-v1:{raw_actor}", 16)
+        pairs.append((f"{prefix}.actor", actor_hash))
+    pairs.append((f"{prefix}.family", family))
+    return pairs
+
+
+def _otlp_commit_trailers(commit):
+    """`{short_name: first_value}` of a landed commit's `Ao-` trailers."""
+    raw = commit.get("trailers")
+    if isinstance(raw, list):
+        carried = _ao_trailers(raw)
+        return {key[3:].lower(): values[0] for key, values in carried.items() if values}
+    if isinstance(raw, dict):
+        return {str(key).lower(): str(val) for key, val in raw.items() if val is not None}
+    return {}
+
+
+def _otlp_resolve_grant(row, maps):
+    """Resolve a grant row's candidate, slice, review, verification, waiver and tree links once."""
+    cand = row.get("candidate") if isinstance(row.get("candidate"), dict) else {}
+    itree = _otlp_allow_string("ao.commit.tree", cand.get("index_tree") or row.get("tree"))
+    vid = _otlp_allow_string("ao.verification.id", row.get("verification"))
+    artefact = _otlp_allow_string("ao.review.id", os.path.basename(str(row.get("review") or "")))
+    wid = _otlp_allow_string("ao.waiver.id", row.get("waiver"))
+    cdigest = (
+        _otlp_allow_string("ao.candidate", cand.get("digest"))
+        or maps["verification_to_candidate"].get(vid)
+        or maps["review_to_candidate"].get(artefact)
+        or maps["waiver_to_candidate"].get(wid)
+        or maps["tree_to_candidate"].get(itree)
+    )
+    review_row = maps["review_by_artefact"].get(artefact) or (
+        maps["review_by_candidate"].get(cdigest) if not wid else None
+    )
+    if artefact is None and review_row is not None:
+        artefact = _otlp_allow_string("ao.review.id", os.path.basename(str(review_row.get("artefact") or "")))
+    move_only = row.get("move_only") if isinstance(row.get("move_only"), dict) else {}
+    gslice = _otlp_allow_string("ao.slice", row.get("slice") or move_only.get("slice"))
+    slice_id = (
+        gslice
+        or maps["review_to_slice"].get(artefact)
+        or maps["waiver_to_slice"].get(wid)
+        or maps["verification_to_slice"].get(vid)
+        or maps["candidate_to_slice"].get(cdigest)
+        or maps["tree_to_slice"].get(itree)
+    )
+    return {
+        "cand": cand,
+        "itree": itree,
+        "vid": vid,
+        "artefact": artefact,
+        "wid": wid,
+        "cdigest": cdigest,
+        "slice_id": slice_id,
+        "review_row": review_row,
+    }
+
+
+def _otlp_resolve_commit(commit, maps):
+    """Resolve a landed commit's grant, candidate, slice, review, verification and waiver links once."""
+    csha = _otlp_allow_string("ao.commit.sha", commit.get("sha"))
+    ctree = _otlp_allow_string("ao.commit.tree", commit.get("tree"))
+    trailers = _otlp_commit_trailers(commit)
+    has_ao_trailer = any(trailers.get(k) for k in ("grant", "tree", "verification", "review", "waiver"))
+    grant_token = str(trailers.get("grant") or "").strip()
+    grant_row = maps["token_to_grant"].get(grant_token) or maps["tree_to_grant"].get(ctree)
+    gcand = (
+        grant_row.get("candidate")
+        if isinstance(grant_row, dict) and isinstance(grant_row.get("candidate"), dict)
+        else {}
+    )
+    vid = _otlp_allow_string(
+        "ao.verification.id", trailers.get("verification") or (grant_row or {}).get("verification")
+    )
+    artefact = _otlp_allow_string(
+        "ao.review.id",
+        os.path.basename(str(trailers.get("review") or (grant_row or {}).get("review") or "")),
+    )
+    wid = _otlp_allow_string("ao.waiver.id", trailers.get("waiver") or (grant_row or {}).get("waiver"))
+    cdigest = (
+        _otlp_allow_string("ao.candidate", gcand.get("digest"))
+        or maps["verification_to_candidate"].get(vid)
+        or maps["review_to_candidate"].get(artefact)
+        or maps["waiver_to_candidate"].get(wid)
+        or maps["tree_to_candidate"].get(ctree)
+    )
+    review_row = (
+        maps["review_by_artefact"].get(artefact)
+        or (maps["review_by_candidate"].get(cdigest) if not wid else None)
+        or maps["review_by_commit"].get(csha)
+    )
+    if artefact is None and review_row is not None:
+        artefact = _otlp_allow_string("ao.review.id", os.path.basename(str(review_row.get("artefact") or "")))
+    gmove = (grant_row or {}).get("move_only") if isinstance((grant_row or {}).get("move_only"), dict) else {}
+    slice_id = (
+        maps["commit_to_slice"].get(csha)
+        or _otlp_allow_string("ao.slice", (grant_row or {}).get("slice") or gmove.get("slice"))
+        or maps["review_to_slice"].get(artefact)
+        or maps["waiver_to_slice"].get(wid)
+        or maps["verification_to_slice"].get(vid)
+        or maps["candidate_to_slice"].get(cdigest)
+        or maps["tree_to_slice"].get(ctree)
+    )
+    relevant = bool(
+        has_ao_trailer
+        or grant_row is not None
+        or csha in maps["commit_to_slice"]
+        or ctree in maps["tree_to_candidate"]
+        or ctree in maps["tree_to_slice"]
+    )
+    return {
+        "csha": csha,
+        "ctree": ctree,
+        "trailers": trailers,
+        "grant_token": grant_token or None,
+        "grant_row": grant_row,
+        "vid": vid,
+        "artefact": artefact,
+        "wid": wid,
+        "cdigest": cdigest,
+        "slice_id": slice_id,
+        "review_row": review_row,
+        "relevant": relevant,
+    }
+
+
+def export_otlp(root, cfg=None, *, attested=False):
+    """The project's ledger as one OTLP/JSON ExportTraceServiceRequest (EXPORT-OTLP).
+
+    Strictly read-only: reads snapshot history without creating `.lock` files or settling
+    pending seals, and never writes to the project or `~/.ao`. By default (`attested=False`),
+    refuses with `LedgerCorruption` when any ledger has rows or a seal not covered by this
+    machine's checkpoint store; with `attested=True`, exports only the checkpoint-attested
+    prefix and states so in `resource.attributes`.
+    """
+    from . import __version__
+    from .storage import LedgerCorruption, _read_chained_history_snapshot, chained_row_digest
+
+    ledger_specs = (
+        ("verifications", os.path.join(root, ".ao", "ledger", "verifications.jsonl"), VERIFICATION_CHAIN, True),
+        ("reviews", review_ledger_path(root), REVIEW_CHAIN, False),
+        ("grants", os.path.join(root, ".ao", "ledger", "authority.jsonl"), AUTHORITY_CHAIN, False),
+        ("waivers", waivers_path(root), WAIVER_CHAIN, True),
+        ("slice_rows", slice_ledger_path(root), SLICE_CHAIN, False),
+    )
+    loaded = {}
+    unattested_list = []
+    for name, path, chain, legacy in ledger_specs:
+        raw_rows, unattested = _read_chained_history_snapshot(
+            path, chain, legacy_prefix=legacy, attested=True
+        )
+        loaded[name] = [row for row in raw_rows if isinstance(row, dict)]
+        if unattested is not None:
+            unattested_list.append(unattested)
+    if unattested_list and not attested:
+        raise LedgerCorruption("; ".join(item["message"] for item in unattested_list))
+
+    verifications = loaded["verifications"]
+    reviews = loaded["reviews"]
+    grants = loaded["grants"]
+    waivers = loaded["waivers"]
+    slice_rows = loaded["slice_rows"]
+    voided_ordinals = {row["voids"]: row.get("slice") for row in slice_rows if isinstance(row.get("voids"), int)}
+    slice_rows = [
+        row for row in slice_rows
+        if "voids" not in row and not (
+            row.get("ordinal") in voided_ordinals and voided_ordinals[row.get("ordinal")] == row.get("slice")
+        )
+    ]
+    commits = [row for row in landed_commits(root, "HEAD") if isinstance(row, dict)]
+
+    if cfg is None:
+        cfg = project_config_document(root).get("config")
+    catalog = _otlp_adapter_catalog(cfg)
+    declared_families = catalog[0]
+    declared_profiles = _otlp_declared_profiles(root)
+
+    maps = {
+        "candidate_to_slice": {},
+        "tree_to_candidate": {},
+        "tree_to_slice": {},
+        "verification_to_slice": {},
+        "verification_to_candidate": {},
+        "review_to_slice": {},
+        "review_to_candidate": {},
+        "review_by_artefact": {},
+        "review_by_candidate": {},
+        "review_by_commit": {},
+        "grant_by_review": {},
+        "grant_by_candidate": {},
+        "waiver_to_slice": {},
+        "waiver_to_candidate": {},
+        "token_to_grant": {},
+        "tree_to_grant": {},
+        "commit_to_slice": {},
+    }
+
+    commit_shas = [
+        csha for csha in (_otlp_allow_string("ao.commit.sha", c.get("sha")) for c in commits) if csha
+    ]
+    for row in slice_rows:
+        notes = row.get("notes") if isinstance(row.get("notes"), dict) else {}
+        raw_commit = str(row.get("commit") or notes.get("commit") or "").strip().lower()
+        sslice = _otlp_allow_string("ao.slice", row.get("slice"))
+        if not (raw_commit and sslice and _OTLP_SHORT_SHA.fullmatch(raw_commit)):
+            continue
+        csha = _otlp_allow_string("ao.commit.sha", raw_commit)
+        if csha:
+            maps["commit_to_slice"][csha] = sslice
+        else:
+            matches = [full for full in commit_shas if full.startswith(raw_commit)]
+            if len(matches) == 1:
+                maps["commit_to_slice"][matches[0]] = sslice
+
+    for row in verifications:
+        vid = _otlp_allow_string("ao.verification.id", row.get("id"))
+        cand = row.get("candidate") if isinstance(row.get("candidate"), dict) else {}
+        cdigest = _otlp_allow_string("ao.candidate", cand.get("digest"))
+        itree = _otlp_allow_string("ao.commit.tree", cand.get("index_tree"))
+        vslice = _otlp_allow_string("ao.slice", row.get("slice"))
+        if vid and cdigest:
+            maps["verification_to_candidate"][vid] = cdigest
+        if itree and cdigest:
+            maps["tree_to_candidate"][itree] = cdigest
+        if vslice and cdigest:
+            maps["candidate_to_slice"][cdigest] = vslice
+        if vslice and vid:
+            maps["verification_to_slice"][vid] = vslice
+        if vslice and itree:
+            maps["tree_to_slice"][itree] = vslice
+
+    for row in reviews:
+        artefact = _otlp_allow_string("ao.review.id", os.path.basename(str(row.get("artefact") or "")))
+        rslice = _otlp_allow_string("ao.slice", row.get("slice"))
+        cdigest = _otlp_allow_string("ao.candidate", row.get("candidate"))
+        if artefact:
+            maps["review_by_artefact"][artefact] = row
+        if cdigest:
+            maps["review_by_candidate"][cdigest] = row
+        if artefact and cdigest:
+            maps["review_to_candidate"][artefact] = cdigest
+        if artefact and rslice:
+            maps["review_to_slice"][artefact] = rslice
+        if cdigest and rslice:
+            maps["candidate_to_slice"][cdigest] = rslice
+        for rcommit in (row.get("commits") if isinstance(row.get("commits"), list) else []):
+            csha = _otlp_allow_string("ao.commit.sha", rcommit)
+            if csha:
+                maps["review_by_commit"][csha] = row
+                if rslice:
+                    maps["commit_to_slice"].setdefault(csha, rslice)
+
+    for row in waivers:
+        if row.get("event") != "waived":
+            continue
+        wid = _otlp_allow_string("ao.waiver.id", row.get("id"))
+        wslice = _otlp_allow_string("ao.slice", row.get("slice"))
+        cdigest = _otlp_allow_string("ao.candidate", row.get("candidate"))
+        if wid and cdigest:
+            maps["waiver_to_candidate"][wid] = cdigest
+        if wid and wslice:
+            maps["waiver_to_slice"][wid] = wslice
+        if cdigest and wslice:
+            maps["candidate_to_slice"][cdigest] = wslice
+
+    def _propagate_grants():
+        for row in grants:
+            token = str(row.get("token") or "").strip()
+            if token:
+                maps["token_to_grant"][token] = row
+            info = _otlp_resolve_grant(row, maps)
+            itree = info["itree"]
+            vid = info["vid"]
+            artefact = info["artefact"]
+            wid = info["wid"]
+            resolved_cand = info["cdigest"]
+            resolved_slice = info["slice_id"]
+            if itree and row.get("granted") is True:
+                maps["tree_to_grant"][itree] = row
+            if artefact:
+                maps["grant_by_review"][artefact] = row
+            if resolved_cand:
+                maps["grant_by_candidate"][resolved_cand] = row
+            if resolved_cand and resolved_slice:
+                maps["candidate_to_slice"][resolved_cand] = resolved_slice
+            if itree and resolved_cand:
+                maps["tree_to_candidate"][itree] = resolved_cand
+            if itree and resolved_slice:
+                maps["tree_to_slice"][itree] = resolved_slice
+            if vid and resolved_slice:
+                maps["verification_to_slice"][vid] = resolved_slice
+            if vid and resolved_cand:
+                maps["verification_to_candidate"][vid] = resolved_cand
+            if artefact and resolved_slice:
+                maps["review_to_slice"][artefact] = resolved_slice
+            if artefact and resolved_cand:
+                maps["review_to_candidate"][artefact] = resolved_cand
+            if wid and resolved_slice:
+                maps["waiver_to_slice"][wid] = resolved_slice
+            if wid and resolved_cand:
+                maps["waiver_to_candidate"][wid] = resolved_cand
+
+    _propagate_grants()
+
+    for commit in commits:
+        info = _otlp_resolve_commit(commit, maps)
+        ctree = info["ctree"]
+        vid = info["vid"]
+        artefact = info["artefact"]
+        wid = info["wid"]
+        cdigest = info["cdigest"]
+        cslice = info["slice_id"]
+        if cdigest and cslice:
+            maps["candidate_to_slice"][cdigest] = cslice
+        if ctree and cslice:
+            maps["tree_to_slice"][ctree] = cslice
+        if ctree and cdigest:
+            maps["tree_to_candidate"][ctree] = cdigest
+        if vid and cslice:
+            maps["verification_to_slice"][vid] = cslice
+        if artefact and cslice:
+            maps["review_to_slice"][artefact] = cslice
+        if wid and cslice:
+            maps["waiver_to_slice"][wid] = cslice
+
+    _propagate_grants()
+
+    steps = []
+    for row in verifications:
+        record_digest = chained_row_digest(row, VERIFICATION_CHAIN)
+        vid = _otlp_allow_string("ao.verification.id", row.get("id"))
+        cand = row.get("candidate") if isinstance(row.get("candidate"), dict) else {}
+        cdigest = _otlp_allow_string("ao.candidate", cand.get("digest")) or maps["verification_to_candidate"].get(vid)
+        itree = _otlp_allow_string("ao.commit.tree", cand.get("index_tree"))
+        slice_id = (
+            _otlp_allow_string("ao.slice", row.get("slice"))
+            or maps["verification_to_slice"].get(vid)
+            or maps["candidate_to_slice"].get(cdigest)
+            or maps["tree_to_slice"].get(itree)
+        )
+        gates = [g for g in (row.get("gates") or []) if isinstance(g, dict)]
+        passed_gates = sum(
+            1 for g in gates
+            if (g.get("passed") is True if isinstance(g.get("passed"), bool) else g.get("outcome") == "PASS")
+        )
+        failed_gates = len(gates) - passed_gates
+        pass_tests = 0
+        fail_tests = 0
+        for g in gates:
+            counts = g.get("counts") if isinstance(g.get("counts"), dict) else {}
+            p_val = counts.get("pass") if "pass" in counts else g.get("pass_count")
+            f_val = counts.get("fail") if "fail" in counts else g.get("fail_count")
+            if isinstance(p_val, int) and not isinstance(p_val, bool):
+                pass_tests += int(p_val)
+            if isinstance(f_val, int) and not isinstance(f_val, bool):
+                fail_tests += int(f_val)
+        duration_ns = int(round(sum(
+            float(g["seconds"]) for g in gates
+            if isinstance(g.get("seconds"), (int, float)) and not isinstance(g.get("seconds"), bool)
+            and float(g["seconds"]) > 0
+        ) * 1_000_000_000))
+        start_ns = _otlp_unix_nano(row.get("at"))
+        end_ns = start_ns + duration_ns if duration_ns > 0 else start_ns
+        changed_count = _otlp_changed_count(cand)
+        if isinstance(row.get("passed"), bool):
+            outcome = "PASS" if row["passed"] else "FAIL"
+        else:
+            outcome = _otlp_allow_string("ao.outcome", row.get("outcome")) or "FAIL"
+        steps.append({
+            "step": "verification",
+            "record_digest": record_digest,
+            "span_id": _otlp_hex_id(f"ao-otlp-span-v1:verification:{record_digest}", 16),
+            "slice": slice_id,
+            "candidate": cdigest,
+            "start_ns": start_ns,
+            "end_ns": end_ns,
+            "status_code": 1 if outcome == "PASS" else 2,
+            "ref_id": vid,
+            "links": {},
+            "pairs": [
+                ("ao.step", "verification"),
+                ("ao.slice", slice_id),
+                ("ao.candidate", cdigest),
+                ("ao.verification.id", vid),
+                ("ao.verification.profile", row.get("profile")),
+                ("ao.outcome", outcome),
+                ("ao.commit.tree", itree),
+                ("ao.gates.count", len(gates)),
+                ("ao.gates.passed_count", passed_gates),
+                ("ao.gates.failed_count", failed_gates),
+                ("ao.tests.pass_count", pass_tests),
+                ("ao.tests.fail_count", fail_tests),
+                ("ao.candidate.changed_count", changed_count),
+            ],
+        })
+
+    for row in reviews:
+        record_digest = chained_row_digest(row, REVIEW_CHAIN)
+        artefact = _otlp_allow_string("ao.review.id", os.path.basename(str(row.get("artefact") or "")))
+        cdigest = _otlp_allow_string("ao.candidate", row.get("candidate")) or maps["review_to_candidate"].get(artefact)
+        slice_id = (
+            _otlp_allow_string("ao.slice", row.get("slice"))
+            or maps["review_to_slice"].get(artefact)
+            or maps["candidate_to_slice"].get(cdigest)
+        )
+        linked_grant = maps["grant_by_review"].get(artefact) or maps["grant_by_candidate"].get(cdigest) or {}
+        verdict = _otlp_allow_string("ao.outcome", row.get("verdict")) or "INVALID"
+        start_ns = _otlp_unix_nano(row.get("at"))
+        reviewers_list = row.get("reviewers") if isinstance(row.get("reviewers"), list) else None
+        pairs = [
+            ("ao.step", "review"),
+            ("ao.slice", slice_id),
+            ("ao.candidate", cdigest),
+            ("ao.review.id", artefact),
+            ("ao.review.kind", row.get("kind")),
+            ("ao.review.tier", row.get("tier")),
+            ("ao.outcome", verdict),
+            ("ao.authorizable", row.get("authorizable") if isinstance(row.get("authorizable"), bool) else None),
+            ("ao.reviewers.count", len(reviewers_list) if reviewers_list is not None else None),
+        ]
+        pairs.extend(_otlp_actor_pairs(
+            "ao.implementer",
+            row.get("implementer")
+            or linked_grant.get("implementer")
+            or (linked_grant.get("role_bindings") or {}).get("implementer"),
+            identity=(
+                row.get("implementer_identity")
+                or row.get("author")
+                or linked_grant.get("implementer_identity")
+                or linked_grant.get("author")
+            ),
+            catalog=catalog,
+        ))
+        pairs.extend(_otlp_actor_pairs(
+            "ao.reviewer",
+            row.get("reviewer") or linked_grant.get("reviewer"),
+            identity=row.get("reviewer_identity") or linked_grant.get("reviewer_identity"),
+            catalog=catalog,
+        ))
+        steps.append({
+            "step": "review",
+            "record_digest": record_digest,
+            "span_id": _otlp_hex_id(f"ao-otlp-span-v1:review:{record_digest}", 16),
+            "slice": slice_id,
+            "candidate": cdigest,
+            "start_ns": start_ns,
+            "end_ns": start_ns,
+            "status_code": 1 if verdict == "APPROVED" else 2,
+            "ref_id": artefact,
+            "links": {"candidate": cdigest},
+            "pairs": pairs,
+        })
+
+    for row in grants:
+        record_digest = chained_row_digest(row, AUTHORITY_CHAIN)
+        info = _otlp_resolve_grant(row, maps)
+        cand = info["cand"]
+        itree = info["itree"]
+        vid = info["vid"]
+        artefact = info["artefact"]
+        wid = info["wid"]
+        cdigest = info["cdigest"]
+        slice_id = info["slice_id"]
+        review_row = info["review_row"] or {}
+        granted = bool(row.get("granted") is True)
+        start_ns = _otlp_unix_nano(row.get("at"))
+        changed_count = _otlp_changed_count(cand)
+        reasons = row.get("reasons") if isinstance(row.get("reasons"), list) else []
+        pairs = [
+            ("ao.step", "grant"),
+            ("ao.slice", slice_id),
+            ("ao.candidate", cdigest),
+            ("ao.verification.id", vid),
+            ("ao.review.id", artefact),
+            ("ao.waiver.id", wid),
+            ("ao.review.tier", row.get("tier") or review_row.get("tier")),
+            ("ao.outcome", "GRANTED" if granted else "REFUSED"),
+            ("ao.granted", granted),
+            ("ao.commit.tree", itree),
+            ("ao.candidate.changed_count", changed_count),
+            ("ao.reasons.count", len(reasons)),
+        ]
+        pairs.extend(_otlp_actor_pairs(
+            "ao.implementer",
+            row.get("implementer") or (row.get("role_bindings") or {}).get("implementer"),
+            identity=(
+                row.get("implementer_identity")
+                or row.get("author")
+                or review_row.get("implementer_identity")
+                or review_row.get("author")
+            ),
+            catalog=catalog,
+        ))
+        pairs.extend(_otlp_actor_pairs(
+            "ao.reviewer",
+            row.get("reviewer") or review_row.get("reviewer"),
+            identity=row.get("reviewer_identity") or review_row.get("reviewer_identity"),
+            catalog=catalog,
+        ))
+        steps.append({
+            "step": "grant",
+            "record_digest": record_digest,
+            "span_id": _otlp_hex_id(f"ao-otlp-span-v1:grant:{record_digest}", 16),
+            "slice": slice_id,
+            "candidate": cdigest,
+            "start_ns": start_ns,
+            "end_ns": start_ns,
+            "status_code": 1 if granted else 2,
+            "ref_id": record_digest,
+            "grant_token": str(row.get("token") or "").strip() or None,
+            "grant_tree": itree if granted else None,
+            "links": {"review": artefact, "verification": vid, "candidate": cdigest},
+            "pairs": pairs,
+        })
+
+    for commit in commits:
+        info = _otlp_resolve_commit(commit, maps)
+        if not info["relevant"]:
+            continue
+        csha = info["csha"]
+        ctree = info["ctree"]
+        trailers = info["trailers"]
+        grant_row = info["grant_row"] or {}
+        review_row = info["review_row"] or {}
+        vid = info["vid"]
+        artefact = info["artefact"]
+        wid = info["wid"]
+        cdigest = info["cdigest"]
+        slice_id = info["slice_id"]
+        record_digest = chained_row_digest(
+            {"sha": commit.get("sha"), "tree": commit.get("tree"), "at": commit.get("at")},
+            _OTLP_COMMIT_CHAIN,
+        )
+        start_ns = _otlp_unix_nano(commit.get("at"))
+        pairs = [
+            ("ao.step", "commit"),
+            ("ao.slice", slice_id),
+            ("ao.candidate", cdigest),
+            ("ao.commit.sha", csha),
+            ("ao.commit.tree", ctree),
+            ("ao.verification.id", vid),
+            ("ao.review.id", artefact),
+            ("ao.waiver.id", wid),
+            ("ao.outcome", "LANDED"),
+        ]
+        pairs.extend(_otlp_actor_pairs(
+            "ao.implementer",
+            trailers.get("author")
+            or grant_row.get("implementer")
+            or (grant_row.get("role_bindings") or {}).get("implementer"),
+            identity=(
+                grant_row.get("implementer_identity")
+                or grant_row.get("author")
+                or review_row.get("implementer_identity")
+                or review_row.get("author")
+            ),
+            catalog=catalog,
+        ))
+        pairs.extend(_otlp_actor_pairs(
+            "ao.reviewer",
+            trailers.get("reviewer") or grant_row.get("reviewer") or review_row.get("reviewer"),
+            identity=grant_row.get("reviewer_identity") or review_row.get("reviewer_identity"),
+            catalog=catalog,
+        ))
+        steps.append({
+            "step": "commit",
+            "record_digest": record_digest,
+            "span_id": _otlp_hex_id(f"ao-otlp-span-v1:commit:{record_digest}", 16),
+            "slice": slice_id,
+            "candidate": cdigest,
+            "start_ns": start_ns,
+            "end_ns": start_ns,
+            "status_code": 1,
+            "ref_id": csha,
+            "links": {
+                "grant_token": info["grant_token"],
+                "grant_tree": ctree,
+                "review": artefact,
+                "verification": vid,
+            },
+            "pairs": pairs,
+        })
+
+    grouped, group_order = {}, []
+    for item in steps:
+        if item["slice"]:
+            key = f"slice:{item['slice']}"
+        elif item["candidate"]:
+            key = f"candidate:{item['candidate']}"
+        else:
+            key = f"step:{item['record_digest']}"
+        if key not in grouped:
+            grouped[key] = []
+            group_order.append(key)
+        grouped[key].append(item)
+
+    spans = []
+    for key in group_order:
+        group = sorted(
+            grouped[key],
+            key=lambda item: (item["start_ns"], _OTLP_STEP_RANK.get(item["step"], 9), item["record_digest"]),
+        )
+        trace_slice = next((item["slice"] for item in reversed(group) if item["slice"]), None)
+        trace_candidate = next((item["candidate"] for item in reversed(group) if item["candidate"]), None)
+        trace_seed = "|".join(
+            [f"ao-otlp-trace-v1:{key}:{trace_candidate or ''}"]
+            + sorted(item["record_digest"] for item in group)
+        )
+        trace_id = _otlp_hex_id(trace_seed, 32)
+
+        verification_spans = {}
+        review_spans = {}
+        grant_by_token = {}
+        grant_by_tree = {}
+        root_span_id = group[0]["span_id"]
+
+        for index, item in enumerate(group):
+            parent_span_id = None
+            if index > 0:
+                links = item.get("links") or {}
+                if item["step"] == "commit":
+                    parent_span_id = (
+                        grant_by_token.get(links.get("grant_token"))
+                        or grant_by_tree.get(links.get("grant_tree"))
+                        or review_spans.get(links.get("review"))
+                        or verification_spans.get(links.get("verification"))
+                        or group[index - 1]["span_id"]
+                    )
+                elif item["step"] == "grant":
+                    parent_span_id = (
+                        review_spans.get(links.get("review"))
+                        or verification_spans.get(links.get("verification"))
+                        or group[index - 1]["span_id"]
+                    )
+                elif item["step"] == "review":
+                    parent_span_id = verification_spans.get(links.get("candidate")) or root_span_id
+                else:
+                    parent_span_id = group[index - 1]["span_id"]
+                if parent_span_id == item["span_id"]:
+                    parent_span_id = root_span_id if root_span_id != item["span_id"] else None
+
+            if item["step"] == "verification":
+                if item.get("ref_id"):
+                    verification_spans[item["ref_id"]] = item["span_id"]
+                if item.get("candidate"):
+                    verification_spans[item["candidate"]] = item["span_id"]
+            elif item["step"] == "review" and item.get("ref_id"):
+                review_spans[item["ref_id"]] = item["span_id"]
+            elif item["step"] == "grant":
+                if item.get("grant_token"):
+                    grant_by_token[item["grant_token"]] = item["span_id"]
+                if item.get("grant_tree"):
+                    grant_by_tree[item["grant_tree"]] = item["span_id"]
+
+            enriched_pairs = []
+            for attr_key, attr_val in item["pairs"]:
+                if attr_key == "ao.slice" and attr_val is None:
+                    attr_val = trace_slice
+                elif attr_key == "ao.candidate" and attr_val is None:
+                    attr_val = trace_candidate
+                enriched_pairs.append((attr_key, attr_val))
+
+            span = {
+                "traceId": trace_id,
+                "spanId": item["span_id"],
+                "name": item["step"],
+                "kind": 1,
+                "startTimeUnixNano": str(item["start_ns"]),
+                "endTimeUnixNano": str(item["end_ns"]),
+                "attributes": _otlp_attributes(
+                    enriched_pairs, declared_families=declared_families, declared_profiles=declared_profiles
+                ),
+                "status": {"code": item["status_code"]},
+            }
+            if parent_span_id:
+                span["parentSpanId"] = parent_span_id
+            spans.append(span)
+
+    resource_pairs = [
+        ("service.name", "ao"),
+        ("service.version", __version__),
+    ]
+    if attested:
+        resource_pairs.append(("ao.export.attested_only", True))
+        resource_pairs.append(("ao.export.partial", bool(unattested_list)))
+        if unattested_list:
+            resource_pairs.append((
+                "ao.export.unattested_ledgers",
+                ",".join(item["ledger"] for item in unattested_list),
+            ))
+
+    return {
+        "resourceSpans": [
+            {
+                "resource": {
+                    "attributes": _otlp_attributes(
+                        resource_pairs, declared_families=declared_families, declared_profiles=declared_profiles
+                    ),
+                },
+                "scopeSpans": [
+                    {
+                        "scope": {
+                            "name": "ao",
+                            "version": __version__,
+                        },
+                        "spans": spans,
+                    }
+                ],
+            }
+        ]
+    }

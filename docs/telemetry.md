@@ -257,6 +257,55 @@ numbers for another program; `--sources` names the files they came from. A platf
 run appears once one is recorded there, with how many commits HEAD has added since the
 commit it ran at.
 
+## OTLP/JSON trace export: `ao export otlp`
+
+`ao export otlp` reads the project's ledgers and writes one OpenTelemetry `ExportTraceServiceRequest`
+document in the OTLP/JSON encoding, for a person to hand to an OpenTelemetry collector, Langfuse or
+Jaeger themselves. `ao` sends nothing anywhere: it writes `--out <file>` or standard output, and
+touches nothing in the project or in `~/.ao`.
+
+```bash
+ao export otlp                     # write one ExportTraceServiceRequest to stdout
+ao export otlp --out traces.json   # write to a file instead
+ao export otlp --attested          # export only checkpoint-attested rows when a ledger has no/partial checkpoint
+```
+
+**Checkpoint attestation.** The export reads only what this machine's checkpoint store records `ao`
+committing. A ledger the store does not cover — no entry for it (moved, reset, recorded elsewhere, or
+older than checkpoints), or rows past its recorded count — is refused naming the ledger and why, rather
+than exported as an empty or partial document with exit 0. Passing `--attested` exports only the
+checkpoint-attested rows and marks the document's `resource.attributes` with
+`ao.export.attested_only=true`, `ao.export.partial` (`true` when any ledger was uncovered or truncated)
+and `ao.export.unattested_ledgers`.
+
+**What the export holds.** One trace per slice (its candidate) and one span per gate step the ledger
+records for it — `verification`, `review`, `grant` and `commit` — with the ledger's own timestamps in
+unix nanoseconds as decimal strings (`startTimeUnixNano`, `endTimeUnixNano`), integer `kind` (`1`,
+`SPAN_KIND_INTERNAL`) and integer `status.code` (`1` for `STATUS_CODE_OK`, `2` for
+`STATUS_CODE_ERROR`). Every `traceId` (32 lowercase hex characters) and `spanId` (16 lowercase hex
+characters) is derived from the ledger records' own SHA-256 digests, so the same ledger always
+exports the exact same ids. Span attributes use OTLP `AnyValue` fields (`stringValue`, `intValue` as
+a decimal string, `boolValue`) and carry only:
+
+- **Ids:** `ao.slice`, `ao.candidate`, `ao.verification.id`, `ao.review.id` (basename only),
+  `ao.waiver.id`, `ao.commit.sha` and `ao.commit.tree`.
+- **Step names:** `ao.step` (`verification`, `review`, `grant`, `commit`), `ao.verification.profile`
+  and `ao.review.kind`.
+- **Outcomes:** `ao.outcome` (`PASS`/`FAIL`, review verdict, `GRANTED`/`REFUSED`, `LANDED`),
+  `ao.review.tier`, `ao.authorizable` and `ao.granted`.
+- **Actors and model families:** `ao.implementer.actor` and `ao.reviewer.actor` (stable `sha256:`
+  identifiers derived from the actor or route value, never the raw string), and
+  `ao.implementer.family` and `ao.reviewer.family` (the adapter declaration's model family, or
+  `unknown`).
+- **Counts:** `ao.gates.count`, `ao.gates.passed_count`, `ao.gates.failed_count`,
+  `ao.tests.pass_count`, `ao.tests.fail_count`, `ao.reviewers.count`, `ao.candidate.changed_count`
+  and `ao.reasons.count`.
+
+**What the export never holds.** Never transcript text, prompts, review prose, diffs, changed file
+paths, refusal reason strings, paths under the person's home (`~` or `$HOME`) or repository root,
+capability grant tokens (`C-…`), API keys, credentials or anything else `ao` keeps private
+([privacy.md](privacy.md)).
+
 ## Thresholds that earned their place
 
 | Signal | Warn | Act |

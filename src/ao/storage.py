@@ -754,7 +754,7 @@ def _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix=Fals
 
 
 def read_chained_jsonl(path, chain, allow_partial_tail=True, timeout=10.0, *,
-                       previous_field=CHAIN_PREVIOUS_FIELD, legacy_prefix=False):
+                       previous_field=CHAIN_PREVIOUS_FIELD, legacy_prefix=False, lock=True, attested=False):
     """Read and validate every committed row in one predecessor hash chain.
 
     The chain proves no row was changed or inserted; the recorded length proves
@@ -764,6 +764,10 @@ def read_chained_jsonl(path, chain, allow_partial_tail=True, timeout=10.0, *,
             and "intent" not in _checkpoint_entry(path):
         _check_missing_chained_ledger(path, chain, seal=_load_seal(path))
         return []
+    if not lock:
+        return _read_chained_snapshot(
+            path, chain, allow_partial_tail, previous_field, legacy_prefix, attested=attested
+        )[0]
     with _exclusive_lock(path + ".lock", timeout=timeout):
         return _read_chained_unlocked(path, chain, allow_partial_tail, previous_field, legacy_prefix)[0]
 
@@ -780,7 +784,77 @@ def _read_chained_unlocked(path, chain, allow_partial_tail, previous_field, lega
     return rows, seal
 
 
-def read_chained_history(path, chain, timeout=10.0, *, previous_field=CHAIN_PREVIOUS_FIELD, legacy_prefix=False):
+def _read_chained_snapshot(path, chain, allow_partial_tail, previous_field, legacy_prefix, *, attested=False):
+    """(the live rows, the seal they follow, unattested info), validated without locking or settling a seal (EXPORT-OTLP)."""
+    stray = seal_path(path) + ".pending"
+    if os.path.lexists(stray):
+        raise LedgerCorruption(
+            f"{stray} names a seal of {os.path.basename(path)} that this machine did not begin: ao records a seal's "
+            f"intent in {checkpoint_path()}, never in the tree. It is left where it is and the ledger is not read "
+            "while it stands; read it, then move it out of .ao/ledger/"
+        )
+    entry = _checkpoint_entry(path)
+    if "intent" in entry:
+        raise LedgerCorruption(f"the seal of {path} awaits settlement; read the ledger under its lock before "
+                               "reading a snapshot")
+    seal = _load_seal(path)
+    if not os.path.exists(path):
+        _check_missing_chained_ledger(path, chain, seal=seal)
+        return [], seal, None
+    rows = _read_jsonl_unlocked(path, allow_partial_tail)
+    _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix, seal=seal)
+    _check_committed_length(path, rows, chain, seal=seal)
+    retired = seal["retired"] if seal else 0
+    total = retired + len(rows)
+    count = entry.get("count")
+    has_count = isinstance(count, int) and not isinstance(count, bool) and count > 0
+    unattested = None
+    if has_count:
+        if total > count:
+            extra = total - count
+            msg = (
+                f"{os.path.basename(path)} ({path}) holds {total} row(s), {extra} past its recorded count of {count} "
+                f"in {checkpoint_path()} (no checkpoint here for the trailing row(s): recorded elsewhere, reset, or "
+                "an append still under way); pass --attested to export only the attested part"
+            )
+            if not attested:
+                raise LedgerCorruption(msg)
+            rows = rows[:max(0, count - retired)]
+            unattested = {"ledger": os.path.basename(path), "reason": "rows_past_checkpoint", "message": msg}
+    elif total > 0 or seal is not None:
+        msg = (
+            f"{os.path.basename(path)} ({path}) holds {total} row(s) with no checkpoint here: moved, reset, "
+            f"recorded elsewhere, older than checkpoints (checkpoints are kept in {checkpoint_path()}); "
+            "pass --attested to export only the attested part"
+        )
+        if not attested:
+            raise LedgerCorruption(msg)
+        rows = []
+        seal = None
+        unattested = {"ledger": os.path.basename(path), "reason": "no_checkpoint", "message": msg}
+    else:
+        rows = []
+    return rows, seal, unattested
+
+
+def _read_chained_history_snapshot(path, chain, *, previous_field=CHAIN_PREVIOUS_FIELD, legacy_prefix=False,
+                                   attested=False):
+    """(rows, unattested) for a lockless snapshot of a chained ledger's full history (EXPORT-OTLP)."""
+    if not os.path.exists(path) and not os.path.lexists(seal_path(path) + ".pending") \
+            and "intent" not in _checkpoint_entry(path):
+        _check_missing_chained_ledger(path, chain, seal=_load_seal(path))
+        return [], None
+    rows, seal, unattested = _read_chained_snapshot(
+        path, chain, True, previous_field, legacy_prefix, attested=attested
+    )
+    recorded = _checkpoint_entry(path).get("sealed")
+    retired, _ = _sealed_rows_held(path, chain, seal, previous_field, legacy_prefix,
+                                   recorded=recorded.get("archives") if isinstance(recorded, dict) else None)
+    return retired + rows, unattested
+
+
+def read_chained_history(path, chain, timeout=10.0, *, previous_field=CHAIN_PREVIOUS_FIELD, legacy_prefix=False,
+                         lock=True, attested=False):
     """Every row a chained ledger ever committed, oldest first: those its seal retired, then the live ones (LEDGER-HISTORY).
 
     One chain, read under the ledger's lock: the archives end at the seal's digest with exactly
@@ -788,12 +862,17 @@ def read_chained_history(path, chain, timeout=10.0, *, previous_field=CHAIN_PREV
     reader that asks what was ever granted, verified or waived reads this; one that asks for the
     newest decision reads the live rows. Read from the live rows alone, a seal made a spent waiver
     look unused and moved the first grant the landed-tree check starts from (the review of
-    BOUNDED-STORES).
+    BOUNDED-STORES). `lock=False` reads a snapshot without creating a `.lock` file or settling a
+    seal (EXPORT-OTLP).
     """
     if not os.path.exists(path) and not os.path.lexists(seal_path(path) + ".pending") \
             and "intent" not in _checkpoint_entry(path):
         _check_missing_chained_ledger(path, chain, seal=_load_seal(path))
         return []
+    if not lock:
+        return _read_chained_history_snapshot(
+            path, chain, previous_field=previous_field, legacy_prefix=legacy_prefix, attested=attested
+        )[0]
     with _exclusive_lock(path + ".lock", timeout=timeout):
         rows, seal = _read_chained_unlocked(path, chain, True, previous_field, legacy_prefix)
         recorded = _checkpoint_entry(path).get("sealed")

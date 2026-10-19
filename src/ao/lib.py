@@ -495,7 +495,7 @@ def project_config_document(root):
     return {"config": parsed, "raw": raw, "problem": None}
 
 
-def load_config(root):
+def load_config(root, record=True):
     """Load bounded project config; malformed legacy state degrades explicitly.
 
     Missing config remains optional for discovery and ``ao init``. When a config
@@ -530,7 +530,7 @@ def load_config(root):
                                            "implementer is configured" if beside else "")}
             cfg["implementer"] = found
     # `auto` names no session: each role's is resolved here, once, for every reader (SESSION-IDENTITY).
-    cfg = resolve_sessions(root, cfg)
+    cfg = resolve_sessions(root, cfg, record=record)
     # What a review or a hunt would start is judged as it was read here, before anything can put the file back
     # (ROUTE-ARGV); noted only, so loading writes nothing.
     return note_routes_read(cfg)
@@ -1292,5 +1292,3 @@ _part("lib_alarms", globals())
 _part("lib_lanes", globals())
 _part("lib_pr", globals())
 _part("lib_events", globals())
-
-
