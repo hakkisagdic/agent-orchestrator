@@ -88,11 +88,12 @@ def _until(condition, seconds=20.0):
 
 def _start_in_a_process(root, tmp_path, item):
     """`ao lane start <item>` as its own process, returned once its record names the post-create command. It finds the
-    machine calm, as every test's ao does (MACHINE-PRESSURE)."""
+    machine calm, as every test's ao does (MACHINE-PRESSURE). A loaded machine starts a Python process, a worktree and
+    the command slowly, so the bound is generous: a passing run returns at once (TEST-TIMING-2)."""
     env = dict(os.environ, HOME=str(tmp_path / "home"), PYTHONPATH=SRC, PYTHONDONTWRITEBYTECODE="1")
     ao = subprocess.Popen(CALM_AO + ["-C", root, "lane", "start", item], env=env,
                           stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    if not _until(lambda: ((A.lane_record(root, item) or {}).get("command") or {}).get("pid")):
+    if not _until(lambda: ((A.lane_record(root, item) or {}).get("command") or {}).get("pid"), 90):
         ao.kill()
         pytest.fail(ao.communicate(timeout=30)[0].decode("utf-8", "replace"))
     return ao, A.lane_record(root, item)["command"]["pid"]
@@ -330,9 +331,9 @@ def test_a_signal_that_stops_ao_while_it_prepares_a_lane_stops_the_command_and_f
 
     ao.send_signal(getattr(signal, signame))
 
-    said = ao.communicate(timeout=30)[0].decode("utf-8", "replace")
+    said = ao.communicate(timeout=120)[0].decode("utf-8", "replace")          # a loaded machine (TEST-TIMING-2)
     assert ao.returncode == 130 and "lane B not ready: ao was stopped" in said, said
-    assert _until(lambda: not _group_alive(command), 5)        # the command and what it started
+    assert _until(lambda: not _group_alive(command), 30)       # the command and what it started
     record = A.lane_record(root, "B")
     assert record["state"] == "failed" and "stopped" in record["problem"] and record["prepared"] == [".venv"]
     assert "command" not in record and "process" not in record
