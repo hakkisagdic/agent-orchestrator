@@ -4,6 +4,7 @@ import json
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -78,6 +79,22 @@ def _own_home():
 
 
 _own_home()
+
+
+def _own_signals():
+    """The stop signals unblocked in the suite's process, so every process a test starts hears what is sent to it.
+
+    A blocked signal stays blocked across fork and exec. The shell of a landing daemon had come to block
+    SIGINT, every suite it started inherited the block, and so did each `ao` a lane test started: the
+    test's SIGINT stayed pending, the post-create command ran out its minute and the lane went ready
+    (SUITE-SIGMASK). SIGINT, SIGTERM and SIGHUP are what the tests send; a test that blocks one does so
+    itself. A signal the suite was started ignoring is CALM_AO's to put back.
+    """
+    if hasattr(signal, "pthread_sigmask"):
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, [signal.SIGINT, signal.SIGTERM, signal.SIGHUP])
+
+
+_own_signals()
 
 from ao import lib as A  # noqa: E402
 from ao import pressure as P  # noqa: E402
@@ -253,7 +270,15 @@ for _module, _name, _in_its_place in KEPT_OFF_SHARED.values():
 
 CALM_MACHINE = P.Reading(free_memory_pct=60.0, swapins_per_sec=0, swapin_samples=(0, 0, 0, 0), free_disk_gib=500.0,
                          unmeasured=())
-CALM_AO = [sys.executable, "-c", "import sys\nfrom ao import pressure\n"
+# A terminal starts a program with SIGINT, SIGTERM and SIGHUP at their defaults. A shell that runs the suite in the
+# background starts it with SIGINT ignored, nohup with SIGHUP ignored, and an ao keeps a signal it was set to ignore
+# ignored: a lane test's SIGINT or SIGHUP then stopped nothing (SUITE-SIGMASK). So CALM_AO starts ao as a terminal does.
+AS_A_TERMINAL_STARTS_IT = ("import signal\n"
+                           "signal.signal(signal.SIGINT, signal.default_int_handler)\n"
+                           "for _name in ('SIGTERM', 'SIGHUP'):\n"
+                           "    if hasattr(signal, _name):\n"
+                           "        signal.signal(getattr(signal, _name), signal.SIG_DFL)\n")
+CALM_AO = [sys.executable, "-c", AS_A_TERMINAL_STARTS_IT + "import sys\nfrom ao import pressure\n"
            f"pressure.read = lambda: pressure.{CALM_MACHINE!r}\n"
            "from ao.cli import main\nsys.exit(main())\n"]
 

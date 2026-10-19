@@ -11,6 +11,7 @@ this process out of those directories. These hold it to that.
 import ast
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -104,6 +105,50 @@ def test_git_runs_no_maintenance_of_its_own_in_a_tests_repository(tmp_path):
     subprocess.run([conftest.GIT, "init", "-q", str(tmp_path)], check=True)
     assert subprocess.run([conftest.GIT, "-C", str(tmp_path), "config", "--type=bool", "maintenance.auto"],
                           capture_output=True, text=True, check=True).stdout.strip() == "false"
+
+
+
+def _blocked_in_a_child():
+    """The signals a process this test starts finds blocked."""
+    said = subprocess.run([sys.executable, "-c", "import signal; "
+                           "print(*sorted(int(s) for s in signal.pthread_sigmask(signal.SIG_BLOCK, [])))"],
+                          capture_output=True, text=True, check=True).stdout.split()
+    return {int(number) for number in said}
+
+
+@pytest.mark.skipif(not hasattr(signal, "pthread_sigmask"), reason="Windows keeps no signal mask")
+def test_a_stop_signal_blocked_where_the_suite_started_is_unblocked_for_every_process_a_test_starts():
+    """A landing daemon's shell had come to block SIGINT, and each `ao` a lane test started inherited the block:
+    the test's SIGINT never arrived (SUITE-SIGMASK)."""
+    stop = {int(signal.SIGINT), int(signal.SIGTERM), int(signal.SIGHUP)}
+    assert not _blocked_in_a_child() & stop
+    before = signal.pthread_sigmask(signal.SIG_BLOCK, stop)
+    try:
+        assert _blocked_in_a_child() >= stop                    # what a process blocks, the one it starts inherits
+        conftest._own_signals()
+        assert not _blocked_in_a_child() & stop
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, before)
+
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows has no SIGHUP, and no signal a parent ignores passes an exec")
+def test_an_ao_a_test_starts_hears_the_stop_signals_a_shell_or_nohup_started_the_suite_ignoring():
+    """A shell runs a command it puts in the background with SIGINT ignored and nohup ignores SIGHUP; an ao keeps
+    what it was set to ignore, so CALM_AO starts it as a terminal does (SUITE-SIGMASK)."""
+    report = ("import signal; print(signal.getsignal(signal.SIGINT) is signal.default_int_handler, "
+              "signal.getsignal(signal.SIGTERM) is signal.SIG_DFL, signal.getsignal(signal.SIGHUP) is signal.SIG_DFL)")
+    ignoring = ("import os, signal, sys\n"
+                "signal.signal(signal.SIGINT, signal.SIG_IGN); signal.signal(signal.SIGHUP, signal.SIG_IGN)\n"
+                "os.execv(sys.executable, [sys.executable, '-c', sys.argv[1]])\n")
+
+    def started_ignoring(code):
+        return subprocess.run([sys.executable, "-c", ignoring, code], capture_output=True, text=True,
+                              check=True).stdout.split()
+
+    assert started_ignoring(report)[::2] == ["False", "False"]              # what was ignored stays ignored
+    assert started_ignoring(conftest.AS_A_TERMINAL_STARTS_IT + report) == ["True", "True", "True"]
+    assert conftest.CALM_AO[2].startswith(conftest.AS_A_TERMINAL_STARTS_IT)
 
 
 def test_path_is_the_suites_bin_then_the_directory_that_holds_git_alone_then_the_systems_own():
