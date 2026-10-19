@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>agent-orchestrator — attach to the agent you are already running</title>
-<meta name="description" content="Attach to a coding agent that is already working. No new harness, no re-planning, no restart. It watches, restarts, verifies and decides what may be committed.">
+<title>agent-orchestrator — your agents commit, every change is granted first or flagged</title>
+<meta name="description" content="Keep the coding agents you already use. ao runs your gates on the exact change an agent staged, has a model of another family review it, refuses any other git commit in its hook, and flags a commit made around it. Every decision goes into a ledger that shows tampering.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◎</text></svg>">
 <style>
 :root{
@@ -47,6 +47,8 @@ pre.term .d{color:var(--dim)} pre.term .a{color:var(--accent)}
 pre.term .y{color:var(--yellow)} pre.term .u{color:var(--blue)}
 pre.sh{background:var(--card);border:1px solid var(--line);border-radius:10px;
   padding:16px 18px;font-family:var(--mono);font-size:13px;overflow-x:auto}
+pre.sh .k{color:var(--accent)} pre.sh .c{color:var(--muted)}
+.cap{font-family:var(--mono);font-size:12px;color:var(--muted);margin:-24px 0 32px}
 
 section{padding:56px 0;border-bottom:1px solid var(--line)}
 h2{font-size:15px;font-family:var(--mono);font-weight:600;letter-spacing:.06em;
@@ -65,6 +67,7 @@ td:first-child{font-family:var(--mono);font-size:13px;white-space:nowrap;
   padding-right:20px}
 .pill{font-family:var(--mono);font-size:11px;padding:2px 7px;border-radius:4px;
   background:var(--accent-soft);color:var(--accent)}
+.note{color:var(--muted);font-size:15px;max-width:66ch}
 footer{padding:44px 0 72px;color:var(--muted);font-size:14px}
 [lang-tr]{display:none}
 html[data-lang=tr] [lang-en]{display:none}
@@ -78,36 +81,202 @@ html[data-lang=tr] [lang-tr]{display:revert}
 </div>
 
 <header><div class="wrap">
-  <div class="eyebrow">agent-orchestrator</div>
-  <h1><span lang-en>Point it at the agent you<br>are already running.</span
-      ><span lang-tr>Zaten çalışan ajanına<br>doğrult.</span></h1>
+  <div class="eyebrow">agent-orchestrator · v0.6.0 · MIT</div>
+  <h1><span lang-en>Your agents commit.<br>Every change is granted first, or flagged.</span
+      ><span lang-tr>Ajanların commit atıyor.<br>Her değişiklik ya önce yetkilendirilir ya da işaretlenir.</span></h1>
   <p class="lede">
-    <span lang-en><strong>No new harness. No re-planning. No restart.</strong>
-    It attaches to a coding agent already working — in your IDE, in a terminal,
-    started by someone else — reads its state without touching it, and takes over
-    the tedious half: noticing when it stalls, running the gates, deciding what may
-    be committed, and keeping work moving while you sleep.</span>
-    <span lang-tr><strong>Yeni harness yok. Yeniden planlama yok. Yeniden başlatma yok.</strong>
-    Hâlihazırda çalışan bir kodlama ajanına iliştirir — IDE'ndeki, terminaldeki,
-    başkasının başlattığı — durumunu ona dokunmadan okur ve sıkıcı yarısını devralır:
-    takıldığını fark etmek, gate'leri koşturmak, neyin commit edilebileceğine karar
-    vermek, ve sen uyurken işi yürütmek.</span>
+    <span lang-en>By default <strong>a model of another family reviews the exact change an
+    agent staged</strong>, and a git hook refuses anything else at <code>git commit</code>.
+    Keep the agents you already use — Claude Code, Codex, Kiro, Qoder, OpenCode and the
+    rest. ao sits above them: it runs <em>your</em> gates on that staged change, grants
+    commit authority for that one tree, and writes every decision to a ledger that shows
+    tampering. A person can waive review, on the record; a commit no review or waiver
+    granted is flagged by <code>ao doctor</code> and the watchdog.</span>
+    <span lang-tr>Varsayılan olarak ajanın sahnelediği tam değişikliği <strong>başka bir
+    model ailesinden bir gözden geçiren</strong> inceler; git hook'u da
+    <code>git commit</code>'te ondan başkasını reddeder. Kullandığın ajanları bırak —
+    Claude Code, Codex, Kiro, Qoder, OpenCode ve gerisi. ao onların üstünde durur:
+    o sahnelenen değişiklikte <em>senin</em> gate'lerini koşturur, tek bir ağaç için commit
+    yetkisi verir ve her kararı, kurcalanmayı gösteren bir deftere yazar. Bir kişi review'ı kayda
+    geçerek devre dışı bırakabilir; hiçbir review ya da muafiyetin vermediği commit'i
+    <code>ao doctor</code> ve watchdog işaretler.</span>
   </p>
 </div></header>
 
 <section><div class="wrap">
-  <h2><span lang-en>Sixty seconds</span><span lang-tr>Altmış saniye</span></h2>
-  <pre class="sh">git clone https://github.com/hakkisagdic/agent-orchestrator ~/ao
-mkdir -p ~/.local/bin &amp;&amp; ln -s ~/ao/bin/ao ~/.local/bin/ao
-cd ~/your-project &amp;&amp; ao status</pre>
-  <p style="color:var(--muted);font-size:15px">
-    <span lang-en>No dependencies — Python standard library only. Nothing to configure
-    first: it discovers the running session from the agent's own store.</span>
-    <span lang-tr>Bağımlılık yok — yalnız Python standart kütüphanesi. Önceden
-    yapılandırma gerekmez: çalışan oturumu ajanın kendi deposundan keşfeder.</span></p>
+  <h2><span lang-en>Five minutes</span><span lang-tr>Beş dakika</span></h2>
+  <pre class="sh"><span class="c" lang-en># or: uv tool install ao-orchestrator</span
+><span class="c" lang-tr># ya da: uv tool install ao-orchestrator</span>
+pip install ao-orchestrator
+cd <span lang-en>your-repository</span><span lang-tr>deponun-yolu</span>
+ao init --profile claude-kiro   <span class="c" lang-en># Kiro implements, another family reviews</span
+><span class="c" lang-tr># Kiro yazar, başka bir aile gözden geçirir</span>
+git add .ao-project .gitignore &amp;&amp; git commit -m "adopt ao"
+ao hooks install                <span class="c" lang-en># the hook refuses an ungranted git commit; ao flags --no-verify</span
+><span class="c" lang-tr># hook yetkisiz git commit'i reddeder; ao --no-verify'ı işaretler</span></pre>
+  <p class="note">
+    <span lang-en>Then, for every change an agent stages: <code>ao verify</code>,
+    <code>ao review</code>, <code>ao commit-ok</code>, <code>ao commit</code>. Nothing to
+    configure first and no dependencies by choice — Python's standard library only, 3.9
+    and up, because ao watches agents on machines it does not control.</span>
+    <span lang-tr>Sonra, ajanın sahnelediği her değişiklik için: <code>ao verify</code>,
+    <code>ao review</code>, <code>ao commit-ok</code>, <code>ao commit</code>. Başta yapılandırma yok; bağımlılık da yok, bu bir tercih: yalnız Python'un
+    standart kütüphanesi, 3.9 ve üstü; çünkü ao kendi denetlemediği makinelerdeki ajanları
+    izliyor.</span></p>
+  <p class="note">
+    <span lang-en>Want to see the guarantee before adopting it? <code>ao demo</code> plays
+    one change through ao on a scratch project, and <code>ao prove</code> runs the
+    guarantees on a throwaway candidate instead of describing them. On Windows
+    <code>bin/ao.ps1</code> runs <code>status</code>, <code>board</code> and
+    <code>doctor</code> with nothing installed.</span>
+    <span lang-tr>Benimsemeden önce o güvenceyi görmek ister misin? <code>ao demo</code>
+    tek bir değişikliği, sıfırdan kurulup atılacak bir projede ao'nun içinden geçirir;
+    <code>ao prove</code> ise garantileri tarif etmek yerine yine böyle bir aday üzerinde koşturur. Windows'ta
+    <code>bin/ao.ps1</code> hiçbir şey kurulu olmadan <code>status</code>,
+    <code>board</code> ve <code>doctor</code> çalıştırır.</span></p>
 
-<pre class="term"><span class="a">══════════════════════════════════════════════════════════════════</span>
-  <b>ACME-API</b><span class="d">   agent-orchestrator   12 Sep 14:44:44</span>
+<pre class="term" lang-en><span class="d">$</span> ao verify
+  <span class="g">PASS</span>  gates run on the staged tree <span class="d">· 412 passed, 0 failed · 6m 04s</span>
+<span class="d">$</span> ao review
+  <span class="d">route:</span> kiro <span class="d">→ its read-only agent</span> <span class="d">(family: kiro · implementer: antigravity)</span>
+  <span class="g">APPROVED</span> <span class="d">0 blockers, 0 highs · 2 notes · the candidate's digest bound to the verdict</span>
+<span class="d">$</span> ao commit-ok
+  <span class="g">granted</span> <span class="d">for tree 8c1d2e4… — verify V-1792342, review adf8d371</span>
+<span class="d">$</span> ao commit -m "feat: count failed logins per account"
+  <span class="g">committed</span> <span class="d">· trailers bind it to that grant · push was never granted</span>
+<span class="d">$</span> git commit -m "anything else"
+  <span class="r">refused</span> <span class="d">by ao's pre-commit hook: no grant for this staged tree</span></pre>
+<pre class="term" lang-tr><span class="d">$</span> ao verify
+  <span class="g">PASS</span>  gate'ler sahnelenen ağaçta koştu <span class="d">· 412 geçti, 0 kaldı · 6dk 04sn</span>
+<span class="d">$</span> ao review
+  <span class="d">rota:</span> kiro <span class="d">→ kendi salt-okunur ajanı</span> <span class="d">(aile: kiro · uygulayıcı: antigravity)</span>
+  <span class="g">APPROVED</span> <span class="d">0 blocker, 0 high · 2 not · adayın özeti hükme bağlandı</span>
+<span class="d">$</span> ao commit-ok
+  <span class="g">yetki verildi</span> <span class="d">ağaç 8c1d2e4… — doğrulama V-1792342, review adf8d371</span>
+<span class="d">$</span> ao commit -m "feat: hesap başına başarısız girişleri say"
+  <span class="g">commit edildi</span> <span class="d">· trailer'lar onu bu yetkiye bağlar · push asla verilmedi</span>
+<span class="d">$</span> git commit -m "başka bir şey"
+  <span class="r">reddedildi</span> <span class="d">— ao pre-commit hook: bu sahnelenen ağaç için yetki yok</span></pre>
+  <p class="cap"><span lang-en>an illustrative run: the four commands of one change, and a plain git commit refused</span
+    ><span lang-tr>örnek bir koşum: bir değişikliğin dört komutu, ve reddedilen düz bir git commit</span></p>
+</div></section>
+
+<section><div class="wrap">
+  <h2><span lang-en>How a change lands</span><span lang-tr>Değişiklik nasıl iniyor</span></h2>
+<pre class="sh"><span lang-en>the agent edits and stages</span><span lang-tr>ajan yazar ve sahneye alır</span>
+  -&gt; <span class="k">ao verify</span><span lang-en>      your gates, run again by something with no stake in the result</span><span lang-tr>   senin gate'lerin, sonuçta çıkarı olmayan bir şeyce yeniden koşturulur</span>
+  -&gt; <span class="k">ao review</span><span lang-en>      another model family reads that candidate and the code around it</span><span lang-tr>  başka bir model ailesi o adayı ve çevresindeki kodu okur</span>
+  -&gt; <span class="k">ao commit-ok</span><span lang-en>   commit authority for that exact tree, granted from the evidence</span><span lang-tr> o tam ağaç için commit yetkisi, kanıttan verilerek</span>
+  -&gt; <span class="k">ao commit</span><span lang-en>      the commit carries trailers that bind it to the grant</span><span lang-tr>     commit, onu o yetkiye bağlayan trailer'lar taşır</span>
+<span lang-en>the pre-commit hook refuses any other git commit, and ao flags one made around it; </span><span lang-tr>pre-commit hook öteki her git commit'i reddeder, etrafından dolaşanı da ao işaretler; </span><span class="k">push</span><span lang-en> is never granted</span><span lang-tr> asla verilmez</span></pre>
+  <p class="note">
+    <span lang-en>Each refusal names the condition it is missing, and a review is bound to
+    the digest of the bytes it read: change the staged tree and the verdict no longer
+    applies. When no reviewer can be reached, ao writes a request bound to that same
+    digest — you paste it into any session of another family, and a person files the
+    answer with <code>ao collect-review</code>.</span>
+    <span lang-tr>Her ret eksik koşulu adıyla söyler; bir review okuduğu baytların
+    özetiyle bağlanır: sahnelenen ağacı değiştirirsen hüküm artık geçerli değil. Hiçbir
+    gözden geçirene ulaşılamayınca ao aynı özetle bağlı bir istek yazar — onu başka bir
+    ailenin herhangi bir oturumuna yapıştırırsın, cevabı da bir kişi
+    <code>ao collect-review</code> ile işler.</span></p>
+</div></section>
+
+<section><div class="wrap">
+  <h2><span lang-en>What it does</span><span lang-tr>Ne yapar</span></h2>
+  <div class="grid">
+    <div><h3><span lang-en>Reviews on its own terms</span><span lang-tr>Kendi kurallarıyla gözden geçirir</span></h3><p>
+      <span lang-en>A model of another family than the one that wrote the change, by
+      default — a model reviewing its own family's work shares its blind spots. And a
+      reviewer only reads: ao measures that per harness, and where no flag denies the
+      tools it writes a read-only agent for that harness itself. A route that could write
+      is refused where it starts.</span>
+      <span lang-tr>Değişikliği yazandan farklı bir model ailesi, varsayılan olarak —
+      bir model kendi ailesinin işini gözden geçirince kör noktaları da ortak olur. Bir gözden geçiren yalnız okur: ao bunu harness bazında ölçüyor; hiçbir bayrağın araçları kapatmadığı bir harness içinse o harness'ın kendi salt-okunur ajanını yazıyor.
+      Yazabilecek bir rota, başladığı yerde reddedilir.</span></p></div>
+    <div><h3><span lang-en>Verifies</span><span lang-tr>Doğrular</span></h3><p>
+      <span lang-en>Runs <em>your</em> gates and writes the numbers to a ledger. Not the
+      agent's report of its gates — the commands, run again, by something with no stake in
+      the result.</span>
+      <span lang-tr><em>Senin</em> gate'lerini koşturur ve sayıları deftere yazar. Ajanın
+      gate raporunu değil — komutları, yeniden, sonuçta çıkarı olmayan bir şey
+      tarafından.</span></p></div>
+    <div><h3><span lang-en>Decides</span><span lang-tr>Karar verir</span></h3><p>
+      <span lang-en>Commit authority from that evidence: gates passed, review approved,
+      plan unedited, and the measurement still describes the tree in front of it. Every
+      refusal names its missing condition. It never covers <code>push</code>.</span>
+      <span lang-tr>Commit yetkisini o kanıttan verir: gate'ler geçti, review onaylandı,
+      plan değiştirilmedi, ölçüm hâlâ önündeki ağacı tarif ediyor. Her ret eksik koşulu
+      adıyla söyler. <code>push</code>'u asla kapsamaz.</span></p></div>
+    <div><h3><span lang-en>Watches</span><span lang-tr>İzler</span></h3><p>
+      <span lang-en>A live panel — and the part no other panel has: whether the agent is
+      <em>busy but producing nothing</em>. A stuck agent looks perfectly healthy.
+      Transcript growing, tool calls firing, credits burning. This compares activity
+      against artifacts and says so.</span>
+      <span lang-tr>Canlı bir panel — ve başka hiçbir panelde olmayan şey: ajan
+      <em>meşgul ama üretmiyor mu?</em> Saplanmış bir ajan sapasağlam görünür.
+      Transcript büyür, tool call'lar akar, kredi yanar. Bu, faaliyeti üretilen şeyle
+      karşılaştırır ve söyler.</span></p></div>
+    <div><h3><span lang-en>Restarts</span><span lang-tr>Yeniden başlatır</span></h3><p>
+      <span lang-en>Turn-based agents stop when a turn ends, mid-slice or not. A watchdog
+      notices and nudges — behind guards that make sure a nudge is never spent where it
+      cannot help: not into a provider outage, past a round budget, or beside a tree a
+      person has taken.</span>
+      <span lang-tr>Tur-bazlı ajanlar tur bitince durur, dilim ortasında bile. Watchdog
+      fark edip dürter — dürtme işe yaramayacağı yerde harcanmasın: sağlayıcı
+      kesintisine, tur bütçesinin ötesine ya da bir kişinin devraldığı ağacın yanına
+      değil.</span></p></div>
+    <div><h3><span lang-en>Keeps going</span><span lang-tr>İşi yürütür</span></h3><p>
+      <span lang-en>A board of pre-authorised work: a slice waiting on you is parked with
+      its reason, and when the queue runs dry the architect is woken to refill it. A turn
+      that cannot be read is not counted as one that finished.</span>
+      <span lang-tr>Önceden yetkilendirilmiş işin panosu: seni bekleyen dilim, nedeni yazılı olarak park edilir; kuyruk boşalınca mimar onu doldursun diye uyandırılır. Okunamayan
+      bir tur, bitmiş sayılmaz.</span></p></div>
+    <div><h3><span lang-en>Catches up</span><span lang-tr>Kovuşturur</span></h3><p>
+      <span lang-en>A review you waive is recorded, not swallowed: <code>ao catchup</code>
+      has a reviewer of another family read the landed range later, and
+      <code>ao doctor</code> names a commit whose content no review or waiver granted.</span>
+      <span lang-tr>Muaf tuttuğun review kaydedilir, yutulmaz: <code>ao catchup</code>, inen aralığı sonra başka bir aileden bir gözden geçirene okutur;
+      <code>ao doctor</code> da içeriği hiçbir review ya da muafiyetin vermediği commit'i
+      adıyla söyler.</span></p></div>
+    <div><h3><span lang-en>Reaches you</span><span lang-tr>Sana ulaşır</span></h3><p>
+      <span lang-en>Alerts carry an audience: a human hears only what a human can fix.
+      From a phone you can answer — and your reply becomes an urgent decision the
+      implementer cannot commit past until it has read it.</span>
+      <span lang-tr>Uyarıların hedef kitlesi var: insana yalnız insanın çözebileceği şey
+      ulaşır. Telefondan cevap yazabilirsin — ve yazdığın şey, uygulayıcının okumadan
+      üstünden commit edemeyeceği acil bir karara dönüşür.</span></p></div>
+  </div>
+  <p class="note" style="margin-top:28px">
+    <span lang-en>Agents report and read over MCP; other orchestrators read the board over
+    A2A; and a bridge lets an MCP-only agent reach the A2A ones. All of it is the same
+    files, so a project that installs none of it loses nothing.</span>
+    <span lang-tr>Ajanlar MCP üzerinden rapor verir ve okur; başka orkestratörler panoyu
+    A2A üzerinden okur; bir köprü de yalnız MCP konuşan ajanı A2A konuşanlara ulaştırır.
+    Hepsi aynı dosyalara dayanıyor, yani hiçbirini kurmayan proje hiçbir şey kaybetmez.</span></p>
+</div></section>
+
+<section><div class="wrap">
+  <h2><span lang-en>Why it is different</span><span lang-tr>Farkı ne</span></h2>
+  <p style="font-size:17px;max-width:64ch">
+    <span lang-en>Every other orchestrator <strong>owns the agent</strong>: it spawns the
+    process, drives the loop, and adopting it means restarting your work inside it.
+    This one owns the <strong>authority</strong> instead — what is finished, what is
+    good, what may land — and leaves the agent exactly where it is. And it can be shown
+    its own work: <code>ao gain</code> reads ao's ledgers and says what it measured,
+    slices landed, what reviews said, what a turn cost.</span>
+    <span lang-tr>Piyasadaki diğer orkestratörler <strong>ajanın sahibidir</strong>:
+    süreci onlar başlatır, döngüyü onlar sürer, benimsemek de işi onların içinde yeniden
+    başlatmak demek. Bu ise <strong>yetkinin</strong> sahibidir — ne bitti, ne iyi, ne
+    inebilir — ajanı tam olduğu yerde bırakır. Bir de kendi işini gösterebiliyor:
+    <code>ao gain</code> ao'nun defterlerini okur ve ne ölçtüğünü söyler — inen dilimler,
+    review'ların dediği, bir turun maliyeti.</span></p>
+</div></section>
+
+<section><div class="wrap">
+  <h2><span lang-en>The panel</span><span lang-tr>Panel</span></h2>
+<pre class="term" lang-en><span class="a">══════════════════════════════════════════════════════════════════</span>
+  <b>ACME-API</b><span class="d">   agent-orchestrator   18 Oct 14:44:44</span>
 <span class="a">══════════════════════════════════════════════════════════════════</span>
 
 <span class="g">● WORKING</span>  <span class="d">kiro · last write 0m 32s ago</span>
@@ -122,9 +291,9 @@ cd ~/your-project &amp;&amp; ao status</pre>
      <span class="d">activity is not progress — re-specify, split, or check for a wait loop</span>
 
 <span class="a">── REVIEWS ──────────────────────────────────────────────────────</span>
-   <span class="d">round 5/5</span>
-   2026-09-12-141502-8c1d2e4.md   <span class="y">NEEDS_CHANGES</span>
-   2026-09-12-121930-8c1d2e4.md   <span class="y">NEEDS_CHANGES</span>
+   <span class="d">round 3/5</span>   <span class="d">candidate</span> 8c1d2e4 <span class="d">· staged tree bound to the verdict</span>
+   2026-10-18-141502-8c1d2e4.md   <span class="y">NEEDS_CHANGES</span> <span class="d">1 high · kiro</span>
+   2026-10-18-121930-8c1d2e4.md   <span class="g">APPROVED</span> <span class="d">2 notes · antigravity</span>
 
 <span class="a">── THROUGHPUT 24h ───────────────────────────────────────────────</span>
    <span class="d">staged 2 · landed 1 · decisions 1 asked, 1 waiting (oldest 0h 52m)</span>
@@ -136,7 +305,7 @@ cd ~/your-project &amp;&amp; ao status</pre>
    e41c5d2 docs: describe the webhook retry policy
    <span class="d">2 files uncommitted · 3 ahead / 0 behind origin/main</span>
 
-   <b>Mailbox:</b> 20260912-1352-kiro-to-architect-QUESTION-lockout-scope.md
+   <b>Mailbox:</b> 20261018-1352-kiro-to-architect-QUESTION-lockout-scope.md
    <span class="d">1 other message(s) waiting in agent-mail/</span>
    <b>Board:</b>   1 running · 1 blocked · 4 queued · 6 done
      <span class="r">⊘</span> ACME-142  rotate webhook secrets — new key from ops
@@ -147,93 +316,73 @@ cd ~/your-project &amp;&amp; ao status</pre>
    <span class="d">14:41</span> <span class="a">AGENT</span>  Moving the counter to the account key; the migration
         <span class="d">│</span>      and its test come next.
 <span class="d">  every 15s · Ctrl+C to exit</span></pre>
-</div></section>
+<pre class="term" lang-tr><span class="a">══════════════════════════════════════════════════════════════════</span>
+  <b>ACME-API</b><span class="d">   agent-orchestrator   18 Eki 14:44:44</span>
+<span class="a">══════════════════════════════════════════════════════════════════</span>
 
-<section><div class="wrap">
-  <h2><span lang-en>What it does</span><span lang-tr>Ne yapar</span></h2>
-  <div class="grid">
-    <div><h3><span lang-en>Watches</span><span lang-tr>İzler</span></h3><p>
-      <span lang-en>A live panel — and the part no other panel has: whether the agent is
-      <em>busy but producing nothing</em>. A stuck agent looks perfectly healthy.
-      Transcript growing, tool calls firing, credits burning. This compares activity
-      against artifacts and says so.</span>
-      <span lang-tr>Canlı bir panel — ve başka hiçbir panelde olmayan şey: ajan
-      <em>meşgul ama üretmiyor mu?</em> Saplanmış bir ajan sapasağlam görünür.
-      Transcript büyür, tool call'lar akar, kredi yanar. Bu, faaliyeti üretilen şeyle
-      karşılaştırır ve söyler.</span></p></div>
-    <div><h3><span lang-en>Restarts</span><span lang-tr>Yeniden başlatır</span></h3><p>
-      <span lang-en>Turn-based agents stop when a turn ends, mid-slice or not. A watchdog
-      notices and nudges — behind guards that make sure a nudge is never spent where it
-      cannot help.</span>
-      <span lang-tr>Tur-bazlı ajanlar tur bitince durur, dilim ortasında bile. Watchdog
-      fark edip dürter — dürtmenin işe yaramayacağı yerde harcanmamasını sağlayan bir
-      koruma zincirinin ardında.</span></p></div>
-    <div><h3><span lang-en>Speaks both protocols</span><span lang-tr>İki protokolü de konuşur</span></h3><p>
-      <span lang-en>MCP tools for the agent to report and read; an A2A endpoint so
-      other orchestrators can read the board; and a bridge so an MCP-only agent can
-      reach A2A ones. All of it backed by the same files, so a project that installs
-      none of it loses nothing.</span>
-      <span lang-tr>Ajanın rapor yazıp okuması için MCP araçları; başka orkestratörlerin
-      panoyu okuyabilmesi için A2A uç noktası; ve yalnız MCP konuşan bir ajanın A2A
-      konuşanlara ulaşması için köprü. Hepsi aynı dosyalara dayanıyor, yani hiçbirini
-      kurmayan proje hiçbir şey kaybetmez.</span></p></div>
-    <div><h3><span lang-en>Verifies</span><span lang-tr>Doğrular</span></h3><p>
-      <span lang-en>Runs <em>your</em> gates and writes the numbers to a ledger. Not the
-      agent's report of its gates — the commands, run again, by something with no stake
-      in the result.</span>
-      <span lang-tr><em>Senin</em> gate'lerini koşturur ve sayıları deftere yazar. Ajanın
-      gate raporunu değil — komutları, yeniden, sonuçta çıkarı olmayan bir şey
-      tarafından.</span></p></div>
-    <div><h3><span lang-en>Reaches you</span><span lang-tr>Sana ulaşır</span></h3><p>
-      <span lang-en>Alerts carry an audience: a human hears only what a human can fix.
-      From a phone you can answer — and your reply becomes an urgent decision the
-      implementer cannot commit past until it has read it. When the architect's quota
-      runs out, that is what keeps the run alive.</span>
-      <span lang-tr>Uyarıların hedef kitlesi var: insana yalnız insanın çözebileceği
-      şey ulaşır. Telefondan cevap yazabilirsin — ve yazdığın şey, uygulayıcının
-      okumadan üstünden commit edemeyeceği acil bir karara dönüşür. Mimarın kotası
-      bittiğinde işi ayakta tutan budur.</span></p></div>
-    <div><h3><span lang-en>Decides</span><span lang-tr>Karar verir</span></h3><p>
-      <span lang-en>Commit authority from that evidence: gates passed, review approved,
-      plan unedited, and the measurement still describes the tree in front of it. Every
-      refusal names its missing condition. It never covers <code>push</code>.</span>
-      <span lang-tr>Commit yetkisini o kanıttan verir: gate'ler geçti, review onaylandı,
-      plan değiştirilmedi, ölçüm hâlâ önündeki ağacı tarif ediyor. Her ret eksik koşulu
-      adıyla söyler. <code>push</code>'u asla kapsamaz.</span></p></div>
-  </div>
-</div></section>
+<span class="g">● ÇALIŞIYOR</span>  <span class="d">kiro · son yazma 0dk 32sn önce</span>
+  <span class="d">↳</span> hız sınırlayıcıyı giriş rotasına bağlıyor, sonra gate'ler
 
-<section><div class="wrap">
-  <h2><span lang-en>Why it is different</span><span lang-tr>Farkı ne</span></h2>
-  <p style="font-size:17px;max-width:64ch">
-    <span lang-en>Every other orchestrator <strong>owns the agent</strong>: it spawns the
-    process, drives the loop, and adopting it means restarting your work inside it.
-    This one owns the <strong>authority</strong> instead — what is finished, what is
-    good, what may land — and leaves the agent exactly where it is.</span>
-    <span lang-tr>Piyasadaki diğer orkestratörler <strong>ajanın sahibidir</strong>:
-    süreci onlar başlatır, döngüyü onlar sürer, ve benimsemek işini onların içinde
-    yeniden başlatmak demektir. Bu ise <strong>yetkinin</strong> sahibidir — ne bitti,
-    ne iyi, ne inebilir — ajanı tam olduğu yerde bırakır.</span></p>
+<span class="a">── KOTA / BAĞLAM ───────────────────────────────────────────────</span>
+   bağlam   <span class="g">█████████████░░░░░░░</span> 68%
+   maliyet  son tur <b>99</b> kredi (162 araç çağrısı) · 5 tur, toplam <b>412</b><span class="d"> (ort 82)</span>
+
+<span class="r">── SORUNLAR ────────────────────────────────────────────────────</span>
+   <span class="r">dönüp duruyor</span> <span class="d">41dk meşgul, commit ya da değişiklik yok</span>
+     <span class="d">faaliyet ilerleme değildir — yeniden tarif et, böl ya da bekleme döngüsüne bak</span>
+
+<span class="a">── GÖZDEN GEÇİRMELER ───────────────────────────────────────────</span>
+   <span class="d">tur 3/5</span>   <span class="d">aday</span> 8c1d2e4 <span class="d">· sahnelenen ağaç hükme bağlı</span>
+   2026-10-18-141502-8c1d2e4.md   <span class="y">NEEDS_CHANGES</span> <span class="d">1 high · kiro</span>
+   2026-10-18-121930-8c1d2e4.md   <span class="g">APPROVED</span> <span class="d">2 not · antigravity</span>
+
+<span class="a">── AKIŞ 24sa ───────────────────────────────────────────────────</span>
+   <span class="d">sahnelenen 2 · inen 1 · kararlar 1 soruldu, 1 bekliyor (en eski 0sa 52dk)</span>
+   <span class="g">iniyor: adaylar commit'e ulaşıyor</span>
+
+<span class="a">── DEPO ────────────────────────────────────────────────────────</span>
+   8c1d2e4 feat: hesap başına başarısız girişleri say
+   3b7a9f0 fix: token yenilemede oturum çerezini koru
+   e41c5d2 docs: webhook yeniden deneme politikasını anlat
+   <span class="d">2 dosya commit edilmemiş · origin/main'in 3 önünde / 0 gerisinde</span>
+
+   <b>Posta kutusu:</b> 20261018-1352-kiro-to-architect-QUESTION-lockout-scope.md
+   <span class="d">agent-mail/ içinde bekleyen 1 mesaj daha</span>
+   <b>Pano:</b>         1 çalışan · 1 engelli · 4 kuyrukta · 6 tamam
+     <span class="r">⊘</span> ACME-142  webhook sırlarını yenile — ops'tan yeni anahtar
+
+<span class="a">── SON MESAJLAR ────────────────────────────────────────────────</span>
+   <span class="d">14:36</span> <span class="u">SEN  </span>  Başarısız girişleri IP başına değil hesap başına say;
+        <span class="d">│</span>      karar posta kutusunda.
+   <span class="d">14:41</span> <span class="a">AJAN </span>  Sayacı hesap anahtarına taşıyorum; sırada göç betiği
+        <span class="d">│</span>      ve testi var.
+<span class="d">  her 15sn · çıkmak için Ctrl+C</span></pre>
+  <p class="cap"><span lang-en><code>ao watch</code>, on a sample project — the fields come
+    from the agent's own store and ao's ledgers</span
+    ><span lang-tr><code>ao watch</code>, örnek bir projede — alanlar ajanın kendi
+    deposundan ve ao'nun defterlerinden geliyor</span></p>
 </div></section>
 
 <section><div class="wrap">
   <h2><span lang-en>The rules it enforces</span><span lang-tr>Dayattığı kurallar</span></h2>
-  <p style="color:var(--muted);margin-top:-12px;font-size:15px">
+  <p class="note" style="margin-top:-12px">
     <span lang-en>Not style preferences. Each one is a failure that cost real hours.</span>
     <span lang-tr>Üslup tercihi değil. Her biri gerçek saatlere mal olmuş bir arıza.</span></p>
   <ul class="rules">
     <li><span lang-en><strong>Whoever writes the code does not verify it</strong>, and does
       not decide it may land.</span>
-      <span lang-tr><strong>Kodu yazan doğrulamaz</strong>, ve inebileceğine karar veremez.</span></li>
+      <span lang-tr><strong>Kodu yazan doğrulamaz</strong> ve inebileceğine karar veremez.</span></li>
     <li><span lang-en><strong>A plan is read, never edited.</strong> When the document a
       slice is judged against can be edited by the thing being judged, every later check
       is circular.</span>
       <span lang-tr><strong>Plan okunur, yazılmaz.</strong> Bir dilimin karşısında ölçüldüğü
       belge, ölçülen şey tarafından değiştirilebiliyorsa sonraki her kontrol döngüseldir.</span></li>
     <li><span lang-en><strong>Pulling work is not authorising it.</strong> A tracker item is
-      something a person wrote, not a specification anyone verified.</span>
+      something a person wrote, not a specification anyone verified. It enters the queue
+      with a written acceptance boundary or it does not enter.</span>
       <span lang-tr><strong>İş çekmek yetkilendirmek değildir.</strong> Takip sistemindeki
-      bir kayıt birinin yazdığı şeydir; kimsenin doğruladığı bir şartname değil.</span></li>
+      bir kayıt birinin yazdığı şeydir; kimsenin doğruladığı bir şartname değil. Kuyruğa
+      yazılı bir kabul sınırıyla girer, yoksa girmez.</span></li>
     <li><span lang-en><strong>Heavy operations belong to one actor.</strong> N projects
       running N test suites is not N times the throughput — it is one suite that no longer
       finishes.</span>
@@ -252,13 +401,19 @@ cd ~/your-project &amp;&amp; ao status</pre>
 
 <section><div class="wrap">
   <h2><span lang-en>Agent support</span><span lang-tr>Ajan desteği</span></h2>
+  <p class="note" style="margin-top:-12px">
+    <span lang-en>ao reads each agent's own session store; the adapter says where and in
+    what shape, and is written from a measurement, not from documentation prose.</span>
+    <span lang-tr>ao her ajanın kendi oturum deposunu okur; adaptör nerede ve hangi
+    biçimde okuduğunu söyler — doküman cümlesinden değil, ölçümden yazılmıştır.</span></p>
   <table>
-    <tr><th lang-en>verified</th><th lang-tr>doğrulama</th><th>adapters</th></tr>
+    <tr><th lang-en>verified</th><th lang-tr>doğrulama</th><th lang-en>adapters</th><th lang-tr>adaptörler</th></tr>
     <tr><td><span class="pill">full</span></td><td>kiro · claude-code · antigravity<br>
       <span style="color:var(--muted);font-size:13px">
       <span lang-en>every capability exercised in a production run</span>
       <span lang-tr>her yetenek gerçek koşumda sınandı</span></span></td></tr>
-    <tr><td><span class="pill">partial</span></td><td>opencode · command-code<br>
+    <tr><td><span class="pill">partial</span></td><td>opencode · command-code · codex ·
+      qoder · openai-api · warp<br>
       <span style="color:var(--muted);font-size:13px">
       <span lang-en>reads state, some capabilities unexercised</span>
       <span lang-tr>durumu okur, bazı yetenekler sınanmadı</span></span></td></tr>
@@ -266,17 +421,25 @@ cd ~/your-project &amp;&amp; ao status</pre>
       <span style="color:var(--muted);font-size:13px">
       <span lang-en>written from published docs, not yet run</span>
       <span lang-tr>yayımlanmış dokümandan yazıldı, henüz koşulmadı</span></span></td></tr>
-    <tr><td><span class="pill">untested</span></td><td>codex · gemini · aider · amp ·
-      copilot · amazon-q · deepseek · qoder · ollama<br>
+    <tr><td><span class="pill">untested</span></td><td>gemini · aider · amp · copilot ·
+      amazon-q · deepseek · ollama · droid · grok · hermes · kilocode · kimi · omp ·
+      pi · pr-agent · qwen · reasonix · trae<br>
       <span style="color:var(--muted);font-size:13px">
       <span lang-en>schema present, needs a first run</span>
       <span lang-tr>şema hazır, ilk koşumu bekliyor</span></span></td></tr>
   </table>
+  <p class="note" style="margin-top:20px">
+    <span lang-en><code>ao adapters</code> shows this table against what is actually
+    installed on your machine, and — with keyflip — whether an account exists even when
+    the CLI does not. Adding one is a JSON file.</span>
+    <span lang-tr><code>ao adapters</code> bu tabloyu makinende gerçekten kurulu olana
+    karşı gösterir; keyflip ile, CLI kurulu değilse bile hesap var mı diye de bakar. Yeni
+    eklemek bir JSON dosyası.</span></p>
 </div></section>
 
 <section><div class="wrap">
   <h2><span lang-en>Where this came from</span><span lang-tr>Nereden çıktı</span></h2>
-  <p style="max-width:64ch">
+  <p class="note">
     <span lang-en>Extracted from a 30-epic durable-workflow product built over weeks by
     exactly this loop. Every guard in it exists because something went wrong first: a
     watchdog that started a second turn on one session and left a rename half-applied;
@@ -288,22 +451,49 @@ cd ~/your-project &amp;&amp; ao status</pre>
     dayanıklı-iş-akışı ürününden çıkarıldı. İçindeki her koruma önce bir şey ters
     gittiği için var: tek oturumda ikinci tur başlatıp yeniden adlandırmayı yarım
     bırakan bir watchdog; tek depoda biriken on beş ajan süreci; canlı kanıtı üç saat
-    bayat gösteren bir saat hatası. Hiçbiri önceden tasarlanmadı —
-    <a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/lessons.md">dersler
-    dosyası</a> listesi.</span></p>
+    bayat gösteren bir saat hatası. Hiçbiri önceden tasarlanmadı — liste
+    <a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/lessons.md">dersler dosyasında</a>.</span></p>
+  <h3 style="margin-top:36px"><span lang-en>What is not built</span><span lang-tr>Neler kurulmadı</span></h3>
+  <p class="note">
+    <span lang-en>The suite runs on Linux, macOS and Windows with Python 3.9 and 3.12, and
+    every command in the list is exercised daily against a real project. Still
+    specification: read lanes, a lane's role and the merge queue, and cross-project
+    parallel <em>execution</em> — the view exists, and running several implementers at once
+    is governed by the machine-wide gate lock but has not been run in anger.</span>
+    <span lang-tr>Suite Linux, macOS ve Windows'ta Python 3.9 ve 3.12 ile koşuyor;
+    komut listesindeki her komut gerçek bir projede her gün kullanılıyor. Hâlâ
+    şartname olanlar: okuma şeritleri, bir şeridin rolü ve merge kuyruğu ile projeler
+    arası paralel <em>yürütme</em> — görünüm var, birden çok uygulayıcıyı aynı anda
+    koşturmak makine geneli gate kilidine bağlı ama hiç gerçek koşumda denenmedi.</span></p>
+  <p class="note">
+    <span lang-en>What ao's own ledgers say about the guarantee on its own repository is
+    published too: <a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/evidence.md">evidence</a>.</span>
+    <span lang-tr>ao'nun kendi defterlerinin kendi deposundaki güvence hakkında söylediği
+    de yayında: <a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/evidence.md">kanıt</a>.</span></p>
 </div></section>
 
 <footer><div class="wrap">
   <a href="https://github.com/hakkisagdic/agent-orchestrator">GitHub</a> ·
-  <a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/protocol.md">Docs</a> ·
+  <a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/getting-started.md"><span lang-en>Getting started</span><span lang-tr>Başlarken</span></a> ·
+  <a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/commands.md" lang-en>Commands</a><a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/commands.tr.md" lang-tr>Komutlar</a> ·
+  <a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/safety.md"><span lang-en>Safety</span><span lang-tr>Güvenlik</span></a> ·
+  <a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/threat-model.md"><span lang-en>Threat model</span><span lang-tr>Tehdit modeli</span></a> ·
+  <a href="https://github.com/hakkisagdic/agent-orchestrator/blob/main/docs/lessons.md"><span lang-en>Lessons</span><span lang-tr>Dersler</span></a> ·
   <a href="https://github.com/hakkisagdic/keyflip">keyflip</a> ·
-  MIT
+  MIT · v0.6.0
 </div></footer>
 
 <script>
+var HEAD={
+  en:['agent-orchestrator — your agents commit, every change is granted first or flagged',
+      'Keep the coding agents you already use. ao runs your gates on the exact change an agent staged, has a model of another family review it, refuses any other git commit in its hook, and flags a commit made around it. Every decision goes into a ledger that shows tampering.'],
+  tr:['agent-orchestrator — ajanların commit atıyor, her değişiklik ya önce yetkilendirilir ya da işaretlenir',
+      'Zaten kullandığın kod ajanlarıyla devam et. ao, bir ajanın sahneye aldığı tam değişiklik üzerinde senin gate\'lerini koşturur, onu başka bir model ailesine gözden geçirtir, hook\'unda başka her git commit\'i reddeder ve etrafından dolaşan commit\'i işaretler. Her karar, kurcalamayı gösteren bir deftere yazılır.']};
 function setLang(l){
   document.documentElement.setAttribute('data-lang', l);
   document.documentElement.setAttribute('lang', l);
+  document.title = HEAD[l][0];
+  document.querySelector('meta[name=description]').setAttribute('content', HEAD[l][1]);
   document.getElementById('b-en').setAttribute('aria-pressed', l==='en');
   document.getElementById('b-tr').setAttribute('aria-pressed', l==='tr');
   try{ localStorage.setItem('ao-lang', l); }catch(e){}

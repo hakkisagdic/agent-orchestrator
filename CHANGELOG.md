@@ -20,6 +20,10 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 - `ao mcp serve` speaks the Model Context Protocol revision dated `2026-07-28` beside `2025-06-18`: it answers `server/discover` with `supportedVersions` (`["2026-07-28", "2025-06-18"]`), `capabilities`, `resultType: "complete"` and `_meta["io.modelcontextprotocol/serverInfo"]`, negotiates on each request in `params._meta`, refuses an unknown version in `_meta` with JSON-RPC error `-32022` (`Unsupported protocol version`) naming `supported` and `requested` and malformed `_meta` with `-32602`, and keeps `initialize`-based clients working while answering an unknown version on `initialize` with `2025-06-18` (MCP-2026).
 
+### Under the hood
+
+- The landing page says what ao does now, and a test module keeps it saying that: the page still sold ao as attaching to a running agent, named 15 of the 28 adapters ao ships and left codex and qoder untested after their adapters moved to partial, so its headline, its setup block, its sample run, its adapter table and its two languages are now read from the tree that publishes it - and the headline sentence itself now stands in the package description, the module docstring and the Homebrew formula, which a seventh test holds to it (LANDING-REFRESH).
+
 ## [0.6.0] - 2026-10-19
 
 ### New commands

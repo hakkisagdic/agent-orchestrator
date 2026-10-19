@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "ao-orchestrator"
 # The version is written once, in src/ao/__init__.py: [tool.hatch.version] below reads it.
 dynamic = ["version"]
-description = "Attach to the coding agent you are already running: watch it, restart it, verify its work, and decide what may be committed."
+description = "Your agents commit, every change is granted first or flagged: ao gates the change an agent staged, has a model of another family review it, refuses any other git commit in its hook, and flags a commit made around it."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.9"
