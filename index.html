@@ -413,12 +413,16 @@ ao hooks install                <span class="c" lang-en># the hook refuses an un
     <code>qwen</code> and <code>trae</code> declare a transcript shape with no session store
     ao resolves yet; <code>amazon-q</code>, <code>amp</code>, <code>copilot</code>,
     <code>deepseek</code>, <code>gemini</code> and <code>reasonix</code> leave the
-    transcript <code>unknown</code>; and <code>openai-api</code>, <code>pr-agent</code> and
-    <code>ollama</code> are tool reviewers or a model backend with no session store. Only
-    the <code>full</code> and <code>partial</code> rows are measured against an install;
-    <code>cursor-agent</code> (<code>documented</code>) is written from published docs only,
-    and the <code>untested</code> rows are written from documented interfaces and have not
-    been run.</span>
+    transcript <code>unknown</code>; <code>openai-api</code>, <code>pr-agent</code> and
+    <code>ollama</code> are tool reviewers or a model backend with no session store; and
+    <code>cloud-generic</code> (a cloud template omitted from the table below) observes work
+    through pull-request polling and Git results. Only the <code>full</code> and
+    <code>partial</code> rows are measured against an install, except
+    <code>openai-api</code>, whose client was tested against a stand-in endpoint while a
+    provider's own answer is proven only by an owner's local run; <code>cursor-agent</code>
+    (<code>documented</code>) is written from published docs only, and the
+    <code>untested</code> rows are written from documented interfaces and have not been
+    run.</span>
     <span lang-tr>Her adaptör, ao'nun o harness'ı nasıl gözlemlediğini ve bu bildirimin ne
     kadarının ölçüldüğünü söyler. ao, <code>kiro</code>, <code>claude-code</code>,
     <code>opencode</code> ve <code>qoder</code> için ajanın kendi oturum deposunu çözüp
@@ -431,11 +435,15 @@ ao hooks install                <span class="c" lang-en># the hook refuses an un
     biçimini bildirir; <code>amazon-q</code>, <code>amp</code>, <code>copilot</code>,
     <code>deepseek</code>, <code>gemini</code> ve <code>reasonix</code> transcript'i
     <code>unknown</code> bırakır; <code>openai-api</code>, <code>pr-agent</code> ve
-    <code>ollama</code> ise oturum deposu olmayan araç gözden geçirenleri ya da model
-    arka uçlarıdır. Yalnız <code>full</code> ve <code>partial</code> satırları kurulu bir
-    araç üzerinde ölçülmüştür; <code>cursor-agent</code> (<code>documented</code>) yalnız
-    yayımlanmış dokümandan yazılmıştır, <code>untested</code> satırları ise dokümante
-    arayüzlerden yazılmış ve henüz koşulmamıştır.</span></p>
+    <code>ollama</code> oturum deposu olmayan araç gözden geçirenleri ya da model arka
+    uçlarıdır; <code>cloud-generic</code> (aşağıdaki tabloda yer almayan bulut şablonu) ise
+    işi pull request yoklaması ve Git sonuçları üzerinden gözlemler. Yalnız
+    <code>full</code> ve <code>partial</code> satırları kurulu bir araç üzerinde
+    ölçülmüştür — istemcisi vekil bir uç noktaya karşı sınanan ve sağlayıcının kendi yanıtı
+    ancak sahibinin yerel koşumuyla kanıtlanan <code>openai-api</code> hariç;
+    <code>cursor-agent</code> (<code>documented</code>) yalnız yayımlanmış dokümandan
+    yazılmıştır, <code>untested</code> satırları ise dokümante arayüzlerden yazılmış ve
+    henüz koşulmamıştır.</span></p>
   <table>
     <tr><th lang-en>verified</th><th lang-tr>doğrulama</th><th lang-en>adapters</th><th lang-tr>adaptörler</th></tr>
     <tr><td><span class="pill">full</span></td><td>kiro · claude-code · antigravity<br>

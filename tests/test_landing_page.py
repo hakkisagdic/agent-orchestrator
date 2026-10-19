@@ -91,20 +91,29 @@ def _typed_commands(text):
 
 
 def _declared_support():
-    """Group non-cloud packaged adapters by how ao observes them and by verification status, directly
-    from `src/ao/adapters/*.json`."""
+    """Group packaged adapters by how ao observes them, by verification status, and by stand-in
+    measurement qualification, directly from `src/ao/adapters/*.json`."""
     observed = {
         "session_store": set(),
         "call_return": set(),
         "transcript_only": set(),
         "unknown": set(),
         "stateless": set(),
+        "cloud": set(),
     }
     verified = {}
+    standin = set()
     for name, adapter in A.package_adapters().items():
         if adapter.get("kind") == "cloud":
+            assert isinstance(adapter.get("poll"), dict) and isinstance(adapter.get("result"), dict), name
+            observed["cloud"].add(name)
             continue
-        verified.setdefault(adapter.get("verified"), set()).add(name)
+        level = adapter.get("verified")
+        verified.setdefault(level, set()).add(name)
+        disclaimer = adapter.get("disclaimer") or ""
+        if level in ("full", "partial") and "stand-in" in disclaimer:
+            assert "proven on a local candidate by the owner" in disclaimer, name
+            standin.add(name)
         transcript_kind = (adapter.get("transcript") or {}).get("kind")
         if A.session_store_reachable(adapter):
             observed["session_store"].add(name)
@@ -114,9 +123,12 @@ def _declared_support():
             observed["transcript_only"].add(name)
         elif transcript_kind == "unknown":
             observed["unknown"].add(name)
-        else:
+        elif adapter.get("kind") in ("tool-reviewer", "model-backend"):
             observed["stateless"].add(name)
-    return observed, verified
+        else:
+            raise AssertionError("unclassified adapter: {}".format(name))
+    assert set().union(*observed.values()) == set(A.package_adapters())
+    return observed, verified, standin
 
 
 def test_the_landing_page_loads_nothing_from_another_host():
@@ -136,7 +148,7 @@ def test_the_landing_page_groups_each_adapter_as_its_adapter_declares_it():
     """LANDING-REFRESH-3: the table is the README's table in another shape - each level naming the adapters
     whose adapter declares that level, and no level missing. A cloud agent's adapter is left out as
     `ao adapters` leaves it out: it names no harness this page can review with."""
-    _, declared = _declared_support()
+    _, declared, _ = _declared_support()
     shown = {level: {name.strip() for name in TAG.sub("", cell).split("·") if name.strip()}
              for level, cell in PILL.findall(_page())}
 
@@ -145,34 +157,36 @@ def test_the_landing_page_groups_each_adapter_as_its_adapter_declares_it():
 
 
 def test_the_landing_page_support_intro_states_how_each_adapter_is_observed_and_measured():
-    """LANDING-REFRESH-2: the support section's opening paragraph must state how each group of packaged
-    adapters is observed (a reachable session store read, call-return data that ao keeps itself, a
-    declared transcript shape without a resolved session store, an unknown transcript, or a stateless
-    reviewer/model backend) and which levels are measured (`full`, `partial`), written from published
-    docs only (`documented`), or `untested` - never claiming every adapter reads a session store or is
-    written from a measurement."""
+    """LANDING-REFRESH-2, LANDING-REFRESH-3: the support section's opening paragraph must state how each
+    group of packaged adapters is observed (a reachable session store read, call-return data that ao keeps
+    itself, a declared transcript shape without a resolved session store, an unknown transcript, a
+    stateless reviewer/model backend, or a cloud template observed through pull-request polling and Git
+    results) and which levels are measured (`full`, `partial`, with stand-in-tested adapters qualified),
+    written from published docs only (`documented`), or `untested` - never claiming every adapter reads a
+    session store or is written from a measurement."""
     page = _page()
     assert OVERSTATED_SUPPORT.search(page) is None
 
     match = SUPPORT_INTRO.search(page)
     assert match, "the Agent support section carries no bilingual intro paragraph"
-    observed, verified = _declared_support()
+    observed, verified, standin = _declared_support()
 
     for lang, intro in zip(("en", "tr"), match.groups()):
         sentences = [part.strip() for part in intro.strip().split(".") if part.strip()]
         assert len(sentences) == 3, (lang, sentences)
         obs_clauses = [clause.strip() for clause in sentences[1].split(";")]
-        assert len(obs_clauses) == 5, (lang, obs_clauses)
+        assert len(obs_clauses) == 6, (lang, obs_clauses)
 
         assert set(INLINE_CODE.findall(obs_clauses[0])) == observed["session_store"], lang
         assert set(INLINE_CODE.findall(obs_clauses[1])) == observed["call_return"] | {"call-return"}, lang
         assert set(INLINE_CODE.findall(obs_clauses[2])) == observed["transcript_only"], lang
         assert set(INLINE_CODE.findall(obs_clauses[3])) == observed["unknown"] | {"unknown"}, lang
         assert set(INLINE_CODE.findall(obs_clauses[4])) == observed["stateless"], lang
+        assert set(INLINE_CODE.findall(obs_clauses[5])) == observed["cloud"], lang
 
         meas_clauses = [clause.strip() for clause in sentences[2].split(";")]
         assert len(meas_clauses) == 2, (lang, meas_clauses)
-        assert set(INLINE_CODE.findall(meas_clauses[0])) == {"full", "partial"}, lang
+        assert set(INLINE_CODE.findall(meas_clauses[0])) == {"full", "partial"} | standin, lang
         assert set(INLINE_CODE.findall(meas_clauses[1])) == verified["documented"] | {"documented", "untested"}, lang
 
     en_intro, tr_intro = match.groups()
@@ -180,6 +194,50 @@ def test_the_landing_page_support_intro_states_how_each_adapter_is_observed_and_
     assert "measured against an install" in en_intro and "published docs only" in en_intro and "have not been run" in regex_collapse(en_intro)
     assert "oturum deposunu çözüp okur" in regex_collapse(tr_intro) and "kendisi tutar" in regex_collapse(tr_intro)
     assert "ölçülmüştür" in tr_intro and "yayımlanmış dokümandan" in regex_collapse(tr_intro) and "henüz koşulmamıştır" in regex_collapse(tr_intro)
+
+
+def test_the_landing_page_support_intro_describes_how_cloud_adapters_are_observed():
+    """LANDING-REFRESH-3: `Each adapter` at the start of the support intro promises every packaged adapter is
+    covered, so `cloud-generic` cannot be omitted while the table below leaves cloud templates out; the
+    intro must name every cloud adapter from `src/ao/adapters/*.json` and state that its declaration
+    observes work through pull-request polling (`poll`) and Git results (`result`)."""
+    match = SUPPORT_INTRO.search(_page())
+    assert match, "the Agent support section carries no bilingual intro paragraph"
+    observed, _, _ = _declared_support()
+    assert observed["cloud"], "no cloud adapter declared in src/ao/adapters/*.json"
+
+    for lang, intro in zip(("en", "tr"), match.groups()):
+        sentences = [part.strip() for part in intro.strip().split(".") if part.strip()]
+        obs_clauses = [clause.strip() for clause in sentences[1].split(";")]
+        named_adapters = set(INLINE_CODE.findall(sentences[1])) - {"call-return", "unknown"}
+        assert named_adapters == set(A.package_adapters()), (lang, set(A.package_adapters()) - named_adapters)
+        assert set(INLINE_CODE.findall(obs_clauses[-1])) == observed["cloud"], (lang, obs_clauses[-1])
+
+    en_cloud = regex_collapse(match.group(1).split(".")[1].split(";")[-1])
+    tr_cloud = regex_collapse(match.group(2).split(".")[1].split(";")[-1])
+    assert "pull-request polling" in en_cloud and "Git results" in en_cloud, en_cloud
+    assert "pull request yoklaması" in tr_cloud and "Git sonuçları" in tr_cloud, tr_cloud
+
+
+def test_the_landing_page_does_not_claim_standin_tested_adapters_were_measured_against_an_install():
+    """LANDING-REFRESH-3: `openai-api` sits in the `partial` row, but its declaration in
+    `src/ao/adapters/openai-api.json` states that `ao-api-review` was run against a stand-in of the
+    chat-completions endpoint on this machine while a provider's own answer is proven on a local candidate
+    by the owner. Claiming that the `full` and `partial` rows were measured against an install without
+    qualifying `openai-api` overstates that evidence."""
+    match = SUPPORT_INTRO.search(_page())
+    assert match, "the Agent support section carries no bilingual intro paragraph"
+    _, _, standin = _declared_support()
+    assert standin, "no stand-in-measured adapter found in src/ao/adapters/*.json"
+
+    for lang, intro in zip(("en", "tr"), match.groups()):
+        meas_clause = intro.strip().split(".")[2].split(";")[0]
+        assert standin <= set(INLINE_CODE.findall(meas_clause)), (lang, meas_clause)
+
+    en_meas = regex_collapse(match.group(1).split(".")[2].split(";")[0])
+    tr_meas = regex_collapse(match.group(2).split(".")[2].split(";")[0])
+    assert "stand-in endpoint" in en_meas and "owner's local run" in en_meas, en_meas
+    assert "vekil bir uç noktaya" in tr_meas and "sahibinin yerel koşumuyla" in tr_meas, tr_meas
 
 
 def regex_collapse(text):
