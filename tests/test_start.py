@@ -457,8 +457,123 @@ def test_start_ignores_project_local_profiles_json_and_uses_selected_pair(tmp_pa
     assert saved["implementer"]["adapter"] == "alpha"
     assert A.block_adapter(saved["reviewer"]) == "beta"
     assert saved["architect"]["adapter"] == "alpha"
-    assert A.profiles(root)["alpha-beta"] == {"implementer": "alpha", "reviewer": "beta", "architect": "alpha"}
-    assert A.default_profile(root) == "alpha-beta"
+    assert A.profiles()["alpha-beta"] == {"implementer": "alpha", "reviewer": "beta", "architect": "alpha"}
+    assert A.default_profile() == "alpha-beta"
+    assert A.profiles(root)["gamma-beta"] == {"implementer": "gamma", "reviewer": "beta", "architect": "gamma"}
+    assert A.default_profile(root) == "gamma-beta"
+
+
+def test_project_local_profiles_json_drives_init_and_review_fallback(tmp_path, monkeypatch, capsys):
+    root = _repo(tmp_path)
+    bin_dir = tmp_path / "bin"
+    for name in ("alpha-cli", "beta-cli", "gamma-cli"):
+        standin.program(bin_dir, name, REVIEW_STANDIN)
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+    monkeypatch.setenv("AO_USER_ADAPTERS", str(tmp_path / "user-adapters"))
+
+    adapters = {
+        "alpha": _adapter("alpha", "alpha-cli", "fam-alpha", verified="full", trust_flag="--read-only"),
+        "beta": _adapter("beta", "beta-cli", "fam-beta", verified="full", trust_flag="--no-tools"),
+        "gamma": _adapter("gamma", "gamma-cli", "fam-gamma", verified="documented", trust_flag="--sandbox"),
+    }
+    monkeypatch.setattr(A, "package_adapters", lambda: adapters)
+    monkeypatch.setattr(A, "turn_adapter", lambda aid: adapters.get(aid))
+    monkeypatch.setattr(A, "adapter_catalog", lambda r=None: {
+        k: {"id": k, "source": "package", "path": k, "adapter": v, "problem": None}
+        for k, v in adapters.items()
+    })
+
+    project_adapters = os.path.join(root, ".ao", "adapters")
+    os.makedirs(project_adapters, exist_ok=True)
+    with open(os.path.join(project_adapters, "profiles.json"), "w", encoding="utf-8") as fh:
+        json.dump(
+            {
+                "init": "gamma-beta",
+                "profiles": {
+                    "gamma-beta": {"implementer": "gamma", "reviewer": "beta", "architect": "gamma"},
+                },
+            },
+            fh,
+        )
+
+    assert "gamma-beta" in A.profiles(root)
+    assert A.default_profile(root) == "gamma-beta"
+
+    parser = cli.build_parser(root)
+    parsed = parser.parse_args(["init", "--profile", "gamma-beta", "--no-mcp"])
+    assert parsed.profile == "gamma-beta"
+
+    # Unconfigured-reviewer fallback in cmd_review reads the project's default_profile(root).
+    assert cli.cmd_review(
+        {"root": root, "project": "demo"},
+        SimpleNamespace(
+            range_revs=None, range_slice=None, boundary=None, pinned=False,
+            carried=None, person=None, author=None,
+        ),
+    ) == 1
+    review_out = _plain(capsys)
+    assert "beta-cli" in review_out
+
+    assert cli.cmd_init({"root": root}, parsed) == 0
+    _plain(capsys)
+    saved = A.load_config(root)
+    assert saved["implementer"]["adapter"] == "gamma"
+    assert A.block_adapter(saved["reviewer"]) == "beta"
+    assert saved["architect"]["adapter"] == "gamma"
+
+
+def test_start_does_not_write_user_profile_when_cmd_init_refuses(tmp_path, monkeypatch, capsys):
+    root = _repo(tmp_path)
+    bin_dir = tmp_path / "bin"
+    standin.program(bin_dir, "alpha-cli", REVIEW_STANDIN)
+    standin.program(
+        bin_dir,
+        "beta-cli",
+        "import sys\n"
+        "if '--version' in sys.argv:\n"
+        "    print('standin-agent 1.0.0')\n"
+        "    raise SystemExit(0)\n"
+        "print('probe refused', file=sys.stderr)\n"
+        "raise SystemExit(17)\n",
+    )
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+    monkeypatch.setenv("AO_USER_ADAPTERS", str(tmp_path / "user-adapters"))
+
+    adapters = {
+        "alpha": _adapter("alpha", "alpha-cli", "fam-alpha", verified="full", trust_flag="--read-only"),
+        "beta": _adapter("beta", "beta-cli", "fam-beta", verified="full", trust_flag="--no-tools"),
+    }
+    monkeypatch.setattr(A, "package_adapters", lambda: adapters)
+    monkeypatch.setattr(A, "turn_adapter", lambda aid: adapters.get(aid))
+    monkeypatch.setattr(A, "adapter_catalog", lambda r=None: {
+        k: {"id": k, "source": "package", "path": k, "adapter": v, "problem": None}
+        for k, v in adapters.items()
+    })
+    monkeypatch.setattr(cli, "cmd_demo", lambda cfg, a: 0)
+    monkeypatch.setattr(cli, "cmd_hooks", lambda cfg, a: 0)
+    monkeypatch.setattr(cli, "cmd_prove", lambda cfg, a: 0)
+
+    # 1. No prior user profiles.json: failed cmd_init leaves no profiles.json behind.
+    cfg = A.load_config(root)
+    assert cli.cmd_start(cfg, SimpleNamespace(yes=True)) == 1
+    out = _plain(capsys)
+    assert "init refused: reviewer probe" in out
+    assert "wrote profile" not in out
+    assert not os.path.exists(A.user_profiles_path())
+
+    # 2. Existing user profiles.json: failed cmd_init leaves machine-wide init default untouched.
+    A.write_profile("beta-alpha", {"implementer": "beta", "reviewer": "alpha", "architect": "beta"}, default=True)
+    with open(A.user_profiles_path(), "rb") as fh:
+        before_bytes = fh.read()
+    assert A.default_profile() == "beta-alpha"
+
+    assert cli.cmd_start(cfg, SimpleNamespace(yes=True)) == 1
+    out = _plain(capsys)
+    assert "init refused: reviewer probe" in out
+    assert "wrote profile" not in out
+    with open(A.user_profiles_path(), "rb") as fh:
+        assert fh.read() == before_bytes
+    assert A.default_profile() == "beta-alpha"
 
 
 def test_start_writes_nothing_before_init_step_is_confirmed(tmp_path, monkeypatch, capsys):

@@ -4065,7 +4065,7 @@ def cmd_review(cfg, args):
         if not rv.get("argv") and not carried and not person:
             print(f"{C['yellow']}No reviewer configured.{C['reset']} Add to .ao/config.json, or "
                   f"`ao role set reviewer <adapter> --model <model>`:")
-            reviewer = (A.profiles().get(A.default_profile()) or {}).get("reviewer") or ""
+            reviewer = (A.profiles(root).get(A.default_profile(root)) or {}).get("reviewer") or ""
             try:
                 example = _reviewer_block(reviewer, _models(reviewer).get("review"))
             except ValueError:

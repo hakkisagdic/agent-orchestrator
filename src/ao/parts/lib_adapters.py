@@ -274,9 +274,9 @@ def _layer_profile_document(path):
 
 
 def _profile_document(root=None):
-    """Merged adapters/profiles.json across package and user layers."""
+    """Merged adapters/profiles.json across package, user and project layers."""
     merged = {"profiles": {}}
-    for _, folder in adapter_layers():
+    for _, folder in adapter_layers(root):
         doc = _layer_profile_document(os.path.join(folder, PROFILES_FILE))
         if doc.get("init"):
             merged["init"] = doc["init"]
@@ -294,7 +294,7 @@ def user_profiles_path():
     return os.path.join(os.environ.get("AO_USER_ADAPTERS") or os.path.join(HOME, ".ao", "adapters"), PROFILES_FILE)
 
 
-def write_profile(name, roles, default=True, path=None):
+def write_profile(name, roles, default=True, path=None, check_only=False):
     """Record a profile `{implementer, reviewer, architect}` in profiles.json without touching shipped files.
 
     Opened and replaced in its folder held through no link, and refused when a link, a non-regular file or a hard link
@@ -352,7 +352,9 @@ def write_profile(name, roles, default=True, path=None):
         base = os.path.dirname(base)
     if storage.not_a_folder_of_its_own(base):
         raise storage.InTheWay(base, "is a link or a file where a folder goes")
-    with storage._tree_folder(base, folder_parts, make=True) as folder:
+    with storage._tree_folder(base, folder_parts, make=not check_only) as folder:
+        if folder is None:
+            return target
         try:
             info = storage._tree_stat(folder, leaf)
         except FileNotFoundError:
@@ -364,7 +366,10 @@ def write_profile(name, roles, default=True, path=None):
                 raise storage.InTheWay(target, "is no regular file")
             if info.st_nlink != 1:
                 raise storage.InTheWay(target, "is a file with another name")
-            raw = storage._tree_bytes(folder, leaf)
+            if not check_only:
+                raw = storage._tree_bytes(folder, leaf)
+        if check_only:
+            return target
         try:
             loaded = json.loads(raw.decode(UTF8)) if raw is not None else {}
         except (UnicodeDecodeError, ValueError):

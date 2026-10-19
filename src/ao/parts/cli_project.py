@@ -351,7 +351,7 @@ def _profile_config(root, args, base):
     person's opt-in once it writes.
     """
     cfg = dict(base) if isinstance(base, dict) else {}
-    presets = A.profiles()
+    presets = A.profiles(root)
     given_roles = getattr(args, "roles", None)
     prof = dict(given_roles) if isinstance(given_roles, dict) else presets.get(getattr(args, "profile", None) or "")
     impl_adapter = getattr(args, "implementer", None) or (prof or {}).get("implementer")
@@ -363,7 +363,7 @@ def _profile_config(root, args, base):
         opted.append("review.same_family labeled")
     if not impl_adapter and not prof:
         return cfg, opted
-    roles = prof or presets.get(A.default_profile()) or {}
+    roles = prof or presets.get(A.default_profile(root)) or {}
     added = []
     if "implementer" not in cfg:
         impl_adapter = impl_adapter or roles.get("implementer")
@@ -438,12 +438,12 @@ def _planned_runtime_config(root, cfg):
     return runtime
 
 
-def _init_tier_hints(args):
+def _init_tier_hints(args, root=None):
     """How `ao init` goes on after its probe refused a reviewer no review tier admits (REVIEW-TIERS)."""
     profile = getattr(args, "profile", None)
     base = f"ao init --profile {profile}" if profile else " ".join(
         ["ao init"] + ([f"--implementer {args.implementer}"] if getattr(args, "implementer", None) else []))
-    other = A.default_profile()
+    other = A.default_profile(root)
     lines = [f"{C['dim']}or, at init:{C['reset']}"]
     if other and other != profile:
         lines.append(f"ao init --profile {other}   a reviewer of another model family: the strongest tier")
@@ -579,7 +579,7 @@ def cmd_init(cfg, args):
             f"{_reviewer_probe_text(reviewer_probe)}"
         )
         if reviewer_probe.get("tier_refused"):
-            for line in _init_tier_hints(args):
+            for line in _init_tier_hints(args, root):
                 print(f"  {line}")
         return 1
 
@@ -2641,6 +2641,16 @@ def cmd_start(cfg, args):
     init_cmd = f"ao init --profile {chosen['profile']}"
     if ask_step("Step 2/4: ao init", init_cmd):
         try:
+            A.write_profile(chosen["profile"], chosen["roles"], default=True, check_only=True)
+        except OSError as exc:
+            print(f"\n  {C['red']}start refused{C['reset']}: could not write profile to "
+                  f"{A.shown_text(_home_relative(A.user_profiles_path()))} ({exc}); "
+                  "make the adapter folder and profiles.json regular files of your own, then run `ao start` again")
+            return 1
+        code = cmd_init(cfg, _start_init_args(chosen["profile"], chosen["roles"]))
+        if code:
+            return code
+        try:
             profile_path = A.write_profile(chosen["profile"], chosen["roles"], default=True)
         except OSError as exc:
             print(f"\n  {C['red']}start refused{C['reset']}: could not write profile to "
@@ -2650,9 +2660,6 @@ def cmd_start(cfg, args):
         print(f"  {C['green']}wrote profile{C['reset']} {chosen['profile']} "
               f"(implementer={chosen['roles']['implementer']}, reviewer={chosen['roles']['reviewer']}, "
               f"architect={chosen['roles'].get('architect') or 'none'}) → {_home_relative(profile_path)}")
-        code = cmd_init(cfg, _start_init_args(chosen["profile"], chosen["roles"]))
-        if code:
-            return code
 
     if ask_step("Step 3/4: ao hooks install", "ao hooks install"):
         if not os.path.lexists(os.path.join(root, ".ao", "config.json")):
