@@ -11,6 +11,7 @@ A value that is present but unusable - a string where a number belongs, a number
 out of range - is not used, and `ao doctor` says what was set and what ao uses.
 """
 import json
+import math
 import os
 from collections import namedtuple
 
@@ -46,6 +47,13 @@ SETTINGS = {
     "stall_minutes": Setting(
         60, int, 1, None, "project",
         "minutes a staged candidate may wait to land before throughput calls the slice stalled"),
+    "slice_budget_minutes": Setting(
+        0, int, 0, None, "project",
+        "minutes one run of a slice may spend before the watchdog parks it; 0 leaves it unbounded"),
+    "slice_budget_spend": Setting(
+        0.0, float, 0, None, "project",
+        "implementer spend, in the unit its adapter records, one run of a slice may reach before the "
+        "watchdog parks it; 0 leaves it unbounded"),
     "size.guideline_paths": Setting(
         5, int, 1, None, "project",
         "paths a candidate may change before its boundary must say why it is one slice"),
@@ -354,7 +362,11 @@ def usable(key, value):
         if isinstance(value, bool) or not isinstance(value, int):
             return False
     elif spec.kind is float:
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
+        try:
+            finite = not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
+        except OverflowError:
+            return False
+        if not finite:
             return False
     elif spec.kind is str:
         return isinstance(value, str) and bool(value.strip()) and "/" not in value and "\\" not in value
@@ -379,7 +391,7 @@ def expected(key):
         return "a repository URL or path"
     if spec.kind is str:
         return "a name with no path separator"
-    words = {int: "a whole number", float: "a number"}[spec.kind]
+    words = {int: "a whole number", float: "a finite number"}[spec.kind]
     if spec.minimum is not None and spec.maximum is not None:
         return f"{words} from {spec.minimum} to {spec.maximum}"
     if spec.minimum is not None:
@@ -420,7 +432,10 @@ def parse(key, text):
     if spec.kind is int:
         value = int(text)
     elif spec.kind is float:
-        value = float(text)
+        try:
+            value = float(text)
+        except OverflowError as exc:
+            raise ValueError(f"{key} must be {expected(key)}") from exc
     elif spec.kind is list:
         value = [part.strip() for part in str(text).split(",") if part.strip()]
     else:

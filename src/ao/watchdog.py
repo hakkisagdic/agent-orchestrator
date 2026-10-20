@@ -9,6 +9,8 @@ have cost when a human noticed twenty minutes later.
 Guards, in order — the point is to spend nothing when spending would not help:
 
   -1. Has a human taken the tree?           (.ao/hold — overrides everything)
+  -1b. Has the running slice spent past its budget, or is a reading its budget needs missing?
+                                             (park it; nothing resumes it)
   0. Is an agent already WORKING here?      (cwd match AND a moving transcript; a
                                              process alive but long silent is hung,
                                              and is reaped rather than waited on)
@@ -33,6 +35,7 @@ Run it from cron/launchd every couple of minutes, or once by hand.
 import argparse
 from contextvars import ContextVar
 import json
+import math
 import os
 import re
 import subprocess
@@ -2138,6 +2141,356 @@ def touch_quota_park(root, st, cfg=None):
                   red_after=red_after, what=f"{items}: {park.get('text')}")
 
 
+# ---- a slice past the budget it was given (SLICE-BUDGET) ---------------------------------------
+#
+# The watchdog nags a slice that makes no progress and parks one whose window is spent, but nothing
+# stopped it starting turn after turn on a slice that moved - just slowly, or expensively. What a
+# slice spent was read only after the fact, by `ao gain`. A slice given a budget is parked when its
+# current run spends past it, and ao never gives it more: the architect, or a person, does.
+
+BUDGET_NEEDS = "budget"
+BUDGET_WHY = "the slice spent past the budget it was given"
+
+
+def budget_needs(reading):
+    """The `needs:` a slice past its budget carries: the reading it is past."""
+    return f"{BUDGET_NEEDS} ({reading})"
+
+
+def _is_budget_park(row):
+    """Whether a slice ledger row is the watchdog parking the slice on its budget."""
+    needs = str(((row.get("notes") if isinstance(row.get("notes"), dict) else None) or {}).get("needs") or "")
+    return (row.get("to") == "blocked" and row.get("by") == "watchdog"
+            and (row.get("why") == BUDGET_WHY or needs == BUDGET_NEEDS or needs.startswith(f"{BUDGET_NEEDS} (")))
+
+
+def budget_start(item_id, moves):
+    """When the slice's current run started: its recorded budget grant, or None where no line authorizes it.
+
+    A slice's first move to `running` starts its run, and a later move to `running` starts a new
+    run only when a person, the architect, or the watchdog's quota-park resume makes it: the
+    implementer blocking and resuming its own slice keeps the run it already had, so it cannot
+    grant itself a fresh budget. A row moved by hand has no line (docs/slices.md), and a slice that
+    left `running` in the ledger and was later moved back to `running` by hand, or that the
+    watchdog parked on budget without a person or the architect starting it since, has no recorded
+    start for its current run.
+    """
+    start, started, parked, running = None, False, False, False
+    for row in moves:
+        if row.get("slice") != item_id:
+            continue
+        to, by, at = row.get("to"), row.get("by"), row.get("at")
+        stamp = (float(at) if isinstance(at, (int, float)) and not isinstance(at, bool) and math.isfinite(at)
+                 else None)
+        if to == "running":
+            if by not in ("implementer", "watchdog", None) or (by == "watchdog" and not parked):
+                start, started, parked, running = stamp, True, False, True
+            elif not started:
+                start, started, parked, running = stamp, True, False, True
+            elif not parked:
+                running = True
+        elif _is_budget_park(row):
+            parked, running = True, False
+        else:
+            running = False
+    return start if running and not parked else None
+
+
+def budget_runs(board, moves, cfg):
+    """The running intervals [(start, end, closed)] of each implementer slice, from the slice ledger and board.
+
+    A move to `running` opens an interval and a move elsewhere closes it. A slice that left `running`
+    by hand - landing moves a slice to `done` by hand (docs/slices.md) - closes by the next start
+    recorded for another slice, or stays open when none followed. An implementer slice on `running`
+    with no recorded start is open from its last recorded departure from `running` (or the beginning
+    of time), so its share of a turn's spend with another running slice is never guessed away.
+    """
+    items = {item["id"]: item for section in board.values() for item in section}
+    running = {item["id"] for item in board["running"] if implementers_item(item, cfg)}
+    events = [(row.get("slice"), row.get("to"), float(row["at"])) for row in moves
+              if isinstance(row.get("slice"), str) and row.get("slice")
+              and (row["slice"] not in items or implementers_item(items[row["slice"]], cfg))
+              and isinstance(row.get("at"), (int, float)) and not isinstance(row.get("at"), bool)
+              and math.isfinite(row["at"])]
+    runs, opened, closed_at = {}, {}, {}
+    for sid, to, at in events:
+        if to == "running":
+            if sid in opened:
+                runs.setdefault(sid, []).append((opened[sid], at, True))
+            opened[sid] = at
+        elif sid in opened:
+            runs.setdefault(sid, []).append((opened.pop(sid), at, True))
+            closed_at[sid] = at
+    for sid, lo in opened.items():
+        if sid in running:
+            runs.setdefault(sid, []).append((lo, float("inf"), False))
+        else:
+            later = [at for other, to, at in events if to == "running" and other != sid and at >= lo]
+            runs.setdefault(sid, []).append((lo, later[0], True) if later else (lo, float("inf"), False))
+    for sid in running - set(opened):
+        runs.setdefault(sid, []).append((closed_at.get(sid, -float("inf")), float("inf"), False))
+    return runs
+
+
+def _read_transcript_records(msgs):
+    """The implementer's transcript records; raises when the transcript store is missing or fails to read."""
+    if not msgs or not os.path.exists(msgs):
+        raise OSError("the transcript could not be read")
+    if isinstance(msgs, A.DatabaseTail):
+        declared = msgs.record
+        table, session_key = A._store_name(declared.get("table")), A._store_name(declared.get("session_key"))
+        order = A._store_name(declared.get("order")) or A._store_name(declared.get("time"))
+        if not (msgs.session and table and session_key and order):
+            raise OSError("the transcript could not be read")
+        connection = msgs._connect()
+        if connection is None:
+            raise OSError("the transcript could not be read")
+        try:
+            connection.execute(
+                f"SELECT 1 FROM {table} WHERE {session_key} = ? ORDER BY {order} DESC LIMIT 1",
+                (msgs.session,),
+            ).fetchall()
+            children = A._block(declared, "children")
+            child_table = A._store_name(children.get("table"))
+            child_key = A._store_name(children.get("key"))
+            child_parent = A._store_name(children.get("parent_key"))
+            child_order = A._store_name(children.get("order")) or A._store_name(children.get("time"))
+            child_session = A._store_name(children.get("session_key")) or child_key
+            if child_table and children.get("as") and child_key and child_parent and child_order:
+                connection.execute(
+                    f"SELECT 1 FROM {child_table} WHERE {child_session} = ? ORDER BY {child_order} ASC LIMIT 1",
+                    (msgs.session,),
+                ).fetchall()
+        finally:
+            connection.close()
+        return A.read_tail(msgs, 400_000_000)
+    with A._open_regular(msgs) as fh:
+        size = os.fstat(fh.fileno()).st_size
+        fh.seek(max(0, size - 400_000_000))
+        blob = fh.read()
+    recs = A.read_tail(msgs, 400_000_000)
+    if not recs and blob.strip():
+        raise OSError("the transcript could not be read")
+    return recs
+
+
+def _read_subagent_records(path):
+    """A subagent transcript's records; raises when the subagent transcript fails to read."""
+    with A._open_regular(path) as fh:
+        blob = fh.read()
+    recs = A.subagent_records(path)
+    if not recs and blob.strip():
+        raise OSError("the transcript could not be read")
+    return recs
+
+
+def _usage_events(cfg):
+    """(unit, [(window_start, at, grown)]) from the implementer's transcript, in the unit its adapter declares.
+
+    Each usage record is read in its turn (`next_turn`, `add_usage`), so per-response records and
+    later records of a turn that already wrote usage before a slice started count from the slice's
+    start onwards, and a whole-turn usage summary whose turn opened before the start and closed after
+    it keeps its turn opening time (`window_start < start`) and is charged in full to the slice when no
+    other slice ran in that span. Replies the harness wrote in the model's place (`in_place_reply`)
+    count nothing, and an adapter that declares no usage telemetry or a transcript store that fails to
+    read raises so a spend budget never passes silently.
+    """
+    msgs, _ = A.session_paths(cfg)
+    adapter = A.implementer_adapter(cfg)
+    shape = A.transcript_shape(adapter)
+    usage = shape["usage"]
+    unit = shape["unit"] or "unit"
+    if not usage:
+        name = A.implementer_adapter_id(cfg) or str((cfg.get("implementer") or {}).get("adapter") or "unknown")
+        raise ValueError(f"adapter {name!r} declares no transcript usage telemetry")
+    recs = _read_transcript_records(msgs)
+    turn, counted, events, when = None, {}, [], None
+    for rec, subagent in A.with_subagents(recs, shape, msgs, read=_read_subagent_records):
+        when = A._ledger_time(A.record_time(rec, shape)) or when
+        kind = A.record_kind(rec, shape)
+        turn, opened = A.next_turn(turn, rec, shape, subagent)
+        if opened:
+            turn["at"] = when
+            turn["steps"] = 0
+        body = A.record_body(rec, shape)
+        if body is None or kind != usage["type"] or A.in_place_reply(rec, shape):
+            continue
+        turn = {"at": when, "steps": 0} if turn is None else turn
+        grown = A.add_usage(turn, body, usage, counted, subagent)
+        if when is not None and grown > 0:
+            steps = turn.get("steps", 0)
+            lo = (when if usage["reading"] == "per-response" or steps > 0
+                  else (turn.get("at") if turn.get("at") is not None else when))
+            events.append((lo, when, float(grown)))
+            turn["at"] = when
+            turn["steps"] = steps + 1
+    return unit, events
+
+
+def budget_spend_for(item_id, start, runs, events):
+    """(spent, shared) for `item_id`'s run since `start`: what it spent alone, and which slices shared a turn's spend."""
+    spent, shared = 0.0, []
+    for lo, when, grown in events:
+        if when < start:
+            continue
+        span = max(lo, start)
+        active = sorted(sid for sid, intervals in runs.items()
+                        if any(r_lo <= when and (span < r_hi if closed else span <= r_hi)
+                               for r_lo, r_hi, closed in intervals))
+        if len(active) > 1 and item_id in active:
+            for sid in active:
+                if sid not in shared:
+                    shared.append(sid)
+        elif active == [item_id] or not active:
+            spent += grown
+    return spent, shared
+
+
+def budget_reading(minutes, minute_budget, spent, unit, spend_budget, spend_missing=None):
+    """The reading a park writes: each budget the run is past or could not be read against."""
+    parts = []
+    if spend_budget:
+        if spend_missing:
+            parts.append(spend_missing)
+        elif spent is not None and spent > spend_budget:
+            parts.append(f"spent {spent:g} {unit} of {spend_budget:g}")
+    if minute_budget and minutes > minute_budget:
+        whole = max(int(minutes), int(minute_budget) + 1)
+        parts.append(f"{whole}m of {minute_budget}m")
+    return "; ".join(parts)
+
+
+def _committed_project_config(root):
+    """The project `.ao/config.json` from `HEAD`, or `{}` when no committed config can be read."""
+    if not root:
+        return {}
+    try:
+        raw = json.loads(A._git_output(root, "show", "HEAD:.ao/config.json") or "{}")
+    except Exception:
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _effective_slice_budgets(root, cfg):
+    """(minute_budget, spend_budget) holding the tightest positive caps across config, HEAD, and machine settings.
+
+    A cap the implementer cannot move is the machine settings' cap, outside the tree. A cap
+    committed in `.ao/config.json` counts while `HEAD` shows it, and is no guard against an
+    implementer that moves `HEAD` or breaks the git read (which reads as no committed cap); a
+    person widens or switches off a cap with `0` where it is set.
+    """
+    committed = _committed_project_config(root)
+    out = {}
+    for key, kind in (("slice_budget_minutes", int), ("slice_budget_spend", float)):
+        candidates = [S.get(cfg, key), S.get({}, key)]
+        if key in committed and S.usable(key, committed[key]):
+            candidates.append(kind(committed[key]))
+        positive = [kind(val) for val in candidates if val and val > 0]
+        out[key] = min(positive) if positive else kind(0)
+    return out["slice_budget_minutes"], out["slice_budget_spend"]
+
+
+def slice_budget(root, cfg, dry_run=False, now=None):
+    """Park the implementer's running slices that spent past their budget or lack a reading it needs (SLICE-BUDGET).
+
+    A budget is per run, not per slice: `slice_budget_minutes` of wall time and `slice_budget_spend`
+    of the implementer's own spend - in the unit its adapter's transcript records - since the slice's
+    newest recorded move to running, including the spend of the turn that started it (charged in full
+    when a whole-turn usage summary opened before the start and closed after it), attributed to the
+    slice running then. A slice blocked on quota and resumed starts a new run, and one a person starts
+    again gets its budget again.
+
+    The guard fails closed: every reading a configured budget cannot make - no recorded start, an
+    unreadable slice ledger, a transcript store that fails to read, spend that overlapping slices make
+    unattributable, or usage the adapter does not report for a spend cap - parks the slice with
+    `needs: budget (<reading>)`, by the watchdog, and tells the architect; it never reads a missing
+    reading as zero or as within budget. The implementer may not lift a watchdog's block, and nothing
+    resumes it by itself: only the architect's or a person's `ao slice start` does, and the run the
+    budget counts from starts again there. Nothing is read when no budget is set.
+    """
+    now = time.time() if now is None else now
+    minute_budget, spend_budget = _effective_slice_budgets(root, cfg)
+    if not minute_budget and not spend_budget:
+        return False
+    edit = A.BoardEdit(root)
+    running = [item for item in edit.board["running"] if implementers_item(item, cfg)]
+    try:
+        moves = A.slice_moves(root)
+    except Exception as exc:
+        if not running:
+            print(f"the slice ledger could not be read ({exc}); no slice can be judged against its budget, "
+                  "so not nudging")
+            return True
+        print(f"the slice ledger could not be read ({exc}); parking {', '.join(item['id'] for item in running)}")
+        overdue = [(item["id"], "the slice ledger could not be read") for item in running]
+        held = {}
+        for item in running:
+            prior_needs = item["notes"].get(A.HELD_NEEDS) or item["notes"].get("needs")
+            held[item["id"]] = None if str(prior_needs or "").startswith(f"{BUDGET_NEEDS} (") else prior_needs
+        moves = None
+    if moves is not None:
+        if not running:
+            return False
+        starts = [(item, budget_start(item["id"], moves)) for item in running]
+        runs = budget_runs(edit.board, moves, cfg) if spend_budget else {}
+        unit, events, spend_err = None, [], None
+        if spend_budget and any(start is not None and start <= now for _, start in starts):
+            try:
+                unit, events = _usage_events(cfg)
+            except Exception as exc:
+                spend_err = exc
+        overdue, held = [], {}
+        for item, start in starts:
+            if start is None or start > now:
+                reading = "no recorded start"
+            else:
+                minutes = max(0.0, (now - start) / 60.0)
+                spent, spend_missing = None, None
+                if spend_budget:
+                    if spend_err is not None:
+                        if isinstance(spend_err, ValueError) and "declares no transcript usage telemetry" in str(spend_err):
+                            spend_missing = str(spend_err)
+                        else:
+                            spend_missing = "the transcript could not be read"
+                            print(f"{item['id']}: its spend could not be read ({spend_err}); parking")
+                    else:
+                        spent, shared = budget_spend_for(item["id"], start, runs, events)
+                        if shared:
+                            spent = None
+                            spend_missing = f"spend cannot be attributed across {', '.join(shared)}"
+                reading = budget_reading(minutes, minute_budget, spent, unit, spend_budget,
+                                         spend_missing=spend_missing)
+            if reading:
+                overdue.append((item["id"], reading))
+                prior_needs = item["notes"].get(A.HELD_NEEDS) or item["notes"].get("needs")
+                held[item["id"]] = None if str(prior_needs or "").startswith(f"{BUDGET_NEEDS} (") else prior_needs
+        if not overdue:
+            return False
+    _FACTS["slice_budget"] = {"items": [item for item, _ in overdue],
+                              "readings": {item: reading for item, reading in overdue}}
+    readings = "; ".join(f"{item}: {reading}" for item, reading in overdue)
+    if dry_run:
+        print(f"DRY RUN: would park {readings} on the budget it was given; not nudging")
+        return True
+    for item, reading in overdue:
+        edit.move(item, "blocked", {"needs": budget_needs(reading), A.HELD_NEEDS: held.get(item)},
+                  by="watchdog", why=BUDGET_WHY)
+    if moves is None:
+        edit.moves.clear()
+    try:
+        edit.write()
+    except A.BoardChanged:
+        print("the board changed while the watchdog read it: nothing moved on budget this cycle, and the next "
+              "cycle decides again on the board as it stands")
+        return True
+    names = ", ".join(item for item, _ in overdue)
+    notify(language.text(cfg, "alarm.slice-budget-title", project=A.project_key(root), items=names),
+           language.text(cfg, "alarm.slice-budget", reading=readings),
+           root, key="slice-budget", window=6 * 3600, audience="architect", what=readings)
+    print(f"{names} parked on the budget it was given ({readings}); not nudging")
+    return True
+
+
 def main():
     # What a cycle decided is printed, board titles and mail subjects included, to a terminal, a pipe
     # or the log a scheduled job keeps: in UTF-8, whatever the platform's code page (#71).
@@ -2779,6 +3132,8 @@ def _cycle_impl(args, root):
         _FACTS["ungranted_commits"] = landed[:120] if landed else None
     impl = cfg.get("implementer") or {}
     if not impl:
+        if not A.hold_state(root) and slice_budget(root, cfg, dry_run=args.dry_run):
+            return 0
         print("no implementer session; nothing to watch")
         return 0
     adapter = A.load_adapter(impl.get("adapter", ""), root)
@@ -2787,6 +3142,8 @@ def _cycle_impl(args, root):
     metered = A.metered_adapter(cfg)
     msgs, _ = A.session_paths(cfg)
     if not msgs or not os.path.exists(msgs):
+        if not A.hold_state(root) and slice_budget(root, cfg, dry_run=args.dry_run):
+            return 0
         # An `auto` ao could not resolve says why, where it read as a transcript gone missing (SESSION-IDENTITY).
         state = A.session_state(cfg, "implementer") or {}
         print(f"the implementer's session is {state['how']}: {state['why']}; nothing to watch"
@@ -2908,6 +3265,11 @@ def _cycle_impl(args, root):
         # Nothing below runs, so no other alarm tells a request nobody has been shown (#30).
         ring_unseen_requests(root, cfg, st, restart)
         print(f"held by {held.get('by')} for {held['minutes']}m: {held.get('reason','')}")
+        return 0
+
+    # -1b — a running slice past its budget, or whose budget reading is missing, parks here and
+    # nothing after this runs for it (SLICE-BUDGET).
+    if slice_budget(root, cfg, dry_run=args.dry_run):
         return 0
 
     # Report anything needing judgement before the guard chain stands down on it.

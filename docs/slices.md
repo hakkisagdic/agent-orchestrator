@@ -101,7 +101,8 @@ stages inside it are the verdicts the review ledger holds for the slice, and com
 why - chained like the other evidence ([ledger.md](ledger.md#slices)). ao makes a move with
 `ao slice start`, `ao slice block` and `ao slice abandon`; an item enters the board with
 `ao board add` or `ao source import`; and the watchdog parks a slice on quota and gives it
-back. A row moved by hand has no line, and where ao recorded an earlier move of it
+back, or on a budget it was given and leaves it to the architect or a person to give more
+([watchdog.md](watchdog.md#a-slice-past-its-budget)). A row moved by hand has no line, and where ao recorded an earlier move of it
 `ao slice status` and `ao slices` name the disagreement - the board holds it under one section
 and the last move ao recorded put it under another - and list a row removed by hand from that
 last move. Landing is still a hand move: the playbook moves a slice to `done` after
@@ -303,8 +304,9 @@ A start writes `since:` and clears `waiting:`, whether the slice was queued or b
 so a later block does not inherit a wait that ended. One the architect or a person makes
 of an item that is not READY records why it was not. A block's reason becomes the row's
 `needs:`; a `needs:` the slice carried is kept in `held-needs:` and given back when it resumes,
-as the watchdog's quota park keeps it, and a slice the watchdog parked is given back when the
-limit resets, or by the architect or a person. `--boundary-file` points a slice at a file
+as the watchdog's quota and budget parks keep it: a slice parked on quota is given back when the
+limit resets, or by the architect or a person, and one parked on its budget only by one of those,
+by starting it again. `--boundary-file` points a slice at a file
 committed in the repository as it stands, `boundary: <path>@<commit>`, in place of its
 acceptance sentence, which the ledger keeps. `--slice` names the slice when more than one is
 running, or another than the one that is. Abandoning a running or blocked slice sends no

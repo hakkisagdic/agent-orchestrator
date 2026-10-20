@@ -781,6 +781,15 @@ bu adrese gider; `ao alarms` merdiveni gösterir.
         "tr": "{error} — sıfırlanma saati belirtilmedi: {reset}'de bir dürtme yeniden dener; daha erken devam etmek "
               "için oturumu sürdürün ya da {items} öğesini blocked'dan çıkarın",
     },
+    # a slice parked when its run spent past the budget it was given ({items}: the board ids, {reading}: each
+    # budget it is past and how far) (SLICE-BUDGET)
+    "alarm.slice-budget-title": {"en": "{project}: {items} past its budget",
+                                 "tr": "{project}: {items} bütçesini aştı"},
+    "alarm.slice-budget": {
+        "en": "{reading} — no nudge starts another turn; the architect or a person gives it more by starting it again",
+        "tr": "{reading} — hiçbir dürtme yeni bir tur başlatmaz; daha fazlasını mimar ya da bir kişi dilimi yeniden "
+              "başlatarak verir",
+    },
     # the watchdog's lines to the phone about the architect ({n}: reports, {pid}: the process woken)
     "watchdog.architect-done": {"en": "✅ *Architect done* — {n} report(s) closed, queue empty",
                                 "tr": "✅ *Mimar bitirdi* — {n} rapor kapandı, kuyruk boş"},

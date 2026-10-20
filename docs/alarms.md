@@ -18,7 +18,7 @@ desktop, Telegram, e-mail, or dead-man-switch ping channels.
 
 Some of what an alarm says follows the project's `language` ([configuration.md](configuration.md)),
 and a project whose `language` is `tr` reads it in Turkish: the architect at quota, a slice parked
-on quota, a failed wake, `ao alarms test`, the lines a red mail adds below an alarm's text, and the
+on quota, a slice past its budget, a failed wake, `ao alarms test`, the lines a red mail adds below an alarm's text, and the
 phone's "architect woken" and "architect done" lines. An alarm's key never follows the language, and
 neither does its audience: a project that changes its language raises the episode that stands, and
 nothing rings again for it.
@@ -167,6 +167,10 @@ reset, since a park that ends at its reset asks nothing of anyone, and is then h
 reset that stands. With none named it is red after the hour and mailed on red's schedule until
 the park ends: a person may be what ends it. Raised once, it went quiet two hours later, while a
 slice whose reset nobody named waited on.
+
+A slice past the budget it was given ([watchdog.md](watchdog.md#a-slice-past-its-budget)) is told to
+the architect, once per window, with the reading it is past (`31m of 30m`, `spent 7.5 credit of 5`)
+and that nothing resumes it but a start; the implementer may not lift the block.
 
 `ao alarms` lists the live episodes with their level and age. `ao alarms test
 --level red` sends a real test through every channel.

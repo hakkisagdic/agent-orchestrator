@@ -1393,6 +1393,26 @@ def _slice_blocked_by(root, iid):
     return rows[-1].get("by") if rows and rows[-1].get("to") == "blocked" else None
 
 
+def _slice_budget_parked(root, iid, item):
+    """Whether a blocked slice was parked on its budget by the watchdog."""
+    needs = str((item.get("notes") or {}).get("needs") or "")
+    if needs == "budget" or needs.startswith("budget ("):
+        return True
+    parked = False
+    for row in A.slice_moves(root):
+        if row.get("slice") != iid:
+            continue
+        if row.get("to") == "running" and row.get("by") not in ("implementer", "watchdog", None):
+            parked = False
+        elif row.get("to") == "blocked" and row.get("by") == "watchdog":
+            row_needs = str(((row.get("notes") if isinstance(row.get("notes"), dict) else None) or {}).get("needs")
+                            or "")
+            if (row.get("why") == "the slice spent past the budget it was given"
+                    or row_needs == "budget" or row_needs.startswith("budget (")):
+                parked = True
+    return parked
+
+
 def _boundary_file_pointer(root, named):
     """(`path@commit`, None) for the boundary file a slice starts against, or (None, why it cannot be one).
 
@@ -1457,6 +1477,10 @@ def _slice_start(cfg, args, edit):
         if not_ready:
             return _slice_refused(f"{not_ready}; an implementer starts only a READY item, and `ao board ready` "
                                   "lists them")
+        if state == "blocked" and _slice_budget_parked(root, iid, item):
+            return _slice_refused(
+                f"{iid} is parked on its budget by the watchdog, and nothing gives it back on its own: "
+                f"the architect or a person gives it more with `ao slice start {iid}`")
         blocker = _slice_blocked_by(root, iid) if state == "blocked" else "implementer"
         if blocker != "implementer":
             return _slice_refused(

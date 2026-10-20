@@ -66,6 +66,7 @@ Order matters: each guard sees only what the ones above left standing.
 | # | guard | measures | verdict when it fires |
 |---|---|---|---|
 | −1 | hold | `.ao/hold` | stand down; red after four hours |
+| −1b | slice budget | the running run's minutes, and the implementer's spend in the unit its adapter records, since its newest recorded move to running | past `slice_budget_minutes` or `slice_budget_spend`, or missing a reading it needs: park the implementer's running items with `needs: budget (…)` and tell the architect — see [below](#a-slice-past-its-budget) |
 | 0 | working here | orphans swept, live turns counted by root | stand down while a turn is live; reap a turn silent past 3× idle, by process group, and stand down and tell a person while what it reaped still runs (`reap-survived`); where the process table cannot be read, stand down and tell a person (`process-table-unreadable`) |
 | 1 | idle | the implementer's last write, a subagent's included, vs `--idle-minutes` | not idle yet: stand down |
 | 1b | usage limit | the implementer's newest words, when its harness wrote them in the model's place; the last nudge, when it died within seconds; each in the words its adapter declares | stopped on its limit: park the implementer's running items until the reset, or one retry where none was named, then resume the session once — see [below](#a-slice-parked-on-quota) |
@@ -207,6 +208,41 @@ again on a fresh stop after the state lost it keeps the `held-needs:` its items'
 the slice ledger by `watchdog`, with why ([ledger.md](ledger.md#slices)). The park moves on the reading
 of the board it was decided on: a board a hand changed meanwhile - a slice landed by hand while keyflip
 was asked - moves nothing, and the cycle stands down, saying so, and decides again on the next.*
+
+## A slice past its budget
+
+*In ao since slice SLICE-BUDGET: a slice can be given a budget - minutes of one run
+(`slice_budget_minutes`) and implementer spend (`slice_budget_spend`, in the unit the adapter's
+transcript records) - and a run that spends past either, or is missing a reading its budget needs,
+is parked once `.ao/hold` is clear, before an active turn, idleness, or a missing session, and
+nothing after it in the cycle runs for a parked slice.
+Because the implementer runs in the project worktree, the guard reads the tightest positive cap
+fresh each cycle across `.ao/config.json`, committed `HEAD:.ao/config.json` (a git read that fails
+reads as no committed cap), and the machine settings: a person widens a cap, or switches it off
+with `0`, where it is set. A cap the implementer cannot move is the machine settings' cap (outside
+the tree); as a known limit, when the only cap is in an uncommitted `.ao/config.json` the
+implementer can widen or zero it, and a cap committed in `.ao/config.json` counts while `HEAD`
+shows it and is no guard against an implementer that moves `HEAD` or breaks the git read (a budget
+is a cost guard, not a gate, and neither reaches a gate outcome under
+[threat-model.md](threat-model.md)). The run starts at the
+slice's first recorded move to `running`, or at a later move to `running` by a person, the
+architect, or the watchdog's quota-park resume (the implementer blocking and resuming its own slice
+keeps the run it already had). Every reading a configured budget cannot make parks the slice and names
+the missing reading in `needs: budget (…)`: no recorded start for the running slice (`no recorded start`, including
+a row moved or returned to `running` by hand after blocking), an unreadable slice ledger (`the slice
+ledger could not be read`), a transcript store that fails to read (`the transcript could not be read`),
+spend that overlapping running slices make unattributable (`spend cannot be attributed across …`), or
+usage the adapter does not report for a spend cap (`adapter … declares no transcript usage telemetry`).
+It never reads a missing reading as zero or as within budget. The park writes
+`needs: budget (31m of 30m)` or `needs: budget (spent 7.5 credit of 5)` - or the missing reading -
+moves the item to `blocked` by the watchdog, and tells the architect. ao never resumes it: the
+implementer may not lift a watchdog's block, and only the architect's or a person's `ao slice start`
+gives it more, starting the run the budget counts from anew. A spend budget reads the implementer's
+transcript from the slice's start, counting per-response and per-step usage records written from that
+start onwards and charging in full a whole-turn usage summary whose turn opened before the start and
+closed after it (over-counting one turn is the safe side of a cap; under-counting lets a slice start
+inside a turn and spend without limit), and attributes each turn's spend to the slice running then.
+Until a spend budget is set, and when no budget is set, no transcript is read.*
 
 ## The architect at its usage limit
 

@@ -38,6 +38,8 @@ machine setting written into a project.
 | `review.prune_after_days` | `30` | project | days after which ao prune moves a review artefact nothing rests on out of the repository |
 | `review_timeout` | `900` | project | seconds one reviewer may take; never taken from the command line |
 | `stall_minutes` | `60` | project | minutes a staged candidate may wait to land before throughput calls the slice stalled |
+| `slice_budget_minutes` | `0` | project | minutes one run of a slice may spend before the watchdog parks it; 0 leaves it unbounded |
+| `slice_budget_spend` | `0.0` | project | implementer spend, in the unit its adapter records, one run of a slice may reach before the watchdog parks it; 0 leaves it unbounded |
 | `size.guideline_paths` | `5` | project | paths a candidate may change before its boundary must say why it is one slice |
 | `size.guideline_product_lines` | `400` | project | product lines a candidate may change before its boundary must say why it is one slice |
 | `size.refuse_product_lines` | `4000` | project | product lines above which no review is credible and ao review refuses before spawning |
@@ -183,6 +185,15 @@ ao config set limits.refuse_below_free_disk_gib 4 --machine
 
 `limits.max_write_lanes` is the project's own: how many lanes `ao lane start` keeps in one
 checkout, a failed one among them until `ao lane remove` retires it ([parallel.md](parallel.md)).
+
+`slice_budget_minutes` and `slice_budget_spend` take the tightest positive cap across the working
+`.ao/config.json`, committed `HEAD:.ao/config.json` (a git read that fails reads as no committed
+cap), and `~/.ao/settings.json` ([watchdog.md](watchdog.md#a-slice-past-its-budget)): a person
+widens a cap, or switches it off with `0`, where it is set. A cap the implementer cannot move is
+the machine settings' cap (`--machine`, outside the tree). As a known limit, a cap set only in an
+uncommitted `.ao/config.json` can be widened or zeroed in the working tree, and a cap committed in
+`.ao/config.json` counts while `HEAD` shows it and is no guard against an implementer that moves
+`HEAD` or breaks the git read.
 
 `review.same_family` weakens a guarantee, so it is a person's act on one project, on the
 record, as a waiver is. `ao config set review.same_family labeled --by <name>` (and `unset`)
