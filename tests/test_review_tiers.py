@@ -239,6 +239,7 @@ def test_a_reviewer_of_the_implementers_family_is_refused_in_one_sentence_by_rol
     out = _plain(capsys)
     assert cli._tier_refusal("it runs the implementer's own engine (codex)") in out and "unresolved binary" not in out
     assert "--review-tier same-family --by <name>" in out and "--review-tier person" in out
+    assert "ao mode lite --by" in out
     assert not (fresh / ".ao").exists()
 
 

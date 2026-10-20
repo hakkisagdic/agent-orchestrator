@@ -430,12 +430,14 @@ def tools_for_role(role, project_scope=None):
 
 
 def status_payload(cfg):
-    from . import watchdog as W
+    from . import cli, watchdog as W
     root = cfg["root"]
     # The server loads the config once, and an agent starts it before its own session has written a
     # transcript: a session `auto` found no session for is looked for again (SESSION-IDENTITY).
     if not (A.session_state(cfg, "implementer") or {}).get("session"):
         cfg = dict(A.load_config(root), root=root)
+    mode = cli.project_mode(cfg)
+    enforcement = cli.ENFORCEMENT_OFF_LITE_LINE if mode == "lite" else "on"
     impl = cfg.get("implementer") or {}
     adapter = A.load_adapter(impl.get("adapter", "")) if impl else {}
     state, age, desc = A.busy(cfg, adapter) if impl else ("unknown", None, "")
@@ -453,6 +455,7 @@ def status_payload(cfg):
     except TableUnreadable as exc:
         processes, unread = None, str(exc)
     return {"project": cfg.get("project") or os.path.basename(root), "root": root,
+            "mode": mode, "enforcement": enforcement,
             "adapter": impl.get("adapter"), "state": state, "seconds_since_write": age,
             "doing": desc, "spinning_minutes": A.spinning(root),
             "nothing_to_do_since": (W.load_state(root).get("idle_answer") or {}).get("since"),

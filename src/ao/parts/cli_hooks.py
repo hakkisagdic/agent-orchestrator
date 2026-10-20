@@ -1606,6 +1606,8 @@ def cmd_push(cfg, args):
         json.dump({"at": int(time.time()), "minutes": args.minutes, "by": os.environ.get("USER", "human")}, open(tok, "w", encoding=UTF8))
         print(f"{C['green']}push allowed{C['reset']} for {args.minutes} minutes"); return 0
     if args.action == "check":
+        if project_mode(dict(A.load_config(root), root=root)) == "lite":
+            return 0
         try:
             t = json.load(open(tok, encoding=UTF8))
             if time.time() - t["at"] <= t.get("minutes", 30) * 60:

@@ -1649,6 +1649,12 @@ def cmd_commit(cfg, args):
     runs. A path staged after the check stays staged, uncommitted. A project ao does not
     govern passes the check with no grant, and `git commit` commits it as before.
     """
+    if project_mode(cfg) == "lite":
+        print(
+            f"{C['red']}commit refused{C['reset']}: there is no gate to commit through in lite mode "
+            f"({ENFORCEMENT_OFF_LITE} — nothing is enforced; switch to full mode with `ao mode full`)"
+        )
+        return 1
     message, file = getattr(args, "message", None), getattr(args, "file", None)
     if message is not None and file is not None:
         print("ao commit takes exactly one of -m MESSAGE or -F FILE")
@@ -1916,6 +1922,8 @@ def _bound_commit_check(cfg, args):
     probe_code = _commit_hook_probe_response(root)
     if probe_code is not None:
         return probe_code
+    if project_mode(dict(A.load_config(root), root=root)) == "lite":
+        return 0
     # On the hook path writes use its top, never the project: a .git planted after the binding check must
     # not redirect the enrollment record into another repository (NESTED-GIT).
     # Kept outside the tree, for a branch not born yet to ask where no ref tracks the marker any more; a proof that

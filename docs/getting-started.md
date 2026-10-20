@@ -74,13 +74,31 @@ otherwise it names the lines for you to add. `ao skill install` writes the playb
 and exits 1 when it did not write one.
 
 With one harness for both roles, a same-family reviewer is refused until you choose a
-[review tier](roles.md#review-tiers): another model of the same family, labeled as weaker
+[review tier](roles.md#review-tiers) for `full` mode: another model of the same family, labeled as weaker
 independence wherever its reviews show, or no model reviewer at all and a person reviewing each
 candidate.
 
 ```bash
 ao init --implementer claude-code --review-tier same-family --by <name>
 ao init --implementer claude-code --review-tier person
+```
+
+Where `ao init` would refuse a `full` setup because no independent reviewer is available
+(for example, the reviewer binary is missing or a same-family reviewer was given no `--review-tier`) or
+because Git hooks cannot be installed at all (a redirected repository, an unknown enrollment, a hook path
+that is not a directory, a foreign hook, or a shared hooks path on Windows), it refuses with nothing
+written and says how a person can start in `lite` mode instead: `ao mode lite --by <name>`, then
+`ao init` (for a shared hooks path elsewhere, `ao init` succeeds and names
+`ao hooks install --allow-shared-hooks` as the next step). `lite` is the basic setup without
+enforcement: no reviewer probe and no commit hooks, `ao commit` refuses because there is no gate to
+commit through, and every surface that reads the mode (`ao status`, `ao doctor`, the MCP status)
+says plainly `enforcement: off - lite` that nothing is enforced ([safety](safety.md)). Once an
+independent reviewer route and hooks are ready, switch the project to `full` mode:
+
+```bash
+ao mode show                         # the current mode and what each mode does and does not protect
+ao mode full                         # checks reviewer independence and hooks, refuses if anything is missing
+ao mode lite --by <name>             # a person switches the project to lite, on the record
 ```
 
 ## 2. Wire what makes the guarantees hold

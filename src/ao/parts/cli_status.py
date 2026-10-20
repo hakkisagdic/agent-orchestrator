@@ -92,6 +92,9 @@ def status_facts(cfg, msg_count=8, window_hours=24.0, shown=False):
     root, impl, adapter = _ctx(cfg)
     facts = {"project": cfg.get("project") or os.path.basename(root), "root": root, "at": int(time.time()),
              "implementer": None, "workspaces": None, "telemetry": None, "problems": None}
+    if project_mode(cfg) == "lite":
+        facts["mode"] = "lite"
+        facts["enforcement"] = ENFORCEMENT_OFF_LITE_LINE
     recs = []
     if impl:
         state, age, desc = A.busy(cfg, adapter)
@@ -188,6 +191,11 @@ def render(cfg, msg_count=8, width=None, max_lines=None, window_hours=24.0, show
     a(f"{C['b']}  {A.shown_text(facts['project'].upper())}{C['reset']}{C['dim']}   agent-orchestrator   "
       f"{datetime.fromtimestamp(facts['at']):%d %b %H:%M:%S}{C['reset']}")
     a(f"{C['b']}{C['cyan']}{'═' * w}{C['reset']}")
+    if project_mode(cfg) == "lite":
+        a(f"  {C['yellow']}{C['b']}{ENFORCEMENT_OFF_LITE}{C['reset']} — nothing is enforced (no reviewer probe, no commit hooks)")
+    elif unrecorded_lite(cfg):
+        a(f"  {C['yellow']}mode is lite in {unrecorded_lite(cfg)} with no person's record, so full mode stays in force: "
+          f"ao mode lite --by <name>{C['reset']}")
 
     # implementer state
     implementer = facts["implementer"]

@@ -568,20 +568,28 @@ def cmd_init(cfg, args):
     runtime_cfg = _planned_runtime_config(root, json.loads(json.dumps(planned_config)))
     if opt_in:
         runtime_cfg["_same_family_opt_in"] = opt_in
+    already_lite = config_existed and project_mode(_planned_runtime_config(root, base_config)) == "lite"
     # A reviewer kept from the configuration as it stood is probed only as a person accepted it, as a review starts it;
     # one init composes is its own (ROUTE-ARGV).
-    if config_existed and "reviewer" not in added:
-        A.note_routes_read(runtime_cfg)
-    reviewer_probe = _reviewer_probe(runtime_cfg)
-    if not reviewer_probe["ok"]:
-        print(
-            f"{C['red']}init refused{C['reset']}: reviewer probe "
-            f"{_reviewer_probe_text(reviewer_probe)}"
-        )
-        if reviewer_probe.get("tier_refused"):
-            for line in _init_tier_hints(args, root):
-                print(f"  {line}")
-        return 1
+    if already_lite:
+        reviewer_probe = {"ok": False, "kind": "lite-mode", "reason": "skipped in lite mode"}
+    else:
+        if config_existed and "reviewer" not in added:
+            A.note_routes_read(runtime_cfg)
+        reviewer_probe = _reviewer_probe(runtime_cfg)
+        if not reviewer_probe["ok"]:
+            print(
+                f"{C['red']}init refused{C['reset']}: reviewer probe "
+                f"{_reviewer_probe_text(reviewer_probe)}"
+            )
+            if reviewer_probe.get("tier_refused"):
+                for line in _init_tier_hints(args, root):
+                    print(f"  {line}")
+            print(
+                f"  {C['dim']}or, to start in lite mode ({ENFORCEMENT_OFF_LITE_LINE}): "
+                f"ao mode lite --by <name>, then run ao init again{C['reset']}"
+            )
+            return 1
 
     # The probe may take time. Revalidate both planning inputs immediately
     # before the first write; never apply a plan to marker/config state that
@@ -613,6 +621,15 @@ def cmd_init(cfg, args):
         )
         print(f"{C['red']}init refused{C['reset']}: {_project_refusal(problem)}")
         return 1
+    if not already_lite:
+        hook_problem = _init_hook_problem(root, allow_shared_hooks=True)
+        if hook_problem:
+            print(f"{C['red']}init refused{C['reset']}: commit hooks cannot be installed ({hook_problem})")
+            print(
+                f"  {C['dim']}or, to start in lite mode ({ENFORCEMENT_OFF_LITE_LINE}): "
+                f"ao mode lite --by <name>, then run ao init again{C['reset']}"
+            )
+            return 1
     # Every file init writes in the project is made, replaced or read in folders held open from the root down, never
     # through a link (storage.create_in_tree and its kin): one on the way, there before init or put there while it
     # writes, took the configuration, the board, the playbook and the manifest wherever it led (LEADS-ADAPTERS).
@@ -808,17 +825,30 @@ def cmd_init(cfg, args):
         print(f"  {C['green'] if code == 0 else C['red']}watchdog{C['reset']} "
               f"{'installed' if code == 0 else 'install failed — run ao watchdog install'}")
 
-    hook_proof = _hook_execution_probe(_ao_hook_inventory(root))
-    tone = C["green"] if hook_proof["installed"] else C["yellow"]
-    print(f"  {tone}commit hook{C['reset']} {_hook_probe_text(hook_proof)}")
+    if already_lite:
+        print(f"  {C['yellow']}mode{C['reset']}        {ENFORCEMENT_OFF_LITE_LINE}")
+        print(f"  {C['dim']}commit hook{C['reset']} not installed ({ENFORCEMENT_OFF_LITE} — nothing is enforced)")
+        print(f"  {C['dim']}reviewer probe{C['reset']} not enforced ({ENFORCEMENT_OFF_LITE} — nothing is enforced)")
+    else:
+        hook_inv = _ao_hook_inventory(root)
+        hook_proof = _hook_execution_probe(hook_inv)
+        tone = C["green"] if hook_proof["installed"] else C["yellow"]
+        print(f"  {tone}commit hook{C['reset']} {_hook_probe_text(hook_proof)}")
 
-    probe_tone = C["green"] if reviewer_probe["ok"] else C["red"]
-    print(
-        f"  {probe_tone}reviewer probe{C['reset']} "
-        f"{_reviewer_probe_text(reviewer_probe)}"
-    )
+        probe_tone = C["green"] if reviewer_probe["ok"] else C["red"]
+        print(
+            f"  {probe_tone}reviewer probe{C['reset']} "
+            f"{_reviewer_probe_text(reviewer_probe)}"
+        )
 
     print(f"\n{C['b']}Next, for a person:{C['reset']}")
+    if not already_lite and not hook_inv["error"] and any(
+        target["needs_authorization"] for target in _active_hook_targets(hook_inv).values()
+    ):
+        print(
+            f"  · Run `ao hooks install --allow-shared-hooks` to install commit hooks at {hook_inv['active_dir']} "
+            f"({hook_inv['directory_class']})."
+        )
     for line in skillkit.next_steps(agents, registered):
         print(f"  · {line}")
     if unwritten:

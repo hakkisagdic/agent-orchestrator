@@ -690,6 +690,15 @@ def build_parser(root=None):
     adp.add_argument("action", nargs="?", choices=["list", "validate", "conform"], default="list")
     adp.add_argument("target", nargs="?", help="an adapter id or a JSON file")
     adp.set_defaults(fn=cmd_adapters)
+    md = sub.add_parser("mode", help="the project's mode: full (enforced) or lite (basic setup without enforcement)")
+    md.add_argument("action", choices=["show", "lite", "full"], nargs="?", default="show")
+    md.add_argument("--by", help="lite: the person who switches enforcement off, on the record; required")
+    md.add_argument(
+        "--allow-shared-hooks", action="store_true",
+        help="authorize hook install or uninstall where Git routes hooks through shared, external, "
+             "or global/system configuration",
+    )
+    md.set_defaults(fn=cmd_mode)
     dr = sub.add_parser("doctor", help="check this workspace's wiring")
     dr.add_argument("--check", action="store_true",
                     help="quiet: one line per problem, exit 1 if any; pages nobody without --notify")

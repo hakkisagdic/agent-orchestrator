@@ -2175,18 +2175,29 @@ def cmd_doctor(cfg, args):
     has_cfg = os.path.exists(os.path.join(root, ".ao", "config.json"))
     print(f"config          " + (f"{C['green']}.ao/config.json{C['reset']}" if has_cfg
                                  else f"{C['dim']}none — using auto-discovery{C['reset']}"))
+    lite = project_mode(cfg) == "lite"
+    if lite:
+        opt_in = _lite_mode_opt_in(cfg)
+        who = f" (set by {_person_line(opt_in)})" if opt_in else ""
+        print(f"mode            {C['yellow']}{ENFORCEMENT_OFF_LITE_LINE}{C['reset']}{who}")
+    else:
+        print(f"mode            {C['green']}full{C['reset']} — enforcement: on")
     for line in _session_lines(cfg):
         print(line)
     msgs, _ = A.session_paths(cfg)
     print(f"transcript      {ok(bool(msgs and os.path.exists(msgs)))}")
     print(f"mailbox         {ok(os.path.isdir(os.path.join(root, cfg['mailbox'])))}")
     print(f"reviews         {ok(os.path.isdir(os.path.join(root, cfg['reviews'])))}")
-    reviewer_probe = _reviewer_probe(cfg)
-    probe_tone = C["green"] if reviewer_probe["ok"] else C["red"]
-    print(
-        f"reviewer probe  {probe_tone}{_reviewer_probe_text(reviewer_probe)}"
-        f"{C['reset']}"
-    )
+    if lite:
+        reviewer_probe = {"ok": True}
+        print(f"reviewer probe  {C['dim']}not run ({ENFORCEMENT_OFF_LITE} — nothing is enforced){C['reset']}")
+    else:
+        reviewer_probe = _reviewer_probe(cfg)
+        probe_tone = C["green"] if reviewer_probe["ok"] else C["red"]
+        print(
+            f"reviewer probe  {probe_tone}{_reviewer_probe_text(reviewer_probe)}"
+            f"{C['reset']}"
+        )
     # The tier the next review would stand in, and whether any does (REVIEW-TIERS).
     from . import tiers as T
     tier_text, tier_problems = _active_review_tier(cfg)
@@ -2195,7 +2206,7 @@ def cmd_doctor(cfg, args):
     for _, text in tier_problems:
         print(f"                {C['yellow']}{text}{C['reset']}")
     print(f"review budget   {C['dim']}{_review_budget_text(_review_timeout(cfg))}{C['reset']}")
-    guard = _implementer_commit_guard(cfg)
+    guard = None if lite else _implementer_commit_guard(cfg)
     if guard:
         print(f"commit guard    {C['dim']}{guard}{C['reset']}")
     try:
@@ -2245,52 +2256,57 @@ def cmd_doctor(cfg, args):
         print(f"                {C['dim']}{err.get('tail','')[:110]}{C['reset']}")
     else:
         print(f"last restart    {C['dim']}no failures recorded{C['reset']}")
-    hook_inventory = _ao_hook_inventory(root)
-    if hook_inventory["error"]:
-        detail = f"resolver failure: {hook_inventory['error']}"
-        print(f"{'commit hook':<16}{C['yellow']}{detail}{C['reset']}  ao hooks status")
-        print(f"{'push hook':<16}{C['yellow']}{detail}{C['reset']}  AO push-window hook unavailable")
+    if lite:
+        print(f"{'commit hook':<16}{C['dim']}not installed ({ENFORCEMENT_OFF_LITE} — nothing is enforced){C['reset']}")
+        print(f"{'push hook':<16}{C['dim']}not installed ({ENFORCEMENT_OFF_LITE} — nothing is enforced){C['reset']}")
+        print(f"{'commit proof':<16}{C['dim']}not run ({ENFORCEMENT_OFF_LITE} — nothing is enforced){C['reset']}")
     else:
-        active = _active_hook_targets(hook_inventory)
-        enrollment = _project_enrollment(root)
-        install_problem = _hook_install_problem(enrollment)
-        for role, label in (("pre-commit", "commit hook"), ("pre-push", "push hook")):
-            target = active[role]
-            base = _state_base(target["static_state"])
-            current = base in ("current-local", "current-scoped")
-            tone = C["green"] if current else C["yellow"]
-            notes = []
-            if install_problem:
-                tone = C["yellow"]
-                notes.append(install_problem)
-            elif role == "pre-commit" and not current:
-                notes.append("ao hooks install")
-            if role == "pre-push" and not current:
-                notes.append("AO push-window hook unavailable")
-            suffix = "  " + "; ".join(notes) if notes else ""
-            print(
-                f"{label:<16}{tone}{target['static_state']} / "
-                f"{target['track_state']}{C['reset']}{suffix}"
-            )
-        for target in hook_inventory["targets"]:
-            if target["active"] or target["role"] != "pre-commit" \
-                    or target["reachability"] != "potentially-effective" \
-                    or _state_base(target["static_state"]) not in (
-                        "current-local", "current-scoped", "legacy", "ambiguous-ao"
-                    ):
-                continue
-            print(
-                f"{'commit misplaced':<16}{C['yellow']}{target['static_state']} / "
-                f"{target['track_state']} / {target['directory_class']} — "
-                f"{target['path']}{C['reset']}  ao hooks uninstall, then ao hooks install"
-            )
-    hook_proof = _hook_execution_probe(hook_inventory)
-    proof_tone = C["green"] if hook_proof["installed"] else C["yellow"]
-    print(f"{'commit proof':<16}{proof_tone}{_hook_probe_text(hook_proof)}{C['reset']}")
-    reach = _hook_ao_reach(hook_inventory)
-    if reach:
-        print(f"{'ao for hooks':<16}{C['yellow']}{reach[0]}{C['reset']}")
-        print(f"{'':<16}{C['dim']}fix: {reach[1]}{C['reset']}")
+        hook_inventory = _ao_hook_inventory(root)
+        if hook_inventory["error"]:
+            detail = f"resolver failure: {hook_inventory['error']}"
+            print(f"{'commit hook':<16}{C['yellow']}{detail}{C['reset']}  ao hooks status")
+            print(f"{'push hook':<16}{C['yellow']}{detail}{C['reset']}  AO push-window hook unavailable")
+        else:
+            active = _active_hook_targets(hook_inventory)
+            enrollment = _project_enrollment(root)
+            install_problem = _hook_install_problem(enrollment)
+            for role, label in (("pre-commit", "commit hook"), ("pre-push", "push hook")):
+                target = active[role]
+                base = _state_base(target["static_state"])
+                current = base in ("current-local", "current-scoped")
+                tone = C["green"] if current else C["yellow"]
+                notes = []
+                if install_problem:
+                    tone = C["yellow"]
+                    notes.append(install_problem)
+                elif role == "pre-commit" and not current:
+                    notes.append("ao hooks install")
+                if role == "pre-push" and not current:
+                    notes.append("AO push-window hook unavailable")
+                suffix = "  " + "; ".join(notes) if notes else ""
+                print(
+                    f"{label:<16}{tone}{target['static_state']} / "
+                    f"{target['track_state']}{C['reset']}{suffix}"
+                )
+            for target in hook_inventory["targets"]:
+                if target["active"] or target["role"] != "pre-commit" \
+                        or target["reachability"] != "potentially-effective" \
+                        or _state_base(target["static_state"]) not in (
+                            "current-local", "current-scoped", "legacy", "ambiguous-ao"
+                        ):
+                    continue
+                print(
+                    f"{'commit misplaced':<16}{C['yellow']}{target['static_state']} / "
+                    f"{target['track_state']} / {target['directory_class']} — "
+                    f"{target['path']}{C['reset']}  ao hooks uninstall, then ao hooks install"
+                )
+        hook_proof = _hook_execution_probe(hook_inventory)
+        proof_tone = C["green"] if hook_proof["installed"] else C["yellow"]
+        print(f"{'commit proof':<16}{proof_tone}{_hook_probe_text(hook_proof)}{C['reset']}")
+        reach = _hook_ao_reach(hook_inventory)
+        if reach:
+            print(f"{'ao for hooks':<16}{C['yellow']}{reach[0]}{C['reset']}")
+            print(f"{'':<16}{C['dim']}fix: {reach[1]}{C['reset']}")
     print(f"{'checkout':<16}{_checkout_position(A.git_state(root))}")
     print(_machine_line(cfg))
     for line in _measurement_lines(cfg):

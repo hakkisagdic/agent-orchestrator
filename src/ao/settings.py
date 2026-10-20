@@ -99,6 +99,11 @@ SETTINGS = {
         "refused", str, None, None, "project",
         "refused: a reviewer of the implementer's model family is refused; labeled: another model of that "
         "family may review, labeled weaker independence, once a person opts in with --by, on the record"),
+    "mode": Setting(
+        "full", str, None, None, "project",
+        "full: independent reviewer and commit hooks enforced; lite: basic setup without enforcement "
+        "(no reviewer probe, no commit hooks; ao commit refuses), switched to with ao mode lite --by <name>, "
+        "on the record"),
     "review.transport": Setting(
         "spawn", str, None, None, "project",
         "spawn: each reviewer route runs as its command; acp: a route whose adapter's ACP command was measured to "
@@ -273,6 +278,7 @@ SETTINGS = {
 # A setting whose values are words, and the words it takes. Any other value is unusable: set by
 # hand, it is passed over for the default, and `ao doctor` names it.
 CHOICES = {
+    "mode": ("full", "lite"),
     "review.same_family": ("refused", "labeled"),
     "review.transport": ("spawn", "acp"),
     "language": ("en", "tr"),
@@ -284,7 +290,7 @@ CHOICES = {
 # who did it - the name, the login, whether a terminal was attached - to .ao/ledger/opt-ins.jsonl.
 # A value written into .ao/config.json by hand, which an agent that edits files can do, is not in
 # force until a person's record says the same.
-RECORDED = ("review.same_family",)
+RECORDED = ("review.same_family", "mode")
 
 _MISSING = object()
 

@@ -176,6 +176,50 @@ On Windows, a value that cmd.exe or PowerShell could expand suppresses both
 copyable commands; ao keeps the diff and digest visible and asks the person
 to enter a command using their shell's literal quoting.*
 
+### Lite mode (`enforcement: off - lite`) and what it does not protect
+
+*In ao since slice MODES: `ao mode lite|full|show`.*
+
+A project runs in `full` mode by default or in `lite` mode (`mode` in `.ao/config.json`).
+`lite` is the basic setup without enforcement: the board, slice ledger, mailbox, playbook,
+MCP coordination and `ao verify` remain available, while nothing in the commit path is
+enforced:
+
+- **What `lite` mode does not protect:**
+  - It runs **no reviewer probe** and requires **no independent reviewer**;
+  - It installs and requires **no commit hooks**, so a plain `git commit` is not gated by
+    `ao commit-check` and unreviewed, unverified or ungranted changes can be committed
+    directly through Git;
+  - It raises **no `landed-without-grant` doctor finding** on commits made without a grant; and
+  - `ao commit` **refuses in `lite` mode**, because there is no gate to commit through.
+- **Every surface that reads the mode says plainly that nothing is enforced:** `ao status`
+  (text and `--json`), `ao doctor` (full and `--check`), and the MCP `ao_status` payload
+  all carry `enforcement: off - lite` (`enforcement: off - lite — nothing is enforced`).
+- **How a project enters or leaves `lite` mode:**
+  - `ao init` never puts a project into `lite` mode by itself. Where `ao init` refuses a `full`
+    setup because no independent reviewer is available or because commit hooks cannot be installed,
+    it writes nothing and says how a person can start in `lite` mode instead:
+    `ao mode lite --by <name>`, followed by `ao init`.
+  - Entering `lite` mode weakens enforcement, so it is always a person's act, recorded in
+    `.ao/ledger/opt-ins.jsonl` like `ao features off --by` and `review.same_family`:
+    `ao mode lite --by <name>` (`ao config set` refuses `mode` and names `ao mode lite --by <name>` /
+    `ao mode full`) records the name, the login and whether a terminal was attached, refuses an agent
+    or role name in `--by`, and, like every person's act, relies on the harness grants
+    (`allowlist.FORBIDDEN`) keeping it from agents rather than treating `AO_ROLE` or any environment
+    variable as proof of who ran the command (`ao` still cannot prove that no agent typed it). It
+    removes AO's own untracked hooks (any tracked `.githooks/*` hook stays in the working tree and
+    stands aside in `ao commit-check` and `ao push check` while `lite` mode is in force). An
+    unrecorded `"mode": "lite"` written directly into `.ao/config.json` stays in `full` mode and is
+    flagged as `mode-opt-in`; when `.ao/config.json` is not `lite` while the latest attested `mode`
+    row says `lite`, reading the mode appends an attested `mode = full` row by `ao` so that opt-in is
+    spent and writing `"mode": "lite"` back later stays in `full` mode until a person records
+    `ao mode lite --by <name>` again.
+  - `ao mode full` checks everything `full` mode needs — a reviewer route that passes the
+    independence check and probe (or the `person` review tier), and commit hooks that install and
+    pass the execution probe — records its opt-in row first and writes the config after, and refuses,
+    naming every missing requirement, rather than half-switching.
+  - `ao mode show` prints the current mode and what each mode does and does not protect.
+
 Hook ownership is content- and topology-sensitive, not marker-based. Project
 enrollment is marker-based: only a root `.ao-project` with exact
 `ao-project-v1\n` bytes in HEAD or the active index activates enforcement. The

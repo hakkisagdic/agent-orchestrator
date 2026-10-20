@@ -111,6 +111,281 @@ def _implementer_commit_guard(cfg):
     return f"{impl['adapter']}'s grant admits no hook bypass; ao commit and the hook hold commits"
 
 
+ENFORCEMENT_OFF_LITE = "enforcement: off - lite"
+ENFORCEMENT_OFF_LITE_LINE = f"{ENFORCEMENT_OFF_LITE} — nothing is enforced"
+
+
+def _lite_mode_opt_in(cfg):
+    """The recorded opt-in row when `mode` is `'lite'` in `.ao/config.json` with a valid `by` record, else None (MODES)."""
+    root = cfg.get("root")
+    if not root:
+        return None
+    try:
+        row = A.recorded_opt_in(root, "mode")
+    except Exception:
+        return None
+    if not isinstance(row, dict) or row.get("value") != "lite":
+        return None
+    value, source, _ = S.resolve(cfg, "mode")
+    if value != "lite" or source != "project":
+        try:
+            A.record_opt_in(root, "mode", "full", "ao")
+        except Exception:
+            pass
+        return None
+    by = str(row.get("by") or "").strip()
+    if not by or by == "ao init" or by.lower() in _agent_names(cfg):
+        return None
+    return row
+
+
+def unrecorded_lite(cfg):
+    """Where `mode` is set to `lite` without a recorded opt-in, or None (MODES)."""
+    value, source, _ = S.resolve(cfg, "mode")
+    if value == "lite" and _lite_mode_opt_in(cfg) is None:
+        return ".ao/config.json" if source == "project" else f"the {source} settings"
+    return None
+
+
+def project_mode(cfg):
+    """The project's effective mode: `'lite'` when set to `lite` in `.ao/config.json` with a recorded opt-in, else `'full'`."""
+    return "lite" if _lite_mode_opt_in(cfg) is not None else "full"
+
+
+def _init_hook_problem(root, allow_shared_hooks=False):
+    """Why commit hooks cannot be installed in `root`, or None when they can (MODES)."""
+    enrollment = _project_enrollment(root)
+    redirected = enrollment["detail"] if enrollment["state"] == "redirected" else _commit_repository_binding(root)
+    if redirected:
+        return redirected
+    if enrollment.get("unknown"):
+        return _hook_install_problem(enrollment)
+    inv = _ao_hook_inventory(root)
+    if inv["error"]:
+        return inv["error"]
+    if os.path.lexists(inv["active_dir"]) and not os.path.isdir(inv["active_dir"]):
+        return f"effective hook path is not a directory: {inv['active_dir']}"
+    targets = _active_hook_targets(inv)
+    for role in _HOOK_ROLES:
+        target = targets[role]
+        base = _state_base(target["static_state"])
+        if base not in ("current-local", "current-scoped") and not (
+            target["eligible"] and base in ("absent", "legacy")
+        ):
+            return (
+                f"{role} hook at {target['path']} is {target['static_state']} / {target['track_state']} "
+                "and cannot be installed"
+            )
+        if target["needs_authorization"] and (os.name == "nt" or not allow_shared_hooks):
+            return (
+                SHARED_HOOKS_REFUSED
+                if os.name == "nt"
+                else f"hooks at {inv['active_dir']} are {inv['directory_class']} (pass --allow-shared-hooks)"
+            )
+    return None
+
+
+def _mode_full_missing(cfg, allow_shared_hooks=False):
+    """What `ao mode full` needs before switching: reviewer independence/probe and installable commit hooks (MODES)."""
+    root = cfg["root"]
+    probe_cfg = dict(cfg, mode="full")
+    missing = []
+    if M.is_strict(probe_cfg):
+        probe = _reviewer_probe(probe_cfg)
+        if not probe["ok"]:
+            missing.append(f"independent reviewer: {_reviewer_probe_text(probe)}")
+    elif not probe_cfg.get("implementer"):
+        missing.append(
+            "independent reviewer: no implementer is configured "
+            f"(ao init --profile {A.default_profile()}, or an implementer in .ao/config.json)"
+        )
+    else:
+        reviewer = probe_cfg.get("reviewer") or {}
+        if reviewer and not reviewer.get("argv"):
+            missing.append(
+                "independent reviewer: no model reviewer is configured "
+                "(ao role set reviewer <adapter> --model <model>)"
+            )
+        elif reviewer.get("argv"):
+            probe = _reviewer_probe(probe_cfg)
+            if not probe["ok"]:
+                missing.append(f"independent reviewer: {_reviewer_probe_text(probe)}")
+    enrollment = _project_enrollment(root)
+    redirected = enrollment["detail"] if enrollment["state"] == "redirected" else _commit_repository_binding(root)
+    if redirected:
+        missing.append(f"commit hooks: {redirected}")
+    elif enrollment.get("unknown") or _hook_install_problem(enrollment):
+        missing.append(f"commit hooks: {_hook_install_problem(enrollment)}")
+    elif enrollment["state"] == "uninitialized":
+        missing.append(
+            f"commit hooks: {PROJECT_MARKER} is not tracked in HEAD or the index "
+            f"(stage {PROJECT_MARKER} with git add {PROJECT_MARKER})"
+        )
+    else:
+        hook_problem = _init_hook_problem(root, allow_shared_hooks=allow_shared_hooks)
+        if hook_problem:
+            missing.append(f"commit hooks: {hook_problem}")
+    return missing
+
+
+def _uninstall_lite_hooks(root, allow_shared_hooks=False):
+    """Remove untracked AO hooks when switching to `lite` mode; tracked hooks stay in the tree and stand aside in `ao commit-check` and `ao push check`."""
+    inv = _ao_hook_inventory(root)
+    if inv["error"]:
+        return
+    for target in inv["targets"]:
+        base = _state_base(target["static_state"])
+        if base not in ("current-local", "current-scoped", "legacy"):
+            continue
+        if target["track_state"] != "untracked":
+            continue
+        if (target["directory_class"] in ("shared", "external") or target["globally_configured"]) and (
+            os.name == "nt" or not allow_shared_hooks
+        ):
+            continue
+        try:
+            os.remove(target["path"])
+        except OSError:
+            pass
+
+
+def cmd_mode(cfg, args):
+    """Show or switch the project mode: `lite`, `full`, or `show` (MODES)."""
+    from .storage import ReplacedNotDurable
+    root = cfg["root"]
+    action = getattr(args, "action", "show") or "show"
+    by = (getattr(args, "by", None) or "").strip()
+    if action == "show":
+        if by:
+            print("--by is only used with `ao mode lite --by <name>`")
+            return 2
+        where = unrecorded_lite(cfg)
+        if where:
+            print(
+                f"{C['yellow']}mode is lite in {where} with no person's record, so full mode stays in force"
+                f"{C['reset']}: ao mode lite --by <name>"
+            )
+        mode = project_mode(cfg)
+        if mode == "lite":
+            opt_in = _lite_mode_opt_in(cfg)
+            who = f" (set by {_person_line(opt_in)})" if opt_in else ""
+            print(f"mode: lite — {ENFORCEMENT_OFF_LITE_LINE}{who}")
+        else:
+            print("mode: full — enforcement: on")
+        print("\nfull mode:")
+        print(
+            "  protects: independent reviewer probe and review gate, commit-ok grant, "
+            "pre-commit and pre-push hooks, and ao commit gate enforcement"
+        )
+        print(
+            "  does not protect: commits made outside ao's hooks or with --no-verify on a harness whose "
+            "tool grant admits raw git commit (surfaced after the fact as landed-without-grant)"
+        )
+        print(f"\nlite mode ({ENFORCEMENT_OFF_LITE}):")
+        print(
+            "  protects: nothing is enforced — basic setup only (.ao/config.json, .ao/backlog.md, "
+            ".ao/gates.json, mailbox, status, doctor, and the playbook)"
+        )
+        print(
+            "  does not protect: no reviewer probe, no independent review gate, no commit hooks, "
+            "no pre-commit or pre-push enforcement, and ao commit refuses because there is no gate to commit through"
+        )
+        return 0
+    if action == "lite":
+        if not by or not by.isprintable() or len(by) > 80:
+            print(
+                "--by is required: switching to lite mode turns enforcement off (no reviewer probe, no commit hooks), "
+                "and a person does it on the record, in one line of at most 80 characters"
+            )
+            return 2
+        if by.lower() in _agent_names(cfg):
+            print(f"--by names an agent or a role ({by}); switching to lite mode is a person's act")
+            return 2
+        config_path = os.path.join(root, ".ao", "config.json")
+        if os.path.lexists(config_path) or _project_enrollment(root)["state"] != "uninitialized":
+            document = A.project_config_document(root)
+            if document["problem"]:
+                print(f"{C['red']}not changed{C['reset']}: {document['problem']}")
+                return 1
+            base_config = document["config"]
+        else:
+            base_config = {
+                "project": os.path.basename(root),
+                "round_budget": S.default("round_budget"),
+            }
+        try:
+            A.write_project_config(
+                root, json.dumps(S.assign(base_config, "mode", "lite"), indent=2, ensure_ascii=False)
+            )
+        except ReplacedNotDurable as exc:
+            print(f"{C['red']}{exc}{C['reset']}; no opt-in was recorded; retry this command to record one if required")
+            return 1
+        except (OSError, ValueError) as exc:
+            print(f"{C['red']}not changed{C['reset']}: {exc}")
+            return 1
+        try:
+            A.record_opt_in(root, "mode", "lite", by)
+        except Exception as exc:
+            print(f"{C['red']}not recorded{C['reset']}: {exc}; lite mode is not in force until it is")
+            return 1
+        _uninstall_lite_hooks(root, allow_shared_hooks=bool(getattr(args, "allow_shared_hooks", False)))
+        print(f"mode = 'lite' (recorded as set by {by}) — {ENFORCEMENT_OFF_LITE_LINE}")
+        return 0
+    if action == "full":
+        document = A.project_config_document(root)
+        if document["problem"]:
+            print(f"{C['red']}not changed{C['reset']}: {document['problem']}")
+            return 1
+        allow = bool(getattr(args, "allow_shared_hooks", False))
+        missing = _mode_full_missing(cfg, allow_shared_hooks=allow)
+        if missing:
+            print(
+                f"{C['red']}mode full refused{C['reset']}: full mode needs an independent reviewer route and "
+                f"working commit hooks; still in {project_mode(cfg)} mode:"
+            )
+            for item in missing:
+                print(f"  - {item}")
+            return 1
+        was_lite = project_mode(cfg) == "lite"
+        rc = cmd_hooks(dict(cfg, mode="full"), argparse.Namespace(action="install", allow_shared_hooks=allow))
+        if rc != 0:
+            if was_lite:
+                _uninstall_lite_hooks(root, allow_shared_hooks=allow)
+            print(
+                f"{C['red']}mode full refused{C['reset']}: commit hooks could not be installed; "
+                f"still in {project_mode(cfg)} mode"
+            )
+            return 1
+        hook_proof = _hook_execution_probe(_ao_hook_inventory(root))
+        if not hook_proof["installed"]:
+            if was_lite:
+                _uninstall_lite_hooks(root, allow_shared_hooks=allow)
+            print(
+                f"{C['red']}mode full refused{C['reset']}: commit hooks: {_hook_probe_text(hook_proof)}; "
+                f"still in {project_mode(cfg)} mode"
+            )
+            return 1
+        planned_text = json.dumps(S.assign(document["config"], "mode", "full"), indent=2, ensure_ascii=False)
+        try:
+            A.record_opt_in(root, "mode", "full", by or "human")
+        except Exception as exc:
+            if was_lite:
+                _uninstall_lite_hooks(root, allow_shared_hooks=allow)
+            print(f"{C['red']}not recorded{C['reset']}: {exc}")
+            return 1
+        try:
+            A.write_project_config(root, planned_text)
+        except ReplacedNotDurable as exc:
+            print(f"{C['red']}{exc}{C['reset']}")
+            return 1
+        except (OSError, ValueError) as exc:
+            print(f"{C['red']}not changed{C['reset']}: {exc}")
+            return 1
+        print("mode = 'full' — enforcement: on (independent reviewer probe and commit hooks active)")
+        return 0
+    return 2
+
+
 def _active_review_tier(cfg):
     """(the review tier a review would stand in now, [(key, problem)]), from the configuration alone (REVIEW-TIERS).
 
@@ -122,6 +397,13 @@ def _active_review_tier(cfg):
     from . import tiers as T
     root = cfg["root"]
     problems = []
+    value, source, _ = S.resolve(cfg, "mode")
+    if value == "lite" and _lite_mode_opt_in(cfg) is None:
+        where = ".ao/config.json" if source == "project" else f"the {source} settings"
+        problems.append(("mode-opt-in", f"mode is lite in {where}, but no person's opt-in is recorded for this "
+                                        "project, so full mode stays in force — ao mode lite --by <name>"))
+    if project_mode(cfg) == "lite":
+        return f"none ({ENFORCEMENT_OFF_LITE})", problems
     value, source, _ = S.resolve(cfg, "review.same_family")
     opt_in = _same_family_opt_in(cfg)
     if value == T.LABELED and opt_in is None:
@@ -326,8 +608,9 @@ def doctor_problems(cfg):
     key = A.project_key(root)
     # A redirect is a finding, not a reason to suppress the other checks or their alarms (NESTED-GIT).
     out = [("repository-redirect", redirected)] if redirected else []
+    lite = project_mode(cfg) == "lite"
     strict_matrix = M.is_strict(cfg)
-    if strict_matrix:
+    if strict_matrix and not lite:
         try:
             matrix_resolution = _resolve_matrix(cfg, require_independent=False)
         except M.MatrixError as exc:
@@ -356,6 +639,13 @@ def doctor_problems(cfg):
     if foreign:
         out.append(("opt-ins-unattested",
                     f".ao/ledger/opt-ins.jsonl holds {_unattested_repair(foreign, attested)}"))
+    where_lite = unrecorded_lite(cfg)
+    if where_lite:
+        out.append((
+            "mode-opt-in",
+            f"mode is lite in {where_lite} with no opt-in record, so full mode stays in force — "
+            "ao mode lite --by <name>, or remove it",
+        ))
     out.extend(_harness_config_problem(root))
     out.extend(_environment_problem(root))
 
@@ -458,7 +748,7 @@ def doctor_problems(cfg):
     arch_bin = os.path.basename(((cfg.get("architect") or {}).get("argv") or [""])[0])
     rv = cfg.get("reviewer") or {}
     rv_bin = os.path.basename((rv.get("argv") or [""])[0])
-    if not strict_matrix and arch_bin and arch_bin == rv_bin and not rv.get("fallbacks"):
+    if not lite and not strict_matrix and arch_bin and arch_bin == rv_bin and not rv.get("fallbacks"):
         out.append(("shared-pool", f"architect and reviewer both run `{arch_bin}` on one quota pool and the reviewer has no "
                                    f"fallback — let keyflip rotate accounts before a spawn (`ao config set "
                                    f"keyflip.rotation on --machine`), use another model family, or, on a "
@@ -505,7 +795,7 @@ def doctor_problems(cfg):
                                       "missing from it — restore .ao/ledger/mail-store.jsonl from a backup"))
     # A reviewer whose adapter cannot deny tools is not a reviewer (#88).
     reviewer_adapter = (cfg.get("reviewer") or {}).get("adapter")
-    if reviewer_adapter:
+    if reviewer_adapter and not lite:
         eligible, why = A.reviewer_eligibility(A.load_adapter(reviewer_adapter, root))
         if not eligible:
             out.append((f"reviewer-ineligible:{reviewer_adapter}", f"the reviewer runs {reviewer_adapter}, which may not "
@@ -516,6 +806,8 @@ def doctor_problems(cfg):
     except Exception:
         absent = []
     for actor, ident, binaries in absent:
+        if lite and actor == "reviewer":
+            continue
         out.append((f"adapter-binary:{actor}", f"{actor} runs the {ident} adapter, but {' or '.join(binaries)} "
                     "is not on this machine (PATH, binaries.extra_dirs, the usual install directories)"))
     # Agent configuration checked by AgentShield's categories, natively (#14).
@@ -568,57 +860,58 @@ def doctor_problems(cfg):
     # commit-hook result requires Git itself to resolve the active path, execute
     # it with an isolated synthetic index, and return AO's nonce-bound refusal.
     # Pre-push remains informational: #59 is about commit authority.
-    hook_inventory = _ao_hook_inventory(root)
-    proof = _hook_execution_probe(hook_inventory)
-    if hook_inventory["error"]:
-        out.append(("commit-hook", proof["detail"] + " — ao hooks status"))
-    else:
-        active = _active_hook_targets(hook_inventory)
-        commit = active["pre-commit"]
-        misplaced = [
-            target for target in hook_inventory["targets"]
-            if not target["active"]
-            and target["role"] == "pre-commit"
-            and target["reachability"] == "potentially-effective"
-            and _state_base(target["static_state"]) in (
-                "current-local", "current-scoped", "legacy", "ambiguous-ao"
-            )
-        ]
-        reasons = []
-        if not proof["installed"]:
-            reasons.append("execution proof failed: " + proof["detail"])
-        if misplaced:
-            reasons.append(
-                "potentially-effective misplaced pre-commit: "
-                + ", ".join(target["path"] for target in misplaced[:3])
-            )
-        if reasons:
-            enrollment = _project_enrollment(root)
-            install_problem = _hook_install_problem(enrollment)
-            if install_problem:
-                repair = _hook_install_problem(enrollment, said=proof["detail"])
-            elif commit["repository_source"] and commit["track_state"] == "tracked" \
-                    and commit["crlf_only"]:
-                repair = "git restore -- .githooks/pre-commit"
-            elif misplaced:
-                needs_allow = any(
-                    target["directory_class"] in ("shared", "external")
-                    or target["globally_configured"]
-                    for target in misplaced
+    if not lite:
+        hook_inventory = _ao_hook_inventory(root)
+        proof = _hook_execution_probe(hook_inventory)
+        if hook_inventory["error"]:
+            out.append(("commit-hook", proof["detail"] + " — ao hooks status"))
+        else:
+            active = _active_hook_targets(hook_inventory)
+            commit = active["pre-commit"]
+            misplaced = [
+                target for target in hook_inventory["targets"]
+                if not target["active"]
+                and target["role"] == "pre-commit"
+                and target["reachability"] == "potentially-effective"
+                and _state_base(target["static_state"]) in (
+                    "current-local", "current-scoped", "legacy", "ambiguous-ao"
                 )
-                flag = " --allow-shared-hooks" if needs_allow else ""
-                repair = f"ao hooks uninstall{flag}, then ao hooks install{flag}"
-            elif _state_base(commit["static_state"]) not in (
-                "current-local", "current-scoped"
-            ):
-                repair = "ao hooks install (restore tracked hooks with Git)"
-            elif HOOK_AO_NOT_FOUND in proof["detail"]:
-                repair = _ao_link_fix()           # an alias is invisible to the hook's /bin/sh (SAFE-REMOVE)
-            else:
-                repair = "ensure the hook can resolve this AO executable, then ao hooks status"
-            out.append(("commit-hook", "; ".join(reasons) + (f" — {repair}" if repair else "")))
+            ]
+            reasons = []
+            if not proof["installed"]:
+                reasons.append("execution proof failed: " + proof["detail"])
+            if misplaced:
+                reasons.append(
+                    "potentially-effective misplaced pre-commit: "
+                    + ", ".join(target["path"] for target in misplaced[:3])
+                )
+            if reasons:
+                enrollment = _project_enrollment(root)
+                install_problem = _hook_install_problem(enrollment)
+                if install_problem:
+                    repair = _hook_install_problem(enrollment, said=proof["detail"])
+                elif commit["repository_source"] and commit["track_state"] == "tracked" \
+                        and commit["crlf_only"]:
+                    repair = "git restore -- .githooks/pre-commit"
+                elif misplaced:
+                    needs_allow = any(
+                        target["directory_class"] in ("shared", "external")
+                        or target["globally_configured"]
+                        for target in misplaced
+                    )
+                    flag = " --allow-shared-hooks" if needs_allow else ""
+                    repair = f"ao hooks uninstall{flag}, then ao hooks install{flag}"
+                elif _state_base(commit["static_state"]) not in (
+                    "current-local", "current-scoped"
+                ):
+                    repair = "ao hooks install (restore tracked hooks with Git)"
+                elif HOOK_AO_NOT_FOUND in proof["detail"]:
+                    repair = _ao_link_fix()           # an alias is invisible to the hook's /bin/sh (SAFE-REMOVE)
+                else:
+                    repair = "ensure the hook can resolve this AO executable, then ao hooks status"
+                out.append(("commit-hook", "; ".join(reasons) + (f" — {repair}" if repair else "")))
     out.extend(_actor_grant_problems(cfg))
-    if _project_enrollment(root)["state"] in ("enrolled", "legacy"):
+    if not lite and _project_enrollment(root)["state"] in ("enrolled", "legacy"):
         # Every commit since the first grant, merges among them, and a check that cannot run named as such: an
         # error read as no commit to name (LEDGER-HISTORY).
         landed = A.landed_without_grant(root)
@@ -855,6 +1148,8 @@ def _doctor_check(cfg, page=False):
     from .watchdog import credit_reset, credits_told, notify
     root = cfg["root"]
     project = A.project_key(root)
+    if project_mode(cfg) == "lite":
+        print(ENFORCEMENT_OFF_LITE_LINE)
     due = _watchdog_first_cycle_due(root) if page else None
     problems = doctor_problems(cfg)
     if not problems:
@@ -1123,11 +1418,14 @@ def cmd_config(cfg, args):
         print(f"unknown setting {key!r}; `ao config list` shows the names")
         return 2
     if args.action == "get":
-        print(S.get(cfg, key))
+        print(project_mode(cfg) if key == "mode" else S.get(cfg, key))
         return 0
     machine = bool(getattr(args, "machine", False))
     if S.SETTINGS[key].scope == "machine" and not machine:
         print(f"{key} governs the whole machine; set it with --machine")
+        return 2
+    if key == "mode":
+        print("mode is switched with `ao mode lite --by <name>` or `ao mode full`, not `ao config`")
         return 2
     by = (getattr(args, "by", None) or "").strip()
     if key in S.RECORDED:
