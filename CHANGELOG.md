@@ -51,6 +51,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Under the hood
 
+- The test suite replaces `watchdog.desktop_notify` in every test with an in-memory recorder so `watchdog.notify(..., audience="human")` never runs `osascript` or PowerShell on the machine running the suite, while tests of `desktop_notify` itself opt into the real function explicitly with `real_desktop_notify` (SUITE-NO-BANNER).
 - The landing page says what ao does now, and a test module keeps it saying that: the page still sold ao as attaching to a running agent, named 15 of the 28 adapters ao ships and left codex and qoder untested after their adapters moved to partial, so its headline, its setup block, its sample run, its adapter table and its two languages are now read from the tree that publishes it - and the headline sentence itself now stands in the package description, the module docstring and the Homebrew formula, which a seventh test holds to it (LANDING-REFRESH).
 
 ## [0.6.0] - 2026-10-19

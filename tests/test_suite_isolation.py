@@ -255,3 +255,25 @@ def test_a_new_package_install_directory_reaches_children_and_is_kept_off_tests(
     assert A.binary_candidates("newcomer") == []
     assert cli._reviewer_candidate_paths("newcomer") == []
     assert directory not in W.child_path().split(os.pathsep)
+
+
+def test_a_human_notice_in_a_test_reaches_the_stand_in_and_starts_no_desktop_notification_program(
+    project, monkeypatch, desktop_notifications,
+):
+    """tests/test_notify_ntfy.py called watchdog.notify(..., audience="human") with ntfy and Telegram
+    stubbed while watchdog.desktop_notify still ran osascript on the owner's Mac (SUITE-NO-BANNER)."""
+    real_run = subprocess.run
+
+    def guarded_run(argv, *args, **kwargs):
+        first = argv[0] if isinstance(argv, (list, tuple)) and argv else argv
+        program = os.path.splitext(os.path.basename(str(first).replace("\\", "/")))[0].lower()
+        if program in ("osascript", "powershell", "pwsh"):
+            pytest.fail(f"a test started desktop notification program {first!r}")
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", guarded_run)
+
+    assert W.desktop_notify is not conftest._DESKTOP_NOTIFY
+    assert W.notify("cap hit", "daily cap reached", root=project["root"], key="cap", audience="human") is True
+    assert desktop_notifications == [("cap hit", "daily cap reached")]
+    assert W.desktop_notify.sent == [("cap hit", "daily cap reached")]

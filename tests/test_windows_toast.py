@@ -16,7 +16,7 @@ def _windows(monkeypatch, calls, code=0):
     monkeypatch.setattr(W.subprocess, "run", run)
 
 
-def test_a_toast_is_off_until_the_project_turns_it_on(project, monkeypatch):
+def test_a_toast_is_off_until_the_project_turns_it_on(project, monkeypatch, real_desktop_notify):
     calls = []
     _windows(monkeypatch, calls)
 
@@ -25,7 +25,7 @@ def test_a_toast_is_off_until_the_project_turns_it_on(project, monkeypatch):
     assert calls == []
 
 
-def test_a_toast_carries_its_text_in_the_environment_never_in_the_script(project, monkeypatch):
+def test_a_toast_carries_its_text_in_the_environment_never_in_the_script(project, monkeypatch, real_desktop_notify):
     calls = []
     _windows(monkeypatch, calls)
     cfg = dict(project, features={"toast": True})
@@ -39,7 +39,7 @@ def test_a_toast_carries_its_text_in_the_environment_never_in_the_script(project
     assert kwargs["env"]["AO_TOAST_TITLE"] == title and kwargs["env"]["AO_TOAST_BODY"] == body
 
 
-def test_a_failed_toast_is_reported_and_never_raises(project, monkeypatch):
+def test_a_failed_toast_is_reported_and_never_raises(project, monkeypatch, real_desktop_notify):
     calls = []
     _windows(monkeypatch, calls, code=1)
     cfg = dict(project, features={"toast": True})

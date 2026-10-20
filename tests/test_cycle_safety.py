@@ -114,7 +114,7 @@ def test_a_retired_projects_heartbeat_is_not_a_dead_watchdog(project):
     assert set(A.stale_siblings(project["root"])) == {"recently-dead"}
 
 
-def test_desktop_notifications_never_raise_where_the_platform_has_none(monkeypatch):
+def test_desktop_notifications_never_raise_where_the_platform_has_none(monkeypatch, real_desktop_notify):
     monkeypatch.setattr(W.sys, "platform", "linux")
     assert W.desktop_notify("title", "message") is False
     assert all(part for part in W.child_path().split(os.pathsep))

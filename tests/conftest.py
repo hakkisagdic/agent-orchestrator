@@ -353,6 +353,40 @@ def _calm_machine():
     P.read = measured
 
 
+_DESKTOP_NOTIFY = W.desktop_notify
+
+
+@pytest.fixture(autouse=True)
+def desktop_notifications():
+    """Every test gets a stand-in for watchdog.desktop_notify so no test shows a banner on the machine
+    running the suite.
+
+    On 2026-10-21 every batch run showed "cap hit / daily cap reached", "review warning / two rounds
+    stuck" and "heads up / minor drift" from Script Editor on the owner's Mac because
+    tests/test_notify_ntfy.py called watchdog.notify(..., audience="human") with ntfy and Telegram
+    stubbed while watchdog.desktop_notify still ran osascript (SUITE-NO-BANNER). A test of
+    desktop_notify itself asks for `real_desktop_notify` and stubs the program it runs. Not through
+    monkeypatch, for the reason _ledger_checkpoints gives.
+    """
+    sent = []
+
+    def _stand_in(title, msg, cfg=None):
+        sent.append((title, msg))
+        return True
+
+    _stand_in.sent = sent
+    W.desktop_notify = _stand_in
+    yield sent
+    W.desktop_notify = _DESKTOP_NOTIFY
+
+
+@pytest.fixture
+def real_desktop_notify(desktop_notifications):
+    """Give a test of watchdog.desktop_notify itself the real function back (SUITE-NO-BANNER)."""
+    W.desktop_notify = _DESKTOP_NOTIFY
+    return _DESKTOP_NOTIFY
+
+
 @pytest.fixture(autouse=True)
 def _events_log(tmp_path_factory):
     """The machine's event log lives outside the repository; give each test its own file.
