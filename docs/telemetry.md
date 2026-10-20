@@ -257,6 +257,18 @@ numbers for another program; `--sources` names the files they came from. A platf
 run appears once one is recorded there, with how many commits HEAD has added since the
 commit it ran at.
 
+`ao evidence record` reads a lane's CI run through `gh` and writes what the run says — its
+status and conclusion, the commit it ran on, its repository and its jobs — and `ao evidence show`
+reads the newest row of each platform back with how far HEAD has moved since - or every row with
+`--all` ([commands.md](commands.md)). The ledger is chained and held to this machine's checkpoint
+store like `.ao/ledger/opt-ins.jsonl`: only the prefix this machine recorded ao appending counts,
+a row past it - written by hand or on another machine - does not count and nothing is appended
+after it, and an edited attested row cannot be read. A run that is not on this repository, not
+finished, not successful, not on a commit HEAD holds as an ancestor, or more than
+`evidence.max_commits_behind` commits behind HEAD never reads as green and is a finding of `ao
+doctor --check`; a project that recorded none is not told anything, and a green rerun clears what
+the run before it said.
+
 ## OTLP/JSON trace export: `ao export otlp`
 
 `ao export otlp` reads the project's ledgers and writes one OpenTelemetry `ExportTraceServiceRequest`

@@ -650,6 +650,9 @@ def doctor_problems(cfg):
     out.extend(_environment_problem(root))
 
     out.extend(_turn_problems(cfg))
+    # A platform run ao recorded no longer covers this tree: red, naming a commit this repository
+    # cannot place, or past the bound. Absence is not a finding (LANE-EVIDENCE).
+    out.extend(A.evidence_problems(cfg))
     hb = A.heartbeat_age(root)
     if hb is not None and hb > WATCHDOG_SILENT_AFTER:
         # The tool named is this platform's: launchctl means nothing on Windows or Linux (WINDOWS-SAY-WHY).

@@ -14,7 +14,7 @@ import os
 import time
 from datetime import datetime, timedelta
 
-EVIDENCE_FILE = os.path.join(".ao", "ledger", "platform-runs.jsonl")
+EVIDENCE_FILE = A.PLATFORM_RUNS_FILE
 CLASSES = ("product", "analysis", "ceremony", "coordination")
 BOARD_ORDER = ("running", "queued", "blocked", "verified", "inbox", "done", "rejected")
 
@@ -117,42 +117,16 @@ def _gain_project(cfg, project, when, days):
         "notices": len(notices),
         "notices_sent": sum(1 for row in notices if row.get("sent")),
     }
-    out["evidence"] = _gain_evidence(root)
-    out["daily"] = _gain_daily(out, days, turns)
-    return out
-
-
-def _gain_evidence(root):
-    """The newest recorded run of each platform, and how far HEAD has moved since its commit."""
-    path = os.path.join(root, EVIDENCE_FILE)
-    newest = {}
     try:
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                try:
-                    row = json.loads(line)
-                except ValueError:
-                    continue
-                if isinstance(row, dict) and isinstance(row.get("platform"), str) and row["platform"]:
-                    if row["platform"] not in newest or (row.get("at") or 0) > (newest[row["platform"]].get("at") or 0):
-                        newest[row["platform"]] = row
-    except OSError:
-        return []
-    out = []
-    for platform in sorted(newest):
-        row = newest[platform]
-        behind = None
-        commit = str(row.get("commit") or "")
-        if commit:
-            try:
-                counted = A._git_text(root, "rev-list", "--count", f"{commit}..HEAD").strip()
-                behind = int(counted) if counted.isdigit() else None
-            except Exception:
-                behind = None
-        out.append({"platform": platform, "commit": commit, "run": row.get("run"),
-                    "at": row.get("at"), "passed": row.get("passed"), "failed": row.get("failed"),
-                    "skipped": row.get("skipped"), "suite": row.get("suite"), "behind": behind,
-                    "green": row.get("failed") == 0})
+        from .storage import _unattested_repair, unattested_in_tree
+        foreign, attested = unattested_in_tree(root, EVIDENCE_FILE, A.PLATFORM_RUNS_CHAIN)
+        out["evidence"] = A.platform_run_summaries(root, cfg)
+        if foreign:
+            out["evidence_unattested"] = _unattested_repair(foreign, attested)
+    except Exception as exc:
+        out["evidence"] = None
+        out["evidence_error"] = f"{type(exc).__name__}: {exc}"
+    out["daily"] = _gain_daily(out, days, turns)
     return out
 
 
@@ -323,15 +297,21 @@ def _gain_show(project, args):
     print(f"  {'activity':<10} {activity.get('wakes', 0)} wakes · {activity.get('refills', 0)} refills · "
           f"{activity.get('nudges', 0)} nudges · {activity.get('hunts', 0)} hunts · "
           f"{activity.get('notices', 0)} notices ({activity.get('notices_sent', 0)} sent)")
-    evidence = project.get("evidence") or []
-    if evidence:
+    evidence = project.get("evidence")
+    if evidence is None:
+        print(f"  {'evidence':<10} {dim}cannot read {EVIDENCE_FILE}: {project.get('evidence_error')}{reset}")
+    elif evidence:
         said = []
         for row in evidence:
-            state = "green" if row["green"] else f"{red}red{reset}"
-            where = f" at {row['commit'][:10]}" if row.get("commit") else ""
-            behind = f", {row['behind']} commit(s) behind HEAD" if row.get("behind") is not None else ""
-            said.append(f"{row['platform']} {state}{where}{behind}")
+            _, state = _evidence_state(row)
+            shown = state if state == "green" else f"{red if state == 'red' else yellow}{state}{reset}"
+            said.append(f"{row['platform']} {shown} {_evidence_where(row)}")
         print(f"  {'evidence':<10} " + " · ".join(said))
+        if project.get("evidence_unattested"):
+            print(f"  {'':<10} {yellow}{EVIDENCE_FILE} holds {project['evidence_unattested']}{reset}")
+    elif project.get("evidence_unattested"):
+        print(f"  {'evidence':<10} {dim}no platform run recorded here ({EVIDENCE_FILE} holds "
+              f"{project['evidence_unattested']}){reset}")
     else:
         print(f"  {'evidence':<10} {dim}no platform run recorded ({EVIDENCE_FILE}){reset}")
     quota = project.get("quota")

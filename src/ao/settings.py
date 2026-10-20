@@ -67,6 +67,10 @@ SETTINGS = {
     "merge.check_days": Setting(
         7, int, 1, None, "project",
         "days back ao doctor looks for merges no passing run of their result vouches for"),
+    "evidence.max_commits_behind": Setting(
+        100, int, 0, None, "project",
+        "commits HEAD may move past a platform run's commit before ao doctor calls that platform's newest "
+        "evidence stale; 0 treats any commit behind as stale"),
     "mail.unseen_yellow_minutes": Setting(
         15, int, 1, None, "project",
         "minutes a needs-decision message may wait unseen before the architect is told"),

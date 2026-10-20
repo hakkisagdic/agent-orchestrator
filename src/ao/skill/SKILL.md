@@ -284,6 +284,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao stats [--all] [--since D] [--until D]` | slice outcomes from the ledgers: rounds, first-pass rate, time, size, defects found later |
 | `ao gain [--since D] [--all] [--days N] [--slices] [--json] [--sources] [--quota]` | one surface for what ao measured: slices, reviews, board, spend, activity, lane evidence and a daily trend, read from the ledgers; `--quota` asks the implementer's account |
 | `ao export otlp [--out <file>] [--attested]` | the project's ledger as OpenTelemetry traces in the OTLP/JSON encoding (one `ExportTraceServiceRequest`), written to `--out` or stdout; refuses unattested ledgers unless `--attested` asks for only checkpoint-attested rows; strictly read-only, ao sends nothing anywhere |
+| `ao evidence [record --platform windows --run ID]` / `ao evidence show [--all] [--json]` | a platform lane's CI run read through `gh` and recorded in the chained evidence ledger, and what each platform's newest run still vouches for; a red, unplaceable or stale run is a finding of `ao doctor --check` |
 | `ao doctor --consistency [--repair]` | board, ledgers, review artefacts and git checked against each other |
 | `ao prove [--no-review]` | run the guarantees: the hook refuses, the reviewer answers, a throwaway slice lands |
 | `ao demo [--keep]` | a person's command: the guarantee played in a scratch folder with a stand-in reviewer, a change with a bug refused and its fix landed; it touches nothing outside that folder |

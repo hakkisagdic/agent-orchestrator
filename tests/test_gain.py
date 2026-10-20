@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from ao import cli, lib as A
+from tests.test_evidence import FakeGh
 
 
 def _review(root, name, verdict, slice_id, digest="sha256:c1"):
@@ -50,12 +51,10 @@ def _landed(project):
         fh.write(text)
 
 
-def _evidence(root, commit):
-    os.makedirs(os.path.join(root, ".ao", "ledger"), exist_ok=True)
-    with open(os.path.join(root, ".ao", "ledger", "platform-runs.jsonl"), "a", encoding="utf-8") as fh:
-        fh.write(json.dumps({"at": int(time.time()) - 60, "platform": "windows", "commit": commit,
-                             "run": "39026620122", "passed": 5295, "failed": 0, "skipped": 215,
-                             "suite": "full"}) + "\n")
+def _evidence(root, tmp_path, monkeypatch, commit):
+    gh = FakeGh(tmp_path, monkeypatch, root=root)
+    gh.add_run("39026620122", commit=commit, platform="windows")
+    A.record_platform_run(root, platform="windows", run="39026620122", at=int(time.time()) - 60)
 
 
 def _transcript(tmp_path, monkeypatch, now):
@@ -77,7 +76,7 @@ def test_gain_reads_slices_spend_reviews_and_evidence_from_their_stores(project,
     root = project["root"]
     first = subprocess.run([A.git_binary(), "rev-parse", "HEAD"], cwd=root, check=True,
                            capture_output=True, text=True).stdout.strip()
-    _evidence(root, first)
+    _evidence(root, tmp_path, monkeypatch, first)
     _landed(project)
     _transcript(tmp_path, monkeypatch, time.time())
 
@@ -96,8 +95,9 @@ def test_gain_reads_slices_spend_reviews_and_evidence_from_their_stores(project,
 
 def test_gain_json_is_one_document_of_the_same_numbers(project, tmp_path, monkeypatch, capsys):
     _landed(project)
-    _evidence(project["root"], subprocess.run([A.git_binary(), "rev-parse", "HEAD"], cwd=project["root"],
-                                             check=True, capture_output=True, text=True).stdout.strip())
+    _evidence(project["root"], tmp_path, monkeypatch,
+              subprocess.run([A.git_binary(), "rev-parse", "HEAD"], cwd=project["root"],
+                             check=True, capture_output=True, text=True).stdout.strip())
     _transcript(tmp_path, monkeypatch, time.time())
 
     assert cli.cmd_gain(project, _args(json=True)) == 0
@@ -133,3 +133,38 @@ def test_gain_says_what_is_absent_instead_of_showing_zero(project, monkeypatch, 
     assert "no review recorded in this window" in out
     assert "no implementer turn in this window" in out
     assert "no platform run recorded" in out
+
+
+def test_gain_validates_the_evidence_chain_and_shows_whether_a_run_still_vouches(
+    project, tmp_path, monkeypatch, capsys
+):
+    """LANE-EVIDENCE, from the review: `ao gain` read platform-runs.jsonl as raw lines, so a stale or unplaced run
+    still printed as green and a chained row edited after recording still printed as green while `ao evidence show`
+    and `ao doctor --check` refused the broken chain."""
+    monkeypatch.setattr(A, "session_paths", lambda cfg: (None, None))
+    root = project["root"]
+    first = subprocess.run([A.git_binary(), "rev-parse", "HEAD"], cwd=root, check=True,
+                           capture_output=True, text=True).stdout.strip()
+    gh = FakeGh(tmp_path, monkeypatch, root=root)
+    gh.add_run("1", commit=first, platform="windows")
+    gh.add_run("2", commit=first, platform="windows")
+    A.record_platform_run(root, platform="windows", run="1", at=100)
+    A.record_platform_run(root, platform="windows", run="2", at=100)
+    subprocess.run([A.git_binary(), "-c", "core.hooksPath=", "commit", "--allow-empty", "-m", "move"],
+                   cwd=root, check=True, capture_output=True)
+    strict = dict(project, evidence={"max_commits_behind": 0})
+
+    assert cli.cmd_gain(strict, _args()) == 0
+    out = capsys.readouterr().out
+    assert "windows stale" in out and "windows green" not in out
+
+    ledger = os.path.join(root, A.PLATFORM_RUNS_FILE)
+    with open(ledger, encoding="utf-8") as fh:
+        text = fh.read()
+    with open(ledger, "w", encoding="utf-8") as fh:
+        fh.write(text.replace('"suite":"full"', '"suite":"tampered"', 1))
+
+    assert cli.cmd_gain(project, _args()) == 0
+    out = capsys.readouterr().out
+    assert "cannot read .ao/ledger/platform-runs.jsonl" in out and "broken hash chain" in out
+    assert "windows green" not in out

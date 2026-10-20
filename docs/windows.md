@@ -231,6 +231,17 @@ runner must pass the process backend's native self-check rather than silently us
 the shell fallback. Each lane's log ends with every test it skipped and the reason
 (`pytest -rs`).
 
+A lane's result becomes evidence when a person or the lane's own script records its CI run id
+after the run: `ao` reads the run through `gh` and records what the run says. Nothing records a
+hosted run automatically yet. `ao evidence show` and `ao gain` read the rows back, and `ao
+doctor` names a platform whose newest run is red or no longer covers HEAD (EVIDENCE,
+[telemetry.md](telemetry.md)):
+
+```bash
+ao evidence record --platform windows --run 39026620122
+ao evidence show
+```
+
 The Windows lane has run. Its first run, on demand on 2026-09-17, failed on what *Found by
 the lane's first run* lists; the run on demand after those fixes that day, and the weekly
 run of 2026-09-21, were green on the hosted runner with Python 3.12: 1232 and then 1280

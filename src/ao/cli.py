@@ -38,6 +38,7 @@ A._part("cli_authority", globals())
 
 A._part("cli_channels", globals())
 A._part("cli_gain", globals())
+A._part("cli_evidence", globals())
 
 
 A._part("cli_review", globals())
@@ -222,6 +223,14 @@ def build_parser(root=None):
                     help="export only the rows this machine's checkpoint store attests and mark the output accordingly")
     ex.add_argument("--out", metavar="FILE", help="write to FILE instead of standard output")
     ex.set_defaults(fn=cmd_export)
+    ev = sub.add_parser("evidence", help="platform lane runs recorded from CI as evidence, and what each "
+                                         "platform's newest run still vouches for")
+    ev.add_argument("action", nargs="?", default="show", choices=["record", "show"])
+    ev.add_argument("--platform", help="record: the lane that ran, such as windows, macos or linux")
+    ev.add_argument("--run", help="record: the CI run's id, read through gh")
+    ev.add_argument("--all", action="store_true", help="show: every recorded row, not only each platform's newest")
+    ev.add_argument("--json", action="store_true", help="show: the same readings as one JSON document")
+    ev.set_defaults(fn=cmd_evidence)
     rc = sub.add_parser("recall", help="what was decided, found or learned before, across projects")
     rc.add_argument("text", nargs="+")
     rc.add_argument("-n", "--limit", type=int, default=10)
