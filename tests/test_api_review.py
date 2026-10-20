@@ -20,8 +20,9 @@ APPROVED = "VERDICT: APPROVED\nBLOCKER: 0\nHIGH: 0\nMEDIUM: 0\nLOW: 0\n\n## Find
 class _Endpoint:
     """A chat-completions stand-in on 127.0.0.1: it keeps each request and answers as it is told."""
 
-    def __init__(self, answer=APPROVED, status=200, location=None, reply=None):
+    def __init__(self, answer=APPROVED, status=200, location=None, reply=None, turns=None):
         self.requests, endpoint = [], self
+        scripted = list(turns) if turns is not None else []
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_POST(self):
@@ -33,9 +34,19 @@ class _Endpoint:
                     self.send_header("Location", location)
                     self.end_headers()
                     return
-                body = reply if reply is not None else {"choices": [{"message": {"role": "assistant", "content": answer}}]}
-                encoded = json.dumps(body).encode()
-                self.send_response(status)
+                code = status
+                if scripted:
+                    step = scripted.pop(0)
+                    if isinstance(step, tuple):
+                        code, payload = step
+                    else:
+                        payload = step
+                elif reply is not None:
+                    payload = reply
+                else:
+                    payload = {"choices": [{"message": {"role": "assistant", "content": answer}}]}
+                encoded = json.dumps(payload).encode()
+                self.send_response(code)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(encoded)))
                 self.end_headers()
@@ -51,6 +62,18 @@ class _Endpoint:
     def close(self):
         self.server.shutdown()
         self.server.server_close()
+
+
+def _tool_turn(*calls):
+    return {"choices": [{"message": {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {"id": f"call_{idx}", "type": "function",
+             "function": {"name": name, "arguments": json.dumps(args)}}
+            for idx, (name, args) in enumerate(calls, 1)
+        ],
+    }, "finish_reason": "tool_calls"}]}
 
 
 @pytest.fixture
@@ -73,10 +96,14 @@ def _providers(monkeypatch, tmp_path, *entries):
     return path
 
 
-def _run(tmp_path, model, prompt="review this"):
+def _run(tmp_path, model, prompt="review this", tree=None):
     diff, out = tmp_path / "candidate.diff", tmp_path / "answer.md"
     diff.write_text("diff --git a/x b/x\n", encoding="utf-8")
-    code = api_review.main(["--model", model, "--diff-file", str(diff), "--output", str(out), prompt])
+    argv = ["--model", model, "--diff-file", str(diff), "--output", str(out)]
+    if tree is not None:
+        argv += ["--tree", str(tree)]
+    argv.append(prompt)
+    code = api_review.main(argv)
     return code, (out.read_text(encoding="utf-8") if out.exists() else None)
 
 
@@ -159,7 +186,7 @@ def test_a_review_through_the_api_reviewer_is_read_and_recorded(project, monkeyp
     _repo_with_change(root)
     served = endpoint()
     home = tmp_path / "home"
-    (home / ".ao").mkdir(parents=True)
+    (home / ".ao").mkdir(parents=True, exist_ok=True)
     (home / ".ao" / "settings.json").write_text(json.dumps(
         {"review": {"api_providers": [f"local {served.url} AO_TEST_API_KEY"]}}), encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))                    # the tool reads the machine's settings as ao does
@@ -187,7 +214,7 @@ def test_a_prompt_past_one_argument_reaches_the_client_on_its_standard_input(pro
     _repo_with_change(root)
     served = endpoint()
     home = tmp_path / "home"
-    (home / ".ao").mkdir(parents=True)
+    (home / ".ao").mkdir(parents=True, exist_ok=True)
     (home / ".ao" / "settings.json").write_text(json.dumps(
         {"review": {"api_providers": [f"local {served.url} AO_TEST_API_KEY"]}}), encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
@@ -326,3 +353,294 @@ def test_an_empty_answer_that_did_not_run_out_is_still_no_answer(monkeypatch, tm
     monkeypatch.setenv("AO_TEST_API_KEY", "a-key-for-this-test")
 
     assert _run(tmp_path, "local/m")[0] == 1 and "local gave no answer for m" in capsys.readouterr().err
+
+
+def test_the_client_with_a_tree_runs_read_grep_glob_and_list_and_answers(monkeypatch, tmp_path, endpoint):
+    """API-REVIEWER-TOOLS: a loopback stub calls read, grep, glob and list over --tree DIR and then writes its verdict."""
+    import secrets
+    tree = tmp_path / "tree"
+    (tree / "src").mkdir(parents=True)
+    (tree / "README.md").write_text("# title\n", encoding="utf-8")
+    (tree / "src" / "mod.py").write_text("line1 = 1\ncaller_target = 42\nline3 = 3\n", encoding="utf-8")
+    (tree / "src" / "notes.txt").write_text("caller_target in notes\n", encoding="utf-8")
+    turns = [
+        _tool_turn(
+            ("list", {"path": "."}),
+            ("glob", {"pattern": "src/**/*.py"}),
+        ),
+        _tool_turn(
+            ("grep", {"pattern": "caller_target", "path": "src", "glob": "*.py"}),
+            ("read", {"path": "src/mod.py", "first_line": 2, "line_count": 1}),
+        ),
+    ]
+    served = endpoint(turns=turns)
+    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
+    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+
+    code, answer = _run(tmp_path, "local/m", "review prompt", tree=tree)
+
+    assert code == 0 and answer == APPROVED
+    assert len(served.requests) == 3
+    assert [t["function"]["name"] for t in served.requests[0]["body"]["tools"]] == ["read", "grep", "glob", "list"]
+    round1_tools = [m for m in served.requests[1]["body"]["messages"] if m["role"] == "tool"]
+    assert [m["content"] for m in round1_tools] == ["README.md\nsrc/", "src/mod.py"]
+    round2_tools = [m for m in served.requests[2]["body"]["messages"] if m["role"] == "tool"][2:]
+    assert round2_tools[0]["content"] == "src/mod.py:2: caller_target = 42"
+    assert round2_tools[1]["content"] == "2: caller_target = 42"
+    stats = json.loads((tmp_path / "answer.md.tool.json").read_text(encoding="utf-8"))
+    assert stats["rounds"] == 2 and stats["read_bytes"] > 0
+
+
+def test_confinement_refuses_absolute_paths_parent_escapes_and_links_out_and_keeps_links_inside(
+        monkeypatch, tmp_path, endpoint):
+    """API-REVIEWER-TOOLS: every path is relative to DIR and resolved inside it; a link that stays inside works."""
+    import secrets
+    outside = tmp_path / "outside.txt"
+    outside.write_text("OUTSIDE_MARKER\n", encoding="utf-8")
+    tree = tmp_path / "tree"
+    (tree / "sub").mkdir(parents=True)
+    (tree / "sub" / "inside.py").write_text("INSIDE_OK = 1\n", encoding="utf-8")
+    (tree / "out_rel").symlink_to("../outside.txt")
+    (tree / "out_abs").symlink_to(str(outside))
+    (tree / "in_link.py").symlink_to("sub/inside.py")
+    (tree / "sub" / "rel_in.py").symlink_to("../sub/inside.py")
+
+    turns = [
+        _tool_turn(
+            ("read", {"path": str(outside)}),
+            ("read", {"path": "../outside.txt"}),
+            ("read", {"path": "sub/../../outside.txt"}),
+            ("read", {"path": "out_rel"}),
+            ("read", {"path": "out_abs"}),
+            ("grep", {"pattern": "OUTSIDE", "path": "../outside.txt"}),
+            ("grep", {"pattern": "OUTSIDE", "path": "out_rel"}),
+            ("glob", {"pattern": "../outside.txt"}),
+            ("glob", {"pattern": str(outside)}),
+            ("glob", {"pattern": "out_rel"}),
+            ("list", {"path": ".."}),
+            ("list", {"path": str(tmp_path)}),
+            ("list", {"path": "out_rel"}),
+            ("read", {"path": "in_link.py"}),
+            ("read", {"path": "sub/rel_in.py"}),
+        ),
+    ]
+    served = endpoint(turns=turns)
+    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
+    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+
+    code, answer = _run(tmp_path, "local/m", tree=tree)
+
+    assert code == 0 and answer == APPROVED
+    results = [m["content"] for m in served.requests[1]["body"]["messages"] if m["role"] == "tool"]
+    assert all("OUTSIDE_MARKER" not in r for r in results)
+    for refused in results[:13]:
+        assert refused.startswith("refused:"), refused
+    assert results[13] == "1: INSIDE_OK = 1"
+    assert results[14] == "1: INSIDE_OK = 1"
+
+
+def test_harness_configuration_is_hidden_from_the_tools_at_every_depth(monkeypatch, tmp_path, endpoint):
+    """API-REVIEWER-TOOLS: harness configuration in the tree is hidden from read, grep, glob and list."""
+    import secrets
+    tree = tmp_path / "tree"
+    (tree / ".claude").mkdir(parents=True)
+    (tree / ".claude" / "settings.json").write_text('{"hooks": "HIDDEN_HOOK"}\n', encoding="utf-8")
+    (tree / "CLAUDE.md").write_text("HIDDEN_RULE\n", encoding="utf-8")
+    (tree / "pkg" / ".kiro" / "steering").mkdir(parents=True)
+    (tree / "pkg" / ".kiro" / "steering" / "guide.md").write_text("HIDDEN_STEERING\n", encoding="utf-8")
+    (tree / "pkg" / "visible.py").write_text("VISIBLE_CODE = 1\n", encoding="utf-8")
+    (tree / "cfg_link").symlink_to("CLAUDE.md")
+
+    turns = [
+        _tool_turn(
+            ("list", {"path": "."}),
+            ("list", {"path": "pkg"}),
+            ("glob", {"pattern": "**/*"}),
+            ("grep", {"pattern": "HIDDEN|VISIBLE"}),
+            ("read", {"path": "CLAUDE.md"}),
+            ("read", {"path": ".claude/settings.json"}),
+            ("read", {"path": "pkg/.kiro/steering/guide.md"}),
+            ("read", {"path": "cfg_link"}),
+            ("list", {"path": ".claude"}),
+            ("glob", {"pattern": ".claude/*"}),
+        ),
+    ]
+    served = endpoint(turns=turns)
+    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
+    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+
+    code, answer = _run(tmp_path, "local/m", tree=tree)
+
+    assert code == 0 and answer == APPROVED
+    results = [m["content"] for m in served.requests[1]["body"]["messages"] if m["role"] == "tool"]
+    assert results[0] == "pkg/"
+    assert results[1] == "visible.py"
+    assert results[2] == "pkg/visible.py"
+    assert results[3] == "pkg/visible.py:1: VISIBLE_CODE = 1"
+    for refused in results[4:]:
+        assert "refused:" in refused and "withheld" in refused
+    assert all("HIDDEN_" not in r for r in results)
+
+
+def test_each_answer_bound_and_each_turn_bound_tells_the_model_and_asks_for_a_verdict_without_tools(
+        monkeypatch, tmp_path, endpoint):
+    """API-REVIEWER-TOOLS: per-answer bounds (bytes, lines, matches) and per-turn bounds (rounds, read_bytes, wall time)."""
+    import secrets
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    for i in range(6):
+        (tree / f"f{i}.py").write_text("\n".join(f"match_{i}_{line}" for line in range(10)) + "\n", encoding="utf-8")
+
+    # 1. Per-answer bounds: lines, bytes, matches
+    monkeypatch.setattr(api_review, "TOOL_MAX_LINES", 3)
+    monkeypatch.setattr(api_review, "TOOL_MAX_MATCHES", 2)
+    monkeypatch.setattr(api_review, "TOOL_MAX_BYTES", 80)
+    served = endpoint(turns=[
+        _tool_turn(
+            ("read", {"path": "f0.py"}),
+            ("grep", {"pattern": "match_"}),
+            ("glob", {"pattern": "*.py"}),
+            ("list", {"path": "."}),
+        ),
+    ])
+    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
+    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+    code, answer = _run(tmp_path, "local/m", tree=tree)
+    assert code == 0 and answer == APPROVED
+    ans_tools = [m["content"] for m in served.requests[1]["body"]["messages"] if m["role"] == "tool"]
+    assert "truncated at 3 lines" in ans_tools[0] or "truncated at 80 bytes" in ans_tools[0]
+    assert all(len(r.encode("utf-8")) <= 80 for r in ans_tools)
+    assert "truncated at 2 matches" in ans_tools[1]
+    assert "truncated at 2 matches" in ans_tools[2]
+    assert "truncated at 2 entries" in ans_tools[3]
+
+    # 2. Turn bound: tool rounds
+    monkeypatch.setattr(api_review, "TOOL_MAX_LINES", 200)
+    monkeypatch.setattr(api_review, "TOOL_MAX_MATCHES", 100)
+    monkeypatch.setattr(api_review, "TOOL_MAX_BYTES", 32_768)
+    monkeypatch.setattr(api_review, "TURN_MAX_ROUNDS", 2)
+    served_rounds = endpoint(turns=[
+        _tool_turn(("list", {"path": "."})),
+        _tool_turn(("list", {"path": "."})),
+    ])
+    _providers(monkeypatch, tmp_path, f"local {served_rounds.url} AO_TEST_API_KEY")
+    code, answer = _run(tmp_path, "local/m", tree=tree)
+    assert code == 0 and answer == APPROVED and len(served_rounds.requests) == 3
+    assert "tools" in served_rounds.requests[0]["body"] and "tools" in served_rounds.requests[1]["body"]
+    assert "tools" not in served_rounds.requests[2]["body"]
+    assert "tool round limit (2 rounds) reached" in served_rounds.requests[2]["body"]["messages"][-1]["content"]
+
+    # 3. Turn bound: total bytes read
+    monkeypatch.setattr(api_review, "TURN_MAX_ROUNDS", 16)
+    monkeypatch.setattr(api_review, "TURN_MAX_READ_BYTES", 25)
+    served_bytes = endpoint(turns=[_tool_turn(("read", {"path": "f0.py"}))])
+    _providers(monkeypatch, tmp_path, f"local {served_bytes.url} AO_TEST_API_KEY")
+    code, answer = _run(tmp_path, "local/m", tree=tree)
+    assert code == 0 and answer == APPROVED and len(served_bytes.requests) == 2
+    assert "tools" not in served_bytes.requests[1]["body"]
+    assert "total bytes read limit (25 bytes) reached" in served_bytes.requests[1]["body"]["messages"][-1]["content"]
+    stats = json.loads((tmp_path / "answer.md.tool.json").read_text(encoding="utf-8"))
+    assert stats["read_bytes"] == 25
+
+    # 4. Turn bound: wall time
+    monkeypatch.setattr(api_review, "TURN_MAX_READ_BYTES", 262_144)
+    monkeypatch.setattr(api_review, "TURN_MAX_SECONDS", 0.0)
+    served_time = endpoint(turns=[_tool_turn(("read", {"path": "f0.py"}))])
+    _providers(monkeypatch, tmp_path, f"local {served_time.url} AO_TEST_API_KEY")
+    code, answer = _run(tmp_path, "local/m", tree=tree)
+    assert code == 0 and answer == APPROVED and len(served_time.requests) == 2
+    assert "tools" not in served_time.requests[1]["body"]
+    assert "wall-time limit" in served_time.requests[1]["body"]["messages"][-1]["content"]
+
+
+def test_a_provider_that_refuses_tools_makes_the_review_unavailable_and_says_so(monkeypatch, tmp_path, endpoint, capsys):
+    """API-REVIEWER-TOOLS: a provider that refuses tools makes the review UNAVAILABLE and never runs silently without them."""
+    import secrets
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    refusing = endpoint(turns=[(400, {"error": {"message": "tools are not supported by this model"}})])
+    _providers(monkeypatch, tmp_path, f"local {refusing.url} AO_TEST_API_KEY")
+    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+
+    code, answer = _run(tmp_path, "local/m", tree=tree)
+
+    said = capsys.readouterr().err
+    assert code == 1 and answer is None and len(refusing.requests) == 1
+    assert "local refused the review tools for m" in said
+
+
+def test_a_route_opting_into_tree_gets_the_tree_and_evidence_while_a_route_without_tree_is_unchanged(
+        project, monkeypatch, tmp_path, endpoint):
+    """API-REVIEWER-TOOLS: a route with `--tree {tree}` gets the unpacked candidate tree, the tree note and evidence
+    fields (`rounds`, `read_bytes`), while a route without `--tree {tree}` sends one request with no tools."""
+    import hashlib
+    import secrets
+    import subprocess
+    root = project["root"]
+    os.makedirs(os.path.join(root, ".claude"), exist_ok=True)
+    with open(os.path.join(root, ".claude", "settings.json"), "w", encoding="utf-8") as fh:
+        fh.write('{"hooks": "withheld"}\n')
+    _repo_with_change(root)
+
+    served = endpoint(turns=[
+        _tool_turn(
+            ("list", {"path": "."}),
+            ("read", {"path": "src/a.py"}),
+            ("read", {"path": ".claude/settings.json"}),
+        ),
+    ])
+    home = tmp_path / "home"
+    (home / ".ao").mkdir(parents=True, exist_ok=True)
+    (home / ".ao" / "settings.json").write_text(json.dumps(
+        {"review": {"api_providers": [f"local {served.url} AO_TEST_API_KEY"]}}), encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("PYTHONPATH", os.path.join(A.REPO, "src"))
+    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+    client = cli._tool_beside_interpreter("ao-api-review")
+    if client is None:
+        pytest.skip("the client's script is installed with ao, and this interpreter has none")
+    monkeypatch.setattr(cli, "_reviewer_resolve_binary", lambda root_, name: (
+        (client, "ao-api-review") if name == "ao-api-review" else (None, None)))
+
+    # 1. Opted-in route with --tree {tree}
+    composed = A.compose_reviewer("openai-api", model="local/m", family="zhipu")
+    tree_route = dict(composed, id="rv-tree", argv=composed["argv"][:-1] + ["--tree", "{tree}", composed["argv"][-1]])
+    staged_diff = A.candidate_diff(root, A.index_candidate(root))
+    expected_digest = "sha256:" + hashlib.sha256(staged_diff).hexdigest()
+
+    assert cli.cmd_review(dict(project, reviewer=tree_route), _args()) == 0
+
+    assert len(served.requests) == 2
+    first_prompt = served.requests[0]["body"]["messages"][0]["content"]
+    assert cli._tree_note(project, True) in first_prompt
+    assert "tools" in served.requests[0]["body"]
+    tool_outputs = [m["content"] for m in served.requests[1]["body"]["messages"] if m["role"] == "tool"]
+    assert "src/" in tool_outputs[0] and ".claude/" not in tool_outputs[0]
+    assert "x = 2" in tool_outputs[1]
+    assert "refused:" in tool_outputs[2] and "withheld" in tool_outputs[2]
+    row = storage.read_chained_jsonl(A.review_ledger_path(root), A.REVIEW_CHAIN)[-1]
+    assert row["verdict"] == "APPROVED"
+    names = sorted(os.listdir(os.path.join(root, "semantic-review")))
+    evidence = A.review_evidence(open(os.path.join(root, "semantic-review", names[-1]), encoding="utf-8").read())
+    assert evidence["tool"]["handed"] == expected_digest
+    assert evidence["tool"]["bytes"] == len(staged_diff)
+    assert evidence["tool"]["rounds"] == 1 and evidence["tool"]["read_bytes"] > 0
+    assert cli._tool_review_evidence({"diff_digest": expected_digest}, tree_route,
+                                     {"tool": {"handed": "sha256:" + "0" * 64, "bytes": 1, "rounds": 1, "read_bytes": 5}}) \
+        == "the bytes handed to the tool reviewer are not the candidate diff this review names"
+
+    # 2. Route without --tree {tree}: one request, no tools, no tree note
+    plain_served = endpoint()
+    (home / ".ao" / "settings.json").write_text(json.dumps(
+        {"review": {"api_providers": [f"local {plain_served.url} AO_TEST_API_KEY"]}}), encoding="utf-8")
+    plain_route = dict(composed, id="rv-plain")
+
+    assert cli.cmd_review(dict(project, reviewer=plain_route), _args()) == 0
+
+    (only_req,) = plain_served.requests
+    assert "tools" not in only_req["body"]
+    assert cli._tree_note(project, True) not in only_req["body"]["messages"][0]["content"]
+    names = sorted(os.listdir(os.path.join(root, "semantic-review")))
+    plain_evidence = A.review_evidence(open(os.path.join(root, "semantic-review", names[-1]), encoding="utf-8").read())
+    assert plain_evidence["tool"]["rounds"] == 0 and plain_evidence["tool"]["read_bytes"] == 0

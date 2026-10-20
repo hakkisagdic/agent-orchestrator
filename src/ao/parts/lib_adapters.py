@@ -186,7 +186,7 @@ ADAPTER_CONTRACT = 1
 ADAPTER_VERIFIED = ("full", "partial", "documented", "untested", "planned")
 ADAPTER_PLACEHOLDERS = ("prompt", "session", "model", "effort", "mode", "cwd", "escaped_cwd", "workspace_hash",
                         "timeout", "tools", "schema", "max_steps", "provider", "name", "n", "tokens", "dir", "path",
-                        "agent", "agent_login", "branch", "issue", "lane", "pr", "url", "diff_file", "output")
+                        "agent", "agent_login", "branch", "issue", "lane", "pr", "url", "diff_file", "output", "tree")
 
 
 def adapter_layers(root=None):
@@ -2385,7 +2385,7 @@ def admit_rewrites(argv, rewriters=None, prompt=None):
 
 # ---- a reviewer can be a tool ao runs over the candidate, on its own provider (#86) -------
 
-TOOL_REVIEW_PLACEHOLDERS = ("prompt", "diff_file", "output", "model", "timeout")
+TOOL_REVIEW_PLACEHOLDERS = ("prompt", "diff_file", "output", "model", "timeout", "tree")
 TOOL_REVIEW_ENV_PLACEHOLDERS = ("model", "timeout")
 
 
@@ -2414,6 +2414,12 @@ def tool_review_problems(adapter, argv=None):
             problems.append(f"`review.encoding` is {review['encoding']!r}, which is not an encoding")
     if "release" in review and not re.fullmatch(r"\d+(?:\.\d+)*", str(review["release"])):
         problems.append("`review.release` names the release the contract was measured against, in dotted digits")
+    tree_flag = review.get("tree")
+    if tree_flag is not None and not (
+            isinstance(tree_flag, list) and tree_flag and all(isinstance(part, str) for part in tree_flag)
+            and str(tree_flag[0]).startswith("-")
+            and [name for part in tree_flag for name in re.findall(r"\{([a-z_]+)\}", part)] == ["tree"]):
+        problems.append("`review.tree` must be a flag, carrying {tree} in exactly one argument")
     answer = review.get("answer")
     if not isinstance(answer, dict) or answer.get("from") != "output":
         problems.append("`review.answer.from` must be output: the file ao names in {output}")
@@ -2432,6 +2438,8 @@ def tool_review_problems(adapter, argv=None):
     for name in ("prompt", "diff_file", "output"):
         if used.count(name) != 1:
             problems.append(f"a tool reviewer's argv must carry {{{name}}} exactly once")
+    if "tree" in used and (tree_flag is None or used.count("tree") != 1):
+        problems.append("a tool reviewer's argv may carry {tree} once only when `review.tree` is declared")
     # Null is no environment, and so is nothing; any other value that is no object is refused, not read as one: an
     # empty list or string was taken for no rules (LEADS-ADAPTERS).
     environment = {} if review.get("environment") is None else review["environment"]

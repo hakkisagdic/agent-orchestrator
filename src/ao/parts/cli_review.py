@@ -487,6 +487,17 @@ def _tool_route(route):
     return isinstance(route, dict) and route.get("kind") == "tool"
 
 
+def _tool_tree_argv(route):
+    """Whether a tool reviewer route's argv names the candidate tree its adapter declares (API-REVIEWER-TOOLS)."""
+    if not _tool_route(route):
+        return False
+    adapter = A.package_adapters().get(str(route.get("adapter") or ""))
+    contract = A.tool_review_contract(adapter) or {}
+    tree_flag = contract.get("tree")
+    given = [str(part) for part in route.get("argv") or []]
+    return bool(isinstance(tree_flag, list) and tree_flag and A._holds(given[1:], [str(part) for part in tree_flag]))
+
+
 def _tool_invocation(route, prompt, candidate):
     """(what a tool reviewer is run with, None), or (None, why it cannot run) (#86).
 
@@ -505,9 +516,20 @@ def _tool_invocation(route, prompt, candidate):
     if problems:
         return None, "; ".join(problems)
     # A route that named the tool's adapter ran any program it listed, and the review was recorded as that
-    # tool's: it runs the command its adapter declares, as `ao role set reviewer` composes it (REVIEWER-TOOL-2).
+    # tool's: it runs the command its adapter declares, as `ao role set reviewer` composes it (REVIEWER-TOOL-2),
+    # with `review.tree` when the route opts in to reading the candidate's tree (API-REVIEWER-TOOLS).
     send = adapter.get("send") if isinstance(adapter.get("send"), dict) else {}
-    if [str(part) for part in route.get("argv") or []] != [str(part) for part in send.get("argv") or []]:
+    declared = [str(part) for part in send.get("argv") or []]
+    given = [str(part) for part in route.get("argv") or []]
+    tree_flag = [str(part) for part in contract.get("tree") or []]
+    wants_tree = bool(tree_flag and A._holds(given[1:], tree_flag))
+    without_tree = list(given)
+    if wants_tree and without_tree != declared:
+        for at in range(1, len(without_tree) - len(tree_flag) + 1):
+            if without_tree[at:at + len(tree_flag)] == tree_flag:
+                without_tree = without_tree[:at] + without_tree[at + len(tree_flag):]
+                break
+    if without_tree != declared:
         return None, (f"a tool reviewer runs the command adapter {ident} declares, as `ao role set reviewer {ident}` "
                       "composes it, and this route runs another")
     model = route.get("model")
@@ -516,7 +538,7 @@ def _tool_invocation(route, prompt, candidate):
     if not isinstance(candidate, (bytes, bytearray)):
         return None, "a tool reviewer is handed the candidate as a file, and no candidate was given"
     return {"adapter": ident, "contract": contract, "prompt": prompt, "candidate": bytes(candidate),
-            "model": model.strip(), "install": contract.get("install")}, None
+            "model": model.strip(), "install": contract.get("install"), "tree": wants_tree}, None
 
 
 def _tool_render(text, values):
@@ -573,6 +595,8 @@ def _tool_prepare(fresh, argv, env, timeout, tool):
                                          "cannot read")
     paths = {"diff_file": os.path.join(fresh, REVIEW_TOOL_CANDIDATE),
              "output": os.path.join(fresh, REVIEW_TOOL_ANSWER)}
+    if tool.get("tree"):
+        paths["tree"] = os.path.join(fresh, REVIEW_TREE_DIR)
     try:
         with open(paths["diff_file"], "xb") as fh:
             fh.write(tool["candidate"])
@@ -626,8 +650,19 @@ def _tool_answer(fresh, tool, handoff, stdout, stderr):
         text = text[at + len(echo):]
     if not text.strip():
         return failed("silence", "wrote an empty answer (exit 0)")
+    recorded = dict(handoff, rounds=0, read_bytes=0)
+    try:
+        with open(path + ".tool.json", encoding=UTF8) as fh:
+            stats = json.load(fh)
+    except (OSError, ValueError):
+        stats = None
+    if isinstance(stats, dict):
+        for key in ("rounds", "read_bytes"):
+            value = stats.get(key)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                recorded[key] = value
     return {"ok": True, "out": text.strip(), "reason": "", "returncode": 0, "kind": "success", "retryable": False,
-            "tool": dict(handoff)}
+            "tool": recorded}
 
 
 def _tool_review_evidence(evidence, route, attempt):
@@ -644,6 +679,8 @@ def _tool_review_evidence(evidence, route, attempt):
     evidence["tool"] = {"adapter": route.get("adapter"), "model": route.get("model"),
                         "version": (attempt or {}).get("version") or None,
                         "handed": handoff.get("handed"), "bytes": handoff.get("bytes"),
+                        "rounds": int(handoff.get("rounds") or 0),
+                        "read_bytes": int(handoff.get("read_bytes") or 0),
                         "limits": [str(limit) for limit in limits] if isinstance(limits, list) else []}
     if not handoff.get("handed") or handoff.get("handed") != evidence.get("diff_digest"):
         return "the bytes handed to the tool reviewer are not the candidate diff this review names"
@@ -1076,8 +1113,8 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
                 "returncode": None, "kind": "isolation-error",
                 "retryable": False,
             }
-        # A tool is handed files of its own here, and no tree (REVIEW-TREE-2).
-        if tree and tool is None and _unpack_candidate(root, tree, fresh) is None:
+        # A tool is handed files of its own here, and no tree unless its route opts in (REVIEW-TREE-2, API-REVIEWER-TOOLS).
+        if tree and (tool is None or tool.get("tree")) and _unpack_candidate(root, tree, fresh) is None:
             print(f"{C['dim']}{label} reads what the prompt carries: the candidate's tree could not be "
                   f"unpacked{C['reset']}")
         if tool is None:
@@ -2366,8 +2403,11 @@ def _invoke_reviewer_sections(root, chain, prompt, sections, journal, timeout, s
     attempt = dict((last or {}).get("attempt") or {"ok": True, "binary": "section journal"}, out="\n".join(body))
     handoffs = [row.get("tool") for row in rows]
     attempt.pop("tool", None)
-    if handoffs and all(handoffs) and all(handoff == handoffs[0] for handoff in handoffs):
-        attempt["tool"] = handoffs[0]
+    if handoffs and all(isinstance(h, dict) for h in handoffs) \
+            and len({(h.get("handed"), h.get("bytes")) for h in handoffs}) == 1:
+        attempt["tool"] = dict(handoffs[0],
+                               rounds=sum(int(h.get("rounds") or 0) for h in handoffs),
+                               read_bytes=sum(int(h.get("read_bytes") or 0) for h in handoffs))
     # So does an answer through ACP: the review came through it when every section did, from one adapter's
     # agent; each section that did says so in its summary (ACP-REVIEWER).
     through = [row.get("acp") for row in rows]
@@ -2454,8 +2494,9 @@ def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
         route_timeout = min(float(timeout), room())
         tool_route = not strict and _tool_route(cand)
         label, binary, version, attempt = _reviewer_route_invocation(
-            root, cand, treeless if tool_route and treeless is not None else prompt, route_timeout, strict,
-            primary, tree=tree, transport=transport, **({"candidate": candidate} if tool_route else {})
+            root, cand, treeless if tool_route and not _tool_tree_argv(cand) and treeless is not None else prompt,
+            route_timeout, strict, primary, tree=tree, transport=transport,
+            **({"candidate": candidate} if tool_route else {})
         )
         labels[position] = label
         if attempt["ok"] and validate is not None:

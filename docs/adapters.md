@@ -227,6 +227,7 @@ it - and a `review` contract, which ao reads from the package's adapters only:
 | `review` → `encoding` | the encoding the tool reads the diff in; a candidate in another is refused before the tool starts |
 | `review` → `install`, `limits` | what would install it, named when it is absent; what ao cannot know about its answer, written into the evidence |
 | `review` → `release` | the release the contract was measured against, in dotted digits: a tool whose `--version` names another release, or none, is unavailable rather than taken for it |
+| `review` → `tree` | the flag (`["--tree", "{tree}"]`) with which a route opts in to having the candidate's tree unpacked into `candidate/`, harness configuration withheld, and the tree note carried in the prompt (API-REVIEWER-TOOLS) |
 
 ```bash
 ao role set reviewer pr-agent --model <provider/model> --family <family>
@@ -237,9 +238,13 @@ pins, and the family, which a person names because ao never infers one from a mo
 route with no family may not review. The question is ao's own review prompt, candidate included,
 so the verdict rule and the count schema are every other reviewer's; a tool is given neither the
 candidate's tree, which ao unpacks where every other reviewer runs, nor the note about it
-([pipeline.md](pipeline.md), REVIEW-TREE-2). The evidence adds `adapter`
+([pipeline.md](pipeline.md), REVIEW-TREE-2), unless its adapter declares `review` → `tree` and the
+route's `argv` names `--tree {tree}`, in which case ao unpacks the candidate's tree into
+`candidate/` (every harness's configuration hidden at every depth, REVIEW-TREE-3), fills `{tree}`,
+and includes the tree note in the prompt (API-REVIEWER-TOOLS). The evidence adds `adapter`
 and `model` to `reviewer`, and a `tool` block with the tool's version, the digest and size of the
-bytes handed and the adapter's limits; a review whose handed bytes are not the candidate diff is
+bytes handed, the tool rounds (`rounds`) and bytes read from the tree (`read_bytes`), and the
+adapter's limits; a review whose handed bytes are not the candidate diff is
 INVALID. A tool that is not installed makes the review UNAVAILABLE, naming what would install it,
 and `ao doctor` lists it among the optional capabilities. A tool route spends no actor's window:
 ao asks keyflip about no provider for it, and never runs the architect's route.
@@ -249,9 +254,17 @@ mode (`--diff-file`) reads the candidate with no pull request and no platform to
 nowhere, and `ask` carries ao's prompt. A capability-matrix project cannot bind a tool reviewer yet.
 
 `openai-api` is ao's own client, `ao-api-review`, installed with ao and using nothing but the standard
-library. It asks an OpenAI-compatible `/chat/completions` once, with ao's review prompt as the only
-message, and writes the answer it gets; it has no tools, so the model reads what the prompt carries
-and nothing else. The providers are the machine's: `review.api_providers` names each by a word, with
+library. Without `--tree {tree}`, it asks an OpenAI-compatible `/chat/completions` once, with ao's
+review prompt as the only message and no tools, and writes the answer it gets; the model reads what
+the prompt carries and nothing else. When a route's `argv` names `--tree {tree}`, `ao-api-review --tree DIR`
+offers four read-only OpenAI function tools over the unpacked candidate (`read`, `grep`, `glob` and
+`list`) and loops while the model's answer carries `tool_calls`: every path is relative to `DIR` and
+resolved inside it (an absolute path, a `..` that leaves `DIR`, a symbolic link leading out, or a
+harness configuration path is refused in the tool's answer and never followed), each tool answer is
+bounded in bytes, lines and matches, and the turn is bounded in tool rounds, total bytes read and
+wall time (past a bound the model is told so and asked for its verdict with no tools offered); a
+provider that refuses tools makes the review UNAVAILABLE and says so, never falling back to a silent
+review without them (API-REVIEWER-TOOLS). The providers are the machine's: `review.api_providers` names each by a word, with
 its base URL and the environment variable that holds its key, and a route names `<word>/<model>`.
 The key is read from that variable when the request is sent, goes to that URL alone - over HTTPS, or
 to this machine with no proxy between - and is never carried through a redirect; a provider whose key
