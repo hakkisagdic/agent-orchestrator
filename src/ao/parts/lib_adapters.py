@@ -938,11 +938,11 @@ def _harness_read(full):
     return digest.hexdigest(), ("file", b"".join(kept) if size <= HARNESS_CONFIG_SHOW_BYTES else None, size)
 
 
-def harness_baseline(root):
+def harness_baseline(root, key=None):
     """The HEAD this project's harness configuration was first read at - `ao init`'s, or the first reading's - kept in
     ~/.ao and never moved by ao again; None before one is recorded (HARNESS-CONFIG)."""
     try:
-        with open(project_file(root, "harness-base"), encoding=UTF8) as fh:
+        with open(project_file(root, "harness-base", key=key), encoding=UTF8) as fh:
             record = json.load(fh)
     except (OSError, ValueError):
         return None
@@ -971,11 +971,12 @@ def record_harness_baseline(root, why):
 
 def _nearest_ancestor(root, marks):
     """Of `marks`, the commit nearest HEAD that HEAD descends from; None when none is."""
-    best = None
+    best, git_env = None, {"GIT_OPTIONAL_LOCKS": "0"}
     for mark in dict.fromkeys(mark for mark in marks if mark):
         try:
-            _git_output(root, "merge-base", "--is-ancestor", mark, "HEAD")
-            distance = int(_git_output(root, "rev-list", "--count", f"{mark}..HEAD").decode("ascii").strip())
+            _git_output(root, "merge-base", "--is-ancestor", mark, "HEAD", env=git_env)
+            distance = int(_git_output(root, "rev-list", "--count", f"{mark}..HEAD",
+                                       env=git_env).decode("ascii").strip())
         except (RuntimeError, ValueError, UnicodeError):
             continue
         if best is None or distance < best[0]:
@@ -983,7 +984,7 @@ def _nearest_ancestor(root, marks):
     return best[1] if best else None
 
 
-def harness_config_base(root):
+def harness_config_base(root, key=None):
     """The commit harness configuration is measured from when HEAD's own is not to be trusted: the one below the
     oldest commit with no grant on HEAD's first-parent line, after the newest of the first grant's base, the HEAD a
     person last recorded as seen, and the HEAD the configuration was first read at. None when every commit since is
@@ -994,11 +995,13 @@ def harness_config_base(root):
     no grant at all, or one where a granted commit came after it, it went unseen all the same (the reviews of
     HARNESS-CONFIG). Measured from below the oldest ungranted commit, it is a change until a person sees it."""
     trees, base, _ = _granted_trees(root)
-    lower = _nearest_ancestor(root, [base, (harness_seen_record(root) or {}).get("head"), harness_baseline(root)])
+    lower = _nearest_ancestor(root, [base, (harness_seen_record(root, key=key) or {}).get("head"),
+                                     harness_baseline(root, key=key)])
     if lower is None:
         return None
     try:
-        log = _git_output(root, "log", "--first-parent", "--format=%H %T", f"{lower}..HEAD", "--").decode("ascii")
+        log = _git_output(root, "log", "--first-parent", "--format=%H %T", f"{lower}..HEAD", "--",
+                          env={"GIT_OPTIONAL_LOCKS": "0"}).decode("ascii")
     except (RuntimeError, UnicodeError):
         return None
     commits = [line.split() for line in log.splitlines() if line.strip()]
@@ -1166,7 +1169,8 @@ def python_startup_files(top, listed=(), folders_out=None):
     # An environment the repository tracks is found by its marker too: git status names only what changed, and a .pth
     # added to a tracked environment changed nothing of its pyvenv.cfg (the review of PYTHON-ENV).
     try:
-        tracked = _git_output(top, "ls-files", "-z", "--", "*pyvenv.cfg", "*conda-meta/*", "*os.py").split(b"\0")
+        tracked = _git_output(top, "ls-files", "-z", "--", "*pyvenv.cfg", "*conda-meta/*", "*os.py",
+                              env={"GIT_OPTIONAL_LOCKS": "0"}).split(b"\0")
     except RuntimeError:
         tracked = []
     for item in tracked:
@@ -1294,7 +1298,7 @@ def environment_in_tree(root):
     return found
 
 
-def project_config_changes(root, names=None, shown=None):
+def project_config_changes(root, names=None, shown=None, key=None):
     """[(path, state, sha256 or None)], sorted by path: each path in the working tree that a harness reads from a
     project as its configuration or instructions - `project_config_member` names it - and that differs from HEAD
     (HARNESS-CONFIG).
@@ -1316,10 +1320,11 @@ def project_config_changes(root, names=None, shown=None):
     person is shown is what they record. Raises RuntimeError when git or a file cannot be read, and past
     HARNESS_CONFIG_LIMIT changes.
     """
+    git_env = {"GIT_OPTIONAL_LOCKS": "0"}
     names = project_config_names() if names is None else names
     firsts = {entry[0] for entry in names}
     worktree_dirs = harness_worktree_dirs()
-    top = os.fsdecode(_git_output(root, "rev-parse", "--show-toplevel")).strip()
+    top = os.fsdecode(_git_output(root, "rev-parse", "--show-toplevel", env=git_env)).strip()
     changes, visited, walking, worktrees, startup, startup_folders = {}, set(), set(), [], set(), {}
 
     def parts_of(rel):
@@ -1423,7 +1428,7 @@ def project_config_changes(root, names=None, shown=None):
 
     listed = {}
     for item in _git_output(top, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching",
-                            "--no-renames").split(b"\0"):
+                            "--no-renames", env=git_env).split(b"\0"):
         if len(item) > 3:
             listed.setdefault(os.fsdecode(item[3:]), []).append(item[:2].decode("ascii", "replace"))
     startup.update(python_startup_files(top, listed, startup_folders))
@@ -1451,16 +1456,17 @@ def project_config_changes(root, names=None, shown=None):
         if rel not in changes and any(rel.startswith(folder) for folder in folders):
             take(rel, "python")
     # What was committed since the last granted tree is no review's either: it is read as it stands now.
-    since = harness_config_base(top)
+    since = harness_config_base(top, key=key)
     if since:
-        for item in _git_output(top, "diff", "--name-only", "-z", "--no-renames", since, "HEAD", "--").split(b"\0"):
+        for item in _git_output(top, "diff", "--name-only", "-z", "--no-renames", since, "HEAD", "--",
+                                env=git_env).split(b"\0"):
             rel = os.fsdecode(item)
             if item and rel not in changes and member(rel):
                 # what Python runs as it starts says so, as it does uncommitted (the review of PYTHON-ENV)
                 take(rel, "python" if starts_python(rel) else "committed")
     # A link git tracks unchanged is read through as well: what it leads to can change while the link does not, and git
     # names that change at the target's own path, which may be no configuration at all (the review of HARNESS-CONFIG).
-    for item in _git_output(top, "ls-files", "-s", "-z").split(b"\0"):
+    for item in _git_output(top, "ls-files", "-s", "-z", env=git_env).split(b"\0"):
         meta, _, path = item.partition(b"\t")
         rel = os.fsdecode(path)
         if meta.startswith(b"120000 ") and rel not in changes and (member(rel) or leads_to(rel)):
@@ -1479,8 +1485,8 @@ def _hidden_config_changes(top, member, take, record, changes):
     change time is not checked, as on Windows - reads as unchanged (the review of HARNESS-CONFIG); and one marked
     assume-unchanged (`h`, any lower-case tag of `git ls-files -v`) or skip-worktree (`S`) is left out of it
     altogether. Each is hashed as git would store it and compared with HEAD's blob."""
-    hidden = []
-    for item in _git_output(top, "ls-files", "-v", "-z").split(b"\0"):
+    hidden, git_env = [], {"GIT_OPTIONAL_LOCKS": "0"}
+    for item in _git_output(top, "ls-files", "-v", "-z", env=git_env).split(b"\0"):
         tag, rel = item[:1].decode("ascii", "replace"), os.fsdecode(item[2:])
         if len(item) > 2 and rel not in changes and member(rel):
             hidden.append((rel, tag))
@@ -1489,7 +1495,7 @@ def _hidden_config_changes(top, member, take, record, changes):
     heads = {}
     try:
         listed = _git_output(top, "--literal-pathspecs", "ls-tree", "-r", "-z", "HEAD", "--",
-                             *[rel for rel, _ in hidden])
+                             *[rel for rel, _ in hidden], env=git_env)
     except RuntimeError:
         listed = b""                    # no commit yet: each of them is new to HEAD
     for item in listed.split(b"\0"):
@@ -1500,7 +1506,8 @@ def _hidden_config_changes(top, member, take, record, changes):
     full = {rel: os.path.join(top, *rel.split("/")) for rel, _ in hidden}
     files = [rel for rel, _ in hidden if os.path.isfile(full[rel]) and not os.path.islink(full[rel])]
     # Hashed as git would store them, filters and line endings applied, so a checkout's CRLF is no change.
-    work = dict(zip(files, _git_output(top, "hash-object", "--", *files).decode("ascii").split())) if files else {}
+    work = dict(zip(files, _git_output(top, "hash-object", "--", *files, env=git_env).decode("ascii").split())) \
+        if files else {}
     sparse = None
     for rel, tag in hidden:
         head = heads.get(rel)
@@ -1510,13 +1517,13 @@ def _hidden_config_changes(top, member, take, record, changes):
             if tag in "Ss":
                 # A sparse checkout keeps out of the tree what lies outside its cone, and marks it skip-worktree.
                 if sparse is None:
-                    sparse = _git_text(top, "config", "--bool", "core.sparseCheckout") == "true"
+                    sparse = _git_text(top, "config", "--bool", "core.sparseCheckout", env=git_env) == "true"
                 if sparse:
                     continue
             record(rel, "deleted", None, ("deleted",))
         elif os.path.islink(full[rel]):
             if head is None or head[0] != "120000" \
-                    or _git_output(top, "cat-file", "blob", head[1]) != os.fsencode(os.readlink(full[rel])):
+                    or _git_output(top, "cat-file", "blob", head[1], env=git_env) != os.fsencode(os.readlink(full[rel])):
                 take(rel, "hidden" if tag == "S" or tag.islower() else "modified")
         elif head is None or work.get(rel) != head[1]:
             take(rel, "hidden" if tag == "S" or tag.islower() else "modified")
@@ -1533,10 +1540,10 @@ def harness_config_digest(changes):
     return "sha256:" + digest.hexdigest()
 
 
-def harness_seen_record(root):
+def harness_seen_record(root, key=None):
     """What a person last recorded as seen of this project's harness configuration, or None (HARNESS-CONFIG)."""
     try:
-        with open(project_file(root, "harness-seen"), encoding=UTF8) as fh:
+        with open(project_file(root, "harness-seen", key=key), encoding=UTF8) as fh:
             record = json.load(fh)
     except (OSError, ValueError):
         return None
@@ -1912,11 +1919,11 @@ def turn_digest(role, identity):
     return hashlib.sha256(json.dumps({"role": role, "turn": identity}, sort_keys=True).encode(UTF8)).hexdigest()
 
 
-def turn_record(root):
+def turn_record(root, key=None):
     """{role: {sha256, identity, by, at}}: each role's command as last accepted - by `ao init`, at the first reading, or
     by a person who saw it - kept in ~/.ao, outside the tree an agent writes; {} before any is (TURN-ARGV)."""
     try:
-        with open(project_file(root, "harness-turns"), encoding=UTF8) as fh:
+        with open(project_file(root, "harness-turns", key=key), encoding=UTF8) as fh:
             record = json.load(fh)
     except (OSError, ValueError):
         return {}
@@ -2026,10 +2033,11 @@ def turn_command(cfg, role):
     return ident, argv
 
 
-def turn_changes(root, shown=None):
+def turn_changes(root, shown=None, key=None):
     """[(path, "changed", digest)] for each role whose block says otherwise of its command than the one last accepted,
     the path `the architect's command`; with `shown`, what a person is shown of each, by its path (TURN-ARGV)."""
-    cfg, record, out = turn_config(root), turn_record(root), []
+    record = turn_record(root) if key is None else turn_record(root, key=key)
+    cfg, out = turn_config(root), []
     for role in HELD_COMMANDS:
         identity = turn_identity(cfg, role)
         accepted = record.get(role) or {}
@@ -2041,10 +2049,12 @@ def turn_changes(root, shown=None):
     return out
 
 
-def harness_config_changes(root, shown=None):
+def harness_config_changes(root, shown=None, key=None):
     """Every change that holds what ao starts in this tree until a person has seen it: each to what a harness reads from
     the tree (project_config_changes), and each role's command its block changed (turn_changes) (TURN-ARGV)."""
-    return project_config_changes(root, shown=shown) + turn_changes(root, shown=shown)
+    changes = (project_config_changes(root, shown=shown) if key is None
+               else project_config_changes(root, shown=shown, key=key))
+    return changes + turn_changes(root, shown=shown, key=key)
 
 
 def unseen_turn(root, cfg, role):

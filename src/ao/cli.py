@@ -39,6 +39,7 @@ A._part("cli_authority", globals())
 A._part("cli_channels", globals())
 A._part("cli_gain", globals())
 A._part("cli_evidence", globals())
+A._part("cli_next", globals())
 
 
 A._part("cli_review", globals())
@@ -231,6 +232,12 @@ def build_parser(root=None):
     ev.add_argument("--all", action="store_true", help="show: every recorded row, not only each platform's newest")
     ev.add_argument("--json", action="store_true", help="show: the same readings as one JSON document")
     ev.set_defaults(fn=cmd_evidence)
+    nx = sub.add_parser("next", help="what needs doing now, and whose hand does it: a person's items first, then the "
+                                     "staged candidate's landing chain, each with the command that closes it")
+    nx.add_argument("--json", action="store_true", help="print one JSON document, for the panel and a script")
+    nx.add_argument("--short", action="store_true", help="one line: how many wait for a person and for the "
+                                                         "implementer, for a menu bar")
+    nx.set_defaults(fn=cmd_next)
     rc = sub.add_parser("recall", help="what was decided, found or learned before, across projects")
     rc.add_argument("text", nargs="+")
     rc.add_argument("-n", "--limit", type=int, default=10)

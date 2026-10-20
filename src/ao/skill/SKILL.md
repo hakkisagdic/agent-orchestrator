@@ -145,7 +145,8 @@ it stands. The same change proposed twice is one proposal.
   and is mirrored to `.ao/ledger/mail.jsonl` (`ao mail log`, `ao mail search`).
 - Tools: `ao_inbox`, `ao_ack`, `ao_report {blocked|status|done}`, `ao_ask`
   (options, answerable from a phone), `ao_decisions`, `ao_propose` (a change to a
-  rule, for a person to decide), `ao_status`, `ao_board`, `ao_notices`, `ao_fanout`,
+  rule, for a person to decide), `ao_status`, `ao_board`, `ao_next` (what stands
+  in the way now, and whose hand closes it), `ao_notices`, `ao_fanout`,
   `ao_watchdog`.
 - **One blocker, one report.** `ao_report` folds a repeat into the standing
   file and returns `repeated: N`; when you see it, end the turn with one line.
@@ -161,6 +162,8 @@ it stands. The same change proposed twice is one proposal.
 
 Never conclude from a name, a cwd, an mtime or a diff size. `ao status` (who is
 working, quota, problems), `ao board` (READY / running / blocked with `needs:`),
+`ao next` (which command stands in the way now, and whose hand holds it: a
+person's items first, then the staged candidate's landing chain),
 `ao doctor` (binaries, last wake, last tick, channels, live alarms),
 `ao writers` (turns, not processes; orphans set aside), `ao watchdog explain`
 (why the watchdog did or did not act, every measurement and verdict),
@@ -273,6 +276,7 @@ start. Run anything in a repository whose owner has not approved it.
 | `ao completion zsh` | a person's shell setup: print the script that completes ao's commands in bash, zsh, fish or PowerShell |
 | `ao status` / `ao watch` / `ao watch --all` | the panel: who is working, quota, problems, mail |
 | `ao board` | READY / running / blocked (`needs:`) / verified / done |
+| `ao next [--json\|--short]` | what stands in the way now and whose hand closes it, each with the command: a person's items first, then the staged candidate's landing chain at its first open stage. Read-only — it names a person's command, never runs it |
 | `ao room search <words>` / `ao mail compact <days>` | stored messages across projects; collapse old bodies to stubs |
 | `ao content add <source>@<commit> [--skills a,b] [--steering c,d] [--agents e,f] [--from <dir>] [--dry-run]` / `verify` | borrow skills, steering and agent definitions pinned and text-only, hooks never; check they have not drifted |
 | `ao backup --to <dir|ref|remote:name>` / `ao restore <dir>` | the governance off this disk, and back, verified |

@@ -73,6 +73,7 @@ changes nothing, **write** records something in its mailbox, decisions or ledger
 |---|---|---|
 | `ao_status` | read | The implementer's state, context and cost telemetry, git state, the mailbox and the latest reviews, and the agent processes in the tree, `agent_processes`: null where the process table cannot be read, with `agent_processes_unread` saying why. |
 | `ao_board` | read | Where each pre-authorised work item is, what may start now, and what the board cannot resolve. |
+| `ao_next` | read | What stands in this project now and whose hand closes it: a person's items first, then the staged candidate's landing chain at the first stage that does not hold, each with the command that closes it. It runs and records nothing; a person's command is named, never typed. |
 | `ao_candidate` | read | The candidate staged now and what a review judges it against: the running slice and its boundary, the candidate's digest and paths, and the committed source a test-only candidate exercises. Not the diff. |
 | `ao_notices` | read | Alerts this project raised, and on request the ones the rate limit held back. |
 | `ao_fleet` | read | One row per project with a local agent session. |
@@ -174,7 +175,7 @@ ao mcp config --role reviewer     # a client's config, with the role among the s
 | Role | Served |
 |---|---|
 | architect | every tool, as before roles existed |
-| implementer | `ao_status`, `ao_board`, `ao_notices`, `ao_inbox`, `ao_ack`, `ao_report`, `ao_ask`, `ao_decisions`, `ao_propose`, `ao_fanout`, `ao_watchdog`, `ao_verify` |
+| implementer | `ao_status`, `ao_board`, `ao_next`, `ao_notices`, `ao_inbox`, `ao_ack`, `ao_report`, `ao_ask`, `ao_decisions`, `ao_propose`, `ao_fanout`, `ao_watchdog`, `ao_verify` |
 | reviewer | `ao_status`, `ao_board`, `ao_candidate` |
 
 A tool outside its role's set is neither listed nor run: called by name anyway, it answers with an

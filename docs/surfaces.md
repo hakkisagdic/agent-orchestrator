@@ -124,6 +124,37 @@ reads it, and a status bar polling it would otherwise keep a marked message no p
 climbing the watchdog's ladder ([messaging.md](messaging.md)). Such a message is in `urgent` and in
 `unseen` both.
 
+## Surface 1b — the one question: `ao next`
+
+*In ao since slice NEXT.* `ao board` answers where an item is, `ao status` whether an agent is
+alive, `ao gain` what the work cost. The question a person asks on coming back, and an agent asks
+when its turn ends, is another one: which command, in what order, by whom. With eighty commands,
+about fifty of them needing a project, that was answered from memory - and a landing chain stalls
+in exactly that place: a candidate verified but never reviewed, a review approved but never granted,
+a stand-in request left unread in `~/.ao/review-requests`, a harness route no person has accepted
+holding every review that would follow it.
+
+`ao next` reads those same stores through the readers the gate reads, and answers it. Every item
+names its actor, and a person's item is shown as a command and run by no one: nothing here records,
+grants or starts anything.
+
+The chain is named at its first stage that does not hold, and it is `ao commit-ok`'s own reading of
+the same candidate - the staged bytes, the newest verification bound to them, the review bound to
+them or a person's waiver, the grant bound to them - so a candidate this calls ready is one the gate
+agrees with. Where the two could drift, they are held against each other by a test that runs
+`ao commit-ok` and requires it to refuse for the reason `ao next` named.
+
+| form | what it prints |
+|---|---|
+| `ao next` | one block per actor, the command under the reason, then the line that says nothing here was run |
+| `ao next --json` | `{"project", "person": [...], "implementer": [...]}`, each item `who`, `kind`, `why`, `command`, `detail`, `slice` - null where it has none |
+| `ao next --short` | one line for a menu bar: how many items ask for a person's hand and how many for the implementer's, with the command when exactly one is open |
+
+A stand-in review request that binds bytes no longer staged is listed as `review-superseded` with no
+command, because `ao collect-review` refuses it and a person who typed the shown command would only
+meet that refusal. A store that cannot be read is an item that says it cannot be read, never an
+empty list, which would read as nothing waiting.
+
 ## Surface 2 — MCP, i.e. any chat app becomes the cockpit
 
 This is the answer to *"manage it without leaving the app I'm already in."* Register the

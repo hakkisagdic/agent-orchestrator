@@ -570,6 +570,7 @@ def test_project_keys_with_accents_spaces_parentheses_and_plus_work_across_every
         return [
             ("ao_status", {"project": key}),
             ("ao_board", {"project": key}),
+            ("ao_next", {"project": key}),
             ("ao_candidate", {"project": key}),
             ("ao_notices", {"project": key, "limit": 5}),
             ("ao_fleet", {"project": key}),

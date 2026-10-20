@@ -158,6 +158,16 @@ TOOLS = [
                     "waits on), queued, inbox, verified, done. Blocked items are the ones a "
                     "human must act on.",
      "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "ao_next",
+     "description": "What stands in this project right now and whose hand closes it: a person's "
+                    "items first (a harness change no person has read, a stand-in review request "
+                    "awaiting the answer a person carries back, urgent mail, an open rule "
+                    "proposal), then the staged candidate's landing chain at the first stage that "
+                    "does not hold. Each item carries the command that closes it. Read-only: it "
+                    "starts and records nothing, and a person's command is named, never typed.",
+     "inputSchema": {"type": "object",
+                     "properties": {"who": {"type": "string", "enum": ["person", "implementer"],
+                                            "description": "only this actor's items"}}}},
     {"name": "ao_candidate",
      "description": "The candidate staged now and what a review judges it against: the running "
                     "slice and its boundary, the candidate's digest and paths, and the committed "
@@ -271,7 +281,7 @@ EVERY_TOOL = tuple(tool["name"] for tool in TOOLS)
 # architect keeps every tool it had before roles existed.
 ROLE_TOOLS = {
     "architect": EVERY_TOOL,
-    "implementer": ("ao_status", "ao_board", "ao_notices", "ao_inbox", "ao_ack", "ao_report", "ao_ask",
+    "implementer": ("ao_status", "ao_board", "ao_next", "ao_notices", "ao_inbox", "ao_ack", "ao_report", "ao_ask",
                     "ao_decisions", "ao_propose", "ao_fanout", "ao_watchdog", "ao_verify"),
     "reviewer": ("ao_status", "ao_board", "ao_candidate"),
 }
@@ -478,6 +488,21 @@ def board_payload(root):
             "ready": [item["id"] for item in graph["ready"]], "problems": graph["problems"],
             "a2a": {k: A.A2A_STATE.get(k) for k in b if b[k]},
             "counts": {k: len(v) for k, v in b.items()}}
+
+
+def next_payload(cfg, who=None):
+    """What stands in this project, as the items `ao next` shows (NEXT).
+
+    One reading for every surface, so an agent and a person cannot be told different things: this calls
+    the same `A.next_items` the terminal calls. `who` narrows it to one actor's items, which is what a
+    playbook asks for at the end of a turn. Counts are the items that name a command - a superseded
+    review request is listed and asks nothing of anyone.
+    """
+    items = A.next_items(cfg)
+    counts = {name: sum(1 for item in items if item["who"] == name and item.get("command"))
+              for name in (A.PERSON, "implementer")}
+    mine = [item for item in items if item["who"] == who] if who is not None else items
+    return {"project": cfg.get("project") or A.next_project_key(cfg["root"]), "counts": counts, "items": mine}
 
 
 def candidate_payload(cfg):
@@ -904,6 +929,11 @@ def call(name, args, cfg, allow_verify, role=None, project_scope=None):
         return out
     if name == "ao_board":
         return _attach_project(board_payload(root), project_name, project_scope)
+    if name == "ao_next":
+        out = next_payload(cfg, args.get("who"))
+        if project_scope == "all":
+            out = dict(out, project=project_name)
+        return out
     if name == "ao_candidate":
         return _attach_project(candidate_payload(cfg), project_name, project_scope)
     if name == "ao_notices":

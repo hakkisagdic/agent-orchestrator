@@ -425,9 +425,9 @@ def project_file_name(what, key):
     return PROJECT_FILES[what].format(key=key)
 
 
-def project_file(root, what):
-    """Where one of this project's files is kept in ~/.ao."""
-    return os.path.join(HOME, ".ao", project_file_name(what, project_key(root)))
+def project_file(root, what, key=None):
+    """Where one of this project's files is kept in ~/.ao, under `key` or the project's key."""
+    return os.path.join(HOME, ".ao", project_file_name(what, key or project_key(root)))
 
 
 def project_file_names(key):

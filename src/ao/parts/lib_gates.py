@@ -633,15 +633,16 @@ def bound_git_environment(env):
     return clean
 
 
-def _git_output(root, *args, timeout=60):
+def _git_output(root, *args, timeout=60, env=None):
     """Run git without a shell and return bytes, failing closed on an unreadable tree.
 
     In a process group of its own, as every Git query of authority's is: a timeout stops git with what it started -
     a hook or a filter a repository configures - where it stopped git alone (LEADS-GATE-RUNS).
     """
     try:
+        merged = dict(os.environ, **env) if env else os.environ.copy()
         result = run_as_group([git_binary(), *args], timeout, cwd=root, stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE, env=bound_git_environment(os.environ.copy()))
+                              stderr=subprocess.PIPE, env=bound_git_environment(merged))
     except (OSError, subprocess.TimeoutExpired) as exc:
         left, unasked = getattr(exc, "left", None), getattr(exc, "unasked", None)
         raise RuntimeError(f"cannot measure git tree: {exc}"
@@ -653,7 +654,7 @@ def _git_output(root, *args, timeout=60):
     return result.stdout
 
 
-def _git_text(cwd, *args, timeout=20):
+def _git_text(cwd, *args, timeout=20, env=None):
     """What `sh("git …", cwd=cwd)` returned, from the same git without a shell started in front of it.
 
     A status read and every watchdog cycle asked the shell for their git queries, and each
@@ -664,8 +665,9 @@ def _git_text(cwd, *args, timeout=20):
     argv = [git_binary(), *args]
     try:
         # In a process group of its own, as every Git query is: a timeout stops git with what it started (LEADS-GATE-RUNS).
+        merged = dict(os.environ, **env) if env else os.environ.copy()
         result = run_as_group(argv, timeout, cwd=cwd, capture_output=True, text=True, encoding=UTF8,
-                              errors="replace", env=bound_git_environment(os.environ.copy()))
+                              errors="replace", env=bound_git_environment(merged))
     except Exception:
         return ""
     return result.stdout.strip()
