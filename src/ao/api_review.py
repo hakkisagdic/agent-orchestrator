@@ -738,17 +738,30 @@ def main(argv=None):
             return refuse(f"{model} on {provider} requested tool calls when no tools were offered", FAILED)
 
         state["rounds"] += 1
-        messages.append({"role": "assistant", "content": message.get("content"), "tool_calls": tool_calls})
-        for call in tool_calls:
+        seen_ids = state.setdefault("call_ids", set())
+        normalized_calls = []
+        for index, call in enumerate(tool_calls, 1):
             if not isinstance(call, dict) or not isinstance(call.get("function"), dict):
                 return refuse(f"{provider} returned a malformed tool call for {model}", FAILED)
+            raw_id = call.get("id")
+            call_id = raw_id.strip() if isinstance(raw_id, str) else ""
+            if not call_id or call_id in seen_ids:
+                call_id = f"call_{state['rounds']}_{index}"
+                suffix = 1
+                while call_id in seen_ids:
+                    suffix += 1
+                    call_id = f"call_{state['rounds']}_{index}_{suffix}"
+            seen_ids.add(call_id)
+            normalized_calls.append(dict(call, id=call_id))
+        messages.append({"role": "assistant", "content": message.get("content"), "tool_calls": normalized_calls})
+        for call in normalized_calls:
             if state["bound"] is None and (time.monotonic() - state["started"]) >= state["turn_seconds"]:
                 state["bound"] = f"wall-time limit ({state['turn_seconds']:g}s) reached"
             if state["bound"] is None and state["read_bytes"] >= TURN_MAX_READ_BYTES:
                 state["bound"] = f"total bytes read limit ({TURN_MAX_READ_BYTES} bytes) reached"
             fn = call["function"]
             out = _dispatch_tool(state, str(fn.get("name") or ""), fn.get("arguments") or "{}")
-            messages.append({"role": "tool", "tool_call_id": str(call.get("id") or ""), "content": out})
+            messages.append({"role": "tool", "tool_call_id": call["id"], "content": out})
 
         if state["bound"] is None and (time.monotonic() - state["started"]) >= state["turn_seconds"]:
             state["bound"] = f"wall-time limit ({state['turn_seconds']:g}s) reached"

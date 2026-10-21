@@ -2120,6 +2120,33 @@ def cmd_restore(cfg, args):
     return 1 if unverified else 0
 
 
+def _shipped_tool_lines(root):
+    """`ao doctor`'s lines naming any PATH copy of a tool that ships with ao (`ao-api-review`) whose version differs
+    from this ao's own (API-REVIEWER-TOOLS-2)."""
+    lines, seen = [], set()
+    binaries = sorted({binary for adapter in A.package_adapters().values()
+                       for contract in (A.tool_review_contract(adapter),)
+                       if contract is not None and not contract.get("install") and not contract.get("release")
+                       for binary in A.adapter_binaries(adapter)})
+    for binary in binaries:
+        for entry in A.search_directories():
+            cand = A.program_path(binary, path=entry)
+            if not cand or A.program_in_repository(cand, root):
+                continue
+            real = os.path.normcase(os.path.realpath(cand))
+            if real in seen:
+                continue
+            seen.add(real)
+            ver = _reviewer_binary_version(root, cand)
+            if ver != __version__:
+                lines.append(
+                    f"{binary:<16}{C['yellow']}{cand} on PATH is {ver or 'of a version it does not state'}, "
+                    f"not this ao's {__version__}{C['reset']}  {C['dim']}ao runs its own installation's copy when "
+                    f"present; update or remove the stale PATH copy{C['reset']}"
+                )
+    return lines
+
+
 def _backup_lines(cfg):
     """How old the newest backup is, and whether governance exists with none (#46)."""
     age = A.backup_age(cfg["root"])
@@ -2444,4 +2471,6 @@ def cmd_doctor(cfg, args):
             print(f"                {C['dim']}{c} → {os.path.realpath(c)}{C['reset']}")
         print(f"                {C['dim']}keep one: drop the shell alias, or "
               f"uv tool uninstall ao-orchestrator{C['reset']}")
+    for line in _shipped_tool_lines(root):
+        print(line)
     return 0 if reviewer_probe["ok"] and not redirected else 1

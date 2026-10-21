@@ -601,7 +601,7 @@ def test_a_route_opting_into_tree_gets_the_tree_and_evidence_while_a_route_witho
     if client is None:
         pytest.skip("the client's script is installed with ao, and this interpreter has none")
     monkeypatch.setattr(cli, "_reviewer_resolve_binary", lambda root_, name: (
-        (client, "ao-api-review") if name == "ao-api-review" else (None, None)))
+        (client, "ao-api-review") if name in ("ao-api-review", client) else (None, None)))
 
     # 1. Opted-in route with --tree {tree}
     composed = A.compose_reviewer("openai-api", model="local/m", family="zhipu")
@@ -644,3 +644,183 @@ def test_a_route_opting_into_tree_gets_the_tree_and_evidence_while_a_route_witho
     names = sorted(os.listdir(os.path.join(root, "semantic-review")))
     plain_evidence = A.review_evidence(open(os.path.join(root, "semantic-review", names[-1]), encoding="utf-8").read())
     assert plain_evidence["tool"]["rounds"] == 0 and plain_evidence["tool"]["read_bytes"] == 0
+
+
+def test_a_route_opting_into_tree_drops_the_tree_flag_on_probe_and_keeps_it_on_review(
+        project, monkeypatch, tmp_path, endpoint):
+    """API-REVIEWER-TOOLS-2: where a command is built with no candidate tree to hand it (the reviewer probe, or an
+    unpack that failed), `review.tree` (`--tree {tree}`) leaves together with `{tree}`; a review with a candidate
+    fills it as before."""
+    import secrets
+    root = project["root"]
+    _repo_with_change(root)
+    client = cli._tool_beside_interpreter("ao-api-review")
+    if client is None:
+        pytest.skip("the client's script is installed with ao, and this interpreter has none")
+    monkeypatch.setattr(cli, "_reviewer_resolve_binary", lambda root_, name: (
+        (client, "ao-api-review") if name in ("ao-api-review", client) else (None, None)))
+    home = tmp_path / "home"
+    (home / ".ao").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("PYTHONPATH", os.path.join(A.REPO, "src"))
+    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+
+    composed = A.compose_reviewer("openai-api", model="local/m", family="zhipu")
+    tree_route = dict(composed, id="rv-tree", argv=composed["argv"][:-1] + ["--tree", "{tree}", composed["argv"][-1]])
+
+    # 1. Reviewer probe of the route with `--tree {tree}`: no candidate tree, so `--tree {tree}` leaves and the
+    # prompt is not misread as `--tree`'s argument.
+    monkeypatch.setattr(cli, "_reviewer_probe_nonce", lambda: "AO-REVIEWER-PROBE-deadbeef")
+    probe_served = endpoint(answer="AO-REVIEWER-PROBE-deadbeef")
+    (home / ".ao" / "settings.json").write_text(json.dumps(
+        {"review": {"api_providers": [f"local {probe_served.url} AO_TEST_API_KEY"]}}), encoding="utf-8")
+
+    probe = cli._reviewer_probe(dict(project, reviewer=tree_route), timeout=30)
+
+    assert probe["ok"] is True and probe["route"] == "rv-tree"
+    (probe_req,) = probe_served.requests
+    assert "tools" not in probe_req["body"]
+    probe_prompt = probe_req["body"]["messages"][0]["content"]
+    assert "AO-REVIEWER-PROBE-deadbeef" in probe_prompt
+    assert cli._tree_note(project, True) not in probe_prompt
+
+    # 2. A review of the same route with a candidate fills `--tree {tree}` and offers tools.
+    review_served = endpoint(turns=[_tool_turn(("read", {"path": "src/a.py"}))])
+    (home / ".ao" / "settings.json").write_text(json.dumps(
+        {"review": {"api_providers": [f"local {review_served.url} AO_TEST_API_KEY"]}}), encoding="utf-8")
+
+    assert cli.cmd_review(dict(project, reviewer=tree_route), _args()) == 0
+
+    assert len(review_served.requests) == 2
+    assert "tools" in review_served.requests[0]["body"]
+    assert cli._tree_note(project, True) in review_served.requests[0]["body"]["messages"][0]["content"]
+    tool_msgs = [m for m in review_served.requests[1]["body"]["messages"] if m["role"] == "tool"]
+    assert len(tool_msgs) == 1 and "x = 2" in tool_msgs[0]["content"]
+
+
+def test_ao_runs_its_own_installations_client_before_path_and_doctor_names_a_mismatched_path_copy(
+        project, monkeypatch, tmp_path, endpoint):
+    """API-REVIEWER-TOOLS-2: a tool that ships with ao runs from the installation of the ao that runs it first, and
+    `ao doctor` names a PATH copy whose version differs from ao's own."""
+    import secrets
+    import sys
+    root = project["root"]
+    _repo_with_change(root)
+    client = cli._tool_beside_interpreter("ao-api-review")
+    if client is None:
+        pytest.skip("the client's script is installed with ao, and this interpreter has none")
+
+    # Put an older `ao-api-review` (0.5.2, which rejects `--tree`) first on PATH.
+    stale_bin = tmp_path / "stale-bin"
+    stale_bin.mkdir()
+    stale_marker = tmp_path / "stale-ran"
+    stale_script = stale_bin / ("ao-api-review.cmd" if os.name == "nt" else "ao-api-review")
+    if os.name == "nt":
+        stale_script.write_text(
+            f'@echo off\nif "%1"=="--version" (\n  echo ao-api-review 0.5.2\n  exit /b 0\n)\n'
+            f'echo stale > "{stale_marker}"\nexit /b 2\n',
+            encoding="utf-8",
+        )
+    else:
+        stale_script.write_text(
+            f"#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo \"ao-api-review 0.5.2\"\n  exit 0\nfi\n"
+            f"echo stale > {str(stale_marker)!r}\nexit 2\n",
+            encoding="utf-8",
+        )
+        stale_script.chmod(0o755)
+    monkeypatch.setenv("PATH", str(stale_bin) + os.pathsep + os.environ.get("PATH", ""))
+
+    # 1. `ao doctor` names the mismatched PATH copy, and says nothing when its version matches ao's own.
+    lines = cli._shipped_tool_lines(root)
+    assert len(lines) == 1
+    assert str(stale_script) in lines[0] and "0.5.2" in lines[0] and cli.__version__ in lines[0]
+
+    matching_bin = tmp_path / "matching-bin"
+    matching_bin.mkdir()
+    matching_script = matching_bin / ("ao-api-review.cmd" if os.name == "nt" else "ao-api-review")
+    if os.name == "nt":
+        matching_script.write_text(f"@echo off\necho ao-api-review {cli.__version__}\n", encoding="utf-8")
+    else:
+        matching_script.write_text(f"#!/bin/sh\necho \"ao-api-review {cli.__version__}\"\n", encoding="utf-8")
+        matching_script.chmod(0o755)
+    monkeypatch.setenv("PATH", str(matching_bin))
+    assert cli._shipped_tool_lines(root) == []
+
+    # 2. With the stale copy first on PATH, a review still runs this ao's own installation's copy beside sys.executable.
+    monkeypatch.setenv("PATH", str(stale_bin) + os.pathsep + os.environ.get("PATH", ""))
+    served = endpoint(turns=[_tool_turn(("read", {"path": "src/a.py"}))])
+    home = tmp_path / "home"
+    (home / ".ao").mkdir(parents=True, exist_ok=True)
+    (home / ".ao" / "settings.json").write_text(json.dumps(
+        {"review": {"api_providers": [f"local {served.url} AO_TEST_API_KEY"]}}), encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("PYTHONPATH", os.path.join(A.REPO, "src"))
+    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+    composed = A.compose_reviewer("openai-api", model="local/m", family="zhipu")
+    tree_route = dict(composed, id="rv-tree", argv=composed["argv"][:-1] + ["--tree", "{tree}", composed["argv"][-1]])
+
+    assert cli.cmd_review(dict(project, reviewer=tree_route), _args()) == 0
+    assert not stale_marker.exists()
+    assert len(served.requests) == 2
+
+
+def test_tool_calls_without_ids_or_with_duplicate_ids_receive_unique_matching_ids(
+        monkeypatch, tmp_path, endpoint):
+    """API-REVIEWER-TOOLS-2: every tool call of a round gets a non-empty id unique within the turn, written into both
+    the assistant message's `tool_calls` and the tool result's `tool_call_id`."""
+    import secrets
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    (tree / "a.txt").write_text("alpha\n", encoding="utf-8")
+    (tree / "b.txt").write_text("beta\n", encoding="utf-8")
+    turns = [
+        # Round 1: missing id, None id, empty/whitespace id
+        {"choices": [{"message": {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"type": "function", "function": {"name": "read", "arguments": json.dumps({"path": "a.txt"})}},
+                {"id": None, "type": "function", "function": {"name": "read", "arguments": json.dumps({"path": "b.txt"})}},
+                {"id": "   ", "type": "function", "function": {"name": "list", "arguments": json.dumps({"path": "."})}},
+            ],
+        }, "finish_reason": "tool_calls"}]},
+        # Round 2: duplicate id within the round ("dup") and duplicate of a round-1 synthesized id ("call_1_1")
+        {"choices": [{"message": {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "dup", "type": "function", "function": {"name": "read", "arguments": json.dumps({"path": "a.txt"})}},
+                {"id": "dup", "type": "function", "function": {"name": "read", "arguments": json.dumps({"path": "b.txt"})}},
+                {"id": "call_1_1", "type": "function", "function": {"name": "list", "arguments": json.dumps({"path": "."})}},
+            ],
+        }, "finish_reason": "tool_calls"}]},
+    ]
+    served = endpoint(turns=turns)
+    _providers(monkeypatch, tmp_path, f"local {served.url} AO_TEST_API_KEY")
+    monkeypatch.setenv("AO_TEST_API_KEY", secrets.token_hex(8))
+
+    code, answer = _run(tmp_path, "local/m", tree=tree)
+
+    assert code == 0 and answer == APPROVED
+    assert len(served.requests) == 3
+
+    # Check request 2 (sent after round 1)
+    msgs_r1 = served.requests[1]["body"]["messages"]
+    assistant_r1 = [m for m in msgs_r1 if m["role"] == "assistant"][0]
+    tools_r1 = [m for m in msgs_r1 if m["role"] == "tool"]
+    r1_call_ids = [c["id"] for c in assistant_r1["tool_calls"]]
+    r1_result_ids = [m["tool_call_id"] for m in tools_r1]
+    assert r1_call_ids == ["call_1_1", "call_1_2", "call_1_3"]
+    assert r1_result_ids == r1_call_ids
+
+    # Check request 3 (sent after round 2)
+    msgs_r2 = served.requests[2]["body"]["messages"]
+    assistant_r2 = [m for m in msgs_r2 if m["role"] == "assistant"][1]
+    tools_r2 = [m for m in msgs_r2 if m["role"] == "tool"][3:]
+    r2_call_ids = [c["id"] for c in assistant_r2["tool_calls"]]
+    r2_result_ids = [m["tool_call_id"] for m in tools_r2]
+    assert r2_call_ids == ["dup", "call_2_2", "call_2_3"]
+    assert r2_result_ids == r2_call_ids
+    assert len(set(r1_call_ids + r2_call_ids)) == 6

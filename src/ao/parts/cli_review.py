@@ -487,6 +487,20 @@ def _tool_route(route):
     return isinstance(route, dict) and route.get("kind") == "tool"
 
 
+def _without_tree_flag(argv, contract=None):
+    """`argv` without the adapter-declared `review.tree` flag and its `{tree}` value (API-REVIEWER-TOOLS-2)."""
+    out = [str(part) for part in argv or []]
+    if contract is None:
+        contract = A.tool_review_contract(A.command_adapter(out)) or {}
+    tree_flag = [str(part) for part in (contract or {}).get("tree") or []]
+    if not tree_flag:
+        return out
+    for at in range(1, len(out) - len(tree_flag) + 1):
+        if out[at:at + len(tree_flag)] == tree_flag:
+            return out[:at] + out[at + len(tree_flag):]
+    return out
+
+
 def _tool_tree_argv(route):
     """Whether a tool reviewer route's argv names the candidate tree its adapter declares (API-REVIEWER-TOOLS)."""
     if not _tool_route(route):
@@ -523,12 +537,7 @@ def _tool_invocation(route, prompt, candidate):
     given = [str(part) for part in route.get("argv") or []]
     tree_flag = [str(part) for part in contract.get("tree") or []]
     wants_tree = bool(tree_flag and A._holds(given[1:], tree_flag))
-    without_tree = list(given)
-    if wants_tree and without_tree != declared:
-        for at in range(1, len(without_tree) - len(tree_flag) + 1):
-            if without_tree[at:at + len(tree_flag)] == tree_flag:
-                without_tree = without_tree[:at] + without_tree[at + len(tree_flag):]
-                break
+    without_tree = _without_tree_flag(given, contract) if wants_tree and given != declared else list(given)
     if without_tree != declared:
         return None, (f"a tool reviewer runs the command adapter {ident} declares, as `ao role set reviewer {ident}` "
                       "composes it, and this route runs another")
@@ -595,8 +604,11 @@ def _tool_prepare(fresh, argv, env, timeout, tool):
                                          "cannot read")
     paths = {"diff_file": os.path.join(fresh, REVIEW_TOOL_CANDIDATE),
              "output": os.path.join(fresh, REVIEW_TOOL_ANSWER)}
-    if tool.get("tree"):
-        paths["tree"] = os.path.join(fresh, REVIEW_TREE_DIR)
+    tree_dir = os.path.join(fresh, REVIEW_TREE_DIR)
+    if tool.get("tree") and os.path.isdir(tree_dir):
+        paths["tree"] = tree_dir
+    else:
+        argv = _without_tree_flag(argv, contract)
     try:
         with open(paths["diff_file"], "xb") as fh:
             fh.write(tool["candidate"])
@@ -1114,9 +1126,16 @@ def _run_reviewer(root, argv, timeout, fallback=False, label=None, tool=None, ch
                 "retryable": False,
             }
         # A tool is handed files of its own here, and no tree unless its route opts in (REVIEW-TREE-2, API-REVIEWER-TOOLS).
-        if tree and (tool is None or tool.get("tree")) and _unpack_candidate(root, tree, fresh) is None:
+        has_tree = bool(tree and (tool is None or tool.get("tree")) and _unpack_candidate(root, tree, fresh) is not None)
+        if tree and (tool is None or tool.get("tree")) and not has_tree:
             print(f"{C['dim']}{label} reads what the prompt carries: the candidate's tree could not be "
                   f"unpacked{C['reset']}")
+            if channel is not None and tool is not None and tool.get("tree"):
+                channel, refused = A.prompt_plan(_without_tree_flag(channel["argv"], tool["contract"]),
+                                                 channel["prompt"], tool["adapter"])
+                if refused:
+                    return {"ok": False, "out": "", "reason": refused, "returncode": None, "kind": "handoff-error",
+                            "retryable": False}
         if tool is None:
             argv, refused = _reviewer_agent(fresh, argv)
             if refused:
@@ -1607,17 +1626,19 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, can
                 "returncode": None, "kind": "configuration-error",
                 "retryable": False,
             }
-        plan, refused = _reviewer_prompt_plan(cand, prompt)
+        effective = cand if tree else dict(cand, argv=_without_tree_flag(raw, tool["contract"]))
+        plan, refused = _reviewer_prompt_plan(effective, prompt)
         if refused:
             return label, None, None, refused
         # The prompt and the candidate's paths are filled in the reviewer's own directory.
-        argv = list(raw) if plan["channel"] == "argument" else list(plan["argv"])
+        argv = list(effective["argv"]) if plan["channel"] == "argument" else list(plan["argv"])
     else:
         raw = cand.get("argv") or []
         label = cand.get("id") or (str(raw[0]) if raw else "reviewer")
         fallback = cand is not primary
         try:
-            argv = [part.replace("{prompt}", prompt) for part in raw]
+            effective_raw = list(raw) if tree else _without_tree_flag(raw)
+            argv = [part.replace("{prompt}", prompt) for part in effective_raw]
         except (AttributeError, TypeError) as exc:
             attempt = {
                 "ok": False, "out": "",
@@ -1626,7 +1647,8 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, can
                 "retryable": False,
             }
             return label, None, None, attempt
-        plan, refused = _reviewer_prompt_plan(cand, prompt)
+        effective = cand if tree else dict(cand, argv=effective_raw)
+        plan, refused = _reviewer_prompt_plan(effective, prompt)
         if refused:
             return label, None, None, refused
         if plan["channel"] != "argument":
@@ -1680,10 +1702,12 @@ def _reviewer_route_invocation(root, cand, prompt, timeout, strict, primary, can
             }
     declared_binary = str(argv[0])
     try:
-        exe, version = _reviewer_resolve_binary(root, argv[0])
-        beside = _tool_beside_interpreter(argv[0]) if not exe and tool is not None else None
-        if beside:
-            exe, version = _reviewer_resolve_binary(root, beside)
+        # A tool that ships with ao runs from this ao's installation first, and falls back to PATH only when not there
+        # (API-REVIEWER-TOOLS-2).
+        beside = _tool_beside_interpreter(argv[0]) if tool is not None else None
+        exe, version = _reviewer_resolve_binary(root, beside) if beside else (None, "")
+        if not exe:
+            exe, version = _reviewer_resolve_binary(root, argv[0])
     except Exception as exc:
         return label, declared_binary, None, {
             "ok": False, "out": "", "binary": declared_binary,
@@ -2494,7 +2518,8 @@ def _invoke_reviewer_chain(root, chain, prompt, timeout, strict, primary=None,
         route_timeout = min(float(timeout), room())
         tool_route = not strict and _tool_route(cand)
         label, binary, version, attempt = _reviewer_route_invocation(
-            root, cand, treeless if tool_route and not _tool_tree_argv(cand) and treeless is not None else prompt,
+            root, cand,
+            treeless if tool_route and not (tree and _tool_tree_argv(cand)) and treeless is not None else prompt,
             route_timeout, strict, primary, tree=tree, transport=transport,
             **({"candidate": candidate} if tool_route else {})
         )

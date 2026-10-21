@@ -241,7 +241,9 @@ candidate's tree, which ao unpacks where every other reviewer runs, nor the note
 ([pipeline.md](pipeline.md), REVIEW-TREE-2), unless its adapter declares `review` → `tree` and the
 route's `argv` names `--tree {tree}`, in which case ao unpacks the candidate's tree into
 `candidate/` (every harness's configuration hidden at every depth, REVIEW-TREE-3), fills `{tree}`,
-and includes the tree note in the prompt (API-REVIEWER-TOOLS). The evidence adds `adapter`
+and includes the tree note in the prompt (API-REVIEWER-TOOLS); where a command is built with no
+candidate tree to hand it (`ao doctor`'s reviewer probe, or a candidate whose tree could not be
+unpacked), `review` → `tree` (`--tree {tree}`) leaves together with `{tree}` (API-REVIEWER-TOOLS-2). The evidence adds `adapter`
 and `model` to `reviewer`, and a `tool` block with the tool's version, the digest and size of the
 bytes handed, the tool rounds (`rounds`) and bytes read from the tree (`read_bytes`), and the
 adapter's limits; a review whose handed bytes are not the candidate diff is
@@ -261,7 +263,9 @@ offers four read-only OpenAI function tools over the unpacked candidate (`read`,
 `list`) and loops while the model's answer carries `tool_calls`: every path is relative to `DIR` and
 resolved inside it (an absolute path, a `..` that leaves `DIR`, a symbolic link leading out, or a
 harness configuration path is refused in the tool's answer and never followed), each tool answer is
-bounded in bytes, lines and matches, and the turn is bounded in tool rounds, total bytes read and
+bounded in bytes, lines and matches, every tool call of a round is given an `id` in the assistant
+message and its tool result alike (its own when unique within the turn, else `call_<round>_<index>`,
+API-REVIEWER-TOOLS-2), and the turn is bounded in tool rounds, total bytes read and
 wall time (past a bound the model is told so and asked for its verdict with no tools offered); a
 provider that refuses tools makes the review UNAVAILABLE and says so, never falling back to a silent
 review without them (API-REVIEWER-TOOLS). The providers are the machine's: `review.api_providers` names each by a word, with
@@ -273,8 +277,11 @@ key's value never, and nothing is sent. A base URL holding a query or a fragment
 `/chat/completions` landed in it and the key went to the base URL's own path, and so is one naming a
 user or a password, a credential written in a setting that urllib printed in the error refusing it;
 neither refusal repeats the URL. A redirect is said with its status and where to write the URL the
-endpoint moved to (HUNT-LEADS-SEC). `ao doctor` finds the client where a review does, in a
-Windows interpreter's Scripts directory too. A prompt past one argument
+endpoint moved to (HUNT-LEADS-SEC). A tool that ships with ao (`ao-api-review`) runs from the
+installation of the ao that runs it - the scripts beside `sys.executable`, in a Windows
+interpreter's Scripts directory too - and falls back to `PATH` only when it is not there; `ao doctor`
+finds it the same way and names any `PATH` copy whose version differs from ao's own
+(API-REVIEWER-2, API-REVIEWER-TOOLS-2). A prompt past one argument
 reaches it on its standard input. A reasoning model can spend the whole answer its provider allows
 on reasoning and write no verdict: EVREN allows 16,384 tokens, and on 2026-10-06 its reasoning
 models spent them so on a review prompt of about 28 KB, where DeepSeek V4.1 Flash reviewed a 10 KB
