@@ -4,7 +4,7 @@ import subprocess
 import time
 from types import SimpleNamespace
 
-from ao import cli, lib as A
+from ao import cli, lib as A, storage
 
 OLD = time.time() - 40 * 86400
 KINDS = ("grant", "verification", "board", "tracked", "loose", "recent")
@@ -60,6 +60,7 @@ def test_nothing_is_pruned_when_what_rests_on_the_artefacts_cannot_be_read(proje
     loose = _artefact(root, "2026-08-01-100000-abc.md")
     with open(A.review_ledger_path(root), "w", encoding="utf-8") as fh:
         fh.write('{"artefact": "2026-08-01-100000-abc.md"}\n')
+    storage._record_committed_length(A.review_ledger_path(root), 1, None)
 
     _prune(project, apply=True)
 

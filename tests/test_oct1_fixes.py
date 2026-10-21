@@ -14,7 +14,7 @@ import sys
 import time
 from types import SimpleNamespace
 
-from ao import cli, lib as A, watchdog as W
+from ao import cli, lib as A, storage, watchdog as W
 from tests.test_catchup_ready import APPROVED, PERSON, _catchup, _land, _legacy_waiver
 from tests.test_review_chain import _fake
 
@@ -104,6 +104,7 @@ def test_no_move_only_slice_is_reported_missing_when_the_waiver_ledger_cannot_be
     A.waive(root, "review", "B7", "quota", by="A. Person")
     with open(A.waivers_path(root), "a", encoding="utf-8") as fh:
         fh.write(json.dumps({"event": "closed", "id": "W-other", "at": 1, "outcome": "forged"}) + "\n")
+    storage._record_committed_length(A.waivers_path(root), 2, None)
     monkeypatch.setattr(W, "run", lambda ns: 0)
 
     assert _catchup(project, move_only="B7", by="A. Person") == 1

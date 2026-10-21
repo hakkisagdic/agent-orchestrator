@@ -5,7 +5,7 @@ import subprocess
 import time
 from types import SimpleNamespace
 
-from ao import cli, features as F, lib as A
+from ao import cli, features as F, lib as A, storage
 
 
 def test_features_default_on_and_switch(project):
@@ -251,6 +251,7 @@ def _legacy_waiver(root, slice_id):
            "head": _head(root), "tree": "t"}
     with open(path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(row) + "\n")
+    storage._record_committed_length(path, count + 1, storage.chained_row_digest(row, A.WAIVER_CHAIN))
     return row
 
 
@@ -359,8 +360,10 @@ def test_catchup_refuses_a_forged_waiver_head_without_a_shell(project, monkeypat
     canary = tmp_path / "pwned"
     forged = {"event": "waived", "id": "W-forged", "gate": "review", "slice": "B7", "why": "x", "by": "h",
               "at": 1, "head": f"HEAD; touch {canary}", "tree": "t"}
-    with open(os.path.join(root, ".ao", "ledger", "waivers.jsonl"), "a", encoding="utf-8") as fh:
+    path = os.path.join(root, ".ao", "ledger", "waivers.jsonl")
+    with open(path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(forged) + "\n")
+    storage._record_committed_length(path, 1, storage.chained_row_digest(forged, A.WAIVER_CHAIN))
     _bump(root, 2, "b7")
 
     seen = _catchup_with_recorded_ranges(project, monkeypatch)

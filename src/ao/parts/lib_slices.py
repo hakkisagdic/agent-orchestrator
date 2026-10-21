@@ -999,6 +999,80 @@ def restore_backup(root, source):
     return restored, unverified
 
 
+RESTORE_CHAIN = "ao-restore-row-v1"
+
+
+def backup_manifest_digest(source):
+    """The SHA-256 digest of a backup directory's `manifest.json` bytes (LEDGER-ATTESTED)."""
+    with open(os.path.join(source, "manifest.json"), "rb") as fh:
+        return "sha256:" + hashlib.sha256(fh.read()).hexdigest()
+
+
+def record_restore_attestation(root, by, manifest_digest, ledgers):
+    """Record a person's attestation of a restored backup in `.ao/ledger/restores.jsonl` (LEDGER-ATTESTED)."""
+    from .storage import append_chained_in_tree
+    user, interactive = _login_and_terminal()
+    return append_chained_in_tree(
+        root,
+        ".ao/ledger/restores.jsonl",
+        {"at": int(time.time()), "by": str(by).strip(), "user": user, "interactive": interactive,
+         "manifest": manifest_digest, "ledgers": {rel: rows for rel, rows, *_ in ledgers}},
+        RESTORE_CHAIN,
+    )
+
+
+def latest_restore_attestation(root):
+    """The newest recorded restore attestation in `.ao/ledger/restores.jsonl`, or None (LEDGER-ATTESTED)."""
+    from .storage import read_chained_in_tree
+    rows = [row for row in read_chained_in_tree(root, ".ao/ledger/restores.jsonl", RESTORE_CHAIN)
+            if isinstance(row, dict)]
+    return rows[-1] if rows else None
+
+
+def _restored_ledgers(root, restored, *, attest=False):
+    """Validate each restored chained ledger against its seal and archives; when `attest=True`, record this machine's
+    checkpoint for each one that validates, and return `[(rel, rows, digest)]` of the gate ledgers attested (or, when
+    `attest=False`, those that need attestation on this machine) (LEDGER-ATTESTED)."""
+    from .storage import GATE_LEDGERS, LedgerCorruption, _load_seal, attest_restored_ledger, seal_path
+    gate_rels = {rel for _, rel, _, _, _ in GATE_LEDGERS}
+    chains = tuple((rel, chain, legacy) for _, rel, chain, legacy, _ in GATE_LEDGERS) + (
+        (".ao/ledger/merges.jsonl", MERGE_CHAIN, False),
+        (".ao/ledger/slices.jsonl", SLICE_CHAIN, False),
+        (".ao/ledger/mail-store.jsonl", MAIL_STORE_CHAIN, False),
+        (".ao/ledger/repairs.jsonl", REPAIR_CHAIN, False),
+        (".ao/ledger/restores.jsonl", RESTORE_CHAIN, False),
+    )
+    verified = set(restored)
+    unattested, errors = [], []
+    for rel, chain, legacy in chains:
+        if rel not in verified:
+            continue
+        path = os.path.join(root, *rel.split("/"))
+        if os.path.lexists(seal_path(path)):
+            if f"{rel}.seal.json" not in verified:
+                errors.append(f"{rel}: its seal was not verified from the backup")
+                continue
+            try:
+                seal = _load_seal(path)
+            except Exception as exc:
+                errors.append(str(exc))
+                continue
+            if seal and any(f".ao/ledger/sealed/{name}" not in verified for name in (seal.get("archives") or [])):
+                errors.append(f"{rel}: its sealed archives were not verified from the backup")
+                continue
+        try:
+            is_gate = rel in gate_rels
+            rows, digest, already = attest_restored_ledger(path, chain, legacy_prefix=legacy, record=attest)
+            if is_gate and rows > 0 and (attest or not already):
+                unattested.append((rel, rows, digest))
+        except Exception as exc:
+            errors.append(str(exc))
+    if errors:
+        raise LedgerCorruption("; ".join(errors))
+    return unattested
+
+
+
 def backup_age(root):
     """(seconds since the newest backup, where it went), or None when there is none (#46)."""
     from .storage import read_jsonl

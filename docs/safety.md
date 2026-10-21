@@ -95,6 +95,13 @@ authority ledger with the candidate and scope it rested on. Each authority row h
 the preceding canonical JSON object. `ao commit-check` validates the complete committed
 chain before selecting the newest decision and refuses a missing or incorrect link. A
 non-empty legacy ledger without links is unreadable and is never rewritten implicitly.
+Across every chained ledger the gate reads (`authority`, `verifications`, `waivers`,
+`reviews`, `decisions`, `plans`, and `opt-ins`), a row counts only within the prefix this
+machine's checkpoint store (`~/.ao/ledger-checkpoints.json`, outside the tree) records `ao`
+committing: a self-consistent row appended into the working tree by hand is ignored on read
+and blocks further appends until removed, and a ledger copied in with no checkpoint entry on
+this machine counts no row (`ao doctor` names `<ledger>-unattested` and
+`<ledger>-unreadable`, LEDGER-ATTESTED).
 `ao commit-check` is the non-mutating enforcement half: the optional AO pre-commit hook
 runs it against Git's active index and revalidates the latest persisted grant, its exact
 verification and review or live waiver, plus current plan drift, holds, and urgent mail.
@@ -166,7 +173,8 @@ bound to the candidate as a model's review is.
 `ao config set review.same_family labeled --by <name>` lets another model of the implementer's family
 review, labeled as weaker independence wherever its reviews show, and it is in force only while a
 person's record in `.ao/ledger/opt-ins.jsonl` says so - a row ao appended on this machine, as its
-checkpoint store shows, never one written into the file by hand. Each records the name, the login and whether a
+checkpoint store shows, never one written into the file by hand, under the same attested-prefix rule
+as every other gate ledger (OPTIN-ATTESTED, LEDGER-ATTESTED). Each records the name, the login and whether a
 terminal was attached, refuses a name that belongs to an agent or a role, and is on the list of commands
 no actor's grant may admit; ao still cannot prove that no agent typed it.
 

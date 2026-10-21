@@ -93,6 +93,7 @@ def test_reference_chains_keep_their_legacy_prefix(project, kind):
         "decision": (A.decisions_path(root), A.DECISION_CHAIN),
     }[kind]
     Path(path).write_text('{"review": "kept.md"}\n', encoding="utf-8")
+    storage._record_committed_length(path, 1, storage.chained_row_digest({"review": "kept.md"}, chain))
     storage.append_chained_jsonl(path, {"id": "newer"}, chain, legacy_prefix=True)
     result = A.prune_review_artefacts(root, project, 30, apply=True)
     assert artefact.exists() and kind in result["kept"]["kept.md"]

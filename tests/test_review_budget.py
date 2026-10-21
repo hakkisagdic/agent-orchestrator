@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, language, lib as A, watchdog as W
+from ao import cli, language, lib as A, storage, watchdog as W
 from tests.test_prompt_channel import _declare, _git, _linux, _route
 
 # What the tree note adds to a prompt held to one argument (REVIEW-TREE): the bound leaves room for it.
@@ -37,6 +37,7 @@ def _waived_range(root, commits=8):
               "head": _git(root, "rev-parse", "HEAD"), "tree": "t"}
     with open(A.waivers_path(root), "a", encoding="utf-8") as fh:
         fh.write(json.dumps(waiver) + "\n")
+    storage._record_committed_length(A.waivers_path(root), 1, storage.chained_row_digest(waiver, A.WAIVER_CHAIN))
     with open(os.path.join(root, "large.txt"), "w", encoding="utf-8") as fh:
         fh.write("değer = 'bir satır'\n" * 4_700)
     _git(root, "add", "large.txt")

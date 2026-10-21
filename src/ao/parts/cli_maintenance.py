@@ -2096,6 +2096,19 @@ def cmd_backup(cfg, args):
 def cmd_restore(cfg, args):
     """Reconstruct the control plane from a backup directory; say what could not be verified (#46)."""
     root = cfg["root"]
+    raw_by = getattr(args, "by", None)
+    by = (raw_by or "").strip()
+    ask = bool(getattr(args, "ask", False))
+    if raw_by is not None:
+        if not by or not by.isprintable() or len(by) > 80:
+            print("--by is required: the person who attests the restored backup, in one line of at most 80 characters")
+            return 2
+        if by.lower() in _agent_names(cfg):
+            print(f"--by names an agent or a role ({by}); attesting a restored backup is a person's act")
+            return 2
+    if ask and not by:
+        print("--by is required with --ask: the person who attests the restored backup, in one line of at most 80 characters")
+        return 2
     try:
         restored, unverified = A.restore_backup(root, args.source)
     except (OSError, ValueError, KeyError) as exc:
@@ -2110,13 +2123,37 @@ def cmd_restore(cfg, args):
         print(f"{C['red']}the backup restored no control plane{C['reset']}: "
               + ("no file was restored" if not restored else ".ao/config.json is not among what was restored"))
         return 1
+    if by and by.lower() in _agent_names(A.load_config(root)):
+        print(f"--by names an agent or a role ({by}); attesting a restored backup is a person's act")
+        return 2
     try:
-        A.authority_history(root)            # the sealed archives too, as one chain (LEDGER-HISTORY)
+        unattested = A._restored_ledgers(root, restored, attest=False)
+        if ".ao/ledger/authority.jsonl" not in restored:
+            A.authority_history(root)        # the sealed archives too, as one chain (LEDGER-HISTORY)
         A.board(root)
         print(f"{C['green']}the authority chain and the board validate{C['reset']}")
     except Exception as exc:
         print(f"{C['red']}restored state does not validate{C['reset']}: {exc}")
         return 1
+    if by and ask and unattested:
+        manifest_digest = A.backup_manifest_digest(args.source)
+        print(f"  manifest  {manifest_digest}")
+        for rel, rows, digest in unattested:
+            print(f"  ledger    {rel}: {rows} row(s), last {digest}")
+        if _confirm(f"  Attest these {len(unattested)} restored gate ledger(s) on this machine as {by}? [y/N]: ") is True:
+            try:
+                attested = A._restored_ledgers(root, restored, attest=True)
+                A.authority_history(root)
+                row = A.record_restore_attestation(root, by, manifest_digest, attested)
+            except Exception as exc:
+                print(f"{C['red']}restored state does not validate{C['reset']}: {exc}")
+                return 1
+            print(f"  {C['green']}attested{C['reset']}  {len(attested)} gate ledger(s) by {row['by']} "
+                  f"(manifest {manifest_digest[:19]})")
+            unattested = []
+    for rel, rows, _ in unattested:
+        print(f"  {C['yellow']}unattested{C['reset']}  {rel}: restored ({rows} row(s)), but unattested on this "
+              f"machine — attest with: ao restore {args.source} --by <name> --ask")
     return 1 if unverified else 0
 
 
@@ -2148,14 +2185,26 @@ def _shipped_tool_lines(root):
 
 
 def _backup_lines(cfg):
-    """How old the newest backup is, and whether governance exists with none (#46)."""
-    age = A.backup_age(cfg["root"])
+    """How old the newest backup is, and whether governance exists with none (#46); also the newest restore
+    attestation when one is recorded (LEDGER-ATTESTED)."""
+    root = cfg["root"]
+    age = A.backup_age(root)
     if age is None:
-        return [f"{'backup':<16}{C['yellow']}none{C['reset']}  {C['dim']}the control plane is on this disk only — "
-                f"ao backup --to <directory|ref|remote:name>{C['reset']}"]
-    seconds, where = age
-    tone = C["green"] if seconds < 7 * 86400 else C["yellow"]
-    return [f"{'backup':<16}{tone}{_elapsed(seconds)} ago{C['reset']}  {C['dim']}{where}{C['reset']}"]
+        lines = [f"{'backup':<16}{C['yellow']}none{C['reset']}  {C['dim']}the control plane is on this disk only — "
+                 f"ao backup --to <directory|ref|remote:name>{C['reset']}"]
+    else:
+        seconds, where = age
+        tone = C["green"] if seconds < 7 * 86400 else C["yellow"]
+        lines = [f"{'backup':<16}{tone}{_elapsed(seconds)} ago{C['reset']}  {C['dim']}{where}{C['reset']}"]
+    try:
+        att = A.latest_restore_attestation(root)
+    except Exception:
+        att = None
+    if att is not None:
+        ledgers = att.get("ledgers") or {}
+        lines.append(f"{'restore':<16}{C['green']}attested{C['reset']} by {att.get('by', '?')} "
+                     f"({len(ledgers)} ledger(s), manifest {str(att.get('manifest', ''))[:19]})")
+    return lines
 
 
 def _machine_line(cfg):

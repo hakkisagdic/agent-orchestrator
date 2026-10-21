@@ -80,8 +80,10 @@ def test_a_forged_verification_row_makes_the_ledger_unreadable(project, tmp_path
     forged.pop("ordinal")
     if link:
         forged["previous"] = link
-    with open(os.path.join(root, ".ao", "ledger", "verifications.jsonl"), "a", encoding="utf-8") as fh:
+    path = os.path.join(root, ".ao", "ledger", "verifications.jsonl")
+    with open(path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(forged) + "\n")
+    storage._record_committed_length(path, 2, None)
     capsys.readouterr()
 
     with pytest.raises(storage.LedgerCorruption):
@@ -95,6 +97,7 @@ def test_rows_from_before_the_chain_stay_history_and_never_count(project):
     path = os.path.join(root, ".ao", "ledger", "verifications.jsonl")
     legacy = [{"id": "V-1", "passed": True}, {"id": "V-2", "passed": True}]
     open(path, "w", encoding="utf-8").write("".join(json.dumps(row) + "\n" for row in legacy))
+    storage._record_committed_length(path, 2, storage.chained_row_digest(legacy[-1], A.VERIFICATION_CHAIN))
 
     assert A.latest_verification(root) is None
     A.record_verification(root, {"id": "V-3", "passed": True})

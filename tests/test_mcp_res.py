@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from ao import cli, lib as A, mcp
+from ao import cli, lib as A, mcp, storage
 from ao.storage import append_jsonl
 
 
@@ -68,9 +68,10 @@ def _make_project(tmp_path, name, slice_id="S1"):
         encoding="utf-8",
     )
     A.record_slice_move(str(root), slice_id, "queued", "running", by="implementer", why="start")
-    append_jsonl(
+    storage.append_chained_jsonl(
         str(root / ".ao" / "ledger" / "decisions.jsonl"),
         {"id": "DEC-1", "decision": f"Use stdlib in {name}", "why": "zero deps", "scope": "mcp", "at": 1700000010},
+        A.DECISION_CHAIN,
     )
     A.ask(str(root), f"Which port for {name}?", ["8731", "8732"], context="loopback", slice_id=slice_id, cfg=dict(cfg, root=str(root)))
     return root
@@ -85,9 +86,10 @@ def test_resources_and_templates_list_and_read_under_every_protocol_version(proj
         encoding="utf-8",
     )
     A.record_slice_move(root, "MCP-RES", "queued", "running", by="implementer", why="start")
-    append_jsonl(
+    storage.append_chained_jsonl(
         str(Path(root, ".ao", "ledger", "decisions.jsonl")),
         {"id": "DEC-9", "decision": "Keep authority in the CLI", "why": "separation of duties", "at": 1700000100},
+        A.DECISION_CHAIN,
     )
     A.ask(root, "Keep URI scheme ao://?", ["yes", "no"], slice_id="MCP-RES", cfg=project)
 

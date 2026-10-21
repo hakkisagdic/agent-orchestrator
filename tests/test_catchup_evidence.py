@@ -18,7 +18,7 @@ import sys
 import time
 from types import SimpleNamespace
 
-from ao import cli, language, lib as A, watchdog as W
+from ao import cli, language, lib as A, storage, watchdog as W
 from tests.test_switches_and_bypass import _allow_candidate_verification
 
 APPROVED = ("VERDICT: APPROVED", "BLOCKER: 0", "HIGH: 0", "MEDIUM: 0", "LOW: 0")
@@ -119,6 +119,7 @@ def test_the_review_of_a_waived_range_is_told_what_its_commits_claim_bounded_sca
               "head": _git(root, "rev-parse", "HEAD"), "tree": "t"}
     with open(A.waivers_path(root), "a", encoding="utf-8") as fh:
         fh.write(json.dumps(waiver) + "\n")
+    storage._record_committed_length(A.waivers_path(root), 1, storage.chained_row_digest(waiver, A.WAIVER_CHAIN))
     token = "gh" + "p_" + "A" * 36
     marker = language.text(project, "prompt.review-candidate")
     messages = ["fix: count\tthe first value\n\nWhat was wrong: nothing was counted, and " + token + " leaked.\n"

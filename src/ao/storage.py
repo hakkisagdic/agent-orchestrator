@@ -407,6 +407,16 @@ def _record_committed_length(path, count, digest, sealed=None, *, identity=None)
     _update_checkpoint(path, change, identity=identity)
 
 
+def _record_append_intent(path, digest, *, identity=None):
+    """Record the digest of the row an append is about to write, cleared when its count is recorded (LEDGER-ATTESTED)."""
+    _update_checkpoint(path, lambda previous: dict(previous, append=digest), identity=identity)
+
+
+def _clear_append_intent(path, *, identity=None):
+    """Clear a write-ahead append intent once the uncommitted row has been taken back (LEDGER-ATTESTED)."""
+    _update_checkpoint(path, lambda previous: {k: v for k, v in previous.items() if k != "append"}, identity=identity)
+
+
 def _check_committed_length(path, rows, chain, seal=None, *, identity=None):
     """Refuse a ledger shorter than its recorded length, or diverging from it (#62), across a seal (#50)."""
     mark = _load_committed_lengths().get(identity or os.path.realpath(path))
@@ -753,13 +763,41 @@ def _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix=Fals
     return rows
 
 
+# The gate ledgers: every chained ledger a gate decision reads, defined once for the attested-prefix rule and
+# `ao doctor` (LEDGER-ATTESTED).
+GATE_LEDGERS = (
+    ("opt-ins", ".ao/ledger/opt-ins.jsonl", "ao-opt-in-row-v1", False, "no opt-in counts"),
+    ("authority", ".ao/ledger/authority.jsonl", "ao-authority-row-v1", False, "no grant counts"),
+    ("verifications", ".ao/ledger/verifications.jsonl", "ao-verification-row-v1", True, "no verification counts"),
+    ("waivers", ".ao/ledger/waivers.jsonl", "ao-waiver-row-v1", True, "no waiver counts"),
+    ("reviews", ".ao/ledger/reviews.jsonl", "ao-review-row-v1", False, "no review counts"),
+    ("decisions", ".ao/ledger/decisions.jsonl", "ao-decision-row-v1", True, "no decision counts"),
+    ("plans", ".ao/ledger/plans.jsonl", "ao-plan-row-v1", True, "no plan baseline counts"),
+)
+GATE_CHAINS = frozenset(chain for _, _, chain, _, _ in GATE_LEDGERS)
+GATE_LEDGER_FILES = frozenset(os.path.basename(rel) for _, rel, _, _, _ in GATE_LEDGERS)
+
+
+def _is_gate_ledger(path, chain):
+    return chain in GATE_CHAINS or os.path.basename(path) in GATE_LEDGER_FILES
+
+
 def read_chained_jsonl(path, chain, allow_partial_tail=True, timeout=10.0, *,
-                       previous_field=CHAIN_PREVIOUS_FIELD, legacy_prefix=False, lock=True, attested=False):
+                       previous_field=CHAIN_PREVIOUS_FIELD, legacy_prefix=False, lock=True, attested=False,
+                       for_append=False):
     """Read and validate every committed row in one predecessor hash chain.
 
     The chain proves no row was changed or inserted; the recorded length proves
-    none was cut off the end, including all of them (#62).
+    none was cut off the end, including all of them (#62), and that for every
+    gate ledger (`GATE_LEDGERS`) every row returned is one this machine's
+    checkpoint store records ao appending (LEDGER-ATTESTED).
     """
+    if _is_gate_ledger(path, chain) and _ledger_store_in_tree(path):
+        if for_append:
+            raise LedgerCorruption(
+                f"the checkpoint store {checkpoint_path()} lies inside the project, where an agent writes: ao records "
+                "no row beside it - point AO_LEDGER_CHECKPOINTS outside the tree, or unset it")
+        return []
     if not os.path.exists(path) and not os.path.lexists(seal_path(path) + ".pending") \
             and "intent" not in _checkpoint_entry(path):
         _check_missing_chained_ledger(path, chain, seal=_load_seal(path))
@@ -769,18 +807,43 @@ def read_chained_jsonl(path, chain, allow_partial_tail=True, timeout=10.0, *,
             path, chain, allow_partial_tail, previous_field, legacy_prefix, attested=attested
         )[0]
     with _exclusive_lock(path + ".lock", timeout=timeout):
-        return _read_chained_unlocked(path, chain, allow_partial_tail, previous_field, legacy_prefix)[0]
+        return _read_chained_unlocked(
+            path, chain, allow_partial_tail, previous_field, legacy_prefix, for_append=for_append
+        )[0]
 
 
-def _read_chained_unlocked(path, chain, allow_partial_tail, previous_field, legacy_prefix):
-    """(the live rows, the seal they follow), validated; the caller holds the ledger lock."""
+def _read_chained_unlocked(path, chain, allow_partial_tail, previous_field, legacy_prefix, *, every=False,
+                           for_append=False):
+    """(the live rows, the seal they follow), validated; the caller holds the lock."""
+    gate = _is_gate_ledger(path, chain)
+    if gate and _ledger_store_in_tree(path):
+        if for_append:
+            raise LedgerCorruption(
+                f"the checkpoint store {checkpoint_path()} lies inside the project, where an agent writes: ao records "
+                "no row beside it - point AO_LEDGER_CHECKPOINTS outside the tree, or unset it")
+        return (0 if every else []), None
     _settle_seal(path, chain, previous_field, legacy_prefix)
     seal = _load_seal(path)
     if not os.path.exists(path):
         _check_missing_chained_ledger(path, chain, seal=seal)
-    rows = _read_jsonl_unlocked(path, allow_partial_tail) if os.path.exists(path) else []
+        return (0 if every else []), seal
+    with open(path, "rb") as handle:
+        data = handle.read()
+    records, unfinished = _jsonl_records(data)
+    if every:
+        return len(records), seal
+    attested = _attested_length(path, seal) if gate else len(records)
+    if unfinished is not None and not allow_partial_tail:
+        raise LedgerCorruption(f"uncommitted final record {unfinished + 1} in {path}")
+    # For a gate ledger, only the rows ao recorded are read and checked: a tail past them - well formed or not - is
+    # nobody's record, and never makes ao's own unreadable (OPTIN-ATTESTED, LEDGER-ATTESTED).
+    rows = [_jsonl_row(body, index, path) for index, body in records[:attested]]
     _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix, seal=seal)
     _check_committed_length(path, rows, chain, seal=seal)
+    if for_append and gate:
+        past = len(records) - len(rows)
+        if past > 0 and not _is_interrupted_append(records, len(rows), path, chain, unfinished=unfinished):
+            raise LedgerCorruption(f"{path}: {_unattested_repair(past, len(rows))}")
     return rows, seal
 
 
@@ -865,6 +928,9 @@ def read_chained_history(path, chain, timeout=10.0, *, previous_field=CHAIN_PREV
     BOUNDED-STORES). `lock=False` reads a snapshot without creating a `.lock` file or settling a
     seal (EXPORT-OTLP).
     """
+    gate = _is_gate_ledger(path, chain)
+    if gate and _ledger_store_in_tree(path):
+        return []
     if not os.path.exists(path) and not os.path.lexists(seal_path(path) + ".pending") \
             and "intent" not in _checkpoint_entry(path):
         _check_missing_chained_ledger(path, chain, seal=_load_seal(path))
@@ -876,9 +942,61 @@ def read_chained_history(path, chain, timeout=10.0, *, previous_field=CHAIN_PREV
     with _exclusive_lock(path + ".lock", timeout=timeout):
         rows, seal = _read_chained_unlocked(path, chain, True, previous_field, legacy_prefix)
         recorded = _checkpoint_entry(path).get("sealed")
-        retired, _ = _sealed_rows_held(path, chain, seal, previous_field, legacy_prefix,
+        retired, _ = _sealed_rows_held(path, chain, seal if (not gate or isinstance(recorded, dict)) else None,
+                                       previous_field, legacy_prefix,
                                        recorded=recorded.get("archives") if isinstance(recorded, dict) else None)
         return retired + rows
+
+
+def unattested_ledger(path, chain, *, previous_field=CHAIN_PREVIOUS_FIELD, legacy_prefix=False):
+    """(rows this machine's checkpoint store does not record ao appending, rows it does) of a chained ledger
+    (LEDGER-ATTESTED)."""
+    if _ledger_store_in_tree(path):
+        if not os.path.exists(path):
+            return 0, 0
+        with _exclusive_lock(path + ".lock"):
+            with open(path, "rb") as handle:
+                return len(_jsonl_records(handle.read())[0]), 0
+    if not os.path.exists(path) and not os.path.lexists(seal_path(path) + ".pending") \
+            and "intent" not in _checkpoint_entry(path):
+        _check_missing_chained_ledger(path, chain, seal=_load_seal(path))
+        return 0, 0
+    with _exclusive_lock(path + ".lock"):
+        attested = len(_read_chained_unlocked(path, chain, True, previous_field, legacy_prefix)[0])
+        total = _read_chained_unlocked(path, chain, True, previous_field, legacy_prefix, every=True)[0]
+        return max(0, total - attested), attested
+
+
+def attest_restored_ledger(path, chain, *, previous_field=CHAIN_PREVIOUS_FIELD, legacy_prefix=False, record=True):
+    """Validate a restored chained ledger (and its seal and archives) and, when `record=True`, record this machine's
+    checkpoint for it so its rows count; returns `(count, digest, already_attested)` (LEDGER-ATTESTED)."""
+    if _ledger_store_in_tree(path):
+        raise LedgerCorruption(
+            f"the checkpoint store {checkpoint_path()} lies inside the project, where an agent writes: ao records "
+            "no row beside it - point AO_LEDGER_CHECKPOINTS outside the tree, or unset it")
+    with _exclusive_lock(path + ".lock"):
+        stray = seal_path(path) + ".pending"
+        if os.path.lexists(stray):
+            raise LedgerCorruption(f"{stray} names an unfinished seal in the restored backup")
+        seal = _load_seal(path)
+        _, archived = _sealed_rows_held(path, chain, seal, previous_field, legacy_prefix)
+        rows = _read_jsonl_unlocked(path, allow_partial_tail=False) if os.path.exists(path) else []
+        _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix, seal=seal)
+        retired = seal["retired"] if seal else 0
+        count = retired + len(rows)
+        digest = chained_row_digest(rows[-1], chain) if rows else (seal["digest"] if seal else None)
+        sealed = {"retired": seal["retired"], "digest": seal["digest"], "archives": archived} if seal else None
+        entry = _checkpoint_entry(path)
+        attested = (count == 0 or (entry.get("count") == count and entry.get("digest") == digest
+                                   and entry.get("sealed") == sealed and "intent" not in entry))
+        if record and count > 0:
+            mark = {"count": count, "digest": digest, "at": int(time.time())}
+            if sealed is not None:
+                mark["sealed"] = sealed
+            _update_checkpoint(path, lambda _: mark)
+            attested = True
+        return count, digest, attested
+
 
 
 def _sync_directory(directory, fsync):
@@ -1514,7 +1632,7 @@ def _chained_in_tree(root, rel, chain, record=None, every=False):
             if data is None:
                 _check_missing_chained_ledger(identity, chain, seal=seal, identity=identity)
                 data = b""
-            attested = _attested_length(identity, seal)
+            attested = _attested_length(identity, seal, identity=identity)
             if record is None:
                 records, _ = _jsonl_records(data)
                 if every:
@@ -1525,12 +1643,18 @@ def _chained_in_tree(root, rel, chain, record=None, every=False):
                 _validate_chained_rows(identity, rows, chain, CHAIN_PREVIOUS_FIELD, seal=seal)
                 _check_committed_length(identity, rows, chain, seal=seal, identity=identity)
                 return rows
-            past = len(_jsonl_records(data)[0]) - attested
+            records, unfinished = _jsonl_records(data)
+            past = len(records) - attested
+            cut_to = None
             if past > 0:
-                # Appended after them, ao's record would vouch for rows it never wrote (OPTIN-ATTESTED). Counted as a
-                # read counts them, before anything parses them.
-                raise LedgerCorruption(f"{rel}: {_unattested_repair(past, attested)}")
-            rows = _jsonl_rows(data, identity)
+                if not _is_interrupted_append(records, attested, identity, chain, identity=identity,
+                                              unfinished=unfinished):
+                    # Appended after them, ao's record would vouch for rows it never wrote (OPTIN-ATTESTED). Counted as
+                    # a read counts them, before anything parses them.
+                    raise LedgerCorruption(f"{rel}: {_unattested_repair(past, attested)}")
+                cut_to = sum(len(line) for line in data.splitlines(keepends=True)[:records[attested][0]])
+                records = records[:attested]
+            rows = [_jsonl_row(body, index, identity) for index, body in records]
             _validate_chained_rows(identity, rows, chain, CHAIN_PREVIOUS_FIELD, seal=seal)
             _check_committed_length(identity, rows, chain, seal=seal, identity=identity)
             retired = seal["retired"] if seal else 0
@@ -1538,6 +1662,7 @@ def _chained_in_tree(root, rel, chain, record=None, every=False):
             chained = {CHAIN_PREVIOUS_FIELD: previous, "ordinal": retired + len(rows) + 1}
             chained.update(record)
             payload = _encode_jsonl(chained)
+            digest = chained_row_digest(chained, chain)
             created = False
             try:
                 fd = _tree_open(folder, name, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o644)
@@ -1553,19 +1678,24 @@ def _chained_in_tree(root, rel, chain, record=None, every=False):
                     current = handle.read()
                 if current != data:
                     raise InTheWay(rel, "changed while ao read it; retry the opt-in")
-                boundary = len(data) if not data or data.endswith((b"\n", b"\r")) else \
-                    max(data.rfind(b"\n"), data.rfind(b"\r")) + 1
+                if cut_to is not None:
+                    boundary = cut_to
+                else:
+                    boundary = len(data) if not data or data.endswith((b"\n", b"\r")) else \
+                        max(data.rfind(b"\n"), data.rfind(b"\r")) + 1
                 os.ftruncate(fd, boundary)
                 if boundary != len(data):
                     os.fsync(fd)
+                if cut_to is not None:
+                    _clear_append_intent(identity, identity=identity)
                 os.lseek(fd, boundary, os.SEEK_SET)
+                _record_append_intent(identity, digest, identity=identity)
                 try:
                     _write_all(fd, payload)
                     os.fsync(fd)
                     if created:
                         _tree_sync(folder, os.fsync)
-                    _record_committed_length(identity, retired + len(rows) + 1,
-                                             chained_row_digest(chained, chain), identity=identity)
+                    _record_committed_length(identity, retired + len(rows) + 1, digest, identity=identity)
                 except BaseException:
                     os.ftruncate(fd, boundary)
                     os.fsync(fd)
@@ -1655,22 +1785,47 @@ def _store_in_tree(root):
     return False
 
 
+def _ledger_store_in_tree(path):
+    """Whether `path` is a project ledger under `.ao/ledger/` whose checkpoint store lies inside that project."""
+    ledger_dir = os.path.dirname(os.path.abspath(path))
+    ao_dir = os.path.dirname(ledger_dir)
+    if os.path.basename(ledger_dir) == "ledger" and os.path.basename(ao_dir) == ".ao":
+        return _store_in_tree(os.path.dirname(ao_dir))
+    return False
+
+
 def _unattested_repair(foreign, attested):
     """What a person does about rows past ao's record, keeping the ones ao did record (OPTIN-ATTESTED)."""
     keep = (f"the first {attested} row(s) are ao's own and stay; a person removes exactly the last {foreign} line(s) "
-            "of the file") if attested else "no row of it is ao's own; a person moves the file aside"
+            "of the file") if attested else ("no row of it is ao's own; a person moves the file aside, or attests a "
+                                             "restored backup with ao restore <source> --by <name> --ask")
     return (f"{foreign} row(s) the checkpoint store of this machine ({checkpoint_path()}) does not record ao "
             f"appending - something other than ao wrote them, or an append did not finish. They turn nothing off and "
             f"ao appends nothing after them: {keep}, and records again what is missing")
 
 
-def _attested_length(identity, seal):
+def _attested_length(path, seal, *, identity=None):
     """How many of a ledger's live rows this machine's checkpoint store records ao committing (OPTIN-ATTESTED)."""
-    count = _checkpoint_entry(identity, identity=identity).get("count")
+    count = _checkpoint_entry(path, identity=identity).get("count")
     return max(0, (count if isinstance(count, int) else 0) - (seal["retired"] if seal else 0))
 
 
-def _repair_partial_tail(path, fsync, checkpoint):
+def _is_interrupted_append(records, attested, path, chain, *, identity=None, unfinished=None):
+    """Whether the single record past `attested` is the one this machine recorded an intent to append (LEDGER-ATTESTED)."""
+    if unfinished is not None or len(records) - attested != 1:
+        return False
+    intent = _checkpoint_entry(path, identity=identity).get("append")
+    if not isinstance(intent, str) or not intent:
+        return False
+    index, body = records[attested]
+    try:
+        row = _jsonl_row(body, index, path)
+        return isinstance(row, dict) and chained_row_digest(row, chain) == intent
+    except (LedgerCorruption, TypeError, ValueError):
+        return False
+
+
+def _repair_partial_tail(path, fsync, checkpoint, *, limit=None):
     """Cut off the uncommitted final record an interrupted or failed append left.
 
     It is never completed: its writer did not return, so it was never committed (#68).
@@ -1683,7 +1838,11 @@ def _repair_partial_tail(path, fsync, checkpoint):
     # new record was appended, falsely reporting a successful durable write on
     # an already-corrupt ledger.
     data = open(path, "rb").read()
-    _read_jsonl_unlocked(path, allow_partial_tail=True)
+    if limit is None:
+        _read_jsonl_unlocked(path, allow_partial_tail=True)
+    else:
+        for index, body in _jsonl_records(data)[0][:limit]:
+            _jsonl_row(body, index, path)
     if data.endswith((b"\n", b"\r")):
         return "clean"
 
@@ -1802,6 +1961,11 @@ def append_chained_jsonl(path, record, chain, timeout=10.0, *,
         raise ValueError("previous_field must be a non-empty string")
     if previous_field in record or "ordinal" in record:
         raise ValueError(f"caller must not set the {previous_field!r} or 'ordinal' chain fields")
+    gate = _is_gate_ledger(path, chain)
+    if gate and _ledger_store_in_tree(path):
+        raise LedgerCorruption(
+            f"the checkpoint store {checkpoint_path()} lies inside the project, where an agent writes: ao records "
+            "no row beside it - point AO_LEDGER_CHECKPOINTS outside the tree, or unset it")
 
     parent = os.path.dirname(path) or "."
     os.makedirs(parent, exist_ok=True)
@@ -1811,11 +1975,52 @@ def append_chained_jsonl(path, record, chain, timeout=10.0, *,
     with _exclusive_lock(path + ".lock", timeout=timeout):
         _call(_checkpoint, "locked")
         _settle_seal(path, chain, previous_field, legacy_prefix)
-        if not os.path.exists(path):
-            _check_missing_chained_ledger(path, chain, seal=_load_seal(path))
-        _repair_partial_tail(path, fsync, _checkpoint)
-        rows = _read_jsonl_unlocked(path, allow_partial_tail=False)
         seal = _load_seal(path)
+        if not os.path.exists(path):
+            _check_missing_chained_ledger(path, chain, seal=seal)
+        if gate:
+            attested = _attested_length(path, seal)
+            if os.path.exists(path):
+                with open(path, "rb") as handle:
+                    data = handle.read()
+            else:
+                data = b""
+            records, unfinished = _jsonl_records(data)
+            past = len(records) - attested
+            if past > 0:
+                if not _is_interrupted_append(records, attested, path, chain, unfinished=unfinished):
+                    # Appended after them, ao's record would vouch for rows it never wrote (OPTIN-ATTESTED,
+                    # LEDGER-ATTESTED). Counted as a read counts them, before anything parses or truncates them.
+                    raise LedgerCorruption(f"{path}: {_unattested_repair(past, attested)}")
+                rows = [_jsonl_row(body, index, path) for index, body in records[:attested]]
+                _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix, seal=seal)
+                _check_committed_length(path, rows, chain, seal=seal)
+                boundary = sum(len(line) for line in data.splitlines(keepends=True)[:records[attested][0]])
+                with open(path, "r+b", buffering=0) as handle:
+                    handle.truncate(boundary)
+                    fsync(handle.fileno())
+                _call(_checkpoint, "truncated-tail")
+                _clear_append_intent(path)
+                with open(path, "rb") as handle:
+                    data = handle.read()
+            else:
+                rows = [_jsonl_row(body, index, path) for index, body in records[:attested]]
+                _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix, seal=seal)
+                _check_committed_length(path, rows, chain, seal=seal)
+                _repair_partial_tail(path, fsync, _checkpoint, limit=attested)
+                if os.path.exists(path):
+                    with open(path, "rb") as handle:
+                        data = handle.read()
+                else:
+                    data = b""
+        else:
+            _repair_partial_tail(path, fsync, _checkpoint)
+            if os.path.exists(path):
+                with open(path, "rb") as handle:
+                    data = handle.read()
+            else:
+                data = b""
+        rows = _jsonl_rows(data, path, allow_partial_tail=False)
         _validate_chained_rows(path, rows, chain, previous_field, legacy_prefix, seal=seal)
         _check_committed_length(path, rows, chain, seal=seal)
         retired = seal["retired"] if seal else 0
@@ -1829,9 +2034,17 @@ def append_chained_jsonl(path, record, chain, timeout=10.0, *,
             chained.update(fields)
         payload = _encode_jsonl(chained)
         digest = chained_row_digest(chained, chain)
-        undo = _append_payload_unlocked(
-            path, parent, payload, write, fsync, _checkpoint
-        )
+        _record_append_intent(path, digest)
+        try:
+            undo = _append_payload_unlocked(
+                path, parent, payload, write, fsync, _checkpoint
+            )
+        except BaseException:
+            try:
+                _clear_append_intent(path)
+            except OSError:
+                pass
+            raise
         try:
             _record_committed_length(path, retired + len(rows) + 1, digest)
         except BaseException:

@@ -121,6 +121,8 @@ def test_catchup_reads_the_ledger_before_starting_a_review_or_closing_an_unchang
     assert [row["id"] for row in A.open_waivers(root)] == [row["id"] for row in waivers]
     out = capsys.readouterr().out
     assert "review ledger cannot be read" in out
+    if failure == "corrupt":
+        assert "does not record ao appending" in out
     assert all(f"{row['id']} stays open" in out for row in waivers)
 
 

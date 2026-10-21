@@ -2,7 +2,7 @@
 import os
 import time
 
-from ao import lib as A
+from ao import lib as A, storage
 
 
 def _write(root, name, body):
@@ -92,8 +92,11 @@ def test_respecified_slice_restarts_round_budget(project):
             base + i, head,
         )
     assert A.rounds(root, "semantic-review") == 3
-    with open(os.path.join(root, ".ao", "ledger", "decisions.jsonl"), "a", encoding="utf-8") as fh:
-        fh.write('{"id":"AD-1","at":%d,"scope":"B6","by":"architect"}\n' % int(time.time() + 5))
+    storage.append_chained_jsonl(
+        os.path.join(root, ".ao", "ledger", "decisions.jsonl"),
+        {"id": "AD-1", "at": int(time.time() + 5), "scope": "B6", "by": "architect"},
+        A.DECISION_CHAIN, legacy_prefix=True,
+    )
     assert A.rounds(root, "semantic-review") == 0
 
 

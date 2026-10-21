@@ -103,8 +103,10 @@ def test_a_waiver_for_every_slice_or_without_an_expiry_covers_nothing(project, m
     _allow_candidate_verification(monkeypatch, _stage(root, "a.py", "value = 1\n"))
     with open(A.waivers_path(root), "w", encoding="utf-8") as fh:
         for wid, slice_id in (("W-every", "*"), ("W-legacy", "B7")):
-            fh.write(json.dumps({"event": "waived", "id": wid, "gate": "review", "slice": slice_id,
-                                 "why": "old", "by": "human", "at": 1, "head": "x", "tree": "t"}) + "\n")
+            row = {"event": "waived", "id": wid, "gate": "review", "slice": slice_id,
+                   "why": "old", "by": "human", "at": 1, "head": "x", "tree": "t"}
+            fh.write(json.dumps(row) + "\n")
+    storage._record_committed_length(A.waivers_path(root), 2, storage.chained_row_digest(row, A.WAIVER_CHAIN))
 
     code, out = _commit_ok(project, capsys)
     assert code == 1
@@ -118,6 +120,7 @@ def test_a_row_appended_without_a_link_makes_waivers_unreadable(project, monkeyp
     A.waive(root, "review", "B7", "quota", by="alice (owner)")
     with open(A.waivers_path(root), "a", encoding="utf-8") as fh:
         fh.write(json.dumps({"event": "closed", "id": "W-other", "at": 1, "outcome": "forged"}) + "\n")
+    storage._record_committed_length(A.waivers_path(root), 2, None)
 
     with pytest.raises(storage.LedgerCorruption):
         A.open_waivers(root)

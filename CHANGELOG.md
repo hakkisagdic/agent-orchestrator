@@ -40,6 +40,7 @@ closed in parentheses: `#n`, or `part of #n` for a row still open, each kept wit
 
 ### Security
 
+- Gate-deciding chained ledgers (`authority`, `verifications`, `waivers`, `reviews`, `decisions`, and `plans`, alongside `opt-ins`) now count only rows attested in this machine's checkpoint store, recover interrupted appends from a write-ahead digest intent in that store, and refuse or report in `ao doctor` any unattested trailing rows written in the tree (LEDGER-ATTESTED).
 - A switch or a review tier that weakens a guarantee is off only on a row ao appended to `.ao/ledger/opt-ins.jsonl` on this machine, as its checkpoint store records: the first row of the chain needs no digest, so an implementer that wrote the config and one row by hand had review off and was granted on verification alone. A row written by hand, or on another machine, now turns nothing off, ao appends nothing after one, and `ao doctor` names it; a checkpoint store `AO_LEDGER_CHECKPOINTS` puts inside the project attests nothing ([features](docs/features.md), OPTIN-ATTESTED).
 
 ### Windows

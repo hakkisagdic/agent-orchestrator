@@ -128,10 +128,16 @@ to a public product remote would publish the coordination history.
 
 `ao restore <directory>` puts the files back, restoring only those whose bytes match the digest
 they were backed up with, and whose path stays inside the checkout, and naming the rest; then
-it checks that the authority chain and the board validate. A backup that restores nothing, or
-no `.ao/config.json`, restores no control plane, and the restore fails. When the authority
-chain cannot be read, `ao backup` keeps every review artefact rather than only those a grant
-names, and says so.
+it checks that the authority chain and the board validate. `ao restore <directory> --by <name> --ask`
+at a terminal shows the backup manifest digest and each gate ledger's row count and last row
+digest, asks `y/N`, and on a `yes` records this machine's checkpoint for each restored ledger
+whose chain validates and appends a restore attestation row (`by`, login, `interactive`,
+manifest digest, attested lengths) to `.ao/ledger/restores.jsonl`, which `ao doctor` reports;
+without `--by` and `--ask` (or without a terminal, or on a `no`), each restored gate ledger
+stays unattested until a person attests it. A backup that restores nothing, or no
+`.ao/config.json`, restores no control plane, and the restore fails. When the authority chain
+cannot be read, `ao backup` keeps every review artefact rather than only those a grant names,
+and says so.
 
 ## What is deliberately not recovered
 

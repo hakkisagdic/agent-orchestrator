@@ -297,6 +297,9 @@ def build_parser(root=None):
     bk.set_defaults(fn=cmd_backup)
     rsr = sub.add_parser("restore", help="reconstruct the governance from a backup directory")
     rsr.add_argument("source", help="a backup directory with its manifest.json")
+    rsr.add_argument("--by", help="the person who attests the restored ledgers on this machine; never an agent or a role")
+    rsr.add_argument("--ask", action="store_true",
+                     help="at a terminal, show what would be attested and attest it on a yes")
     rsr.set_defaults(fn=cmd_restore)
     ct = sub.add_parser("content", help="borrow third-party skills, steering and agent definitions pinned to a "
                                         "commit, text only; verify them")

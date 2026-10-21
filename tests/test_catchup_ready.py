@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, matrix as M, watchdog as W
+from ao import cli, lib as A, matrix as M, storage, watchdog as W
 from tests.test_capability_matrix import _strict_config
 from tests.test_review_chain import _fake
 from tests.test_switches_and_bypass import _allow_candidate_verification
@@ -51,8 +51,11 @@ def _legacy_waiver(root, slice_id):
     row = {"event": "waived", "id": f"W-legacy-{slice_id}", "gate": "review", "slice": slice_id,
            "why": "the implementer is out of credits", "by": "A. Person", "at": int(time.time()),
            "head": _git(root, "rev-parse", "HEAD"), "tree": "t"}
-    with open(A.waivers_path(root), "a", encoding="utf-8") as fh:
+    path = A.waivers_path(root)
+    with open(path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(row) + "\n")
+    count = len(open(path, encoding="utf-8").read().splitlines())
+    storage._record_committed_length(path, count, storage.chained_row_digest(row, A.WAIVER_CHAIN))
     return row
 
 

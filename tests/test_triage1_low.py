@@ -64,6 +64,7 @@ def test_prune_says_plans_are_kept_whole_and_never_sealed(project, capsys, yes):
 def test_doctor_names_an_unreadable_evidence_bound(project):
     path = Path(project["root"]) / ".ao" / "ledger" / "verifications.jsonl"
     path.write_text("not json\n", encoding="utf-8")
+    storage._record_committed_length(str(path), 1, None)
     line = "\n".join(cli._store_bound_lines(project))
     assert "cannot measure evidence retention" in line
     assert "verifications.jsonl" in line and "backup" in line

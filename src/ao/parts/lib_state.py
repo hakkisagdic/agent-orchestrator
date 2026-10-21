@@ -274,8 +274,11 @@ def range_review(root, commits, since=0, author=None):
 
 
 def review_row_count(root):
+    """How many committed rows the review ledger holds when ao may append to it; refuses up front when rows past
+    the attested prefix or an in-tree checkpoint store would refuse the append, from one locked read of the
+    file with its handle closed (CATCHUP-ROW, LEDGER-ATTESTED)."""
     from .storage import read_chained_jsonl
-    return len(read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN))
+    return len(read_chained_jsonl(review_ledger_path(root), REVIEW_CHAIN, for_append=True))
 
 
 def latest_candidate_review(root, review_dir, candidate_digest, limit=40):

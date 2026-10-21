@@ -234,7 +234,7 @@ def test_an_append_outlasts_a_read_of_another_ledger_holding_the_checkpoint_stor
         the_read_finishes()
 
     assert [row["grant"] for row in storage.read_chained_jsonl(authority, CHAIN)] == [0, 1]
-    assert waits == [storage._REPLACE_FIRST_WAIT] and len(attempts) == 2
+    assert waits == [storage._REPLACE_FIRST_WAIT] and len(attempts) == 3
     with open(store, encoding="utf-8") as fh:
         assert json.load(fh)[os.path.realpath(authority)]["count"] == 2
 

@@ -114,7 +114,9 @@ def test_c5_stats_names_an_unreadable_project_and_proposals_name_the_ledger(proj
     _land(project["root"], "C-land")
     broken = tmp_path / "broken"
     (broken / ".ao" / "ledger").mkdir(parents=True)
-    (broken / ".ao" / "ledger" / "authority.jsonl").write_text("bad\n", encoding="utf-8")
+    broken_auth = broken / ".ao" / "ledger" / "authority.jsonl"
+    broken_auth.write_text("bad\n", encoding="utf-8")
+    storage._record_committed_length(str(broken_auth), 1, None)
     monkeypatch.setattr(A, "recall_roots", lambda root: [("good", root), ("broken", str(broken))])
     cli.cmd_stats(project, SimpleNamespace(all=True, since=None, until=None, slices=False))
     output = capsys.readouterr().out
@@ -211,7 +213,9 @@ def test_c9_long_decision_request_is_classified(project):
 
 @pytest.mark.parametrize("row", [{}, [], {"item": "B1"}, {"item": [], "digest": "d"}])
 def test_c10_malformed_baseline_refuses_commit(project, monkeypatch, capsys, row):
-    Path(project["root"], ".ao", "ledger", "plans.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+    path = Path(project["root"], ".ao", "ledger", "plans.jsonl")
+    path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    storage._record_committed_length(str(path), 1, storage.chained_row_digest(row, A.PLAN_CHAIN) if isinstance(row, dict) else None)
     monkeypatch.setattr(A, "hold_state", lambda root: None)
     monkeypatch.setattr(A, "urgent_messages", lambda *args, **kwargs: [])
     assert cli.cmd_commit_ok(review_off(project), SimpleNamespace(verify=False, profile=None)) == 1
@@ -233,7 +237,9 @@ def test_c10_plan_chain_detects_tampering(project, damage):
 def test_c10_re_admission_is_explicit_and_legacy_prefix_is_kept(project):
     root = project["root"]
     path = Path(root, ".ao", "ledger", "plans.jsonl")
-    path.write_text('{"item":"B1","digest":"first"}\n', encoding="utf-8")
+    legacy = {"item": "B1", "digest": "first"}
+    path.write_text(json.dumps(legacy) + "\n", encoding="utf-8")
+    storage._record_committed_length(str(path), 1, storage.chained_row_digest(legacy, A.PLAN_CHAIN))
     A.record_plan(root, "B1", "second")
     row = json.loads(path.read_text(encoding="utf-8").splitlines()[-1])
     assert row.get("event") == "readmitted" and row.get("replaces") == "first"
@@ -244,7 +250,9 @@ def test_c10_re_admission_is_explicit_and_legacy_prefix_is_kept(project):
 def test_c5_no_corrupt_ledger_is_silently_omitted(project, ledger):
     _grant(project)
     _land(project["root"], "C-land")
-    Path(project["root"], ".ao", "ledger", ledger + ".jsonl").write_text("bad\n", encoding="utf-8")
+    path = Path(project["root"], ".ao", "ledger", ledger + ".jsonl")
+    path.write_text("bad\n", encoding="utf-8")
+    storage._record_committed_length(str(path), 1, None)
     with pytest.raises(storage.LedgerCorruption):
         A.slice_outcomes(project["root"])
 
@@ -261,6 +269,7 @@ def test_c5_landing_time_is_not_grant_time(project, monkeypatch):
 def test_c10_duplicate_legacy_baseline_is_not_a_readmission(project):
     path = Path(project["root"], ".ao", "ledger", "plans.jsonl")
     path.write_text('{"item":"B1","digest":"first"}\n{"item":"B1","digest":"second"}\n', encoding="utf-8")
+    storage._record_committed_length(str(path), 2, None)
     with pytest.raises(storage.LedgerCorruption):
         A.plan_baseline(project["root"])
 

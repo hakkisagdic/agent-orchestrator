@@ -162,9 +162,10 @@ def test_latest_authority_decision_uses_only_actual_boolean_rows(project):
 
 
 def test_latest_authority_decision_fails_closed_on_corruption(project):
-    from ao.storage import LedgerCorruption
+    from ao.storage import LedgerCorruption, _record_committed_length
 
     path = os.path.join(project["root"], ".ao", "ledger", "authority.jsonl")
     open(path, "w", encoding="utf-8").write('{"granted":true}\nnot-json\n')
+    _record_committed_length(path, 2, None)
     with pytest.raises(LedgerCorruption):
         A.latest_authority_decision(project["root"])

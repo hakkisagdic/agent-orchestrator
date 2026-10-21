@@ -247,6 +247,7 @@ def test_chained_rows_link_to_the_canonical_previous_digest(tmp_path):
 def test_chained_append_refuses_legacy_or_broken_prefix_without_writing(tmp_path):
     path = tmp_path / "authority.jsonl"
     path.write_text('{"id":"legacy"}\n', encoding="utf-8")
+    storage._record_committed_length(str(path), 1, None)
     before = path.read_bytes()
 
     with pytest.raises(storage.LedgerCorruption, match="has no 'previous' field"):
@@ -268,6 +269,7 @@ def test_chained_append_repairs_only_an_uncommitted_partial_tail(tmp_path):
 
     with open(path, "ab") as handle:
         handle.write(b'not-json\n')
+    storage._record_committed_length(str(path), 3, None)
     with pytest.raises(storage.LedgerCorruption):
         storage.read_chained_jsonl(str(path), CHAIN)
 

@@ -29,8 +29,10 @@ def _seed(project, tmp_path):
     with open(os.path.join(root, ".ao", "board.md"), "a", encoding="utf-8") as fh:
         fh.write("- [B7] a slice · landed: deadbee\n")
     gone = str(tmp_path / "gone" / ".ao" / "ledger" / "authority.jsonl")
+    marks = json.load(open(storage.checkpoint_path(), encoding="utf-8"))
+    marks[gone] = {"count": 1, "digest": "sha256:x", "at": 1}
     with open(storage.checkpoint_path(), "w", encoding="utf-8") as fh:
-        json.dump({gone: {"count": 1, "digest": "sha256:x", "at": 1}}, fh)
+        json.dump(marks, fh)
     os.makedirs(os.path.dirname(A.architect_lock_path(root)), exist_ok=True)
     with open(A.architect_lock_path(root), "w", encoding="utf-8") as fh:
         json.dump({"pid": _dead_pid(), "who": "a wake that died", "at": 1}, fh)

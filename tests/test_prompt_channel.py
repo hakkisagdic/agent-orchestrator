@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, language, lib as A, procs, watchdog as W
+from ao import cli, language, lib as A, procs, storage, watchdog as W
 from tests import standin
 from tests.scenarios import World
 
@@ -207,6 +207,7 @@ def test_catch_up_keeps_a_waiver_open_when_no_reviewer_can_be_handed_its_range(p
               "head": _git(root, "rev-parse", "HEAD"), "tree": "t"}
     with open(A.waivers_path(root), "a", encoding="utf-8") as fh:
         fh.write(json.dumps(waiver) + "\n")
+    storage._record_committed_length(A.waivers_path(root), 1, storage.chained_row_digest(waiver, A.WAIVER_CHAIN))
     _large_range(root)
     cfg = dict(project, reviewer={"id": "r1", "family": "review-family", "adapter": "bare",
                                   "argv": [sys.executable, "-c", APPROVED, "{prompt}"]})

@@ -14,16 +14,20 @@ The ledger is the fix: an append-only record that outlives the messages.
 
 ```
 .ao/ledger/
-├── decisions.jsonl      # why we chose things
+├── decisions.jsonl      # hash-chained: why we chose things
 ├── verifications.jsonl  # what was actually measured, and by whom (hash-chained)
 ├── authority.jsonl      # hash-chained commit grants and refusals
 ├── reviews.jsonl        # hash-chained: each review artefact, its bytes and verdict
 ├── waivers.jsonl        # hash-chained: a person's waiver of a gate for a slice, and its closing
-├── opt-ins.jsonl        # hash-chained: a person's opt-in into a weaker review tier, with login and terminal;
-│                        #   only rows this machine's checkpoint store records ao appending count
+├── opt-ins.jsonl        # hash-chained: a person's opt-in into a weaker review tier, with login and terminal
 ├── merges.jsonl         # hash-chained: each merge-check run and the merge it vouches for
 └── slices.jsonl         # hash-chained: each move of a slice between the board's sections
 ```
+
+In every ledger whose rows decide the gate (`.ao/ledger/authority.jsonl`,
+`.ao/ledger/verifications.jsonl`, `.ao/ledger/waivers.jsonl`, `.ao/ledger/reviews.jsonl`,
+`.ao/ledger/decisions.jsonl`, `.ao/ledger/plans.jsonl`, `.ao/ledger/opt-ins.jsonl`), a row
+counts only when this machine's checkpoint store records `ao` appending it.
 
 ## Decisions
 
@@ -96,23 +100,34 @@ write is let go, since the file is no longer empty, and nothing is left to write
 handle closes.*
 
 Every prefix of a valid chain is itself valid, so the chain alone cannot see a removed
-tail. Each row therefore also carries its `ordinal`, and every append records the
-ledger's committed length and the digest of its last row outside the repository, in
-`~/.ao/ledger-checkpoints.json`. A ledger shorter than that record — newest rows cut, or
-the whole file gone — is a broken commitment, not a shorter chain: reading refuses it,
-nothing is appended onto it, and `ao commit-check` refuses. A fresh machine has no record
-to compare with. Retiring a ledger on purpose means archiving the file and removing its
-entry from that record by hand; sealing old rows instead is #50.
+tail, nor who wrote a self-consistent row past the last one `ao` committed. Each row
+therefore also carries its `ordinal`, and every append records a write-ahead intent (the
+new row's digest) in `~/.ao/ledger-checkpoints.json` before writing, then records the
+ledger's committed length and the digest of its last row after the write and clears the
+intent with it. Across every gate ledger (`authority`, `verifications`, `waivers`,
+`reviews`, `decisions`, `plans`, `opt-ins`), a row counts only within that attested prefix
+(the recorded count minus what a seal retired): rows past it are ignored on read, and a
+ledger with rows and no checkpoint entry on this machine returns none of them. Before
+writing, `append_chained_jsonl` takes back a single trailing row whose digest matches the
+recorded write-ahead intent of an interrupted append, and refuses any other row past the
+prefix so a later append never vouches for a foreign row (`ao doctor` names each such
+ledger `<ledger>-unattested`, and `<ledger>-unreadable` when it cannot be read,
+LEDGER-ATTESTED). A ledger shorter than its recorded count — newest rows cut, or the whole
+file gone — is a broken commitment, not a shorter chain: reading refuses it, nothing is
+appended onto it, and `ao commit-check` refuses. Retiring a ledger on purpose means
+archiving the file and removing its entry from that record by hand; sealing old rows
+instead is #50.
 
 *In ao since slice LEDGER-HISTORY: the record is replaced whole as ao's other whole files are - under a
 name no file had, synced, renamed, and its folder synced after the rename. It was renamed into place
 with no sync of its folder, so a power cut could take back the record of an append that had returned,
 and a row then cut from the ledger matched the length recorded before it.*
 
-This is tamper-evidence, not authentication. Same-user write access can recompute a suffix,
-append a correctly linked forged row, or cut a valid tail and rewrite the length record to
-match, because AO has no external trusted head or signing key. See the exact security boundary in
-[`safety.md`](safety.md).
+This is tamper-evidence against an agent confined to the repository tree, not
+authentication against same-user access outside it. A process that can also write
+`~/.ao/ledger-checkpoints.json` can recompute a suffix, append a linked row, or cut a
+valid tail and rewrite the checkpoint record to match, because AO has no external trusted
+head or signing key. See the exact security boundary in [`safety.md`](safety.md).
 
 ## Plan baselines
 

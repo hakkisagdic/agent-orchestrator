@@ -108,6 +108,7 @@ def test_plan_baselines_survive_a_torn_append_and_fail_closed_on_corruption(proj
 
     with open(ledger, "a", encoding="utf-8") as handle:
         handle.write("not json\n")
+    storage._record_committed_length(ledger, 3, None)
     with pytest.raises(storage.LedgerCorruption):
         A.plan_baseline(root)
 
@@ -115,8 +116,10 @@ def test_plan_baselines_survive_a_torn_append_and_fail_closed_on_corruption(proj
 def test_commit_ok_refuses_when_plan_baselines_cannot_be_read(project, monkeypatch, capsys):
     root = project["root"]
     os.makedirs(os.path.join(root, ".ao", "ledger"), exist_ok=True)
-    with open(os.path.join(root, ".ao", "ledger", "plans.jsonl"), "w", encoding="utf-8") as handle:
+    plans = os.path.join(root, ".ao", "ledger", "plans.jsonl")
+    with open(plans, "w", encoding="utf-8") as handle:
         handle.write("not json\n")
+    storage._record_committed_length(plans, 1, None)
     monkeypatch.setattr(A, "hold_state", lambda root: None)
     monkeypatch.setattr(A, "urgent_messages", lambda *args, **kwargs: [])
     capsys.readouterr()

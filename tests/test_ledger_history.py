@@ -359,7 +359,7 @@ def test_a_landed_tree_check_that_cannot_run_is_named_and_told_not_passed(projec
     _land(root, "b.txt", "around the hook\n", granted=False)
     lines = open(_authority(root), "rb").read().splitlines(keepends=True)
     with open(_authority(root), "wb") as fh:
-        fh.write(b"".join(lines) + b'{"not": "a row ao wrote"\n')
+        fh.write(b'{"not": "a row ao wrote"\n' + b"".join(lines[1:]))
 
     found = dict(cli.doctor_problems(project))
     W.report_ungranted_commits(root, A.project_key(root))

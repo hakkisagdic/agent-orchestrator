@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A, matrix as M
+from ao import cli, lib as A, matrix as M, storage
 from tests.conftest import review_off
 
 
@@ -583,8 +583,10 @@ def test_strict_catchup_keeps_waiver_open_on_configuration_exit_two(
               "why": "reviewer unavailable", "by": "human", "at": 1, "tree": "t",
               "head": subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
                                      capture_output=True, text=True).stdout.strip()}
-    with open(os.path.join(root, ".ao", "ledger", "waivers.jsonl"), "a", encoding="utf-8") as fh:
+    ledger = os.path.join(root, ".ao", "ledger", "waivers.jsonl")
+    with open(ledger, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(waiver) + "\n")
+    storage._record_committed_length(ledger, 1, storage.chained_row_digest(waiver, A.WAIVER_CHAIN))
     _stage_change(root)
     subprocess.run(
         ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "landed"],

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ao import cli, lib as A
+from ao import cli, lib as A, storage
 
 
 def _git(root, *args):
@@ -615,6 +615,8 @@ def test_commit_check_refuses_a_broken_authority_chain_without_mutating_it(
     with open(ledger, "w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, separators=(",", ":")) + "\n")
+    if mutation == "wrong-predecessor-append":
+        storage._record_committed_length(ledger, len(rows), None)
     before = open(ledger, "rb").read()
 
     code = cli.cmd_commit_check(project, SimpleNamespace())
@@ -640,6 +642,7 @@ def test_commit_ok_refuses_to_append_to_an_unchained_legacy_ledger(
     open(ledger, "w", encoding="utf-8").write(
         '{"granted":false,"token":"legacy"}\n'
     )
+    storage._record_committed_length(ledger, 1, None)
     before = open(ledger, "rb").read()
 
     code = cli.cmd_commit_ok(project, SimpleNamespace(verify=False, profile=None))
