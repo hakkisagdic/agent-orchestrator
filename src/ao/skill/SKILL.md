@@ -163,7 +163,10 @@ it stands. The same change proposed twice is one proposal.
 Never conclude from a name, a cwd, an mtime or a diff size. `ao status` (who is
 working, quota, problems), `ao board` (READY / running / blocked with `needs:`),
 `ao next` (which command stands in the way now, and whose hand holds it: a
-person's items first, then the staged candidate's landing chain),
+person's items first, then the staged candidate's landing chain;
+`ao next --short` prints the menu-bar line and dropdown lines for SwiftBar or
+xbar, where a person runs `ao surfaces install|uninstall swiftbar --dir <dir>`
+to write or remove ao's plugin in the folder named),
 `ao doctor` (binaries, last wake, last tick, channels, live alarms),
 `ao writers` (turns, not processes; orphans set aside), `ao watchdog explain`
 (why the watchdog did or did not act, every measurement and verdict),

@@ -148,12 +148,24 @@ agrees with. Where the two could drift, they are held against each other by a te
 |---|---|
 | `ao next` | one block per actor, the command under the reason, then the line that says nothing here was run |
 | `ao next --json` | `{"project", "person": [...], "implementer": [...]}`, each item `who`, `kind`, `why`, `command`, `detail`, `slice` - null where it has none |
-| `ao next --short` | one line for a menu bar: how many items ask for a person's hand and how many for the implementer's, with the command when exactly one is open |
+| `ao next --short` | one line for a menu bar (how many actionable items wait for a person and how many for the implementer, with the command when one item is open), then `---` and the dropdown lines in the plugin output format SwiftBar and xbar read |
 
 A stand-in review request that binds bytes no longer staged is listed as `review-superseded` with no
 command, because `ao collect-review` refuses it and a person who typed the shown command would only
 meet that refusal. A store that cannot be read is an item that says it cannot be read, never an
 empty list, which would read as nothing waiting.
+
+*In ao since slice SURFACES-SWIFTBAR: `ao next --short` and
+`ao surfaces [install|uninstall] swiftbar --dir <dir>`. On macOS, SwiftBar and xbar read a plugin's
+standard output as the menu-bar line before `---` and the dropdown lines after it, splitting each
+line on `|` for item parameters (`bash=`, `shell=`, `href=`, `terminal=`). `ao next --short` prints
+the summary line, `---`, and each actor's items as plain text with `|` escaped (`\x7c`) and no
+parameter attached, so a person's step appears as the command text only and clicking a line never
+runs a command. `ao surfaces install swiftbar --dir <dir>` writes one executable `ao.30s.sh` file in
+the folder the person names (never a guessed folder), bound to the project's root and running
+`ao next --short` and nothing else; it refuses to write over a file that is not ao's own byte-for-byte
+plugin. `ao surfaces uninstall swiftbar --dir <dir>` removes only ao's `ao.30s.sh` file and leaves
+every other file in that folder untouched.*
 
 ## Surface 2 — MCP, i.e. any chat app becomes the cockpit
 
@@ -216,8 +228,8 @@ fetch a page, and a fetch is no proof that a person read it, so the message's al
 until a command shows it to its reader. A page carries the panel's colours when ao's own output
 would: started from a terminal, and not while `NO_COLOR` is set.*
 
-A menu-bar item is a natural next reader, not built yet. Neither it nor the tab should become the
-only way to do something.
+The menu-bar item (`ao surfaces install swiftbar --dir <dir>`, running `ao next --short`) is a reader
+of the same kind: neither it nor the tab is the only way to do something.
 
 ## Align, don't depend
 

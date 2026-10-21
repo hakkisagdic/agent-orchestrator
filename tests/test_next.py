@@ -595,7 +595,11 @@ def test_the_short_line_counts_actions_and_names_one_command(project, capsys, mo
     _verification(project, candidate)
     _review(project, candidate)
     _grant(project, candidate)
-    assert _run(project, capsys, "--short").strip() == '0 for you · 1 for the implementer · ao commit -m "<message>"'
+    lines = _run(project, capsys, "--short").splitlines()
+    assert lines[0] == '0 for you · 1 for the implementer · ao commit -m "<message>"'
+    assert lines[1] == "---"
+    assert lines[2] == "for the implementer (1)"
+    assert 'ao commit -m "<message>"' in lines[-1]
 
 
 def test_an_unactionable_person_item_is_counted_for_no_one(project, capsys, monkeypatch):
@@ -606,8 +610,126 @@ def test_an_unactionable_person_item_is_counted_for_no_one(project, capsys, monk
     A.write_review_request(root, project, candidate, A.candidate_scope(candidate),
                            "sha256:" + "0" * 64, "product change", "S1", candidate["changed_paths"], "judge")
     _stage(project, text="value = 8\n")
-    assert _run(project, capsys, "--short").strip() == "0 for you · 1 for the implementer · ao verify"
+    lines = _run(project, capsys, "--short").splitlines()
+    assert lines[0] == "0 for you · 1 for the implementer · ao verify"
+    assert lines[1] == "---"
+    assert any("review-superseded" in line for line in lines[2:])
     assert "review-superseded" in _kinds(project)
+
+
+def test_short_renders_swiftbar_and_xbar_dropdown_with_command_text_only(project, capsys):
+    """`ao next --short` prints the menu bar line, `---`, and plain dropdown lines with no executable parameters."""
+    root = project["root"]
+    _stage(project)
+    lines = _run(project, capsys, "--short").splitlines()
+    assert lines[0] == "1 for you · 1 for the implementer"
+    assert lines[1] == "---"
+    assert "for you (1)" in lines[2:]
+    assert "for the implementer (1)" in lines[2:]
+    assert any("ao harness seen --by <your name> --ask" in line for line in lines[2:])
+    assert any(line.strip() == "ao verify" for line in lines[2:])
+    assert all("|" not in line for line in lines)
+    assert all(not any(param in line for param in ("bash=", "shell=", "href=", "terminal=")) for line in lines)
+    assert A.harness_seen_record(root) is None
+
+
+def test_short_when_nothing_waits_and_disarms_swiftbar_pipe_parameters(project, capsys, monkeypatch):
+    _nothing_waits_a_person(monkeypatch)
+    monkeypatch.setattr(A, "pipeline_items", lambda *a, **k: [])
+    lines = _run(project, capsys, "--short").splitlines()
+    assert lines == [
+        "0 for you · 0 for the implementer",
+        "---",
+        "Nothing is waiting. What is staged stands granted, and no item holds on a person.",
+    ]
+    monkeypatch.setattr(
+        A, "urgent_messages",
+        lambda root, cfg, role=None: [{"id": "M-1", "title": "Pick one | bash=/bin/sh terminal=false"}],
+    )
+    piped = _run(project, capsys, "--short").splitlines()
+    assert piped[0] == "1 for you · 0 for the implementer · ao mail ack M-1"
+    assert piped[1] == "---"
+    assert all("|" not in line for line in piped)
+    assert any(r"\x7c bash=/bin/sh" in line for line in piped[2:])
+
+
+def test_surfaces_install_and_uninstall_swiftbar_plugin(project, tmp_path, capsys):
+    root = project["root"]
+    plugin_dir = tmp_path / "swiftbar"
+    plugin_dir.mkdir()
+    bystander = plugin_dir / "other.1m.sh"
+    bystander.write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
+
+    assert cli.main(["-C", root, "surfaces", "install", "swiftbar", "--dir", str(plugin_dir)]) == 0
+    capsys.readouterr()
+    plugin = plugin_dir / cli.SWIFTBAR_PLUGIN
+    assert plugin.is_file() and os.access(plugin, os.X_OK)
+    body = plugin.read_text(encoding="utf-8")
+    assert body.startswith("#!/bin/sh\n" + cli.SWIFTBAR_MARKER + "\n")
+    assert body.endswith('exec "$ao" -C "$root" next --short\n')
+
+    ran = subprocess.run([str(plugin)], capture_output=True, text=True, check=True)
+    ran_lines = ran.stdout.splitlines()
+    assert len(ran_lines) >= 3 and ran_lines[1] == "---"
+
+    assert cli.main(["-C", root, "surfaces", "install", "swiftbar", "--dir", str(plugin_dir)]) == 0
+    capsys.readouterr()
+    assert cli.main(["-C", root, "surfaces", "uninstall", "swiftbar", "--dir", str(plugin_dir)]) == 0
+    capsys.readouterr()
+    assert not plugin.exists()
+    assert bystander.read_text(encoding="utf-8") == "#!/bin/sh\necho hi\n"
+    assert cli.main(["-C", root, "surfaces", "uninstall", "swiftbar", "--dir", str(plugin_dir)]) == 0
+    capsys.readouterr()
+
+
+def test_surfaces_never_guesses_a_directory_and_refuses_a_foreign_file(project, tmp_path, capsys):
+    root = project["root"]
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["-C", root, "surfaces", "install", "swiftbar"])
+    assert exc.value.code == 2
+    capsys.readouterr()
+
+    plugin_dir = tmp_path / "plugins"
+    plugin_dir.mkdir()
+    plugin = plugin_dir / cli.SWIFTBAR_PLUGIN
+    foreign = f"#!/bin/sh\n{cli.SWIFTBAR_MARKER}\necho not-ao\n"
+    plugin.write_text(foreign, encoding="utf-8")
+
+    assert cli.main(["-C", root, "surfaces", "install", "swiftbar", "--dir", str(plugin_dir)]) == 1
+    out = capsys.readouterr().out
+    assert "not ao's plugin file" in out
+    assert plugin.read_text(encoding="utf-8") == foreign
+
+    assert cli.main(["-C", root, "surfaces", "uninstall", "swiftbar", "--dir", str(plugin_dir)]) == 1
+    out = capsys.readouterr().out
+    assert "not ao's plugin file" in out
+    assert plugin.read_text(encoding="utf-8") == foreign
+
+
+def test_an_agent_s_grant_refuses_surfaces_install_and_admits_next_short():
+    from ao import allowlist as AL
+    adapter = A.load_adapter("claude-code")
+    grants = {
+        "implementer": AL.rules(A.role_commands(adapter)["implementer"]),
+        "architect": AL.rules(cli._architect_argv("claude-code")),
+    }
+    for role, rules in grants.items():
+        assert any(AL.admits(rule, "ao next --short") for rule in rules), role
+        assert not any(AL.admits(rule, "ao surfaces install swiftbar --dir x") for rule in rules), role
+        assert not any(AL.admits(rule, "ao surfaces uninstall swiftbar --dir x") for rule in rules), role
+    assert AL.problems(["claude", "--allowedTools", "Bash(ao next --short)"]) == []
+    for rule, expected in [
+        ("Bash(ao surfaces install swiftbar --dir x)", "installs a menu bar plugin"),
+        ("Bash(ao surfaces uninstall swiftbar --dir x)", "removes a menu bar plugin"),
+        ("Bash(ao surfaces --dir=x install swiftbar)", "installs a menu bar plugin"),
+        ("Bash(ao surfaces install swiftbar --di x)", "installs a menu bar plugin"),
+        ("Bash(ao surfaces uninstall swiftbar --d=x)", "removes a menu bar plugin"),
+        ("Bash(ao -C . surfaces install swiftbar --dir x)", "installs a menu bar plugin"),
+        ("Bash(ao surfaces install:*)", "installs a menu bar plugin"),
+        ("Bash(ao surfaces:*)", "installs a menu bar plugin"),
+    ]:
+        found = AL.problems(["claude", "--allowedTools", rule])
+        assert found and found[0][0] == expected and found[0][2] == rule, (rule, found)
 
 
 # ---- the same answer over MCP ----------------------------------------------------------------------------

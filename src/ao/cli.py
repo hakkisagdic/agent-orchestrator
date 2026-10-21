@@ -235,9 +235,16 @@ def build_parser(root=None):
     nx = sub.add_parser("next", help="what needs doing now, and whose hand does it: a person's items first, then the "
                                      "staged candidate's landing chain, each with the command that closes it")
     nx.add_argument("--json", action="store_true", help="print one JSON document, for the panel and a script")
-    nx.add_argument("--short", action="store_true", help="one line: how many wait for a person and for the "
-                                                         "implementer, for a menu bar")
+    nx.add_argument("--short", action="store_true",
+                    help="menu-bar output for SwiftBar or xbar: one summary line, then --- and the dropdown lines")
     nx.set_defaults(fn=cmd_next)
+    sf = sub.add_parser("surfaces",
+                        help="install or remove a desktop surface plugin in the folder you name; never guessed")
+    sf.add_argument("action", choices=["install", "uninstall"])
+    sf.add_argument("surface", choices=["swiftbar"])
+    sf.add_argument("--dir", required=True, metavar="DIR",
+                    help="the plugin folder to write into or remove from; required")
+    sf.set_defaults(fn=cmd_surfaces)
     rc = sub.add_parser("recall", help="what was decided, found or learned before, across projects")
     rc.add_argument("text", nargs="+")
     rc.add_argument("-n", "--limit", type=int, default=10)

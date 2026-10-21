@@ -36,11 +36,17 @@ NAMED_NOT_RUN = {
         "ao commit-check": "what the commit hook runs against Git's index; ao commit runs it itself",
         "ao hooks status": "how doctor and init prove the hook, not a step of the loop",
         "ao hooks": "installing and removing hooks is a person's (allowlist.FORBIDDEN)",
+        "ao surfaces install|uninstall swiftbar --dir <dir>": (
+            "installing and removing the menu bar plugin is a person's (allowlist.FORBIDDEN)"
+        ),
     },
     "architect": {
         "ao lock": "named where an urgent note reaches the implementer; the architect runs none of the three",
         "ao verify": "as ao lock",
         "ao commit-ok": "as ao lock",
+        "ao surfaces install|uninstall swiftbar --dir <dir>": (
+            "installing and removing the menu bar plugin is a person's (allowlist.FORBIDDEN)"
+        ),
     },
 }
 
